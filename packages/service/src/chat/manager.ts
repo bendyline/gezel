@@ -2798,9 +2798,18 @@ export class ChatManager {
     // therefore the accurate cold-session capability evidence.
     const liveSession = this.states.get(sessionId)?.session;
     const liveRegisteredTools = liveSession?.getRegisteredToolNames?.();
-    const registeredTools = liveRegisteredTools ?? [
-      ...new Set((record.scriptTools ?? []).map((tool) => tool.name)),
-    ];
+    const persistedScriptTools = [...new Set((record.scriptTools ?? []).map((tool) => tool.name))];
+    const registeredTools = liveRegisteredTools ?? persistedScriptTools;
+    // An empty list means three very different things, and collapsing
+    // them sent one investigation chasing a bridge that had never
+    // dropped: the bundle said "Registered tools: none" for an aborted
+    // turn whose own system prompt listed ~80 wired tools. Only the
+    // `live` branch is evidence of absence.
+    const registeredToolsSource: 'live' | 'persisted' | 'unavailable' = liveRegisteredTools
+      ? 'live'
+      : persistedScriptTools.length > 0
+        ? 'persisted'
+        : 'unavailable';
     // Build the prompt with the live tools when available — same
     // refresh logic the runtime applies right after session creation
     // (see `refreshSystemPromptForLiveTools`). This makes the debug
@@ -2916,6 +2925,7 @@ export class ChatManager {
       ...(sessionOpts.volatileContext ? { volatileContext: sessionOpts.volatileContext } : {}),
       customToolsMd,
       registeredTools,
+      registeredToolsSource,
       turnStatus: this.inflight.has(sessionId)
         ? 'in-progress'
         : (this.pendingSends.get(sessionId)?.length ?? 0) > 0
@@ -6203,6 +6213,8 @@ export class ChatManager {
           ...(ev.detail ? { detail: ev.detail } : {}),
           ...(typeof ev.progress === 'number' ? { progress: ev.progress } : {}),
           ...(typeof ev.ttftMs === 'number' ? { ttftMs: ev.ttftMs } : {}),
+          ...(typeof ev.outputTokens === 'number' ? { outputTokens: ev.outputTokens } : {}),
+          ...(typeof ev.tokensPerSec === 'number' ? { tokensPerSec: ev.tokensPerSec } : {}),
         });
       });
       // turn_stats — llama-cpp + Ollama per-turn token counts +

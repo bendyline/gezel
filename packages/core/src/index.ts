@@ -16,6 +16,7 @@ export * from './growth-cosmetics.js';
 export * from './security/policy.js';
 export * from './gezel-display.js';
 export * from './github-urls.js';
+export * from './github-pr-selection.js';
 export * from './log.js';
 export * from './error-report.js';
 export * from './process-errors.js';

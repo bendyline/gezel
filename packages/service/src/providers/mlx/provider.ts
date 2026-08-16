@@ -1888,6 +1888,14 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                     provider: 'mlx',
                     phase: 'generating',
                     detail: mlxGenerationPhaseDetail(generationTps, completionTokens),
+                    // Same numbers the detail string carries, as fields the
+                    // UI can render without scraping prose out of the label.
+                    ...(completionTokens !== undefined && completionTokens > 0
+                      ? { outputTokens: completionTokens }
+                      : {}),
+                    ...(generationTps !== undefined && generationTps > 0
+                      ? { tokensPerSec: generationTps }
+                      : {}),
                   });
                   lastPhaseAt = now;
                 }

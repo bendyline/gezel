@@ -200,7 +200,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     }
   });
 
-  it('shows the active gezel and live output estimate using the boring-mode name', async () => {
+  it('keeps the live output estimate out of the pill, in the tooltip and popover', async () => {
     mockLiveTurns = new Map([
       [
         'talkie-session',
@@ -232,12 +232,64 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       ],
     });
 
+    const user = userEvent.setup();
     render(<EngineStatusPill />);
 
     const pill = await screen.findByRole('button', { name: /technical-writer.*Generating/i });
-    expect(pill).toHaveTextContent('technical-writer · Generating · ≈100 tok');
+    expect(pill).toHaveTextContent('technical-writer · Generating');
+    expect(pill).not.toHaveTextContent('tok');
     expect(pill).not.toHaveTextContent('Liesel');
     expect(pill.getAttribute('title')).toContain('about 100 output tokens');
+
+    await user.click(pill);
+    expect(await screen.findByText('This turn')).toBeInTheDocument();
+    expect(screen.getByText('≈100 tok')).toBeInTheDocument();
+  });
+
+  /**
+   * llama-server (`timings_per_token`) and MLX both publish a running
+   * `predicted_n` / `output_tokens` counter. When the engine tells us the
+   * number there is nothing to approximate, and hedging a figure we were
+   * handed reads as a bug.
+   */
+  it('drops the approximation mark when the engine reports exact counters', async () => {
+    mockLiveTurns = new Map([
+      [
+        'talkie-session',
+        {
+          provider: 'llama-cpp',
+          phase: 'generating',
+          label: 'Generating',
+          gezelId: 'liesel',
+          // Deliberately inconsistent with the exact counter: whatever the
+          // character estimate would say, the engine's number wins.
+          outputChars: 400,
+          outputTokens: 59,
+          tokensPerSec: 24.4,
+          startedAt: Date.now(),
+          lastEventAt: Date.now(),
+        },
+      ],
+    ]);
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'talkie-1930-13b-q4' },
+      deviceSafety: { mode: 'observe' },
+    } as ConfigResponse);
+
+    const user = userEvent.setup();
+    render(<EngineStatusPill />);
+
+    await waitFor(() => expect(document.querySelectorAll('button').length).toBeGreaterThan(0));
+    const pill = [...document.querySelectorAll('button')].find((el) =>
+      (el.getAttribute('title') ?? '').includes('Generating'),
+    )!;
+    expect(pill.getAttribute('title')).toContain('59 output tokens');
+    expect(pill.getAttribute('title')).not.toContain('about');
+
+    await user.click(pill);
+    expect(await screen.findByText('This turn')).toBeInTheDocument();
+    expect(screen.getByText(/^59 tok · 24 tok\/s$/)).toBeInTheDocument();
   });
 
   it('persists the Observe/Manage choice from the engine pill', async () => {

@@ -41,6 +41,7 @@ import {
 } from '@bendyline/gezel';
 import type {
   ConfigResponse,
+  ModelSpeed,
   ProviderQueueState,
   QueueStatusResponse,
 } from '@bendyline/gezel-client';
@@ -53,16 +54,13 @@ import { summarizeCacheEntries } from './cacheDisplay.js';
 import { formatElapsedClock } from './elapsed-time.js';
 import { type DeviceHealth, presentDeviceHealth } from './engine-pill-device-health.js';
 import {
-  type ModelSpeedTotals,
   type TurnStatsEntry,
-  accumulateModelSpeed,
   composeQueueStatus,
   computeLiveTokensPerSec,
   computeRollingTokensPerSec,
   estimateLiveOutputTokens,
   formatBytes,
   formatTokensPerSec,
-  rankModelSpeeds,
 } from './engine-pill-stats.js';
 import { providerLabel } from './provider-label.js';
 import { type LiveTurnState, useOnDeviceLiveTurns } from './useOnDeviceLiveTurns.js';
@@ -397,11 +395,12 @@ function EngineStatusPillForProvider({
   >([]);
   // Rolling window of recent turn_stats events, newest-last.
   const [recentTurns, setRecentTurns] = useState<TurnStats[]>([]);
-  // Per-model generation speed for the life of this page, keyed by model
-  // id. Not windowed: the 60s window empties the moment the machine goes
-  // quiet, which is precisely when a user opens the popover to ask how
-  // fast their model is.
-  const [modelSpeeds, setModelSpeeds] = useState<ReadonlyMap<string, ModelSpeedTotals>>(new Map());
+  // Per-model generation speed, median over every turn the DAEMON has served.
+  // Deliberately not accumulated in the page: the 60s rolling window empties
+  // the moment the machine goes quiet — precisely when a user opens the
+  // popover to ask how fast their model is — and a page-scoped tally starts
+  // empty again after every reload. The daemon's own record outlives both.
+  const [modelSpeeds, setModelSpeeds] = useState<ModelSpeed[]>([]);
   // Static RAM footprint (bytes) once llama-cpp finishes loading the model.
   const [ramAllocBytes, setRamAllocBytes] = useState<number | undefined>(undefined);
   // Active local media-engine work (image / video generation), keyed by
@@ -418,6 +417,17 @@ function EngineStatusPillForProvider({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const popoverStyle = useStableHeaderPopoverPosition(rootRef, open, 6);
   const popoverId = onDeviceProvider ?? 'media';
+  // Guards state writes from fetches that resolve after unmount. Same role
+  // as the outer component's ref; the effect-local `cancelled` flags below
+  // can't cover a callback shared between an effect and an event handler.
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Click-outside closes the dropdown. Same pattern as QueueMeter.
   useEffect(() => {
@@ -595,13 +605,35 @@ function EngineStatusPillForProvider({
     [installedModels, onDeviceProvider],
   );
 
+  // Daemon-side per-model speed record. Only a finished turn can change it,
+  // so the slow timer is a backstop for turns this page didn't witness
+  // (another window, a scheduled job) rather than the primary trigger.
+  const refreshModelSpeeds = useCallback(() => {
+    if (!onDeviceProvider) {
+      setModelSpeeds([]);
+      return;
+    }
+    void api
+      .getUsage()
+      .then((usage) => {
+        if (!mountedRef.current) return;
+        setModelSpeeds(usage.providers[onDeviceProvider]?.modelSpeeds ?? []);
+      })
+      .catch(() => {});
+  }, [onDeviceProvider]);
+
+  useEffect(() => {
+    refreshModelSpeeds();
+    const timer = setInterval(refreshModelSpeeds, 30_000);
+    return () => clearInterval(timer);
+  }, [refreshModelSpeeds]);
+
   // Pill-specific telemetry (per-turn stats + static RAM footprint).
   // Kept on its own subscription so QueueMeter — which doesn't need
   // any of this — stays lean.
   useEffect(() => {
     if (!onDeviceProvider) {
       setRecentTurns([]);
-      setModelSpeeds(new Map());
       setRamAllocBytes(undefined);
       return;
     }
@@ -627,7 +659,6 @@ function EngineStatusPillForProvider({
                 ? { tokensPerSec: event.tokensPerSec }
                 : {}),
             };
-            setModelSpeeds((prev) => accumulateModelSpeed(prev, entry));
             setRecentTurns((prev) => {
               const cutoff = Date.now() - STATS_WINDOW_MS;
               const filtered = prev.filter((t) => t.at >= cutoff);
@@ -636,6 +667,7 @@ function EngineStatusPillForProvider({
                 ? next.slice(next.length - STATS_MAX_ENTRIES)
                 : next;
             });
+            refreshModelSpeeds();
           } else if (event.type === 'engine_stats') {
             if (event.provider !== onDeviceProvider) continue;
             setRamAllocBytes(event.ramAllocBytes);
@@ -646,7 +678,7 @@ function EngineStatusPillForProvider({
       }
     })();
     return () => ctrl.abort();
-  }, [onDeviceProvider]);
+  }, [onDeviceProvider, refreshModelSpeeds]);
 
   // Media-engine activity belongs to the primary instance only. It remains
   // independent of the chat provider, but secondary local-engine pills must
@@ -717,7 +749,7 @@ function EngineStatusPillForProvider({
     () => computeRollingTokensPerSec(recentTurns),
     [recentTurns],
   );
-  const modelSpeedRows = useMemo(() => rankModelSpeeds(modelSpeeds), [modelSpeeds]);
+  const modelSpeedRows = useMemo(() => modelSpeeds.slice(0, 4), [modelSpeeds]);
   const lastTurn = recentTurns.length > 0 ? recentTurns[recentTurns.length - 1] : undefined;
 
   // Most-recent active media-engine job, if any. Takes visual precedence
@@ -759,31 +791,43 @@ function EngineStatusPillForProvider({
   const activeGezelName = activeGezel
     ? displayName(activeGezel, config?.roleBasedNameOnlyMode === true)
     : undefined;
-  // Some engines (currently MLX) already put their exact cumulative token
-  // count in the phase label. Others report usage only when the turn ends;
-  // for those, derive an explicitly approximate live counter from all
-  // streamed output channels.
+  // Live decode counters. llama-server (`timings_per_token`) and MLX both
+  // publish an exact running token count and decode rate on the phase
+  // event; that is the truth and is printed bare. Only when an engine
+  // publishes nothing until the turn ends do we fall back to deriving a
+  // count from streamed characters — and then every number downstream of
+  // it wears the "≈" so the readout never claims precision it lacks.
+  const generating = current?.phase === 'generating';
+  const exactOutputTokens = generating ? current.outputTokens : undefined;
+  const exactTokensPerSec = generating ? current.tokensPerSec : undefined;
   const estimatedOutputTokens =
-    current?.phase === 'generating' && !phaseLabelIncludesTokenCount(busyLabel)
+    exactOutputTokens === undefined && generating && !phaseLabelIncludesTokenCount(busyLabel)
       ? estimateLiveOutputTokens(current.outputChars ?? 0)
       : 0;
+  const liveOutputTokens =
+    exactOutputTokens ?? (estimatedOutputTokens > 0 ? estimatedOutputTokens : null);
+  const tokensAreExact = exactOutputTokens !== undefined;
   const liveTokenLabel =
-    estimatedOutputTokens > 0 ? `≈${estimatedOutputTokens.toLocaleString('en-US')} tok` : '';
-  // Live decode rate for the turn in flight. Only for engines whose own
-  // phase label doesn't already carry one — MLX and DwarfStar report an
-  // exact engine-side tok/s in `detail`, and printing a second, weaker
-  // estimate beside it would read as a contradiction.
+    liveOutputTokens !== null
+      ? `${tokensAreExact ? '' : '≈'}${liveOutputTokens.toLocaleString('en-US')} tok`
+      : '';
+  // Estimated rate only when the engine reports none and its own phase
+  // label doesn't already carry one — printing a weaker second estimate
+  // beside an engine-side figure would read as a contradiction.
   const liveTokensPerSec =
-    current?.phase === 'generating' &&
-    current.generatingSince !== undefined &&
-    !phaseLabelIncludesTokenRate(busyLabel)
+    exactTokensPerSec ??
+    (generating && current.generatingSince !== undefined && !phaseLabelIncludesTokenRate(busyLabel)
       ? computeLiveTokensPerSec(estimatedOutputTokens, current.generatingSince, Date.now())
-      : null;
-  // The token count feeding this is itself an estimate, so the rate
-  // inherits the approximation mark rather than implying engine truth.
-  const liveRateLabel = liveTokensPerSec !== null ? `≈${formatTokensPerSec(liveTokensPerSec)}` : '';
+      : null);
+  const rateIsExact = exactTokensPerSec !== undefined;
+  const liveRateLabel =
+    liveTokensPerSec !== null && liveTokensPerSec !== undefined
+      ? `${rateIsExact ? '' : '≈'}${formatTokensPerSec(liveTokensPerSec)}`
+      : '';
   const liveRateTooltip =
-    liveTokensPerSec !== null ? ` · about ${formatTokensPerSec(liveTokensPerSec)}` : '';
+    liveTokensPerSec !== null && liveTokensPerSec !== undefined
+      ? ` · ${rateIsExact ? '' : 'about '}${formatTokensPerSec(liveTokensPerSec)}`
+      : '';
   // Strip catalog qualifiers like " (MLX, 4-bit)" from the displayed
   // model name. The engine pill already conveys "this Mac / on-device"
   // context — repeating the runtime + quantization in the pill is
@@ -865,11 +909,11 @@ function EngineStatusPillForProvider({
   // The engine is "active" — animated dot, busy styling — whenever a
   // turn is in flight OR the provider is running OR work is waiting.
   const engineActive = busy || queue.active;
-  // Popover Status line. While a turn is actively generating we show
-  // the live phase label (queue counts aren't known to composeQueueStatus);
-  // otherwise the queue-aware idle/queued string.
+  // Popover Status line — who and what, not how many. The decode counters
+  // have their own "This turn" row below; repeating them here made one long
+  // string the eye has to parse for the part it wanted.
   const statusText = busy
-    ? `${activeGezelName ? `${activeGezelName} · ` : ''}${busyLabel}${liveTokenLabel ? ` · ${liveTokenLabel}` : ''}${liveRateLabel ? ` · ${liveRateLabel}` : ''}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}`
+    ? `${activeGezelName ? `${activeGezelName} · ` : ''}${busyLabel}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}`
     : queue.idleStatus;
   const healthPresentation = deviceHealth ? presentDeviceHealth(deviceHealth) : null;
   const dotClassName = [
@@ -912,7 +956,7 @@ function EngineStatusPillForProvider({
         aria-expanded={open}
         title={
           busy
-            ? `${platformPillLabel}${tooltipModelSuffix} — ${activeGezelName ? `${activeGezelName} · ` : ''}${busyLabel}${liveTokenLabel ? ` · about ${estimatedOutputTokens.toLocaleString('en-US')} output tokens` : ''}${liveRateTooltip}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''}`
+            ? `${platformPillLabel}${tooltipModelSuffix} — ${activeGezelName ? `${activeGezelName} · ` : ''}${busyLabel}${liveOutputTokens !== null ? ` · ${tokensAreExact ? '' : 'about '}${liveOutputTokens.toLocaleString('en-US')} output tokens` : ''}${liveRateTooltip}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''}`
             : `${platformPillLabel}${tooltipModelSuffix}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''} — click for details`
         }
       >
@@ -944,9 +988,6 @@ function EngineStatusPillForProvider({
                 </span>
               ) : (
                 busyLabel
-              )}
-              {liveTokenLabel && (
-                <span className="engine-pill-live-tokens">{` · ${liveTokenLabel}`}</span>
               )}
               {liveRateLabel && (
                 <span className="engine-pill-live-rate">{` · ${liveRateLabel}`}</span>
@@ -1129,6 +1170,15 @@ function EngineStatusPillForProvider({
                 <dd>{queue.queueRow}</dd>
               </>
             )}
+            {liveTokenLabel && !activeMedia && (
+              <>
+                <dt>This turn</dt>
+                <dd>
+                  {liveTokenLabel}
+                  {liveRateLabel && <> · {liveRateLabel}</>}
+                </dd>
+              </>
+            )}
             {lastTurn && !activeMedia && (
               <>
                 <dt>Last turn</dt>
@@ -1150,6 +1200,9 @@ function EngineStatusPillForProvider({
             {modelSpeedRows.length > 0 && !activeMedia && (
               <>
                 <dt>Speed by model</dt>
+                {/* Median across every turn this daemon has run — the
+                    long-run answer to "how fast is this model here",
+                    unlike the two rows above it. */}
                 <dd>
                   <ul className="engine-pill-model-speeds">
                     {modelSpeedRows.map((row) => (
@@ -1158,7 +1211,7 @@ function EngineStatusPillForProvider({
                           {installedModelNames.get(row.model) ?? row.model}
                         </span>
                         <span className="engine-pill-model-speed-rate">
-                          {formatTokensPerSec(row.tokensPerSec)}
+                          {formatTokensPerSec(row.medianOutputTokensPerSec)}
                         </span>
                         <span className="engine-pill-model-speed-turns">
                           {row.turns === 1 ? '1 turn' : `${row.turns} turns`}

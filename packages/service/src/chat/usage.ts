@@ -68,7 +68,28 @@ export interface ProviderUsage {
    * "n/a" rather than zero.
    */
   medianOutputTokensPerSec: number | null;
+  /**
+   * The same median decode rate split per model, for the turns that reported
+   * one. A 27B and a 4B averaged together is a number describing nothing, and
+   * the question a user actually asks — "how fast is this model on my machine"
+   * — is per model. Sorted fastest first; empty for providers that report no
+   * throughput at all.
+   *
+   * This is the durable half of the speed story: it spans every session the
+   * daemon has served, so it is still there when a page reloads mid-turn and
+   * the client-side rolling window is empty.
+   */
+  modelSpeeds: ModelSpeed[];
   lastUpdated: string | null;
+}
+
+/** Per-model decode-rate rollup inside {@link ProviderUsage}. */
+export interface ModelSpeed {
+  model: string;
+  /** Median engine-reported decode rate across this model's turns. */
+  medianOutputTokensPerSec: number;
+  /** Turns that contributed a rate — not the model's total turn count. */
+  turns: number;
 }
 
 export interface UsageSummary {
@@ -168,6 +189,7 @@ export class UsageTracker {
             .map((t) => t.outputTokensPerSec)
             .filter((v): v is number => typeof v === 'number' && v > 0),
         ),
+        modelSpeeds: rollUpModelSpeeds(state.turns),
         lastUpdated: last,
       };
     }
@@ -188,6 +210,43 @@ function laterTimestamp(a: string | null, b: string | null): string | null {
   if (!a) return b;
   if (!b) return a;
   return a > b ? a : b;
+}
+
+/**
+ * Group recorded turns by model and take each model's median decode rate.
+ * Median rather than mean for the same reason the provider-level figure uses
+ * it: a cold first turn on freshly-loaded weights is an outlier about disk,
+ * not about the model.
+ *
+ * Ranked by generation seconds — how much of the user's waiting each model
+ * actually accounts for — so the model doing the work leads even when a small
+ * one-shot helper racked up more turns. Exported for tests.
+ */
+export function rollUpModelSpeeds(turns: readonly UsageTurn[]): ModelSpeed[] {
+  const byModel = new Map<string, { rates: number[]; seconds: number }>();
+  for (const turn of turns) {
+    const rate = turn.outputTokensPerSec;
+    if (!turn.model || typeof rate !== 'number' || !(rate > 0)) continue;
+    const entry = byModel.get(turn.model) ?? { rates: [], seconds: 0 };
+    entry.rates.push(rate);
+    // Back out generation seconds from rate + tokens rather than using
+    // durationMs, which includes prefill and tool round-trips.
+    const seconds = turn.outputTokens / rate;
+    if (Number.isFinite(seconds) && seconds > 0) entry.seconds += seconds;
+    byModel.set(turn.model, entry);
+  }
+  const ranked: Array<ModelSpeed & { seconds: number }> = [];
+  for (const [model, { rates, seconds }] of byModel) {
+    const median = medianOf(rates);
+    if (median === null) continue;
+    ranked.push({ model, medianOutputTokensPerSec: median, turns: rates.length, seconds });
+  }
+  ranked.sort((a, b) => b.seconds - a.seconds);
+  return ranked.map(({ model, medianOutputTokensPerSec, turns: contributing }) => ({
+    model,
+    medianOutputTokensPerSec,
+    turns: contributing,
+  }));
 }
 
 /** Median of a numeric list, or null when empty. Exported for tests. */

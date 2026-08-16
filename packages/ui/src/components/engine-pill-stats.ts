@@ -48,72 +48,12 @@ export function formatTokensPerSec(rate: number): string {
 }
 
 /**
- * Per-model generation speed, accumulated across the whole session
- * rather than the 60s rolling window. The window exists so the "right
- * now" number tracks a machine that just got busier; it is the wrong
- * shape for "how fast is this model here", which is the question a
- * user asks between turns — exactly when the window is empty.
- *
- * Totals rather than an average-of-averages, same reasoning as
- * `computeRollingTokensPerSec`.
+ * Per-model generation speed used to be tallied here, over the life of the
+ * page. It now comes from the daemon's own usage record (`rollUpModelSpeeds`
+ * in the service's chat/usage.ts, served on `/api/usage`): the question is
+ * "how fast is this model on my machine", and the honest answer spans every
+ * session the daemon has run, not the handful this browser tab witnessed.
  */
-export interface ModelSpeedTotals {
-  tokens: number;
-  seconds: number;
-  turns: number;
-}
-
-/**
- * Fold one finished turn into the per-model totals. Returns `prev`
- * unchanged (same reference) when the turn carries nothing usable, so
- * callers can hand this straight to a React state setter without
- * forcing a re-render on every unlabelled turn.
- */
-export function accumulateModelSpeed(
-  prev: ReadonlyMap<string, ModelSpeedTotals>,
-  entry: TurnStatsEntry,
-): ReadonlyMap<string, ModelSpeedTotals> {
-  if (!entry.model) return prev;
-  if (entry.tokensPerSec === undefined || entry.tokensPerSec <= 0) return prev;
-  const seconds = entry.completionTokens / entry.tokensPerSec;
-  if (!Number.isFinite(seconds) || seconds <= 0 || entry.completionTokens <= 0) return prev;
-  const existing = prev.get(entry.model);
-  const next = new Map(prev);
-  next.set(entry.model, {
-    tokens: (existing?.tokens ?? 0) + entry.completionTokens,
-    seconds: (existing?.seconds ?? 0) + seconds,
-    turns: (existing?.turns ?? 0) + 1,
-  });
-  return next;
-}
-
-export interface ModelSpeedRow {
-  model: string;
-  tokensPerSec: number;
-  turns: number;
-}
-
-/**
- * Rank models by how much of the user's time they actually account for
- * (generation seconds), so the model doing the work leads even when a
- * one-shot helper racked up more turns.
- */
-export function rankModelSpeeds(
-  totals: ReadonlyMap<string, ModelSpeedTotals>,
-  limit = 4,
-): ModelSpeedRow[] {
-  const rows: Array<ModelSpeedRow & { seconds: number }> = [];
-  for (const [model, t] of totals) {
-    if (t.seconds <= 0 || t.tokens <= 0) continue;
-    rows.push({ model, tokensPerSec: t.tokens / t.seconds, turns: t.turns, seconds: t.seconds });
-  }
-  rows.sort((a, b) => b.seconds - a.seconds);
-  return rows.slice(0, limit).map(({ model, tokensPerSec, turns }) => ({
-    model,
-    tokensPerSec,
-    turns,
-  }));
-}
 
 /**
  * Minimum decoding time before a live rate is worth showing. Under this

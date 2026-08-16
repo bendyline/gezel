@@ -638,6 +638,12 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
               ...(frame.detail ? { detail: frame.detail } : {}),
               ...(typeof frame.progress === 'number' ? { progress: frame.progress } : {}),
               ...(typeof frame.ttftMs === 'number' ? { ttftMs: frame.ttftMs } : {}),
+              ...(typeof frame.outputTokens === 'number'
+                ? { outputTokens: frame.outputTokens }
+                : {}),
+              ...(typeof frame.tokensPerSec === 'number'
+                ? { tokensPerSec: frame.tokensPerSec }
+                : {}),
             });
           }
           break;

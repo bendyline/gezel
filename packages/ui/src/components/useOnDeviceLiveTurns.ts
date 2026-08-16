@@ -58,6 +58,16 @@ export interface LiveTurnState {
    */
   outputChars?: number;
   /**
+   * Exact completion tokens decoded so far, straight from the engine's own
+   * counter (llama-server `timings.predicted_n`, MLX streamed usage). When
+   * this is present consumers must show it as fact; `outputChars` is only
+   * the fallback for engines that publish nothing until the turn ends, and
+   * anything derived from it has to be marked approximate.
+   */
+  outputTokens?: number;
+  /** Exact engine-measured decode rate right now, tokens/sec. */
+  tokensPerSec?: number;
+  /**
    * Wall-clock millis of the most recent event that touched this
    * entry (user_message seed, engine_phase update). Used by the idle
    * sweeper to drop entries whose `done` event was missed (SSE
@@ -126,6 +136,8 @@ export function useOnDeviceLiveTurns(
             ...(prior?.generatingSince !== undefined
               ? { generatingSince: prior.generatingSince }
               : {}),
+            ...(prior?.outputTokens !== undefined ? { outputTokens: prior.outputTokens } : {}),
+            ...(prior?.tokensPerSec !== undefined ? { tokensPerSec: prior.tokensPerSec } : {}),
             outputChars: (prior?.outputChars ?? 0) + addition.chars,
           });
         }
@@ -155,6 +167,8 @@ export function useOnDeviceLiveTurns(
             const phase = event.phase;
             const detail = event.detail;
             const progress = event.progress;
+            const outputTokens = event.outputTokens;
+            const tokensPerSec = event.tokensPerSec;
             setLiveTurns((prev) => {
               const next = new Map(prev);
               const prior = next.get(sessionId);
@@ -179,6 +193,19 @@ export function useOnDeviceLiveTurns(
                 outputChars: prior?.outputChars ?? 0,
                 ...(generatingSince !== undefined ? { generatingSince } : {}),
                 ...(typeof progress === 'number' ? { progress } : {}),
+                // Engines emit these on a ticker; a phase event that carries
+                // no counter (a TTFT or prefill emit landing mid-decode)
+                // must not blank the last real reading.
+                ...(typeof outputTokens === 'number'
+                  ? { outputTokens }
+                  : prior?.outputTokens !== undefined
+                    ? { outputTokens: prior.outputTokens }
+                    : {}),
+                ...(typeof tokensPerSec === 'number'
+                  ? { tokensPerSec }
+                  : prior?.tokensPerSec !== undefined
+                    ? { tokensPerSec: prior.tokensPerSec }
+                    : {}),
               });
               return next;
             });

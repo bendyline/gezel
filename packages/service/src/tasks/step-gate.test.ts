@@ -36,6 +36,74 @@ function okRun(output: unknown): ScriptRun {
   };
 }
 
+describe('evaluateStepGate — unresolved launch placeholders', () => {
+  it('treats a leftover {{param}} as an infrastructure fault, not a repairable rejection', async () => {
+    // Wild-caught on Pull Request Review: the scope gate reached the
+    // regex engine as `PR\s*#{{number}}`, so a correctly-written note
+    // could never match. Presented as an ordinary rejection, it cost
+    // three attempts of the reviewer re-deriving why correct work kept
+    // failing, and was finally "passed" by writing the literal template
+    // token into the task's permanent audit trail.
+    const runScript = vi.fn();
+    const outcome = await evaluateStepGate({
+      gate: gate({
+        scripts: [
+          {
+            name: 'checkTaskNoteContains',
+            inputs: { pattern: '##\\s*Scope\\s*[—-]\\s*PR\\s*#{{number}}' },
+          },
+        ],
+      }),
+      ws: ws(),
+      runScript,
+    });
+    expect(outcome.decision).toBe('reject');
+    expect(outcome.infrastructureError).toBe(true);
+    expect(outcome.message).toContain('{{number}}');
+    expect(outcome.message).toContain('can never pass');
+    // No assignee can fix it, so nothing should be spawned to try.
+    expect(runScript).not.toHaveBeenCalled();
+  });
+
+  it('finds placeholders nested anywhere in a check, and names the field', async () => {
+    const outcome = await evaluateStepGate({
+      gate: gate({
+        checks: [
+          {
+            kind: 'corpusCoverage',
+            file: 'coverage.json',
+            corpusDir: '{{corpusScope}}',
+            artifact: true,
+          },
+        ],
+      }),
+      ws: ws(),
+      runScript: vi.fn(),
+    });
+    expect(outcome.infrastructureError).toBe(true);
+    expect(outcome.message).toContain('corpusDir');
+    expect(outcome.message).toContain('{{corpusScope}}');
+  });
+
+  it('leaves a fully-interpolated gate alone', async () => {
+    // Regex braces must not read as template tokens — `\d{2}` and
+    // friends are ordinary quantifiers, and flagging them would break
+    // every numeric pattern in the catalog.
+    const outcome = await evaluateStepGate({
+      gate: gate({
+        checks: [
+          { kind: 'contains', file: 'review.md', pattern: 'PR #46 \\d{2,4} \\w{3}' },
+          { kind: 'minBytes', file: 'review.md', bytes: 1 },
+        ],
+      }),
+      ws: ws({ 'review.md': 'PR #46 1234 abc' }),
+      runScript: vi.fn(),
+    });
+    expect(outcome.infrastructureError).toBeUndefined();
+    expect(outcome.decision).toBe('approve');
+  });
+});
+
 describe('evaluateStepGate', () => {
   it('rejects on a failed check WITHOUT running any script', async () => {
     const runScript = vi.fn();

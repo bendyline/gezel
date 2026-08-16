@@ -61,11 +61,13 @@ import type { HistoryManager } from '../history/manager.js';
 import type { ScriptRunner } from '../scripts/runner.js';
 import { nextCronFire, parseCron } from './cron.js';
 import {
+  type DeliverableSurface,
   type EscalationStage,
   appendGateAttempt,
   buildPlateauDiagnosisNote,
   buildStageOneNudge,
   buildStageTwoNudge,
+  deliverableSurface,
   escalationDisabled,
   gateFailureSignature,
   plateauScore,
@@ -249,15 +251,48 @@ function interpolateContext(text: string, context: Record<string, string>): stri
 }
 
 /**
+ * Recursive {@link interpolateContext} over a nested plain-data value —
+ * strings, arrays, and object values alike, returning fresh containers so
+ * nothing aliased is mutated in place.
+ *
+ * A gate buries its launch parameters well below its own top level:
+ * `scripts[].inputs.pattern`, `checks[].corpusDir`, `checks[].pattern`,
+ * `checks[].outlineFile`, `checks[].files[]`. Interpolating a hand-written
+ * list of fields missed every one of them, and the miss is invisible —
+ * an uninterpolated `{{number}}` reaches the regex engine as a literal
+ * and simply never matches. Pull Request Review's `scope` gate shipped
+ * `##\s*Scope\s*[—-]\s*PR\s*#{{number}}` to a reviewer who had written
+ * the note correctly; the only way past was to put the raw template token
+ * into the task's permanent audit trail. Walk the whole gate instead of
+ * naming fields, so a new check kind can never reintroduce this.
+ */
+function interpolateContextDeep<T>(value: T, context: Record<string, string>): T {
+  if (typeof value === 'string') return interpolateContext(value, context) as T;
+  if (Array.isArray(value)) {
+    return value.map((entry) => interpolateContextDeep(entry, context)) as T;
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        interpolateContextDeep(entry, context),
+      ]),
+    ) as T;
+  }
+  return value;
+}
+
+/**
  * Apply {@link interpolateContext} across the text-bearing fields of a
  * child craftbook's steps: name/description/prompt plus the file paths in
- * `advanceWhen` and every gate check. The step objects themselves are
- * fresh snapshot copies, but their NESTED `advanceWhen`/`gate` are still
- * aliased to the source book (`snapshotCraftbookForTask` shallow-spreads
- * each step) — so those are replaced copy-on-write, never mutated in
- * place, or the substitution would write through into the resolver's
- * template and leak one task's params into the next. Non-fatal by
- * construction — only string fields are touched.
+ * `advanceWhen` and every string anywhere inside the gate. The step
+ * objects themselves are fresh snapshot copies, but their NESTED
+ * `advanceWhen`/`gate` are still aliased to the source book
+ * (`snapshotCraftbookForTask` shallow-spreads each step) — so those are
+ * replaced copy-on-write, never mutated in place, or the substitution
+ * would write through into the resolver's template and leak one task's
+ * params into the next. Non-fatal by construction — only string fields
+ * are touched.
  */
 function interpolateStepsContext(
   steps: TaskCraftbookStep[],
@@ -280,18 +315,26 @@ function interpolateStepsContext(
         file: interpolateContext(step.advanceWhen.file, context),
       };
     }
-    const gate = step.gate as { checks?: Array<Record<string, unknown>> } | undefined;
-    if (gate?.checks?.some((check) => typeof check.file === 'string')) {
-      step.gate = {
-        ...gate,
-        checks: gate.checks.map((check) =>
-          typeof check.file === 'string'
-            ? { ...check, file: interpolateContext(check.file, context) }
-            : check,
-        ),
-      } as typeof step.gate;
-    }
+    if (step.gate) step.gate = interpolateContextDeep(step.gate, context);
   }
+}
+
+/**
+ * The surface a step's gate rejection should speak to. Consults the gate
+ * itself, not `advanceWhen` alone: a step can carry a gate without ever
+ * declaring an `advanceWhen` deliverable, and reading only `advanceWhen`
+ * classified every one of those as 'workspace' — which is how a task-note
+ * script gate came to demand `replace_in_file`.
+ */
+function stepDeliverableSurface(
+  step: Pick<TaskCraftbookStep, 'advanceWhen' | 'gate'>,
+): DeliverableSurface {
+  const gate = step.gate ? normalizeStepGate(step.gate) : undefined;
+  return deliverableSurface({
+    advanceWhen: step.advanceWhen,
+    checks: gate?.checks as ReadonlyArray<Record<string, unknown>> | undefined,
+    scripts: gate?.scripts,
+  });
 }
 
 /**
@@ -2577,9 +2620,7 @@ export class TaskManager {
         };
       }
 
-      const frozenSurface = step.advanceWhen?.artifact
-        ? ('artifact' as const)
-        : ('workspace' as const);
+      const frozenSurface = stepDeliverableSurface(step);
       const nudge =
         stage === 2 && deliverableFile
           ? buildStageTwoNudge({
@@ -2862,9 +2903,7 @@ export class TaskManager {
     let stage: EscalationStage = modelDriven ? stageForPlateau(score) : 0;
     const deliverableFile = step.advanceWhen?.file;
     if (stage === 2 && !deliverableFile) stage = 1;
-    const rejectSurface = step.advanceWhen?.artifact
-      ? ('artifact' as const)
-      : ('workspace' as const);
+    const rejectSurface = stepDeliverableSurface(step);
     const message =
       stage === 1
         ? buildStageOneNudge({
@@ -3247,6 +3286,11 @@ export class TaskManager {
    * hook even when the target IS the gated step itself — `onReject:
    * <self>` deliberately produces a fresh activation + handoff session
    * each rejection (the loop shape that carries small models).
+   *
+   * A fresh SESSION is not a fresh BUDGET, though: when the route points
+   * back at the gated step, the rejection count has to survive the
+   * re-activation or `maxAttempts` is unreachable and the loop never
+   * escalates. See the self-loop carve-out in {@link bumpStepActivation}.
    */
   private async reactivateStepForGate(
     projectId: string,
@@ -3265,7 +3309,9 @@ export class TaskManager {
       ...task,
       craftbook: {
         ...task.craftbook,
-        steps: bumpStepActivation(task.craftbook.steps, targetId, now),
+        steps: bumpStepActivation(task.craftbook.steps, targetId, now, {
+          preserveGateBudget: targetId === gatedStep.id,
+        }),
         updatedAt: now,
       },
       activeStepId: targetId,
@@ -3791,6 +3837,7 @@ function bumpStepActivation(
   steps: TaskCraftbookStep[],
   stepId: string,
   at: string,
+  opts?: { preserveGateBudget?: boolean },
 ): TaskCraftbookStep[] {
   return steps.map((s) => {
     if (s.id !== stepId) return s;
@@ -3820,7 +3867,24 @@ function bumpStepActivation(
     void _lgr;
     void _rc;
     void _lra;
-    return { ...rest, attemptCount: (s.attemptCount ?? 0) + 1, lastActivatedAt: at };
+    const bumped = { ...rest, attemptCount: (s.attemptCount ?? 0) + 1, lastActivatedAt: at };
+    if (!opts?.preserveGateBudget) return bumped;
+    // Self-loop carve-out. A gate with `onReject: <self>` re-activates the
+    // step it just rejected, so the reset above handed it a brand-new
+    // budget on every rejection and `maxAttempts` became unreachable —
+    // the pause-for-help that budget exists to trigger could never fire.
+    // Wild-caught on Pull Request Review: the step logged attemptCount 3
+    // while every trail entry (and every message the model saw) read
+    // "attempt 1/3", so nothing ever escalated and the loop could have run
+    // forever. Only a gate rejection routing back to ITSELF takes this
+    // branch; a loop through another step is real upstream rework and
+    // still earns a clean budget, as do create/manual activation and the
+    // deliberate `resetStepRecoveryBudget` second chance.
+    return {
+      ...bumped,
+      ...(s.gateAttempts !== undefined ? { gateAttempts: s.gateAttempts } : {}),
+      ...(s.lastGateReject !== undefined ? { lastGateReject: s.lastGateReject } : {}),
+    };
   });
 }
 

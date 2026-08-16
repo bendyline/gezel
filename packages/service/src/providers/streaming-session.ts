@@ -14,6 +14,15 @@ export interface EnginePhaseEvent {
   progress?: number;
   /** Time from request dispatch to the first model-produced token/fragment. */
   ttftMs?: number;
+  /**
+   * Exact cumulative completion tokens decoded so far this turn, as the
+   * engine counts them. Only on `generating`, and only from engines that
+   * publish a running counter — its absence is what forces the UI onto an
+   * approximate character-derived estimate.
+   */
+  outputTokens?: number;
+  /** Exact engine-measured decode rate right now, tokens/sec. */
+  tokensPerSec?: number;
 }
 
 /**

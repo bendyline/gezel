@@ -60,6 +60,58 @@ describe('UsageTracker decode-rate aggregation', () => {
   });
 });
 
+/**
+ * The per-model split answers "how fast is this model on my machine", which a
+ * single provider-wide figure cannot: blending a 27B and a 4B describes
+ * neither. It also has to outlive a page reload, which is why it is computed
+ * here rather than tallied in the engine pill.
+ */
+describe('UsageTracker per-model speeds', () => {
+  it('never blends two models into one figure', () => {
+    const t = new UsageTracker();
+    t.recordTurn(
+      'llama-cpp',
+      turn({ model: 'qwen-27b', outputTokens: 300, outputTokensPerSec: 30 }),
+    );
+    t.recordTurn(
+      'llama-cpp',
+      turn({ model: 'gemma-4b', outputTokens: 90, outputTokensPerSec: 90 }),
+    );
+    const rows = t.summary().providers['llama-cpp']?.modelSpeeds ?? [];
+    expect(rows.map((r) => r.model)).toEqual(['qwen-27b', 'gemma-4b']);
+    expect(rows[0]!.medianOutputTokensPerSec).toBe(30);
+    expect(rows[1]!.medianOutputTokensPerSec).toBe(90);
+  });
+
+  it('medians each model rather than letting a cold first turn set the figure', () => {
+    const t = new UsageTracker();
+    for (const rate of [7, 34, 36, 35]) {
+      t.recordTurn('mlx', turn({ model: 'qwen-27b', outputTokensPerSec: rate }));
+    }
+    const rows = t.summary().providers.mlx?.modelSpeeds ?? [];
+    expect(rows[0]!.medianOutputTokensPerSec).toBe(34.5);
+    expect(rows[0]!.turns).toBe(4);
+  });
+
+  it('ranks by generation seconds, so the model doing the work leads', () => {
+    // The 4B racked up three quick turns; the 27B owned the machine.
+    const t = new UsageTracker();
+    t.recordTurn('llama-cpp', turn({ model: 'big', outputTokens: 600, outputTokensPerSec: 20 }));
+    for (let i = 0; i < 3; i++) {
+      t.recordTurn('llama-cpp', turn({ model: 'small', outputTokens: 90, outputTokensPerSec: 90 }));
+    }
+    const rows = t.summary().providers['llama-cpp']?.modelSpeeds ?? [];
+    expect(rows[0]!.model).toBe('big');
+    expect(rows[1]!.turns).toBe(3);
+  });
+
+  it('omits turns with no rate rather than counting them as zero', () => {
+    const t = new UsageTracker();
+    t.recordTurn('llama-cpp', turn({ model: 'qwen-27b' }));
+    expect(t.summary().providers['llama-cpp']?.modelSpeeds).toEqual([]);
+  });
+});
+
 describe('UsageTracker standalone quota snapshots', () => {
   it('surfaces quota windows without inventing a chat turn', () => {
     const t = new UsageTracker();

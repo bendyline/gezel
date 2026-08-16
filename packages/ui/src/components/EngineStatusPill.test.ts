@@ -1,12 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  type ModelSpeedTotals,
-  accumulateModelSpeed,
   composeQueueStatus,
   computeLiveTokensPerSec,
   computeRollingTokensPerSec,
   estimateLiveOutputTokens,
-  rankModelSpeeds,
 } from './engine-pill-stats.js';
 
 /**
@@ -82,130 +79,6 @@ describe('computeRollingTokensPerSec', () => {
       { at: now, promptTokens: 10, completionTokens: 100, durationMs: 5_000, tokensPerSec: 20 },
     ]);
     expect(result!).toBeCloseTo(20, 1);
-  });
-});
-
-/**
- * Per-model totals answer "how fast is this model on my machine",
- * which is a different question from the 60s window's "how fast is the
- * machine right now". Mixing a 27B and a 4B into one average answers
- * neither.
- */
-describe('accumulateModelSpeed / rankModelSpeeds', () => {
-  const now = Date.now();
-  const empty: ReadonlyMap<string, ModelSpeedTotals> = new Map();
-
-  it('keeps the same map reference for a turn with no model', () => {
-    const next = accumulateModelSpeed(empty, {
-      at: now,
-      promptTokens: 10,
-      completionTokens: 100,
-      durationMs: 5_000,
-      tokensPerSec: 20,
-    });
-    expect(next).toBe(empty);
-  });
-
-  it('keeps the same map reference for a turn with no usable rate', () => {
-    const next = accumulateModelSpeed(empty, {
-      at: now,
-      model: 'qwen3.8-27b-q4',
-      promptTokens: 10,
-      completionTokens: 100,
-      durationMs: 5_000,
-    });
-    expect(next).toBe(empty);
-  });
-
-  it('aggregates by total tokens over total seconds, per model', () => {
-    // qwen: 50 tok @ 25 tok/s (2s) then 100 tok @ 20 tok/s (5s)
-    //       → 150 / 7 ≈ 21.4 tok/s across 2 turns
-    let totals = accumulateModelSpeed(empty, {
-      at: now,
-      model: 'qwen',
-      promptTokens: 40,
-      completionTokens: 50,
-      durationMs: 3_000,
-      tokensPerSec: 25,
-    });
-    totals = accumulateModelSpeed(totals, {
-      at: now,
-      model: 'qwen',
-      promptTokens: 40,
-      completionTokens: 100,
-      durationMs: 6_000,
-      tokensPerSec: 20,
-    });
-    const rows = rankModelSpeeds(totals);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.model).toBe('qwen');
-    expect(rows[0]!.turns).toBe(2);
-    expect(rows[0]!.tokensPerSec).toBeCloseTo(150 / 7, 1);
-  });
-
-  it('never blends two models into one figure', () => {
-    let totals = accumulateModelSpeed(empty, {
-      at: now,
-      model: 'qwen-27b',
-      promptTokens: 40,
-      completionTokens: 300,
-      durationMs: 12_000,
-      tokensPerSec: 30,
-    });
-    totals = accumulateModelSpeed(totals, {
-      at: now,
-      model: 'gemma-4b',
-      promptTokens: 40,
-      completionTokens: 90,
-      durationMs: 1_200,
-      tokensPerSec: 90,
-    });
-    const rows = rankModelSpeeds(totals);
-    expect(rows.map((r) => r.model)).toEqual(['qwen-27b', 'gemma-4b']);
-    expect(rows[0]!.tokensPerSec).toBeCloseTo(30, 1);
-    expect(rows[1]!.tokensPerSec).toBeCloseTo(90, 1);
-  });
-
-  it('ranks by generation seconds, not turn count', () => {
-    // The 4B racked up three quick turns; the 27B owned the machine.
-    // The model doing the work should lead the list.
-    let totals = accumulateModelSpeed(empty, {
-      at: now,
-      model: 'big',
-      promptTokens: 40,
-      completionTokens: 600,
-      durationMs: 30_000,
-      tokensPerSec: 20,
-    });
-    for (let i = 0; i < 3; i++) {
-      totals = accumulateModelSpeed(totals, {
-        at: now,
-        model: 'small',
-        promptTokens: 40,
-        completionTokens: 90,
-        durationMs: 1_000,
-        tokensPerSec: 90,
-      });
-    }
-    const rows = rankModelSpeeds(totals);
-    expect(rows[0]!.model).toBe('big');
-    expect(rows[1]!.turns).toBe(3);
-  });
-
-  it('caps the list so the popover cannot grow without bound', () => {
-    let totals = empty;
-    for (let i = 0; i < 9; i++) {
-      totals = accumulateModelSpeed(totals, {
-        at: now,
-        model: `model-${i}`,
-        promptTokens: 10,
-        completionTokens: 100,
-        durationMs: 5_000,
-        tokensPerSec: 20,
-      });
-    }
-    expect(rankModelSpeeds(totals)).toHaveLength(4);
-    expect(rankModelSpeeds(totals, 2)).toHaveLength(2);
   });
 });
 

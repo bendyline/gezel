@@ -41,8 +41,10 @@ export {
   canUseLinuxSystemdDenyNet,
   unavailableToolsForPlatform,
 } from './platform-tool-availability.js';
+// Re-exported from core so the service, the UI, and this server all rank
+// pulls by the same rule; the published mcp surface keeps the name.
 export {
   prioritizePullsForCurrentBranch,
   type BranchPrioritizedPulls,
   type PullWithHeadRef,
-} from './github-pr-selection.js';
+} from '@bendyline/gezel';

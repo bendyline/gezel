@@ -1077,6 +1077,22 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     detail: z.string().optional(),
     progress: z.number().min(0).max(1).optional(),
     ttftMs: z.number().int().nonnegative().optional(),
+    /**
+     * Exact cumulative completion tokens decoded so far this turn, as the
+     * engine counts them (llama-server `timings.predicted_n`, MLX's
+     * streamed `usage.output_tokens`). Present only on `generating`, and
+     * only for engines that publish a running counter — the UI falls back
+     * to an explicitly-approximate character estimate when it is absent,
+     * so this field is what lets a readout drop its "≈".
+     */
+    outputTokens: z.number().int().nonnegative().optional(),
+    /**
+     * Exact decode rate right now, engine-measured over the generation
+     * phase alone (llama-server `timings.predicted_per_second`, MLX's
+     * `generation_tps`). Same contract as `outputTokens`: absent means the
+     * UI must derive and mark its own estimate.
+     */
+    tokensPerSec: z.number().nonnegative().optional(),
   }),
   /**
    * Per-turn telemetry for locally-hosted providers (llama-cpp +

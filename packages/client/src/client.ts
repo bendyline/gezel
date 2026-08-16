@@ -442,7 +442,22 @@ export interface ProviderUsage {
    * Optional so an older daemon that predates the field still typechecks.
    */
   medianOutputTokensPerSec?: number | null;
+  /**
+   * Per-model split of the same median decode rate, fastest first. Spans the
+   * daemon's whole life, so it stays populated across page reloads where a
+   * client-side rolling window starts empty. Optional so an older daemon that
+   * predates the field still typechecks.
+   */
+  modelSpeeds?: ModelSpeed[];
   lastUpdated: string | null;
+}
+
+/** Per-model decode-rate rollup inside {@link ProviderUsage}. */
+export interface ModelSpeed {
+  model: string;
+  medianOutputTokensPerSec: number;
+  /** Turns that contributed a rate — not the model's total turn count. */
+  turns: number;
 }
 
 export interface UsageResponse {

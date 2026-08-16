@@ -32,6 +32,8 @@ function deps(): AdapterDeps {
 
 interface RuntimeOpts {
   open?: { number: number; headRef: string }[];
+  /** What HEAD points at in the checkout; `null` = detached/unreadable. */
+  currentBranch?: string | null;
   files?: {
     filename: string;
     status: string;
@@ -95,6 +97,8 @@ function runtime(opts: RuntimeOpts = {}): GitHubPullsRuntime {
       getPullRequestDiff: async () => opts.diff ?? 'diff --git a/src/auth.ts b/src/auth.ts',
     },
     project: async () => project(),
+    currentBranch: async () =>
+      opts.currentBranch === null ? undefined : (opts.currentBranch ?? 'feature-x'),
   };
 }
 
@@ -312,5 +316,39 @@ describe('resolveLaunchPullNumber', () => {
     await expect(resolveLaunchPullNumber(rt, project(), {})).rejects.toThrow(
       /No open pull request for branch "feature-x"/,
     );
+  });
+
+  // The launch bug this guards: `project.github.branch` is the *configured*
+  // tracking branch and is unset on most links, so reading it instead of
+  // HEAD turned every "review the PR for this branch" launch into "the
+  // checkout has no branch" — a 409 on projects that were on a branch the
+  // whole time.
+  it('resolves against live HEAD, not the link’s pinned branch', async () => {
+    const rt = runtime({
+      currentBranch: 'bugfix-y',
+      open: [
+        { number: 41, headRef: 'feature-x' },
+        { number: 52, headRef: 'bugfix-y' },
+      ],
+    });
+    expect(await resolveLaunchPullNumber(rt, project(), {})).toBe(52);
+  });
+
+  it('falls back to the pinned branch when HEAD is unreadable', async () => {
+    const rt = runtime({
+      currentBranch: null,
+      open: [
+        { number: 41, headRef: 'someone-else' },
+        { number: 52, headRef: 'feature-x' },
+      ],
+    });
+    expect(await resolveLaunchPullNumber(rt, project(), {})).toBe(52);
+  });
+
+  it('names no branch only when neither HEAD nor the link has one', async () => {
+    const rt = runtime({ currentBranch: null, open: [{ number: 41, headRef: 'someone-else' }] });
+    await expect(
+      resolveLaunchPullNumber(rt, project({ github: { url: 'https://github.com/x/y' } }), {}),
+    ).rejects.toThrow(/the project checkout has no branch/);
   });
 });

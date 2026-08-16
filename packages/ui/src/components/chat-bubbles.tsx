@@ -846,11 +846,21 @@ export function formatDebugBundle(opts: {
   lines.push(`- Session: \`${s.sessionId}\``);
   lines.push(`- Turn status at export: \`${s.turnStatus}\``);
   if (s.registeredTools.length > 0) {
+    const scope = s.registeredToolsSource === 'persisted' ? ', last known' : '';
     lines.push(
-      `- Registered tools (${s.registeredTools.length}): ${s.registeredTools.map((t) => `\`${t}\``).join(', ')}`,
+      `- Registered tools (${s.registeredTools.length}${scope}): ${s.registeredTools.map((t) => `\`${t}\``).join(', ')}`,
     );
+  } else if (s.registeredToolsSource === 'live') {
+    lines.push('- Registered tools: **none** (live session reported an empty bridge)');
   } else {
-    lines.push('- Registered tools: **none** (cold session, or MCP bridge not yet started)');
+    // Never assert "none" without having asked a live bridge. An empty
+    // list from a cold session is missing evidence, not evidence of a
+    // missing roster — and reading it as the latter cost one whole
+    // investigation, on a bundle whose own prompt listed ~80 tools.
+    // Older snapshots carry no source at all; they land here too.
+    lines.push(
+      '- Registered tools: **not recorded** (no live session at export — unknown, NOT an empty roster; read the "Tools available this turn" block in the prompt below)',
+    );
   }
   if (s.customToolsMd) {
     lines.push(

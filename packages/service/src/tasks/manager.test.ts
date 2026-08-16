@@ -185,6 +185,86 @@ describe('TaskManager', () => {
     expect(created.craftbook.steps[0]?.advanceWhen?.file).toBe('marne-battle.pptx');
   });
 
+  it('interpolates launch params everywhere inside a gate, not just check.file', async () => {
+    // A gate buries its params below its own top level. The old
+    // field-by-field walk touched `checks[].file` only, so Pull Request
+    // Review's scope gate shipped the literal `#{{number}}` to the regex
+    // engine: the reviewer wrote the note the step asked for, the gate
+    // could never match it, and the only way past was to put the raw
+    // template token into the task's permanent audit trail.
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            id,
+            name: 'Pull Request Review',
+            steps: [
+              {
+                id: 'scope',
+                name: 'Map PR #{{number}}',
+                prompt: 'Read the corpus at {{corpusScope}}.',
+                gate: {
+                  at: 'completion',
+                  scripts: [
+                    {
+                      name: 'checkTaskNoteContains',
+                      scope: 'standard',
+                      inputs: { pattern: '##\\s*Scope\\s*[—-]\\s*PR\\s*#{{number}}' },
+                    },
+                  ],
+                  checks: [
+                    {
+                      kind: 'contains',
+                      file: 'review-{{number}}.md',
+                      pattern: 'Pull Request Review — PR #{{number}}',
+                      artifact: true,
+                    },
+                    {
+                      kind: 'corpusCoverage',
+                      file: 'coverage.json',
+                      corpusDir: '{{corpusScope}}',
+                      artifact: true,
+                    },
+                  ],
+                },
+                terminal: true,
+              },
+            ],
+            entryStepId: 'scope',
+            createdAt: '2026-08-16T00:00:00Z',
+            updatedAt: '2026-08-16T00:00:00Z',
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+    const created = await tasks.create('website', {
+      title: 'Review PR 46',
+      assignee: { kind: 'user' },
+      craftbookId: 'pull-request-review',
+      craftbookParams: {
+        number: '46',
+        corpusScope: 'artifacts/data/github-pull-requests/pr-46',
+      },
+    });
+    const gate = created.craftbook.steps[0]?.gate as {
+      scripts?: Array<{ inputs?: Record<string, string> }>;
+      checks?: Array<Record<string, unknown>>;
+    };
+    expect(created.craftbook.steps[0]?.name).toBe('Map PR #46');
+    // The gate SCRIPT input — the one that actually rejected Ayza.
+    expect(gate.scripts?.[0]?.inputs?.pattern).toBe('##\\s*Scope\\s*[—-]\\s*PR\\s*#46');
+    // A check's non-`file` strings interpolate too.
+    expect(gate.checks?.[0]?.file).toBe('review-46.md');
+    expect(gate.checks?.[0]?.pattern).toBe('Pull Request Review — PR #46');
+    expect(gate.checks?.[1]?.corpusDir).toBe('artifacts/data/github-pull-requests/pr-46');
+    // Non-string fields survive the walk intact — including the drawer
+    // flag the schema used to strip.
+    expect(gate.checks?.[1]?.artifact).toBe(true);
+    expect(JSON.stringify(gate)).not.toContain('{{');
+  });
+
   it('emits task.created history', async () => {
     await tasks.create('website', {
       title: 'Ship',

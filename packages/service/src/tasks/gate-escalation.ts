@@ -95,8 +95,45 @@ export function appendGateAttempt(
  * at all) sends the model chasing a tool it does not have; the molen
  * dependency-audit night shift burned its whole gate budget exactly
  * that way. Default 'workspace' keeps legacy call sites byte-stable.
+ *
+ * `'note'` is the fileless case: the gate judges the TASK RECORD, so
+ * there is no deliverable on disk to claim exists or to patch. Pull
+ * Request Review's `scope` gate is one (`checkTaskNoteContains`), and it
+ * rendered as "The file the deliverable EXISTS … use replace_in_file" —
+ * broken grammar, an unprovable existence claim, and a tool that had
+ * been stripped from the roster because workspace writes were off.
  */
-export type DeliverableSurface = 'workspace' | 'artifact';
+export type DeliverableSurface = 'workspace' | 'artifact' | 'note';
+
+/**
+ * Classify a step's deliverable surface from what its gate actually
+ * reads. An explicit `advanceWhen` deliverable wins; otherwise the gate's
+ * own checks decide, and a gate that names no file anywhere while
+ * carrying scripts is judging the task record.
+ *
+ * The artifact verdict requires EVERY file-naming check to be drawer-
+ * flagged: a mixed gate still needs workspace wording, because the
+ * failure the model must repair may well be the workspace half.
+ */
+export function deliverableSurface(opts: {
+  advanceWhen?: { file?: string; artifact?: boolean } | undefined;
+  checks?: ReadonlyArray<Record<string, unknown>> | undefined;
+  scripts?: ReadonlyArray<unknown> | undefined;
+}): DeliverableSurface {
+  if (opts.advanceWhen?.file) return opts.advanceWhen.artifact ? 'artifact' : 'workspace';
+  const fileChecks = (opts.checks ?? []).filter(
+    (check) =>
+      typeof check.file === 'string' ||
+      Array.isArray(check.files) ||
+      typeof check.dir === 'string' ||
+      Array.isArray(check.ext),
+  );
+  if (fileChecks.length > 0) {
+    return fileChecks.every((check) => check.artifact === true) ? 'artifact' : 'workspace';
+  }
+  if ((opts.scripts?.length ?? 0) > 0) return 'note';
+  return 'workspace';
+}
 
 /**
  * Stage 1 — smallest-targeted-edit directive. Ports the eval harness's
@@ -107,7 +144,8 @@ export type DeliverableSurface = 'workspace' | 'artifact';
  * or scenario-check header — this stage wants a surgical edit, not a
  * whole-file rewrite (both directions pinned by unit tests). The
  * artifact surface has no partial-edit tool, so its "targeted edit" is
- * a minimal rewrite through `write_artifact`.
+ * a minimal rewrite through `write_artifact`; the note surface has no
+ * file at all, so it neither claims existence nor names a file tool.
  */
 export function buildStageOneNudge(opts: {
   file?: string;
@@ -116,14 +154,26 @@ export function buildStageOneNudge(opts: {
   surface?: DeliverableSurface;
 }): string {
   const artifact = opts.surface === 'artifact';
+  const note = opts.surface === 'note';
   const fileRef = opts.file ? `\`${opts.file}\`` : 'the deliverable';
-  const opener = opts.frozen
-    ? 'Continue. You resubmitted the SAME deliverable and the gate rejected it again for the same reasons — resubmitting unchanged content cannot pass.'
-    : 'Continue. Your last edits did not move the gate — the same checks fail after each attempt.';
-  const fix = artifact
-    ? 'Fix the FIRST failure above with the smallest change — read the artifact with read_artifact, correct only the section the check names, and save it back with write_artifact. Do NOT switch to a different file, do NOT re-read everything, and do NOT reply that you already finished.'
-    : 'Fix the FIRST failure above with the smallest targeted edit — use replace_in_file on the exact section the check names. Do NOT recreate the file, do NOT re-read everything, and do NOT reply that you already finished.';
-  return `GATE_TARGETED_EDIT: ${opener} The ${artifact ? 'artifact' : 'file'} ${fileRef} EXISTS but fails exactly these checks:
+  const opener = note
+    ? opts.frozen
+      ? 'Continue. You wrote the SAME note again and the gate rejected it for the same reason — reposting unchanged content cannot pass.'
+      : 'Continue. Your last attempt did not move the gate — the same checks fail after each attempt.'
+    : opts.frozen
+      ? 'Continue. You resubmitted the SAME deliverable and the gate rejected it again for the same reasons — resubmitting unchanged content cannot pass.'
+      : 'Continue. Your last edits did not move the gate — the same checks fail after each attempt.';
+  const fix = note
+    ? 'Fix the FIRST failure above by recording it on the task itself — write_task_note for a required note, or whichever task tool the failure names. Do NOT edit workspace files, do NOT re-read everything, and do NOT reply that you already finished. If you are confident the note already satisfies the check, say so plainly and stop: escalate to the task owner rather than reshaping the note to match the checker.'
+    : artifact
+      ? 'Fix the FIRST failure above with the smallest change — read the artifact with read_artifact, correct only the section the check names, and save it back with write_artifact. Do NOT switch to a different file, do NOT re-read everything, and do NOT reply that you already finished.'
+      : 'Fix the FIRST failure above with the smallest targeted edit — use replace_in_file on the exact section the check names. Do NOT recreate the file, do NOT re-read everything, and do NOT reply that you already finished.';
+  // A note gate has no artifact on disk, so the existence claim the file
+  // and drawer surfaces open with would be a fabrication.
+  const subject = note
+    ? 'This gate reads the task record, not a file, and it still fails exactly these checks:'
+    : `The ${artifact ? 'artifact' : 'file'} ${fileRef} EXISTS but fails exactly these checks:`;
+  return `GATE_TARGETED_EDIT: ${opener} ${subject}
 
 ${opts.failingBullets}
 

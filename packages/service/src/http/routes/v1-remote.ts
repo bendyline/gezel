@@ -538,6 +538,8 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
             ...(ev.detail ? { detail: ev.detail } : {}),
             ...(typeof ev.progress === 'number' ? { progress: ev.progress } : {}),
             ...(typeof ev.ttftMs === 'number' ? { ttftMs: ev.ttftMs } : {}),
+            ...(typeof ev.outputTokens === 'number' ? { outputTokens: ev.outputTokens } : {}),
+            ...(typeof ev.tokensPerSec === 'number' ? { tokensPerSec: ev.tokensPerSec } : {}),
           }),
         ) ?? (() => {}),
       );

@@ -2013,6 +2013,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       if (!project) throw new Error(`project ${projectId} not found`);
       return project;
     },
+    // Degrades to the link's pinned branch rather than failing the launch
+    // when the checkout is missing or git is unreadable.
+    currentBranch: async (project) => (await git.status(project).catch(() => null))?.branch,
   });
   tasks.setConnectorPrepHook(
     async ({ projectId, craftbookId, connectors: needs, params }) => {

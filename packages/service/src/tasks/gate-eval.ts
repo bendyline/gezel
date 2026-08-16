@@ -388,7 +388,7 @@ async function evalCheckInner(
     }
     case 'unsupportedClaims': {
       const r = await unsupportedClaims(
-        ws,
+        reader,
         c.file,
         c.sourceFiles,
         c.patterns,
@@ -407,7 +407,7 @@ async function evalCheckInner(
     }
     case 'jsParses': {
       const file = c.file ?? 'index.html';
-      const content = await ws.read(file);
+      const content = await reader.read(file);
       if (content === null) {
         return { ok: false, detail: `${file} not found (needed for the inline-JS parse check)` };
       }
@@ -423,7 +423,7 @@ async function evalCheckInner(
           };
     }
     case 'htmlLint': {
-      const content = await ws.read(c.file);
+      const content = await reader.read(c.file);
       if (content === null) {
         return { ok: false, detail: `${c.file} not found (needed for the HTML lint check)` };
       }
@@ -444,7 +444,7 @@ async function evalCheckInner(
       };
     }
     case 'esmImports': {
-      const content = await ws.read(c.file);
+      const content = await reader.read(c.file);
       if (content === null) {
         return { ok: false, detail: `${c.file} not found (needed for the ESM-import check)` };
       }
@@ -452,7 +452,7 @@ async function evalCheckInner(
       return { ok: r.ok, detail: r.detail };
     }
     case 'sourceParses': {
-      const content = await ws.read(c.file);
+      const content = await reader.read(c.file);
       if (content === null) {
         return { ok: false, detail: `${c.file} not found (needed for the source-parse check)` };
       }

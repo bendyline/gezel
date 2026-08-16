@@ -6120,6 +6120,20 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     expect(snap.diagnostics?.engineLogGlob).toBeUndefined();
   });
 
+  it('labels an empty tool list as unrecorded, not as an empty roster', async () => {
+    // A cold snapshot never asked a bridge anything. Reporting a bare
+    // "none" sent one investigation after a phantom dropped bridge on a
+    // bundle whose own system prompt listed ~80 wired tools, so the
+    // source has to travel with the list.
+    await store.createGezel({ name: 'Dev', role: 'developer' });
+    const project = await store.createProject({ name: 'Cold tools' });
+    const session = await manager.createSession({ gezelId: 'dev', projectId: project.id });
+
+    const snap = await manager.getSessionDebug(session.id);
+    expect(snap.registeredTools).toEqual([]);
+    expect(snap.registeredToolsSource).toBe('unavailable');
+  });
+
   it('marks debug snapshots exported during an active turn as in progress', async () => {
     await store.createGezel({ name: 'Dev', role: 'developer' });
     const project = await store.createProject({ name: 'Live debug' });

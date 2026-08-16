@@ -1105,6 +1105,56 @@ describe('LlamaCppProvider constructor', () => {
     expect(phases).toEqual(['prefill', 'generating']);
   });
 
+  /**
+   * `timings_per_token` puts llama-server's running counters on every chunk.
+   * Publishing them is what lets the status readouts state a token count and
+   * a decode rate as fact instead of estimating both from streamed characters
+   * and hedging the result with "≈".
+   */
+  it('publishes llama-server running timings on the generating phase', async () => {
+    globalThis.fetch = (async () => {
+      return sseResponse([
+        {
+          choices: [{ index: 0, delta: { content: 'hello' } }],
+          timings: { predicted_n: 1, predicted_per_second: 61.4 },
+        },
+        {
+          choices: [{ index: 0, delta: { content: ' there' } }],
+          timings: { predicted_n: 59, predicted_per_second: 24.4 },
+        },
+        {
+          choices: [{ index: 0, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 59 },
+        },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = (await provider.createSession({
+      systemMessage: 'sys',
+    })) as unknown as {
+      onEnginePhase: (
+        h: (ev: {
+          phase: string;
+          outputTokens?: number;
+          tokensPerSec?: number;
+        }) => void,
+      ) => () => void;
+      sendAndWait: (prompt: string) => Promise<string>;
+    };
+    const counted: Array<{ outputTokens?: number; tokensPerSec?: number }> = [];
+    session.onEnginePhase((ev) => {
+      if (ev.phase === 'generating' && ev.outputTokens !== undefined) {
+        counted.push({ outputTokens: ev.outputTokens, tokensPerSec: ev.tokensPerSec });
+      }
+    });
+    await session.sendAndWait('hi');
+    // The 300ms throttle decides how many of a fast stream's readings get
+    // through, so only the first emission is deterministic here.
+    expect(counted[0]).toEqual({ outputTokens: 1, tokensPerSec: 61.4 });
+    expect(counted.every((c) => typeof c.outputTokens === 'number')).toBe(true);
+  });
+
   it('fan-outs supervisor-classified phase events to active sessions', async () => {
     // Turn stays running (hangs on stream) until we trigger phase emission
     // from the provider side, then ends naturally.

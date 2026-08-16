@@ -182,6 +182,13 @@ const MAX_TOOL_LOOP_TURNS = 96;
  * (ChatManager, TaskRunner) typically pass their own via `opts.timeoutMs`.
  */
 const DEFAULT_TIMEOUT_MS = 120_000;
+/**
+ * Cadence for the live `generating` phase carrying llama-server's running
+ * token/rate counters. Fast enough that the status readout ticks visibly,
+ * slow enough that a 200 tok/s decode doesn't push an event per token onto
+ * the chat bus. Matches the MLX provider's phase throttle.
+ */
+const GENERATING_PHASE_MIN_INTERVAL_MS = 300;
 // This is a floor, not a preferred cap. A model with a larger catalog
 // `sampling.maxTokens` keeps that larger value; models with no tuning land
 // on this fallback. Keep the fallback bounded for small local models, and
@@ -702,6 +709,9 @@ export function isGateSurgicalEditTurn(
   // (the drawer has no patch tool) — clamping that turn to the workspace
   // patch tools would strand it.
   if (prompt.includes('write_artifact')) return false;
+  // Same escape for the note surface: a fileless gate is repaired with
+  // `write_task_note`, which a patch-only clamp strips outright.
+  if (prompt.includes('write_task_note')) return false;
   const names = (tools ?? [])
     .map((tool) => chatCompletionToolName(tool))
     .filter((name): name is string => !!name);
@@ -3264,6 +3274,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // subsequent iterations means we've already seen the first token
     // so the "prefill" phase doesn't re-fire on each tool loop.
     let firstTokenAt: number | null = null;
+    // Throttle for the live `generating` phase carrying llama-server's
+    // running `timings` counters. Turn-scoped so a tool loop's second
+    // iteration doesn't restart the cadence.
+    let lastGeneratingPhaseAt = 0;
     // Register with the provider so supervisor-side phase events
     // (model load progress) fan out to this session while it's in-
     // flight. Deregister in the finally block below.
@@ -5037,6 +5051,38 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                   `[llama-cpp] ABORT-FIRED reason=immediate-write-structured (${toolCallAccumulator.rawArgumentsForTool('write_file')?.length ?? 0} arg chars) afterMs=${Date.now() - start}`,
                 );
                 ctrl.abort();
+              }
+            }
+            // `timings_per_token` puts llama-server's running counters on
+            // EVERY chunk, not just the final usage one — an exact decoded
+            // token count and an exact decode rate, live. Publish them so the
+            // status readouts stop estimating both from streamed characters
+            // (chars/4) and marking the result approximate.
+            if (firstTokenAt !== null) {
+              const live = (chunk as { timings?: Record<string, unknown> }).timings;
+              const decodedTokens =
+                typeof live?.predicted_n === 'number' ? live.predicted_n : undefined;
+              const decodeRate =
+                typeof live?.predicted_per_second === 'number'
+                  ? live.predicted_per_second
+                  : undefined;
+              const nowMs = Date.now();
+              if (
+                decodedTokens !== undefined &&
+                decodedTokens > 0 &&
+                nowMs - lastGeneratingPhaseAt >= GENERATING_PHASE_MIN_INTERVAL_MS
+              ) {
+                lastGeneratingPhaseAt = nowMs;
+                this.emitEnginePhase({
+                  provider: 'llama-cpp',
+                  phase: 'generating',
+                  // No `detail`: the counters are the payload, and the
+                  // phase's own copy belongs to the UI.
+                  outputTokens: decodedTokens,
+                  ...(decodeRate !== undefined && decodeRate > 0
+                    ? { tokensPerSec: decodeRate }
+                    : {}),
+                });
               }
             }
             if (chunk.usage) {

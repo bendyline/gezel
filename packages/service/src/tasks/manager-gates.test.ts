@@ -215,6 +215,91 @@ describe('completion gates — checks floor', () => {
     expect((await tasks.get('default', task.num))!.craftbook.steps[0]!.gateAttempts).toBe(2);
   });
 
+  it('a self-looping gate keeps its budget across re-activation and can actually exhaust it', async () => {
+    // `onReject: <self>` re-activates the step it just rejected, and the
+    // activation reset handed it a brand-new budget every time — so
+    // `maxAttempts` was unreachable and the pause-for-help it exists to
+    // trigger never fired. Wild-caught on Pull Request Review: the step
+    // reached attemptCount 3 while every rejection the model saw read
+    // "attempt 1/3", and the loop could have run forever.
+    const task = await tasks.create('default', {
+      title: 'Self-looping gate',
+      description: 'the reject route points back at the gated step.',
+      assignee: { kind: 'user' },
+      steps: [
+        {
+          name: 'Scope',
+          id: 'scope',
+          assignee: { kind: 'user' },
+          gate: {
+            at: 'completion',
+            checks: [{ kind: 'minBytes', file: 'scope.md', bytes: 500 }],
+            onReject: 'scope',
+            maxAttempts: 3,
+          },
+        },
+        { name: 'Done', id: 'done', assignee: { kind: 'user' } },
+      ] as never,
+    });
+
+    const attemptsAfterReject = async (content: string): Promise<number> => {
+      // Vary the deliverable each pass so the identical-resubmit damper
+      // doesn't short-circuit and mask the counter.
+      await writeWorkspaceFile('scope.md', content);
+      await tasks.completeStepChecked('default', task.num, 'scope');
+      const after = await tasks.get('default', task.num);
+      return after!.craftbook.steps.find((s) => s.id === 'scope')!.gateAttempts ?? 0;
+    };
+
+    expect(await attemptsAfterReject('one')).toBe(1);
+    expect(await attemptsAfterReject('two')).toBe(2);
+    expect(await attemptsAfterReject('three')).toBe(3);
+
+    // Budget spent → paused, instead of looping on "attempt 1/3" forever.
+    const paused = await tasks.get('default', task.num);
+    expect(paused!.status).toBe('paused');
+    // The step really was re-activated each pass; the count and the
+    // budget are separate facts and both must be true.
+    expect(paused!.craftbook.steps.find((s) => s.id === 'scope')!.attemptCount).toBeGreaterThan(1);
+  });
+
+  it('a loop through a DIFFERENT step still earns a clean budget', async () => {
+    // Routing rejection upstream means real rework happened there, so the
+    // reset is correct — only the self-route is a continuation.
+    const task = await tasks.create('default', {
+      title: 'Upstream loop',
+      description: 'reject routes to an earlier step, not to itself.',
+      assignee: { kind: 'user' },
+      steps: [
+        { name: 'Build', id: 'build', assignee: { kind: 'user' } },
+        {
+          name: 'Check',
+          id: 'check',
+          assignee: { kind: 'user' },
+          gate: {
+            at: 'completion',
+            checks: [{ kind: 'minBytes', file: 'out.md', bytes: 500 }],
+            onReject: 'build',
+          },
+        },
+      ] as never,
+    });
+    const gateAttempts = async (): Promise<number | undefined> =>
+      (await tasks.get('default', task.num))!.craftbook.steps.find((s) => s.id === 'check')!
+        .gateAttempts;
+
+    await writeWorkspaceFile('out.md', 'short');
+    await tasks.activateStep('default', task.num, 'check');
+    await tasks.completeStepChecked('default', task.num, 'check'); // reject → routes to build
+    // The reject bumped `build`, not `check`, so the persisted count is
+    // untouched — the carve-out is scoped to the self-route and doesn't
+    // leak into ordinary upstream loop-backs.
+    expect(await gateAttempts()).toBe(1);
+
+    await tasks.completeStep('default', task.num, 'build', 'check'); // rework done → back to check
+    expect(await gateAttempts()).toBeUndefined();
+  });
+
   it('force bypasses the gate and completes the step', async () => {
     const task = await tasks.create('default', {
       title: 'Gated build',

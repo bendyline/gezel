@@ -101,6 +101,93 @@ describe('evaluateGate', () => {
     expect(artScoped.failures).toEqual([]);
   });
 
+  it('the code/prose checks honor the artifact flag instead of always reading the workspace', async () => {
+    // These five read their content directly rather than through a helper,
+    // and each had grabbed `ws` instead of the artifact-swapped `reader` —
+    // so a drawer deliverable reported "not found" no matter what the
+    // craftbook declared. A review of a read-only checkout can only write
+    // the drawer, so this was the difference between a runnable gate and
+    // an unwinnable one.
+    const broken = 'function a() { return 1;';
+    const r = splitReader(
+      {},
+      {
+        'reports/build.mjs': broken,
+        'reports/page.html': `<html><body><script>${broken}</script></body></html>`,
+        'reports/imports.mjs': "import { nope } from 'node:url';\n",
+        'reports/claims.md': 'This is the fastest renderer ever built.',
+        'reports/source.md': 'It renders quickly.',
+      },
+    );
+    const flagged = await evaluateGate(
+      [
+        { kind: 'sourceParses', file: 'reports/build.mjs', artifact: true },
+        { kind: 'jsParses', file: 'reports/page.html', artifact: true },
+        { kind: 'htmlLint', file: 'reports/page.html', artifact: true },
+        { kind: 'esmImports', file: 'reports/imports.mjs', artifact: true },
+        {
+          kind: 'unsupportedClaims',
+          file: 'reports/claims.md',
+          sourceFiles: ['reports/source.md'],
+          patterns: [{ pattern: 'fastest[\\w\\s]*ever built', label: 'superlative' }],
+          artifact: true,
+        },
+      ],
+      r,
+    );
+    // Every one of these FAILS on content — which is the point: the checks
+    // reached the drawer and judged it. Before the fix they all failed as
+    // "not found", indistinguishable from a missing deliverable.
+    expect(flagged.pass).toBe(false);
+    expect(flagged.failures.some((f) => /not found/.test(f))).toBe(false);
+
+    const clean = splitReader(
+      {},
+      {
+        'reports/build.mjs': 'export function a() {\n  return 1;\n}\n',
+        'reports/imports.mjs': "import { fileURLToPath } from 'node:url';\n",
+      },
+    );
+    const passing = await evaluateGate(
+      [
+        { kind: 'sourceParses', file: 'reports/build.mjs', artifact: true },
+        { kind: 'esmImports', file: 'reports/imports.mjs', artifact: true },
+      ],
+      clean,
+    );
+    expect(passing.pass).toBe(true);
+  });
+
+  it('corpusCoverage accepts a drawer-side ledger (writes-off review projects)', async () => {
+    // The PR-review book declares `artifact: true` here because a review
+    // never writes the checkout. The flag used to be stripped by the
+    // schema, so the ledger was hunted for in the workspace and the whole
+    // craftbook was unsatisfiable on any writes-off project.
+    const record = (path: string) => `---\npath: ${path}\nstatus: modified\n---\n\n# ${path}\n`;
+    const r = splitReader(
+      {},
+      {
+        'data/github-pulls/pr-46/files/001--a--aaaa1111.md': record('src/a.ts'),
+        'pr-review-coverage.json': JSON.stringify({
+          reviewedFiles: ['src/a.ts'],
+          reviewedRecords: ['data/github-pulls/pr-46/files/001--a--aaaa1111.md'],
+        }),
+      },
+    );
+    const res = await evaluateGate(
+      [
+        {
+          kind: 'corpusCoverage',
+          file: 'pr-review-coverage.json',
+          corpusDir: 'artifacts/data/github-pulls/pr-46',
+          artifact: true,
+        },
+      ],
+      r,
+    );
+    expect(res.pass).toBe(true);
+  });
+
   it('an artifact-flagged check fails closed when the reader has no artifact accessor', async () => {
     // A plain reader (no readArtifact) must not silently pass an artifact
     // check by reading the wrong tree — it fails "not found" instead.

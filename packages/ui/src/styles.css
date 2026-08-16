@@ -1408,9 +1408,6 @@ html.embedded-chat #root {
 .engine-pill-actor {
   font-weight: 600;
 }
-.engine-pill-live-tokens {
-  opacity: 0.78;
-}
 .engine-pill-live-rate {
   opacity: 0.78;
   font-variant-numeric: tabular-nums;
@@ -21812,6 +21809,23 @@ a.license-button:hover {
   margin: 0 0 0.5rem;
   color: var(--text-muted);
   font-size: 0.72rem;
+}
+
+/* Takes the footnote's slot on failure, so the reason sits against the
+   button that produced it. Wraps rather than clips — a connector prep
+   error is a whole sentence naming the fix. */
+.gz-ntd-submit-error {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+/* A launch we can already tell will not resolve its subject. Not an error
+   yet — the user can still type the missing value — so it warns in the
+   footnote's slot rather than shouting. */
+.gz-ntd-launch-hint {
+  color: color-mix(in srgb, var(--warning, #e8c34a) 80%, var(--text));
+  line-height: 1.35;
 }
 
 /* Compact radio chips used by secondary pickers inside the dialog. */

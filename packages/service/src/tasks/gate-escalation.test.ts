@@ -11,6 +11,7 @@ import {
   buildPlateauDiagnosisNote,
   buildStageOneNudge,
   buildStageTwoNudge,
+  deliverableSurface,
   escalationDisabled,
   gateFailureSignature,
   plateauScore,
@@ -199,6 +200,88 @@ describe('escalation nudges vs llama-cpp turn-mode matchers', () => {
     // scenario-repair — the structural exclusion, not chain order.
     const scenarioShaped = `[scenario check] I looked at \`index.html\` and the success criteria aren't met yet.\n${stage1Frozen}`;
     expect(isGateSurgicalEditTurn(scenarioShaped, patchTools)).toBe(false);
+  });
+});
+
+describe('note-surface escalation nudges', () => {
+  const bullets =
+    '- The task notes do not yet contain /##\\s*Scope\\s*[—-]\\s*PR\\s*#46/ — write the required note (use write_task_note) before advancing.';
+
+  it('classifies a fileless script gate as the note surface', () => {
+    expect(
+      deliverableSurface({
+        checks: [],
+        scripts: [{ name: 'checkTaskNoteContains', inputs: { pattern: '## Scope' } }],
+      }),
+    ).toBe('note');
+    // A gate that names a file is still judged by that file, script or not.
+    expect(
+      deliverableSurface({
+        checks: [{ kind: 'minBytes', file: 'report.md', bytes: 10 }],
+        scripts: [{ name: 'checkTaskNoteContains' }],
+      }),
+    ).toBe('workspace');
+    expect(
+      deliverableSurface({ checks: [{ kind: 'minBytes', file: 'r.md', artifact: true }] }),
+    ).toBe('artifact');
+    // Mixed gates keep workspace wording — the half the model must repair
+    // may well be the workspace half.
+    expect(
+      deliverableSurface({
+        checks: [
+          { kind: 'minBytes', file: 'r.md', artifact: true },
+          { kind: 'minBytes', file: 'index.html' },
+        ],
+      }),
+    ).toBe('workspace');
+    // An explicit deliverable still wins outright, and no gate at all is
+    // the byte-stable legacy default.
+    expect(
+      deliverableSurface({
+        advanceWhen: { file: 'r.md', artifact: true },
+        checks: [{ kind: 'minBytes', file: 'index.html' }],
+      }),
+    ).toBe('artifact');
+    expect(deliverableSurface({})).toBe('workspace');
+  });
+
+  it('stage 1 claims no file, names write_task_note, and never names a patch tool', () => {
+    const stage1 = buildStageOneNudge({ failingBullets: bullets, frozen: false, surface: 'note' });
+    expect(stage1).toContain('GATE_TARGETED_EDIT:');
+    expect(stage1).toContain('write_task_note');
+    expect(stage1).toContain(bullets);
+    // The workspace/artifact opener asserts the deliverable EXISTS. There
+    // is no file here, so that claim would be a fabrication — and the
+    // wild-caught rendering read "The file the deliverable EXISTS".
+    expect(stage1).not.toContain('EXISTS');
+    expect(stage1).not.toContain('the deliverable');
+    expect(stage1).not.toContain('replace_in_file');
+    expect(stage1).not.toContain('write_file');
+  });
+
+  it('steers a stuck reviewer to escalate rather than reshape the note to match the checker', () => {
+    // Ayza cleared this gate by writing the literal `{{number}}` template
+    // token into the task's permanent audit trail. Passing a broken gate
+    // is worse than pausing on it.
+    const frozen = buildStageOneNudge({ failingBullets: bullets, frozen: true, surface: 'note' });
+    expect(frozen).toContain('escalate to the task owner');
+    expect(frozen).toContain('reposting unchanged content cannot pass');
+  });
+
+  it('does not clamp the turn to patch-only tools', () => {
+    // The patch clamp strips write_task_note, so a note-surface stage 1
+    // that tripped it could never be repaired — the same trap the
+    // artifact surface already escapes.
+    const patchTools = [
+      {
+        type: 'function' as const,
+        function: { name: 'replace_in_file', description: 'Edit.', parameters: {} },
+      },
+      ...WRITE_FILE_TOOL,
+    ];
+    const stage1 = buildStageOneNudge({ failingBullets: bullets, frozen: false, surface: 'note' });
+    expect(isGateSurgicalEditTurn(stage1, patchTools)).toBe(false);
+    expect(isImmediateFileWriteTurn(stage1, WRITE_FILE_TOOL)).toBe(false);
   });
 });
 

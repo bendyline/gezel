@@ -213,6 +213,9 @@ export const PhaseFrameSchema = z.object({
   detail: z.string().optional(),
   progress: z.number().optional(),
   ttftMs: z.number().int().nonnegative().optional(),
+  /** Engine-exact running decode counters — see `engine_phase` in core. */
+  outputTokens: z.number().int().nonnegative().optional(),
+  tokensPerSec: z.number().nonnegative().optional(),
 });
 /** End-of-turn native-engine performance counters. */
 export const TurnStatsFrameSchema = z.object({

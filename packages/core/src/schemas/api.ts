@@ -5814,6 +5814,23 @@ export const SessionDebugSnapshotSchema = z.object({
    * MLX sessions whose MCP subprocess is up.
    */
   registeredTools: z.array(z.string()),
+  /**
+   * Where {@link registeredTools} came from, so an empty list can't be
+   * misread as proof no tools were wired.
+   *
+   * `live` — asked the running session's bridge; an empty list here is
+   * real evidence. `persisted` — no live session, so this is the
+   * last-known project-type script tools off the record. `unavailable` —
+   * no live session and nothing persisted, i.e. the bridge state is
+   * simply unknown; the prompt's `## Tools available this turn` block is
+   * the roster to read instead.
+   *
+   * Wild-caught: a bundle exported right after an aborted turn reported
+   * "Registered tools: none" while the very same bundle's system prompt
+   * listed ~80 wired tools, sending an investigation after a phantom
+   * dropped bridge. Optional so older persisted snapshots still parse.
+   */
+  registeredToolsSource: z.enum(['live', 'persisted', 'unavailable']).optional(),
   /** Live session state at export time; prevents an unfinished turn looking like an empty reply. */
   turnStatus: z.enum(['idle', 'in-progress', 'queued']),
   /**

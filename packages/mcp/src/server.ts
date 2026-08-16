@@ -57,6 +57,7 @@ import {
   isReservedShadowArtifactPath,
   isTrustedConstrainedToolset,
   pickRandomNameWithGender,
+  prioritizePullsForCurrentBranch,
   removeStepAndCleanEdges,
   reorderStepsArray,
   resolveRoleId,
@@ -88,7 +89,6 @@ import {
   normalizeDocumentOutputPath,
 } from './document-routing.js';
 import { normalizeGenerateImageToolArgs } from './generate-image-normalization.js';
-import { prioritizePullsForCurrentBranch } from './github-pr-selection.js';
 import {
   buildKickoffStepDescription,
   buildKickoffTaskDescription,
