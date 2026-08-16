@@ -81,6 +81,7 @@ import type {
 import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
 import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs, runInQueue } from '../queue.js';
 import { RambleDetector } from '../ramble-detector.js';
+import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
 import { type EnginePhaseEvent, StreamingSessionBase } from '../streaming-session.js';
 import { terminalToolClosingText } from '../terminal-tool-policy.js';
 import { coerceToolCallArgs } from '../tool-arg-schema-coercion.js';
@@ -1513,11 +1514,8 @@ function setChatTemplateKwarg(body: Record<string, unknown>, key: string, value:
 type DisableThinkingRequestShape = 'chat-template' | 'deepseek';
 
 /**
- * Chat-template variables that name a model's reasoning DEPTH rather than an
- * on/off switch. `applyTuning` has already written the manifest's declared
- * `reasoning.templateKwargs` onto the body by the time the constrained-turn
- * paths run, so we downgrade whichever dial this model actually reads instead
- * of keeping a per-model branch here.
+ * Reasoning-depth handling now lives in `../reasoning-depth.ts` so both local
+ * engines share one definition.
  *
  * Load-bearing for templates that have no `enable_thinking` at all: Muse
  * Glimmer reads only `reasoning_strength`, so the disable below is a silent
@@ -1526,7 +1524,6 @@ type DisableThinkingRequestShape = 'chat-template' | 'deepseek';
  * eval — 1027 reasoning chars against the 1024 limit, two aborted turns and a
  * poisoned-session recovery on a run that otherwise passed.
  */
-const REASONING_DEPTH_TEMPLATE_KWARGS = new Set(['reasoning_effort', 'reasoning_strength']);
 
 export interface LlamaCppReasoningRequestDiagnostic {
   enableThinking?: boolean;
@@ -1573,14 +1570,7 @@ function disableThinkingForConstrainedTurn(
   model: string | undefined,
 ): void {
   setChatTemplateKwarg(body, 'enable_thinking', false);
-  const declared = body.chat_template_kwargs;
-  if (declared && typeof declared === 'object' && !Array.isArray(declared)) {
-    for (const key of Object.keys(declared as Record<string, unknown>)) {
-      if (REASONING_DEPTH_TEMPLATE_KWARGS.has(key)) {
-        setChatTemplateKwarg(body, key, 'low');
-      }
-    }
-  }
+  downgradeReasoningDepthKwargs(body);
   // llama.cpp's bundled GPT-OSS template ignores enable_thinking and defaults
   // reasoning_effort to "medium". Set the template's actual control for terse,
   // tool-constrained turns so the model can reach the required call promptly.

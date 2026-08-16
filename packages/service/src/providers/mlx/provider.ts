@@ -87,6 +87,7 @@ import {
 } from '../project-macro-loop-bail.js';
 import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs, runInQueue } from '../queue.js';
 import { RambleDetector } from '../ramble-detector.js';
+import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
 import {
   type EnginePhaseEvent,
   type EngineStatsEvent,
@@ -1434,8 +1435,17 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           body.temperature = 0.2;
           body.top_p = 0.8;
           setChatTemplateKwarg(body, 'enable_thinking', false);
+          // The switch alone is not enough. Qwen 3.8's HF template resolves
+          // `reasoning_effort|default('xhigh')` inside its thinking branch, so
+          // a turn that isn't fully suppressed reasons at the model's most
+          // expensive setting and truncates the write_file body it was asked
+          // for. llama-cpp has downgraded depth here for a while; MLX did not,
+          // which is the whole of the measured engine divergence.
+          const downgraded = downgradeReasoningDepthKwargs(body);
           log.debug(
-            `turn#${seq}.${turn} immediate-write mode: write_file-only surface, thinking disabled, max_tokens=${body.max_tokens}`,
+            `turn#${seq}.${turn} immediate-write mode: write_file-only surface, thinking disabled${
+              downgraded.length > 0 ? `, reasoning depth -> low (${downgraded.join(', ')})` : ''
+            }, max_tokens=${body.max_tokens}`,
           );
         }
         if (
