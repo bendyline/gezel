@@ -1,5 +1,6 @@
-import { mkdir, readFile, rm } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import type { Stats } from 'node:fs';
+import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
+import { dirname, isAbsolute, relative } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
 import { isReservedShadowArtifactPath } from '@bendyline/gezel';
 import {
@@ -81,6 +82,22 @@ export class ShadowPathWriteDeniedError extends Error {
       'artifacts/shadow/ is the derived shadow-file cache (converted documents, descriptions, transcripts), regenerated automatically by indexing. Write your file elsewhere in artifacts.',
     );
     this.name = 'ShadowPathWriteDeniedError';
+  }
+}
+
+export class ArtifactPathNotFoundError extends Error {
+  readonly code = 'artifact-not-found' as const;
+  constructor(path: string) {
+    super(`artifact not found: ${path}`);
+    this.name = 'ArtifactPathNotFoundError';
+  }
+}
+
+export class ArtifactPathExistsError extends Error {
+  readonly code = 'artifact-exists' as const;
+  constructor(path: string) {
+    super(`an artifact already exists at ${path}`);
+    this.name = 'ArtifactPathExistsError';
   }
 }
 
@@ -360,6 +377,68 @@ export class ProjectArtifactsStore {
     if (!full) throw new Error('path traversal blocked');
     await rm(full, { recursive: true, force: true });
     await this.touchProject(id);
+  }
+
+  async createProjectArtifactFolder(id: string, folderPath: string): Promise<string> {
+    const base = this.projectArtifactsDir(id);
+    const cleaned = normalizeArtifactPath(folderPath);
+    if (!cleaned) throw new Error('empty artifact path');
+    if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
+    const full = safeJoin(base, cleaned);
+    if (!full) throw new Error('path traversal blocked');
+    await mkdir(full, { recursive: true });
+    await this.touchProject(id);
+    return cleaned;
+  }
+
+  /**
+   * Move/rename within the artifacts drawer. Same refusals as the documents
+   * library — the drawer root, a folder into its own subtree, and overwriting
+   * an existing path — so a rename can never silently destroy an artifact.
+   */
+  async renameProjectArtifactPath(
+    id: string,
+    fromPath: string,
+    toPath: string,
+  ): Promise<{ fromPath: string; toPath: string }> {
+    const base = this.projectArtifactsDir(id);
+    const from = normalizeArtifactPath(fromPath);
+    const to = normalizeArtifactPath(toPath);
+    if (!from || !to) throw new Error('the artifacts root cannot be renamed');
+    if (isReservedShadowArtifactPath(from) || isReservedShadowArtifactPath(to)) {
+      throw new ShadowPathWriteDeniedError();
+    }
+    const fromFull = safeJoin(base, from);
+    const toFull = safeJoin(base, to);
+    if (!fromFull || !toFull) throw new Error('path traversal blocked');
+    if (fromFull === toFull) return { fromPath: from, toPath: to };
+
+    let sourceStat: Stats;
+    try {
+      sourceStat = await stat(fromFull);
+    } catch {
+      throw new ArtifactPathNotFoundError(from);
+    }
+    if (await pathExists(toFull)) throw new ArtifactPathExistsError(to);
+    if (sourceStat.isDirectory()) {
+      const relativeTarget = relative(fromFull, toFull);
+      if (relativeTarget && !relativeTarget.startsWith('..') && !isAbsolute(relativeTarget)) {
+        throw new Error('a folder cannot be moved inside itself');
+      }
+    }
+    await mkdir(dirname(toFull), { recursive: true });
+    await rename(fromFull, toFull);
+    await this.touchProject(id);
+    return { fromPath: from, toPath: to };
+  }
+}
+
+async function pathExists(full: string): Promise<boolean> {
+  try {
+    await stat(full);
+    return true;
+  } catch {
+    return false;
   }
 }
 

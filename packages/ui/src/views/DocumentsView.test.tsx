@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FileEntry } from '../components/FileTree.js';
@@ -15,6 +15,8 @@ vi.mock('../theme.js', () => ({ useEffectiveTheme: () => 'dark' }));
 // a flat list with click + delete buttons so we can drive selection
 // and deletion without exercising the tree internals.
 vi.mock('../components/FileTree.js', () => ({
+  // FileFlatList (the flat view modes) imports this from the same module.
+  defaultIconFor: () => null,
   FileTree: ({
     entries,
     onSelect,
@@ -154,8 +156,32 @@ describe('DocumentsView', () => {
     await waitFor(() => {
       expect(screen.getByText(/No documents yet/)).toBeInTheDocument();
     });
-    expect(api.listDocuments).toHaveBeenCalledWith('', true);
+    expect(api.listDocuments).toHaveBeenCalledWith('', true, { stats: true, hidden: false });
     expect(screen.queryByTestId('file-tree')).not.toBeInTheDocument();
+  });
+
+  it('is the shared file browser: view modes, hidden key, resize grip, and Open', async () => {
+    vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
+    render(<DocumentsView />);
+    await screen.findByTestId('file-tree');
+
+    const tray = screen.getByRole('radiogroup', { name: 'File list view' });
+    // Three modes — the library carries no review issues, like Artifacts.
+    expect(within(tray).getAllByRole('radio')).toHaveLength(3);
+    expect(screen.getByRole('separator', { name: 'Resize documents files' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open' })).toHaveAttribute(
+      'title',
+      'Open in file manager',
+    );
+
+    fireEvent.click(within(tray).getByRole('radio', { name: 'All files by last modified' }));
+    expect(window.localStorage.getItem('gezel.documentsFilesView')).toBe('flat-modified');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show hidden files' }));
+    await waitFor(() => {
+      expect(api.listDocuments).toHaveBeenLastCalledWith('', true, { stats: true, hidden: true });
+    });
+    expect(window.localStorage.getItem('gezel.documentsFilesHidden')).toBe('1');
   });
 
   it('renders the file tree when documents come back', async () => {
@@ -192,7 +218,7 @@ describe('DocumentsView', () => {
     } as never);
     const { container } = render(<DocumentsView />);
     await screen.findByTestId('file-tree');
-    const treePane = container.querySelector('.documents-tree');
+    const treePane = container.querySelector('.file-tree-panel');
     expect(treePane).not.toBeNull();
     const file = new File(['# Dropped'], 'notes.md', { type: 'text/markdown' });
     Object.defineProperty(file, 'text', { value: vi.fn(async () => '# Dropped') });
@@ -213,7 +239,7 @@ describe('DocumentsView', () => {
     window.localStorage.setItem('gezel:documents:selectedPath', 'guidelines');
     const { container } = render(<DocumentsView />);
     await screen.findByTestId('folder-view');
-    const detailPane = container.querySelector('.documents-detail');
+    const detailPane = container.querySelector('.file-viewer-panel');
     expect(detailPane).not.toBeNull();
     const file = new File(['# Brief'], 'brief.md', { type: 'text/markdown' });
     Object.defineProperty(file, 'text', { value: vi.fn(async () => '# Brief') });
@@ -289,7 +315,7 @@ describe('DocumentsView', () => {
 
     const folderButton = screen.getByRole('button', { name: 'New folder' });
     const documentButton = screen.getByRole('button', { name: 'New document' });
-    expect(folderButton.parentElement).toHaveClass('area-toolbar-actions');
+    expect(folderButton.parentElement).toHaveClass('file-create-tray');
     expect(folderButton.querySelector('i')).toHaveClass('fa-solid', 'fa-folder-plus');
     expect(documentButton.querySelector('i')).toHaveClass('fa-solid', 'fa-file-circle-plus');
   });

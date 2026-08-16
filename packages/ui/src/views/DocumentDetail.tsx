@@ -10,6 +10,7 @@ import {
   deriveContainerScope,
   resolveOutsideInLayout,
 } from '../components/SquisqIntegration/index.js';
+import { BINARY_FILE, NonTextFilePreview, looksBinary } from '../components/file-browser/index.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
@@ -49,6 +50,8 @@ export function DocumentDetail({ path }: DocumentDetailProps) {
   }
   return <TextDocumentDetail path={path} />;
 }
+
+const fetchDocumentBlob = (filePath: string) => api.fetchDocumentBlob(filePath);
 
 function TextDocumentDetail({ path }: DocumentDetailProps) {
   const editorTheme = useEffectiveTheme();
@@ -116,6 +119,12 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
   }
   if (content === null) {
     return <p className="placeholder">Loading {path}…</p>;
+  }
+  // Backstop for binary types the extension didn't reveal — the same one the
+  // project file panels use. Raw bytes in the editor render as garbage and an
+  // autosave would write that garbage back.
+  if (looksBinary(content)) {
+    return <NonTextFilePreview content={BINARY_FILE} path={path} fetchBlob={fetchDocumentBlob} />;
   }
 
   const markdown = isMarkdown(path);

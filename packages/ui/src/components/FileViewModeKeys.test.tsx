@@ -8,7 +8,7 @@ describe('FileHiddenKey', () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const { rerender } = render(
-      <FileHiddenKey tab="workspace" value={false} onChange={onChange} />,
+      <FileHiddenKey kind="workspace" value={false} onChange={onChange} />,
     );
 
     const key = screen.getByRole('button', { name: 'Show hidden files' });
@@ -16,7 +16,7 @@ describe('FileHiddenKey', () => {
     await user.click(key);
     expect(onChange).toHaveBeenCalledWith(true);
 
-    rerender(<FileHiddenKey tab="workspace" value={true} onChange={onChange} />);
+    rerender(<FileHiddenKey kind="workspace" value={true} onChange={onChange} />);
     expect(screen.getByRole('button', { name: 'Show hidden files' })).toHaveAttribute(
       'aria-pressed',
       'true',
@@ -26,13 +26,15 @@ describe('FileHiddenKey', () => {
   });
 
   it('names what each tab is hiding', () => {
-    const { rerender } = render(<FileHiddenKey tab="workspace" value={false} onChange={vi.fn()} />);
+    const { rerender } = render(
+      <FileHiddenKey kind="workspace" value={false} onChange={vi.fn()} />,
+    );
     expect(screen.getByRole('button', { name: 'Show hidden files' })).toHaveAttribute(
       'title',
       'Show hidden files — dot-files and folders like node_modules.',
     );
 
-    rerender(<FileHiddenKey tab="artifacts" value={false} onChange={vi.fn()} />);
+    rerender(<FileHiddenKey kind="artifacts" value={false} onChange={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Show hidden files' })).toHaveAttribute(
       'title',
       'Show hidden files — dot-files and the generated shadow folder.',

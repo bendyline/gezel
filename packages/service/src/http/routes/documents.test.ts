@@ -107,6 +107,36 @@ describe('GET /api/documents — listing', () => {
     expect(paths).toContain('top-level.md');
   });
 
+  it('reports mtimes and the truncation flag when the browser asks for stats', async () => {
+    await api('PUT', '/api/documents/write', { path: 'stats/a.md', content: 'a' });
+
+    const res = await api('GET', '/api/documents?recursive=1&stats=1');
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as {
+      files: Array<{ path: string; isDirectory: boolean; mtimeMs?: number }>;
+      truncated: boolean;
+    };
+    const file = data.files.find((f) => f.path === 'stats/a.md');
+    expect(typeof file?.mtimeMs).toBe('number');
+    expect(data.truncated).toBe(false);
+    // Directories never carry stats — the walker only lstats files.
+    expect(data.files.find((f) => f.path === 'stats')?.mtimeMs).toBeUndefined();
+  });
+
+  it('surfaces dotfiles only under hidden=1', async () => {
+    await api('PUT', '/api/documents/write', { path: '.private/secret.md', content: 's' });
+
+    const plain = (await (await api('GET', '/api/documents?recursive=1')).json()) as {
+      files: Array<{ path: string }>;
+    };
+    expect(plain.files.some((f) => f.path.startsWith('.private'))).toBe(false);
+
+    const hidden = (await (await api('GET', '/api/documents?recursive=1&hidden=1')).json()) as {
+      files: Array<{ path: string }>;
+    };
+    expect(hidden.files.some((f) => f.path.startsWith('.private'))).toBe(true);
+  });
+
   it('non-recursive list at a subpath returns only that folder', async () => {
     await api('PUT', '/api/documents/write', {
       path: 'sub/inner.md',

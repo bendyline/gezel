@@ -15,6 +15,7 @@ import {
   isEngagementAllowed,
   isProactiveAllowed,
   isSchedulingAllowed,
+  isSharedLibraryProject,
   projectAllowsAmbientWork,
 } from '@bendyline/gezel';
 import type { ChatEventBus } from '../chat/events.js';
@@ -322,7 +323,13 @@ export class MeesterStatusGenerator {
 
   private async collectCandidates(config: GezelConfig): Promise<ProjectContext[]> {
     const projects = await this.store.listProjects().catch(() => [] as Project[]);
-    const ambient = projects.filter((p) => projectAllowsAmbientWork(p));
+    // The shared library is a reference shelf, not a jobsite: it has no
+    // voorman, no progress to chase, and a status report saying so every
+    // idle period is pure noise. Deliberate task work filed there still
+    // runs — only this ambient check-in skips it.
+    const ambient = projects.filter(
+      (p) => projectAllowsAmbientWork(p) && !isSharedLibraryProject(p),
+    );
     const from = new Date(this.now().getTime() - EVENT_WINDOW_MS).toISOString();
     const out: ProjectContext[] = [];
     for (const project of ambient) {

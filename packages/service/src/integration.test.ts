@@ -269,6 +269,42 @@ describe('projects API', () => {
     expect(data.projects.find((p) => p.id === 'default')).toBeTruthy();
   });
 
+  it('boots the shared library project onto the documents root', async () => {
+    const res = await api('GET', '/api/projects');
+    const data = (await res.json()) as {
+      projects: Array<{
+        id: string;
+        workingDir?: string;
+        properties?: Record<string, string>;
+        voormanAutoAssignedAt?: string;
+        managedWorkspaceWritePolicy?: string;
+      }>;
+    };
+    const shared = data.projects.find((p) => p.properties?.['gezel.sharedLibrary'] === '1');
+    expect(shared).toBeTruthy();
+    // Its workspace IS the library, which is what earns it every
+    // per-project service without a second pipeline.
+    expect(shared?.workingDir).toContain('documents');
+    // Written through the document tools, so the external-workingDir gate
+    // must admit them; and no lead is recruited for a document shelf.
+    expect(shared?.managedWorkspaceWritePolicy).toBe('allow');
+    expect(shared?.voormanAutoAssignedAt).toBeTruthy();
+
+    // The starter document is what a first-run user opens.
+    const docs = await api('GET', '/api/documents');
+    const listing = (await docs.json()) as { files: Array<{ path: string }> };
+    expect(listing.files.some((f) => f.path.startsWith('About this library'))).toBe(true);
+
+    // The Boekwachter is the library's resident gezel — and its presence on
+    // the roster is what opts the library into the AI enrichment tier.
+    const roster = await api('GET', `/api/projects/${shared?.id}/gezels`);
+    const crew = (await roster.json()) as { gezelIds: string[] };
+    const cfgRes = await api('GET', '/api/config');
+    const cfg = (await cfgRes.json()) as { boekwachterGezelId?: string };
+    expect(cfg.boekwachterGezelId).toBeTruthy();
+    expect(crew.gezelIds).toContain(cfg.boekwachterGezelId);
+  });
+
   it('creates a project and manages artifacts', async () => {
     await api('POST', '/api/projects', {
       name: 'IntegTest',

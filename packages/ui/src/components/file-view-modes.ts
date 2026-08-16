@@ -35,6 +35,20 @@ export const ARTIFACT_VIEW_MODES: readonly FileViewMode[] = [
   'flat-modified',
 ];
 
+/** The documents library carries no review issues either. */
+export const DOCUMENT_VIEW_MODES: readonly FileViewMode[] = ARTIFACT_VIEW_MODES;
+
+/** Relative mtime for a file row: seconds granularity while a write is fresh. */
+export function formatRelativeFileTime(iso: string): string {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return iso;
+  const deltaSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (deltaSec < 60) return `${deltaSec}s ago`;
+  if (deltaSec < 3600) return `${Math.floor(deltaSec / 60)}m ago`;
+  if (deltaSec < 86_400) return `${Math.floor(deltaSec / 3600)}h ago`;
+  return `${Math.floor(deltaSec / 86_400)}d ago`;
+}
+
 function compareNames(a: string, b: string): number {
   return a.localeCompare(b);
 }
@@ -135,16 +149,21 @@ export function fileHiddenStorageKey(projectId: string, tab: 'workspace' | 'arti
 
 /**
  * Coerce a persisted (or otherwise untrusted) mode string to one valid for
- * the given tab. Unknown values — and workspace-only modes persisted before
- * a switch to the artifacts tab — fall back to `tree-alpha`.
+ * the given surface. Unknown values — and workspace-only modes persisted
+ * before a switch to a surface without review issues — fall back to
+ * `tree-alpha`.
  */
 export function coerceFileViewMode(
   raw: string | null | undefined,
-  tab: 'workspace' | 'artifacts',
+  scope: 'workspace' | 'artifacts' | 'documents',
 ): FileViewMode {
-  const allowed = tab === 'workspace' ? WORKSPACE_VIEW_MODES : ARTIFACT_VIEW_MODES;
+  const allowed = scope === 'workspace' ? WORKSPACE_VIEW_MODES : ARTIFACT_VIEW_MODES;
   return allowed.includes(raw as FileViewMode) ? (raw as FileViewMode) : 'tree-alpha';
 }
+
+/** Persistence keys for the documents library's copy of the same two prefs. */
+export const DOCUMENTS_VIEW_STORAGE_KEY = 'gezel.documentsFilesView';
+export const DOCUMENTS_HIDDEN_STORAGE_KEY = 'gezel.documentsFilesHidden';
 
 /** Map a flat index-file record (or any path) to a FileTree-shaped entry. */
 export function fileEntryFromPath(path: string, mtimeMs?: number): FileEntry {

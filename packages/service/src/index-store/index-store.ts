@@ -574,7 +574,8 @@ export class IndexStore {
     return this.db
       .prepare(
         `SELECT file_path, name, kind, line_start, line_end, signature
-         FROM fts_symbols WHERE fts_symbols MATCH ? AND collection_id = ? LIMIT ?`,
+         FROM fts_symbols WHERE fts_symbols MATCH ? AND collection_id = ?
+         ORDER BY bm25(fts_symbols) LIMIT ?`,
       )
       .all<{
         file_path: string;
@@ -823,7 +824,8 @@ export class IndexStore {
       .prepare(
         `SELECT f.path AS file_path, s.snip FROM (
            SELECT content_hash, collection_id, snippet(fts_summaries, 0, '', '', '…', 12) AS snip
-           FROM fts_summaries WHERE fts_summaries MATCH ? AND collection_id = ? LIMIT ?
+           FROM fts_summaries WHERE fts_summaries MATCH ? AND collection_id = ?
+           ORDER BY bm25(fts_summaries) LIMIT ?
          ) s
          JOIN files f ON f.hash = s.content_hash AND f.collection_id = s.collection_id
          LIMIT ?`,
@@ -994,8 +996,12 @@ export class IndexStore {
     if (!this.caps.fts) return [];
     return this.db
       .prepare(
+        // FTS5 bm25() is lower-is-better, so plain ascending order is the
+        // best-first order. Without it FTS5 yields rowid (insertion) order and
+        // a LIMIT returns the oldest-indexed matches, not the closest ones.
         `SELECT file_path, line_start, chunk_id, snippet(fts_docs, 0, '', '', '…', 12) AS snip
-         FROM fts_docs WHERE fts_docs MATCH ? AND collection_id = ? LIMIT ?`,
+         FROM fts_docs WHERE fts_docs MATCH ? AND collection_id = ?
+         ORDER BY bm25(fts_docs) LIMIT ?`,
       )
       .all<{ file_path: string; line_start: number; chunk_id: number; snip: string }>(
         ftsPhrase(query),

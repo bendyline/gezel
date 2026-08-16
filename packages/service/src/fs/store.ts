@@ -64,6 +64,9 @@ import {
   type ProjectTabVisibility,
   type ProviderName,
   type Question,
+  SHARED_PROJECT_FALLBACK_ID,
+  SHARED_PROJECT_ID,
+  SHARED_PROJECT_MARKER,
   type Task,
   type TaskNote,
   TaskNoteSchema,
@@ -81,6 +84,7 @@ import {
   encodeProjectGezelId,
   inferGenderForName,
   isSafeEntityId,
+  isSharedLibraryProject,
   isValidKokoroVoice,
   nowIso,
   parseGezelMarkdown,
@@ -163,7 +167,14 @@ import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../workspace/erro
 import { type JournalContext, appendJournalEntry } from '../workspace/journal.js';
 import { bootstrapWorkspace } from '../workspace/template.js';
 import { writeFileAtomic } from './atomic.js';
-import { DEFAULT_PROJECT_ABOUT_MD, DEFAULT_PROJECT_MISSION_MD } from './default-project-docs.js';
+import {
+  DEFAULT_PROJECT_ABOUT_MD,
+  DEFAULT_PROJECT_MISSION_MD,
+  SHARED_LIBRARY_STARTER_DOC,
+  SHARED_LIBRARY_STARTER_MD,
+  SHARED_PROJECT_ABOUT_MD,
+  SHARED_PROJECT_MISSION_MD,
+} from './default-project-docs.js';
 import { DocumentsStore } from './documents-store.js';
 import { ensurePrivateUserHome } from './home-permissions.js';
 import { extForMimeType, mimeTypeForFilename, safeBasename } from './media-types.js';
@@ -300,7 +311,8 @@ export interface SessionChangeEvent {
 }
 
 export interface DocumentChangeEvent {
-  type: 'write' | 'delete';
+  /** `mkdir` carries no content — listeners that index files skip it. */
+  type: 'write' | 'delete' | 'mkdir';
   path: string;
 }
 
@@ -327,7 +339,7 @@ export class ConfigCorruptionError extends Error {
 export class ProjectDeleteError extends Error {
   constructor(
     message: string,
-    readonly reason: 'default_project' | 'machine_shared' | 'not_found',
+    readonly reason: 'default_project' | 'shared_project' | 'machine_shared' | 'not_found',
   ) {
     super(message);
     this.name = 'ProjectDeleteError';
@@ -968,6 +980,125 @@ export class Store {
       about: DEFAULT_PROJECT_ABOUT_MD,
       missionObjectives: DEFAULT_PROJECT_MISSION_MD,
     });
+  }
+
+  /**
+   * Ensure the canonical `shared` project exists and points at the resolved
+   * documents root. Its workspace IS the shared document library, so every
+   * per-project service (content index, shadow conversion, enrichment,
+   * watcher, search) reaches the library without a parallel pipeline.
+   *
+   * The library folder is user-owned and possibly cloud-synced, so nothing
+   * here writes into it beyond the one starter document on a first run.
+   *
+   * Returns whether it created the project, so boot can do the one-shot
+   * roster wiring (Boekwachter) exactly once.
+   */
+  async ensureSharedProject(): Promise<{ id: string; created: boolean }> {
+    const config = await this.readConfig();
+    const preferredId = config.sharedProjectId ?? SHARED_PROJECT_ID;
+    const documentsRoot = this.documentsDir();
+    const existing = await this.tryGetProjectMeta(preferredId);
+
+    if (existing) {
+      if (isSharedLibraryProject(existing)) {
+        // The documents root is relocatable (Settings -> Folders), so the
+        // pointer is derived state that re-syncs on every boot rather than
+        // a value the user edits on the project.
+        if (existing.workingDir !== documentsRoot) {
+          await this.writeProjectMeta({
+            ...existing,
+            workingDir: documentsRoot,
+            updatedAt: nowIso(),
+          });
+        }
+        await this.backfillSharedProjectDocs(preferredId);
+        return { id: preferredId, created: false };
+      }
+      // A project the user created first owns this id. Never adopt or
+      // overwrite it, and never hand it back as the library either — the
+      // Documents area is a facade over whatever this returns, so a foreign
+      // project here would expose someone's workspace as the library.
+      // `uniqueProjectId` settles on a free id, so this converges in one
+      // boot rather than walking the id space forever.
+      const fallbackId = await this.uniqueProjectId(SHARED_PROJECT_FALLBACK_ID);
+      const created = await this.createSharedProject(fallbackId, documentsRoot);
+      await this.writeConfig({ ...config, sharedProjectId: created.id });
+      return { id: created.id, created: true };
+    }
+
+    const created = await this.createSharedProject(preferredId, documentsRoot);
+    if (config.sharedProjectId !== preferredId && preferredId !== SHARED_PROJECT_ID) {
+      await this.writeConfig({ ...config, sharedProjectId: created.id });
+    }
+    return { id: created.id, created: true };
+  }
+
+  private async createSharedProject(id: string, documentsRoot: string): Promise<ProjectDetail> {
+    await mkdir(documentsRoot, { recursive: true });
+    const project = await this.createProject(
+      {
+        name: 'Shared Library',
+        description: 'Shared knowledge every gezel can reach, from any project.',
+        about: SHARED_PROJECT_ABOUT_MD,
+        missionObjectives: SHARED_PROJECT_MISSION_MD,
+        workingDir: documentsRoot,
+        indexingEnabled: true,
+      },
+      { id },
+    );
+    const meta = await this.tryGetProjectMeta(id);
+    if (meta) {
+      await this.writeProjectMeta({
+        ...meta,
+        properties: { ...(meta.properties ?? {}), [SHARED_PROJECT_MARKER]: '1' },
+        // The library is written through the document tools by design;
+        // without this the external-workingDir gate denies those writes.
+        managedWorkspaceWritePolicy: 'allow',
+        // A library is not a jobsite: no lead to recruit, no progress to
+        // chase. Pre-stamping the auto-assign marker keeps the first index
+        // pass from creating a voorman nobody asked for.
+        voormanAutoAssignedAt: nowIso(),
+        projectTypeId: 'content-writing',
+        updatedAt: nowIso(),
+      });
+    }
+    await this.seedSharedLibraryStarterDoc();
+    return project;
+  }
+
+  /**
+   * One starter document, and only when the library is empty — an explanation
+   * a first-run user can read and edit, not a file we re-create after they
+   * delete it.
+   */
+  private async seedSharedLibraryStarterDoc(): Promise<void> {
+    try {
+      const entries = await this.listDocuments('');
+      if (entries.length > 0) return;
+      await this.writeDocument(SHARED_LIBRARY_STARTER_DOC, SHARED_LIBRARY_STARTER_MD);
+    } catch (err) {
+      log.warn(
+        '[store] failed to seed shared library starter doc:',
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  private async backfillSharedProjectDocs(id: string): Promise<void> {
+    const seeds: Array<[string, string]> = [
+      ['about.md', SHARED_PROJECT_ABOUT_MD],
+      ['missionObjectives.md', SHARED_PROJECT_MISSION_MD],
+    ];
+    for (const [name, content] of seeds) {
+      if ((await this.readProjectDoc(id, name)) !== null) continue;
+      await this.writeProjectDoc(id, name, content).catch((err) => {
+        log.warn(
+          `[store] failed to seed shared project ${name}:`,
+          err instanceof Error ? err.message : err,
+        );
+      });
+    }
   }
 
   /**
@@ -3121,6 +3252,23 @@ export class Store {
   ): Promise<ProjectDetail> {
     const meta = await this.tryGetProjectMeta(id);
     if (!meta) throw new Error(`project ${id} not found`);
+    if (isSharedLibraryProject(meta)) {
+      // Its workingDir is derived from the documents root on every boot, so
+      // a direct edit here silently reverts; the library moves through
+      // Settings -> Folders. Archiving would strand the Documents area, and
+      // a git link makes no sense for a document library.
+      if (patch.workingDir !== undefined) {
+        throw new Error(
+          'the shared library location is managed in Settings → Folders, not on the project',
+        );
+      }
+      if (patch.archived === true) {
+        throw new Error('the shared library project cannot be archived');
+      }
+      if (patch.github) {
+        throw new Error('the shared library project cannot be linked to a git repository');
+      }
+    }
     if (typeof patch.workingDir === 'string') this.assertSafeWorkingDir(patch.workingDir);
     let nextGitHub = mergeGitHubPatch(meta.github, patch.github);
     // Auto-link: if the user is pointing workingDir at an existing
@@ -3439,6 +3587,14 @@ export class Store {
     const meta = await this.tryGetProjectMeta(id);
     if (!meta) {
       throw new ProjectDeleteError(`project ${id} not found`, 'not_found');
+    }
+    // Deleting this project would take the Documents area's backing store
+    // with it. The library is managed from Settings -> Folders instead.
+    if (isSharedLibraryProject(meta)) {
+      throw new ProjectDeleteError(
+        'The shared library project cannot be deleted — it is the Documents library.',
+        'shared_project',
+      );
     }
     if (meta.storageScope === 'machine-shared') {
       throw new ProjectDeleteError(
@@ -3902,6 +4058,18 @@ export class Store {
 
   async deleteProjectArtifact(id: string, filePath: string): Promise<void> {
     await this.artifacts.deleteProjectArtifact(id, filePath);
+  }
+
+  async createProjectArtifactFolder(id: string, folderPath: string): Promise<string> {
+    return this.artifacts.createProjectArtifactFolder(id, folderPath);
+  }
+
+  async renameProjectArtifactPath(
+    id: string,
+    fromPath: string,
+    toPath: string,
+  ): Promise<{ fromPath: string; toPath: string }> {
+    return this.artifacts.renameProjectArtifactPath(id, fromPath, toPath);
   }
 
   // ---------- session images (pasted / uploaded in a chat) ----------
@@ -4785,6 +4953,18 @@ export class Store {
 
   async listDocumentsRecursive(): Promise<ProjectFileEntry[]> {
     return this.documents.listDocumentsRecursive();
+  }
+
+  async readDocumentAsMarkdown(
+    filePath: string,
+  ): Promise<{ content: string; converted: boolean } | null> {
+    return this.documents.readDocumentAsMarkdown(filePath);
+  }
+
+  async listDocumentsRecursiveDetailed(
+    opts: { withStats?: boolean; includeHidden?: boolean } = {},
+  ): Promise<WalkDirResult> {
+    return this.documents.listDocumentsRecursiveDetailed(opts);
   }
 
   async readDocument(filePath: string): Promise<string | null> {

@@ -35,7 +35,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { join, resolve as resolvePath } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
@@ -705,6 +705,7 @@ export class MlxModelManager {
             itemDir,
             src.huggingfaceRepo,
             src.revision,
+            src.subdir,
             file,
             index,
             fileCount,
@@ -925,6 +926,7 @@ export class MlxModelManager {
     itemDir: string,
     repo: string,
     revision: string | undefined,
+    subdir: string | undefined,
     file: { name: string; sha256: string; sizeBytes: number },
     index: number,
     total: number,
@@ -938,12 +940,19 @@ export class MlxModelManager {
     verifiedDigests: Record<string, string>,
   ): Promise<'ok' | 'error' | 'aborted'> {
     const finalPath = join(itemDir, file.name);
+    // File names are relative to the selected model root and may preserve
+    // nested layout. The catalog schema guarantees they are contained paths;
+    // create their parent directories before the resumable downloader opens
+    // the `.partial` sibling.
+    await mkdir(dirname(finalPath), { recursive: true });
     const tmpPath = `${finalPath}.partial`;
     // Pin to the catalog's revision (commit SHA) when present so we get
     // the exact bytes the sha256 was computed against; fall back to
     // `main` for legacy manifests that predate revision pinning.
     const ref = revision ?? 'main';
-    const url = `https://huggingface.co/${repo}/resolve/${encodeURIComponent(ref)}/${encodeURIComponent(file.name)}?download=true`;
+    const repoPath = subdir ? `${subdir}/${file.name}` : file.name;
+    const encodedRepoPath = repoPath.split('/').map(encodeURIComponent).join('/');
+    const url = `https://huggingface.co/${repo}/resolve/${encodeURIComponent(ref)}/${encodedRepoPath}?download=true`;
 
     // Live sum across every file's bytes-so-far. Files complete out of
     // order under concurrency, so we can't use a "bytes of prior files"

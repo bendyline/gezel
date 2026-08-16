@@ -56,6 +56,8 @@ export const CATALOG_RELEVANT_HISTORY_KINDS: ReadonlySet<string> = new Set([
   'project.created',
   'project.updated',
   'document.created',
+  'document.folder.created',
+  'document.renamed',
   'document.deleted',
 ]);
 

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { InstalledToolsetSchema, ToolsetRuntimeSchema } from './catalog.js';
+import {
+  ChatModelMlxSourceSchema,
+  InstalledToolsetSchema,
+  ToolsetRuntimeSchema,
+} from './catalog.js';
 
 const validRuntime = {
   kind: 'npm-package' as const,
@@ -83,5 +87,56 @@ describe('custom MCP runtime validation', () => {
         source: { kind: 'imported' },
       }),
     ).toThrow();
+  });
+});
+
+describe('MLX catalog source path validation', () => {
+  const validSource = {
+    huggingfaceRepo: 'example/multi-quant-model',
+    subdir: 'quants/6bit',
+    revision: 'a'.repeat(40),
+    files: [
+      { name: 'config.json', sha256: 'b'.repeat(64), sizeBytes: 100 },
+      { name: 'weights/model.safetensors', sha256: 'c'.repeat(64), sizeBytes: 1_000 },
+    ],
+    approxSizeBytes: 1_100,
+  };
+
+  it('accepts a contained source subdirectory and contained installed paths', () => {
+    expect(ChatModelMlxSourceSchema.parse(validSource)).toMatchObject(validSource);
+  });
+
+  it.each([
+    '../6bit',
+    '/6bit',
+    './6bit',
+    'quants/../6bit',
+    'quants//6bit',
+    'quants/6bit/',
+    'quants\\6bit',
+    'quants/6bit\0',
+  ])('rejects unsafe MLX source subdirectory %s', (subdir) => {
+    expect(() => ChatModelMlxSourceSchema.parse({ ...validSource, subdir })).toThrow();
+  });
+
+  it.each(['../config.json', '/config.json', 'weights/../../outside', 'weights\\model'])(
+    'rejects unsafe MLX install path %s',
+    (name) => {
+      expect(() =>
+        ChatModelMlxSourceSchema.parse({
+          ...validSource,
+          files: [{ ...validSource.files[0], name }],
+        }),
+      ).toThrow();
+    },
+  );
+
+  it('rejects duplicate MLX install paths that concurrent workers would race over', () => {
+    expect(() =>
+      ChatModelMlxSourceSchema.parse({
+        ...validSource,
+        files: [validSource.files[0], validSource.files[0]],
+      }),
+    ).toThrow(/duplicate MLX install path/);
   });
 });

@@ -131,10 +131,14 @@ vi.mock('../components/FileTree.js', () => ({
   FileTree: ({
     entries,
     onSelect,
+    onRename,
+    onDelete,
     trailingForEntry,
   }: {
     entries: Array<{ name: string; path: string; isDirectory: boolean }>;
     onSelect: (entry: { name: string; path: string; isDirectory: boolean }) => void;
+    onRename?: (entry: { name: string; path: string; isDirectory: boolean }) => void;
+    onDelete?: (entry: { name: string; path: string; isDirectory: boolean }) => void;
     trailingForEntry?: (entry: {
       name: string;
       path: string;
@@ -147,6 +151,16 @@ vi.mock('../components/FileTree.js', () => ({
           <button type="button" onClick={() => onSelect(entry)}>
             {entry.name}
           </button>
+          {onRename && (
+            <button type="button" onClick={() => onRename(entry)}>
+              rename {entry.name}
+            </button>
+          )}
+          {onDelete && (
+            <button type="button" onClick={() => onDelete(entry)}>
+              delete {entry.name}
+            </button>
+          )}
           {trailingForEntry?.(entry)}
         </div>
       ))}
@@ -192,6 +206,8 @@ describe('ProjectsView', () => {
     window.localStorage.removeItem('gezel:project-output-fraction:v2');
     window.localStorage.removeItem('gezel.projectFilesView:pj-alpha:workspace');
     window.localStorage.removeItem('gezel.projectFilesView:pj-alpha:artifacts');
+    window.localStorage.removeItem('gezel:project-file-tree-width:v1');
+    window.localStorage.removeItem('gezel:project-file-tree-collapsed:v1');
     vi.mocked(api.listProjects).mockResolvedValue({ projects: PROJECTS } as never);
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'mock',
@@ -1118,7 +1134,10 @@ describe('ProjectsView', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
 
     await waitFor(() => {
-      expect(api.listProjectWorkspace).toHaveBeenCalledWith('pj-alpha', '', true, { stats: true });
+      expect(api.listProjectWorkspace).toHaveBeenCalledWith('pj-alpha', '', true, {
+        stats: true,
+        hidden: false,
+      });
     });
 
     const tray = await screen.findByRole('radiogroup', { name: 'File list view' });
@@ -1145,6 +1164,40 @@ describe('ProjectsView', () => {
     await waitFor(() => {
       expect(api.refreshProjectIndex).toHaveBeenCalledWith('pj-alpha');
     });
+  });
+
+  it('resizes the workspace file tree by dragging the grip and collapses it to a rail', async () => {
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+
+    const layout = (await screen.findByText('Workspace', { selector: '.file-tree-title' })).closest(
+      '.project-files-layout',
+    ) as HTMLElement;
+    expect(layout.style.getPropertyValue('--file-tree-user-width')).toBe('240px');
+
+    const grip = screen.getByRole('separator', { name: 'Resize workspace files' });
+    fireEvent.mouseDown(grip, { clientX: 240 });
+    fireEvent.mouseMove(window, { clientX: 360 });
+    fireEvent.mouseUp(window);
+
+    expect(layout.style.getPropertyValue('--file-tree-user-width')).toBe('360px');
+    expect(window.localStorage.getItem('gezel:project-file-tree-width:v1')).toBe('360');
+
+    // Dragging back below the collapse threshold swaps the tree for a rail.
+    fireEvent.mouseDown(grip, { clientX: 360 });
+    fireEvent.mouseMove(window, { clientX: 80 });
+    fireEvent.mouseUp(window);
+
+    expect(window.localStorage.getItem('gezel:project-file-tree-collapsed:v1')).toBe('1');
+    expect(screen.queryByText('Workspace', { selector: '.file-tree-title' })).toBeNull();
+    // The stored width survives the collapse, so expanding restores it.
+    expect(window.localStorage.getItem('gezel:project-file-tree-width:v1')).toBe('360');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show Workspace files' }));
+    expect(await screen.findByText('Workspace', { selector: '.file-tree-title' })).toBeVisible();
+    expect(layout.style.getPropertyValue('--file-tree-user-width')).toBe('360px');
+    expect(window.localStorage.getItem('gezel:project-file-tree-collapsed:v1')).toBe('0');
   });
 
   it('ranks the issue triage views by count and weighted criticality', async () => {
@@ -1199,6 +1252,62 @@ describe('ProjectsView', () => {
       'grave.md',
       'many.md',
     ]);
+  });
+
+  it('offers workspace file mutations only when the write policy allows them', async () => {
+    vi.mocked(api.listProjectWorkspace).mockResolvedValue({
+      files: [{ name: 'note.md', path: 'notes/note.md', isDirectory: false }],
+      truncated: false,
+    } as never);
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      managedWorkspaceWritePolicy: 'deny',
+    } as never);
+
+    const readOnly = render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+    await screen.findByTestId('file-tree');
+
+    expect(screen.queryByRole('button', { name: 'New folder' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'New file' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'rename note.md' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'delete note.md' })).toBeNull();
+    readOnly.unmount();
+
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      managedWorkspaceWritePolicy: 'allow',
+    } as never);
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+    await screen.findByTestId('file-tree');
+
+    expect(screen.getByRole('button', { name: 'New folder' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New file' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'rename note.md' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'delete note.md' })).toBeInTheDocument();
+  });
+
+  it('confirms before deleting an artifact instead of removing it on the first click', async () => {
+    vi.mocked(api.listProjectArtifacts).mockResolvedValue({
+      files: [{ name: 'report.md', path: 'reports/report.md', isDirectory: false }],
+      truncated: false,
+    } as never);
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Artifacts' }));
+    await screen.findByTestId('file-tree');
+
+    fireEvent.click(screen.getByRole('button', { name: 'delete report.md' }));
+    // The confirmation gate owns the delete now — nothing reaches the API
+    // until it is answered (ConfirmDialog is stubbed out in this spec).
+    expect(api.deleteProjectArtifact).not.toHaveBeenCalled();
   });
 
   it('shows only the three shared view modes on the artifacts tab', async () => {

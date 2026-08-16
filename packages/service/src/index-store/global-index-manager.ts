@@ -64,7 +64,7 @@ export class GlobalIndexManager {
 
   private readonly dirtySessions = new Map<string, SessionChangeEvent>();
   private pendingHistory: HistoryEvent[] = [];
-  private readonly dirtyDocuments = new Map<string, DocumentChangeEvent['type']>();
+  private readonly dirtyDocuments = new Map<string, 'write' | 'delete'>();
 
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
@@ -115,6 +115,9 @@ export class GlobalIndexManager {
   }
 
   enqueueDocument(ev: DocumentChangeEvent): void {
+    // A new folder has no content to index; its children arrive as their own
+    // write events. The hook still fires so other listeners see the change.
+    if (ev.type === 'mkdir') return;
     this.dirtyDocuments.set(ev.path, ev.type);
     this.scheduleFlush();
   }
@@ -323,7 +326,7 @@ export class GlobalIndexManager {
 
   // ── documents ──────────────────────────────────────────────────────────
 
-  private async flushDocuments(batch: Map<string, DocumentChangeEvent['type']>): Promise<void> {
+  private async flushDocuments(batch: Map<string, 'write' | 'delete'>): Promise<void> {
     const index = await openGlobalCollection(this.store.homePath, 'documents');
     if (!index) return;
     try {

@@ -41,6 +41,8 @@ import {
 } from '../../craftbook/applicable.js';
 import { writeFileAtomic } from '../../fs/atomic.js';
 import {
+  ArtifactPathExistsError,
+  ArtifactPathNotFoundError,
   ConnectorCorpusWriteDeniedError,
   ShadowPathWriteDeniedError,
 } from '../../fs/project-artifacts-store.js';
@@ -1102,6 +1104,36 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (!filePath) return c.json({ error: 'missing ?path=' }, 400);
     await ctx.store.deleteProjectArtifact(id, filePath);
     return c.json({ ok: true });
+  });
+
+  app.post('/:id/artifacts/mkdir', async (c) => {
+    const id = c.req.param('id');
+    const body = (await c.req.json()) as { path?: string };
+    if (!body.path) return c.json({ error: 'missing path' }, 400);
+    try {
+      const path = await ctx.store.createProjectArtifactFolder(id, body.path);
+      return c.json({ ok: true, path });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  app.post('/:id/artifacts/rename', async (c) => {
+    const id = c.req.param('id');
+    const body = (await c.req.json()) as { fromPath?: string; toPath?: string };
+    if (!body.fromPath || !body.toPath) return c.json({ error: 'missing fromPath / toPath' }, 400);
+    try {
+      const moved = await ctx.store.renameProjectArtifactPath(id, body.fromPath, body.toPath);
+      return c.json({ ok: true, ...moved });
+    } catch (err) {
+      const status =
+        err instanceof ArtifactPathNotFoundError
+          ? 404
+          : err instanceof ArtifactPathExistsError
+            ? 409
+            : 400;
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, status);
+    }
   });
 
   // ── run a user-authored Playwright script against Chromium ──

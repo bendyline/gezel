@@ -157,6 +157,12 @@ export interface BuildInstructionsOptions {
    */
   workspaceFilesTruncated?: boolean;
   documentFiles?: ProjectFileEntry[];
+  /**
+   * True when the recursive documents walk hit its entry cap. Same contract
+   * as {@link workspaceFilesTruncated}: swaps the exact "N more" count for
+   * an honest "more exist" note.
+   */
+  documentFilesTruncated?: boolean;
   voormanName?: string;
   /**
    * The current gezel's id. Used to gate prompt content that's only
@@ -360,6 +366,15 @@ export interface BuildInstructionsOptions {
 const MINIMAL_CONTEXT_ABOUT_MAX_CHARS = 900;
 
 /**
+ * Row cap for the shared-documents listing. Lower than the workspace's 200:
+ * the library is a map the model navigates by search, not an inventory it
+ * works through, and this block rides the volatile band on every non-executor
+ * turn. The walk is breadth-first, so the cap keeps the shallow, high-level
+ * documents and drops the deep tail — which is the right bias for a library.
+ */
+const DOCUMENT_LISTING_CAP = 50;
+
+/**
  * The entire conduct layer in minimal-context mode. Replaces the ~530-token
  * conduct core (act-don't-narrate + ask-when-stuck + markdown) with one
  * short steer suited to a no-tools chat/writing model. Keeps the
@@ -408,6 +423,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     workspaceFiles,
     workspaceFilesTruncated,
     documentFiles,
+    documentFilesTruncated,
     voormanName,
     voormanRoleBasedName,
     roleBasedNameOnlyMode,
@@ -842,7 +858,7 @@ ${artifactsLine}
       const memoryBits: string[] = [];
       if (hasSearchMemory) {
         memoryBits.push(
-          'call `search_memory` (scope: "project") before asking the user something they may already have answered',
+          "call `search_memory` before asking the user something they may already have answered — it covers your own memories and this project's",
         );
       }
       if (hasSaveMemory) memoryBits.push('call `save_memory` to keep things worth remembering');
@@ -889,20 +905,55 @@ ${artifactsLine}
   }
 
   let documentsContext = '';
-  // Executor trim: the shared-documents listing is strategic-altitude
-  // cross-project context (guidelines, mission statements, style guides) a
-  // task-scoped builder doesn't consult. Drop the standing listing for
-  // executors; `list_documents` stays callable if they genuinely need it.
-  if (!trimExecutor && documentFiles && documentFiles.length > 0) {
-    const listing = documentFiles
-      .map((f) => `${f.isDirectory ? '\u{1F4C1}' : ' '} ${f.path}`)
-      .join('\n');
-    const documentTools = toolsFrom(['list_documents', 'read_document', 'write_document']);
-    const documentGuidance =
-      documentTools.length > 0
-        ? `Use ${formatToolList(documentTools)} as their individual capabilities allow:`
-        : 'No shared-document tool is wired this turn; this listing is context only:';
-    documentsContext = `\n\n---\n\nShared documents library (cross-project guidelines, mission statements, style guides). ${documentGuidance}\n\`\`\`\n${listing}\n\`\`\``;
+  if (documentFiles && documentFiles.length > 0) {
+    const hasSearchDocuments = toolsFrom(['search_documents']).length > 0;
+    const hasReadDocument = toolsFrom(['read_document']).length > 0;
+    if (trimExecutor) {
+      // Executor trim: the full listing is strategic-altitude cross-project
+      // context a task-scoped builder doesn't inventory. It still needs to
+      // know the library exists — dropping it outright left "consult team
+      // policy" with no trigger, and the trim's measured win was token
+      // savings only, which a one-line pointer keeps.
+      const pointerTool = hasSearchDocuments
+        ? '`search_documents`'
+        : hasReadDocument
+          ? '`list_documents`'
+          : null;
+      if (pointerTool) {
+        documentsContext = `\n\n---\n\nA shared documents library exists (cross-project guidelines and policies). If team policy or style bears on this work, call ${pointerTool}.`;
+      }
+    } else {
+      // Files only: with recursive paths the folder is evident from the path,
+      // and a bare directory row taught the model nothing it could act on.
+      const files = documentFiles.filter((f) => !f.isDirectory);
+      const shown = files.slice(0, DOCUMENT_LISTING_CAP);
+      const listing = shown.map((f) => f.path).join('\n');
+      documentsContext = `\n\n---\n\n### Shared documents library\n\nCross-project reference available to every gezel — guidelines, mission statements, style guides, policies:\n\`\`\`\n${listing}\n\`\`\``;
+      const fullTreeHint =
+        toolsFrom(['list_documents']).length > 0
+          ? ' — call `list_documents({ recursive: true })` for the full tree'
+          : '';
+      if (documentFilesTruncated) {
+        // The walker's own cap dropped part of the tree, so `files.length` is
+        // itself a floor — an exact "N more" here would understate.
+        documentsContext += `\n(listing incomplete — more files exist; a path absent above may still exist${fullTreeHint})`;
+      } else if (files.length > DOCUMENT_LISTING_CAP) {
+        const more = files.length - DOCUMENT_LISTING_CAP;
+        documentsContext += `\n(${more} more ${
+          more === 1 ? 'file' : 'files'
+        } not shown${fullTreeHint})`;
+      }
+      if (hasSearchDocuments && hasReadDocument) {
+        documentsContext +=
+          '\nFor questions about team policy, guidelines, or conventions, consult this library before answering from memory: call `search_documents` with the topic, then `read_document` the match — do not read documents one by one.';
+      } else if (hasReadDocument) {
+        documentsContext +=
+          '\nConsult these documents with `read_document` when they bear on the request.';
+      } else {
+        documentsContext +=
+          '\nNo shared-document tool is wired this turn; this listing is context only.';
+      }
+    }
   }
 
   const markdownGuidance = `Replies render as rich markdown — use headings, tables, lists, code blocks, **bold**/*italic*, and blockquotes when they help. Keep short answers short. ${SQUISQ_DIALECT_BRIEF}`;

@@ -86,6 +86,7 @@ const CLAUDE_PERMISSION_CHOICES: ReadonlyArray<{
 
 type SectionId =
   | 'general'
+  | 'deviceIntegration'
   | 'team'
   | 'folders'
   | 'defaults'
@@ -153,6 +154,7 @@ function clampPercent(value: string, fallback: number): number {
 function buildSections(platform: string | undefined): SettingsSection[] {
   return [
     { id: 'general', label: 'General' },
+    { id: 'deviceIntegration', label: 'Device Integration' },
     { id: 'team', label: 'Your Team' },
     { id: 'folders', label: 'Folders' },
     { id: 'securityCompliance', label: 'Security & Compliance' },
@@ -314,6 +316,7 @@ export function SettingsView() {
   useEffect(() => {
     const valid = new Set<SectionId>([
       'general',
+      'deviceIntegration',
       'team',
       'folders',
       'defaults',
@@ -1429,65 +1432,6 @@ export function SettingsView() {
                 })()}
               </div>
             </section>
-            <section>
-              <h3>System tray</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Keep a Gezel icon in the {isDarwin ? 'menu bar' : 'system tray'} for at-a-glance
-                status, notifications, and a quick engagement-mode toggle. When on
-                {isDarwin
-                  ? ''
-                  : ', closing the window keeps Gezel running in the tray (quit from the tray menu)'}
-                .
-              </p>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <input
-                  type="checkbox"
-                  checked={config?.showSystemTray !== false}
-                  onChange={(e) => void saveShowSystemTray(e.target.checked)}
-                />
-                <span>Show the tray icon</span>
-              </label>
-              {/* Close-to-tray opt-out. Only relevant when the tray is on, and
-                  only on Windows/Linux — macOS keeps the app alive on close
-                  regardless, so the toggle would be a no-op there. */}
-              {config?.showSystemTray !== false && !isDarwin && (
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    marginTop: '0.5rem',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={config?.quitOnClose === true}
-                    onChange={(e) => void saveQuitOnClose(e.target.checked)}
-                  />
-                  <span>Remove the tray icon on close</span>
-                </label>
-              )}
-            </section>
-            {/* Mac-only: by convention macOS keeps the app running after the
-                window closes. This opt-in makes the red X quit Gezel entirely,
-                matching Windows. Off by default; independent of the tray. */}
-            {isDarwin && (
-              <section style={{ marginTop: '2rem' }}>
-                <h3>Close button</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  By default macOS keeps Gezel running when you close the window. Turn this on to
-                  quit Gezel entirely when you click the red close button.
-                </p>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={config?.quitOnClose === true}
-                    onChange={(e) => void saveQuitOnClose(e.target.checked)}
-                  />
-                  <span>Quit Gezel when the window is closed.</span>
-                </label>
-              </section>
-            )}
             <section style={{ marginTop: '2rem' }}>
               <h3>Night Shift</h3>
               <p className="muted" style={{ marginTop: 0 }}>
@@ -1588,7 +1532,7 @@ export function SettingsView() {
               )}
             </section>
             <section style={{ marginTop: '2rem' }}>
-              <h3>Cloud quota reserve</h3>
+              <h3>Night shift cloud quota reserve</h3>
               <p className="muted" style={{ marginTop: 0 }}>
                 For Claude, Codex, and Copilot subscriptions, run the night shift only until:
               </p>
@@ -1671,6 +1615,70 @@ export function SettingsView() {
                 Reset to defaults
               </button>
             </section>
+          </>
+        )}
+
+        {section === 'deviceIntegration' && (
+          <>
+            <section>
+              <h3>System tray</h3>
+              <p className="muted" style={{ marginTop: 0 }}>
+                Keep a Gezel icon in the {isDarwin ? 'menu bar' : 'system tray'} for at-a-glance
+                status, notifications, and a quick engagement-mode toggle. When on
+                {isDarwin
+                  ? ''
+                  : ', closing the window keeps Gezel running in the tray (quit from the tray menu)'}
+                .
+              </p>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <input
+                  type="checkbox"
+                  checked={config?.showSystemTray !== false}
+                  onChange={(e) => void saveShowSystemTray(e.target.checked)}
+                />
+                <span>Show the tray icon</span>
+              </label>
+              {/* Close-to-tray opt-out. Only relevant when the tray is on, and
+                  only on Windows/Linux — macOS keeps the app alive on close
+                  regardless, so the toggle would be a no-op there. */}
+              {config?.showSystemTray !== false && !isDarwin && (
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    marginTop: '0.5rem',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={config?.quitOnClose === true}
+                    onChange={(e) => void saveQuitOnClose(e.target.checked)}
+                  />
+                  <span>Remove the tray icon on close</span>
+                </label>
+              )}
+            </section>
+            {/* Mac-only: by convention macOS keeps the app running after the
+                window closes. This opt-in makes the red X quit Gezel entirely,
+                matching Windows. Off by default; independent of the tray. */}
+            {isDarwin && (
+              <section style={{ marginTop: '2rem' }}>
+                <h3>Close button</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  By default macOS keeps Gezel running when you close the window. Turn this on to
+                  quit Gezel entirely when you click the red close button.
+                </p>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={config?.quitOnClose === true}
+                    onChange={(e) => void saveQuitOnClose(e.target.checked)}
+                  />
+                  <span>Quit Gezel when the window is closed.</span>
+                </label>
+              </section>
+            )}
           </>
         )}
 

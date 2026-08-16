@@ -135,3 +135,44 @@ describe('GET /api/projects/:id/index/files?detail=1', () => {
     expect(body.paths).toContain('sub/');
   });
 });
+
+describe('artifact folder operations', () => {
+  it('creates a folder and renames a file into it, then refuses to overwrite', async () => {
+    await client.createProjectArtifactFolder(projectId, 'archive');
+    await svc.context.store.writeProjectArtifact(projectId, 'draft.md', 'draft');
+
+    const moved = await client.renameProjectArtifactPath(projectId, 'draft.md', 'archive/draft.md');
+    expect(moved).toMatchObject({ fromPath: 'draft.md', toPath: 'archive/draft.md' });
+    expect(await svc.context.store.readProjectArtifact(projectId, 'archive/draft.md')).toBe(
+      'draft',
+    );
+    expect(await svc.context.store.readProjectArtifact(projectId, 'draft.md')).toBeNull();
+
+    // A second file cannot be renamed on top of the first.
+    await svc.context.store.writeProjectArtifact(projectId, 'other.md', 'other');
+    await expect(
+      client.renameProjectArtifactPath(projectId, 'other.md', 'archive/draft.md'),
+    ).rejects.toThrow(/409/);
+    expect(await svc.context.store.readProjectArtifact(projectId, 'archive/draft.md')).toBe(
+      'draft',
+    );
+  });
+
+  it('renames a folder with everything under it', async () => {
+    await svc.context.store.writeProjectArtifact(projectId, 'notes/one.md', 'one');
+    await client.renameProjectArtifactPath(projectId, 'notes', 'renamed-notes');
+    expect(await svc.context.store.readProjectArtifact(projectId, 'renamed-notes/one.md')).toBe(
+      'one',
+    );
+  });
+
+  it('refuses to move a folder inside itself and refuses the reserved shadow cache', async () => {
+    await svc.context.store.writeProjectArtifact(projectId, 'movable/x.md', 'x');
+    await expect(
+      client.renameProjectArtifactPath(projectId, 'movable', 'movable/inner'),
+    ).rejects.toThrow(/400/);
+    await expect(client.renameProjectArtifactPath(projectId, 'movable', 'shadow')).rejects.toThrow(
+      /400/,
+    );
+  });
+});

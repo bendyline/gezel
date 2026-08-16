@@ -19,6 +19,7 @@ import {
   type SystemHomeInfo,
   SystemHomeInfoSchema,
   createLogger,
+  isUserCreatedProject,
 } from '@bendyline/gezel';
 import { Octokit } from '@octokit/rest';
 import { Hono } from 'hono';
@@ -141,11 +142,15 @@ export function systemRoutes(ctx: ServiceContext): Hono {
    * boundary for public bug reports and must never carry home paths.
    *
    * `everUsed` is structural: a persisted session or a project beyond the
-   * auto-created `default` only ever comes from use. Gezel count says
+   * auto-created built-ins only ever comes from use. Gezel count says
    * nothing (boot auto-creates the whole system crew), and
    * `firstRunCompleted` cannot serve either — the bootstrap sets it on
    * every daemon boot, including headless machine services no human has
    * ever opened.
+   *
+   * "Built-in" is a set, not a count: boot creates `default` AND the shared
+   * library, so a bare `projects.length > 1` would report every pristine
+   * home as used.
    */
   app.get('/home', async (c) => {
     const [config, gezels, projects, sessions] = await Promise.all([
@@ -171,7 +176,7 @@ export function systemRoutes(ctx: ServiceContext): Hono {
           gezelCount: gezels.length,
           projectCount: projects.length,
           sessionCount: sessions.length,
-          everUsed: sessions.length > 0 || projects.length > 1,
+          everUsed: sessions.length > 0 || projects.some(isUserCreatedProject),
         },
         ...(provider ? { provider } : {}),
         ...(defaultModel ? { defaultModel } : {}),

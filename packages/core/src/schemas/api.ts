@@ -1103,6 +1103,12 @@ export const GezelConfigSchema = z.object({
    */
   meesterGezelId: z.string().optional(),
   /**
+   * Id of the canonical shared-library project when it could not take the
+   * default `shared` id — i.e. a user project already owned it. Absent on
+   * every ordinary install; see core `shared-project.ts`.
+   */
+  sharedProjectId: z.string().optional(),
+  /**
    * The gezel currently designated as "klerk" — the workshop scribe.
    * Handles utility text generation (about.md drafts, rewrites, session
    * summaries, memory consolidation) so users can route grunt work to

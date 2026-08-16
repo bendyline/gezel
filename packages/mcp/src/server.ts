@@ -456,7 +456,7 @@ server.tool(
     scope: z
       .enum(['gezel', 'project'])
       .describe(
-        'Where to save: "agent" for personal memories, "project" for project-specific context',
+        'Where to save: "gezel" for your own personal memories, "project" for project-shared context',
       ),
     kind: z
       .enum(['fact', 'decision', 'pref', 'status'])
@@ -3980,14 +3980,14 @@ server.tool(
 
 server.tool(
   'list_documents',
-  'List files in the shared documents library. This library holds cross-cutting guides like mission statements, coding guidelines, and style guides that apply across all projects.',
+  'List files in the shared documents library — cross-project guides every gezel can read (guidelines, mission statements, style guides, policies). Pass { recursive: true } to see inside folders. To find content rather than names, use search_documents.',
   {
     path: z.string().optional().describe('Subdirectory path to list (default: root)'),
     recursive: z.boolean().optional().describe('List all descendants (default: false)'),
   },
   async ({ path, recursive }) => {
     const res = await api.listDocuments(path ?? '', recursive ?? false);
-    const listing = res.files.map((f) => `${f.isDirectory ? '📁' : '📄'} ${f.path}`).join('\n');
+    const listing = res.files.map((f) => `${f.isDirectory ? 'dir ' : 'file'} ${f.path}`).join('\n');
     const summary = res.files.length
       ? `Listed ${res.files.length} ${res.files.length === 1 ? 'document entry' : 'document entries'}.`
       : 'No documents found.';
@@ -4001,21 +4001,21 @@ server.tool(
 
 server.tool(
   'read_document',
-  'Read a document from the shared documents library. Use this to consult mission statements, coding guidelines, style guides, etc.',
+  'Read one document from the shared library by path. Office documents (.docx, .pdf, .pptx, .xlsx) come back converted to markdown. Get paths from the library listing, list_documents, or a search_documents match.',
   {
     path: z
       .string()
       .describe('File path relative to the documents root (e.g. "guidelines/coding.md")'),
   },
   async ({ path }) => {
-    const res = await api.readDocument(path);
+    const res = await api.readDocument(path, { as: 'markdown' });
     return { content: [{ type: 'text' as const, text: res.content }] };
   },
 );
 
 server.tool(
   'write_document',
-  'Create or update a document in the shared documents library. Use this to capture durable, cross-project knowledge like guidelines or policies.',
+  'Create or update a document in the shared documents library (markdown preferred). Use for durable cross-project knowledge — guidelines, policies, style rules. For knowledge specific to one project, use a folder named after that project (e.g. "acme-site/decisions.md"). Deliverables for the current job belong in the workspace or artifacts, not here.',
   {
     path: z
       .string()
@@ -4036,7 +4036,7 @@ server.tool(
 
 server.tool(
   'delete_document',
-  'Delete a document or folder from the shared documents library.',
+  'Delete a document — or a folder and its entire contents — from the shared documents library. Folder deletes are recursive and cannot be undone; prefer exact file paths.',
   {
     path: z.string().describe('File or folder path to delete'),
   },
@@ -4048,7 +4048,7 @@ server.tool(
 
 server.tool(
   'search_documents',
-  'Keyword-search the CONTENT of the shared documents library (not just names). Returns path + line + snippet; follow up with read_document to read a match.',
+  'Search the CONTENT of every document in the shared library, including converted office documents. Returns path + line + snippet; call this first for any question the library might answer — team policy, guidelines, conventions — then read_document the best match.',
   {
     q: z.string().min(1).describe('Full-text query against document content'),
     limit: z.number().optional().describe('Max results (default 10)'),

@@ -5,7 +5,7 @@ import type {
   RecentTab,
   RecentTabArea,
 } from '@bendyline/gezel';
-import { displayName, isOutsideInInternalPath } from '@bendyline/gezel';
+import { SHARED_PROJECT_ID, displayName, isOutsideInInternalPath } from '@bendyline/gezel';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -148,7 +148,11 @@ const AREA_LINKS: RecentTabArea[] = [
 // list only shows projects the user actually started — unless it is the
 // current destination. A restored workspace must always have a visible
 // selected row naming the project that occupies the canvas.
-const HIDDEN_PROJECT_IDS = new Set<string>(['default']);
+//
+// `shared` is hidden for a different reason: it backs the Documents area,
+// which is its own top-level destination. Listing it as a project too would
+// offer two doors into one room.
+const HIDDEN_PROJECT_IDS = new Set<string>(['default', SHARED_PROJECT_ID]);
 const AREA_LINK_LABELS: Record<RecentTabArea, string> = {
   projects: 'Projects',
   gezels: 'Gezellen',

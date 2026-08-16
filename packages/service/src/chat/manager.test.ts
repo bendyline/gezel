@@ -6246,16 +6246,36 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       // now also requires the role to actually hold GitHub tools, which a
       // pure delegation role does not, so it can no longer isolate the
       // role gate from the roster.
-      await store.writeDocument('guidelines.md', 'House style.');
+      await store.writeDocument('brand/guidelines.md', 'House style.');
       const sys = await sysFor({ role: 'voorman', force: true, github: true });
-      expect(sys).toContain('Shared documents library');
-      expect(sys).toContain('guidelines.md');
+      expect(sys).toContain('### Shared documents library');
+      // Foldered path proves the listing walks the tree; a top-level-only
+      // listing would render the folder and hide the document inside it.
+      expect(sys).toContain('brand/guidelines.md');
     });
 
-    it('trims the shared-documents listing for an executor under the behavior', async () => {
-      await store.writeDocument('guidelines.md', 'House style.');
-      const trimmed = await sysFor({ role: 'developer', force: true });
-      expect(trimmed).not.toContain('Shared documents library');
+    it('condenses the shared-documents listing to a pointer for a trimmed executor', async () => {
+      await store.writeDocument('brand/guidelines.md', 'House style.');
+      // Copywriter, not developer: the pointer names a document tool, so it
+      // only renders for an executor whose role actually holds one. The
+      // developer kit carries no `documents` group at all.
+      const trimmed = await sysFor({ role: 'copywriter', force: true });
+      // The inventory goes; knowing the library exists does not, or
+      // "consult team policy" has no trigger.
+      expect(trimmed).not.toContain('### Shared documents library');
+      expect(trimmed).not.toContain('brand/guidelines.md');
+      expect(trimmed).toContain('A shared documents library exists');
+    });
+
+    it('steers to search_documents and hides outside-in companion twins', async () => {
+      await store.writeDocument('brand/guidelines.md', 'House style.');
+      // The editable markdown twin of a binary document. It is a derived
+      // view of a document already listed, so offering it as a second
+      // readable path invites the model to open the wrong one.
+      await store.writeDocument('brand/deck.pptx_files/deck.md', 'converted twin');
+      const sys = await sysFor({ role: 'voorman', force: false });
+      expect(sys).toContain('call `search_documents` with the topic');
+      expect(sys).not.toContain('deck.pptx_files');
     });
   });
 });

@@ -34,6 +34,7 @@ import {
   estimateLlamaCppResidentBytes,
   isEngagementAllowed,
   isLocalProvider,
+  isOutsideInInternalPath,
   isProactiveAllowed,
   leaksUntaggedReasoning,
   normalizeCodexPermissionMode,
@@ -13053,7 +13054,15 @@ export class ChatManager {
     // every time anyone (including a parallel gezel) writes one, and a
     // baked-in listing goes stale immediately. The prompt teaches the
     // model to call `list_artifacts` (recursive by default) instead.
-    const documentFiles = await this.store.listDocuments('');
+    // Recursive: a foldered library rendered only its top-level folder rows,
+    // so anything filed under one was invisible to the model. Outside-in
+    // companion dirs (`report.docx_files/report.md`) are derived twins of a
+    // document already in the listing — showing both invites the model to
+    // read the wrong one.
+    const documentListing = await this.store.listDocumentsRecursiveDetailed();
+    const documentFiles = documentListing.entries.filter(
+      (entry) => !isOutsideInInternalPath(entry.path),
+    );
     const gezel = await this.store.getGezel(record.gezelId);
     const config = await this.store.readConfig();
     // Curated cross-project lessons distilled by the memory compactor's
@@ -13661,6 +13670,7 @@ export class ChatManager {
       workspaceFiles,
       ...(workspaceListing.truncated ? { workspaceFilesTruncated: true } : {}),
       documentFiles,
+      ...(documentListing.truncated ? { documentFilesTruncated: true } : {}),
       voormanName: voorman?.name,
       ...(voorman?.roleBasedName ? { voormanRoleBasedName: voorman.roleBasedName } : {}),
       ...(voorman?.parsed.frontmatter.gender

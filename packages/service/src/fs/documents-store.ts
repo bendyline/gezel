@@ -4,10 +4,29 @@ import { dirname, isAbsolute, relative } from 'node:path';
 import { type ProjectFileEntry, isOutsideInInternalPath } from '@bendyline/gezel';
 import { type ExternalFolders, gezelPaths } from '@bendyline/gezel/paths';
 import type { HistoryManager } from '../history/manager.js';
+import { convertDocToMarkdown, isConvertibleDoc } from '../index-store/docs.js';
 import { writeFileAtomic } from './atomic.js';
 import { mimeTypeForFilename } from './media-types.js';
 import { safeJoin } from './safe-paths.js';
-import { listDirEntries, safeReadTextFile, safeResolveRead, walkDir } from './tree.js';
+import {
+  type WalkDirResult,
+  listDirEntries,
+  safeReadTextFile,
+  safeResolveRead,
+  walkDir,
+  walkDirDetailed,
+} from './tree.js';
+
+/**
+ * A utf8 decode of binary bytes yields replacement characters rather than
+ * failing, so "did this read produce text?" has to be answered after the fact.
+ */
+function looksBinary(text: string): boolean {
+  const sample = text.slice(0, 4096);
+  if (sample.includes('\u0000')) return true;
+  const replacements = sample.match(/�/g)?.length ?? 0;
+  return replacements > sample.length * 0.02;
+}
 
 export interface DocumentsStoreOptions {
   home: string;
@@ -18,7 +37,7 @@ export interface DocumentsStoreOptions {
    * document, which deliberately emit NO history event (the `!existed`
    * gate below). The global search index relies on this hook to see edits.
    */
-  onChange?: (ev: { type: 'write' | 'delete'; path: string }) => void;
+  onChange?: (ev: { type: 'write' | 'delete' | 'mkdir'; path: string }) => void;
 }
 
 /**
@@ -32,7 +51,7 @@ export class DocumentsStore {
   private readonly home: string;
   private readonly external?: ExternalFolders;
   private readonly history?: HistoryManager;
-  private readonly onChange?: (ev: { type: 'write' | 'delete'; path: string }) => void;
+  private readonly onChange?: (ev: { type: 'write' | 'delete' | 'mkdir'; path: string }) => void;
 
   constructor(opts: DocumentsStoreOptions) {
     this.home = opts.home;
@@ -41,7 +60,7 @@ export class DocumentsStore {
     this.onChange = opts.onChange;
   }
 
-  private notifyChange(type: 'write' | 'delete', path: string): void {
+  private notifyChange(type: 'write' | 'delete' | 'mkdir', path: string): void {
     try {
       this.onChange?.({ type, path });
     } catch {
@@ -61,8 +80,60 @@ export class DocumentsStore {
     return walkDir(this.documentsDir());
   }
 
+  /**
+   * Same walk with the walker's full result. The library browser is the same
+   * surface as the project file panels, so it needs what they need: mtimes to
+   * sort by recency, the hidden entries behind the show-hidden key, and the
+   * truncation flag (a library over the walker's cap otherwise renders as a
+   * complete listing).
+   */
+  async listDocumentsRecursiveDetailed(
+    opts: { withStats?: boolean; includeHidden?: boolean } = {},
+  ): Promise<WalkDirResult> {
+    return walkDirDetailed(this.documentsDir(), opts);
+  }
+
   async readDocument(filePath: string): Promise<string | null> {
     return safeReadTextFile(this.documentsDir(), filePath);
+  }
+
+  /**
+   * Model-facing read. A plain utf8 read of a .docx hands the caller
+   * mojibake, and `search_documents` can match inside one (the indexer
+   * converts them), so the tool that follows up a hit has to be able to open
+   * it. Office formats come back as markdown via the same sandboxed
+   * converter the indexer uses; other binaries return an explicit refusal
+   * rather than garbage the model would try to reason about.
+   */
+  async readDocumentAsMarkdown(
+    filePath: string,
+  ): Promise<{ content: string; converted: boolean } | null> {
+    const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+    if (isConvertibleDoc(ext)) {
+      const abs = await safeResolveRead(this.documentsDir(), filePath);
+      if (!abs) return null;
+      const conversion = await convertDocToMarkdown(abs).catch(() => null);
+      if (conversion?.markdown) {
+        return { content: conversion.markdown, converted: true };
+      }
+      return {
+        content: `read_document: '${filePath}' could not be converted to text${
+          conversion?.blocked ? ' (held for safety)' : ''
+        }. Ask the user what it should contain, or work from another source.`,
+        converted: false,
+      };
+    }
+    const text = await safeReadTextFile(this.documentsDir(), filePath);
+    if (text === null) return null;
+    if (looksBinary(text)) {
+      return {
+        content: `read_document: '${filePath}' is a binary file (${mimeTypeForFilename(
+          filePath,
+        )}) and cannot be shown as text.`,
+        converted: false,
+      };
+    }
+    return { content: text, converted: false };
   }
 
   async readDocumentBinary(filePath: string): Promise<{ data: Buffer; mimeType: string } | null> {
@@ -124,6 +195,14 @@ export class DocumentsStore {
   async createDocumentFolder(folderPath: string): Promise<void> {
     const full = this.resolveWritePath(folderPath);
     await mkdir(full, { recursive: true });
+    this.notifyChange('mkdir', folderPath);
+    if (!isOutsideInInternalPath(folderPath)) {
+      await this.history?.log({
+        kind: 'document.folder.created',
+        summary: `Created document folder ${folderPath}`,
+        details: { path: folderPath },
+      });
+    }
   }
 
   async renameDocument(fromPath: string, toPath: string): Promise<void> {

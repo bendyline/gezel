@@ -643,6 +643,7 @@ const MEESTER_TOOL_CAP_PRIORITY = [
   'save_memory',
   'search_history',
   'search_sessions',
+  'search_documents',
   'list_artifacts',
   'read_artifact',
   'write_artifact',
@@ -663,10 +664,14 @@ const MEESTER_TOOL_CAP_PRIORITY = [
   //     in the prompt stack names them, so their absence creates no
   //     prompt-vs-runtime drift, and three more schemas is real prefill on
   //     a 8B.
-  //   - the document search/intel tail (`search_documents`, `search_docs`,
-  //     `read_doc_as_markdown`, `find_entity`, …) — `search_memory` and
-  //     `read_document` cover recall for a coordinator that delegates the
-  //     reading work anyway.
+  //   - the project doc-intel tail (`search_docs`, `read_doc_as_markdown`,
+  //     `find_entity`, …) — workspace-scoped office-document intelligence,
+  //     which a coordinator delegates along with the reading work.
+  //     `search_documents` is NOT in that tail and IS curated above: it
+  //     searches the shared library's content, which nothing else reaches.
+  //     Memory holds what was extracted from conversation, not what a human
+  //     filed in the library, and `read_document` needs a path you must
+  //     already know.
   // Revisit any of these by adding the name here; the cap follows the list
   // length, so curating a tool in never squeezes another one out.
 ] as const;
@@ -710,6 +715,7 @@ const VOORMAN_TOOL_CAP_PRIORITY = [
   'update_project',
   // --- below here trimmed at the small-tier cap ---
   'search_sessions',
+  'search_documents',
   'list_craftbooks',
   'list_project_gezels',
   'list_projects',
@@ -778,6 +784,7 @@ const GENERIC_TOOL_CAP_FALLBACK: readonly string[] = [
   'search_memory',
   'save_memory',
   'list_memories',
+  'search_documents',
   'list_documents',
   'read_document',
   'list_tasks',

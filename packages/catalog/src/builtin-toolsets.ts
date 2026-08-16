@@ -152,7 +152,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
   },
   {
     id: 'documents',
-    name: 'Documents',
+    name: 'Shared document library',
     description:
       'Cross-project shared library — mission docs, guidelines, and any markdown the user wants every gezel to be able to find.',
     tools: [

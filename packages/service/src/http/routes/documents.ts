@@ -15,10 +15,36 @@ export function documentRoutes(ctx: ServiceContext): Hono {
   app.get('/', async (c) => {
     const subpath = c.req.query('path') ?? '';
     const recursive = c.req.query('recursive') === '1';
-    const entries = recursive
-      ? await ctx.store.listDocumentsRecursive()
-      : await ctx.store.listDocuments(subpath);
-    return c.json({ files: entries });
+    // `stats=1` / `hidden=1` mirror the project file routes — the documents
+    // library is browsed through the same file panel, which sorts by mtime and
+    // has a show-hidden key. Only meaningful with `recursive=1`.
+    const withStats = c.req.query('stats') === '1';
+    const includeHidden = c.req.query('hidden') === '1';
+    if (recursive) {
+      const detailed = await ctx.store.listDocumentsRecursiveDetailed({
+        ...(withStats ? { withStats: true } : {}),
+        ...(includeHidden ? { includeHidden: true } : {}),
+      });
+      return c.json({ files: detailed.entries, truncated: detailed.truncated });
+    }
+    return c.json({ files: await ctx.store.listDocuments(subpath) });
+  });
+
+  // Same "Open" affordance the project file panels have, now that the library
+  // is browsed through the same panel. Same argv-array launch as
+  // `POST /api/projects/:id/reveal`: never an interpolated shell string, since
+  // the documents root is relocatable via ExternalFolders.
+  app.post('/reveal', async (c) => {
+    const dir = ctx.store.documentsDir();
+    const { execFile } = await import('node:child_process');
+    const launcher: { cmd: string; args: string[] } =
+      process.platform === 'darwin'
+        ? { cmd: 'open', args: [dir] }
+        : process.platform === 'win32'
+          ? { cmd: 'explorer', args: [dir] }
+          : { cmd: 'xdg-open', args: [dir] };
+    execFile(launcher.cmd, launcher.args, { windowsHide: true }, () => {});
+    return c.json({ ok: true, path: dir });
   });
 
   app.get('/search', async (c) => {
@@ -39,10 +65,24 @@ export function documentRoutes(ctx: ServiceContext): Hono {
     if (c.req.query('raw') === '1') {
       return serveRawFile(c, ctx.store.documentsDir(), filePath);
     }
-    // 1. Global documents library — the canonical interpretation.
-    const content = await ctx.store.readDocument(filePath);
-    if (content !== null) {
-      return c.json({ path: filePath, content, kind: 'document' as const });
+    // 1. Global documents library — the canonical interpretation. Model
+    //    callers ask for `as=markdown` so office formats arrive readable
+    //    instead of as mojibake; the UI's own reads stay byte-for-byte.
+    if (c.req.query('as') === 'markdown') {
+      const doc = await ctx.store.readDocumentAsMarkdown(filePath);
+      if (doc !== null) {
+        return c.json({
+          path: filePath,
+          content: doc.content,
+          kind: 'document' as const,
+          ...(doc.converted ? { converted: true } : {}),
+        });
+      }
+    } else {
+      const content = await ctx.store.readDocument(filePath);
+      if (content !== null) {
+        return c.json({ path: filePath, content, kind: 'document' as const });
+      }
     }
     // 2. Fuzzy fallback: small models routinely confuse "document" vs
     //    "artifact" and omit (or mis-place) the `artifacts/` infix in

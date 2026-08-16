@@ -4567,12 +4567,115 @@ button.danger {
   grid-template-columns: 240px minmax(0, 1fr) minmax(17rem, 21rem);
 }
 
+/* Drag-resizable variant: the file tree gets its own grip track. Gated on
+   `.has-tree-grip` because `.project-files-layout` is also used by views
+   that render only the two panes (github/PullRequestsView) — a grip track
+   they don't fill would push their viewer into the wrong column.
+   `--file-tree-user-width` is the value the drag persists;
+   `--file-tree-width` is what the track actually uses, so narrow
+   containers and the collapsed rail can override it without clobbering
+   the user's stored choice. */
+.project-files-layout.has-tree-grip {
+  --file-tree-width: var(--file-tree-user-width, 240px);
+  grid-template-columns: minmax(0, var(--file-tree-width)) var(--file-tree-grip-track, 8px) minmax(
+      0,
+      1fr
+    );
+  gap: 0;
+}
+
+.project-files-layout.has-tree-grip.has-index-pane {
+  grid-template-columns: minmax(0, var(--file-tree-width)) var(--file-tree-grip-track, 8px) minmax(
+      0,
+      1fr
+    ) minmax(17rem, 21rem);
+}
+
+.project-files-layout.has-tree-grip.tree-collapsed {
+  --file-tree-width: 2.125rem;
+}
+
+/* The documents library mounts the same browser full-bleed inside
+   `.documents-listing`, which already butts against the app frame. */
+.project-files-layout-documents {
+  border: none;
+  border-radius: 0;
+}
+
+.file-tree-grip {
+  width: auto;
+}
+
 .file-tree-panel {
   background: var(--panel);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Both panes of the shared file browser accept OS file drops, and the drop
+   overlay is absolutely positioned — each pane has to be its own containing
+   block or the overlay escapes to the layout root. */
+.file-tree-panel.document-drop-zone,
+.file-viewer-panel.document-drop-zone {
+  position: relative;
+}
+
+/* Title-row actions: the create keys plus "Open", right-aligned. */
+.file-tree-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Transient result of the last create / delete / import, under the header. */
+.file-tree-status {
+  display: block;
+  padding: 0.3rem 0.55rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Collapsed rail: keeps the pane's identity on screen (and a way back)
+   without spending width on a tree too narrow to read. */
+.file-tree-panel-collapsed {
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0.35rem 0;
+}
+
+.file-tree-expand-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.4rem 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.file-tree-expand-btn:hover {
+  background: var(--key-bg-hover);
+  color: var(--text);
+}
+
+.file-tree-expand-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.file-tree-collapsed-label {
+  writing-mode: vertical-rl;
+  font-size: var(--text-2xs, 0.68rem);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .project-config {
@@ -6590,6 +6693,22 @@ button.danger {
 
   .project-files-layout-workspace.has-index-pane {
     grid-template-columns: minmax(10rem, 34%) minmax(0, 1fr);
+  }
+
+  /* Narrow container: cap the stored tree width at a third of the layout,
+     and drop the index-pane track — the pane becomes an overlay below,
+     so a reserved column would just eat the viewer's width. */
+  .project-files-layout-workspace.has-tree-grip,
+  .project-files-layout-artifacts.has-tree-grip,
+  .project-files-layout-documents.has-tree-grip {
+    --file-tree-width: min(var(--file-tree-user-width, 240px), 34%);
+  }
+
+  .project-files-layout-workspace.has-tree-grip.has-index-pane {
+    grid-template-columns: minmax(0, var(--file-tree-width)) var(--file-tree-grip-track, 8px) minmax(
+        0,
+        1fr
+      );
   }
 
   .project-files-layout.has-index-pane .workspace-index-pane {
@@ -20553,10 +20672,13 @@ a.license-button:hover {
   color: #2b2007;
 }
 
+/* Blank lines in a posture/mode description are paragraph breaks — the copy
+   lives in one string (security-levels.ts) shared by first-run and Settings. */
 .engagement-mode-description {
   margin: 0.5rem 0 0;
   color: var(--muted, #888);
   font-size: 0.9rem;
+  white-space: pre-line;
 }
 
 .engagement-mode-banner {

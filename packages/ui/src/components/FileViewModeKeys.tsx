@@ -152,20 +152,22 @@ export function FileViewModeKeys({
  * Artifacts it additionally reveals the reserved `shadow/` cache.
  */
 export function FileHiddenKey({
-  tab,
+  kind,
   value,
   onChange,
 }: {
-  tab: 'workspace' | 'artifacts';
+  kind: 'workspace' | 'artifacts' | 'documents';
   value: boolean;
   onChange: (next: boolean) => void;
 }) {
   const Icon = value ? HiddenFilesIcon : HiddenFilesOffIcon;
   const hint = value
     ? 'Hide hidden files again.'
-    : tab === 'workspace'
+    : kind === 'workspace'
       ? 'Show hidden files — dot-files and folders like node_modules.'
-      : 'Show hidden files — dot-files and the generated shadow folder.';
+      : kind === 'artifacts'
+        ? 'Show hidden files — dot-files and the generated shadow folder.'
+        : 'Show hidden files — dot-files and companion folders.';
   return (
     <div className="gz-tray file-hidden-tray">
       <button

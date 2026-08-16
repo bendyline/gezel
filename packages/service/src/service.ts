@@ -418,8 +418,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   const store = new Store({ home, history, external, serviceRole, privateUserHome });
   if (serviceRole !== 'machine-engine') await recoverTypedProjectCreations(store);
   await store.ensureLayout();
+  let sharedProject: { id: string; created: boolean } | null = null;
   if (serviceRole !== 'machine-engine') {
     await store.ensureDefaultProject();
+    sharedProject = await store.ensureSharedProject();
     await store.ensureDefaultMeester();
     await store.ensureDefaultKlerk();
   }
@@ -547,7 +549,17 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // The Boekwachter is a full, catalog-backed gezel. This runs after catalog
   // construction (unlike the Store-owned Meester/Klerk ensures above) so the
   // canonical gilde about.md and template provenance are preserved.
-  if (serviceRole !== 'machine-engine') await ensureDefaultBoekwachter(store, catalog);
+  if (serviceRole !== 'machine-engine') {
+    // The shared library's AI tier (summaries, media shadows) is gated on a
+    // Boekwachter being on its roster, so a freshly created library opts in
+    // once here. An install that already has the seat filled recruits only
+    // this project; nothing else is re-broadened.
+    await ensureDefaultBoekwachter(
+      store,
+      catalog,
+      sharedProject?.created ? { recruitProjectIds: [sharedProject.id] } : {},
+    );
+  }
   const secrets = await openSecretStore(home);
   log.info(`[secrets] backend=${secrets.backend}`);
   // The engine broker needs its device-identity key, but must never ingest

@@ -27,9 +27,9 @@ export { isOutsideInInternalPath } from '@bendyline/gezel';
 export {
   canDropDocumentFile,
   DROPPABLE_DOCUMENT_EXTENSIONS,
-  importDroppedDocumentFiles,
+  importDroppedFiles,
 } from './document-import.js';
-export type { DroppedDocumentImportResult } from './document-import.js';
+export type { DroppedDocumentImportResult, DroppedFileTarget } from './document-import.js';
 
 export { createDocumentLinkProvider } from './document-link-provider.js';
 export type { DocumentLinkProviderOptions } from './document-link-provider.js';

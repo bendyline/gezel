@@ -12,3 +12,4 @@ regression surface when an anecdote is carrying architectural weight.
 | [0003](0003-throughput-scaled-eval-ceilings.md) | Accepted | Scale eval hard ceilings by measured decode throughput |
 | [0004](0004-accounts-and-project-acls.md) | Proposed | Accounts and per-project ACLs for shared machines |
 | [0005](0005-indexing-3.0.md) | Accepted | Indexing 3.0: the `artifacts/shadow` tree, index provenance, whole-file reviews |
+| [0006](0006-shared-library-project.md) | Accepted | The shared document library is a project (Documents becomes a facade) |

@@ -5265,6 +5265,23 @@ export class GezelClient {
     );
   }
 
+  createProjectArtifactFolder(id: string, folderPath: string): Promise<{ ok: true; path: string }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/artifacts/mkdir`, {
+      path: folderPath,
+    });
+  }
+
+  renameProjectArtifactPath(
+    id: string,
+    fromPath: string,
+    toPath: string,
+  ): Promise<{ ok: true; fromPath: string; toPath: string }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/artifacts/rename`, {
+      fromPath,
+      toPath,
+    });
+  }
+
   // ── workspace (CRUD — writes gated by the managed workspace-write policy) ──
 
   listProjectWorkspace(
@@ -6262,17 +6279,43 @@ export class GezelClient {
   listDocuments(
     subpath?: string,
     recursive?: boolean,
-  ): Promise<{ files: Array<{ name: string; path: string; isDirectory: boolean }> }> {
+    /** `hidden` also surfaces dotfiles and vendor dirs — listed, not walked into. */
+    opts?: { stats?: boolean; hidden?: boolean },
+  ): Promise<{
+    files: Array<{ name: string; path: string; isDirectory: boolean; mtimeMs?: number }>;
+    /** Present on recursive listings: true when the walker's entry cap dropped files. */
+    truncated?: boolean;
+  }> {
     const params = new URLSearchParams();
     if (subpath) params.set('path', subpath);
     if (recursive) params.set('recursive', '1');
+    if (opts?.stats) params.set('stats', '1');
+    if (opts?.hidden) params.set('hidden', '1');
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request('GET', `/api/documents${qs}`);
   }
 
-  readDocument(filePath: string): Promise<{
+  /** Open the shared documents library in the OS file manager. */
+  revealDocuments(): Promise<{ ok: true; path: string }> {
+    return this.request('POST', '/api/documents/reveal');
+  }
+
+  readDocument(
+    filePath: string,
+    opts?: {
+      /**
+       * Return office documents (.docx/.pdf/.pptx/.xlsx) converted to
+       * markdown, and refuse other binaries explicitly, instead of decoding
+       * their bytes as utf8. What model-facing callers want; the editor
+       * wants the bytes it can round-trip, so this is opt-in.
+       */
+      as?: 'markdown';
+    },
+  ): Promise<{
     path: string;
     content: string;
+    /** True when the content was converted from a binary source format. */
+    converted?: boolean;
     /**
      * What the server actually resolved the path to.
      *   - `document`: global shared library
@@ -6284,7 +6327,8 @@ export class GezelClient {
     /** Only present when a fuzzy fallback resolved the path. */
     resolvedFrom?: { projectId: string; relativePath: string };
   }> {
-    return this.request('GET', `/api/documents/read?path=${encodeURIComponent(filePath)}`);
+    const as = opts?.as ? `&as=${opts.as}` : '';
+    return this.request('GET', `/api/documents/read?path=${encodeURIComponent(filePath)}${as}`);
   }
 
   writeDocument(filePath: string, content: string): Promise<{ ok: true; path: string }> {

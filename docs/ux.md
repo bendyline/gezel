@@ -305,6 +305,41 @@ halves on one straight seam and keep `--radius-md` only on the outside corners.
 Menu items should name the variant and may carry one short hint line. The Tasks
 screen's New task / scheduled / Night Shift control is the reference.
 
+**Resizable splits.** A two-pane split that a user might want to rebalance
+gets a grip, not a fixed track: a full-height `role="separator"` element with
+`.chat-rail-grip` between the panes, whose twin rails only appear on hover or
+focus. The drag persists to `localStorage` (globally, not per project) and the
+grip answers Arrow / Shift+Arrow / Home / End so it works without a mouse. Store
+a **fraction** when the split is about balance (the chat rail, the project
+output pane) and **pixels** when the useful size is set by content rather than
+by window width — a file tree is sized by how long filenames are. Pixel splits
+also get a **collapsed rail**: dragging past the point where the pane stops
+being readable snaps it to a ~2rem strip carrying a chevron and the pane's name
+set in `writing-mode: vertical-rl`, which is also the way back. Collapse is a
+snap, never a sliver — never leave a pane too narrow to read. The Workspace /
+Artifacts file tree is the reference.
+
+**One file browser, everywhere.** Any surface that browses a tree of files —
+the project Workspace, the project Artifacts drawer, the shared Documents
+library — renders
+[`FileBrowserPane`](../packages/ui/src/components/file-browser/FileBrowserPane.tsx)
+against a `FileBrowserSource`. That is the whole panel: the resizable +
+collapsible tree, the view-mode keys, the show-hidden key, the create keys,
+per-row rename/delete, OS drag-and-drop import, the truncation notice, and the
+media/binary previews. Do not hand-roll a second file pane; add to this one.
+
+The source adapter is what varies, and capabilities are declared by presence:
+an adapter with no `mkdir` gets no New folder key, one with `canWrite: false`
+(a workspace whose write policy says no) gets no mutations at all, and one with
+no `reveal` gets no Open button. Anything genuinely specific to a surface
+arrives as a slot — `headerExtra`, `notices`, `trailingForEntry`,
+`customList`, `extraPane` — which is how the Workspace hangs its index state,
+issue badges, triage lists, and Boekwachter pane off the shared panel without
+forking it. **Every file editor autosaves** through
+`useSerializedAutosave` with the dirty state in the status bar; a Save button
+in a file pane is a bug, because a mutation elsewhere in the panel flushes the
+lane rather than racing it.
+
 **Forms.** Raw `<input>`, `<textarea>`, `<fieldset>` are fine — Radix
 doesn't ship form primitives and we don't need them. Schema-driven Squisq
 forms use the shared `GezelJsonEditor` wrapper. It keeps Squisq's built-in
