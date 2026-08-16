@@ -2,6 +2,7 @@ import type { CatalogItemSummary, ChatModelManifest, RecoDevice } from '@bendyli
 import {
   composeFitnessBadge,
   computeModelFit,
+  estimateLlamaCppResidentBytes,
   estimateManifestKvBytes,
   hardwareHint,
   isMoEFromTags,
@@ -48,8 +49,6 @@ interface MemoryProfile {
    */
   budgetBytes?: number;
 }
-
-const MEMORY_OVERHEAD_FACTOR = 1.2;
 
 /**
  * The machine half of a {@link computeModelFit} call. Every fit check on this
@@ -723,7 +722,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                     // because of slot count. Pricing the fleet here would flag
                     // models as too big that the daemon would happily run.
                     const installedResidentBytes =
-                      m.predictedResidentBytes ?? m.approxSizeBytes * MEMORY_OVERHEAD_FACTOR;
+                      m.predictedResidentBytes ?? estimateLlamaCppResidentBytes(m.approxSizeBytes);
                     const ramFit = memory
                       ? computeModelFit({
                           residentBytes: installedResidentBytes,
@@ -940,7 +939,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
               // which wrongly buried offloadable MoE models.
               const fit = computeModelFit({
                 residentBytes:
-                  m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR + fitKvBytes(m, memory),
+                  estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes) + fitKvBytes(m, memory),
                 isMoE: isMoEFromTags(item.manifest.tags),
                 ...fitMachine(memory),
               });
@@ -961,7 +960,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
             const fit = memory
               ? computeModelFit({
                   residentBytes:
-                    m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR + fitKvBytes(m, memory),
+                    estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes) + fitKvBytes(m, memory),
                   isMoE: isMoEFromTags(item.manifest.tags),
                   ...fitMachine(memory),
                 })
@@ -1002,7 +1001,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                               isMoE: isMoEFromTags(item.manifest.tags),
                               fitTier: fit.tier,
                               residentBytes:
-                                m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR +
+                                estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes) +
                                 fitKvBytes(m, memory),
                             })
                           : null;

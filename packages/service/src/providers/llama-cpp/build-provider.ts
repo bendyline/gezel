@@ -3,6 +3,7 @@ import {
   DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
   type GezelConfig,
   createLogger,
+  estimateLlamaCppResidentBytes,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { LlamaBackend } from '@bendyline/gezel/native';
@@ -659,7 +660,7 @@ export async function buildLlamaCppProvider(opts: {
         ggufHasMtp = mtpLayerCount > 0;
       }
       const approxBytes = modelCatalogInfo?.approxSizeBytes ?? summary.fileSizeBytes;
-      const residentBytes = Math.round(approxBytes * 1.2);
+      const residentBytes = estimateLlamaCppResidentBytes(approxBytes);
       const vramBytes = maxGpuVramBytes(llamaDevices);
       const split =
         summary.nonExpertBytes !== undefined &&

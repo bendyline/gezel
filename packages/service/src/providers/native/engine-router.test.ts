@@ -1,3 +1,4 @@
+import { estimateLlamaCppResidentBytes } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
 import { CapacityBroker } from './capacity-broker.js';
@@ -155,7 +156,9 @@ describe('EngineRouter', () => {
     });
     // mlx multiplier is the measured 1.05.
     expect(router.resolveBytes('mlx', 'unknown')).toBe(Math.round(10 * GB * 1.05));
-    expect(router.resolveBytes('llama-cpp', 'unknown')).toBe(Math.round(10 * GB * 1.2));
+    expect(router.resolveBytes('llama-cpp', 'unknown')).toBe(
+      estimateLlamaCppResidentBytes(10 * GB),
+    );
   });
 
   it('throws when no builder registered for a provider', async () => {

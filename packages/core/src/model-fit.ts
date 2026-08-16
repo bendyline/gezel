@@ -16,6 +16,55 @@
  * available from the catalog manifest + `/api/system/memory`).
  */
 
+/**
+ * Proportional term: the weight buffers llama.cpp actually allocates, as a
+ * ratio of the GGUF on disk. Measured 2026-08-15 on Vulkan/AMD from
+ * llama.cpp's own `load_tensors: … model buffer size` accounting, summed
+ * across devices (so it is offload-independent) and corroborated against
+ * the OS GPU dedicated-memory counter:
+ *
+ *   qwen3.6-27b-q4      16314 MiB file → 16028 MiB buffers   0.98×
+ *   qwen3.8-27b-q4      16314 MiB file → 16028 MiB buffers   0.98×
+ *   qwen3.6-35b-a3b-q4  21614 MiB file → 21099 MiB buffers   0.98×
+ *   gemma4-e4b-q4        4020 MiB file →  4365 MiB buffers   1.09×
+ *
+ * Three of four land BELOW the file size — nothing decompresses on load,
+ * and the shortfall is GGUF metadata that never becomes a tensor. The 1.09
+ * is gemma4-E4B's per-layer embeddings: real architecture variance rather
+ * than a fixed cost, so the proportional term sits just above that worst
+ * case instead of at the 0.98 the dense models alone would justify.
+ */
+export const LLAMA_CPP_WEIGHTS_MULTIPLIER = 1.1;
+
+/**
+ * Fixed term: compute + output buffers, which llama.cpp sizes from the
+ * batch and the vocab, NOT from the weights. Measured at 86–164 MiB across
+ * that same 3.9→21 GB span — i.e. flat, which is why a single multiplier
+ * fit nothing: it under-described a 4 GB model and over-reserved a 21 GB
+ * one by ~3 GB.
+ */
+export const LLAMA_CPP_FIXED_ENGINE_BYTES = 256 * 1024 ** 2;
+
+/**
+ * Resident llama.cpp footprint for a GGUF of `approxSizeBytes`, KV
+ * EXCLUDED — every caller prices KV explicitly on top.
+ *
+ * Replaces a flat `× 1.2` that predated KV being priced separately. On a
+ * 27B it reserved 19.1 GiB against a measured 15.8 GiB, and that 3.3 GiB
+ * came straight out of the context clamp's KV allowance.
+ *
+ * Still deliberately biased high: under-reserving pages the whole desktop
+ * (the 2026-08-03 incident), while over-reserving only makes sessions
+ * compact sooner. The margin is now ~10% on a large dense model, not ~21%.
+ *
+ * Lives in core because the daemon's admission path and the UI's fit badge
+ * must agree — a fit computed from a different number offers models the
+ * broker then refuses.
+ */
+export function estimateLlamaCppResidentBytes(approxSizeBytes: number): number {
+  return Math.round(approxSizeBytes * LLAMA_CPP_WEIGHTS_MULTIPLIER) + LLAMA_CPP_FIXED_ENGINE_BYTES;
+}
+
 export type ModelFitTier = 'fits' | 'fits-offload' | 'tight' | 'too-big';
 
 export interface ModelFitInput {

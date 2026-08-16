@@ -25,6 +25,7 @@ import {
   LOCAL_CONTEXT_FLOOR_TOKENS,
   type LlamaCppContextSizing,
   createLogger,
+  estimateLlamaCppResidentBytes,
   localContextFloorTokens,
 } from '@bendyline/gezel';
 import {
@@ -496,11 +497,11 @@ export class CapacityBroker {
   /**
    * Fallback estimate when a catalog entry lacks `residentBytes`.
    * Used by callers building reservation requests from
-   * `approxSizeBytes`. Multipliers reflect typical working-set
-   * footprint vs. on-disk size at default context.
+   * `approxSizeBytes`. Reflects the working-set footprint vs. on-disk
+   * size WITHOUT any KV — every caller prices KV explicitly on top.
    *
-   * llama.cpp at Q4_K_M with 8K ctx: ~1.20 × on-disk.
-   * MLX at 4bit with 8K ctx: ~1.30 × on-disk (KV grows faster).
+   * llama.cpp: see {@link estimateLlamaCppResidentBytes}.
+   * MLX at 4bit: ~1.05 × on-disk.
    *
    * ds4 is special: it streams MoE experts from SSD, so its resident
    * working set is bounded by the configured expert-cache budget + KV +
@@ -520,14 +521,11 @@ export class CapacityBroker {
     // and so folded KV into the weights term; every caller now prices KV
     // explicitly on top, making it a double-count worth ~8.9 GB on a 27B.
     // The 1.05 is allocator slack, not a KV allowance.
-    //
-    // llama.cpp's 1.2 is unmeasured and left alone deliberately: it mmaps
-    // GGUF rather than allocating through Metal, so it needs its own reading
-    // before anyone trims it on this one's authority.
-    const mult = engine === 'mlx' ? 1.05 : 1.2;
-    return Math.round(approxSizeBytes * mult);
+    if (engine === 'mlx') return Math.round(approxSizeBytes * 1.05);
+    return estimateLlamaCppResidentBytes(approxSizeBytes);
   }
 }
+
 
 const GIB = 1024 ** 3;
 

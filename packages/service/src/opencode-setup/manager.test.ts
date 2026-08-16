@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -37,11 +38,15 @@ async function fixture(
     platform?: NodeJS.Platform;
     /** Override the raw model inventory; `[]` exercises the unavailable path. */
     models?: ModelInfo[];
+    /** Fail a config read on demand, to land an error at a chosen point. */
+    onReadConfig?: (paths: { configPath: string }) => Promise<void>;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'gezel-opencode-setup-'));
   roots.push(root);
   const home = join(root, 'gezel');
+  const integrationDir = join(home, 'integrations', 'opencode');
+  const configPath = join(integrationDir, 'opencode.json');
   await mkdir(home, { recursive: true });
   const tokenStore = await createTokenStore({ home, rootToken: 'root-test' });
   let listening = false;
@@ -66,6 +71,7 @@ async function fixture(
     tokenStore,
     bridge,
     readConfig: async () => ({
+      ...((await opts.onReadConfig?.({ configPath })) ?? {}),
       openaiEndpoints: endpointsEnabled ? {} : { enabled: false },
       ...(opts.defaultProvider ? { provider: opts.defaultProvider } : {}),
       ...(opts.defaultModel ? { defaultModel: opts.defaultModel } : {}),
@@ -101,8 +107,8 @@ async function fixture(
     tokenStore,
     bridge,
     manager,
-    integrationDir: join(home, 'integrations', 'opencode'),
-    configPath: join(home, 'integrations', 'opencode', 'opencode.json'),
+    integrationDir,
+    configPath,
     tokenPath: join(home, 'integrations', 'opencode', 'token'),
     statePath: join(home, 'integrations', 'opencode', 'setup.json'),
     isListening: () => listening,
@@ -285,26 +291,31 @@ describe('OpenCodeSetupManager', () => {
   // unlike Codex's profile in ~/.codex. Repairing a conflict where setup.json
   // is missing runs with no prior state, so a careless cleanup order deletes
   // the very file the backup exists to protect.
-  it('leaves a displaced config on disk when a repair fails before publishing', async () => {
+  it('leaves a displaced config on disk when a repair fails after taking the backup', async () => {
     const f = await fixture({
       gezels: [maya],
-      beforeBridgeListen: async () => {
-        throw new Error('port already in use');
+      // Fail only once the repair has actually displaced the file, so the
+      // error lands in the cleanup path with a backup in hand.
+      onReadConfig: async ({ configPath }) => {
+        if (existsSync(`${configPath}.backup`)) throw new Error('config read failed mid-publish');
       },
     });
     await mkdir(f.integrationDir, { recursive: true });
     const theirs = '{\n  "model": "mine/own"\n}\n';
     await writeFile(f.configPath, theirs, 'utf8');
 
+    // No setup.json, so this conflict repairs with `before.state === null` —
+    // the exact shape that makes the first-run directory wipe dangerous.
     const conflicted = await f.manager.status();
     expect(conflicted.state).toBe('conflict');
     expect(conflicted.canRepair).toBe(true);
 
     await expect(
       f.manager.configure({ model: `gezel:${maya.id}`, backupConflictingConfig: true }),
-    ).rejects.toMatchObject({ code: 'opencode_bridge_unavailable' });
+    ).rejects.toThrow();
 
     expect(await readFile(f.configPath, 'utf8')).toBe(theirs);
+    expect(existsSync(`${f.configPath}.backup`)).toBe(false);
   });
 
   it('refuses to configure while connected-app serving is off', async () => {

@@ -31,6 +31,7 @@ import {
   decodeProjectGezelId,
   deriveThreadTitleFromMessages,
   displayName,
+  estimateLlamaCppResidentBytes,
   isEngagementAllowed,
   isLocalProvider,
   isProactiveAllowed,
@@ -11445,7 +11446,7 @@ export class ChatManager {
         ctx,
       );
       if (perSlotF16 === undefined) return undefined;
-      const weightsBytes = installed.approxSizeBytes * 1.2;
+      const weightsBytes = estimateLlamaCppResidentBytes(installed.approxSizeBytes);
       const perSlotBytes = perSlotF16 * kvQuantScale(kv);
       return {
         single: Math.round(weightsBytes + perSlotBytes),
@@ -11524,7 +11525,7 @@ export class ChatManager {
               plannedResidentBytes: planned.single,
               reservedResidentBytes: planned.reserved,
               plannedSlots: planned.slots,
-              weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
+              weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes),
             }
           : {}),
         ...(installed.contextWindow ? { nativeContextWindow: installed.contextWindow } : {}),
@@ -11663,7 +11664,7 @@ export class ChatManager {
           slots,
           minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
           kvBytesPerToken,
-          weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
+          weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes),
           budgetBytes: admissionBudgetBytes,
           committedOtherBytes,
           ...previewLiveRam,
@@ -11713,7 +11714,7 @@ export class ChatManager {
               minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
               kvBytesPerToken: windowed.bytesPerToken,
               weightsResidentBytes:
-                Math.round(installed.approxSizeBytes * 1.2) + windowed.fixedBytes * slots,
+                estimateLlamaCppResidentBytes(installed.approxSizeBytes) + windowed.fixedBytes * slots,
               budgetBytes: admissionBudgetBytes,
               committedOtherBytes,
               ...previewLiveRam,
@@ -11751,7 +11752,7 @@ export class ChatManager {
             slots,
             kvBytesPerToken: ladderKvLinearization.bytesPerToken,
             kvFixedPerSlotBytes: ladderKvLinearization.fixedPerSlotBytes,
-            weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
+            weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes),
             fastBudgetBytes,
             committedOtherBytes,
             budgetKind: brokerSnap?.enforced ? brokerSnap.pools.kind : liveBudget.kind,
@@ -11809,7 +11810,7 @@ export class ChatManager {
             plannedResidentBytes: planned.single,
             reservedResidentBytes: planned.reserved,
             plannedSlots: planned.slots,
-            weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
+            weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes),
           }
         : {}),
       ...(installed.contextWindow ? { nativeContextWindow: installed.contextWindow } : {}),

@@ -1,4 +1,5 @@
 import type { ChatModelManifest } from '@bendyline/gezel';
+import { estimateLlamaCppResidentBytes } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import { toRecoCandidate } from './hardware-tier.js';
 
@@ -62,7 +63,7 @@ describe('toRecoCandidate', () => {
       }),
       'darwin',
     );
-    expect(c?.residentBytes).toBe(Math.round(8 * GB * 1.2));
+    expect(c?.residentBytes).toBe(estimateLlamaCppResidentBytes(8 * GB));
   });
 
   it('carries supportsTools through, so the picker can drop a tool-less model', () => {

@@ -17,6 +17,7 @@
  * number.
  */
 
+import { estimateLlamaCppResidentBytes } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { announceModelInventoryChanged } from '../model-inventory.js';
@@ -47,7 +48,6 @@ export interface ContextControlModel {
 
 export const CONTEXT_SLIDER_MIN = 32_768;
 const CONTEXT_SLIDER_STEP = 8_192;
-const MEMORY_OVERHEAD_FACTOR = 1.2;
 
 /**
  * The slider's max: the advertised native window, except ds4 rows where the
@@ -272,7 +272,8 @@ export function ModelContextSliderPanel({
   // one slot (matches the SIZE column's "in memory" headline), and the full
   // slot-fleet reservation for the over-fit check.
   const kvPerToken = model.kvBytesPerTokenPerSlot;
-  const weightsBytes = model.weightsResidentBytes ?? model.approxSizeBytes * MEMORY_OVERHEAD_FACTOR;
+  const weightsBytes =
+    model.weightsResidentBytes ?? estimateLlamaCppResidentBytes(model.approxSizeBytes);
   const kvFixed = model.kvFixedBytesPerSlot ?? 0;
   const singleBytes =
     kvPerToken !== undefined ? weightsBytes + kvFixed + kvPerToken * value : undefined;

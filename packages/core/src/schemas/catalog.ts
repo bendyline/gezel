@@ -1284,8 +1284,8 @@ export const ChatModelLlamaCppSourceSchema = z
      * Working-set footprint when loaded: weights + KV cache at default
      * context + activations + buffers. Used by the local-engine capacity
      * broker to decide how many models fit concurrently. Optional —
-     * absent entries fall back to `Math.round(approxSizeBytes * 1.20)`
-     * (a defensible default for llama.cpp at default ctx).
+     * absent entries fall back to `estimateLlamaCppResidentBytes`, which
+     * is measured rather than assumed (see its comment in model-fit.ts).
      */
     residentBytes: z.number().int().positive().optional(),
     /** Short quant tag for display ('Q4_K_M', 'Q8_0', 'BF16'). */
