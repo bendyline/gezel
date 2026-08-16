@@ -328,9 +328,7 @@ export async function buildMlxProvider(opts: {
         : undefined;
   const kvBits = config.mlxKvBits ?? 0;
   const kvQuantArgs: string[] =
-    kvBits > 0
-      ? ['--kv-bits', String(kvBits), '--kv-quant-scheme', 'uniform']
-      : [];
+    kvBits > 0 ? ['--kv-bits', String(kvBits), '--kv-quant-scheme', 'uniform'] : [];
   const mayBatch = envMlxBatchOverride ?? config.batchedInference?.enabled ?? true;
   const kvBitsForPlanning = mayBatch ? 0 : kvBits;
 

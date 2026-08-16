@@ -1051,7 +1051,7 @@ describe('backgroundLaneCap', () => {
     releases.pop()?.();
     await flush();
     expect(started).toBe(3);
-    releases.forEach((rel) => rel());
+    for (const rel of releases) rel();
   });
 
   it('keeps a slot free for a chat while background work saturates its lane', async () => {
@@ -1073,6 +1073,6 @@ describe('backgroundLaneCap', () => {
     // Two chores hold two of the engine's three slots; the chat takes the
     // third without waiting for either to finish.
     expect(chatStarted).toBe(true);
-    bg.forEach((rel) => rel());
+    for (const rel of bg) rel();
   });
 });
