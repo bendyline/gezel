@@ -370,17 +370,17 @@ export function MlxSettings({
               style={{ flex: 1 }}
             >
               <option value="0">Off — full precision (default)</option>
-              <option value="8">8-bit — mild speedup, near-lossless</option>
-              <option value="6">6-bit — compromise</option>
-              <option value="4">4-bit — best speedup</option>
+              <option value="8">8-bit — about half the memory, near-lossless</option>
+              <option value="6">6-bit — smaller still</option>
+              <option value="4">4-bit — smallest, some quality loss</option>
             </select>
           </div>
           <p className="muted small" style={{ marginTop: '0.35rem' }}>
-            Sets <code>--kv-bits</code> for mlx_lm.server. Quantizing the KV cache lowers memory use
-            and can speed up generation. Off by default because MLX can crash (
-            <code>RotatingKVCache Quantization NYI</code>) once a long session approaches the
-            model's context limit — safe for short sessions, risky for deep Meester histories. Takes
-            effect the next time the engine starts.
+            Compresses the conversation history the model keeps in memory. That history is the
+            biggest cost in a long chat — on a large model with a 256K context it can outweigh the
+            model itself — and 8-bit roughly halves it at close to no quality cost. Only applies
+            while the engine serves one chat at a time; when it is set up to handle several at once,
+            the history stays at full precision. Takes effect the next time the engine starts.
           </p>
         </section>
       </details>

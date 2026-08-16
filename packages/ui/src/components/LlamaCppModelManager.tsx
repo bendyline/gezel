@@ -773,9 +773,10 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                                   <span
                                     className="home-status-pill home-status-warn"
                                     title={
-                                      m.availableVersion
-                                        ? `A newer build is available in the catalog (→ v${m.availableVersion}). Update re-downloads and replaces it in place.`
-                                        : 'A newer build is available in the catalog.'
+                                      m.updateReason ??
+                                      (m.availableVersion
+                                        ? `A newer build is available in the catalog (→ v${m.availableVersion}). Updating downloads only the files that differ.`
+                                        : 'A newer build is available in the catalog.')
                                     }
                                   >
                                     update available

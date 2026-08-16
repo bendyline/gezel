@@ -17898,6 +17898,24 @@ button.timeline-session-divider-continuing::before {
   margin: 0 0 0.5rem 0;
 }
 
+/* DwarfStar lists installed and downloadable builds in one flow of rows
+   rather than the installed-models table the other engines use — each row
+   carries two lines of memory/context guidance that a cell can't hold. The
+   surface and hairline separators still come from the same recipe so the
+   panel reads as one family with MLX and llama.cpp. */
+.ds4-model-list {
+  padding: 0.25rem 0.75rem;
+}
+
+.ds4-model-row.new-row {
+  margin: 0;
+  padding: 0.6rem 0;
+}
+
+.ds4-model-row.new-row:not(:first-child) {
+  border-top: 1px solid var(--border);
+}
+
 .shared-model-migration-copy {
   margin: 0 0 0.65rem;
   max-width: 48rem;

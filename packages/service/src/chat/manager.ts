@@ -13257,34 +13257,31 @@ export class ChatManager {
     // separate q8_0-KV-on-Gemma bug, since fixed by deriving f16 for the
     // family). `isInstalled` stays version-blind on purpose — we don't
     // auto-trigger a multi-GB re-download; the user reinstalls from the
-    // model manager. Compares the installed model's recorded catalog version
-    // against the catalog's current version; resolves from whichever backend
-    // has the model (the recorded version is backend-agnostic).
+    // model manager. The question is asked of the PAYLOAD, not of the version
+    // string: each engine manager compares the catalog's pinned files against
+    // the copy on disk, so a metadata-only catalog edit (retuning, sizing
+    // hints, wording) — which the runtime has already picked up by resolving
+    // from the current catalog — never tells the user to go download tens of
+    // gigabytes for a change that isn't in the weights.
     if (
       resolvedCatalogId &&
       catalogDetail?.manifest.kind === 'chat-model' &&
       !this.warnedStaleModelSessions.has(record.id)
     ) {
       let settingsSection: 'llamaCpp' | 'ds4' | 'mlx' = 'llamaCpp';
-      let installed: { catalogVersion?: string; quantization?: string } | null =
-        (await this.llamaCppModels?.resolveModel(resolvedCatalogId).catch(() => null)) ?? null;
-      if (!installed) {
+      let status = await this.llamaCppModels?.getUpdateStatus(resolvedCatalogId).catch(() => null);
+      if (!status) {
         settingsSection = 'ds4';
-        installed =
-          (await this.ds4Models?.resolveModel(resolvedCatalogId).catch(() => null)) ?? null;
+        status = await this.ds4Models?.getUpdateStatus(resolvedCatalogId).catch(() => null);
       }
-      if (!installed) {
+      if (!status) {
         settingsSection = 'mlx';
-        installed =
-          (await this.mlxModels?.resolveModel(resolvedCatalogId).catch(() => null)) ?? null;
+        status = await this.mlxModels?.getUpdateStatus(resolvedCatalogId).catch(() => null);
       }
-      const installedVersion = installed?.catalogVersion;
-      const currentVersion = catalogDetail.manifest.version;
-      if (installed && installedVersion && currentVersion && installedVersion !== currentVersion) {
+      if (status?.updateAvailable) {
         this.warnedStaleModelSessions.add(record.id);
-        const installedQuant = installed.quantization ? ` (${installed.quantization})` : '';
         log.warn(
-          `[chat] stale model "${resolvedCatalogId}": installed at catalog v${installedVersion}${installedQuant}, catalog now v${currentVersion} — older build, runs but superseded. Notifying user (session ${record.id.slice(0, 8)}).`,
+          `[chat] stale model "${resolvedCatalogId}": catalog now v${status.availableVersion} — ${status.reason ?? 'the files on disk differ from the ones it pins'}. Notifying user (session ${record.id.slice(0, 8)}).`,
         );
         const scope: PublishScope = {
           sessionId: record.id,

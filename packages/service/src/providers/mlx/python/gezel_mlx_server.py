@@ -268,6 +268,45 @@ parser.add_argument(
         "limit alone."
     ),
 )
+parser.add_argument(
+    "--kv-bits",
+    type=int,
+    default=0,
+    help=(
+        "Quantize the KV cache to this many bits. 0 (default) = f16. Halves "
+        "(8-bit) or quarters (4-bit) the largest term in a long-context "
+        "session: a 256K window on a 16-full-attention-layer 27B is 16 GiB of "
+        "f16 KV. Applies to the SERIAL generation path only — mlx-lm's "
+        "BatchGenerator builds BatchKVCache layers, which have no "
+        "`to_quantized`, and `maybe_quantize_kv_cache` skips them silently. "
+        "The launcher therefore plans memory at f16 whenever batching is on, "
+        "so the broker never reserves a discount the engine did not take."
+    ),
+)
+parser.add_argument(
+    "--kv-group-size",
+    type=int,
+    default=64,
+    help="Group size for KV quantization. mlx-lm's default is 64.",
+)
+parser.add_argument(
+    "--kv-quant-scheme",
+    default="uniform",
+    help=(
+        "Quantization scheme passed to mlx-vlm. 'uniform' is right for integer "
+        "bit values; mlx-vlm selects TurboQuant for fractional ones."
+    ),
+)
+parser.add_argument(
+    "--quantized-kv-start",
+    type=int,
+    default=0,
+    help=(
+        "Only quantize a layer once its cache passes this many tokens. Leaves "
+        "short turns on the f16 path, where quantization costs more than the "
+        "memory it saves."
+    ),
+)
 ARGS = parser.parse_args()
 
 
@@ -693,6 +732,28 @@ def _get_generation_lock() -> asyncio.Lock:
     if _GENERATION_LOCK is None:
         _GENERATION_LOCK = asyncio.Lock()
     return _GENERATION_LOCK
+
+
+def _kv_quant_kwargs() -> Dict[str, Any]:
+    """KV-quantization options for the serial `stream_generate` path.
+
+    Forwarded through `stream_generate(**kwargs)` into mlx-vlm's
+    `generate_step`, which converts each layer via `to_quantized` once it
+    passes `quantized_kv_start`. Layer classes without that method
+    (BatchKVCache, ChunkedKVCache) are skipped by `maybe_quantize_kv_cache`
+    rather than raising — safe, but silent, which is why the launcher plans
+    f16 whenever the batched path is in use instead of trusting this flag.
+
+    Empty when disabled, so the default path is byte-identical to before.
+    """
+    if ARGS.kv_bits <= 0:
+        return {}
+    return {
+        "kv_bits": ARGS.kv_bits,
+        "kv_group_size": ARGS.kv_group_size,
+        "kv_quant_scheme": ARGS.kv_quant_scheme,
+        "quantized_kv_start": ARGS.quantized_kv_start,
+    }
 
 
 def _budget_bytes() -> int:
@@ -2395,6 +2456,7 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             generation_kwargs: Dict[str, Any] = {
                 "prompt_cache_state": cache_state,
                 "prefill_step_size": ARGS.prefill_step_size,
+                **_kv_quant_kwargs(),
             }
             if request.max_tokens is not None:
                 generation_kwargs["max_tokens"] = request.max_tokens

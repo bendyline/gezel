@@ -1699,13 +1699,17 @@ export interface LlamaCppInstalledModel {
   chatTemplatePresent: boolean;
   architecture?: string;
   /**
-   * True when the catalog now ships a different version than the one this
-   * model was downloaded against. The model manager surfaces an "Update"
-   * action (re-download + replace in place) when set.
+   * True when the catalog now describes different model FILES than the ones
+   * on disk. The model manager surfaces an "Update" action (fetch what
+   * differs, replace in place) when set. A catalog version bump that only
+   * edits metadata does not set it — the runtime already resolves that live,
+   * so there is nothing to download.
    */
   updateAvailable?: boolean;
   /** The catalog's current version, when it differs from the installed one. */
   availableVersion?: string;
+  /** What changed, in one sentence, for the update tooltip. */
+  updateReason?: string;
   /**
    * True when the model lives in a read-only overlay (the machine/shared asset
    * store), not this daemon's writable root. The delete endpoint refuses these,
@@ -1882,11 +1886,7 @@ export interface MlxInstalledModel {
   quantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;
-  /**
-   * Catalog manifest `version` as of install — compare with the
-   * live catalog's version to detect "stale install" when a catalog
-   * bump changed the upstream repo or file set.
-   */
+  /** Catalog manifest `version` as of install. */
   catalogVersion?: string;
   /**
    * True when the model lives in a read-only overlay (the machine/shared asset
@@ -1894,6 +1894,16 @@ export interface MlxInstalledModel {
    * shows them as machine-provided instead of offering Delete.
    */
   readOnly?: boolean;
+  /**
+   * True when the catalog now describes different model FILES than the ones
+   * on disk — the daemon compares the payload, not the version string, so a
+   * metadata-only catalog edit never asks for a re-download.
+   */
+  updateAvailable?: boolean;
+  /** The catalog's current version, when it differs from the installed one. */
+  availableVersion?: string;
+  /** What changed, in one sentence, for the update tooltip. */
+  updateReason?: string;
 }
 
 /** Snapshot of the Python runtime powering MLX venvs. */

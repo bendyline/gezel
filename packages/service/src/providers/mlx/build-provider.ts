@@ -301,19 +301,38 @@ export async function buildMlxProvider(opts: {
   })();
   const venvPython = venv.binPath('python');
 
-  // KV cache quantization. **Opt-in only.** Originally defaulted to 4
-  // bits but backed out after `RotatingKVCache Quantization NYI`
-  // crashed mid-prefill on a real session whose prompt approached the
-  // model's context limit. mlx-vlm switches to a rotating cache for
-  // long prompts and `to_quantized` isn't implemented on that class
-  // (the very workload that benefits most from cache compression).
-  // Operators with short sessions can opt in via `mlxKvBits` in
-  // config. `--kv-quant-scheme uniform` is the right choice for
-  // integer bit values; mlx_vlm picks TurboQuant for fractional
-  // values automatically.
+  // KV cache quantization. **Opt-in only.** Originally defaulted to 4 bits but
+  // backed out after `RotatingKVCache Quantization NYI` crashed mid-prefill on
+  // a session whose prompt approached the model's context limit. That class
+  // now implements `to_quantized` upstream, and `maybe_quantize_kv_cache`
+  // skips any layer still lacking it rather than raising — so the crash is
+  // gone, but so is any signal that a layer went unquantized.
+  //
+  // Which is the whole difficulty: quantization lands on the SERIAL path only.
+  // mlx-lm's BatchGenerator builds `BatchKVCache` layers, which have no
+  // `to_quantized` and are silently skipped. Planning KV at q8 while the
+  // engine runs f16 would under-reserve by ~45%, and an MLX overcommit is not
+  // a soft failure — a Metal command-buffer OOM SIGABRTs the whole process.
+  //
+  // So the flags always go to the engine (a wave that collapses to serial
+  // still gets the saving, which only ever over-reserves), while PLANNING
+  // takes the discount only when batching is off. `mlxSlots` is not known
+  // yet and depends on this figure, so the intent is read from config/env
+  // alone and an unset value counts as "may batch".
+  const envMlxBatch = process.env.GEZEL_BATCHED_INFERENCE;
+  const envMlxBatchOverride =
+    envMlxBatch === '1' || envMlxBatch === 'true'
+      ? true
+      : envMlxBatch === '0' || envMlxBatch === 'false'
+        ? false
+        : undefined;
   const kvBits = config.mlxKvBits ?? 0;
   const kvQuantArgs: string[] =
-    kvBits > 0 ? ['--kv-bits', String(kvBits), '--kv-quant-scheme', 'uniform'] : [];
+    kvBits > 0
+      ? ['--kv-bits', String(kvBits), '--kv-quant-scheme', 'uniform']
+      : [];
+  const mayBatch = envMlxBatchOverride ?? config.batchedInference?.enabled ?? true;
+  const kvBitsForPlanning = mayBatch ? 0 : kvBits;
 
   // ── Memory-aware batch sizing ──
   // Size concurrent slots to what actually fits GPU memory, not just a tiered
@@ -339,7 +358,8 @@ export async function buildMlxProvider(opts: {
     ? (opts.broker?.fastBudgetBytes() ?? mlxBrokerSnap.pools.fastBytes)
     : fastMemoryBudgetBytes();
   const mlxCommittedOther = mlxBrokerSnap?.enforced ? mlxBrokerSnap.committedBytes : 0;
-  const mlxKvCacheType = kvBits === 4 ? 'q4_0' : kvBits === 8 ? 'q8_0' : 'f16';
+  const mlxKvCacheType =
+    kvBitsForPlanning === 4 ? 'q4_0' : kvBitsForPlanning === 8 ? 'q8_0' : 'f16';
   const mlxKvBudgetBytes = localEngineKvBudgetBytes({
     engine: 'mlx',
     budgetBytes: mlxBudgetBytes,
@@ -438,13 +458,6 @@ export async function buildMlxProvider(opts: {
       weightsResident + kvBytesPerToken * effectiveNumCtx * mlxSlots,
     );
   }
-  const envMlxBatch = process.env.GEZEL_BATCHED_INFERENCE;
-  const envMlxBatchOverride =
-    envMlxBatch === '1' || envMlxBatch === 'true'
-      ? true
-      : envMlxBatch === '0' || envMlxBatch === 'false'
-        ? false
-        : undefined;
   const mlxBatchEnabled = envMlxBatchOverride ?? config.batchedInference?.enabled ?? mlxSlots > 1;
   const mlxBatchMaxConcurrency = mlxBatchEnabled ? mlxSlots : 1;
 

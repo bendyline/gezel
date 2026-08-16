@@ -478,20 +478,6 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
     [unrecognized],
   );
 
-  // Map catalog-item id → current catalog manifest version. Used below
-  // to flag installed models whose on-disk manifest was written
-  // against an older catalog entry (upstream repo was swapped, file
-  // list changed, sha256s rotated). Without this, a stale install
-  // silently points at weights the catalog no longer describes and
-  // the failure mode is confusing — usually `mlx_vlm.server` trying
-  // to fetch a file from Hugging Face that the new build has but
-  // the old install is missing.
-  const catalogVersionById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const item of catalogItems) map.set(item.manifest.id, item.manifest.version);
-    return map;
-  }, [catalogItems]);
-
   const availableCategories = useMemo<CategoryTab[]>(() => {
     const present = new Set<ChatModelCategory>();
     for (const item of catalogItems) {
@@ -618,10 +604,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                 </thead>
                 <tbody>
                   {models.map((m) => {
-                    const latest = catalogVersionById.get(m.id);
-                    const outOfDate = Boolean(
-                      latest && m.catalogVersion && m.catalogVersion !== latest,
-                    );
+                    const outOfDate = m.updateAvailable === true;
                     const reinstalling = Boolean(installs.get(m.id));
                     const fitnessKey = `mlx:${m.id}`;
                     const entry = fitness.get(fitnessKey);
@@ -647,7 +630,10 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                                 {outOfDate && (
                                   <span
                                     className="home-status-pill home-status-warn"
-                                    title={`Downloaded from catalog v${m.catalogVersion}; current catalog is v${latest}. The upstream repo or file list has changed — download it again to pick up the new version.`}
+                                    title={
+                                      m.updateReason ??
+                                      'The catalog ships different model files than the copy on disk. Update to pick them up.'
+                                    }
                                   >
                                     out of date
                                   </span>
