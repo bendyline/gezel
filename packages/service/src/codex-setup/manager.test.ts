@@ -33,9 +33,13 @@ async function fixture(
     defaultProvider?: ProviderName;
     defaultModel?: Partial<Record<ProviderName, string>>;
     meesterGezelId?: string;
+    platform?: NodeJS.Platform;
   } = {},
 ) {
-  const root = await mkdtemp(join(tmpdir(), 'gezel-codex-setup-'));
+  // The space is deliberate. A Windows home is routinely `C:\Users\Mike Smith`,
+  // and it is the only reason the launch command quotes at all — a fixture
+  // rooted at a bare path exercises the shell-quoting branch on no platform.
+  const root = await mkdtemp(join(tmpdir(), 'gezel codex setup '));
   roots.push(root);
   const home = join(root, 'gezel');
   const codexHome = opts.codexHome ?? join(root, 'codex');
@@ -60,6 +64,7 @@ async function fixture(
   const manager = createCodexSetupManager({
     home,
     codexHome,
+    ...(opts.platform ? { platform: opts.platform } : {}),
     tokenStore,
     bridge,
     readConfig: async () => ({
@@ -170,7 +175,11 @@ describe('CodexSetupManager', () => {
   });
 
   it('creates an isolated authenticated profile without touching config.toml', async () => {
-    const f = await fixture();
+    // Pin the platform: the launch command and the profile's auth command are
+    // both platform-conditional, so an unpinned fixture asserts whichever
+    // branch the developer happens to run on. Both are covered per platform in
+    // 'builds the launch and auth commands for each platform' below.
+    const f = await fixture({ platform: 'darwin' });
     await mkdir(f.codexHome, { recursive: true });
     const userConfig = join(f.codexHome, 'config.toml');
     await writeFile(userConfig, 'approval_policy = "untrusted"\n');
@@ -180,9 +189,7 @@ describe('CodexSetupManager', () => {
     expect(status.state).toBe('configured');
     expect(status.canRemove).toBe(true);
     expect(status.launchCommand).toBe(
-      process.platform === 'win32'
-        ? `$env:CODEX_HOME = '${f.codexHome.replace(/'/g, "''")}'; & '/usr/local/bin/codex' --profile 'gezel-local'`
-        : `CODEX_HOME=${f.codexHome} /usr/local/bin/codex --profile gezel-local`,
+      `CODEX_HOME='${f.codexHome}' /usr/local/bin/codex --profile gezel-local`,
     );
     expect(status.bridge).toEqual({
       baseUrl: 'http://127.0.0.1:11435/v1',
@@ -199,6 +206,7 @@ describe('CodexSetupManager', () => {
     expect(profile).toContain('web_search = "disabled"');
     expect(profile).toContain('base_url = "http://127.0.0.1:11435/v1"');
     expect(profile).toContain('[model_providers.gezel.auth]');
+    expect(profile).toContain('command = "/bin/cat"');
     expect(profile).not.toContain(
       f.tokenStore.list().find((r) => r.appId === CODEX_SETUP_APP_ID)!.token,
     );
@@ -230,6 +238,47 @@ describe('CodexSetupManager', () => {
       additional_speed_tiers: [],
       context_window: 16_384,
     });
+  });
+
+  it('builds the launch and auth commands for each platform', async () => {
+    // Both are reached on exactly one platform in production, so each is dead
+    // code to whoever is running the suite. Drive both explicitly: the shape a
+    // user pastes into a terminal, and the credential command Codex itself runs.
+    const posix = await fixture({ platform: 'darwin' });
+    const windows = await fixture({ platform: 'win32' });
+    await Promise.all([posix, windows].map((f) => mkdir(f.codexHome, { recursive: true })));
+
+    const posixStatus = await posix.manager.configure({ model: 'llama-cpp:coder.gguf' });
+    const windowsStatus = await windows.manager.configure({ model: 'llama-cpp:coder.gguf' });
+
+    expect(posixStatus.launchCommand).toBe(
+      `CODEX_HOME='${posix.codexHome}' /usr/local/bin/codex --profile gezel-local`,
+    );
+    expect(windowsStatus.launchCommand).toBe(
+      `$env:CODEX_HOME = '${windows.codexHome}'; & '/usr/local/bin/codex' --profile 'gezel-local'`,
+    );
+
+    const profileFor = (f: Awaited<ReturnType<typeof fixture>>) =>
+      readFile(join(f.codexHome, `${CODEX_SETUP_PROFILE_NAME}.config.toml`), 'utf8');
+    // TOML basic strings escape a Windows separator, so spell the expected line
+    // the way it lands on disk rather than pasting a raw path in.
+    const authLine = (command: string, args: string[]) =>
+      `command = ${JSON.stringify(command)}\nargs = [${args.map((arg) => JSON.stringify(arg)).join(', ')}]`;
+    const tokenPathOf = (f: Awaited<ReturnType<typeof fixture>>) =>
+      join(f.home, 'integrations', 'codex', 'token');
+
+    expect(await profileFor(posix)).toContain(authLine('/bin/cat', [tokenPathOf(posix)]));
+    // PowerShell reads it instead, because Windows has no /bin/cat. `-NoProfile`
+    // keeps a user's profile script out of a credential read, and `-LiteralPath`
+    // stops a home containing `[` or `]` from being read as a wildcard.
+    expect(await profileFor(windows)).toContain(
+      authLine('powershell.exe', [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `(Get-Content -Raw -LiteralPath '${tokenPathOf(windows)}').Trim()`,
+      ]),
+    );
   });
 
   it('refuses to replace an unmanaged profile', async () => {

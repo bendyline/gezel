@@ -1,5 +1,12 @@
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { piExtensionDir, piExtensionPath, resolvePiAgentDir } from './agent-dir.js';
+
+const HOME = '/Users/mike';
+// The resolver joins with the host separator, so the conventional root reads
+// `\Users\mike\.pi\agent` on Windows. Spell the expectation the same way rather
+// than pinning POSIX shapes that only pass on the developer's own platform.
+const DEFAULT_AGENT_DIR = join(HOME, '.pi', 'agent');
 
 describe('resolvePiAgentDir', () => {
   it('prefers an explicit override', () => {
@@ -7,25 +14,27 @@ describe('resolvePiAgentDir', () => {
       resolvePiAgentDir({
         override: '/tmp/pi-agent',
         env: { PI_CODING_AGENT_DIR: '/elsewhere' },
-        home: '/Users/mike',
+        home: HOME,
       }),
     ).toEqual({ dir: '/tmp/pi-agent', source: 'override' });
   });
 
   it('honours PI_CODING_AGENT_DIR when the daemon can see it', () => {
-    expect(
-      resolvePiAgentDir({ env: { PI_CODING_AGENT_DIR: '/srv/pi' }, home: '/Users/mike' }),
-    ).toEqual({ dir: '/srv/pi', source: 'env' });
+    expect(resolvePiAgentDir({ env: { PI_CODING_AGENT_DIR: '/srv/pi' }, home: HOME })).toEqual({
+      dir: '/srv/pi',
+      source: 'env',
+    });
   });
 
   it('falls back to the conventional root', () => {
     // A relative override is not something pi would accept either, so it must
     // not silently become a directory Gezel writes into.
-    expect(
-      resolvePiAgentDir({ env: { PI_CODING_AGENT_DIR: 'relative/pi' }, home: '/Users/mike' }),
-    ).toEqual({ dir: '/Users/mike/.pi/agent', source: 'default' });
-    expect(resolvePiAgentDir({ env: {}, home: '/Users/mike' })).toEqual({
-      dir: '/Users/mike/.pi/agent',
+    expect(resolvePiAgentDir({ env: { PI_CODING_AGENT_DIR: 'relative/pi' }, home: HOME })).toEqual({
+      dir: DEFAULT_AGENT_DIR,
+      source: 'default',
+    });
+    expect(resolvePiAgentDir({ env: {}, home: HOME })).toEqual({
+      dir: DEFAULT_AGENT_DIR,
       source: 'default',
     });
   });
@@ -33,9 +42,9 @@ describe('resolvePiAgentDir', () => {
 
 describe('extension paths', () => {
   it('targets the directory pi auto-loads', () => {
-    expect(piExtensionDir('/Users/mike/.pi/agent')).toBe('/Users/mike/.pi/agent/extensions');
-    expect(piExtensionPath('/Users/mike/.pi/agent')).toBe(
-      '/Users/mike/.pi/agent/extensions/gezel.js',
+    expect(piExtensionDir(DEFAULT_AGENT_DIR)).toBe(join(DEFAULT_AGENT_DIR, 'extensions'));
+    expect(piExtensionPath(DEFAULT_AGENT_DIR)).toBe(
+      join(DEFAULT_AGENT_DIR, 'extensions', 'gezel.js'),
     );
   });
 });

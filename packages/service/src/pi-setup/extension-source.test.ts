@@ -90,8 +90,10 @@ describe('buildPiExtensionSource', () => {
     // The credential is read at run time; it must never be baked into a file
     // that sits in the user's own pi directory.
     expect(source).not.toContain(TOKEN);
-    expect(source).toContain(rosterPath);
-    expect(source).toContain(tokenPath);
+    // Paths are embedded as JS string literals, so a Windows separator arrives
+    // escaped. Assert the encoded form — that is what pi actually reads back.
+    expect(source).toContain(JSON.stringify(rosterPath));
+    expect(source).toContain(JSON.stringify(tokenPath));
   });
 
   it('registers the provider pi expects, reading the roster the manager wrote', async () => {

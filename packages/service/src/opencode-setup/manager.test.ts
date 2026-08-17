@@ -46,7 +46,10 @@ async function fixture(
     onReadConfig?: (paths: { configPath: string }) => Promise<void>;
   } = {},
 ) {
-  const root = await mkdtemp(join(tmpdir(), 'gezel-opencode-setup-'));
+  // The space is deliberate. A Windows home is routinely `C:\Users\Mike Smith`,
+  // and it is the only reason the launch command quotes at all — a fixture
+  // rooted at a bare path exercises the shell-quoting branch on no platform.
+  const root = await mkdtemp(join(tmpdir(), 'gezel opencode setup '));
   roots.push(root);
   const home = join(root, 'gezel');
   const integrationDir = join(home, 'integrations', 'opencode');
@@ -442,7 +445,7 @@ describe('OpenCodeSetupManager', () => {
     expect(status.plugin.canInstall).toBe(false);
     const source = await readFile(f.pluginPath, 'utf8');
     expect(OPENCODE_PLUGIN_MARKER.isManaged(source, setupOwnerId(f.home))).toBe(true);
-    expect(source).toContain(f.configPath);
+    expect(source).toContain(JSON.stringify(f.configPath));
     expect(source).not.toContain(await readFile(f.tokenPath, 'utf8'));
   });
 
@@ -588,9 +591,16 @@ describe('OpenCodeSetupManager', () => {
     const posixStatus = await posix.manager.status();
     const windowsStatus = await windows.manager.status();
 
-    expect(posixStatus.launchCommand).toContain('OPENCODE_CONFIG=');
-    expect(posixStatus.launchCommand).toContain(posixStatus.configPath);
-    expect(windowsStatus.launchCommand).toContain('$env:OPENCODE_CONFIG');
-    expect(windowsStatus.launchCommand).toContain(windowsStatus.configPath);
+    // Assert whole lines, not fragments: this is a command the user pastes, so
+    // the quoting and the order of the env assignment are the contract. A
+    // `toContain` pair passes even when the two halves are unusable together.
+    expect(posixStatus.launchCommand).toBe(
+      `OPENCODE_CONFIG='${posixStatus.configPath}' /usr/local/bin/opencode`,
+    );
+    // PowerShell sets the variable in a separate statement, then needs the call
+    // operator before a quoted executable path.
+    expect(windowsStatus.launchCommand).toBe(
+      `$env:OPENCODE_CONFIG = '${windowsStatus.configPath}'; & '/usr/local/bin/opencode'`,
+    );
   });
 });

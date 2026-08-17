@@ -75,8 +75,10 @@ describe('buildOpenCodePluginSource', () => {
     // The credential is read at run time; it must never be baked into a file
     // that sits in the user's — possibly synced — config directory.
     expect(source).not.toContain(TOKEN);
-    expect(source).toContain(tokenPath);
-    expect(source).toContain(configPath);
+    // Paths are embedded as JS string literals, so a Windows separator arrives
+    // escaped. Assert the encoded form — that is what OpenCode reads back.
+    expect(source).toContain(JSON.stringify(tokenPath));
+    expect(source).toContain(JSON.stringify(configPath));
   });
 
   it('injects the managed provider with the credential read from disk', async () => {
