@@ -20,7 +20,7 @@ const h = vi.hoisted(() => {
   let output: unknown;
   let stamped = false;
 
-  const norm = (p: string) =>
+  const norm = (p: string | undefined) =>
     String(p ?? '')
       .replace(/\\/g, '/')
       .replace(/^\/+|\/+$/g, '');
