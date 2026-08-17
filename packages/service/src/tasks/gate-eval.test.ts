@@ -188,6 +188,149 @@ describe('evaluateGate', () => {
     expect(res.pass).toBe(true);
   });
 
+  describe('corpusBatches (fanout-input completeness)', () => {
+    const CORPUS = 'data/github-pulls/pr-33';
+    const MANIFEST = `${CORPUS}/attachments/001/pr-33-files.json`;
+
+    const batch = (batchNumber: number, start: number, count: number) => ({
+      number: batchNumber,
+      batchNumber,
+      start,
+      end: start + count - 1,
+      paths: Array.from({ length: count }, (_, i) => `packages/p${start + i}/src/file.ts`),
+    });
+    const MANIFEST_JSON = JSON.stringify({
+      totalFiles: 30,
+      batchSize: 25,
+      batches: [batch(1, 1, 25), batch(2, 26, 5)],
+    });
+    /** What a correct publish looks like: the four fanout fields, verbatim. */
+    const entry = (b: ReturnType<typeof batch>) => ({
+      batchNumber: b.batchNumber,
+      start: b.start,
+      end: b.end,
+      paths: b.paths,
+    });
+    const check = {
+      kind: 'corpusBatches' as const,
+      file: 'pr-review/batches.json',
+      corpusDir: `artifacts/${CORPUS}`,
+      artifact: true,
+    };
+    const withPublished = (published: unknown) =>
+      splitReader(
+        {},
+        { [MANIFEST]: MANIFEST_JSON, 'pr-review/batches.json': JSON.stringify(published, null, 2) },
+      );
+
+    it('passes when every batch matches the manifest verbatim', async () => {
+      const res = await evaluateGate(
+        [check],
+        withPublished([entry(batch(1, 1, 25)), entry(batch(2, 26, 5))]),
+      );
+      expect(res.pass).toBe(true);
+    });
+
+    it('rejects a truncated batch array that is still valid JSON', async () => {
+      // The exact incident: the model's write hit its output cap, so it
+      // published a syntactically perfect array holding half the batches.
+      // json-valid + minBytes both pass on this file.
+      const res = await evaluateGate([check], withPublished([entry(batch(1, 1, 25))]));
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/holds 1 batch\(es\) but .* defines 2/);
+      expect(res.failures[0]).toMatch(/work nobody is assigned/);
+    });
+
+    it('rejects a retyped path even when the count is right', async () => {
+      const wrong = entry(batch(2, 26, 5));
+      wrong.paths = [...wrong.paths];
+      wrong.paths[2] = 'packages/p28/src/File.ts';
+      const res = await evaluateGate([check], withPublished([entry(batch(1, 1, 25)), wrong]));
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/path 3 is "packages\/p28\/src\/File\.ts"/);
+      expect(res.failures[0]).toMatch(/Copy paths verbatim/);
+    });
+
+    it('rejects reordered batches the fanout would misaddress', async () => {
+      const res = await evaluateGate(
+        [check],
+        withPublished([entry(batch(2, 26, 5)), entry(batch(1, 1, 25))]),
+      );
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/batchNumber 2, expected 1/);
+    });
+
+    it('rejects a wrapper object around the array', async () => {
+      const res = await evaluateGate(
+        [check],
+        withPublished({ batches: [entry(batch(1, 1, 25)), entry(batch(2, 26, 5))] }),
+      );
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/must BE a JSON array/);
+    });
+
+    it('rejects a duplicated path even when it matches the manifest', async () => {
+      // Verbatim comparison catches a retyped path first, so this branch only
+      // fires when the CORPUS itself double-claims a file. It must still fail:
+      // one path in two batches means two reviewers own it and the coverage
+      // arithmetic downstream still adds up.
+      const dup = batch(2, 26, 5);
+      dup.paths = [...dup.paths];
+      dup.paths[0] = 'packages/p1/src/file.ts';
+      const r = splitReader(
+        {},
+        {
+          [MANIFEST]: JSON.stringify({ totalFiles: 30, batches: [batch(1, 1, 25), dup] }),
+          'pr-review/batches.json': JSON.stringify([entry(batch(1, 1, 25)), entry(dup)]),
+        },
+      );
+      const res = await evaluateGate([check], r);
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/appears in more than one batch/);
+    });
+
+    it('fails closed when the corpus manifest is missing', async () => {
+      const r = splitReader(
+        {},
+        { 'pr-review/batches.json': JSON.stringify([entry(batch(1, 1, 25))]) },
+      );
+      const res = await evaluateGate([check], r);
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/no '\*-files\.json' manifest/);
+    });
+
+    it('fails closed when two manifests could be the source of truth', async () => {
+      const r = splitReader(
+        {},
+        {
+          [MANIFEST]: MANIFEST_JSON,
+          [`${CORPUS}/attachments/002/pr-34-files.json`]: MANIFEST_JSON,
+          'pr-review/batches.json': JSON.stringify([
+            entry(batch(1, 1, 25)),
+            entry(batch(2, 26, 5)),
+          ]),
+        },
+      );
+      const res = await evaluateGate([check], r);
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/2 '\*-files\.json' manifests/);
+    });
+
+    it('fails closed without an artifact accessor', async () => {
+      const res = await evaluateGate(
+        [check],
+        reader({ 'pr-review/batches.json': JSON.stringify([entry(batch(1, 1, 25))]) }),
+      );
+      expect(res.pass).toBe(false);
+    });
+
+    it('reports a missing batch file as missing, not malformed', async () => {
+      const res = await evaluateGate([check], splitReader({}, { [MANIFEST]: MANIFEST_JSON }));
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/not found/);
+    });
+  });
+
   it('an artifact-flagged check fails closed when the reader has no artifact accessor', async () => {
     // A plain reader (no readArtifact) must not silently pass an artifact
     // check by reading the wrong tree — it fails "not found" instead.

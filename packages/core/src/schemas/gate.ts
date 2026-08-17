@@ -326,6 +326,32 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     expectPaths: z.string().min(1).optional(),
   }),
   /**
+   * A fanout-input batch file must reproduce a connector corpus manifest's own
+   * batch array exactly — same count, same ordinals, same paths, in order.
+   *
+   * The upstream sibling of {@link corpusCoverage}: that check proves the work
+   * covered the corpus, this one proves the *plan* did. A batch file is the
+   * spawn host's `overFile`, so a batch dropped here is never reviewed by
+   * anyone and never appears in any coverage ledger. `json-valid` + `minBytes`
+   * cannot see it: a batch array truncated at the model's output cap is still
+   * syntactically perfect JSON. Wild-caught on a 509-file PR whose scope step
+   * published 10 of 21 batches — 259 files silently out of scope, and the run
+   * then deadlocked eight attempts deep in the downstream merge gate, which is
+   * the wrong place to learn it and the one place that cannot fix it.
+   */
+  z.object({
+    kind: z.literal('corpusBatches'),
+    file: z.string().min(1),
+    corpusDir: z.string().min(1),
+    /** Filename suffix identifying the manifest inside the corpus. */
+    manifestSuffix: z.string().min(1).optional(),
+    /** Manifest field holding the authoritative batch array. */
+    itemsField: z.string().min(1).optional(),
+    /** Manifest field holding the total item count the batches must cover. */
+    totalField: z.string().min(1).optional(),
+    artifact: z.boolean().optional(),
+  }),
+  /**
    * The H1 slide titles in `file` must match the numbered slide headings in
    * `outlineFile`, one-for-one and in order. This makes a locked Markdown
    * outline mechanically binding instead of relying on a reviewer to notice

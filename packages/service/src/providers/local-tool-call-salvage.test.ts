@@ -1579,6 +1579,81 @@ describe('appendCapTruncationHintToRejectedWrite', () => {
       before,
     );
   });
+
+  it('names only the incremental tools the roster actually wired', () => {
+    const after = appendCapTruncationHintToRejectedWrite(
+      REJECTED,
+      'write_file',
+      { path: 'index.html', content: 'A'.repeat(30000) },
+      6144,
+      { availableToolNames: new Set(['write_file', 'replace_lines', 'read_file']) },
+    );
+    expect(after).toContain('replace_lines(path="index.html"');
+    expect(after).not.toContain('replace_in_file');
+  });
+
+  it('refuses to steer an over-cap write_artifact at the workspace edit tools', () => {
+    // The artifacts drawer has no incremental writer, and `replace_in_file`
+    // addresses the workspace — pointing there edits a different file, or on a
+    // writes-off project names a tool that is not on the roster at all.
+    const before = 'ERROR: `write_artifact` was not executed because the arguments were malformed.';
+    const after = appendCapTruncationHintToRejectedWrite(before, 'write_artifact', {}, 6144, {
+      argsLostToCap: true,
+      pathHint: 'pr-review/batches.json',
+      availableToolNames: new Set([
+        'write_artifact',
+        'read_artifact',
+        'write_task_note',
+        'set_task_status',
+        // Present but irrelevant: these do not reach the artifacts drawer.
+        'replace_in_file',
+        'replace_lines',
+      ]),
+    });
+    expect(after).toContain('hit the per-turn output token cap');
+    expect(after).toContain('max_tokens=6144');
+    expect(after).toContain('pr-review/batches.json');
+    expect(after).not.toContain('replace_in_file');
+    expect(after).not.toContain('replace_lines');
+    expect(after).toContain('No incremental edit tool is wired this turn');
+    expect(after).toContain('Stop retrying it');
+    expect(after).toContain('write_task_note');
+    expect(after).toContain('set_task_status');
+  });
+
+  it('falls back to a plain explanation when no task tools are wired either', () => {
+    const after = appendCapTruncationHintToRejectedWrite(
+      REJECTED,
+      'write_artifact',
+      { path: 'report.json', content: 'A'.repeat(30000) },
+      4096,
+      { availableToolNames: new Set(['write_artifact', 'read_artifact']) },
+    );
+    expect(after).toContain('Stop retrying it');
+    expect(after).not.toContain('write_task_note');
+    expect(after).not.toContain('set_task_status');
+    expect(after).toContain('exceeds this turn');
+  });
+
+  it('keeps the historical wording when no roster is supplied', () => {
+    const after = appendCapTruncationHintToRejectedWrite(
+      REJECTED,
+      'write_artifact',
+      { path: 'report.json', content: 'A'.repeat(30000) },
+      8192,
+    );
+    // write_artifact is drawer-scoped, so even without a roster there is no
+    // workspace remedy to offer — only the escalation.
+    expect(after).toContain('No incremental edit tool is wired this turn');
+    const workspaceWrite = appendCapTruncationHintToRejectedWrite(
+      REJECTED,
+      'write_file',
+      { path: 'index.html', content: 'A'.repeat(30000) },
+      8192,
+    );
+    expect(workspaceWrite).toContain('replace_in_file(path="index.html"');
+    expect(workspaceWrite).toContain('replace_lines(path="index.html"');
+  });
 });
 
 describe('write-shaped vs payload-mutation tool sets', () => {

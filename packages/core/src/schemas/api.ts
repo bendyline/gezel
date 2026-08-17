@@ -1801,32 +1801,6 @@ export const GezelConfigSchema = z.object({
     })
     .optional(),
   /**
-   * Opportunistic batched inference (experimental; A/B-gated).
-   *
-   * When enabled for a batching-capable local engine, concurrent chat
-   * turns may share the engine's parallel KV slots instead of running
-   * strictly one at a time. The per-provider queue switches to the
-   * "adaptive" interactive policy: ≥2 genuinely-concurrent interactive
-   * turns (e.g. two panes) co-occupy slots, while one slot is reserved so
-   * an arriving live turn never waits behind a background cohort.
-   *
-   * Scope & defaults: a LOCAL-ENGINE optimization, default ON for both
-   * supervised engines, sized from usable fast memory (VRAM on a discrete
-   * GPU; never the adjacent system-RAM offload pool), from 1 on constrained
-   * devices up to 4 on workstation-class hardware. llama.cpp serves its
-   * `--parallel N` slots with continuous batching; MLX runs its
-   * wrapped server with `--max-concurrency N` (one mlx_lm BatchGenerator,
-   * static-wave batching). Set `enabled: false` to force the serial path on
-   * both, or use the `GEZEL_BATCHED_INFERENCE` env var (`1`/`true`/`0`/`false`)
-   * as the eval A/B toggle. `providerConcurrency[engine]` overrides the slot
-   * count verbatim.
-   */
-  batchedInference: z
-    .object({
-      enabled: z.boolean().optional(),
-    })
-    .optional(),
-  /**
    * Tuning knobs for the per-provider request queue.
    *   - `affinity`: when true (the default), the queue prefers
    *     dispatching items that share a session / gezel with recently

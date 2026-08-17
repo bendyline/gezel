@@ -254,6 +254,8 @@ export function gateCheckLabel(c: GateCheck): string {
       return `researchEvidence ${c.sourcePath?.trim() || c.tools.join(',')}`;
     case 'corpusCoverage':
       return `corpusCoverage ${c.file} ${c.corpusDir}`;
+    case 'corpusBatches':
+      return `corpusBatches ${c.file} ${c.corpusDir}`;
     case 'markdownHeadingsMatch':
       return `markdownHeadingsMatch ${c.file} ${c.outlineFile}`;
     case 'valueGrounding':
@@ -626,6 +628,172 @@ async function evalCheckInner(
         ok: true,
         detail: `Research evidence: ${result.matches.length} successful source-acquisition call(s) observed`,
         evidence,
+      };
+    }
+    case 'corpusBatches': {
+      const published = await reader.read(c.file);
+      if (published === null) {
+        return {
+          ok: false,
+          detail: `${c.file} not found — publish the fanout batch array before advancing.`,
+        };
+      }
+      if (!ws.listArtifacts || !ws.readArtifact) {
+        return {
+          ok: false,
+          detail: `${c.file}: batch completeness cannot be verified because artifact reads are unavailable (fail-closed).`,
+        };
+      }
+      const suffix = c.manifestSuffix ?? '-files.json';
+      const itemsField = c.itemsField ?? 'batches';
+      const totalField = c.totalField ?? 'totalFiles';
+      const corpusDir = c.corpusDir
+        .replace(/\\/g, '/')
+        .replace(/^\.?\/+/, '')
+        .replace(/^artifacts\/+/, '')
+        .replace(/\/+$/, '');
+      const manifests = (await ws.listArtifacts())
+        .map((path) => path.replace(/\\/g, '/'))
+        .filter((path) => path.startsWith(`${corpusDir}/`) && path.endsWith(suffix))
+        .sort();
+      if (manifests.length !== 1) {
+        return {
+          ok: false,
+          detail:
+            manifests.length === 0
+              ? `${c.file}: no '*${suffix}' manifest under artifacts/${corpusDir} — the corpus is missing, so the published batches cannot be verified (fail-closed).`
+              : `${c.file}: ${manifests.length} '*${suffix}' manifests under artifacts/${corpusDir} (${manifests.slice(0, 4).join(', ')}) — cannot tell which one the batches should match (fail-closed).`,
+        };
+      }
+      const manifestPath = manifests[0]!;
+      const manifestRaw = await ws.readArtifact(manifestPath);
+      if (manifestRaw === null) {
+        return {
+          ok: false,
+          detail: `${c.file}: could not read the corpus manifest artifacts/${manifestPath} (fail-closed).`,
+        };
+      }
+      let expectedBatches: unknown;
+      let expectedTotal: unknown;
+      try {
+        const manifest = JSON.parse(manifestRaw) as Record<string, unknown>;
+        expectedBatches = manifest?.[itemsField];
+        expectedTotal = manifest?.[totalField];
+      } catch (error) {
+        return {
+          ok: false,
+          detail: `${c.file}: corpus manifest artifacts/${manifestPath} is not valid JSON: ${error instanceof Error ? error.message : String(error)} (fail-closed).`,
+        };
+      }
+      if (!Array.isArray(expectedBatches) || expectedBatches.length === 0) {
+        return {
+          ok: false,
+          detail: `${c.file}: corpus manifest artifacts/${manifestPath} has no non-empty '${itemsField}' array to compare against (fail-closed).`,
+        };
+      }
+      let actual: unknown;
+      try {
+        actual = JSON.parse(published);
+      } catch (error) {
+        return {
+          ok: false,
+          detail: `${c.file} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+      if (!Array.isArray(actual)) {
+        return {
+          ok: false,
+          detail: `${c.file} must BE a JSON array of batch entries, with no wrapper object.`,
+        };
+      }
+      // Count first: this is the truncation signal a json-valid check misses,
+      // and naming it plainly is what tells the assignee the file is short
+      // rather than malformed.
+      if (actual.length !== expectedBatches.length) {
+        return {
+          ok: false,
+          detail: `${c.file} holds ${actual.length} batch(es) but artifacts/${manifestPath} defines ${expectedBatches.length}. Every batch must be published — a missing entry is work nobody is assigned. If the whole array will not fit in one call, say so instead of publishing a partial file.`,
+        };
+      }
+      const batchPaths = (value: unknown): string[] | null => {
+        if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+        const paths = (value as Record<string, unknown>).paths;
+        if (!Array.isArray(paths) || paths.some((path) => typeof path !== 'string')) return null;
+        return paths as string[];
+      };
+      const seen = new Set<string>();
+      for (let index = 0; index < expectedBatches.length; index += 1) {
+        const want = expectedBatches[index];
+        const got = actual[index];
+        const wantPaths = batchPaths(want);
+        const gotPaths = batchPaths(got);
+        const label = `batch at position ${index + 1}`;
+        if (wantPaths === null) {
+          return {
+            ok: false,
+            detail: `${c.file}: corpus manifest ${label} carries no path array (fail-closed).`,
+          };
+        }
+        if (gotPaths === null) {
+          return {
+            ok: false,
+            detail: `${c.file}: ${label} is not an object with a \`paths\` array of strings.`,
+          };
+        }
+        const wantFields = want as Record<string, unknown>;
+        const gotFields = got as Record<string, unknown>;
+        const wantNumber = wantFields.batchNumber ?? wantFields.number;
+        if (gotFields.batchNumber !== wantNumber) {
+          return {
+            ok: false,
+            detail: `${c.file}: ${label} has batchNumber ${JSON.stringify(gotFields.batchNumber ?? null)}, expected ${JSON.stringify(wantNumber ?? null)}. The fanout addresses children by this value.`,
+          };
+        }
+        for (const field of ['start', 'end'] as const) {
+          if (gotFields[field] !== wantFields[field]) {
+            return {
+              ok: false,
+              detail: `${c.file}: ${label} has ${field}=${JSON.stringify(gotFields[field] ?? null)}, expected ${JSON.stringify(wantFields[field] ?? null)}.`,
+            };
+          }
+        }
+        if (gotPaths.length !== wantPaths.length) {
+          return {
+            ok: false,
+            detail: `${c.file}: ${label} carries ${gotPaths.length} path(s), expected ${wantPaths.length}.`,
+          };
+        }
+        for (let p = 0; p < wantPaths.length; p += 1) {
+          if (gotPaths[p] !== wantPaths[p]) {
+            // Order matters as much as membership: a reordered batch still
+            // "contains" the path, but the per-batch coverage gates key off
+            // the published slice, so a retyped path becomes a gate no
+            // reviewer can pass.
+            return {
+              ok: false,
+              detail: `${c.file}: ${label} path ${p + 1} is ${JSON.stringify(gotPaths[p] ?? null)} but the manifest says ${JSON.stringify(wantPaths[p])}. Copy paths verbatim from the manifest — never retype, abbreviate, or reorder them.`,
+            };
+          }
+        }
+        for (const path of gotPaths) {
+          if (seen.has(path)) {
+            return {
+              ok: false,
+              detail: `${c.file}: '${path}' appears in more than one batch; every path must land in exactly one.`,
+            };
+          }
+          seen.add(path);
+        }
+      }
+      if (typeof expectedTotal === 'number' && seen.size !== expectedTotal) {
+        return {
+          ok: false,
+          detail: `${c.file}: batches cover ${seen.size} distinct path(s) but artifacts/${manifestPath} declares ${totalField}=${expectedTotal}.`,
+        };
+      }
+      return {
+        ok: true,
+        detail: `Fanout batches complete: ${actual.length} batch(es), ${seen.size} path(s), matching artifacts/${manifestPath}`,
       };
     }
     case 'corpusCoverage': {

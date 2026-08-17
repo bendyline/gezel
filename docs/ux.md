@@ -355,6 +355,16 @@ forking it. **Every file editor autosaves** through
 in a file pane is a bug, because a mutation elsewhere in the panel flushes the
 lane rather than racing it.
 
+**The pane's own edges are the only edges.** One rounded border belongs to the
+panel as a whole (`.project-files-layout`, or the app frame when a view is
+full-bleed); whatever fills the viewer pane runs flush to it and draws no border
+or radius of its own. A second rounded box a hairline inside the first reads as
+a rendering fault, and its left edge doubles the seam the tree's `border-right`
+already draws — the editor should butt straight against the tree. Card-shaped
+hosts are the contrast that makes the rule clear: a project's about/mission
+field or a gezel's `about.md` is a bordered card sitting *in* a form, and keeps
+its border.
+
 **Forms.** Raw `<input>`, `<textarea>`, `<fieldset>` are fine — Radix
 doesn't ship form primitives and we don't need them. Schema-driven Squisq
 forms use the shared `GezelJsonEditor` wrapper. It keeps Squisq's built-in

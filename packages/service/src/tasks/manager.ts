@@ -289,14 +289,21 @@ function interpolateContextDeep<T>(value: T, context: Record<string, string>): T
 /**
  * Apply {@link interpolateContext} across the text-bearing fields of a
  * child craftbook's steps: name/description/prompt plus the file paths in
- * `advanceWhen` and every string anywhere inside the gate. The step
- * objects themselves are fresh snapshot copies, but their NESTED
- * `advanceWhen`/`gate` are still aliased to the source book
- * (`snapshotCraftbookForTask` shallow-spreads each step) — so those are
- * replaced copy-on-write, never mutated in place, or the substitution
- * would write through into the resolver's template and leak one task's
- * params into the next. Non-fatal by construction — only string fields
+ * `advanceWhen`, every string inside the gate, and every string inside the
+ * `onEnter`/`onExit` script inputs. The step objects themselves are fresh
+ * snapshot copies, but their NESTED `advanceWhen`/`gate`/`onEnter` are still
+ * aliased to the source book (`snapshotCraftbookForTask` shallow-spreads each
+ * step) — so those are replaced copy-on-write, never mutated in place, or the
+ * substitution would write through into the resolver's template and leak one
+ * task's params into the next. Non-fatal by construction — only string fields
  * are touched.
+ *
+ * Step-hook inputs matter as much as gate inputs: an `onEnter` script is how a
+ * step does deterministic work with no model turn, and its inputs address the
+ * same launch-param paths the prompt and gate do (`{{corpusScope}}`). Left out,
+ * the script receives the literal `{{corpusScope}}` and fails on a path that
+ * does not exist — which reads as a broken script rather than a missing
+ * substitution.
  */
 function interpolateStepsContext(
   steps: TaskCraftbookStep[],
@@ -320,6 +327,8 @@ function interpolateStepsContext(
       };
     }
     if (step.gate) step.gate = interpolateContextDeep(step.gate, context);
+    if (step.onEnter) step.onEnter = interpolateContextDeep(step.onEnter, context);
+    if (step.onExit) step.onExit = interpolateContextDeep(step.onExit, context);
   }
 }
 

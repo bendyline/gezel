@@ -670,6 +670,52 @@ describe('project artifacts', () => {
     expect(paths).toEqual(['deep.md', 'report.md']);
   });
 
+  it('scopes a recursive artifact walk to subpath and keeps paths root-relative', async () => {
+    await store.createProject({ name: 'ScopedWalk' });
+    await store.writeProjectArtifact('scopedwalk', 'data/pulls/pr-1/files/a.md', 'a');
+    await store.writeProjectArtifact('scopedwalk', 'data/pulls/pr-1/files/b.md', 'b');
+    await store.writeProjectArtifact('scopedwalk', 'data/pulls/pr-2/files/c.md', 'c');
+    await store.writeProjectArtifact('scopedwalk', 'notes/unrelated.md', 'n');
+
+    const scoped = await store.listProjectArtifactsRecursive('scopedwalk', {
+      subpath: 'data/pulls/pr-1',
+    });
+    const paths = scoped
+      .filter((entry) => !entry.isDirectory)
+      .map((entry) => entry.path)
+      .sort();
+    expect(paths).toEqual(['data/pulls/pr-1/files/a.md', 'data/pulls/pr-1/files/b.md']);
+    // Root-relative paths are directly readable — the whole point of scoping.
+    expect(await store.readProjectArtifact('scopedwalk', paths[0]!)).toBe('a');
+
+    // The redundant prefix is tolerated here exactly as it is on read/write.
+    const prefixed = await store.listProjectArtifactsRecursive('scopedwalk', {
+      subpath: 'artifacts/data/pulls/pr-1/',
+    });
+    expect(prefixed.filter((entry) => !entry.isDirectory)).toHaveLength(2);
+
+    // An escaping subpath yields nothing rather than climbing out of the drawer.
+    expect(
+      await store.listProjectArtifactsRecursive('scopedwalk', { subpath: '../../etc' }),
+    ).toEqual([]);
+  });
+
+  it('scopes a recursive workspace walk to subpath, matching the artifacts twin', async () => {
+    await store.createProject({ name: 'ScopedWs' });
+    await store.writeProjectWorkspaceFile('scopedws', 'src/deep/a.ts', 'a');
+    await store.writeProjectWorkspaceFile('scopedws', 'src/deep/b.ts', 'b');
+    await store.writeProjectWorkspaceFile('scopedws', 'docs/readme.md', 'r');
+
+    const scoped = await store.listProjectWorkspaceRecursive('scopedws', { subpath: 'src' });
+    const paths = scoped
+      .filter((entry) => !entry.isDirectory)
+      .map((entry) => entry.path)
+      .sort();
+    expect(paths).toEqual(['src/deep/a.ts', 'src/deep/b.ts']);
+    expect(await store.readProjectWorkspaceFile('scopedws', paths[0]!)).toBe('a');
+    expect(await store.listProjectWorkspaceRecursive('scopedws', { subpath: '../..' })).toEqual([]);
+  });
+
   it('resolveProjectArtifact returns exact match when path hits', async () => {
     await store.createProject({ name: 'Resolve1' });
     await store.writeProjectArtifact('resolve1', 'reports/summary.md', 'hello');

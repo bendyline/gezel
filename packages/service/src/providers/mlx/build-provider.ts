@@ -317,21 +317,13 @@ export async function buildMlxProvider(opts: {
   //
   // So the flags always go to the engine (a wave that collapses to serial
   // still gets the saving, which only ever over-reserves), while PLANNING
-  // takes the discount only when batching is off. `mlxSlots` is not known
-  // yet and depends on this figure, so the intent is read from config/env
-  // alone and an unset value counts as "may batch".
-  const envMlxBatch = process.env.GEZEL_BATCHED_INFERENCE;
-  const envMlxBatchOverride =
-    envMlxBatch === '1' || envMlxBatch === 'true'
-      ? true
-      : envMlxBatch === '0' || envMlxBatch === 'false'
-        ? false
-        : undefined;
+  // always prices KV at f16. Every slot the engine owns is a slot the
+  // BatchGenerator may batch across, so there is no configuration in which the
+  // q8 discount is safe to plan against — and under-reserving here is the
+  // failure that SIGABRTs the whole python process.
   const kvBits = config.mlxKvBits ?? 0;
   const kvQuantArgs: string[] =
     kvBits > 0 ? ['--kv-bits', String(kvBits), '--kv-quant-scheme', 'uniform'] : [];
-  const mayBatch = envMlxBatchOverride ?? config.batchedInference?.enabled ?? true;
-  const kvBitsForPlanning = mayBatch ? 0 : kvBits;
 
   // ── Memory-aware batch sizing ──
   // Size concurrent slots to what actually fits GPU memory, not just a tiered
@@ -357,8 +349,9 @@ export async function buildMlxProvider(opts: {
     ? (opts.broker?.fastBudgetBytes() ?? mlxBrokerSnap.pools.fastBytes)
     : fastMemoryBudgetBytes();
   const mlxCommittedOther = mlxBrokerSnap?.enforced ? mlxBrokerSnap.committedBytes : 0;
-  const mlxKvCacheType =
-    kvBitsForPlanning === 4 ? 'q4_0' : kvBitsForPlanning === 8 ? 'q8_0' : 'f16';
+  // Always f16 — see the KV-quantization note above. The engine still gets
+  // `--kv-bits` when the user set it; only PLANNING refuses the discount.
+  const mlxKvCacheType = 'f16';
   const mlxKvBudgetBytes = localEngineKvBudgetBytes({
     engine: 'mlx',
     budgetBytes: mlxBudgetBytes,
@@ -460,8 +453,10 @@ export async function buildMlxProvider(opts: {
       weightsResident + kvBytesPerToken * effectiveNumCtx * mlxSlots,
     );
   }
-  const mlxBatchEnabled = envMlxBatchOverride ?? config.batchedInference?.enabled ?? mlxSlots > 1;
-  const mlxBatchMaxConcurrency = mlxBatchEnabled ? mlxSlots : 1;
+  // One width: the memory-ceiling-clamped slot count we reserved KV for is
+  // exactly what `--max-concurrency` opens. `providerConcurrency.mlx = 1` is
+  // the way to ask for a serial engine, and it shrinks the reservation too.
+  const mlxBatchMaxConcurrency = mlxSlots;
 
   const providerHolder: { current: MlxProvider | null } = { current: null };
 

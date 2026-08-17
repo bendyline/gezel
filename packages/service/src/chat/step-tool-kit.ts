@@ -100,6 +100,10 @@ function gateDrivenAdditions(step: Pick<CraftbookStep, 'gate'>, path: string | n
         out.add('find_symbol');
         out.add('search_code');
         break;
+      case 'corpusBatches':
+        out.add('list_artifacts');
+        out.add('read_artifact');
+        break;
       case 'csvShape':
       case 'recordSchema':
       case 'tableShape':

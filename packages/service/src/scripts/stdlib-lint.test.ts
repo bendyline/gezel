@@ -37,10 +37,17 @@ const ALLOWED_STDLIB_GATE_CAPABILITIES = new Set([
   'network',
 ]);
 
-// Action scripts are the stdlib's read-write tier (e.g. storeRecords).
-// Workspace writes go through the same sandboxed dispatcher as user
-// scripts; nothing here may reach network, llm, or credentials.
-const ALLOWED_STDLIB_ACTION_CAPABILITIES = new Set(['workspace.read', 'workspace.write']);
+// Action scripts are the stdlib's read-write tier (e.g. storeRecords,
+// publishCorpusBatches). Writes go through the same sandboxed dispatcher as
+// user scripts, and the artifacts drawer is the narrower of the two surfaces —
+// derived, regenerable, and the only one a writes-off project exposes at all.
+// Nothing here may reach network, llm, or credentials.
+const ALLOWED_STDLIB_ACTION_CAPABILITIES = new Set([
+  'workspace.read',
+  'workspace.write',
+  'artifacts.read',
+  'artifacts.write',
+]);
 
 describe('standard script library', () => {
   it('every script parses, matches its filename, and stays inside its tier', async () => {

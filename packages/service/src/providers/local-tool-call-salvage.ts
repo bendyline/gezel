@@ -3499,6 +3499,16 @@ export function appendTruncationHintToToolResult(
  *   - the result is NOT an `ERROR:` (the write landed; nothing to steer)
  *   - `args.content` isn't a string AND the caller didn't flag the args as
  *     lost to the cap (nothing was truncated)
+ *
+ * The named remedy is ROSTER-CHECKED. It used to hardcode `replace_in_file` /
+ * `replace_lines`, which are workspace tools: on a writes-off project whose
+ * only payload tool is `write_artifact`, the hint forbade the one call the
+ * session could make and prescribed two it could not. Wild-caught on a
+ * craftbook step needing a 25 KB artifact under a 6144-token cap — the model
+ * spent two full cap-length generations, then a whole turn planning a
+ * six-turn `replace_in_file` sequence against an artifact, and the task died
+ * with nothing written. When no incremental tool is wired for the failed
+ * tool's drawer, the honest steer is to stop retrying and report the blocker.
  */
 export function appendCapTruncationHintToRejectedWrite(
   toolResult: string,
@@ -3515,6 +3525,12 @@ export function appendCapTruncationHintToRejectedWrite(
     argsLostToCap?: boolean;
     /** Path recovered from the unparseable argument prefix. */
     pathHint?: string | null;
+    /**
+     * Live tool roster for this turn. When supplied, the remedy names only
+     * wired tools; when omitted, the historical full-roster wording stands
+     * (older callers and unit fixtures).
+     */
+    availableToolNames?: ReadonlySet<string>;
   },
 ): string {
   if (!PAYLOAD_MUTATION_TOOL_NAMES.has(toolName)) return toolResult;
@@ -3530,13 +3546,81 @@ export function appendCapTruncationHintToRejectedWrite(
           ? args.name
           : null;
   const capLabel = maxTokens !== null ? ` (max_tokens=${maxTokens})` : '';
+  const target = path ? ` for \`${path}\`` : '';
+  const what = path ? 'the file body' : 'the payload';
+  const diagnosis = `${toolResult}\n\n[runtime] Your \`${toolName}\` call${target} hit the per-turn output token cap${capLabel} mid-content — ${what} never finished, the write was rejected, and the file on disk is unchanged. Re-emitting the whole file WILL hit the same cap again; do not retry a full rewrite.`;
+  const remedies = capRecoveryRemedies(toolName, opts?.availableToolNames);
+  if (remedies.length === 0) {
+    // No incremental path exists for this drawer. Retrying is the one thing
+    // guaranteed not to work, so name the ceiling and route to the honest
+    // exit rather than inventing a call the roster cannot satisfy.
+    const escalation = capBlockerEscalation(opts?.availableToolNames);
+    return `${diagnosis} No incremental edit tool is wired this turn, so this deliverable cannot be emitted in one call at the current cap. Stop retrying it. ${escalation}`;
+  }
   // Without a recovered path the parameterized examples would read
   // `replace_in_file(path="(unknown path)")` — a call shape the model can
   // and does copy verbatim. Name the strategy instead of a fake target.
-  if (!path) {
-    return `${toolResult}\n\n[runtime] Your \`${toolName}\` call hit the per-turn output token cap${capLabel} mid-content — the payload never finished, the call was rejected, and the file on disk is unchanged. Re-emitting the whole file WILL hit the same cap again; do not retry a full rewrite. Apply the change as a sequence of smaller targeted edits instead (\`replace_in_file\` or \`replace_lines\`), naming the target file explicitly, using several calls if needed, each well under the cap. Do not narrate the failure — emit the first corrective edit call directly.`;
+  const how = path
+    ? remedies.map((remedy) => remedy.example(path)).join(' or ')
+    : `(${remedies.map((remedy) => `\`${remedy.tool}\``).join(' or ')}), naming the target file explicitly,`;
+  return `${diagnosis} Apply the change as a sequence of smaller targeted edits instead: ${how} using several calls if needed, each well under the cap. Do not narrate the failure — emit the first corrective edit call directly.`;
+}
+
+/**
+ * Payload tools that write the artifacts drawer. Their content is NOT
+ * reachable by the workspace edit tools, so a workspace remedy offered here
+ * would edit a different file than the one that failed — or, on a writes-off
+ * project, name a tool that does not exist at all.
+ */
+const ARTIFACT_PAYLOAD_TOOL_NAMES = new Set(['write_artifact']);
+
+/**
+ * Incremental edit tools, most surgical first. All of these address the
+ * WORKSPACE; the artifacts drawer has no incremental writer today, which is
+ * why an over-cap `write_artifact` has no remedy to offer.
+ */
+const INCREMENTAL_EDIT_REMEDIES: ReadonlyArray<{
+  tool: string;
+  example: (path: string) => string;
+}> = [
+  {
+    tool: 'replace_in_file',
+    example: (path) => `\`replace_in_file(path="${path}", find="...", replace="...")\``,
+  },
+  {
+    tool: 'replace_lines',
+    example: (path) => `\`replace_lines(path="${path}", startLine=N, endLine=M, content="...")\``,
+  },
+  {
+    tool: 'append_to_file',
+    example: (path) => `\`append_to_file(path="${path}", content="...the next chunk...")\``,
+  },
+];
+
+function capRecoveryRemedies(
+  toolName: string,
+  roster: ReadonlySet<string> | undefined,
+): ReadonlyArray<{ tool: string; example: (path: string) => string }> {
+  if (ARTIFACT_PAYLOAD_TOOL_NAMES.has(toolName)) return [];
+  // No roster supplied — preserve the historical wording (the two surgical
+  // editors) rather than silently widening or narrowing it.
+  if (!roster) return INCREMENTAL_EDIT_REMEDIES.slice(0, 2);
+  return INCREMENTAL_EDIT_REMEDIES.filter((remedy) => roster.has(remedy.tool));
+}
+
+function capBlockerEscalation(roster: ReadonlySet<string> | undefined): string {
+  const canNote = !roster || roster.has('write_task_note');
+  const canPause = !roster || roster.has('set_task_status');
+  if (canNote && canPause) {
+    return 'Record the blocker with `write_task_note` (name the tool, the path, and the cap), then `set_task_status` to paused so a human can raise the budget or split the deliverable.';
   }
-  return `${toolResult}\n\n[runtime] Your \`${toolName}\` call for \`${path}\` hit the per-turn output token cap${capLabel} mid-content — the file body never finished, the write was rejected, and the file on disk is unchanged. Re-emitting the whole file WILL hit the same cap again; do not retry a full rewrite. Apply the change as a sequence of smaller targeted edits instead: \`replace_in_file(path="${path}", find="...", replace="...")\` or \`replace_lines(path="${path}", startLine=N, endLine=M, content="...")\`, using several calls if needed, each well under the cap. Do not narrate the failure — emit the first corrective edit call directly.`;
+  if (canNote) {
+    return 'Record the blocker with `write_task_note`, naming the tool, the path, and the cap, so a human can raise the budget or split the deliverable.';
+  }
+  if (canPause) {
+    return 'Call `set_task_status` to paused and state the blocker — the tool, the path, and the cap — so a human can raise the budget or split the deliverable.';
+  }
+  return 'Say plainly in your reply that the deliverable exceeds this turn’s output cap, naming the tool, the path, and the cap, so a human can raise the budget or split the deliverable.';
 }
 
 /**

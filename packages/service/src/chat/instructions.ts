@@ -1280,6 +1280,7 @@ ${artifactsLine}
   // the legacy split that's now folded into per-behavior blocks.
   const localHints = (() => {
     if (!profile || !providerName) return '';
+    const behaviorToolNames = new Set((availableTools ?? []).map((tool) => tool.name));
     const promptCtx: PromptCtx = {
       catalogId: profile.catalogId,
       tier: profile.tier,
@@ -1289,9 +1290,9 @@ ${artifactsLine}
       hasPlaywright,
       isMeester: false,
       about,
+      availableToolNames: behaviorToolNames,
     };
     const blocks: string[] = [];
-    const behaviorToolNames = new Set((availableTools ?? []).map((tool) => tool.name));
     for (const entry of profile.behaviors) {
       const hook = entry.behavior.promptAppend;
       if (!hook) continue;

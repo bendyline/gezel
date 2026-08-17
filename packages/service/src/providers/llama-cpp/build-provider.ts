@@ -512,22 +512,11 @@ export async function buildLlamaCppProvider(opts: {
     );
     slots = 1;
   }
-  // Opportunistic batched inference (adaptive interactive policy). Default
-  // on for llama-cpp with >1 slot — llama-server batches the `--parallel`
-  // slots with continuous batching on by default. `GEZEL_BATCHED_INFERENCE`
-  // (eval A/B) overrides config, which overrides the per-engine default.
-  const envBatched = process.env.GEZEL_BATCHED_INFERENCE;
-  const envBatchedOverride =
-    envBatched === '1' || envBatched === 'true'
-      ? true
-      : envBatched === '0' || envBatched === 'false'
-        ? false
-        : undefined;
-  const batchedInferenceEnabled =
-    envBatchedOverride ?? config.batchedInference?.enabled ?? slots > 1;
-  // Only the SUPERVISED path controls `--parallel`, so co-batching is
-  // forwarded only there; an external llama-server may be single-slot.
-  let batchMaxConcurrency = batchedInferenceEnabled && slots > 1 ? slots : 1;
+  // `slots` is the only width. llama-server serves its `--parallel N` slots
+  // with continuous batching on by default, so a slot we reserved KV for is a
+  // slot that can generate — there is no second switch that makes some of them
+  // dispatch-only. `providerConcurrency['llama-cpp'] = 1` is how you ask for a
+  // serial engine, and it shrinks the reservation to match.
 
   // Rolling log file at ~/.gezel/logs/llama-server-YYYY-MM-DD.log.
   // Captures raw stdout/stderr so users (and bug reports) have a
@@ -907,7 +896,6 @@ export async function buildLlamaCppProvider(opts: {
               `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'}${windowedNote}: reducing engine slots ${slots} -> ${ladderPlan.slots} to preserve at least ${contextRequirement.minimumPerTurnCtxTokens} context tokens per turn`,
             );
             slots = ladderPlan.slots;
-            batchMaxConcurrency = batchedInferenceEnabled && slots > 1 ? slots : 1;
           }
           if (ladderPlan.clamped) {
             log.warn(
@@ -950,7 +938,6 @@ export async function buildLlamaCppProvider(opts: {
               effectiveNumCtx = growth.perTurnCtxTokens;
               if (growth.slots < slots) {
                 slots = growth.slots;
-                batchMaxConcurrency = batchedInferenceEnabled && slots > 1 ? slots : 1;
               }
             }
           }
@@ -1371,10 +1358,11 @@ export async function buildLlamaCppProvider(opts: {
     // default; drives the queue, `--parallel`, and (via
     // `provider.queue.concurrency`) the cache adapter's slotCount.
     concurrency: slots,
-    // Engine batch width — only the supervised path controls `--parallel`,
-    // so co-batching is enabled here (not on the external-baseUrl path,
-    // whose server may be single-slot). 1 = today's serial-ish behavior.
-    batchMaxConcurrency,
+    // The same number, deliberately: what we reserved KV for is what can
+    // generate. Passed only on the SUPERVISED path — an external llama-server
+    // owns its own `--parallel` and may be single-slot, so that path leaves
+    // the width at its conservative default.
+    batchMaxConcurrency: slots,
     // Catalog id surfaced via `getEffectiveModelId()` so the chat
     // manager can recover a tier-classifiable model id when neither
     // `record.model` nor `config.defaultModel['llama-cpp']` was set —

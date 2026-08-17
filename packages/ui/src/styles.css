@@ -6145,6 +6145,18 @@ button.danger {
   overflow: auto;
 }
 
+/* The editor fills this pane edge to edge, so it must not draw a second
+   rounded box inside the one `.project-files-layout` already draws. Left as
+   `.editor-wrap`'s default it rounds its corners a hairline inside the panel's
+   own corners and doubles the seam against the tree's `border-right` — the
+   tree's rule is the divider, and the editor butts straight against it. The
+   same reasoning as `.documents-detail .editor-wrap`; card-shaped hosts (the
+   project about/mission fields, a gezel's about.md) keep the border. */
+.file-viewer-panel .editor-wrap {
+  border: none;
+  border-radius: 0;
+}
+
 /* HTML-file viewer: Preview (iframe) / Source (EditorShell) tabs for
    .html files under Workspace or Artifacts. Sizes to fill its parent
    grid cell (`.file-viewer-panel`) — a viewport-based `calc()` would

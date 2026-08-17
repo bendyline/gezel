@@ -3323,13 +3323,13 @@ async function listWorkspaceDeliverableFiles(projectId: string): Promise<string[
 
 server.tool(
   'list_artifacts',
-  'List every file in the project artifacts folder, recursively across all subdirectories. Use this when handing work off between gezels — anything a teammate produced will show up here regardless of how deeply they nested it. Pass `recursive: false` for a one-level listing of a specific subdirectory. Paths are scoped to the artifacts root — do NOT prefix with "artifacts/".',
+  'List files in the project artifacts folder, recursively across all subdirectories. Use this when handing work off between gezels — anything a teammate produced will show up here regardless of how deeply they nested it. Pass `path` to walk one subtree only (large drawers are capped, so scoping is how you see every file in a corpus); pass `recursive: false` for a one-level listing. Returned paths are relative to the artifacts root and can be read as-is — do NOT prefix with "artifacts/".',
   {
     path: z
       .string()
       .optional()
       .describe(
-        'Subdirectory path within the artifacts root (default: root). Do not include "artifacts/" — the call is already scoped there.',
+        'Subdirectory to walk (default: the whole artifacts root). Scopes recursive listings too. Do not include "artifacts/" — the call is already scoped there.',
       ),
     recursive: z
       .boolean()
@@ -3340,19 +3340,21 @@ server.tool(
   },
   async ({ path, recursive }) => {
     const subpath = normalizeArtifactPath(path ?? '');
-    // Recursive list always uses the project root — the underlying client
-    // method walks the whole tree. For a one-level listing, scope to the
-    // requested subpath (or the artifacts root if none was given).
+    // `path` scopes BOTH modes. It used to be dropped on the recursive branch,
+    // so a caller narrowing to one connector corpus silently got the whole
+    // drawer, hit the walker's entry cap, and was then advised to "narrow
+    // path" — the one thing that could not help. The walk now starts inside
+    // the subtree, so the cap applies to the subtree alone.
     const wantRecursive = recursive !== false;
-    const res = wantRecursive
-      ? await api.listProjectArtifacts(projectId, undefined, true)
-      : await api.listProjectArtifacts(projectId, subpath, false);
+    const res = await api.listProjectArtifacts(projectId, subpath || undefined, wantRecursive);
     const listing = res.files.map((f) => `${f.isDirectory ? '📁' : '📄'} ${f.path}`).join('\n');
     const summary = res.files.length
-      ? `Listed ${res.files.length} ${res.files.length === 1 ? 'artifact entry' : 'artifact entries'}.`
-      : 'No artifacts yet.';
+      ? `Listed ${res.files.length} ${res.files.length === 1 ? 'artifact entry' : 'artifact entries'}${subpath ? ` under ${subpath}/` : ''}.`
+      : subpath
+        ? `No artifacts under ${subpath}/.`
+        : 'No artifacts yet.';
     const truncation = res.truncated
-      ? '\nResults were truncated; narrow `path` or use `recursive: false`.'
+      ? `\nResults were truncated; ${subpath ? 'narrow `path` further' : 'pass `path` to scope the walk'} or use \`recursive: false\`.`
       : '';
     return okResult(
       ListToolOutputSchema,

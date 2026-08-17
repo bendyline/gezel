@@ -1957,13 +1957,13 @@ export class LlamaCppProvider implements LLMProvider {
      */
     reserveBackgroundSlot?: boolean;
     /**
-     * Engine batch width. When set > 1 (the manager passes the llama-server
-     * `--parallel` slot count once `batchedInference` is enabled and
-     * `--cont-batching` is on), the queue switches to the adaptive
-     * interactive policy: concurrent interactive turns may co-occupy all
-     * slots, with one reserved so a live turn never waits behind a
-     * background cohort. Default 1 — today's behavior (interactive
-     * single-file, background fills spare slots). See {@link LLMProvider.batch}.
+     * Engine batch width — how many sequences the server can generate at
+     * once. The supervised path passes its `--parallel` slot count, so this
+     * equals {@link concurrency} there; chats may fill all of it, with one
+     * slot withheld from background work so a live turn never waits behind a
+     * background cohort. Default 1, which is what the external-baseUrl path
+     * takes: we don't control that server's `--parallel` and it may be
+     * single-slot. See {@link LLMProvider.batch}.
      */
     batchMaxConcurrency?: number;
     affinity?: boolean;
@@ -2098,19 +2098,15 @@ export class LlamaCppProvider implements LLMProvider {
     this.engineRequestWidth = slots;
     const batchMax = Math.max(1, opts.batchMaxConcurrency ?? 1);
     this.batchMaxConcurrency = batchMax;
-    const batching = batchMax > 1;
-    // Interactive lane capped at 1 (serial) or the batch width; foreground chat
-    // behaves like the old serial queue while background chores fill spare
-    // slots. Reserve at least ONE slot above the interactive cap for the
-    // background lane so a mid-turn one-shot pinned to this provider (compaction
-    // / memory extraction / summarization) can't deadlock behind a full
-    // interactive lane. The default (slots=2, interactive=1) already had a spare
-    // slot; the guard matters when the memory ceiling clamps a big model to a
-    // single slot (`providerConcurrency['llama-cpp']=1` or a tight-RAM auto-size)
-    // — without it, a lone slot + a synchronous mid-turn compaction wedges the
-    // turn, the same failure the MLX single-slot path hit. See the matching note
-    // in the MLX provider.
-    const interactiveConcurrency = batching ? Math.min(slots, batchMax) : 1;
+    // Slots are one fungible pool: chats may fill all of them. Background work
+    // is the only capped lane (`backgroundLaneCap` = width - 1), so a live turn
+    // can always start. Reserve at least ONE queue slot above the interactive
+    // cap for the background lane so a mid-turn one-shot pinned to this provider
+    // (compaction / memory extraction / summarization) can't deadlock behind a
+    // full interactive lane — without it, a lone slot plus a synchronous
+    // mid-turn compaction wedges the turn, the same failure the MLX
+    // single-slot path hit. See the matching note in the MLX provider.
+    const interactiveConcurrency = batchMax;
     const queueConcurrency =
       opts.reserveBackgroundSlot === false ? slots : Math.max(slots, interactiveConcurrency + 1);
     this.queue = new ProviderQueue({
@@ -6422,21 +6418,34 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             // for it explicitly and hand over the recovered path.
             const argsLostToCap = malformedStructuredCallIds.has(call.id);
             const recoveredPath = malformedStructuredCallPaths.get(call.id) ?? null;
+            // The remedy has to be checkable against what this turn actually
+            // wired, not against the union of every write tool that exists.
+            const liveToolNames = new Set(
+              (Array.isArray(body.tools) ? (body.tools as ChatCompletionTool[]) : [])
+                .map((tool) => chatCompletionToolName(tool))
+                .filter((name): name is string => typeof name === 'string'),
+            );
             output = appendCapTruncationHintToRejectedWrite(
               output,
               call.function.name,
               args,
               requestMaxTokens,
-              { argsLostToCap, pathHint: recoveredPath },
+              { argsLostToCap, pathHint: recoveredPath, availableToolNames: liveToolNames },
             );
             if (output.length !== before) {
               const path =
                 recoveredPath ?? (typeof args.path === 'string' ? args.path : '(unknown)');
+              // Two very different outcomes share this branch, and a
+              // postmortem needs to tell them apart: a steer the model can
+              // act on, versus a hard ceiling with no incremental path.
+              const noRemedy = output.includes('No incremental edit tool is wired this turn');
               log.info(
-                `[llama-cpp] cap-truncated rejected write — incremental-edit hint appended tool=${call.function.name} id=${call.id} path=${path} args-lost=${argsLostToCap} max_tokens=${requestMaxTokens ?? 'unset'}`,
+                `[llama-cpp] cap-truncated rejected write — ${noRemedy ? 'no incremental tool wired; escalation hint' : 'incremental-edit hint'} appended tool=${call.function.name} id=${call.id} path=${path} args-lost=${argsLostToCap} max_tokens=${requestMaxTokens ?? 'unset'}`,
               );
               this.emitWarning(
-                `The model hit its output-token cap mid-\`${call.function.name}\` (${path}); the edit was rejected and it was steered to incremental edits instead of a full rewrite.`,
+                noRemedy
+                  ? `The model hit its output-token cap mid-\`${call.function.name}\` (${path}) and this session has no incremental edit tool for that target, so the deliverable cannot be written in one call at the current cap.`
+                  : `The model hit its output-token cap mid-\`${call.function.name}\` (${path}); the edit was rejected and it was steered to incremental edits instead of a full rewrite.`,
               );
             }
           }

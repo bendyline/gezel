@@ -265,6 +265,68 @@ describe('TaskManager', () => {
     expect(JSON.stringify(gate)).not.toContain('{{');
   });
 
+  it('interpolates launch params into onEnter/onExit script inputs', async () => {
+    // Same class as the gate miss above, on the hook that does a step's
+    // deterministic work with no model turn. Pull Request Review's scope step
+    // publishes its fanout batches through an `onEnter` stdlib script; left
+    // out of the walk, that script receives the literal `{{corpusScope}}`,
+    // finds no corpus, and fails as if the connector had never synced.
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            id,
+            name: 'Pull Request Review',
+            steps: [
+              {
+                id: 'scope',
+                name: 'Map the corpus',
+                prompt: 'Read {{corpusScope}}.',
+                onEnter: [
+                  {
+                    name: 'publishCorpusBatches',
+                    scope: 'standard',
+                    inputs: { corpusDir: '{{corpusScope}}', outFile: 'pr-review/batches.json' },
+                  },
+                ],
+                onExit: {
+                  name: 'noteSomething',
+                  scope: 'standard',
+                  inputs: { label: 'PR #{{number}}' },
+                },
+                terminal: true,
+              },
+            ],
+            entryStepId: 'scope',
+            createdAt: '2026-08-17T00:00:00Z',
+            updatedAt: '2026-08-17T00:00:00Z',
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+    const created = await tasks.create('website', {
+      title: 'Review PR 33',
+      assignee: { kind: 'user' },
+      craftbookId: 'pull-request-review',
+      craftbookParams: {
+        number: '33',
+        corpusScope: 'artifacts/data/github-pull-requests/pr-33',
+      },
+    });
+    const step = created.craftbook.steps[0] as {
+      onEnter?: Array<{ inputs?: Record<string, string> }>;
+      onExit?: { inputs?: Record<string, string> };
+    };
+    expect(step.onEnter?.[0]?.inputs?.corpusDir).toBe('artifacts/data/github-pull-requests/pr-33');
+    // Untemplated inputs pass through unchanged.
+    expect(step.onEnter?.[0]?.inputs?.outFile).toBe('pr-review/batches.json');
+    // The legacy single-ref shape interpolates too.
+    expect(step.onExit?.inputs?.label).toBe('PR #33');
+    expect(JSON.stringify(step)).not.toContain('{{');
+  });
+
   it('interpolates the fanout half of the recipe too, and hands children the host’s needs', async () => {
     // Same miss as the gate walk above, one level out: `interpolateStepsContext`
     // walks the HOST's steps, so `spawn.overFile` and every child-template

@@ -95,6 +95,20 @@ export interface PromptCtx extends ModelCtx {
   isMeester: boolean;
   /** The gezel's about.md content (already loaded). */
   about: string;
+  /**
+   * Tool names actually wired for this session (post-allowlist).
+   *
+   * A behavior whose whole point is "reach for tool X instead of tool Y"
+   * must gate on this and return null when X is absent. The rendered block
+   * is also passed through `filterPromptToolDirectives`, but that pass is
+   * lexical: it drops a line only when the line reads as a directive, and
+   * "write a small Node script and execute it — `derive_file(...)`" does
+   * not match, so the block survived intact on a roster with no execution
+   * tool at all and prescribed a remedy the session could not perform.
+   * Positive gating here is the reliable half; the lexical filter is the
+   * backstop for phrasings a behavior author did not anticipate.
+   */
+  availableToolNames: ReadonlySet<string>;
 }
 
 /**

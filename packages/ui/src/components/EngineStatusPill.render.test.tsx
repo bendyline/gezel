@@ -594,11 +594,11 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(screen.queryByText(/Capacity planning only/)).not.toBeInTheDocument();
     // Capacity holders are visible as well as accessible. Known ids take
     // their catalog name; the rest fall back to the id.
-    expect(screen.getByText('Talkie 1930 13B ×2 · 4 concurrent')).toBeInTheDocument();
+    expect(screen.getByText('Talkie 1930 13B ×2 · 4 slots')).toBeInTheDocument();
     expect(screen.getByText('~30.9 GB')).toBeInTheDocument();
     expect(screen.getByText('qwen3.6-27b-q4')).toBeInTheDocument();
     expect(screen.getByText('~19.1 GB')).toBeInTheDocument();
-    expect(capacityMeter).toHaveAccessibleName(/Talkie 1930 13B ×2 · 4 concurrent/i);
+    expect(capacityMeter).toHaveAccessibleName(/Talkie 1930 13B ×2 · 4 slots/i);
     expect(capacityMeter).toHaveAccessibleName(/qwen3\.6-27b-q4/i);
   });
 

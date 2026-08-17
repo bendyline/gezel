@@ -514,8 +514,10 @@ export interface ProviderQueueState {
   /**
    * Cap on how many of the `concurrency` slots can be held by the
    * interactive lane at once. Equal to `concurrency` when no cap is
-   * configured (cloud providers); lower for local providers that
-   * reserve a slot for background work (llama-cpp ships at 2/1).
+   * configured (cloud providers). On a local engine it equals
+   * `maxConcurrency` — chats may fill every slot the engine owns; it is
+   * `backgroundConcurrency` that is held one below, so a live turn can
+   * always start.
    */
   interactiveConcurrency?: number;
   /**
@@ -526,11 +528,14 @@ export interface ProviderQueueState {
    */
   backgroundConcurrency?: number;
   /**
-   * The engine's true concurrent-generation width (its batch capability):
-   * 1 for a serial engine (MLX today), the `--parallel` slot count for
-   * llama-cpp with batched inference on. Surfaced by the EngineStatusPill
-   * as "N concurrent sessions". Distinct from `concurrency`, which can be
-   * raised for ask-overlap without parallel generation.
+   * The engine's slot count: `--parallel N` for llama-cpp,
+   * `--max-concurrency N` for MLX, 1 for a cloud or external server whose
+   * width we don't control. This is the same number the capacity broker
+   * reserved KV for — what we hold memory for is what can generate.
+   *
+   * The denominator for "in flight"; prefer it over `concurrency`, which
+   * carries an extra logical lane so a mid-turn one-shot can enter the
+   * queue without deadlocking behind the turn awaiting it.
    */
   maxConcurrency?: number;
   active: Array<{

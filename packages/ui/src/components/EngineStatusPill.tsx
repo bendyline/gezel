@@ -1150,20 +1150,11 @@ function EngineStatusPillForProvider({
                 <dd>Chat model is paused while this engine uses the GPU.</dd>
               </>
             )}
-            {/* How many chat turns this engine can generate at once. MLX is
-                serial today (1); llama-cpp with batched inference on shows
-                its `--parallel` slot count. A future batched-MLX phase lifts
-                MLX to N here with no change to this surface. */}
-            {typeof queueState?.maxConcurrency === 'number' && !activeMedia && (
-              <>
-                <dt>Concurrency</dt>
-                <dd>
-                  {queueState.maxConcurrency <= 1
-                    ? '1 thread at a time'
-                    : `up to ${queueState.maxConcurrency} concurrent threads`}
-                </dd>
-              </>
-            )}
+            {/* No concurrency row: the slot count is already stated once, on
+                the memory strip's reservation segment, and it is the same
+                number the engine can generate at. Splitting it into "reserved"
+                and "can run" is what made the popover read as a contradiction.
+                Who is occupying the slots lives in the queue popover. */}
             {queue.queueRow && !activeMedia && (
               <>
                 <dt>Queue</dt>

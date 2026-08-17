@@ -1752,6 +1752,125 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(warnings.some((w) => w.includes('insert_at_marker'))).toBe(true);
   });
 
+  it('does not steer an over-cap write_artifact at edit tools the turn never wired', async () => {
+    // The PR-review scope-step incident: a craftbook step needed a 25 KB
+    // derived JSON artifact under a 6144-token cap on a writes-off project,
+    // so the only payload tool wired was `write_artifact`. The hint named
+    // `replace_in_file` / `replace_lines` unconditionally — absent from the
+    // roster AND pointed at the wrong drawer — so the model spent a whole
+    // turn planning a six-turn replace sequence and the task died.
+    const bodies: Array<{
+      max_tokens?: number;
+      messages?: Array<{ role: string; content?: string | null }>;
+    }> = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as (typeof bodies)[number];
+      bodies.push(body);
+      if (bodies.length === 1) {
+        return sseResponse([
+          {
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call_cut_artifact',
+                      type: 'function',
+                      function: {
+                        name: 'write_artifact',
+                        arguments:
+                          '{"path":"pr-review/batches.json","content":"[{\\"batchNumber\\":1,' +
+                          '\\"start\\":1,\\"end\\":25,\\"paths\\":[\\"packages/core/src/schemas/',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          {
+            choices: [{ index: 0, finish_reason: 'length' }],
+            usage: { prompt_tokens: 86000, completion_tokens: 6144 },
+          },
+          '[DONE]',
+        ]);
+      }
+      return sseResponse([
+        { choices: [{ index: 0, delta: { content: 'Reporting the blocker.' } }] },
+        {
+          choices: [{ index: 0, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 87000, completion_tokens: 20 },
+        },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({
+      baseUrl: 'http://ds4.test',
+      includeUsageInStream: true,
+    });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'qwen3.8-27b-q4',
+      tuning: {
+        sampling: { maxTokens: 6144 },
+        reasoning: {},
+        output: {},
+        promptTags: {},
+        wasThinking: false,
+      },
+    });
+    const internal = session as unknown as {
+      deps: {
+        bridges: {
+          isEmpty: () => boolean;
+          getOpenAITools: () => Array<{
+            name: string;
+            description: string;
+            parameters: Record<string, unknown>;
+          }>;
+          hasTool: (name: string) => boolean;
+          callTool: (name: string, args: Record<string, unknown>) => Promise<string>;
+        };
+      };
+    };
+    internal.deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () =>
+        [
+          'write_artifact',
+          'read_artifact',
+          'list_artifacts',
+          'write_task_note',
+          'set_task_status',
+        ].map((name) => ({
+          name,
+          description: `${name} tool`,
+          parameters: { type: 'object' },
+        })),
+      hasTool: () => true,
+      callTool: async () => 'unexpected dispatch',
+    };
+
+    await expect(session.sendAndWait('Publish the fanout batches.')).resolves.toBe(
+      'Reporting the blocker.',
+    );
+
+    const toolResultMessage =
+      (bodies[1]?.messages ?? []).find((m) => m.role === 'tool')?.content ?? '';
+    expect(toolResultMessage).toContain('hit the per-turn output token cap');
+    expect(toolResultMessage).toContain('max_tokens=6144');
+    expect(toolResultMessage).toContain('pr-review/batches.json');
+    expect(toolResultMessage).not.toContain('replace_in_file');
+    expect(toolResultMessage).not.toContain('replace_lines');
+    expect(toolResultMessage).toContain('No incremental edit tool is wired this turn');
+    // Routed to the honest exit, using the task tools that ARE wired.
+    expect(toolResultMessage).toContain('write_task_note');
+    expect(toolResultMessage).toContain('set_task_status');
+  });
+
   it('gate-surgical-edit turns get a low-temp patch-only surface on the first move', async () => {
     // The gate-escalation stage-1 nudge (GATE_TARGETED_EDIT marker) must
     // reshape the turn immediately — no read precondition — to the

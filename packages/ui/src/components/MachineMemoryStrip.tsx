@@ -15,10 +15,14 @@ interface Props {
    */
   modelNames?: ReadonlyMap<string, string>;
   /**
-   * Planned concurrent slots per `provider:modelId`. This belongs beside the
+   * Planned engine slots per `provider:modelId`. This belongs beside the
    * reservation because each additional slot contributes another KV cache;
    * naming the slot count makes a multi-slot reservation directly comparable
    * with the model list's single-chat memory estimate.
+   *
+   * A slot is one number: what we reserve KV for is what can generate. The
+   * engine pill states it here and nowhere else — who is occupying the slots
+   * (chat vs background) belongs to the queue popover, not to this strip.
    */
   modelConcurrentSlots?: ReadonlyMap<string, number>;
 }
@@ -333,7 +337,7 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
             key,
             label: `${modelNames?.get(model.modelId) ?? model.modelId}${
               model.replicaCount > 1 ? ` ×${model.replicaCount}` : ''
-            }${concurrentSlots !== undefined && concurrentSlots > 1 ? ` · ${concurrentSlots} concurrent` : ''}`,
+            }${concurrentSlots !== undefined && concurrentSlots > 1 ? ` · ${concurrentSlots} slots` : ''}`,
             bytes: model.reservedBytes,
           };
         })

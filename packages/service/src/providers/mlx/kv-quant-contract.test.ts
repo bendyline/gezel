@@ -57,18 +57,16 @@ describe('MLX launcher ↔ sidecar argv contract', () => {
     }
   });
 
-  it('plans KV at f16 whenever batching may be on', () => {
+  it('always plans KV at f16', () => {
     // mlx-lm's BatchGenerator builds BatchKVCache layers, which have no
     // `to_quantized`; `maybe_quantize_kv_cache` skips them without a word. If
     // planning took the q8 discount anyway it would under-reserve by ~45%, and
     // an MLX overcommit SIGABRTs the whole python process rather than failing
-    // one slot. `mayBatch` defaults to true precisely so an unset config is
-    // planned as batched.
-    expect(BUILDER).toMatch(
-      /const mayBatch =[\s\S]{0,120}config\.batchedInference\?\.enabled \?\? true;/,
-    );
-    expect(BUILDER).toContain('const kvBitsForPlanning = mayBatch ? 0 : kvBits;');
-    expect(BUILDER).toMatch(/kvBitsForPlanning === 4 \? 'q4_0' : kvBitsForPlanning === 8/);
+    // one slot. Every slot the engine owns is now a slot it may batch across,
+    // so there is no configuration in which the discount is safe to plan
+    // against — the type must stay pinned, not become conditional again.
+    expect(BUILDER).toMatch(/const mlxKvCacheType = 'f16';/);
+    expect(BUILDER).not.toContain('kvBitsForPlanning');
     // The engine still gets the flag — a wave that collapses to serial takes
     // the saving, and over-reserving is the safe direction.
     expect(BUILDER).toMatch(/kvQuantArgs[\s\S]{0,160}kvBits > 0/);

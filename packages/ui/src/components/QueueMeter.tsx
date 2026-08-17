@@ -857,6 +857,15 @@ function QueueMeterPanel({
         const queued = state.queuedInteractive + state.queuedBackground;
         const deferred = Math.min(queued, state.ambientHeld ?? 0);
         const readyQueued = queued - deferred;
+        // The engine's real width, not `concurrency` — that carries an extra
+        // logical lane so a mid-turn one-shot can enter the queue, and using
+        // it as a denominator advertises a slot no turn can occupy.
+        const slots = state.maxConcurrency ?? state.concurrency;
+        const backgroundCap = state.backgroundConcurrency;
+        const laneNote =
+          backgroundCap !== undefined && slots > 1 && backgroundCap < slots
+            ? `Chats can use all ${slots} slots. Background work takes at most ${backgroundCap}, so a chat can always start.`
+            : undefined;
         // Two rows for the same gezel doing the same job read identically
         // whether one is running and the other is waiting for a slot. Name
         // the two groups whenever both exist; a list that is all one thing
@@ -867,11 +876,17 @@ function QueueMeterPanel({
             <header className="queue-meter-panel-provider">
               <span className="queue-meter-panel-provider-name">{getPlatformPillLabel(name)}</span>
               <span className="muted small">
-                {running} / {state.concurrency} in flight
+                {running} / {slots} in flight
                 {readyQueued > 0 ? ` · ${readyQueued} queued` : ''}
                 {deferred > 0 ? ` · ${deferred} deferred until idle` : ''}
               </span>
             </header>
+            {/* The only place the lane split is named. The engine pill states
+                one number — the slot count — and stops there; this is where a
+                user comes to ask who is holding them. Shown only when the cap
+                actually bites (a background lane narrower than the pool), so
+                the common single-slot engine stays quiet. */}
+            {laneNote && <p className="queue-meter-panel-note muted small">{laneNote}</p>}
             {state.active.length === 0 && queued === 0 ? (
               <p className="muted small queue-meter-panel-empty">Idle.</p>
             ) : (

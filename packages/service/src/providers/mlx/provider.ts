@@ -440,7 +440,6 @@ export class MlxProvider implements LLMProvider {
     if (opts.templateOpensReasoning) this.templateOpensReasoning = true;
     const batchMax = Math.max(1, opts.batchMaxConcurrency ?? 1);
     this.batchMaxConcurrency = batchMax;
-    const batching = batchMax > 1;
     // Interactive turns are capped at the memory-safe engine width (`batchMax`);
     // the engine gate below (`acquireExclusiveEngineRequest`) enforces the same
     // bound on real generation. The queue itself, though, must run at least ONE
@@ -454,7 +453,7 @@ export class MlxProvider implements LLMProvider {
     // sessions "mid-turn" once the memory ceiling clamped a big model to width 1.
     // The +1 admits the chore WITHOUT ever running a 2nd concurrent generation —
     // the engine gate, not queue width, is the OOM guard.
-    const interactiveConcurrency = batching ? batchMax : 1;
+    const interactiveConcurrency = batchMax;
     const queueConcurrency = Math.max(opts.concurrency ?? 1, interactiveConcurrency + 1);
     this.queue = new ProviderQueue({
       concurrency: queueConcurrency,

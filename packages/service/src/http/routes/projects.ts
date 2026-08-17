@@ -948,6 +948,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       const detailed = await ctx.store.listProjectArtifactsRecursiveDetailed(id, {
         ...(withStats ? { withStats: true } : {}),
         ...(includeHidden ? { includeHidden: true } : {}),
+        ...(subpath ? { subpath } : {}),
       });
       return c.json({ files: detailed.entries, truncated: detailed.truncated });
     }
@@ -1384,6 +1385,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         const detailed = await ctx.store.listProjectWorkspaceRecursiveDetailed(id, {
           ...(withStats ? { withStats: true } : {}),
           ...(includeHidden ? { includeHidden: true } : {}),
+          ...(subpath ? { subpath } : {}),
         });
         return c.json({ files: detailed.entries, truncated: detailed.truncated });
       }

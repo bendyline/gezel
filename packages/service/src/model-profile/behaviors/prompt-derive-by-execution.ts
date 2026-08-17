@@ -16,20 +16,59 @@
  *
  * Deliberately keyed on what the OUTPUT is, not the task wording:
  * reports and prose that merely cite data are normal write_file work.
+ *
+ * Gated on the roster: the block names the execution tools actually wired
+ * this turn and goes silent when none are. A steer whose remedy is absent
+ * is worse than no steer — it tells the model its instinct is wrong without
+ * giving it anything to do instead.
  */
 
 import type { Behavior, PromptCtx } from '../types.js';
 
-export const DERIVE_BY_EXECUTION_GUIDANCE = `
+/** Execution tools this steer can actually point at, in preference order. */
+const EXECUTION_TOOLS = ['derive_file', 'run_nodejs_script'] as const;
+
+function guidance(execution: readonly string[], writeTool: string | null): string {
+  const how =
+    execution.length === 2
+      ? `\`${execution[0]}({ script, outputPath })\`, or a script file + \`${execution[1]}\``
+      : execution[0] === 'derive_file'
+        ? '`derive_file({ script, outputPath })`'
+        : `a script file + \`${execution[0]}\``;
+  const carveOut = writeTool
+    ? ` Reports and prose that merely cite data are normal \`${writeTool}\` work.`
+    : '';
+  return `
 
 ---
 
 ## Derived data outputs — execute, don't retype
 
-For a json/csv/tsv deliverable BUILT FROM other files (transform, dedup, convert, aggregate): write a small Node script and execute it — \`derive_file({ script, outputPath })\`, or a script file + \`run_nodejs_script\`. Hand-typing rows loses data. Reports and prose that merely cite data are normal \`write_file\` work.`;
+For a json/csv/tsv deliverable BUILT FROM other files (transform, dedup, convert, aggregate): write a small Node script and execute it — ${how}. Hand-typing rows loses data.${carveOut}`;
+}
 
-export function deriveByExecutionPrompt(_ctx?: PromptCtx, _config?: undefined): string {
-  return DERIVE_BY_EXECUTION_GUIDANCE;
+/**
+ * The full-roster wording, kept as an export because tests and the prompt
+ * contract matrix assert against it.
+ */
+export const DERIVE_BY_EXECUTION_GUIDANCE = guidance(EXECUTION_TOOLS, 'write_file');
+
+export function deriveByExecutionPrompt(ctx?: PromptCtx, _config?: undefined): string | null {
+  // No roster (older callers / synthetic contexts) → the standing wording.
+  if (!ctx?.availableToolNames) return DERIVE_BY_EXECUTION_GUIDANCE;
+  const execution = EXECUTION_TOOLS.filter((tool) => ctx.availableToolNames.has(tool));
+  // Steering a session with no execution tool toward "execute, don't retype"
+  // leaves it with a diagnosis and no remedy. Wild-caught on a craftbook step
+  // whose 25 KB derived JSON exceeded the turn's output cap: the block named
+  // `derive_file` and `run_nodejs_script`, neither was wired, and the model
+  // fell back to hand-transcribing 509 paths — exactly what this steer exists
+  // to prevent. Silence is the honest output; the step's own instructions and
+  // the cap-truncation hint carry the recovery from there.
+  if (execution.length === 0) return null;
+  const writeTool = ['write_file', 'write_artifact'].find((tool) =>
+    ctx.availableToolNames.has(tool),
+  );
+  return guidance(execution, writeTool ?? null);
 }
 
 export const PromptDeriveByExecution: Behavior = {

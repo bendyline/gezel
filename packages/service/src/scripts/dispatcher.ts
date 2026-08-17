@@ -231,6 +231,15 @@ export function buildDispatcher(deps: DispatcherDeps): {
       capability: 'artifacts.read',
       handler: async (ctx, params) => {
         const prefix = param<string>(params, 'prefix') ?? '';
+        // Recursive listings are scoped to `prefix`, so a script reading one
+        // connector corpus is not competing with the rest of the drawer for
+        // the walker's entry budget. Paths stay drawer-root-relative either
+        // way, so a result can go straight back into `artifact.read`.
+        if (param<boolean>(params, 'recursive') === true) {
+          return store.listProjectArtifactsRecursive(ctx.projectId, {
+            ...(prefix ? { subpath: prefix } : {}),
+          });
+        }
         return store.listProjectArtifacts(ctx.projectId, prefix);
       },
     },

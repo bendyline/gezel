@@ -141,20 +141,42 @@ export class ProjectArtifactsStore {
 
   async listProjectArtifactsRecursive(
     id: string,
-    opts?: { withStats?: boolean; includeHidden?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean; subpath?: string },
   ): Promise<ProjectFileEntry[]> {
     return (await this.listProjectArtifactsRecursiveDetailed(id, opts)).entries;
   }
 
+  /**
+   * Recursive artifact walk, optionally rooted at `subpath`.
+   *
+   * `subpath` is not a post-filter: the walk starts inside the subtree, so a
+   * caller asking for one connector corpus is not competing with the rest of
+   * the drawer for the walker's entry budget. Filtering a root-rooted walk
+   * instead would return a truncated slice of a truncated listing — which is
+   * how a 509-file PR corpus came back as 485 entries under a drawer-wide cap
+   * and a scoped request silently looked complete. Entry paths stay relative
+   * to the artifacts root either way, so every result is directly readable.
+   */
   async listProjectArtifactsRecursiveDetailed(
     id: string,
-    opts?: { withStats?: boolean; includeHidden?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean; subpath?: string },
   ): Promise<WalkDirResult> {
-    return walkDirDetailed(this.projectArtifactsDir(id), {
+    const root = this.projectArtifactsDir(id);
+    const subpath = normalizeArtifactPath(opts?.subpath ?? '').replace(/\/+$/, '');
+    const base = subpath === '' ? root : safeJoin(root, subpath);
+    if (base === null) return { entries: [], truncated: false };
+    const walked = await walkDirDetailed(base, {
       ...(opts?.withStats ? { withStats: true } : {}),
       ...(opts?.includeHidden ? { includeHidden: true } : {}),
-      skipRootDirs: SHADOW_SKIP,
+      // The reserved shadow cache only exists at the drawer root; scoping the
+      // walk into a subtree makes a same-named folder there an ordinary one.
+      ...(subpath === '' ? { skipRootDirs: SHADOW_SKIP } : {}),
     });
+    if (subpath === '') return walked;
+    return {
+      ...walked,
+      entries: walked.entries.map((entry) => ({ ...entry, path: `${subpath}/${entry.path}` })),
+    };
   }
 
   async readProjectArtifact(id: string, filePath: string): Promise<string | null> {

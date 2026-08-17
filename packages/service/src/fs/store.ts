@@ -3963,14 +3963,14 @@ export class Store {
 
   async listProjectArtifactsRecursive(
     id: string,
-    opts?: { withStats?: boolean; includeHidden?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean; subpath?: string },
   ): Promise<ProjectFileEntry[]> {
     return this.artifacts.listProjectArtifactsRecursive(id, opts);
   }
 
   async listProjectArtifactsRecursiveDetailed(
     id: string,
-    opts?: { withStats?: boolean; includeHidden?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean; subpath?: string },
   ): Promise<WalkDirResult> {
     return this.artifacts.listProjectArtifactsRecursiveDetailed(id, opts);
   }
@@ -4330,19 +4330,37 @@ export class Store {
 
   async listProjectWorkspaceRecursive(
     id: string,
-    opts?: { withStats?: boolean; includeHidden?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean; subpath?: string },
   ): Promise<ProjectFileEntry[]> {
     return (await this.listProjectWorkspaceRecursiveDetailed(id, opts)).entries;
   }
 
-  /** Recursive listing plus the truncation flag, for surfaces that must
-   *  tell the user/model when the walker's entry cap dropped files. */
+  /**
+   * Recursive listing plus the truncation flag, for surfaces that must tell
+   * the user/model when the walker's entry cap dropped files.
+   *
+   * `subpath` roots the walk instead of post-filtering it, so a caller asking
+   * for one folder is not competing with the whole workspace for the entry
+   * budget — the same contract as the artifacts twin. Entry paths stay
+   * workspace-root-relative, so results remain directly readable.
+   */
   async listProjectWorkspaceRecursiveDetailed(
     id: string,
-    opts?: { withStats?: boolean; includeHidden?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean; subpath?: string },
   ): Promise<WalkDirResult> {
-    const base = await this.projectWorkspaceDir(id);
-    return walkDirDetailed(base, opts);
+    const root = await this.projectWorkspaceDir(id);
+    const subpath = (opts?.subpath ?? '')
+      .replace(/\\/g, '/')
+      .replace(/^\.?\/+/, '')
+      .replace(/\/+$/, '');
+    const base = subpath === '' ? root : safeJoin(root, subpath);
+    if (base === null) return { entries: [], truncated: false };
+    const walked = await walkDirDetailed(base, opts);
+    if (subpath === '') return walked;
+    return {
+      ...walked,
+      entries: walked.entries.map((entry) => ({ ...entry, path: `${subpath}/${entry.path}` })),
+    };
   }
 
   async listProjectWorkspaceHtmlPages(id: string): Promise<ProjectFileEntry[]> {
