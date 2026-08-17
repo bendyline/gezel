@@ -23344,11 +23344,12 @@ button.gz-npd-repo-cancel {
 }
 
 .project-chat-compose-main .terminal-composer-input-wrap {
-  /* Border-box height: the established 89.25px entry floor plus the space
-   * reclaimed from terminal's removed empty recipient band. */
-  height: calc(89.25px + var(--compose-header-offset));
-  flex: 1 1 calc(89.25px + var(--compose-header-offset));
-  min-height: 89.25px;
+  /* Border-box height: the 90px entry floor that matches the current Squisq
+   * chat surface, plus the space reclaimed from terminal's removed empty
+   * recipient band. */
+  height: calc(90px + var(--compose-header-offset));
+  flex: 1 1 calc(90px + var(--compose-header-offset));
+  min-height: 90px;
   align-items: stretch;
 }
 
