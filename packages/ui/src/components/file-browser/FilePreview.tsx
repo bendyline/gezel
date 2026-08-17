@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { formatFileSize } from '../file-view-modes.js';
 
 /** Sentinels stored in place of file content for things the editor must not open. */
 export const MEDIA_IMAGE = '__IMAGE__';
@@ -99,10 +100,13 @@ export function NonTextFilePreview({
   content,
   path,
   fetchBlob,
+  sizeBytes,
 }: {
   content: string;
   path: string;
   fetchBlob: (path: string) => Promise<Blob>;
+  /** On-disk size, when the source knew it. The only fact we can offer about a file we cannot show. */
+  sizeBytes?: number;
 }) {
   const kind =
     content === MEDIA_IMAGE
@@ -122,7 +126,7 @@ export function NonTextFilePreview({
         </p>
       )}
       <p className="muted" style={{ textAlign: 'center' }}>
-        {path}
+        {sizeBytes === undefined ? path : `${path} · ${formatFileSize(sizeBytes)}`}
       </p>
     </div>
   );

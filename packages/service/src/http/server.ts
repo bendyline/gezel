@@ -66,6 +66,7 @@ import { pageCheckRoutes } from './routes/page-check.js';
 import { pageInvokeRoutes } from './routes/page-invoke.js';
 import { pageReadRoutes } from './routes/page-read.js';
 import { permissionRoutes } from './routes/permissions.js';
+import { piSetupRoutes } from './routes/pi-setup.js';
 import { previewCapabilityRoutes } from './routes/preview-capabilities.js';
 import { previewLogRoutes } from './routes/preview-log.js';
 import { previewRoutes } from './routes/preview.js';
@@ -626,6 +627,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/gilde-updates', gildeUpdateRoutes(ctx));
   app.route('/api/codex-setup', codexSetupRoutes(ctx));
   app.route('/api/opencode-setup', opencodeSetupRoutes(ctx));
+  app.route('/api/pi-setup', piSetupRoutes(ctx));
   app.route('/api/history', historyRoutes(ctx));
   app.route('/api/handboek', handboekRoutes(ctx));
   app.route('/api/channels', channelRoutes(ctx));

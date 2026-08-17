@@ -7,6 +7,7 @@ import {
   compareFilesByMtimeDesc,
   describeSeverities,
   fileEntryFromPath,
+  formatFileSize,
   parentDirOf,
   sortAggregates,
   sortTreeNodes,
@@ -166,5 +167,28 @@ describe('path helpers', () => {
   it('parentDirOf returns the containing folder or empty at root', () => {
     expect(parentDirOf('docs/deep/note.md')).toBe('docs/deep');
     expect(parentDirOf('root.md')).toBe('');
+  });
+});
+
+describe('formatFileSize', () => {
+  it('spells out bytes below a kilobyte', () => {
+    expect(formatFileSize(0)).toBe('0 bytes');
+    expect(formatFileSize(1)).toBe('1 byte');
+    expect(formatFileSize(1023)).toBe('1023 bytes');
+  });
+
+  it('keeps one decimal from kilobytes up so sizes stay distinguishable', () => {
+    expect(formatFileSize(1024)).toBe('1.0 KB');
+    expect(formatFileSize(3.7 * 1024)).toBe('3.7 KB');
+    expect(formatFileSize(1.4 * 1024 ** 2)).toBe('1.4 MB');
+    expect(formatFileSize(2 * 1024 ** 3)).toBe('2.0 GB');
+    expect(formatFileSize(3 * 1024 ** 4)).toBe('3.0 TB');
+    // No unit beyond TB — a petabyte file counts in thousands of them.
+    expect(formatFileSize(2048 * 1024 ** 4)).toBe('2048.0 TB');
+  });
+
+  it('returns nothing for values that are not a size', () => {
+    expect(formatFileSize(-1)).toBe('');
+    expect(formatFileSize(Number.NaN)).toBe('');
   });
 });

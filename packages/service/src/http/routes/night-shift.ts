@@ -1,9 +1,22 @@
-import { type NightShiftTaskBrief, createLogger } from '@bendyline/gezel';
+import {
+  type NightShiftTallyResponse,
+  type NightShiftTaskBrief,
+  createLogger,
+} from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { buildNightShiftReview } from '../../tasks/night-review.js';
+import { buildNightShiftTally, nightShiftTallyPeriod } from '../../tasks/night-tally.js';
 import type { ServiceContext } from '../context.js';
 
 const log = createLogger('http');
+
+/**
+ * Each tally build rescans the audit log and opens every project's content
+ * index, and the moon menu polls on a 5s cadence. A short memo keeps an
+ * open menu from sweeping the disk twelve times a minute — over a window
+ * this brief the counts barely move.
+ */
+const TALLY_TTL_MS = 15_000;
 
 /**
  * Night Shift control surface.
@@ -21,13 +34,16 @@ const log = createLogger('http');
 export function nightShiftRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
-  // One shape for /status and the /manual response: on/off, plus the
-  // quota-reserve hold summary while pending night work is parked by it.
+  // One shape for /status and the /manual response: on/off, when the period
+  // started and when the scheduled one ends, plus the quota-reserve hold
+  // summary while pending night work is parked by it.
   const statusJson = () => {
     const quotaHold = ctx.nightShift.quotaHoldStatus();
     return {
       active: ctx.nightShift.isActive(),
       source: ctx.nightShift.source(),
+      window: ctx.nightShift.windowBounds(),
+      startedAt: ctx.nightShift.startedAtIso(),
       ...(quotaHold ? { quotaHold } : {}),
     };
   };
@@ -99,6 +115,30 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
   });
 
   app.get('/power-intent', (c) => c.json(ctx.nightShift.getPowerIntent()));
+
+  // How much the shift has got through: the running period's counts, or the
+  // last window's once it's over. Deliberately the same period the review
+  // below reports on, so the numbers and the list can't describe two
+  // different nights.
+  let cached: { since: string; live: boolean; at: number; tally: NightShiftTallyResponse } | null =
+    null;
+  app.get('/tally', async (c) => {
+    const period = nightShiftTallyPeriod(new Date(), ctx.nightShift.currentWindow(), {
+      active: ctx.nightShift.isActive(),
+      startedAt: ctx.nightShift.startedAtIso(),
+    });
+    const since = period.since.toISOString();
+    const now = Date.now();
+    if (cached && cached.since === since && cached.live === period.live) {
+      if (now - cached.at < TALLY_TTL_MS) return c.json(cached.tally);
+    }
+    const tally = await buildNightShiftTally(
+      { history: ctx.history, store: ctx.store, contentIndex: ctx.contentIndex },
+      period,
+    );
+    cached = { since, live: period.live, at: now, tally };
+    return c.json(tally);
+  });
 
   // The morning review: what the most recent night window accomplished —
   // completed tasks + the reports they left, with embedded-action tallies.

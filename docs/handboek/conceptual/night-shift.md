@@ -13,8 +13,13 @@ you. Reviews get written, indexes get refreshed, translations catch up.
 In the morning there's a report waiting instead of a backlog.
 
 The moon in the title bar shows when a shift is running and what it's
-working on. You can also start one manually — stepping out for lunch is a
-perfectly good night.
+working on. It also says **when the period started and when it ends** —
+a scheduled shift closes with its window, a manual one runs until the
+work is done — and keeps a **running tally** of what the shift has got
+through: tasks finished, files indexed and reviewed, files written,
+questions raised for you. During the day the same line tells you when
+the next window opens. You can start a shift manually too — stepping out
+for lunch is a perfectly good night.
 
 ## Roles that bring their own night work
 

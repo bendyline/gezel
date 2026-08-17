@@ -152,6 +152,21 @@ Rules:
   reference implementation. This is still a keys case, not Tabs: the same
   content is being re-presented (sorted, flattened), not swapped for a
   different panel.
+- **A tray may also hold actions, not just modes** — the same icon keys in a
+  `role="toolbar"` (or `role="presentation"` when the group needs no name)
+  instead of a radiogroup, with nothing latched. Reach for it when a compact
+  row of verbs repeats down a list and the words would out-shout the content
+  they act on: the Boekwachter issue rows are the reference, where *Mark
+  read · Not an issue · Mark resolved · Fix* sat as four text links beside
+  every issue and left the message wrapping four words to a line. Three rules
+  travel with it. Put the tray on its own row under the content rather than
+  in a second column — a side rail of controls is what squeezed the text in
+  the first place. **Name the group after the row's subject**
+  (`aria-label="Actions for BW-8"`) so the keys can keep short labels instead
+  of a screen reader hearing "Mark resolved" once per row with nothing to
+  tell them apart. And when one action is more consequential than its
+  neighbours (Fix creates a task), give it the accent ink — never a second
+  latched-looking fill.
 - **Native `<input type="radio">` stays native** in dense config forms
   (folder scopes, engine settings) — the round dot is a true circle and
   keeps its shape. Reach for keys when the choice is prominent enough to
@@ -556,6 +571,18 @@ tray. Derivation lives in
 [system-notices.ts](../packages/ui/src/system-notices.ts), so the rail and
 Settings can never drift apart. The one update outcome that *is* worth
 interrupting for — a verified update waiting to install — also stays a banner.
+
+**Rows that differ only by state need the state named.** When one list holds
+items in two states that share a row shape — a queue's running turns above its
+waiting ones — the row itself says nothing: same figure, same job, same
+duration column. Split the groups with an uppercase eyebrow
+(`--text-2xs`, weight 700, `0.06em`, `--text-muted`) naming each state, and draw
+it only when both groups are present, since a single-state list is already
+answered by the section's own counts. Animation is not the signal: a 24px
+pulsing poppetje is too quiet to carry the distinction on its own. Supporting
+cues stay on the artwork, not the words — a waiting row's figure sits back to
+`opacity: 0.6` while its text keeps full contrast. The QueueMeter's provider
+sections are the reference.
 
 **Scheduled work is not a backlog.** A count in the chrome says "there is
 something here you are waiting on." Work that is deliberately parked until

@@ -6,6 +6,7 @@ import {
   LOCAL_BRIDGE_PORT_RANGE_START,
   codexBridgePortForHome,
   opencodeBridgePortForHome,
+  piBridgePortForHome,
 } from './local-bridge-port.js';
 
 describe('codexBridgePortForHome', () => {
@@ -68,6 +69,41 @@ describe('opencodeBridgePortForHome', () => {
   it('selects different ports for different user homes', () => {
     const alice = opencodeBridgePortForHome(resolve('test-homes', 'alice', '.gezel'));
     const bob = opencodeBridgePortForHome(resolve('test-homes', 'bob', '.gezel'));
+
+    expect(alice).not.toBe(bob);
+  });
+});
+
+describe('piBridgePortForHome', () => {
+  it('is deterministic and stays inside the advertised range', () => {
+    for (let index = 0; index < 1_000; index += 1) {
+      const home = resolve('test-homes', `user-${index}`, '.gezel');
+      const port = piBridgePortForHome(home);
+
+      expect(port).toBe(piBridgePortForHome(home));
+      expect(port).toBeGreaterThanOrEqual(LOCAL_BRIDGE_PORT_RANGE_START);
+      expect(port).toBeLessThanOrEqual(LOCAL_BRIDGE_PORT_RANGE_END);
+    }
+  });
+
+  it('never collides with either older bridge for the same home', () => {
+    // Three-way: stepping off a Codex collision must not land on OpenCode's
+    // port, which a single `+1` nudge would eventually do.
+    for (let index = 0; index < 5_000; index += 1) {
+      const home = resolve('test-homes', `user-${index}`, '.gezel');
+      const ports = new Set([
+        codexBridgePortForHome(home),
+        opencodeBridgePortForHome(home),
+        piBridgePortForHome(home),
+      ]);
+
+      expect(ports.size).toBe(3);
+    }
+  });
+
+  it('selects different ports for different user homes', () => {
+    const alice = piBridgePortForHome(resolve('test-homes', 'alice', '.gezel'));
+    const bob = piBridgePortForHome(resolve('test-homes', 'bob', '.gezel'));
 
     expect(alice).not.toBe(bob);
   });

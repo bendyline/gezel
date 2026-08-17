@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 /**
  * Shapes shared by Gezel's managed agent-harness integrations (Codex,
- * OpenCode). Each harness owns its own tools, sandbox, approvals, and
+ * OpenCode, pi). Each harness owns its own tools, sandbox, approvals, and
  * conversation loop; Gezel supplies inference over an authenticated loopback
  * bridge, plus a managed config file it alone writes.
  *
@@ -44,3 +44,30 @@ export const LocalHarnessBridgeSchema = z.object({
   port: z.number().int().nonnegative(),
 });
 export type LocalHarnessBridge = z.infer<typeof LocalHarnessBridgeSchema>;
+
+/**
+ * The status spine every harness card renders. Each integration `.extend()`s it
+ * with its own binary-detection fields and the identity of the artifact it
+ * publishes — those stay per-harness because they are what the card's copy and
+ * the client's method names are about.
+ */
+export const LocalHarnessStatusBaseSchema = z.object({
+  state: LocalHarnessSetupStateSchema,
+  models: z.array(LocalHarnessModelOptionSchema),
+  configuredModel: z.string().optional(),
+  recommendedModel: z.string().optional(),
+  reasons: z.array(z.string()),
+  message: z.string().optional(),
+  endpointsEnabled: z.boolean(),
+  launchCommand: z.string().min(1),
+  bridge: LocalHarnessBridgeSchema,
+  canConfigure: z.boolean(),
+  /** Whether Gezel-owned credential/state material exists and can be safely removed. */
+  canRemove: z.boolean(),
+  /**
+   * Whether a `conflict` can be resolved by backing the foreign artifact up and
+   * republishing a managed one. False for a credential conflict, which belongs
+   * to another app and is only the user's to revoke.
+   */
+  canRepair: z.boolean(),
+});

@@ -539,6 +539,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     path: string;
     content: string;
     source: FileTab;
+    /** On-disk bytes, as reported by the read. Absent for media, which never reads. */
+    size?: number;
     outsideIn?: OutsideInOpenFile;
   } | null>(null);
   const [workspaceIndexStatus, setWorkspaceIndexStatus] = useState<WorkspaceIndexStatus | null>(
@@ -3189,6 +3191,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               content={openFile.content}
                               path={openFile.path}
                               fetchBlob={fileSource.fetchBlob}
+                              {...(openFile.size === undefined ? {} : { sizeBytes: openFile.size })}
                             />
                           ) : isHtml(openFile.path) ? (
                             <HtmlFileViewer

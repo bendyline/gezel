@@ -1,6 +1,10 @@
 import { type Logger, createLogger } from '@bendyline/gezel';
 import { type ServerType, serve } from '@hono/node-server';
-import type { MiddlewareHandler } from 'hono';
+import type { Hono, MiddlewareHandler } from 'hono';
+import { bearerAuth, requireScope } from './auth.js';
+import type { ServiceContext } from './context.js';
+import { openAiErrorEnvelope } from './openai-compat/error-envelope.js';
+import { requireOpenAiEndpointsEnabled } from './openai-endpoints-gate.js';
 
 /** The fetch handler shape `@hono/node-server` binds a listener to. */
 export type LocalBridgeFetch = Parameters<typeof serve>[0]['fetch'];
@@ -192,4 +196,19 @@ async function closeServer(server: ServerType): Promise<void> {
     const timer = setTimeout(finish, 2_000);
     timer.unref?.();
   });
+}
+
+/**
+ * Guard a bridge route the way every harness bridge needs it guarded.
+ *
+ * Hono distinguishes the exact mount path from its descendants. Apply the same
+ * boundary to both so a retrieve form cannot bypass the scope check.
+ */
+export function mountAuthenticatedRoute(app: Hono, path: string, ctx: ServiceContext): void {
+  for (const pattern of [path, `${path}/*`]) {
+    app.use(pattern, openAiErrorEnvelope());
+    app.use(pattern, requireOpenAiEndpointsEnabled(ctx));
+    app.use(pattern, bearerAuth(ctx.tokenStore));
+    app.use(pattern, requireScope('openai'));
+  }
 }

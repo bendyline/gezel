@@ -499,6 +499,48 @@ describe('QueueMeter — cloud and CLI providers', () => {
   );
 });
 
+describe('QueueMeter — running vs waiting rows', () => {
+  beforeEach(() => {
+    mockLiveTurns = new Map();
+    vi.mocked(api.listGezels).mockResolvedValue({ gezels: [ALEJANDRO] } as never);
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [{ id: 'project-7', name: 'Spanish lessons' }],
+    } as never);
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'openai' } as ConfigResponse);
+  });
+
+  it('names both groups and marks the waiting rows when work is running and queued', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue(busyProviderStatus('openai'));
+
+    const { container } = render(<QueueMeter />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
+
+    const panel = await screen.findByLabelText('AI chat queue');
+    expect(within(panel).getByText('Running')).toBeInTheDocument();
+    expect(within(panel).getByText('Waiting')).toBeInTheDocument();
+    expect(container.querySelectorAll('.queue-meter-panel-item-waiting')).toHaveLength(1);
+    expect(within(panel).getByTitle('Running for 12s')).toHaveTextContent('12s');
+    expect(within(panel).getByTitle('Waiting 4s for a free slot')).toHaveTextContent('4s');
+  });
+
+  it('leaves the headings off when nothing is waiting', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'llama-cpp' } as ConfigResponse);
+    vi.mocked(api.getQueueStatus).mockResolvedValue(ACTIVE_STATUS);
+
+    render(<QueueMeter />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
+
+    const panel = await screen.findByLabelText('AI chat queue');
+    expect(within(panel).getByText('1 / 4 in flight')).toBeInTheDocument();
+    expect(within(panel).queryByText('Running')).not.toBeInTheDocument();
+    expect(within(panel).queryByText('Waiting')).not.toBeInTheDocument();
+  });
+});
+
 describe('QueueMeter — night-shift handoffs', () => {
   /** Four handoffs parked for tonight's window, engine idle. */
   const SCHEDULED_ONLY: QueueStatusResponse = {

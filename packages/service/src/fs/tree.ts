@@ -1,5 +1,5 @@
 import type { Dirent } from 'node:fs';
-import { lstat, readFile, readdir } from 'node:fs/promises';
+import { lstat, readFile, readdir, stat } from 'node:fs/promises';
 import { join, normalize } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
 import { realpathContained, safeJoin } from './safe-paths.js';
@@ -221,6 +221,23 @@ export async function safeReadTextFile(base: string, filePath: string): Promise<
   if (!full) return null;
   try {
     return await readFile(full, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * On-disk byte size of a file behind the same containment fence, or null
+ * when it is missing, unreadable, or not a regular file. The read APIs
+ * hand back UTF-8 text, whose length says nothing about the bytes — a
+ * viewer that cannot preview a file still wants to report how big it is.
+ */
+export async function safeStatFileSize(base: string, filePath: string): Promise<number | null> {
+  const full = await safeResolveRead(base, filePath);
+  if (!full) return null;
+  try {
+    const s = await stat(full);
+    return s.isFile() ? s.size : null;
   } catch {
     return null;
   }

@@ -1,14 +1,17 @@
-import type {
-  OpenCodeSetupModelOption,
-  OpenCodeSetupState,
-  OpenCodeSetupStatusResponse,
-} from '@bendyline/gezel';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import type { OpenCodeSetupStatusResponse } from '@bendyline/gezel';
+import { useCallback } from 'react';
 import { api } from '../api.js';
-import { Select } from '../primitives/index.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { HarnessSetupShell } from './harness-setup/HarnessSetupShell.js';
+import { isGezelOption, useHarnessSetupCard } from './harness-setup/useHarnessSetupCard.js';
 
-type Confirmation = 'configure' | 'repair' | 'remove' | null;
+type Confirmation =
+  | 'configure'
+  | 'repair'
+  | 'remove'
+  | 'install-plugin'
+  | 'replace-plugin'
+  | 'remove-plugin';
 
 export function OpenCodeSetupCard({
   endpointsEnabled,
@@ -17,334 +20,204 @@ export function OpenCodeSetupCard({
   endpointsEnabled: boolean;
   onChanged?: () => void | Promise<void>;
 }) {
-  const modelLabelId = useId();
-  const copyTimerRef = useRef<number | null>(null);
-  const [status, setStatus] = useState<OpenCodeSetupStatusResponse | null>(null);
-  const [model, setModel] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [confirmation, setConfirmation] = useState<Confirmation>(null);
-  const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  const applyStatus = useCallback((next: OpenCodeSetupStatusResponse) => {
-    setStatus(next);
-    if (next.configBackupPath) {
-      setNotice(`The previous file was saved as ${next.configBackupPath}.`);
-    }
-    setModel((current) => {
-      const available = new Set(next.models.map((candidate) => candidate.id));
-      if (current && available.has(current)) return current;
-      if (next.configuredModel && available.has(next.configuredModel)) {
-        return next.configuredModel;
+  const runAction = useCallback(
+    (confirmation: Confirmation, model: string): Promise<OpenCodeSetupStatusResponse> => {
+      switch (confirmation) {
+        case 'remove':
+          return api.removeOpenCodeSetup();
+        case 'install-plugin':
+          return api.installOpenCodePlugin();
+        case 'replace-plugin':
+          return api.installOpenCodePlugin({ backupConflictingPlugin: true });
+        case 'remove-plugin':
+          return api.removeOpenCodePlugin();
+        default:
+          return api.configureOpenCode({
+            model,
+            ...(confirmation === 'repair' ? { backupConflictingConfig: true } : {}),
+          });
       }
-      if (next.recommendedModel && available.has(next.recommendedModel)) {
-        return next.recommendedModel;
-      }
-      return next.models[0]?.id ?? '';
-    });
-  }, []);
+    },
+    [],
+  );
 
-  const refresh = useCallback(async () => {
-    setError(null);
-    try {
-      applyStatus(await api.getOpenCodeSetupStatus());
-    } catch (err) {
-      setError(`Could not check the OpenCode setup — ${apiErrorMessage(err)}`);
-    }
-  }, [applyStatus]);
+  const card = useHarnessSetupCard<OpenCodeSetupStatusResponse, Confirmation>({
+    label: 'OpenCode',
+    endpointsEnabled,
+    fetchStatus: () => api.getOpenCodeSetupStatus(),
+    runAction,
+    errorPrefix: actionErrorPrefix,
+    backupNotice: (next) =>
+      next.pluginBackupPath
+        ? `The previous plugin file was saved as ${next.pluginBackupPath}.`
+        : next.configBackupPath
+          ? `The previous file was saved as ${next.configBackupPath}.`
+          : null,
+    ...(onChanged ? { onChanged } : {}),
+  });
 
-  useEffect(() => {
-    void refresh();
-    return () => {
-      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
-    };
-  }, [refresh]);
-
-  const desktopMode = window.__GEZEL__?.mode;
-  const localDesktopMode =
-    desktopMode === 'local-adopt' ||
-    desktopMode === 'local-spawn-packaged' ||
-    desktopMode === 'local-spawn-dev' ||
-    desktopMode === 'embedded';
-  const remoteMode = desktopMode === 'remote';
-  const configured = status?.state === 'configured' || status?.state === 'update-needed';
-  const canLaunch =
-    status?.state === 'configured' &&
-    status.bridge.listening &&
-    endpointsEnabled &&
-    localDesktopMode;
-  const modelChanged = configured && model !== status?.configuredModel;
-  const repairable = status?.state === 'conflict' && status.canRepair;
-  const needsConfigure =
-    status?.state === 'not-configured' ||
-    status?.state === 'update-needed' ||
-    modelChanged ||
-    repairable;
-  // `canConfigure` already refuses both conflict and unavailable; repair is the
-  // one path that deliberately proceeds from a conflict.
-  const canPublish =
-    status?.state === 'conflict' ? status.canRepair : (status?.canConfigure ?? false);
-  const configureDisabled = busy || !localDesktopMode || !endpointsEnabled || !canPublish || !model;
-  const selectionDisabled = busy || !localDesktopMode || !endpointsEnabled || !canPublish;
-
-  const runConfirmedAction = useCallback(async () => {
-    if (!confirmation || busy) return;
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const next =
-        confirmation === 'remove'
-          ? await api.removeOpenCodeSetup()
-          : await api.configureOpenCode({
-              model,
-              ...(confirmation === 'repair' ? { backupConflictingConfig: true } : {}),
-            });
-      applyStatus(next);
-      setConfirmation(null);
-      void Promise.resolve(onChanged?.()).catch(() => {
-        // The setup mutation succeeded. Roster refresh is best-effort and its
-        // own four-second poll will recover without turning success into error.
-      });
-    } catch (err) {
-      setConfirmation(null);
-      setError(
-        `${confirmation === 'remove' ? 'Could not remove' : confirmation === 'repair' ? 'Could not repair' : status?.state === 'not-configured' ? 'Could not set up' : 'Could not update'} the OpenCode setup — ${apiErrorMessage(err)}`,
-      );
-    } finally {
-      setBusy(false);
-    }
-  }, [applyStatus, busy, confirmation, model, onChanged, status?.state]);
-
-  const copyLaunchCommand = useCallback(async () => {
-    if (!status?.launchCommand) return;
-    setError(null);
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('clipboard access is unavailable');
-      await navigator.clipboard.writeText(status.launchCommand);
-      setCopied(true);
-      if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = window.setTimeout(() => {
-        copyTimerRef.current = null;
-        setCopied(false);
-      }, 2_000);
-    } catch (err) {
-      setError(`Could not copy the OpenCode command — ${apiErrorMessage(err)}`);
-    }
-  }, [status?.launchCommand]);
-
-  const stateLabel = status ? opencodeStateLabel(status.state) : 'Checking…';
-  const configureLabel = repairable
+  const { status, confirmation, setConfirmation, setError, busy, copied } = card;
+  const selectedOption = status?.models.find((candidate) => candidate.id === card.model);
+  const configuredOption = status?.models.find(
+    (candidate) => candidate.id === status.configuredModel,
+  );
+  // Writing into OpenCode's own directory only makes sense once there is a
+  // managed config for the plugin to read, an OpenCode to read it, and a
+  // service running on this computer.
+  const showPluginRow =
+    card.configured &&
+    card.localDesktopMode &&
+    status?.state !== 'conflict' &&
+    status?.plugin.state !== 'unsupported';
+  const configureLabel = card.repairable
     ? 'Repair OpenCode setup…'
     : status?.state === 'not-configured'
       ? 'Set up OpenCode…'
       : 'Update OpenCode…';
-  const configuredOption = status?.models.find(
-    (candidate) => candidate.id === status.configuredModel,
-  );
-  const selectedOption = status?.models.find((candidate) => candidate.id === model);
-  const gezelOptions = status?.models.filter(isGezelOption) ?? [];
-  const rawModelOptions = status?.models.filter((candidate) => !isGezelOption(candidate)) ?? [];
 
   return (
-    <section
-      className="settings-subsection provider-card harness-setup-card"
-      aria-labelledby="opencode-setup-heading"
-    >
-      <div className="settings-card-header">
-        <h3 id="opencode-setup-heading">Use Gezel in OpenCode</h3>
-        <span
-          className={`harness-setup-state harness-setup-state--${status?.state ?? 'checking'}`}
-          aria-live="polite"
-        >
-          {stateLabel}
-        </span>
-      </div>
-
-      <p className="muted small harness-setup-intro">
-        OpenCode keeps its own tools, permissions, and conversation loop while a gezel supplies the
-        character, model, and tuning. Gezel writes its own settings file and points OpenCode at it
-        with one command — your own OpenCode configuration is never edited. Your whole eligible crew
-        is offered, so you can switch between them from OpenCode's model picker.
-      </p>
-
-      {!status && !error && <p className="muted small">Checking the OpenCode setup…</p>}
-
-      {status && (
+    <HarnessSetupShell
+      headingId="opencode-setup-heading"
+      title="Use Gezel in OpenCode"
+      status={status}
+      remoteMode={card.remoteMode}
+      localDesktopMode={card.localDesktopMode}
+      endpointsEnabled={endpointsEnabled}
+      repairable={Boolean(card.repairable)}
+      notice={card.notice}
+      error={card.error}
+      reasonsIntro="The managed setup needs an update:"
+      emptyModelsNote="No gezels or inference models compatible with the OpenCode tool loop are available yet."
+      intro={
         <>
-          {status.message && (
-            <p
-              className={
-                status.state === 'conflict' || status.state === 'unavailable'
-                  ? 'harness-setup-caution small'
-                  : 'muted small'
-              }
-            >
-              {status.message}
-            </p>
-          )}
-
-          {repairable && (
-            <p className="muted small">
-              Repair writes a fresh settings file for this Gezel and keeps a copy of the existing
-              one next to it.
-            </p>
-          )}
-
-          {notice && <p className="muted small">{notice}</p>}
-
-          {!status.opencodeInstalled && status.state !== 'unavailable' && (
-            <p className="muted small">
-              OpenCode was not found on this computer. You can prepare the setup now and use it
-              after installing OpenCode.
-            </p>
-          )}
-
-          {remoteMode && (
-            <p className="harness-setup-caution small">
-              One-click setup is unavailable while this app is connected to a remote Gezel service.
-              Configure OpenCode on the computer where you plan to run it.
-            </p>
-          )}
-
-          {!remoteMode && !localDesktopMode && (
-            <p className="harness-setup-caution small">
-              One-click setup is available in the Gezel desktop app when it is connected to your
-              user service on this computer.
-            </p>
-          )}
-
-          {!endpointsEnabled && (
-            <p className="harness-setup-caution small">
-              Turn on <strong>Allow apps to connect</strong> above before setting up or updating
-              OpenCode.
-            </p>
-          )}
-
-          {status.state === 'update-needed' && status.reasons.length > 0 && (
-            <div className="harness-setup-reasons">
-              <span className="small">The managed setup needs an update:</span>
-              <ul className="muted small">
-                {status.reasons.map((reason) => (
-                  <li key={reason}>{reason}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {configured && configuredOption && !modelChanged && (
-            <p className="muted small">
-              OpenCode starts with <strong>{configuredOption.label}</strong>.
-              {status.opencodeVersion ? ` OpenCode ${status.opencodeVersion} was found.` : ''}
-            </p>
-          )}
-
-          {canLaunch && (
-            <div className="harness-setup-command-row">
-              <span className="muted small">Start it with</span>
-              <code>{status.launchCommand}</code>
-              <button type="button" onClick={() => void copyLaunchCommand()}>
-                {copied ? 'Copied' : 'Copy command'}
-              </button>
-              <output className="sr-only" aria-live="polite">
-                {copied ? 'OpenCode launch command copied.' : ''}
-              </output>
-              <span className="muted small">Keep Gezel running while you use OpenCode.</span>
-            </div>
-          )}
-
-          {status.models.length > 0 && (status.state !== 'conflict' || repairable) && (
-            <div className="harness-setup-model-row">
-              <span id={modelLabelId}>Default gezel</span>
-              <Select.Root value={model} onValueChange={setModel} disabled={selectionDisabled}>
-                <Select.Trigger aria-labelledby={modelLabelId}>
-                  <Select.Value />
-                </Select.Trigger>
-                <Select.Content>
-                  {gezelOptions.length > 0 && (
-                    <Select.Group>
-                      <Select.Label>Gezels</Select.Label>
-                      {gezelOptions.map((candidate) => (
-                        <Select.Item key={candidate.id} value={candidate.id}>
-                          {candidate.label}
-                          {candidate.description ? ` — ${candidate.description}` : ''}
-                        </Select.Item>
-                      ))}
-                    </Select.Group>
-                  )}
-                  {gezelOptions.length > 0 && rawModelOptions.length > 0 && <Select.Separator />}
-                  {rawModelOptions.length > 0 && (
-                    <Select.Group>
-                      <Select.Label>Raw models</Select.Label>
-                      {rawModelOptions.map((candidate) => (
-                        <Select.Item key={candidate.id} value={candidate.id}>
-                          {candidate.label}
-                          {candidate.description ? ` — ${candidate.description}` : ''}
-                        </Select.Item>
-                      ))}
-                    </Select.Group>
-                  )}
-                </Select.Content>
-              </Select.Root>
-            </div>
-          )}
-
-          {status.models.length === 0 && status.state !== 'conflict' && (
-            <p className="harness-setup-caution small">
-              No gezels or inference models compatible with the OpenCode tool loop are available
-              yet.
-            </p>
-          )}
-
-          <div className="harness-setup-actions">
-            {needsConfigure && (
-              <button
-                type="button"
-                className="primary"
-                disabled={configureDisabled}
-                onClick={() => {
-                  setError(null);
-                  setConfirmation(repairable ? 'repair' : 'configure');
-                }}
-              >
-                {configureLabel}
-              </button>
-            )}
-            {status.canRemove && (
-              <button
-                type="button"
-                disabled={busy || !localDesktopMode}
-                onClick={() => {
-                  setError(null);
-                  setConfirmation('remove');
-                }}
-              >
-                {status.state === 'conflict' ? 'Clear Gezel setup…' : 'Remove setup…'}
-              </button>
-            )}
-            {error && (
-              <button type="button" onClick={() => void refresh()} disabled={busy}>
-                Try again
-              </button>
-            )}
-          </div>
+          OpenCode keeps its own tools, permissions, and conversation loop while a gezel supplies
+          the character, model, and tuning. Gezel writes its own settings file and points OpenCode
+          at it with one command. You can also let Gezel add a small plugin of its own to OpenCode,
+          so the gezel provider is simply there in every session. Either way, your own OpenCode
+          settings, conversations, and permissions are never edited. Your whole eligible crew is
+          offered, so you can switch between them from OpenCode's model picker.
         </>
-      )}
-
-      {error && (
-        <p className="error small harness-setup-error" role="alert">
-          {error}
-        </p>
-      )}
-      {!status && error && (
-        <div className="harness-setup-actions">
-          <button type="button" onClick={() => void refresh()} disabled={busy}>
-            Try again
-          </button>
-        </div>
-      )}
-
+      }
+      repairExplainer="Repair writes a fresh settings file for this Gezel and keeps a copy of the existing one next to it."
+      {...(status && !status.opencodeInstalled
+        ? {
+            notInstalledNote:
+              'OpenCode was not found on this computer. You can prepare the setup now and use it after installing OpenCode.',
+          }
+        : {})}
+      {...(card.configured && configuredOption && !card.modelChanged
+        ? {
+            configuredNote: (
+              <>
+                OpenCode starts with <strong>{configuredOption.label}</strong>.
+                {status?.opencodeVersion ? ` OpenCode ${status.opencodeVersion} was found.` : ''}
+              </>
+            ),
+          }
+        : {})}
+      {...(card.canLaunch && status
+        ? {
+            commandRow: (
+              <div className="harness-setup-command-row">
+                <span className="muted small">Start it with</span>
+                <code>{status.launchCommand}</code>
+                <button type="button" onClick={() => void card.copyLaunchCommand()}>
+                  {copied ? 'Copied' : 'Copy command'}
+                </button>
+                <output className="sr-only" aria-live="polite">
+                  {copied ? 'OpenCode launch command copied.' : ''}
+                </output>
+                <span className="muted small">Keep Gezel running while you use OpenCode.</span>
+              </div>
+            ),
+          }
+        : {})}
+      modelRow={{
+        label: 'Default gezel',
+        value: card.model,
+        onChange: card.setModel,
+        disabled: card.selectionDisabled,
+      }}
+      {...(showPluginRow && status
+        ? {
+            extraRows: (
+              <p className="muted small">
+                {status.plugin.state === 'installed' || status.plugin.state === 'stale' ? (
+                  <>
+                    Gezel is in OpenCode's provider list without the command, through{' '}
+                    <code>{status.plugin.path}</code>.
+                  </>
+                ) : status.plugin.state === 'conflict' ? (
+                  status.plugin.message
+                ) : (
+                  <>
+                    Rather not use the command every time? Gezel can add its own plugin file to
+                    OpenCode so the crew shows up in every session.
+                  </>
+                )}
+              </p>
+            ),
+          }
+        : {})}
+      actions={
+        <>
+          {card.needsConfigure && (
+            <button
+              type="button"
+              className="primary"
+              disabled={card.configureDisabled}
+              onClick={() => {
+                setError(null);
+                setConfirmation(card.repairable ? 'repair' : 'configure');
+              }}
+            >
+              {configureLabel}
+            </button>
+          )}
+          {showPluginRow && status && (status.plugin.canInstall || status.plugin.canReplace) && (
+            <button
+              type="button"
+              disabled={busy || !card.localDesktopMode}
+              onClick={() => {
+                setError(null);
+                setConfirmation(status.plugin.canReplace ? 'replace-plugin' : 'install-plugin');
+              }}
+            >
+              {status.plugin.canReplace ? 'Replace OpenCode plugin…' : 'Add to OpenCode…'}
+            </button>
+          )}
+          {showPluginRow && status?.plugin.canRemove && (
+            <button
+              type="button"
+              disabled={busy || !card.localDesktopMode}
+              onClick={() => {
+                setError(null);
+                setConfirmation('remove-plugin');
+              }}
+            >
+              Remove from OpenCode…
+            </button>
+          )}
+          {status?.canRemove && (
+            <button
+              type="button"
+              disabled={busy || !card.localDesktopMode}
+              onClick={() => {
+                setError(null);
+                setConfirmation('remove');
+              }}
+            >
+              {status.state === 'conflict' ? 'Clear Gezel setup…' : 'Remove setup…'}
+            </button>
+          )}
+          {card.error && (
+            <button type="button" onClick={() => void card.refresh()} disabled={busy}>
+              Try again
+            </button>
+          )}
+        </>
+      }
+    >
       <ConfirmDialog
         open={confirmation === 'configure'}
         title={
@@ -355,7 +228,7 @@ export function OpenCodeSetupCard({
         message={
           <>
             Gezel will {status?.state === 'not-configured' ? 'create' : 'update'} its own OpenCode
-            settings file for <strong>{selectedOption?.label ?? model}</strong>.{' '}
+            settings file for <strong>{selectedOption?.label ?? card.model}</strong>.{' '}
             {selectedOption && isGezelOption(selectedOption) ? (
               <>
                 This gezel&apos;s character, {selectedOption.modelLabel ?? 'model'}, and tuning will
@@ -375,7 +248,7 @@ export function OpenCodeSetupCard({
           </>
         }
         confirmLabel={status?.state === 'not-configured' ? 'Set up OpenCode' : 'Update OpenCode'}
-        onConfirm={runConfirmedAction}
+        onConfirm={card.runConfirmedAction}
         onCancel={() => setConfirmation(null)}
       />
 
@@ -385,7 +258,7 @@ export function OpenCodeSetupCard({
         message={
           <>
             Gezel will write a working settings file for{' '}
-            <strong>{selectedOption?.label ?? model}</strong>, connected to this copy of Gezel.
+            <strong>{selectedOption?.label ?? card.model}</strong>, connected to this copy of Gezel.
             {status?.configPath ? (
               <>
                 {' '}
@@ -399,7 +272,7 @@ export function OpenCodeSetupCard({
           </>
         }
         confirmLabel="Repair setup"
-        onConfirm={runConfirmedAction}
+        onConfirm={card.runConfirmedAction}
         onCancel={() => setConfirmation(null)}
       />
 
@@ -412,47 +285,91 @@ export function OpenCodeSetupCard({
         }
         message={
           <>
-            This removes only Gezel's own OpenCode settings file, state, and credential. It does not
-            uninstall OpenCode or touch your own configuration and sessions.
+            This removes only Gezel's own OpenCode settings file, state, and credential
+            {status?.plugin.canRemove ? (
+              <>
+                , along with the plugin file Gezel added at <code>{status.plugin.path}</code>
+              </>
+            ) : null}
+            . It does not uninstall OpenCode or touch your own configuration and sessions.
           </>
         }
         confirmLabel={status?.state === 'conflict' ? 'Clear Gezel setup' : 'Remove setup'}
         danger
-        onConfirm={runConfirmedAction}
+        onConfirm={card.runConfirmedAction}
         onCancel={() => setConfirmation(null)}
       />
-    </section>
+
+      <ConfirmDialog
+        open={confirmation === 'install-plugin' || confirmation === 'replace-plugin'}
+        title={
+          confirmation === 'replace-plugin'
+            ? 'Replace the plugin file in OpenCode?'
+            : 'Add Gezel to OpenCode?'
+        }
+        message={
+          <>
+            Gezel will add one file of its own
+            {status?.plugin.path ? (
+              <>
+                {' '}
+                at <code>{status.plugin.path}</code>
+              </>
+            ) : null}
+            , so every OpenCode session on this computer offers the <strong>gezel</strong> provider
+            without the command above. It holds no password — it reads Gezel's own settings when
+            OpenCode starts, and does nothing at all when Gezel is not running. It does not change
+            which model OpenCode starts with; pick a gezel from OpenCode's own model picker. Your
+            own OpenCode configuration, sessions, and permissions stay untouched, and{' '}
+            <code>opencode --pure</code> always starts without it.
+            {confirmation === 'replace-plugin' ? (
+              <> The file it replaces is kept as a .backup copy beside it, so nothing is lost.</>
+            ) : null}
+          </>
+        }
+        confirmLabel={confirmation === 'replace-plugin' ? 'Replace plugin' : 'Add to OpenCode'}
+        onConfirm={card.runConfirmedAction}
+        onCancel={() => setConfirmation(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmation === 'remove-plugin'}
+        title="Remove Gezel from OpenCode?"
+        message={
+          <>
+            This deletes the plugin file Gezel added
+            {status?.plugin.path ? (
+              <>
+                {' '}
+                at <code>{status.plugin.path}</code>
+              </>
+            ) : null}
+            . OpenCode stops offering the gezel provider unless you start it with the command on
+            this card. The rest of the setup, and everything of your own, stays as it is.
+          </>
+        }
+        confirmLabel="Remove from OpenCode"
+        onConfirm={card.runConfirmedAction}
+        onCancel={() => setConfirmation(null)}
+      />
+    </HarnessSetupShell>
   );
 }
 
-function isGezelOption(option: OpenCodeSetupModelOption): boolean {
-  return option.kind === 'gezel' || option.id.startsWith('gezel:');
-}
-
-function opencodeStateLabel(state: OpenCodeSetupState): string {
-  switch (state) {
-    case 'not-configured':
-      return 'Not configured';
-    case 'configured':
-      return 'Configured';
-    case 'update-needed':
-      return 'Update needed';
-    case 'conflict':
-      return 'Needs attention';
-    case 'unavailable':
-      return 'Unavailable';
+function actionErrorPrefix(confirmation: Confirmation, state: string | undefined): string {
+  switch (confirmation) {
+    case 'remove':
+      return 'Could not remove the OpenCode setup';
+    case 'repair':
+      return 'Could not repair the OpenCode setup';
+    case 'install-plugin':
+    case 'replace-plugin':
+      return 'Could not add Gezel to OpenCode';
+    case 'remove-plugin':
+      return 'Could not remove Gezel from OpenCode';
+    default:
+      return state === 'not-configured'
+        ? 'Could not set up the OpenCode setup'
+        : 'Could not update the OpenCode setup';
   }
-}
-
-function apiErrorMessage(error: unknown): string {
-  if (error && typeof error === 'object' && 'details' in error) {
-    const details = (error as { details?: unknown }).details;
-    if (typeof details === 'string' && details) return details;
-    if (details && typeof details === 'object') {
-      const record = details as Record<string, unknown>;
-      if (typeof record.message === 'string' && record.message) return record.message;
-      if (typeof record.error === 'string' && record.error) return record.error;
-    }
-  }
-  return error instanceof Error ? error.message : String(error);
 }

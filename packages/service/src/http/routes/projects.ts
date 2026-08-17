@@ -964,7 +964,11 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     }
     const content = await ctx.store.readProjectArtifact(id, filePath);
     if (content === null) return c.json({ error: 'not found' }, 404);
-    return c.json({ path: filePath, content });
+    // Byte size rides along so a viewer that cannot preview the content
+    // (binaries) can still say how big the file is. The decoded string's
+    // length does not answer that — UTF-8 replacement chars destroy it.
+    const size = await ctx.store.projectArtifactSize(id, filePath);
+    return c.json({ path: filePath, content, ...(size === null ? {} : { size }) });
   });
 
   app.get('/:id/artifacts/resolve', async (c) => {
@@ -1402,7 +1406,15 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       }
       const content = await ctx.store.readProjectWorkspaceFile(id, filePath);
       if (content === null) return c.json({ error: 'not found' }, 404);
-      return c.json({ path: filePath, content });
+      // Byte size rides along so a viewer that cannot preview the content
+      // (binaries) can still say how big the file is. The decoded string's
+      // length does not answer that — UTF-8 replacement chars destroy it.
+      const info = await ctx.store.statProjectWorkspacePath(id, filePath);
+      return c.json({
+        path: filePath,
+        content,
+        ...(info.kind === 'file' && info.size !== undefined ? { size: info.size } : {}),
+      });
     } catch (err) {
       const mapped = mapWorkspaceError(err);
       return c.json(mapped.body, mapped.status as 400 | 403 | 500);

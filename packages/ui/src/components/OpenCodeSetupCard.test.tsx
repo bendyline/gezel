@@ -5,6 +5,8 @@ import { primitivesMock } from '../test-utils/primitivesMock.js';
 const getOpenCodeSetupStatus = vi.fn();
 const configureOpenCode = vi.fn();
 const removeOpenCodeSetup = vi.fn();
+const installOpenCodePlugin = vi.fn();
+const removeOpenCodePlugin = vi.fn();
 const writeClipboard = vi.fn();
 
 vi.mock('../api.js', () => ({
@@ -12,6 +14,8 @@ vi.mock('../api.js', () => ({
     getOpenCodeSetupStatus,
     configureOpenCode,
     removeOpenCodeSetup,
+    installOpenCodePlugin,
+    removeOpenCodePlugin,
   },
 }));
 vi.mock('../primitives/index.js', () => primitivesMock);
@@ -79,6 +83,22 @@ const MODELS = [
 ];
 
 const CONFIG_PATH = '/Users/test/.gezel/integrations/opencode/opencode.json';
+const PLUGIN_PATH = '/Users/test/.config/opencode/plugins/gezel.js';
+
+type PluginState = 'not-installed' | 'installed' | 'stale' | 'conflict' | 'unsupported';
+
+function pluginStatus(state: PluginState = 'not-installed') {
+  return {
+    state,
+    path: PLUGIN_PATH,
+    canInstall: state === 'not-installed' || state === 'stale',
+    canRemove: state === 'installed' || state === 'stale',
+    canReplace: state === 'conflict',
+    ...(state === 'conflict'
+      ? { message: `${PLUGIN_PATH} was written by another Gezel installation or changed by hand.` }
+      : {}),
+  };
+}
 
 function setupStatus(
   overrides: Partial<{
@@ -96,10 +116,13 @@ function setupStatus(
     canRemove: boolean;
     canRepair: boolean;
     configBackupPath: string;
+    plugin: ReturnType<typeof pluginStatus>;
+    pluginBackupPath: string;
   }> = {},
 ) {
   return {
     state: 'not-configured' as const,
+    plugin: pluginStatus(),
     models: MODELS,
     recommendedModel: MODELS[0]!.id,
     reasons: [],
@@ -268,5 +291,105 @@ describe('OpenCodeSetupCard', () => {
     expect(await screen.findByText(/OpenCode was not found on this computer/)).toBeInTheDocument();
     // No version floor to enforce, so preparing ahead of install stays allowed.
     expect(screen.getByRole('button', { name: 'Set up OpenCode…' })).toBeEnabled();
+  });
+
+  it('adds the plugin only after confirming what lands in the user’s OpenCode', async () => {
+    getOpenCodeSetupStatus.mockResolvedValue(
+      setupStatus({ state: 'configured', configuredModel: MODELS[0]!.id }),
+    );
+    installOpenCodePlugin.mockResolvedValue(
+      setupStatus({
+        state: 'configured',
+        configuredModel: MODELS[0]!.id,
+        plugin: pluginStatus('installed'),
+      }),
+    );
+
+    render(<OpenCodeSetupCard endpointsEnabled />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add to OpenCode…' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Add Gezel to OpenCode?' });
+    expect(dialog).toHaveTextContent(PLUGIN_PATH);
+    // The promise that survives this feature is add-not-edit; keep it on the
+    // confirmation, where the decision is actually made.
+    expect(dialog).toHaveTextContent(/holds no password/);
+    expect(dialog).toHaveTextContent(
+      /own OpenCode configuration, sessions, and permissions stay untouched/,
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add to OpenCode' }));
+
+    await waitFor(() => expect(installOpenCodePlugin).toHaveBeenCalledOnce());
+    expect(installOpenCodePlugin).toHaveBeenCalledWith();
+    expect(await screen.findByText(new RegExp(PLUGIN_PATH))).toBeInTheDocument();
+  });
+
+  it('removes the plugin behind its own confirmation', async () => {
+    getOpenCodeSetupStatus.mockResolvedValue(
+      setupStatus({
+        state: 'configured',
+        configuredModel: MODELS[0]!.id,
+        plugin: pluginStatus('installed'),
+      }),
+    );
+    removeOpenCodePlugin.mockResolvedValue(
+      setupStatus({ state: 'configured', configuredModel: MODELS[0]!.id }),
+    );
+
+    render(<OpenCodeSetupCard endpointsEnabled />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove from OpenCode…' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Remove Gezel from OpenCode?' });
+    expect(dialog).toHaveTextContent(PLUGIN_PATH);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove from OpenCode' }));
+
+    await waitFor(() => expect(removeOpenCodePlugin).toHaveBeenCalledOnce());
+    expect(removeOpenCodeSetup).not.toHaveBeenCalled();
+  });
+
+  it('never overwrites a plugin file it does not own', async () => {
+    getOpenCodeSetupStatus.mockResolvedValue(
+      setupStatus({
+        state: 'configured',
+        configuredModel: MODELS[0]!.id,
+        plugin: pluginStatus('conflict'),
+      }),
+    );
+    installOpenCodePlugin.mockResolvedValue(
+      setupStatus({
+        state: 'configured',
+        configuredModel: MODELS[0]!.id,
+        plugin: pluginStatus('installed'),
+        pluginBackupPath: `${PLUGIN_PATH}.backup`,
+      }),
+    );
+
+    render(<OpenCodeSetupCard endpointsEnabled />);
+
+    expect(await screen.findByText(/written by another Gezel installation/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add to OpenCode…' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Replace OpenCode plugin…' }));
+    fireEvent.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Replace plugin' }),
+    );
+
+    await waitFor(() =>
+      expect(installOpenCodePlugin).toHaveBeenCalledWith({ backupConflictingPlugin: true }),
+    );
+    expect(await screen.findByText(/saved as .*\.backup/)).toBeInTheDocument();
+  });
+
+  it('hides the plugin action when OpenCode cannot host it', async () => {
+    getOpenCodeSetupStatus.mockResolvedValue(
+      setupStatus({
+        state: 'configured',
+        configuredModel: MODELS[0]!.id,
+        plugin: pluginStatus('unsupported'),
+      }),
+    );
+
+    render(<OpenCodeSetupCard endpointsEnabled />);
+
+    expect(await screen.findByText('Configured')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add to OpenCode…' })).not.toBeInTheDocument();
   });
 });

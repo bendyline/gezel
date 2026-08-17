@@ -56,6 +56,7 @@ import type {
   CompleteStepResponse,
   ConfigureCodexRequest,
   ConfigureOpenCodeRequest,
+  ConfigurePiRequest,
   CopilotAvailability,
   CopyArtifactToWorkspaceRequest,
   CopyArtifactToWorkspaceResponse,
@@ -169,8 +170,10 @@ import type {
   ImportCustomMcpConfigRequest,
   ImportCustomMcpConfigResponse,
   InsertAtMarkerInProjectWorkspaceFileRequest,
+  InstallOpenCodePluginRequest,
   InstallPackageRequest,
   InstallPackageResponse,
+  InstallPiExtensionRequest,
   InstalledToolset,
   InvokePageToolRequest,
   InvokePageToolResponse,
@@ -215,7 +218,10 @@ import type {
   NativeEngineResolveEvent,
   NativeEngineStatusResponse,
   NewCraftbookStep,
+  NightShiftQuotaHoldReason,
   NightShiftReviewResponse,
+  NightShiftStatusResponse,
+  NightShiftTallyResponse,
   NightShiftTasksResponse,
   OpenCodeSetupStatusResponse,
   OutlineFileRequest,
@@ -225,6 +231,7 @@ import type {
   PageReadRequest,
   PageReadResponse,
   PendingImports,
+  PiSetupStatusResponse,
   Poppetje,
   PreviewLogEntry,
   ProjectAboutPreviewRequest,
@@ -476,28 +483,12 @@ export interface UsageResponse {
   lastUpdated: string | null;
 }
 
-/** One provider-level reason night work is being held by the quota reserve. */
-export interface NightShiftQuotaHoldReason {
-  provider: ProviderName;
-  /** Provider bucket id that tripped the reserve (e.g. "premium_interactions"). */
-  bucket: string;
-  /** Derived remaining, 0-100. */
-  remainingPercent: number;
-  /** Effective floor that triggered the hold, 0-100. */
-  floorPercent: number;
-  rule: 'overall' | 'per-day';
-  resetDate?: string;
-}
-
-export interface NightShiftStatusResponse {
-  active: boolean;
-  source: 'scheduled' | 'manual' | null;
-  /** Present while >=1 pending night task is held by the quota reserve. */
-  quotaHold?: {
-    heldTaskCount: number;
-    reasons: NightShiftQuotaHoldReason[];
-  };
-}
+/**
+ * Night Shift status + its quota-hold reasons live in core's schema module
+ * with the rest of the night-shift wire types; re-exported here so the
+ * long-standing `@bendyline/gezel-client` import path keeps working.
+ */
+export type { NightShiftQuotaHoldReason, NightShiftStatusResponse };
 
 /**
  * Per-provider queue state — lets the UI render a "3 waiting on
@@ -2291,6 +2282,40 @@ export class GezelClient {
     return this.request('DELETE', '/api/opencode-setup');
   }
 
+  /** Add the Gezel-owned plugin to OpenCode's own config directory. */
+  installOpenCodePlugin(
+    body: InstallOpenCodePluginRequest = {},
+  ): Promise<OpenCodeSetupStatusResponse> {
+    return this.request('PUT', '/api/opencode-setup/plugin', body);
+  }
+
+  removeOpenCodePlugin(): Promise<OpenCodeSetupStatusResponse> {
+    return this.request('DELETE', '/api/opencode-setup/plugin');
+  }
+
+  // ---------- pi local-model setup ----------
+
+  getPiSetupStatus(): Promise<PiSetupStatusResponse> {
+    return this.request('GET', '/api/pi-setup');
+  }
+
+  configurePi(body: ConfigurePiRequest): Promise<PiSetupStatusResponse> {
+    return this.request('PUT', '/api/pi-setup', body);
+  }
+
+  removePiSetup(): Promise<PiSetupStatusResponse> {
+    return this.request('DELETE', '/api/pi-setup');
+  }
+
+  /** Copy the Gezel-owned extension into pi's own agent directory. */
+  installPiExtension(body: InstallPiExtensionRequest = {}): Promise<PiSetupStatusResponse> {
+    return this.request('PUT', '/api/pi-setup/extension', body);
+  }
+
+  removePiExtension(): Promise<PiSetupStatusResponse> {
+    return this.request('DELETE', '/api/pi-setup/extension');
+  }
+
   // ---------- live gilde content updates ----------
 
   getGildeUpdateStatus(): Promise<GildeUpdateStatusResponse> {
@@ -2322,6 +2347,11 @@ export class GezelClient {
   /** The morning review: what the most recent night window accomplished. */
   getNightShiftReview(): Promise<NightShiftReviewResponse> {
     return this.request('GET', '/api/night-shift/review');
+  }
+
+  /** Counted work for the running shift, else the last window that ran. */
+  getNightShiftTally(): Promise<NightShiftTallyResponse> {
+    return this.request('GET', '/api/night-shift/tally');
   }
 
   // ---------- suggested night work ----------
@@ -5156,7 +5186,10 @@ export class GezelClient {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/artifacts${qs}`);
   }
 
-  readProjectArtifact(id: string, filePath: string): Promise<{ path: string; content: string }> {
+  readProjectArtifact(
+    id: string,
+    filePath: string,
+  ): Promise<{ path: string; content: string; size?: number }> {
     return this.request(
       'GET',
       `/api/projects/${encodeURIComponent(id)}/artifacts/read?path=${encodeURIComponent(filePath)}`,
@@ -5405,7 +5438,7 @@ export class GezelClient {
   readProjectWorkspaceFile(
     id: string,
     filePath: string,
-  ): Promise<{ path: string; content: string }> {
+  ): Promise<{ path: string; content: string; size?: number }> {
     return this.request(
       'GET',
       `/api/projects/${encodeURIComponent(id)}/workspace/read?path=${encodeURIComponent(filePath)}`,
@@ -6414,6 +6447,12 @@ export class GezelClient {
     kind?: 'document' | 'project-document' | 'artifact';
     /** Only present when a fuzzy fallback resolved the path. */
     resolvedFrom?: { projectId: string; relativePath: string };
+    /**
+     * On-disk byte size of the file. Only present for a verbatim read of a
+     * shared-library document — the converted and fuzzy-fallback branches
+     * return content that no single file's size describes.
+     */
+    size?: number;
   }> {
     const as = opts?.as ? `&as=${opts.as}` : '';
     return this.request('GET', `/api/documents/read?path=${encodeURIComponent(filePath)}${as}`);

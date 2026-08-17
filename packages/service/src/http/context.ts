@@ -28,6 +28,7 @@ import type { MemoryManager } from '../memory/manager.js';
 import type { EnsureModelOrchestrator } from '../models/ensure.js';
 import type { ChatModelInstallRegistries } from '../models/install-jobs.js';
 import type { OpenCodeSetupManager } from '../opencode-setup/manager.js';
+import type { PiSetupManager } from '../pi-setup/manager.js';
 import type { PreviewLogBuffer } from '../preview-log/buffer.js';
 import type { SpeechToTextProviderManager } from '../providers/audio/stt-manager.js';
 import type { TextToSpeechProviderManager } from '../providers/audio/tts-manager.js';
@@ -254,6 +255,8 @@ export interface ServiceContext {
   codexSetup: CodexSetupManager;
   /** Gezel-owned OpenCode config, credential, and loopback bridge lifecycle. */
   opencodeSetup: OpenCodeSetupManager;
+  /** Gezel-owned pi extension, model list, credential, and loopback bridge lifecycle. */
+  piSetup: PiSetupManager;
   /**
    * Hex SHA-256 of the daemon's current TLS cert DER, when serving HTTPS.
    * `/v1/identity` signs this with the device identity key so a paired client

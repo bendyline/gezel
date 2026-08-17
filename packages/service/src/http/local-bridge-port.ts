@@ -50,6 +50,21 @@ export function opencodeBridgePortForHome(home: string): number {
   return port === LOCAL_BRIDGE_PORT_RANGE_END ? LOCAL_BRIDGE_PORT_RANGE_START : port + 1;
 }
 
+/**
+ * pi is the newest harness, so it is the one that yields: Codex's port is named
+ * by profiles already on user disks, and OpenCode's by published config files
+ * and the plugin that reads them. Stepping must loop rather than add one, since
+ * a single step can land on the *other* harness's port.
+ */
+export function piBridgePortForHome(home: string): number {
+  const taken = new Set([codexBridgePortForHome(home), opencodeBridgePortForHome(home)]);
+  let port = bridgePortForHome(home, 'pi');
+  while (taken.has(port)) {
+    port = port === LOCAL_BRIDGE_PORT_RANGE_END ? LOCAL_BRIDGE_PORT_RANGE_START : port + 1;
+  }
+  return port;
+}
+
 function canonicalPath(path: string): string {
   try {
     return realpathSync(path);

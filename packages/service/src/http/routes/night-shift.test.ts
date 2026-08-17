@@ -162,12 +162,20 @@ describe('night-shift status', () => {
     ],
   };
 
+  const WINDOW = {
+    start: '2026-07-29T22:00:00.000Z',
+    end: '2026-07-30T06:00:00.000Z',
+    open: false,
+  };
+
   function statusCtx(quotaHold: typeof HOLD_STATUS | null): ServiceContext {
     return {
       nightShift: {
         isActive: () => false,
         source: () => null,
         quotaHoldStatus: () => quotaHold,
+        windowBounds: () => WINDOW,
+        startedAtIso: () => null,
       },
     } as unknown as ServiceContext;
   }
@@ -178,6 +186,8 @@ describe('night-shift status', () => {
     expect(await response.json()).toEqual({
       active: false,
       source: null,
+      window: WINDOW,
+      startedAt: null,
       quotaHold: HOLD_STATUS,
     });
   });
@@ -185,6 +195,93 @@ describe('night-shift status', () => {
   it('omits quotaHold entirely when nothing is held', async () => {
     const response = await nightShiftRoutes(statusCtx(null)).request('/status');
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ active: false, source: null });
+    expect(await response.json()).toEqual({
+      active: false,
+      source: null,
+      window: WINDOW,
+      startedAt: null,
+    });
+  });
+
+  // The period the menu names has to come from the daemon: the UI can't
+  // derive "when did this shift actually start" from the window hours —
+  // a sleeping machine or mid-window work makes the two differ.
+  it('names the running period with its own start', async () => {
+    const ctx = {
+      nightShift: {
+        isActive: () => true,
+        source: () => 'scheduled',
+        quotaHoldStatus: () => null,
+        windowBounds: () => ({ ...WINDOW, open: true }),
+        startedAtIso: () => '2026-07-29T23:12:00.000Z',
+      },
+    } as unknown as ServiceContext;
+
+    const body = (await (await nightShiftRoutes(ctx).request('/status')).json()) as {
+      startedAt: string;
+      window: { open: boolean };
+    };
+    expect(body.startedAt).toBe('2026-07-29T23:12:00.000Z');
+    expect(body.window.open).toBe(true);
+  });
+});
+
+describe('night-shift tally', () => {
+  function tallyCtx(events: Array<{ kind: string; at: string; details?: unknown }>) {
+    let historyCalls = 0;
+    const ctx = {
+      nightShift: {
+        isActive: () => true,
+        currentWindow: () => ({ startHour: 22, endHour: 6 }),
+        startedAtIso: () => new Date(Date.now() - 60 * 60_000).toISOString(),
+      },
+      history: {
+        listEvents: async () => {
+          historyCalls++;
+          return events;
+        },
+      },
+      store: { listProjects: async () => [{ id: 'p1' }] },
+      contentIndex: {
+        workCountsSince: async () => ({ summarized: 42, reviewed: 7, described: 2 }),
+      },
+    } as unknown as ServiceContext;
+    return { ctx, calls: () => historyCalls };
+  }
+
+  it('counts the finished work of the period across the log and the index', async () => {
+    const at = new Date().toISOString();
+    const { ctx } = tallyCtx([
+      { kind: 'task.status.changed', at, details: { status: 'complete' } },
+      { kind: 'task.status.changed', at, details: { status: 'paused' } },
+      { kind: 'task.step.completed', at },
+      { kind: 'workspace.write', at },
+      { kind: 'tool.called', at },
+    ]);
+
+    const body = (await (await nightShiftRoutes(ctx).request('/tally')).json()) as Record<
+      string,
+      unknown
+    >;
+    expect(body).toMatchObject({
+      live: true,
+      tasksCompleted: 1,
+      stepsCompleted: 1,
+      filesWritten: 1,
+      toolCalls: 1,
+      filesIndexed: 42,
+      filesReviewed: 7,
+      mediaDescribed: 2,
+    });
+  });
+
+  // The menu polls every 5s; the build behind it sweeps the audit log and
+  // opens every project's index.
+  it('memoizes the build across a poll cadence', async () => {
+    const { ctx, calls } = tallyCtx([]);
+    const routes = nightShiftRoutes(ctx);
+    await routes.request('/tally');
+    await routes.request('/tally');
+    expect(calls()).toBe(1);
   });
 });

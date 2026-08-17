@@ -1,6 +1,7 @@
 import type {
   ChatEventEnvelope,
   NightShiftReviewResponse,
+  NightShiftTallyResponse,
   NightShiftTasksResponse,
   RecentTab,
   RecentTabArea,
@@ -959,6 +960,7 @@ function NightShiftMenu({
   const [tasks, setTasks] = useState<NightShiftTasksResponse | null>(null);
   const [review, setReview] = useState<NightShiftReviewResponse | null>(null);
   const [status, setStatus] = useState<NightShiftStatusResponse | null>(null);
+  const [tally, setTally] = useState<NightShiftTallyResponse | null>(null);
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
@@ -1001,6 +1003,7 @@ function NightShiftMenu({
     if (!open) {
       setTasks(null);
       setStatus(null);
+      setTally(null);
       return;
     }
     let cancelled = false;
@@ -1013,8 +1016,9 @@ function NightShiftMenu({
         .catch(() => {
           /* swallow — the menu still shows the status + action */
         });
-      // The quota-hold detail rides the same poll: it explains why queued
-      // work isn't moving, so it should track the same refresh cadence.
+      // The quota-hold detail and the window bounds ride the same poll: one
+      // explains why queued work isn't moving, the other counts down to the
+      // window's close, and both should track the same refresh cadence.
       api
         .getNightShiftStatus()
         .then((s) => {
@@ -1022,6 +1026,15 @@ function NightShiftMenu({
         })
         .catch(() => {
           /* swallow — the pill's SSE state remains the on/off truth */
+        });
+      // Counted work for the period. Service-side memo absorbs this cadence.
+      api
+        .getNightShiftTally()
+        .then((t) => {
+          if (!cancelled) setTally(t);
+        })
+        .catch(() => {
+          /* swallow — an unavailable tally just hides its block */
         });
     };
     load();
@@ -1045,6 +1058,13 @@ function NightShiftMenu({
   const hasWork =
     tasks !== null &&
     (backgroundWork.length > 0 || tasks.active.length > 0 || tasks.upcoming.length > 0);
+  const periodLine = nightShiftPeriodLine(state, status);
+  const tallyItems = tally ? nightShiftTallyItems(tally) : [];
+  // The review reports on a window that may still be running — calling that
+  // "last night" at 2am, directly under a live tally, reads as a different
+  // night's work when it is in fact tonight's.
+  const reviewHeading =
+    review && Date.parse(review.windowEnd) > Date.now() ? 'Finished so far' : 'Done last night';
 
   return (
     <DropdownMenu.Root open={open} onOpenChange={handleOpenChange}>
@@ -1089,10 +1109,28 @@ function NightShiftMenu({
             {state.active
               ? `Running — ${state.source === 'manual' ? 'manual shift' : 'scheduled window'}`
               : 'Not running'}
+            {periodLine && <span className="app-nightshift-period">{periodLine}</span>}
             {status?.quotaHold && (
               <span className="app-nightshift-quota-hold">{quotaHoldLine(status.quotaHold)}</span>
             )}
           </div>
+          {tallyItems.length > 0 && tally && (
+            <div className="app-nightshift-tally">
+              <div className="app-nightshift-task-heading">
+                {tally.live ? 'So far this shift' : 'Last night'}
+              </div>
+              <div className="app-nightshift-tally-items">
+                {tallyItems.map((item) => (
+                  <span className="app-nightshift-tally-item" key={item.key}>
+                    <span className="app-nightshift-tally-count">
+                      {item.count.toLocaleString()}
+                    </span>{' '}
+                    {item.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           {hasWork && tasks && (
             <div className="app-nightshift-tasks">
               {(backgroundWork.length > 0 || tasks.active.length > 0) && (
@@ -1129,7 +1167,7 @@ function NightShiftMenu({
           {review && (review.tasksCompleted.length > 0 || review.reports.length > 0) && (
             <div className="app-nightshift-tasks">
               <div className="app-nightshift-task-group">
-                <div className="app-nightshift-task-heading">Done last night</div>
+                <div className="app-nightshift-task-heading">{reviewHeading}</div>
                 {review.reports.map((r) => (
                   <button
                     key={`${r.projectId}:${r.path}`}
@@ -1220,6 +1258,92 @@ function NightShiftTaskRow({
   const base = task.stepName ? `${task.projectName} · ${task.stepName}` : task.projectName;
   const meta = task.quotaHeld ? `${base} · waiting for quota` : base;
   return <NightShiftWorkRow title={task.title} meta={meta} active={active} />;
+}
+
+/**
+ * The second status line: when this period started and when it ends.
+ *
+ * A scheduled shift is bounded by its window, so it can promise a close.
+ * A manual one can't — it runs until its work drains, whatever the clock
+ * says — so it states its start and says so. With nothing running, the
+ * line answers the daytime question instead: when does the next window open.
+ */
+function nightShiftPeriodLine(
+  state: NightShiftState,
+  status: NightShiftStatusResponse | null,
+): string | null {
+  const window = status?.window ?? null;
+  if (state.active) {
+    const started = status?.startedAt ? formatClock(status.startedAt) : null;
+    if (!started) return null;
+    // Only a scheduled shift ends with the window; a manual one outlives it.
+    if (state.source === 'manual' || !window?.open) {
+      return `Started ${started} · runs until the work is done`;
+    }
+    const ends = formatClock(window.end);
+    const left = formatTimeLeft(Date.parse(window.end) - Date.now());
+    if (!ends) return `Started ${started}`;
+    return left
+      ? `Started ${started} · ends ${ends} (${left} left)`
+      : `Started ${started} · ends ${ends}`;
+  }
+  if (!window) return null;
+  const start = formatClock(window.start);
+  const end = formatClock(window.end);
+  if (!start || !end) return null;
+  return window.open ? `Window ${start} – ${end}` : `Next window ${start} – ${end}`;
+}
+
+/** Local wall-clock time of an ISO instant, or null when unparseable. */
+function formatClock(iso: string): string | null {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  return at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+/** Coarse "3h 46m" / "24m" remaining; null once the moment has passed. */
+function formatTimeLeft(ms: number): string | null {
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${Math.max(minutes, 1)}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
+}
+
+/**
+ * The tally, as chips. Ordered by how much a person cares about the number
+ * — finished work first, effort last — and zeroes are dropped rather than
+ * rendered as a wall of noughts: a quiet night should read as a short list,
+ * not a full grid of nothing.
+ */
+const NIGHT_SHIFT_TALLY_ITEMS: Array<{
+  key: keyof NightShiftTallyResponse;
+  one: string;
+  many: string;
+}> = [
+  { key: 'tasksCompleted', one: 'task done', many: 'tasks done' },
+  { key: 'stepsCompleted', one: 'step finished', many: 'steps finished' },
+  { key: 'questionsRaised', one: 'question for you', many: 'questions for you' },
+  { key: 'filesIndexed', one: 'file indexed', many: 'files indexed' },
+  { key: 'filesReviewed', one: 'file reviewed', many: 'files reviewed' },
+  { key: 'mediaDescribed', one: 'media file described', many: 'media files described' },
+  { key: 'filesWritten', one: 'file written', many: 'files written' },
+  { key: 'documentsCreated', one: 'new document', many: 'new documents' },
+  { key: 'imagesRendered', one: 'image made', many: 'images made' },
+  { key: 'toolCalls', one: 'tool call', many: 'tool calls' },
+];
+
+function nightShiftTallyItems(
+  tally: NightShiftTallyResponse,
+): Array<{ key: string; count: number; label: string }> {
+  const out: Array<{ key: string; count: number; label: string }> = [];
+  for (const item of NIGHT_SHIFT_TALLY_ITEMS) {
+    const count = tally[item.key];
+    if (typeof count !== 'number' || count <= 0) continue;
+    out.push({ key: item.key, count, label: count === 1 ? item.one : item.many });
+  }
+  return out;
 }
 
 /**

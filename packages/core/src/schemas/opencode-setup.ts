@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import {
-  LocalHarnessBridgeSchema,
   LocalHarnessModelOptionSchema,
   LocalHarnessSetupStateSchema,
+  LocalHarnessStatusBaseSchema,
 } from './local-harness.js';
 
 /** A gezel or raw local model that can safely sit behind OpenCode's tool loop. */
@@ -12,42 +12,60 @@ export type OpenCodeSetupModelOption = z.infer<typeof OpenCodeSetupModelOptionSc
 export const OpenCodeSetupStateSchema = LocalHarnessSetupStateSchema;
 export type OpenCodeSetupState = z.infer<typeof OpenCodeSetupStateSchema>;
 
+export const OpenCodeSetupPluginStateSchema = z.enum([
+  'not-installed',
+  'installed',
+  /** Installed and Gezel-owned, but its contents no longer match this install. */
+  'stale',
+  /** A file of the same name exists that this Gezel install did not write. */
+  'conflict',
+  /** OpenCode is not installed here, so there is nowhere to put the plugin. */
+  'unsupported',
+]);
+export type OpenCodeSetupPluginState = z.infer<typeof OpenCodeSetupPluginStateSchema>;
+
+/**
+ * The optional plugin Gezel writes into OpenCode's own config directory so a
+ * bare `opencode` offers the crew without the launch command. It is the one
+ * artifact Gezel places outside its own home, so it carries an ownership
+ * marker and is never overwritten or deleted unless this install wrote it.
+ */
+export const OpenCodeSetupPluginSchema = z.object({
+  state: OpenCodeSetupPluginStateSchema,
+  /** Absent only when OpenCode's config directory could not be resolved. */
+  path: z.string().min(1).optional(),
+  canInstall: z.boolean(),
+  canRemove: z.boolean(),
+  /** Whether a foreign file may be backed up and replaced. */
+  canReplace: z.boolean(),
+  message: z.string().optional(),
+});
+export type OpenCodeSetupPlugin = z.infer<typeof OpenCodeSetupPluginSchema>;
+
 /**
  * First-party Settings status for the Gezel-owned OpenCode config file and its
  * authenticated loopback inference bridge. Secrets are intentionally absent —
  * the managed config references the credential by path, never by value.
  */
-export const OpenCodeSetupStatusResponseSchema = z.object({
-  state: OpenCodeSetupStateSchema,
-  models: z.array(OpenCodeSetupModelOptionSchema),
-  configuredModel: z.string().optional(),
-  recommendedModel: z.string().optional(),
-  reasons: z.array(z.string()),
-  message: z.string().optional(),
+export const OpenCodeSetupStatusResponseSchema = LocalHarnessStatusBaseSchema.extend({
   opencodeInstalled: z.boolean(),
   opencodeVersion: z.string().optional(),
   opencodePath: z.string().optional(),
-  endpointsEnabled: z.boolean(),
   /** Provider key written into the managed config; also the `<provider>/<model>` prefix. */
   providerId: z.string().min(1),
   /** The Gezel-owned config file. Never the user's own `opencode.json`. */
   configPath: z.string().min(1),
-  launchCommand: z.string().min(1),
-  bridge: LocalHarnessBridgeSchema,
-  canConfigure: z.boolean(),
-  /** Whether Gezel-owned credential/state material exists and can be safely removed. */
-  canRemove: z.boolean(),
-  /**
-   * Whether a `conflict` can be resolved by backing the foreign config up and
-   * republishing a managed one. False for a credential conflict, which belongs
-   * to another app and is only the user's to revoke.
-   */
-  canRepair: z.boolean(),
+  plugin: OpenCodeSetupPluginSchema,
   /**
    * Where a conflicting config was preserved. Present only on the response of
    * the repairing request that moved it.
    */
   configBackupPath: z.string().min(1).optional(),
+  /**
+   * Where a conflicting plugin file was preserved. Present only on the
+   * response of the replacing request that moved it.
+   */
+  pluginBackupPath: z.string().min(1).optional(),
 });
 export type OpenCodeSetupStatusResponse = z.infer<typeof OpenCodeSetupStatusResponseSchema>;
 
@@ -60,3 +78,12 @@ export const ConfigureOpenCodeRequestSchema = z.object({
   backupConflictingConfig: z.boolean().optional(),
 });
 export type ConfigureOpenCodeRequest = z.infer<typeof ConfigureOpenCodeRequestSchema>;
+
+export const InstallOpenCodePluginRequestSchema = z.object({
+  /**
+   * Copy a conflicting plugin file to a `.backup` sibling and replace it.
+   * Rejected unless the status reports `plugin.canReplace`.
+   */
+  backupConflictingPlugin: z.boolean().optional(),
+});
+export type InstallOpenCodePluginRequest = z.infer<typeof InstallOpenCodePluginRequestSchema>;

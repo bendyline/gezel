@@ -9,6 +9,7 @@ import {
   type LocalBridgeIdentity,
   createLocalBridgeController,
   localBridgeHardening,
+  mountAuthenticatedRoute,
 } from './local-bridge.js';
 import { openAiErrorEnvelope } from './openai-compat/error-envelope.js';
 import { requireOpenAiEndpointsEnabled } from './openai-endpoints-gate.js';
@@ -72,17 +73,6 @@ export function buildOpenCodeBridgeApp(ctx: ServiceContext): Hono {
   );
 
   return app;
-}
-
-function mountAuthenticatedRoute(app: Hono, path: string, ctx: ServiceContext): void {
-  // Hono distinguishes the exact mount path from its descendants. Apply the
-  // same boundary to both so a retrieve form cannot bypass the scope check.
-  for (const pattern of [path, `${path}/*`]) {
-    app.use(pattern, openAiErrorEnvelope());
-    app.use(pattern, requireOpenAiEndpointsEnabled(ctx));
-    app.use(pattern, bearerAuth(ctx.tokenStore));
-    app.use(pattern, requireScope('openai'));
-  }
 }
 
 export type OpenCodeBridgeController = LocalBridgeController;

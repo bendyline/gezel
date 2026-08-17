@@ -574,6 +574,17 @@ describe('project artifacts', () => {
     ).rejects.toThrow('traversal');
   });
 
+  it('reports byte size for a file, and null for directories, misses, and escapes', async () => {
+    await store.createProject({ name: 'SizeTest' });
+    // Multi-byte on purpose: the viewer needs on-disk bytes, not string length.
+    await store.writeProjectArtifact('sizetest', 'sub/report.md', 'héllo');
+
+    expect(await store.projectArtifactSize('sizetest', 'sub/report.md')).toBe(6);
+    expect(await store.projectArtifactSize('sizetest', 'sub')).toBeNull();
+    expect(await store.projectArtifactSize('sizetest', 'missing.md')).toBeNull();
+    expect(await store.projectArtifactSize('sizetest', '../../etc/passwd')).toBeNull();
+  });
+
   it('keeps connector corpora read-only to gezels without blocking user edits', async () => {
     await store.createProject({ name: 'ConnectorArtifacts' });
     await expect(

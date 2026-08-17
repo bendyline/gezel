@@ -112,6 +112,16 @@ describe('the documents facade', () => {
     const viaWorkspace = await store.readProjectWorkspaceFile(id, 'guidelines/tone.md');
     expect(viaWorkspace).toContain('Plain and warm.');
   });
+
+  it('reports byte size for a document, and null for anything that is not one', async () => {
+    await store.ensureSharedProject();
+    // Multi-byte on purpose: the viewer needs on-disk bytes, not string length.
+    await store.writeDocument('guidelines/tone.md', 'héllo');
+    expect(await store.documentSize('guidelines/tone.md')).toBe(6);
+    expect(await store.documentSize('guidelines')).toBeNull();
+    expect(await store.documentSize('missing.md')).toBeNull();
+    expect(await store.documentSize('../../etc/passwd')).toBeNull();
+  });
 });
 
 describe('shared library guards', () => {

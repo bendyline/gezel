@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -8,6 +8,7 @@ import {
   type ProviderName,
 } from '@bendyline/gezel';
 import { afterEach, describe, expect, it } from 'vitest';
+import { setupOwnerId } from '../fs/managed-marker.js';
 import type { OpenCodeBridgeController } from '../http/opencode-bridge.js';
 import { createTokenStore } from '../http/token-store.js';
 import type { ModelInfo } from '../providers/types.js';
@@ -17,6 +18,7 @@ import {
   type OpenCodeSetupError,
   createOpenCodeSetupManager,
 } from './manager.js';
+import { OPENCODE_PLUGIN_MARKER } from './plugin-source.js';
 
 const roots: string[] = [];
 
@@ -36,6 +38,8 @@ async function fixture(
     meesterGezelId?: string;
     opencodeInstalled?: boolean;
     platform?: NodeJS.Platform;
+    /** Share one OpenCode config root between two Gezel homes. */
+    opencodeConfigDir?: string;
     /** Override the raw model inventory; `[]` exercises the unavailable path. */
     models?: ModelInfo[];
     /** Fail a config read on demand, to land an error at a chosen point. */
@@ -47,6 +51,10 @@ async function fixture(
   const home = join(root, 'gezel');
   const integrationDir = join(home, 'integrations', 'opencode');
   const configPath = join(integrationDir, 'opencode.json');
+  // Stand in for OpenCode's own config root. Never let a test resolve the real
+  // one — the plugin is the one artifact written outside GEZEL_HOME.
+  const opencodeConfigDir = opts.opencodeConfigDir ?? join(root, 'opencode-config');
+  const pluginPath = join(opencodeConfigDir, 'plugins', 'gezel.js');
   await mkdir(home, { recursive: true });
   const tokenStore = await createTokenStore({ home, rootToken: 'root-test' });
   let listening = false;
@@ -68,6 +76,7 @@ async function fixture(
   const manager = createOpenCodeSetupManager({
     home,
     ...(opts.platform ? { platform: opts.platform } : {}),
+    opencodeConfigDir,
     tokenStore,
     bridge,
     readConfig: async () => ({
@@ -111,6 +120,8 @@ async function fixture(
     configPath,
     tokenPath: join(home, 'integrations', 'opencode', 'token'),
     statePath: join(home, 'integrations', 'opencode', 'setup.json'),
+    opencodeConfigDir,
+    pluginPath,
     isListening: () => listening,
     setEndpointsEnabled: (value: boolean) => {
       endpointsEnabled = value;
@@ -408,6 +419,166 @@ describe('OpenCodeSetupManager', () => {
     await f.manager.reconcile();
 
     expect(f.isListening()).toBe(false);
+  });
+
+  it('does not touch OpenCode until the plugin is explicitly installed', async () => {
+    const f = await fixture({ gezels: [maya] });
+
+    const status = await f.manager.configure({ model: `gezel:${maya.id}` });
+
+    expect(status.plugin.state).toBe('not-installed');
+    expect(status.plugin.path).toBe(f.pluginPath);
+    expect(existsSync(f.opencodeConfigDir)).toBe(false);
+  });
+
+  it('installs a plugin that carries this install’s marker and no credential', async () => {
+    const f = await fixture({ gezels: [maya] });
+    await f.manager.configure({ model: `gezel:${maya.id}` });
+
+    const status = await f.manager.installPlugin({});
+
+    expect(status.plugin.state).toBe('installed');
+    expect(status.plugin.canRemove).toBe(true);
+    expect(status.plugin.canInstall).toBe(false);
+    const source = await readFile(f.pluginPath, 'utf8');
+    expect(OPENCODE_PLUGIN_MARKER.isManaged(source, setupOwnerId(f.home))).toBe(true);
+    expect(source).toContain(f.configPath);
+    expect(source).not.toContain(await readFile(f.tokenPath, 'utf8'));
+  });
+
+  it('refuses to install before the managed config exists', async () => {
+    const f = await fixture({ gezels: [maya] });
+
+    await expect(f.manager.installPlugin({})).rejects.toMatchObject({
+      code: 'opencode_not_configured',
+    });
+    expect(existsSync(f.pluginPath)).toBe(false);
+  });
+
+  it('refuses to install when OpenCode is not on this computer', async () => {
+    const f = await fixture({ gezels: [maya], opencodeInstalled: false });
+    await f.manager.configure({ model: `gezel:${maya.id}` });
+
+    const status = await f.manager.status();
+    expect(status.plugin.state).toBe('unsupported');
+    await expect(f.manager.installPlugin({})).rejects.toMatchObject({
+      code: 'opencode_not_installed',
+    });
+  });
+
+  it('installing twice is idempotent', async () => {
+    const f = await fixture({ gezels: [maya] });
+    await f.manager.configure({ model: `gezel:${maya.id}` });
+    await f.manager.installPlugin({});
+    const first = await stat(f.pluginPath);
+
+    const status = await f.manager.installPlugin({});
+
+    expect(status.plugin.state).toBe('installed');
+    expect((await stat(f.pluginPath)).mtimeMs).toBe(first.mtimeMs);
+  });
+
+  it('leaves a foreign plugin alone without blocking the rest of the card', async () => {
+    const f = await fixture({ gezels: [maya] });
+    await f.manager.configure({ model: `gezel:${maya.id}` });
+    await mkdir(join(f.opencodeConfigDir, 'plugins'), { recursive: true });
+    await writeFile(f.pluginPath, '// someone else wrote this\n', 'utf8');
+
+    const status = await f.manager.status();
+
+    expect(status.plugin.state).toBe('conflict');
+    expect(status.plugin.canInstall).toBe(false);
+    expect(status.plugin.canReplace).toBe(true);
+    // A stray file in the user's OpenCode directory is not a reason to block
+    // the managed config the card is actually about.
+    expect(status.state).toBe('configured');
+    expect(status.canConfigure).toBe(true);
+    await expect(f.manager.installPlugin({})).rejects.toMatchObject({
+      code: 'opencode_plugin_conflict',
+    });
+    expect(await readFile(f.pluginPath, 'utf8')).toBe('// someone else wrote this\n');
+    await expect(f.manager.removePlugin()).rejects.toMatchObject({
+      code: 'opencode_plugin_conflict',
+    });
+    expect(existsSync(f.pluginPath)).toBe(true);
+  });
+
+  it('replaces a foreign plugin only when asked, keeping a backup', async () => {
+    const f = await fixture({ gezels: [maya] });
+    await f.manager.configure({ model: `gezel:${maya.id}` });
+    await mkdir(join(f.opencodeConfigDir, 'plugins'), { recursive: true });
+    await writeFile(f.pluginPath, '// someone else wrote this\n', 'utf8');
+
+    const status = await f.manager.installPlugin({ backupConflictingPlugin: true });
+
+    expect(status.plugin.state).toBe('installed');
+    expect(status.pluginBackupPath).toBe(`${f.pluginPath}.backup`);
+    expect(await readFile(`${f.pluginPath}.backup`, 'utf8')).toBe('// someone else wrote this\n');
+  });
+
+  it('treats another Gezel home’s plugin as foreign', async () => {
+    const shared = await mkdtemp(join(tmpdir(), 'gezel-opencode-shared-'));
+    roots.push(shared);
+    const first = await fixture({ gezels: [maya], opencodeConfigDir: shared });
+    const second = await fixture({ gezels: [maya], opencodeConfigDir: shared });
+    await first.manager.configure({ model: `gezel:${maya.id}` });
+    await first.manager.installPlugin({});
+    await second.manager.configure({ model: `gezel:${maya.id}` });
+
+    const status = await second.manager.status();
+
+    expect(status.plugin.state).toBe('conflict');
+    await expect(second.manager.removePlugin()).rejects.toMatchObject({
+      code: 'opencode_plugin_conflict',
+    });
+    // The other install's setup must survive both a removal attempt and a
+    // wholesale teardown here.
+    await second.manager.remove();
+    expect(existsSync(first.pluginPath)).toBe(true);
+    expect(
+      OPENCODE_PLUGIN_MARKER.isManaged(
+        await readFile(first.pluginPath, 'utf8'),
+        setupOwnerId(first.home),
+      ),
+    ).toBe(true);
+  });
+
+  it('reports and repairs a stale plugin without recreating a deleted one', async () => {
+    const f = await fixture({ gezels: [maya] });
+    await f.manager.configure({ model: `gezel:${maya.id}` });
+    await f.manager.installPlugin({});
+    const published = await readFile(f.pluginPath, 'utf8');
+    await writeFile(
+      f.pluginPath,
+      OPENCODE_PLUGIN_MARKER.build('// an older Gezel wrote this body\n', setupOwnerId(f.home)),
+      'utf8',
+    );
+
+    const stale = await f.manager.status();
+    expect(stale.plugin.state).toBe('stale');
+    expect(stale.state).toBe('update-needed');
+    expect(stale.reasons).toContain('The OpenCode plugin file is out of date.');
+
+    await f.manager.reconcile();
+    expect(await readFile(f.pluginPath, 'utf8')).toBe(published);
+
+    await f.manager.removePlugin();
+    await f.manager.reconcile();
+    // Re-materialising a file in the user's own config directory behind their
+    // back is the one thing this must never do.
+    expect(existsSync(f.pluginPath)).toBe(false);
+  });
+
+  it('removes the plugin along with the rest of the setup', async () => {
+    const f = await fixture({ gezels: [maya] });
+    await f.manager.configure({ model: `gezel:${maya.id}` });
+    await f.manager.installPlugin({});
+
+    const status = await f.manager.remove();
+
+    expect(existsSync(f.pluginPath)).toBe(false);
+    expect(status.plugin.state).toBe('not-installed');
+    expect(existsSync(f.integrationDir)).toBe(false);
   });
 
   it('builds a launch command that names the managed config per platform', async () => {

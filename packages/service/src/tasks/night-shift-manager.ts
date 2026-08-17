@@ -10,6 +10,7 @@ import {
   localDateKey,
   nextNightShiftStart,
   nightShiftDayKey,
+  nightShiftWindowBounds,
   nightShiftWindowKey,
   projectAllowsAmbientWork,
 } from '@bendyline/gezel';
@@ -102,6 +103,8 @@ export class NightShiftManager {
 
   private active = false;
   private src: NightShiftSource = null;
+  /** When the running shift began; null while nothing is running. */
+  private startedAt: string | null = null;
   /** Window key we've drained-and-latched off for; cleared next window. */
   private latchedOffForWindowKey: string | null = null;
   /** Whether a manual ("go to lunch") shift has been requested. */
@@ -151,6 +154,34 @@ export class NightShiftManager {
 
   source(): NightShiftSource {
     return this.src;
+  }
+
+  /**
+   * When the running shift began, or null when nothing is running. This is
+   * the ON edge, not the window's opening hour: a scheduled shift starts on
+   * the tick that turned it on, which is later than `startHour` whenever the
+   * machine was asleep or the work only arrived mid-window. A shift that
+   * changes source mid-run (a scheduled window taking over from a manual
+   * one) keeps its original start — it never stopped running.
+   */
+  startedAtIso(): string | null {
+    return this.startedAt;
+  }
+
+  /**
+   * The scheduled window status surfaces name: the one open right now, else
+   * the next one due. Null while the feature is switched off — nothing is
+   * scheduled, so there is no window to name. Uses the window config cached
+   * from the last tick.
+   */
+  windowBounds(): { start: string; end: string; open: boolean } | null {
+    if (!this.enabled) return null;
+    const bounds = nightShiftWindowBounds(this.now(), this.window);
+    return {
+      start: bounds.start.toISOString(),
+      end: bounds.end.toISOString(),
+      open: bounds.open,
+    };
   }
 
   /**
@@ -463,6 +494,11 @@ export class NightShiftManager {
   /** Single transition chokepoint: diff, broadcast, log. */
   private setActive(next: boolean, src: NightShiftSource): void {
     if (this.active === next && this.src === src) return;
+    // Stamp the period at the OFF → ON edge only, so a source change
+    // mid-run (manual handing over to the scheduled window) doesn't restart
+    // the clock the UI counts from.
+    if (next && !this.active) this.startedAt = this.now().toISOString();
+    else if (!next) this.startedAt = null;
     this.active = next;
     this.src = src;
     this.events.publishGlobalEvent({ type: 'night_shift', active: next, source: src });

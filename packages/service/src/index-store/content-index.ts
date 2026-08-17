@@ -1398,6 +1398,26 @@ export class ContentIndex {
     }
   }
 
+  /**
+   * Indexing work this project recorded in `[since, until)` — summaries,
+   * reviews, and AI shadows, from the tiers' own stamps. Null when the
+   * project has no index (or it's momentarily unavailable); callers tally
+   * across projects and treat that as "nothing to add", never as zero work.
+   */
+  async workCountsSince(
+    projectId: string,
+    since: string,
+    until: string,
+  ): Promise<{ summarized: number; reviewed: number; described: number } | null> {
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    try {
+      return opened.index.workCountsSince(since, until);
+    } finally {
+      opened.index.close();
+    }
+  }
+
   /** One file's boekwachter review (`file_review` tool). */
   async fileReview(projectId: string, relPath: string): Promise<FileReviewResponse> {
     const opened = await this.open(projectId);

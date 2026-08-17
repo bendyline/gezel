@@ -169,7 +169,8 @@ describe('DocumentsView', () => {
     // Three modes — the library carries no review issues, like Artifacts.
     expect(within(tray).getAllByRole('radio')).toHaveLength(3);
     expect(screen.getByRole('separator', { name: 'Resize documents files' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open' })).toHaveAttribute(
+    // The reveal action lives in the toolbar row beside the mode keys.
+    expect(screen.getByRole('button', { name: 'Open in file manager' })).toHaveAttribute(
       'title',
       'Open in file manager',
     );

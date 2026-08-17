@@ -75,6 +75,14 @@ const HiddenFilesOffIcon = () => (
   </svg>
 );
 
+const RevealIcon = () => (
+  <svg {...ICON_PROPS} aria-hidden="true">
+    <path d="M8.6 2.9H3.1v10h10V7.4" />
+    <path d="M9.4 6.6 13.4 2.6" />
+    <path d="M10.3 2.6h3.1v3.1" />
+  </svg>
+);
+
 const MODE_KEYS: Record<FileViewMode, { label: string; hint: string; icon: () => JSX.Element }> = {
   'tree-alpha': {
     label: 'Folders, A to Z',
@@ -179,6 +187,27 @@ export function FileHiddenKey({
         onClick={() => onChange(!value)}
       >
         <Icon />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * "Open in file manager" — an action key at the end of the toolbar row. It is
+ * a verb, not a mode, so it sits in its own tray with nothing latched
+ * (docs/ux.md → "A tray may also hold actions").
+ */
+export function FileRevealKey({ onReveal }: { onReveal: () => void }) {
+  return (
+    <div className="gz-tray file-reveal-tray">
+      <button
+        type="button"
+        className="gz-key gz-key--icon"
+        title="Open in file manager"
+        aria-label="Open in file manager"
+        onClick={onReveal}
+      >
+        <RevealIcon />
       </button>
     </div>
   );

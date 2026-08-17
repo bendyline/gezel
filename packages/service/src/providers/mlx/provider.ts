@@ -115,6 +115,7 @@ import type {
   SessionOpts,
   TurnUsage,
 } from '../types.js';
+import { StreamingReasoningSplit } from './reasoning-stream.js';
 import {
   type MlxFatalError,
   classifyMlxFatalErrorLine,
@@ -359,6 +360,8 @@ export class MlxProvider implements LLMProvider {
    * the catalog has resolved a default model.
    */
   private readonly catalogModelId?: string;
+  /** See the constructor option of the same name. */
+  private readonly templateOpensReasoning: boolean = false;
   private readonly activeSessions = new Set<MlxSession>();
   private lastStartupPhase: EnginePhaseEvent | null = null;
   // Replayed to sessions that register after the engine finishes
@@ -412,6 +415,12 @@ export class MlxProvider implements LLMProvider {
     modelDisplayName?: string;
     /** See {@link MlxProvider.catalogModelId} for the contract. */
     catalogModelId?: string;
+    /**
+     * Whether this model's chat template opens a reasoning block as the last
+     * thing it emits. Detected once from the model directory at build time —
+     * see {@link templateOpensReasoning}.
+     */
+    templateOpensReasoning?: boolean;
   }) {
     if (!opts.supervisor && !opts.baseUrl) {
       throw new Error('[mlx] need either a supervisor or baseUrl');
@@ -428,6 +437,7 @@ export class MlxProvider implements LLMProvider {
     if (opts.modelManager) this.modelManager = opts.modelManager;
     if (opts.modelDisplayName) this.modelDisplayName = opts.modelDisplayName;
     if (opts.catalogModelId) this.catalogModelId = opts.catalogModelId;
+    if (opts.templateOpensReasoning) this.templateOpensReasoning = true;
     const batchMax = Math.max(1, opts.batchMaxConcurrency ?? 1);
     this.batchMaxConcurrency = batchMax;
     const batching = batchMax > 1;
@@ -592,6 +602,7 @@ export class MlxProvider implements LLMProvider {
       ...(opts.debug ? { debug: opts.debug } : {}),
       ...(opts.requestCompaction ? { requestCompaction: opts.requestCompaction } : {}),
       ...(opts.profile ? { profile: opts.profile } : {}),
+      ...(this.templateOpensReasoning ? { templateOpensReasoning: true } : {}),
       ...(opts.activeCraftbookStep ? { activeCraftbookStep: opts.activeCraftbookStep } : {}),
       ...(opts.tuning ? { tuning: opts.tuning } : {}),
       ...(opts.forceDirectFileWork ? { forceDirectFileWork: true } : {}),
@@ -813,6 +824,13 @@ interface MlxSessionDeps {
    * the ramble detector + pre-tool preamble fold on profile opt-in.
    */
   profile?: ResolvedModelProfile;
+  /**
+   * Whether this model's chat template opens a reasoning block as the last
+   * thing it emits, so the stream starts mid-thought with only a closing tag
+   * to come. Read from the model directory at build time — guessing it from
+   * the token stream is exactly the ambiguity that made reasoning leak.
+   */
+  templateOpensReasoning?: boolean;
   /** Active craftbook step — passed to anti-spin abort messages. */
   activeCraftbookStep?: NonNullable<SessionOpts['activeCraftbookStep']>;
   /**
@@ -1807,6 +1825,16 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // version is just noise). Streaming-safe: holds back fragments
         // that could be a partial marker prefix until disambiguated.
         const stripper = new LeakyToolCallStripper();
+        // MLX inlines chain-of-thought in the same content deltas as the
+        // reply; only the end-of-turn `extractReasoningWithProfile` pass below
+        // separates them. Everything reading live deltas — the chat bubble and
+        // every connected app through the OpenAI-compatible facade — would
+        // otherwise render thinking as the answer. This is the dedicated
+        // reasoning channel llama.cpp and ds4 get from their engines.
+        const reasoningSplit = new StreamingReasoningSplit({
+          opensInReasoning: this.deps.templateOpensReasoning === true,
+          enabled: this.deps.profile?.style.reasoningFormat !== 'none',
+        });
         // Throttle live phase emissions during generation so we don't
         // saturate the SSE fanout with one phase event per token —
         // ~3 Hz is fast enough that the tok/s readout feels live, slow
@@ -1919,7 +1947,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                   lastStreamPulseAt = now;
                 }
               }
-              if (safeContent.length > 0) this.emitDelta(safeContent);
+              if (safeContent.length > 0) {
+                // `turnContent` keeps the raw text on purpose: ramble
+                // detection reads the reasoning phase, and the end-of-turn
+                // split still owns what gets committed. Only what goes out
+                // live is separated here.
+                const live = reasoningSplit.push(safeContent);
+                if (live.visible.length > 0) this.emitDelta(live.visible);
+                if (live.reasoning.length > 0) this.emitReasoningDelta(live.reasoning);
+              }
               if (!rambleAborted && ramble.observeContent(turnContent)) {
                 rambleAborted = true;
                 abortReason ??= 'idle';
@@ -2111,7 +2147,17 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         const tail = stripper.flush();
         if (tail.length > 0) {
           turnContent += tail;
-          this.emitDelta(tail);
+          const live = reasoningSplit.push(tail);
+          if (live.visible.length > 0) this.emitDelta(live.visible);
+          if (live.reasoning.length > 0) this.emitReasoningDelta(live.reasoning);
+        }
+        {
+          // Whatever the split was still holding: a reasoning block the model
+          // never closed stays on the reasoning channel rather than becoming
+          // the reply.
+          const rest = reasoningSplit.flush();
+          if (rest.visible.length > 0) this.emitDelta(rest.visible);
+          if (rest.reasoning.length > 0) this.emitReasoningDelta(rest.reasoning);
         }
 
         // Always-on terminator log. `stream-end` here is the smoking gun

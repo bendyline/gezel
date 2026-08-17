@@ -5,6 +5,7 @@ import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { CodexSetupCard } from './CodexSetupCard.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { OpenCodeSetupCard } from './OpenCodeSetupCard.js';
+import { PiSetupCard } from './PiSetupCard.js';
 import {
   approvalErrorMessage,
   formatVerificationCode,
@@ -155,8 +156,8 @@ export function ConnectedAppsPanel() {
       emulateOllama?: boolean;
     }) => {
       const previous = endpoints;
-      // The Ollama toggle now lives in its own subsection, below the Codex
-      // card. Report its save beside the control the user just used.
+      // The Ollama toggle now lives in its own subsection, below the harness
+      // cards. Report its save beside the control the user just used.
       const scope: EndpointsStatusScope =
         next.emulateOllama !== previous.emulateOllama ? 'ollama' : 'endpoints';
       setEndpoints(next);
@@ -372,6 +373,12 @@ export function ConnectedAppsPanel() {
 
       <OpenCodeSetupCard
         key={`opencode-${harnessSetupRefreshKey}`}
+        endpointsEnabled={endpointsEnabled}
+        onChanged={refresh}
+      />
+
+      <PiSetupCard
+        key={`pi-${harnessSetupRefreshKey}`}
         endpointsEnabled={endpointsEnabled}
         onChanged={refresh}
       />

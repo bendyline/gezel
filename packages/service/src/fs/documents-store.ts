@@ -14,6 +14,7 @@ import {
   listDirEntries,
   safeReadTextFile,
   safeResolveRead,
+  safeStatFileSize,
   walkDir,
   walkDirDetailed,
 } from './tree.js';
@@ -114,6 +115,11 @@ export class DocumentsStore {
 
   async readDocument(filePath: string): Promise<string | null> {
     return safeReadTextFile(this.documentsDir(), filePath);
+  }
+
+  /** On-disk byte size of a library document, or null when it is not a readable file. */
+  async documentSize(filePath: string): Promise<number | null> {
+    return safeStatFileSize(this.documentsDir(), filePath);
   }
 
   /**

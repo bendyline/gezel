@@ -5674,6 +5674,96 @@ export const NightShiftReviewResponseSchema = z.object({
 });
 export type NightShiftReviewResponse = z.infer<typeof NightShiftReviewResponseSchema>;
 
+/** One provider-level reason night work is being held by the quota reserve. */
+export const NightShiftQuotaHoldReasonSchema = z.object({
+  provider: ProviderNameSchema,
+  /** Provider bucket id that tripped the reserve (e.g. "premium_interactions"). */
+  bucket: z.string(),
+  /** Derived remaining, 0-100. */
+  remainingPercent: z.number(),
+  /** Effective floor that triggered the hold, 0-100. */
+  floorPercent: z.number(),
+  rule: z.enum(['overall', 'per-day']),
+  resetDate: z.string().optional(),
+});
+export type NightShiftQuotaHoldReason = z.infer<typeof NightShiftQuotaHoldReasonSchema>;
+
+/**
+ * The scheduled window a status surface names: the one open right now, or
+ * the next one due. `open` is what tells "started 22:00, ends 06:00" apart
+ * from "next window 22:00 → 06:00".
+ */
+export const NightShiftWindowBoundsSchema = z.object({
+  start: z.string(),
+  end: z.string(),
+  open: z.boolean(),
+});
+export type NightShiftWindowBounds = z.infer<typeof NightShiftWindowBoundsSchema>;
+
+export const NightShiftStatusResponseSchema = z.object({
+  active: z.boolean(),
+  source: z.enum(['scheduled', 'manual']).nullable(),
+  /** Present while >=1 pending night task is held by the quota reserve. */
+  quotaHold: z
+    .object({
+      heldTaskCount: z.number(),
+      reasons: z.array(NightShiftQuotaHoldReasonSchema),
+    })
+    .optional(),
+  /**
+   * The scheduled window this status is about — open now, else next due.
+   * Null while the feature is switched off entirely (nothing is scheduled).
+   */
+  window: NightShiftWindowBoundsSchema.nullable().optional(),
+  /**
+   * When the running shift actually began — a manual shift starts on the
+   * user's click, a scheduled one on the tick that turned it on (which can
+   * be later than the window opening: the machine may have been asleep, or
+   * the work may have arrived mid-window). Null when nothing is running.
+   */
+  startedAt: z.string().nullable().optional(),
+});
+export type NightShiftStatusResponse = z.infer<typeof NightShiftStatusResponseSchema>;
+
+/**
+ * What the shift has actually got done, counted over one period. Derived
+ * from durable traces on every read — the audit log for the event-shaped
+ * work, the per-project content index for the indexing tiers — so a daemon
+ * restart mid-shift doesn't reset the count.
+ *
+ * Every counter is "since `since`", and every one of them can legitimately
+ * be zero; surfaces render the non-zero ones rather than a wall of zeroes.
+ */
+export const NightShiftTallyResponseSchema = z.object({
+  /** Start of the counted period: the running shift's start, else the window's. */
+  since: z.string(),
+  /** End of the period — now while a shift runs, else the window's close. */
+  until: z.string(),
+  /** True while this is the running shift, i.e. the counts are still climbing. */
+  live: z.boolean(),
+  tasksCompleted: z.number(),
+  stepsCompleted: z.number(),
+  /** Workspace files summarized + embedded by the indexing tiers. */
+  filesIndexed: z.number(),
+  /** Workspace files the boekwachter reviewed against the rubrics. */
+  filesReviewed: z.number(),
+  /** Images described / audio transcribed into shadow markdown. */
+  mediaDescribed: z.number(),
+  /** Workspace files written by gezels (MCP `write_file` and friends). */
+  filesWritten: z.number(),
+  /**
+   * Shared-library documents created. Overwrites of an existing document
+   * go to the library's own audit trail rather than the history log, so
+   * this counts new documents only.
+   */
+  documentsCreated: z.number(),
+  imagesRendered: z.number(),
+  /** Questions raised for the user to answer in the morning. */
+  questionsRaised: z.number(),
+  toolCalls: z.number(),
+});
+export type NightShiftTallyResponse = z.infer<typeof NightShiftTallyResponseSchema>;
+
 export const WorkspaceCommandIndexSchema = z.object({
   meta: WorkspaceIndexMetaSchema,
   commands: z.array(DiscoveredCommandSchema),

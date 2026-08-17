@@ -16,6 +16,7 @@ import {
   listDirEntries,
   safeReadTextFile,
   safeResolveRead,
+  safeStatFileSize,
   walkDir,
   walkDirDetailed,
 } from './tree.js';
@@ -158,6 +159,11 @@ export class ProjectArtifactsStore {
 
   async readProjectArtifact(id: string, filePath: string): Promise<string | null> {
     return safeReadTextFile(this.projectArtifactsDir(id), filePath);
+  }
+
+  /** On-disk byte size of an artifact, or null when it is not a readable file. */
+  async projectArtifactSize(id: string, filePath: string): Promise<number | null> {
+    return safeStatFileSize(this.projectArtifactsDir(id), filePath);
   }
 
   async readProjectArtifactBinary(

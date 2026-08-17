@@ -8,6 +8,7 @@ export * from './codex-setup.js';
 export * from './entity-id.js';
 export * from './local-harness.js';
 export * from './opencode-setup.js';
+export * from './pi-setup.js';
 export * from './gezel.js';
 export * from './growth.js';
 export * from './hook.js';

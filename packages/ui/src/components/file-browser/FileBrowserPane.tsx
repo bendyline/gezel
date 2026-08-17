@@ -8,7 +8,7 @@ import {
 } from 'react';
 import { FileFlatList } from '../FileFlatList.js';
 import { type FileEntry, FileTree, type FileTreeAction } from '../FileTree.js';
-import { FileHiddenKey, FileViewModeKeys } from '../FileViewModeKeys.js';
+import { FileHiddenKey, FileRevealKey, FileViewModeKeys } from '../FileViewModeKeys.js';
 import {
   type FileViewMode,
   compareFilesByMtimeDesc,
@@ -298,21 +298,12 @@ export function FileBrowserPane({
                   )}
                 </div>
               )}
-              {source.reveal && (
-                <button
-                  type="button"
-                  className="tree-reveal-btn"
-                  onClick={() => void source.reveal?.()}
-                  title="Open in file manager"
-                >
-                  Open
-                </button>
-              )}
             </div>
             {headerExtra}
             <div className="file-tree-toolbar">
               <FileViewModeKeys value={viewMode} modes={modes} onChange={onViewModeChange} />
               <FileHiddenKey kind={source.kind} value={showHidden} onChange={onShowHiddenChange} />
+              {source.reveal && <FileRevealKey onReveal={() => void source.reveal?.()} />}
             </div>
           </div>
           {mutations.status && <output className="file-tree-status">{mutations.status}</output>}
@@ -363,9 +354,7 @@ export function FileBrowserPane({
             {!customList && truncated && (
               <p className="muted" style={{ padding: '0.5rem', fontSize: '0.8rem' }}>
                 This folder has more files than can be shown — the listing is incomplete.
-                {source.reveal
-                  ? ' Use "Open" above to browse everything in your file manager.'
-                  : ''}
+                {source.reveal ? ' Use "Open in file manager" above to browse everything.' : ''}
               </p>
             )}
           </div>

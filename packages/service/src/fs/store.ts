@@ -3973,6 +3973,10 @@ export class Store {
     return this.artifacts.readProjectArtifact(id, filePath);
   }
 
+  async projectArtifactSize(id: string, filePath: string): Promise<number | null> {
+    return this.artifacts.projectArtifactSize(id, filePath);
+  }
+
   /**
    * Read an artifact as raw bytes plus a MIME type guess (from the file
    * extension). Used by binary consumers — e.g. the image-layer resolver
@@ -5009,6 +5013,10 @@ export class Store {
 
   async readDocument(filePath: string): Promise<string | null> {
     return this.documents.readDocument(filePath);
+  }
+
+  async documentSize(filePath: string): Promise<number | null> {
+    return this.documents.documentSize(filePath);
   }
 
   /**

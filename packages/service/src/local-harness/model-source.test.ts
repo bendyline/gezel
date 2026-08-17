@@ -1,9 +1,16 @@
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { describe, expect, it, vi } from 'vitest';
-import { createCodexSetupModelSource } from './model-source.js';
+import { createLocalHarnessModelSource } from './model-source.js';
 
 function catalog(
-  entries: Record<string, { name: string; supportsTools: boolean }>,
+  entries: Record<
+    string,
+    {
+      name: string;
+      supportsTools: boolean;
+      reasoningFormat?: 'think' | 'channel' | 'inline' | 'none';
+    }
+  >,
 ): CatalogService {
   const manifests = Object.entries(entries).map(([id, entry]) => ({
     manifest: {
@@ -11,6 +18,15 @@ function catalog(
       id,
       name: entry.name,
       supportsTools: entry.supportsTools,
+      ...(entry.reasoningFormat
+        ? {
+            style: {
+              family: 'other',
+              reasoningFormat: entry.reasoningFormat,
+              toolCallFormat: 'function-call',
+            },
+          }
+        : {}),
     },
   }));
   return {
@@ -21,12 +37,12 @@ function catalog(
   } as unknown as CatalogService;
 }
 
-describe('createCodexSetupModelSource', () => {
+describe('createLocalHarnessModelSource', () => {
   it('uses catalog tool capability and the admitted native context, not inventory claims', async () => {
     const resolveNativeContextWindow = vi.fn(async (_provider: string, modelId: string) =>
       modelId === 'tool-model' ? 49_152 : 131_072,
     );
-    const list = createCodexSetupModelSource({
+    const list = createLocalHarnessModelSource({
       catalog: catalog({
         'tool-model': { name: 'Tool model', supportsTools: true },
         'chat-only': { name: 'Chat only', supportsTools: false },
@@ -66,7 +82,7 @@ describe('createCodexSetupModelSource', () => {
   });
 
   it('omits native models whose catalog capability or memory admission cannot be proven', async () => {
-    const list = createCodexSetupModelSource({
+    const list = createLocalHarnessModelSource({
       catalog: catalog({ admitted: { name: 'Admitted', supportsTools: true } }),
       listModels: async () => [
         { id: 'admitted', name: 'Admitted', supportsTools: true, contextWindow: 65_536 },
@@ -86,7 +102,7 @@ describe('createCodexSetupModelSource', () => {
 
   it('uses catalog capability for known Ollama tags and runtime capability for unknown tags', async () => {
     const resolveNativeContextWindow = vi.fn();
-    const list = createCodexSetupModelSource({
+    const list = createLocalHarnessModelSource({
       catalog: catalog({
         'known-tool': { name: 'Known tool model', supportsTools: true },
         'known-chat': { name: 'Known chat model', supportsTools: false },
@@ -135,7 +151,7 @@ describe('createCodexSetupModelSource', () => {
     vi.useFakeTimers();
     try {
       let inventorySignal: AbortSignal | undefined;
-      const list = createCodexSetupModelSource({
+      const list = createLocalHarnessModelSource({
         catalog: catalog({}),
         listModels: (_provider, signal) => {
           inventorySignal = signal;
@@ -160,7 +176,7 @@ describe('createCodexSetupModelSource', () => {
     vi.useFakeTimers();
     try {
       let admissionSignal: AbortSignal | undefined;
-      const list = createCodexSetupModelSource({
+      const list = createLocalHarnessModelSource({
         catalog: catalog({ tool: { name: 'Tool model', supportsTools: true } }),
         listModels: async () => [
           { id: 'tool', name: 'Tool model', supportsTools: true, contextWindow: 262_144 },
@@ -181,5 +197,36 @@ describe('createCodexSetupModelSource', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('reasoning capability', () => {
+  it('reports whether a local model emits chain-of-thought, which its provider never states', async () => {
+    const list = createLocalHarnessModelSource({
+      catalog: catalog({
+        thinker: { name: 'Thinker', supportsTools: true, reasoningFormat: 'think' },
+        channelled: { name: 'Channelled', supportsTools: true, reasoningFormat: 'channel' },
+        strict: { name: 'Strict', supportsTools: true, reasoningFormat: 'none' },
+        unstyled: { name: 'Unstyled', supportsTools: true },
+      }),
+      // Exactly what mlx/llama-cpp/ds4 return: no reasoning claim at all.
+      listModels: async () => [
+        { id: 'thinker', name: 'Thinker', supportsTools: true },
+        { id: 'channelled', name: 'Channelled', supportsTools: true },
+        { id: 'strict', name: 'Strict', supportsTools: true },
+        { id: 'unstyled', name: 'Unstyled', supportsTools: true },
+      ],
+      resolveNativeContextWindow: async () => 65_536,
+    });
+
+    const models = await list('mlx');
+
+    expect(models.map((model) => [model.id, model.supportsReasoning])).toEqual([
+      ['thinker', true],
+      ['channelled', true],
+      ['strict', false],
+      // No declared style means no claim either way — never a false negative.
+      ['unstyled', undefined],
+    ]);
   });
 });

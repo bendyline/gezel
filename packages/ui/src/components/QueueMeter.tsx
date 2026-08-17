@@ -857,6 +857,11 @@ function QueueMeterPanel({
         const queued = state.queuedInteractive + state.queuedBackground;
         const deferred = Math.min(queued, state.ambientHeld ?? 0);
         const readyQueued = queued - deferred;
+        // Two rows for the same gezel doing the same job read identically
+        // whether one is running and the other is waiting for a slot. Name
+        // the two groups whenever both exist; a list that is all one thing
+        // is already answered by the counts in the section header.
+        const showLaneHeadings = state.active.length > 0 && state.pending.length > 0;
         return (
           <section key={name} className="queue-meter-panel-section">
             <header className="queue-meter-panel-provider">
@@ -871,6 +876,7 @@ function QueueMeterPanel({
               <p className="muted small queue-meter-panel-empty">Idle.</p>
             ) : (
               <ul className="queue-meter-panel-list">
+                {showLaneHeadings && <li className="queue-meter-panel-group">Running</li>}
                 {state.active.map((a, i) => {
                   // For on-device turns, look up the current phase
                   // label so the user can see what the engine is
@@ -922,7 +928,10 @@ function QueueMeterPanel({
                         phase={phase?.label}
                         extra={cacheEntry ? 'cached' : undefined}
                       />
-                      <span className="queue-meter-panel-time muted">
+                      <span
+                        className="queue-meter-panel-time muted"
+                        title={`Running for ${formatMs(a.runningForMs)}`}
+                      >
                         {formatMs(a.runningForMs)}
                       </span>
                       {activeSessionId && (
@@ -942,6 +951,7 @@ function QueueMeterPanel({
                     </li>
                   );
                 })}
+                {showLaneHeadings && <li className="queue-meter-panel-group">Waiting</li>}
                 {state.pending.map((p) => {
                   // Reorder is constrained to same-lane neighbours
                   // (the dispatcher's lane invariant trumps any
@@ -955,7 +965,7 @@ function QueueMeterPanel({
                   return (
                     <li
                       key={`pending-${p.id}`}
-                      className={`queue-meter-panel-item queue-meter-panel-item-pending queue-meter-panel-item-${p.lane}`}
+                      className={`queue-meter-panel-item queue-meter-panel-item-pending queue-meter-panel-item-waiting queue-meter-panel-item-${p.lane}`}
                     >
                       <QueueItemOpenButton
                         sessionId={p.sessionId}
@@ -979,7 +989,12 @@ function QueueMeterPanel({
                         job={p.job}
                         extra={p.ambient && deferred > 0 ? 'deferred until idle' : undefined}
                       />
-                      <span className="queue-meter-panel-time muted">{formatMs(p.waitedMs)}</span>
+                      <span
+                        className="queue-meter-panel-time muted"
+                        title={`Waiting ${formatMs(p.waitedMs)} for a free slot`}
+                      >
+                        {formatMs(p.waitedMs)}
+                      </span>
                       <span className="queue-meter-panel-actions">
                         <button
                           type="button"

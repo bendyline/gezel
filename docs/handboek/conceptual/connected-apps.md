@@ -20,7 +20,7 @@ Apps speak to gezel using the same "OpenAI-style" language most AI tools already
 
 ## Codex and other agent harnesses
 
-The authenticated address also serves the OpenAI **Responses API** at `/v1/responses`. That lets a harness such as Codex keep ownership of its coding tools, sandbox, approvals, and conversation loop while a model installed in gezel supplies the inference. OpenCode connects the same way through the chat endpoint — see [OpenCode](#opencode) below.
+The authenticated address also serves the OpenAI **Responses API** at `/v1/responses`. That lets a harness such as Codex keep ownership of its coding tools, sandbox, approvals, and conversation loop while a model installed in gezel supplies the inference. OpenCode and [pi](https://pi.dev) connect the same way through the chat endpoint — see [OpenCode](#opencode) and [pi](#pi) below.
 
 For Codex, use **Use Gezel in Codex** in this Settings screen. Gezel creates an isolated `gezel-local` Codex profile, a model catalog, and a dedicated revocable credential. It does not edit Codex's main configuration, authentication, conversations, sandbox rules, or approval settings. Start Codex with the command shown on the card (`codex --profile gezel-local`).
 
@@ -42,7 +42,7 @@ A gezel appears here only when its effective local model is installed and can pa
 
 ## OpenCode
 
-[OpenCode](https://opencode.ai) connects the same way, through **Use Gezel in OpenCode** in this Settings screen. Gezel writes its own settings file, a model list covering your eligible crew, and a dedicated revocable credential. It does not edit your own OpenCode configuration, sessions, or permissions — instead it hands you a command that points OpenCode at the Gezel-owned file for that run:
+[OpenCode](https://opencode.ai) connects the same way, through **Use Gezel in OpenCode** in this Settings screen. Gezel writes its own settings file, a model list covering your eligible crew, and a dedicated revocable credential. It never edits your own OpenCode configuration, sessions, or permissions — instead it hands you a command that points OpenCode at the Gezel-owned file for that run:
 
 ```
 OPENCODE_CONFIG=<path shown on the card> opencode
@@ -52,11 +52,39 @@ On Windows the card shows the PowerShell form of the same command. OpenCode merg
 
 The gezel you choose is the one OpenCode starts with. Every eligible gezel and local model is listed in the file, so OpenCode's own model picker shows the whole crew and you can switch inside a session. Gezel also pins OpenCode's *small* model — the one it uses for titles and summaries — to the same choice, so a machine set up for local inference never quietly reaches for a cloud provider you have not configured.
 
+### Without the command
+
+**Add to OpenCode** writes one further file — `gezel.js`, in OpenCode's own `plugins` folder — and from then on the `gezel` provider is in every OpenCode session on that computer, no command needed. This is the one file Gezel places outside its own home, so it is worth being precise about what it is: a file Gezel *adds and owns*, never an edit to a file of yours. It holds no password. It reads Gezel's settings and credential when OpenCode starts, and does nothing at all when Gezel is not running or not set up — an unrelated OpenCode session is never affected either way. `opencode --pure` starts without it, and without any other plugin.
+
+It deliberately does not change which model OpenCode starts with: that stays your choice in OpenCode's own model picker, because this file loads in every project. To check it took effect, run `opencode models` — the crew appears under `gezel/`.
+
+**Remove from OpenCode** deletes it, and removing the whole setup deletes it too. If a `gezel.js` written by a different Gezel installation — or edited by hand — is already there, Gezel says so and leaves it exactly as it is; **Replace OpenCode plugin** keeps the old one beside it as `gezel.js.backup`.
+
 If the card says **Needs attention**, the managed file was hand-edited or was written by a different Gezel installation, so gezel will not touch it. **Repair OpenCode setup** writes a fresh file and keeps the old one beside it as `opencode.json.backup`. The one conflict repair cannot resolve is another connected app holding the OpenCode credential identity — revoke that app first.
 
 Because the credential lives in its own file and the config references it by path, revoking the OpenCode entry under Connected Apps immediately stops it from using the bridge, and no secret is ever copied into a project or shell profile.
 
 As with Codex, a gezel appears here only when its effective local model is installed and can take part in a caller-executed tool loop, one-click setup needs the desktop and the Gezel service on the same computer, and Gezel must stay running while OpenCode uses the model. The bridge carries only inference: the credential grants no access to Gezel projects, files, terminals, or settings.
+
+## pi
+
+[pi](https://pi.dev) is a coding agent that keeps its own tools, permissions, and conversation loop, and lets a provider supply the model. Gezel writes a small **extension** of its own — plus the model list that extension reads — and hands you a command that loads it for that run:
+
+```
+pi -e <path shown on the card>
+```
+
+Both files live in Gezel's own folder, so this mode writes nothing into pi at all. `pi` merges what an extension registers with your own configuration; Gezel only adds a provider named `gezel`, and never touches your `models.json`, settings, or sessions.
+
+### Without the command
+
+**Add to pi** copies that same extension into pi's own `extensions` folder, and from then on the `gezel` provider is in every pi session on that computer. It is a file Gezel *adds and owns*, never an edit to a file of yours. It holds no password: it reads Gezel's model list and credential when pi starts, and quietly does nothing when Gezel is not running. `pi -ne` starts without it, and without any other extension.
+
+To check it took effect, run `pi --list-models` — the crew appears under `gezel/`. **Remove from pi** deletes it, and removing the whole setup deletes it too. If a `gezel.js` written by a different Gezel installation — or edited by hand — is already there, Gezel says so and leaves it alone; **Replace pi extension** keeps the old one beside it as `gezel.js.backup`.
+
+Unlike the Codex profile, nothing here pins pi's own default model. The extension loads in every project, so which model pi starts with stays your choice in its model picker. If you point pi somewhere else with `PI_CODING_AGENT_DIR` in your shell, note that the gezel service cannot see a variable set only in your login shell — the card shows the folder it actually resolved.
+
+As with the others, a gezel appears here only when its effective local model is installed and can take part in a caller-executed tool loop, one-click setup needs the desktop and the Gezel service on the same computer, and Gezel must stay running while pi uses the model.
 
 ## Who answers: gezel choices and the fallback
 

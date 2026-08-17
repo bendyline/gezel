@@ -319,8 +319,10 @@ describe('projects API', () => {
     });
 
     const readRes = await api('GET', '/api/projects/integtest/artifacts/read?path=notes.md');
-    const file = (await readRes.json()) as { content: string };
+    const file = (await readRes.json()) as { content: string; size?: number };
     expect(file.content).toContain('# Notes');
+    // Byte size rides along so the viewer can describe files it cannot preview.
+    expect(file.size).toBe(Buffer.byteLength('# Notes\n\nHello.'));
 
     const listRes = await api('GET', '/api/projects/integtest/artifacts?recursive=1');
     const files = (await listRes.json()) as { files: Array<{ name: string }> };

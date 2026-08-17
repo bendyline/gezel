@@ -1338,6 +1338,47 @@ export class IndexStore {
   }
 
   /**
+   * How much indexing work landed in `[since, until)`, read off the tiers'
+   * own success stamps rather than any separate bookkeeping — which is what
+   * makes a Night Shift tally survive a daemon restart mid-window. Bounds
+   * are ISO-UTC strings, compared lexicographically (`nowIso()` is the only
+   * writer of these columns, so the format is uniform).
+   *
+   * Counted per content hash, so a file re-summarized after an edit counts
+   * again — that is real work done in the period, not double-counting.
+   */
+  workCountsSince(
+    since: string,
+    until: string,
+  ): { summarized: number; reviewed: number; described: number } {
+    const count = (sql: string, ...params: SqlValue[]) =>
+      Number(this.db.prepare(sql).get<{ n: number }>(...params)?.n ?? 0);
+    return {
+      summarized: count(
+        `SELECT COUNT(*) AS n FROM summaries
+         WHERE collection_id = ? AND created_at >= ? AND created_at < ?`,
+        this.collectionId,
+        since,
+        until,
+      ),
+      reviewed: count(
+        `SELECT COUNT(*) AS n FROM file_reviews
+         WHERE collection_id = ? AND reviewed_at >= ? AND reviewed_at < ?`,
+        this.collectionId,
+        since,
+        until,
+      ),
+      described: count(
+        `SELECT COUNT(*) AS n FROM shadow_state
+         WHERE collection_id = ? AND state = 'ok' AND updated_at >= ? AND updated_at < ?`,
+        this.collectionId,
+        since,
+        until,
+      ),
+    };
+  }
+
+  /**
    * Review coverage across the given rubric set. `reviewed` counts ANY
    * successful review on a current file hash regardless of rubric — coverage
    * must not visually wipe when a rubric is edited; `stale` are the reviewed

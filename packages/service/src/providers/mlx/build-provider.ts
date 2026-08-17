@@ -19,6 +19,7 @@ import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { readMlxModelGeometry } from './model-geometry.js';
 import { MlxProvider } from './provider.js';
+import { templateOpensReasoning } from './reasoning-stream.js';
 import { MLX_DEFAULT_PACKAGE_SPEC, MLX_VENV_NAME, mlxVenvPackages } from './venv.js';
 
 const log = createLogger('chat');
@@ -368,6 +369,9 @@ export async function buildMlxProvider(opts: {
   // before this, MLX memory math could only use the weights heuristic,
   // which under-prices small dense models ~3× and over-prices hybrids.
   const mlxGeometry = modelDir ? readMlxModelGeometry(modelDir) : undefined;
+  // Read once per provider build: whether the chat template leaves a reasoning
+  // block open, so a streamed turn starts mid-thought.
+  const opensReasoning = modelDir ? templateOpensReasoning(modelDir) : false;
   const mlxExactPerSlotKvF16 = mlxGeometry
     ? estimateExactPerSlotKvBytesF16(mlxGeometry, effectiveNumCtx)
     : undefined;
@@ -681,6 +685,7 @@ export async function buildMlxProvider(opts: {
     // warm and avoids the offline-fetch attempt entirely.
     defaultModel: modelDir,
     numCtx: effectiveNumCtx,
+    ...(opensReasoning ? { templateOpensReasoning: true } : {}),
     ...(opts.mlxModels ? { modelManager: opts.mlxModels } : {}),
     ...(modelCatalogInfo ? { modelDisplayName: modelCatalogInfo.name } : {}),
     // Catalog id, distinct from `defaultModel` (the on-disk path).

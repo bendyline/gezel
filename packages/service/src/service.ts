@@ -31,7 +31,6 @@ import { ChannelManager } from './channels/manager.js';
 import { ChatEventBus } from './chat/events.js';
 import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
 import { createCodexSetupManager } from './codex-setup/manager.js';
-import { createCodexSetupModelSource } from './codex-setup/model-source.js';
 import { ConnectorActionManager } from './connectors/actions.js';
 import { ProjectLocks } from './connectors/lock.js';
 import { ConnectorManager } from './connectors/manager.js';
@@ -71,12 +70,17 @@ import { createHandboekEngine } from './handboek/engine.js';
 import { type LoopbackCert, generateLoopbackCert } from './http/cert.js';
 import { buildCodexBridgeApp, createCodexBridgeController } from './http/codex-bridge.js';
 import type { ServiceContext } from './http/context.js';
-import { codexBridgePortForHome, opencodeBridgePortForHome } from './http/local-bridge-port.js';
+import {
+  codexBridgePortForHome,
+  opencodeBridgePortForHome,
+  piBridgePortForHome,
+} from './http/local-bridge-port.js';
 import {
   buildOllamaEmulationApp,
   createOllamaEmulationController,
 } from './http/ollama-emulation.js';
 import { buildOpenCodeBridgeApp, createOpenCodeBridgeController } from './http/opencode-bridge.js';
+import { buildPiBridgeApp, createPiBridgeController } from './http/pi-bridge.js';
 import {
   PreviewCapabilityStore,
   normalizePreviewPath,
@@ -94,6 +98,7 @@ import { readImageStaticMeta } from './index-store/image-meta.js';
 import { IndexingJobControl, ensureIndexingJobTask } from './index-store/indexing-job.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
+import { createLocalHarnessModelSource } from './local-harness/model-source.js';
 import { startMachineEngineBridge } from './machine-engine/bridge.js';
 import { registerMailAdapters } from './mail/registry.js';
 import { ensureNightShiftOversightTask } from './meester/night-shift-oversight.js';
@@ -111,6 +116,7 @@ import {
 import { createOpenCodeSetupManager } from './opencode-setup/manager.js';
 import { discoverManagedScriptRuntimes } from './packages/managed-runtimes.js';
 import { normalizeBundledPnpmPath } from './packages/pnpm.js';
+import { createPiSetupManager } from './pi-setup/manager.js';
 import { PreviewLogBuffer } from './preview-log/buffer.js';
 import { recoverTypedProjectCreations } from './project-type/create.js';
 import { SpeechToTextProviderManager } from './providers/audio/stt-manager.js';
@@ -268,6 +274,10 @@ export interface StartServiceOptions {
   codexBridgePort?: number;
   /** Exact OpenCode bridge port override (`0` = ephemeral); production derives one from `home`. */
   opencodeBridgePort?: number;
+  /** Override pi's fixed loopback bridge port. Tests bind ephemeral ports. */
+  piBridgePort?: number;
+  /** Override pi's own agent directory. Tests must never write to a real one. */
+  piAgentDir?: string;
 }
 
 export interface RunningService {
@@ -2134,7 +2144,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     },
     port: opts.codexBridgePort ?? codexBridgePortForHome(home),
   });
-  const listCodexSetupModels = createCodexSetupModelSource({
+  const listCodexSetupModels = createLocalHarnessModelSource({
     catalog,
     listModels: (provider, signal) => chat.listModelsForProvider(provider, signal),
     resolveNativeContextWindow: async (provider, modelId, signal) => {
@@ -2187,6 +2197,29 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
     // The same proven-capability model source Codex uses: a coding harness
     // cannot fall back gracefully from a model that turns out not to do tools.
+    listModels: listCodexSetupModels,
+  });
+
+  // pi speaks the same chat-completions dialect as OpenCode, on its own port
+  // and credential so revoking one harness never disturbs the others.
+  const piBridgeFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
+  const piBridge = createPiBridgeController({
+    fetch: () => {
+      if (!piBridgeFetchRef.value) {
+        throw new Error('pi bridge cannot start before the HTTP app is ready');
+      }
+      return piBridgeFetchRef.value;
+    },
+    port: opts.piBridgePort ?? piBridgePortForHome(home),
+  });
+  const piSetup = createPiSetupManager({
+    home,
+    ...(opts.piAgentDir !== undefined ? { piAgentDir: opts.piAgentDir } : {}),
+    tokenStore,
+    bridge: piBridge,
+    readConfig: () => store.readConfig(),
+    listGezels: () => store.listGezels(),
+    providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
     listModels: listCodexSetupModels,
   });
 
@@ -2277,6 +2310,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     ollamaEmulation,
     codexSetup,
     opencodeSetup,
+    piSetup,
     ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
     ensureModel,
     startedAt: nowIso(),
@@ -2316,6 +2350,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   codexBridgeFetchRef.value = codexBridgeApp.fetch.bind(codexBridgeApp);
   const opencodeBridgeApp = buildOpenCodeBridgeApp(context);
   opencodeBridgeFetchRef.value = opencodeBridgeApp.fetch.bind(opencodeBridgeApp);
+  const piBridgeApp = buildPiBridgeApp(context);
+  piBridgeFetchRef.value = piBridgeApp.fetch.bind(piBridgeApp);
 
   // Port selection, by caller intent:
   //   - explicit `opts.port` (from `--port` / `GEZEL_PORT`): bind exactly
@@ -2585,6 +2621,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         `[service] OpenCode local-model bridge not started: ${err instanceof Error ? err.message : err}`,
       );
     });
+    await piSetup.reconcile().catch((err) => {
+      log.warn(
+        `[service] pi local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+      );
+    });
   }
 
   if (serviceRole !== 'machine-engine') {
@@ -2830,6 +2871,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       await ollamaEmulation.stop();
       await codexSetup.stop();
       await opencodeSetup.stop();
+      await piSetup.stop();
       await machineEngine?.stop();
       await closePairedRemoteFetches(remotes);
       if (previewServer) {

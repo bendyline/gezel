@@ -2214,6 +2214,21 @@ button.machine-memory-unload-button {
   gap: 0.2rem;
 }
 
+/* Group eyebrow inside a provider list. A running row and a waiting row
+   carry the same gezel, the same job, and the same duration column, so
+   nothing in the row itself says which is which — the heading does. */
+.queue-meter-panel-group {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+.queue-meter-panel-group:not(:first-child) {
+  margin-top: 0.3rem;
+}
+
 .queue-meter-panel-item {
   position: relative;
   display: grid;
@@ -2266,6 +2281,13 @@ button.machine-memory-unload-button {
   align-items: center;
   justify-content: center;
 }
+/* A waiting row's figure sits back a step so the pulsing ones above it read
+   as the crew actually at work. Only the artwork dims — the row's text keeps
+   its contrast. */
+.queue-meter-panel-item-waiting .queue-meter-panel-item-marker {
+  opacity: 0.6;
+}
+
 .queue-meter-panel-item-marker .gezel-icon {
   border-color: color-mix(in srgb, var(--border) 78%, var(--accent));
   border-radius: var(--radius-sm);
@@ -2573,13 +2595,6 @@ button.machine-memory-unload-button {
   min-height: 0;
   overflow-y: auto;
   padding: 0.4rem 0.25rem;
-}
-
-/* Keep the folder chevron's click target intact while tightening the visual
-   gap before both folder icons and file icons (whose rows use the matching
-   toggle spacer). */
-.documents-tree-list .tree-label {
-  margin-left: -4px;
 }
 
 /* Document names use the action column while it is dormant. Revealing the
@@ -4174,11 +4189,19 @@ button.machine-memory-unload-button {
   filter: none;
 }
 
-/* The nested name button also matched the shared active-tab filter rule.
-   Clear it explicitly after the mirrored rule so it cannot paint a second
-   rounded silhouette inside the wrapper on either sidebar side. */
+/* The nested name button matches the mirrored rule above at exactly the same
+   specificity (`:root` + the attribute + two classes), so being later that rule
+   beats the wrapper-owned reset and hands the button back its own pane-side
+   border, corner radius and inset highlight — a curved edge stranded between
+   the label and the status light. Repeat the whole reset after the mirror so
+   the wrapper stays the only painted tab silhouette on either sidebar side. */
 .app-sidebar-proj-row.active > .app-sidebar-item.active,
-:root[data-sidebar-side="right"] .app-sidebar-proj-row.active > .app-sidebar-item.active {
+.app-sidebar-gezel-row.active > .app-sidebar-item.active,
+:root[data-sidebar-side="right"] .app-sidebar-proj-row.active > .app-sidebar-item.active,
+:root[data-sidebar-side="right"] .app-sidebar-gezel-row.active > .app-sidebar-item.active {
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
   filter: none;
 }
 
@@ -4657,7 +4680,7 @@ button.danger {
   position: relative;
 }
 
-/* Title-row actions: the create keys plus "Open", right-aligned. */
+/* Title-row actions: the create keys, right-aligned. */
 .file-tree-header-actions {
   display: flex;
   align-items: center;
@@ -5715,6 +5738,12 @@ button.danger {
   gap: 0.35rem;
 }
 
+/* "Open in file manager" is a verb, not a view mode: it sits at the far end
+   of the toolbar so it never reads as part of the mode switch. */
+.file-reveal-tray {
+  margin-left: auto;
+}
+
 .file-flat-parent {
   margin-left: 0.4rem;
   color: var(--text-muted);
@@ -6105,16 +6134,6 @@ button.danger {
   }
 }
 
-.tree-reveal-btn {
-  font-size: 0.75rem;
-  padding: 0.2rem 0.4rem;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: inherit;
-  border-radius: 3px;
-  cursor: pointer;
-}
-
 .file-tree {
   flex: 1;
   overflow-y: auto;
@@ -6268,7 +6287,7 @@ button.danger {
   border: none;
   color: var(--text-muted, inherit);
   cursor: pointer;
-  width: 24px;
+  width: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6296,7 +6315,7 @@ button.danger {
 }
 
 .tree-toggle-spacer {
-  width: 24px;
+  width: 16px;
   flex-shrink: 0;
 }
 
@@ -6305,7 +6324,7 @@ button.danger {
 .tree-icon {
   color: var(--text-muted, rgba(255, 255, 255, 0.55));
   font-size: 0.95em;
-  margin-right: 6px;
+  margin-right: 3px;
 }
 
 .tree-icon-folder {
@@ -6319,7 +6338,7 @@ button.danger {
   color: inherit;
   cursor: pointer;
   text-align: left;
-  padding: 0.25rem 0.2rem;
+  padding: 0.25rem 0.1rem;
   font-size: 0.85rem;
   white-space: nowrap;
   overflow: hidden;
@@ -6544,10 +6563,12 @@ button.danger {
   list-style: none;
 }
 
+/* The actions sit on their own row under the issue rather than in a second
+   column: this pane is narrow, and a column of controls beside the message
+   left it wrapping four words to a line. */
 .workspace-index-issues li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -6562,30 +6583,49 @@ button.danger {
 .workspace-index-issue-content {
   display: block;
   width: 100%;
-  padding: 0.5rem 0.55rem;
-}
-
-.workspace-index-issue-fix.gz-key {
-  padding: 0.2rem 0.45rem;
-  font-size: var(--text-2xs);
-  font-weight: 600;
+  padding: 0.5rem 0.55rem 0.35rem;
 }
 
 .workspace-index-issue-actions {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.3rem;
-  min-width: 5.4rem;
-  padding: 0.4rem;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  padding: 0 0.4rem 0.35rem;
 }
 
-.workspace-index-issue-actions .link-button {
-  max-width: 9rem;
+/* Every row repeats the same four verbs, so they read as glyphs in a small
+   tray rather than a stack of sentences competing with the issue itself. */
+.workspace-index-issue-tray.gz-tray {
+  flex-wrap: nowrap;
+  gap: 0.15rem;
+  padding: 0.2rem;
+}
+
+.workspace-index-issue-key.gz-key {
+  padding: 0.2rem 0.35rem;
+  font-size: var(--text-2xs);
+}
+
+.workspace-index-issue-key.gz-key i {
+  width: 1em;
+  text-align: center;
+}
+
+/* Fix is the row's one consequential action — it creates a task — so it
+   carries the accent ink while the triage keys stay in body ink. */
+.workspace-index-issue-fix.gz-key {
+  color: var(--accent);
+}
+
+/* Keeps the ref visible: the toolbar's glyphs can't name the task the row
+   is waiting on, so this one stays words. */
+.workspace-index-issue-task.link-button {
+  margin-right: auto;
   padding: 0;
   font-size: var(--text-2xs);
   line-height: 1.25;
-  text-align: right;
+  text-align: left;
 }
 
 .gz-dialog.workspace-issue-fix-dialog {
@@ -20909,6 +20949,15 @@ a.license-button:hover {
   margin-bottom: 0.25rem;
 }
 
+/* When the period started and when it ends — the second line of the status
+   strip, above any quota-hold explanation. */
+.app-nightshift-period {
+  display: block;
+  margin-top: 0.2rem;
+  max-width: 18rem;
+  color: var(--text-muted);
+}
+
 /* Second line of the status strip while the cloud quota reserve is holding
    queued night work — explains why "queued" isn't moving. */
 .app-nightshift-quota-hold {
@@ -20916,6 +20965,33 @@ a.license-button:hover {
   margin-top: 0.2rem;
   max-width: 18rem;
   color: var(--text-muted);
+}
+
+/* What the shift got through, counted over the period the status strip
+   names. Chips rather than a table: most nights only a few counters are
+   non-zero, and the row should shrink to them. */
+.app-nightshift-tally {
+  padding: 0.1rem 0.2rem 0.35rem;
+  max-width: 18rem;
+}
+.app-nightshift-tally-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.1rem 0.5rem;
+}
+.app-nightshift-tally-item {
+  padding: 0.12rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.app-nightshift-tally-count {
+  font-weight: 600;
+  color: var(--text);
 }
 
 /* "What the shift is doing" panel: working-on + up-next task lists, shown

@@ -86,7 +86,16 @@ export function documentRoutes(ctx: ServiceContext): Hono {
     } else {
       const content = await ctx.store.readDocument(filePath);
       if (content !== null) {
-        return c.json({ path: filePath, content, kind: 'document' as const });
+        // Byte size rides along so a viewer that cannot preview the content
+        // (binaries) can still say how big the file is. The decoded string's
+        // length does not answer that — UTF-8 replacement chars destroy it.
+        const size = await ctx.store.documentSize(filePath);
+        return c.json({
+          path: filePath,
+          content,
+          kind: 'document' as const,
+          ...(size === null ? {} : { size }),
+        });
       }
     }
     // 2. Fuzzy fallback: small models routinely confuse "document" vs

@@ -49,6 +49,24 @@ export function formatRelativeFileTime(iso: string): string {
   return `${Math.floor(deltaSec / 86_400)}d ago`;
 }
 
+/**
+ * On-disk size for a file row or preview. One decimal from KB up: the
+ * engine-stats formatter rounds to whole MB because hardware is sold that
+ * way, and a 1.4 MB download shown as "1 MB" reads as wrong for a file.
+ */
+export function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '';
+  if (bytes < 1024) return `${bytes} ${bytes === 1 ? 'byte' : 'bytes'}`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value.toFixed(1)} ${units[unit]}`;
+}
+
 function compareNames(a: string, b: string): number {
   return a.localeCompare(b);
 }

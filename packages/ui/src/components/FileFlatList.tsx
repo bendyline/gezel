@@ -42,7 +42,8 @@ export function FileFlatList({
           >
             <span className="tree-toggle-spacer" />
             <button type="button" className="tree-label" onClick={() => onSelect(entry)}>
-              {iconFor(entry)} {entry.name}
+              {iconFor(entry)}
+              {entry.name}
               {parent && <span className="file-flat-parent">{parent}</span>}
             </button>
             {trailing && <span className="tree-row-trailing">{trailing}</span>}

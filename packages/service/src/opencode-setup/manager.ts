@@ -1,24 +1,41 @@
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type {
   ConfigureOpenCodeRequest,
   GezelConfig,
   GezelSummary,
+  InstallOpenCodePluginRequest,
   OpenCodeSetupModelOption,
+  OpenCodeSetupPlugin,
   OpenCodeSetupStatusResponse,
   ProviderName,
 } from '@bendyline/gezel';
 import { writeFileAtomic } from '../fs/atomic.js';
+import { setupOwnerId as managedFileOwnerId } from '../fs/managed-marker.js';
 import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
 import type { OpenCodeBridgeController } from '../http/opencode-bridge.js';
+import { OPENCODE_SETUP_RESERVED_APP_ID, type TokenStore } from '../http/token-store.js';
 import {
-  OPENCODE_SETUP_RESERVED_APP_ID,
-  type TokenRecord,
-  type TokenStore,
-} from '../http/token-store.js';
+  HarnessSetupError,
+  LOCAL_HARNESS_PROVIDER_SET,
+  asError,
+  createMutationQueue,
+  ensurePrivateDir,
+  harnessBridgeSnapshot,
+  harnessTokenRecord,
+  isExactHarnessToken,
+  listEligibleHarnessModels,
+  posixShellWord,
+  powershellLiteral,
+  preserveConflictingFile,
+  readOptionalFile,
+  recommendedHarnessModel,
+} from '../local-harness/base.js';
 import type { ModelInfo } from '../providers/types.js';
 import { type OpenCodeBinaryDetection, detectOpenCodeBinary } from './binary.js';
+import { openCodePluginDir, openCodePluginPath, resolveOpenCodeConfigDir } from './config-dir.js';
+import { OPENCODE_PLUGIN_MARKER, buildOpenCodePluginSource } from './plugin-source.js';
 
 /**
  * Provider key inside the managed config. Also the `<provider>/<model>` prefix
@@ -43,15 +60,6 @@ const DEFAULT_CONTEXT_WINDOW = 32_768;
  */
 const OUTPUT_LIMIT_SHARE = 0.25;
 const MAX_OUTPUT_LIMIT = 32_768;
-const MAX_CONFIG_BACKUPS = 50;
-
-const LOCAL_PROVIDERS = [
-  'llama-cpp',
-  'mlx',
-  'ds4',
-  'ollama',
-] as const satisfies readonly ProviderName[];
-const LOCAL_PROVIDER_SET = new Set<ProviderName>(LOCAL_PROVIDERS);
 
 interface SetupState {
   version: 1;
@@ -72,13 +80,9 @@ interface SetupState {
 
 type ConflictKind = 'config' | 'credential' | 'state';
 
-export class OpenCodeSetupError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly status: 400 | 404 | 409 | 500 = 409,
-  ) {
-    super(message);
+export class OpenCodeSetupError extends HarnessSetupError {
+  constructor(code: string, message: string, status: 400 | 404 | 409 | 500 = 409) {
+    super(code, message, status);
     this.name = 'OpenCodeSetupError';
   }
 }
@@ -86,6 +90,8 @@ export class OpenCodeSetupError extends Error {
 export interface OpenCodeSetupManager {
   status(): Promise<OpenCodeSetupStatusResponse>;
   configure(input: ConfigureOpenCodeRequest): Promise<OpenCodeSetupStatusResponse>;
+  installPlugin(input: InstallOpenCodePluginRequest): Promise<OpenCodeSetupStatusResponse>;
+  removePlugin(): Promise<OpenCodeSetupStatusResponse>;
   remove(): Promise<OpenCodeSetupStatusResponse>;
   reconcile(): Promise<void>;
   stop(): Promise<void>;
@@ -102,6 +108,8 @@ export interface CreateOpenCodeSetupManagerOptions {
   providerForGezel: (gezelId: string) => Promise<ProviderName>;
   listModels: (provider: ProviderName) => Promise<ModelInfo[]>;
   detectOpenCode?: () => Promise<OpenCodeBinaryDetection>;
+  /** Overrides OpenCode's own config root. Tests must never write to a real one. */
+  opencodeConfigDir?: string;
   now?: () => Date;
 }
 
@@ -115,100 +123,44 @@ export function createOpenCodeSetupManager(
   const tokenPath = join(integrationDir, TOKEN_FILE);
   const configPath = join(integrationDir, CONFIG_FILE);
   const now = opts.now ?? (() => new Date());
+  const ownerId = managedFileOwnerId(opts.home);
 
   const detect = opts.detectOpenCode ?? (() => detectOpenCodeBinary({ env }));
 
-  let mutation = Promise.resolve();
-  let closing = false;
-  const serialize = <T>(fn: () => Promise<T>): Promise<T> => {
-    const result = mutation.then(fn, fn);
-    mutation = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
+  // Resolving means spawning `opencode debug paths`; the answer only moves when
+  // the user reinstalls OpenCode somewhere else, so keep it per binary path.
+  let configDirCache: { key: string; dir: string } | null = null;
+  const resolveConfigDir = async (detection: OpenCodeBinaryDetection): Promise<string | null> => {
+    if (opts.opencodeConfigDir) return opts.opencodeConfigDir;
+    if (!detection.installed || !detection.path) return null;
+    if (configDirCache?.key === detection.path) return configDirCache.dir;
+    const resolved = await resolveOpenCodeConfigDir({ binaryPath: detection.path, env });
+    configDirCache = { key: detection.path, dir: resolved.dir };
+    return resolved.dir;
   };
+
+  const pluginSourceFor = (): string =>
+    buildOpenCodePluginSource({
+      configPath,
+      tokenPath,
+      providerId: OPENCODE_SETUP_PROVIDER_ID,
+      ownerId,
+    });
+
+  let closing = false;
+  const serialize = createMutationQueue();
 
   const listEligibleModels = async (
     suppliedConfig?: GezelConfig,
-  ): Promise<OpenCodeSetupModelOption[]> => {
-    const config = suppliedConfig ?? (await opts.readConfig());
-    const groups = await Promise.all(
-      LOCAL_PROVIDERS.map(async (provider) => {
-        try {
-          const models = await opts.listModels(provider);
-          return models
-            .filter((model) => model.supportsTools === true)
-            .map(
-              (model): OpenCodeSetupModelOption => ({
-                id: `${provider}:${model.id}`,
-                label: model.name || model.id,
-                description: `Local ${provider} model`,
-                kind: 'model',
-                provider,
-                ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
-                ...(model.supportsReasoning !== undefined
-                  ? { supportsReasoning: model.supportsReasoning }
-                  : {}),
-                supportsTools: true,
-              }),
-            );
-        } catch {
-          return [];
-        }
-      }),
-    );
-    const rawModels = groups.flat().sort((a, b) => a.label.localeCompare(b.label));
-    const rawModelsByTarget = new Map(rawModels.map((model) => [model.id, model]));
-    const gezels = await opts.listGezels().catch(() => []);
-    const gezelModels = (
-      await Promise.all(
-        gezels.map(async (gezel): Promise<OpenCodeSetupModelOption | null> => {
-          if (gezel.fixedFunction) return null;
-          const provider = await opts.providerForGezel(gezel.id).catch(() => null);
-          if (!provider || !LOCAL_PROVIDER_SET.has(provider)) return null;
+  ): Promise<OpenCodeSetupModelOption[]> =>
+    listEligibleHarnessModels({
+      config: suppliedConfig ?? (await opts.readConfig()),
+      listModels: opts.listModels,
+      listGezels: opts.listGezels,
+      providerForGezel: opts.providerForGezel,
+    });
 
-          const modelId = gezel.model ?? config.defaultModel?.[provider];
-          if (!modelId) return null;
-          const backingModel = rawModelsByTarget.get(`${provider}:${modelId}`);
-          if (!backingModel) return null;
-
-          return {
-            id: `gezel:${gezel.id}`,
-            label: gezel.name,
-            description: [gezel.role, backingModel.label].filter(Boolean).join(' · '),
-            kind: 'gezel',
-            provider,
-            gezelId: gezel.id,
-            ...(gezel.role ? { role: gezel.role } : {}),
-            modelLabel: backingModel.label,
-            ...(backingModel.contextWindow ? { contextWindow: backingModel.contextWindow } : {}),
-            ...(backingModel.supportsReasoning !== undefined
-              ? { supportsReasoning: backingModel.supportsReasoning }
-              : {}),
-            supportsTools: true,
-          };
-        }),
-      )
-    )
-      .filter((model): model is OpenCodeSetupModelOption => model !== null)
-      .sort((a, b) => a.label.localeCompare(b.label));
-
-    // Gezels are the first-class choice. Raw models remain available for
-    // callers that deliberately want OpenCode without a Gezel persona.
-    return [...gezelModels, ...rawModels];
-  };
-
-  const bridgeSnapshot = () => {
-    const live = opts.bridge.status();
-    const port = live.port ?? opts.bridge.desiredPort();
-    const origin = opts.bridge.baseUrl() ?? `http://127.0.0.1:${port}`;
-    return {
-      baseUrl: `${origin}/v1`,
-      listening: live.listening,
-      port,
-    };
-  };
+  const bridgeSnapshot = () => harnessBridgeSnapshot(opts.bridge);
 
   const readState = async (): Promise<SetupState | null> =>
     readSecurityJson(statePath, 'OpenCode setup', decodeSetupState);
@@ -219,6 +171,9 @@ export function createOpenCodeSetupManager(
     models: OpenCodeSetupModelOption[];
     detection: OpenCodeBinaryDetection;
     conflict: ConflictKind | null;
+    configDir: string | null;
+    pluginPath: string | null;
+    pluginFile: string | null;
   }> => {
     const configPromise = opts.readConfig();
     const [config, models, detection, stateResult, managedConfig, tokenFile] = await Promise.all([
@@ -229,17 +184,30 @@ export function createOpenCodeSetupManager(
         (value) => ({ value, error: null as Error | null }),
         (error) => ({ value: null, error: asError(error) }),
       ),
-      readOptional(configPath),
-      readOptional(tokenPath),
+      readOptionalFile(configPath),
+      readOptionalFile(tokenPath),
     ]);
     const state = stateResult.value;
+    const configDir = await resolveConfigDir(detection);
+    const pluginPath = configDir ? openCodePluginPath(configDir) : null;
+    const pluginFile = pluginPath ? await readOptionalFile(pluginPath).catch(() => null) : null;
+    // The file is its own record: an ownership marker proves who wrote it and a
+    // digest proves it still matches this install. Nothing about it is tracked
+    // in Gezel's state, so a crash between writing and recording cannot leave a
+    // setup claiming a file that is not there.
+    const pluginKind: OpenCodeSetupPlugin['state'] =
+      !detection.installed || !pluginPath
+        ? 'unsupported'
+        : pluginFile === null
+          ? 'not-installed'
+          : OPENCODE_PLUGIN_MARKER.isManaged(pluginFile, ownerId)
+            ? pluginFile === pluginSourceFor()
+              ? 'installed'
+              : 'stale'
+            : 'conflict';
     const endpointsEnabled = config.openaiEndpoints?.enabled !== false;
-    const recommendedModel =
-      models.find((model) => model.kind === 'gezel' && model.gezelId === config.meesterGezelId)
-        ?.id ??
-      models.find((model) => model.kind === 'gezel')?.id ??
-      models[0]?.id;
-    const tokenRecord = setupTokenRecord(opts.tokenStore);
+    const recommendedModel = recommendedHarnessModel(models, config.meesterGezelId);
+    const tokenRecord = harnessTokenRecord(opts.tokenStore, OPENCODE_SETUP_APP_ID);
     const tokenOwnedBySetup = tokenRecord?.appName === OPENCODE_SETUP_APP_NAME;
     const configIsOurs =
       managedConfig !== null && state !== null && sha256(managedConfig) === state.configDigest;
@@ -270,7 +238,7 @@ export function createOpenCodeSetupManager(
         reasons.push('The configured gezel or local model is no longer available.');
       }
       if (managedConfig === null) reasons.push('The managed OpenCode config is missing.');
-      if (!tokenRecord || !isExactSetupToken(tokenRecord)) {
+      if (!tokenRecord || !isExactHarnessToken(tokenRecord, OPENCODE_SETUP_APP_NAME)) {
         reasons.push('The OpenCode app credential was revoked or is invalid.');
       } else if (tokenFile !== tokenRecord.token) {
         reasons.push('The managed OpenCode credential file needs repair.');
@@ -292,6 +260,9 @@ export function createOpenCodeSetupManager(
       if (endpointsEnabled && !opts.bridge.status().listening) {
         reasons.push('The OpenCode inference bridge is not running.');
       }
+      // Only a plugin this install still owns is worth reporting as stale;
+      // configure and reconcile both republish it in place.
+      if (pluginKind === 'stale') reasons.push('The OpenCode plugin file is out of date.');
       statusState = reasons.length === 0 ? 'configured' : 'update-needed';
     } else if (models.length === 0) {
       statusState = 'unavailable';
@@ -300,6 +271,22 @@ export function createOpenCodeSetupManager(
 
     const publishable = endpointsEnabled && models.length > 0;
     const canConfigure = publishable && statusState !== 'conflict';
+    // Writing into OpenCode's own directory presupposes a managed config for
+    // the plugin to read, an OpenCode to read it, and no unresolved conflict.
+    const pluginWritable = endpointsEnabled && state !== null && statusState !== 'conflict';
+    const plugin: OpenCodeSetupPlugin = {
+      state: pluginKind,
+      ...(pluginPath ? { path: pluginPath } : {}),
+      canInstall: pluginWritable && (pluginKind === 'not-installed' || pluginKind === 'stale'),
+      canRemove: pluginKind === 'installed' || pluginKind === 'stale',
+      canReplace: pluginWritable && pluginKind === 'conflict',
+      ...pluginMessage({
+        kind: pluginKind,
+        path: pluginPath,
+        detection,
+        configured: state !== null,
+      }),
+    };
     // A credential conflict is another app's to release; the managed config and
     // our own damaged state are the only conflicts Gezel may resolve here.
     const canRepair = publishable && (conflict === 'config' || conflict === 'state');
@@ -308,6 +295,9 @@ export function createOpenCodeSetupManager(
       models,
       detection,
       conflict,
+      configDir,
+      pluginPath,
+      pluginFile,
       status: {
         state: statusState,
         models,
@@ -326,6 +316,7 @@ export function createOpenCodeSetupManager(
           configPath,
           platform,
         }),
+        plugin,
         bridge: bridgeSnapshot(),
         canConfigure,
         canRemove,
@@ -336,23 +327,13 @@ export function createOpenCodeSetupManager(
 
   const status = async (): Promise<OpenCodeSetupStatusResponse> => (await inspect()).status;
 
-  // Exclusive create, never overwrite: the whole point of the backup is that a
-  // file Gezel does not own survives, and that includes an earlier backup.
-  const preserveConflictingConfig = async (content: string): Promise<string> => {
-    for (let attempt = 1; attempt <= MAX_CONFIG_BACKUPS; attempt++) {
-      const candidate = attempt === 1 ? `${configPath}.backup` : `${configPath}.backup-${attempt}`;
-      try {
-        await writeFile(candidate, content, { mode: 0o600, flag: 'wx' });
-        return candidate;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      }
-    }
-    throw new OpenCodeSetupError(
-      'opencode_config_backup_failed',
-      `Could not save a backup copy of ${configPath}. Move the existing backup files aside and try again.`,
-    );
-  };
+  const preserveConflictingConfig = (content: string): Promise<string> =>
+    preserveConflictingFile({
+      path: configPath,
+      content,
+      mode: 0o600,
+      code: 'opencode_config_backup_failed',
+    });
 
   const configure = (input: ConfigureOpenCodeRequest): Promise<OpenCodeSetupStatusResponse> =>
     serialize(async () => {
@@ -393,7 +374,7 @@ export function createOpenCodeSetupManager(
       let backup: { path: string; content: string } | null = null;
       try {
         await ensurePrivateDir(integrationDir);
-        const currentConfig = await readOptional(configPath);
+        const currentConfig = await readOptionalFile(configPath);
         const stateForOwnership = before.state;
         const foreignConfig =
           currentConfig !== null &&
@@ -408,8 +389,12 @@ export function createOpenCodeSetupManager(
         }
         const baseUrl = bridgeSnapshot().baseUrl;
 
-        let record = setupTokenRecord(opts.tokenStore);
-        if (record && record.appName === OPENCODE_SETUP_APP_NAME && !isExactSetupToken(record)) {
+        let record = harnessTokenRecord(opts.tokenStore, OPENCODE_SETUP_APP_ID);
+        if (
+          record &&
+          record.appName === OPENCODE_SETUP_APP_NAME &&
+          !isExactHarnessToken(record, OPENCODE_SETUP_APP_NAME)
+        ) {
           await opts.tokenStore.revoke(OPENCODE_SETUP_APP_ID);
           record = undefined;
         }
@@ -446,7 +431,7 @@ export function createOpenCodeSetupManager(
         // JSON, so a newline would land inside a JSON string literal and make
         // the whole config unparseable.
         await writeFileAtomic(tokenPath, record.token, { mode: 0o600, durable: true });
-        if ((await readOptional(configPath)) !== currentConfig) {
+        if ((await readOptionalFile(configPath)) !== currentConfig) {
           throw new OpenCodeSetupError(
             'opencode_config_conflict',
             `${configPath} changed while setup was running and was not overwritten.`,
@@ -460,6 +445,10 @@ export function createOpenCodeSetupManager(
         }
         await writeFileAtomic(configPath, managedConfig, { mode: 0o600, durable: true });
         await writeSecurityJson(statePath, `${JSON.stringify(nextState, null, 2)}\n`);
+        await refreshManagedPlugin().catch(() => {
+          // The setup itself succeeded. A plugin that could not be refreshed
+          // reports as out of date on the next status rather than failing here.
+        });
         const published = await status();
         return backup ? { ...published, configBackupPath: backup.path } : published;
       } catch (error) {
@@ -486,17 +475,158 @@ export function createOpenCodeSetupManager(
       }
     });
 
+  /**
+   * Republish a plugin this install already owns, so a moved bridge address or
+   * a newer plugin template lands without the user re-installing it. It never
+   * creates one: a plugin the user deleted from their own config directory
+   * must stay deleted.
+   */
+  const refreshManagedPlugin = async (): Promise<void> => {
+    const configDir = await resolveConfigDir(await detect());
+    if (!configDir) return;
+    const pluginPath = openCodePluginPath(configDir);
+    const current = await readOptionalFile(pluginPath).catch(() => null);
+    if (current === null || !OPENCODE_PLUGIN_MARKER.isManaged(current, ownerId)) return;
+    const next = pluginSourceFor();
+    if (next === current) return;
+    await writeFileAtomic(pluginPath, next, { durable: true });
+  };
+
+  /**
+   * Delete the plugin only where this install's marker proves it wrote it.
+   *
+   * Both the currently-resolved root and the conventional one are swept:
+   * OpenCode may have been uninstalled, or moved its config, since the install
+   * — and a plugin left pointing at deleted files would keep loading forever.
+   * Sweeping wider is safe precisely because the marker, not the path, is what
+   * authorizes the delete.
+   */
+  const deleteManagedPlugin = async (): Promise<'deleted' | 'absent' | 'foreign'> => {
+    const candidates = new Set<string>();
+    const resolved = await resolveConfigDir(await detect());
+    if (resolved) candidates.add(openCodePluginPath(resolved));
+    candidates.add(openCodePluginPath((await resolveOpenCodeConfigDir({ env })).dir));
+
+    let outcome: 'deleted' | 'absent' | 'foreign' = 'absent';
+    for (const pluginPath of candidates) {
+      const current = await readOptionalFile(pluginPath).catch(() => null);
+      if (current === null) continue;
+      if (!OPENCODE_PLUGIN_MARKER.isManaged(current, ownerId)) {
+        if (outcome === 'absent') outcome = 'foreign';
+        continue;
+      }
+      await rm(pluginPath, { force: true });
+      outcome = 'deleted';
+    }
+    return outcome;
+  };
+
+  const installPlugin = (
+    input: InstallOpenCodePluginRequest,
+  ): Promise<OpenCodeSetupStatusResponse> =>
+    serialize(async () => {
+      if (closing) {
+        throw new OpenCodeSetupError(
+          'service_stopping',
+          'Gezel is stopping and cannot change the OpenCode setup.',
+          409,
+        );
+      }
+      const before = await inspect();
+      if (!before.status.endpointsEnabled) {
+        throw new OpenCodeSetupError(
+          'openai_endpoints_disabled',
+          'Turn on Allow apps to connect before installing the OpenCode plugin.',
+        );
+      }
+      if (!before.state || before.status.state === 'conflict') {
+        throw new OpenCodeSetupError(
+          'opencode_not_configured',
+          'Set up OpenCode first — the plugin reads the settings file that setup writes.',
+        );
+      }
+      if (!before.detection.installed || !before.configDir || !before.pluginPath) {
+        throw new OpenCodeSetupError(
+          'opencode_not_installed',
+          'OpenCode was not found on this computer, so there is nowhere to install the plugin.',
+        );
+      }
+      if (before.status.plugin.state === 'installed') return before.status;
+
+      const replacing = input.backupConflictingPlugin === true && before.status.plugin.canReplace;
+      if (before.status.plugin.state === 'conflict' && !replacing) {
+        throw new OpenCodeSetupError(
+          'opencode_plugin_conflict',
+          before.status.plugin.message ?? `${before.pluginPath} is not managed by Gezel.`,
+        );
+      }
+
+      const pluginPath = before.pluginPath;
+      let backup: { path: string; content: string } | null = null;
+      try {
+        // OpenCode's config directory belongs to the user: create what is
+        // missing, but never tighten permissions on it.
+        await mkdir(openCodePluginDir(before.configDir), { recursive: true });
+        const current = await readOptionalFile(pluginPath);
+        if (current !== before.pluginFile) {
+          throw new OpenCodeSetupError(
+            'opencode_plugin_conflict',
+            `${pluginPath} changed while the install was running and was not overwritten.`,
+          );
+        }
+        if (current !== null && !OPENCODE_PLUGIN_MARKER.isManaged(current, ownerId)) {
+          backup = {
+            path: await preserveConflictingFile({
+              path: pluginPath,
+              content: current,
+              mode: 0o644,
+              code: 'opencode_plugin_backup_failed',
+            }),
+            content: current,
+          };
+        }
+        // The plugin carries paths, never the credential, so it needs no
+        // private mode in a directory the user may sync between machines.
+        await writeFileAtomic(pluginPath, pluginSourceFor(), { durable: true });
+        const published = await status();
+        return backup ? { ...published, pluginBackupPath: backup.path } : published;
+      } catch (error) {
+        if (backup) {
+          await writeFileAtomic(pluginPath, backup.content, { mode: 0o644, durable: true }).catch(
+            () => undefined,
+          );
+          await rm(backup.path, { force: true }).catch(() => undefined);
+        }
+        throw error;
+      }
+    });
+
+  const removePlugin = (): Promise<OpenCodeSetupStatusResponse> =>
+    serialize(async () => {
+      const outcome = await deleteManagedPlugin();
+      if (outcome === 'foreign') {
+        throw new OpenCodeSetupError(
+          'opencode_plugin_conflict',
+          'That OpenCode plugin file was written by another Gezel installation or changed by hand. It was not removed.',
+        );
+      }
+      return status();
+    });
+
   const removeSetup = (): Promise<OpenCodeSetupStatusResponse> =>
     serialize(async () => {
       const failures: unknown[] = [];
       await opts.bridge.stop().catch((error) => failures.push(error));
+      // The plugin points at files this removal deletes, so it goes too — but
+      // only if this install wrote it.
+      await deleteManagedPlugin().catch((error) => failures.push(error));
 
-      const record = setupTokenRecord(opts.tokenStore);
+      const record = harnessTokenRecord(opts.tokenStore, OPENCODE_SETUP_APP_ID);
       if (record?.appName === OPENCODE_SETUP_APP_NAME) {
         await opts.tokenStore.revoke(OPENCODE_SETUP_APP_ID).catch((error) => failures.push(error));
       }
-      // Everything Gezel writes for OpenCode lives inside its own integration
-      // directory, so removal never reaches into the user's OpenCode config.
+      // Apart from the plugin removed above, everything Gezel writes for
+      // OpenCode lives inside its own integration directory.
       await rm(integrationDir, { recursive: true, force: true }).catch((error) =>
         failures.push(error),
       );
@@ -518,11 +648,11 @@ export function createOpenCodeSetupManager(
         await opts.bridge.stop();
         return;
       }
-      const record = setupTokenRecord(opts.tokenStore);
-      const tokenFile = await readOptional(tokenPath);
-      const managedConfig = await readOptional(configPath);
+      const record = harnessTokenRecord(opts.tokenStore, OPENCODE_SETUP_APP_ID);
+      const tokenFile = await readOptionalFile(tokenPath);
+      const managedConfig = await readOptionalFile(configPath);
       if (
-        !isExactSetupToken(record) ||
+        !isExactHarnessToken(record, OPENCODE_SETUP_APP_NAME) ||
         tokenFile !== record.token ||
         managedConfig === null ||
         sha256(managedConfig) !== state.configDigest
@@ -547,6 +677,7 @@ export function createOpenCodeSetupManager(
         baseUrl: bridgeSnapshot().baseUrl,
         tokenPath,
       });
+      await refreshManagedPlugin().catch(() => undefined);
       if (next === managedConfig) return;
       await writeFileAtomic(configPath, next, { mode: 0o600, durable: true });
       await writeSecurityJson(
@@ -558,6 +689,8 @@ export function createOpenCodeSetupManager(
   return {
     status,
     configure,
+    installPlugin,
+    removePlugin,
     remove: removeSetup,
     reconcile,
     stop: () => {
@@ -567,16 +700,28 @@ export function createOpenCodeSetupManager(
   };
 }
 
-function setupTokenRecord(store: TokenStore): TokenRecord | undefined {
-  return store.list().find((record) => record.appId === OPENCODE_SETUP_APP_ID);
-}
-
-function isExactSetupToken(record: TokenRecord | undefined): record is TokenRecord {
-  return (
-    record?.appName === OPENCODE_SETUP_APP_NAME &&
-    record.scopes.length === 1 &&
-    record.scopes[0] === 'openai'
-  );
+function pluginMessage(input: {
+  kind: OpenCodeSetupPlugin['state'];
+  path: string | null;
+  detection: OpenCodeBinaryDetection;
+  configured: boolean;
+}): { message?: string } {
+  if (input.kind === 'unsupported') {
+    return {
+      message: input.detection.installed
+        ? 'Gezel could not work out where OpenCode keeps its configuration.'
+        : 'Install OpenCode to make Gezel available in it without the launch command.',
+    };
+  }
+  if (input.kind === 'conflict') {
+    return {
+      message: `${input.path} was written by another Gezel installation or changed by hand. It was not modified.`,
+    };
+  }
+  if (input.kind === 'not-installed' && !input.configured) {
+    return { message: 'Set up OpenCode first — the plugin reads the settings file setup writes.' };
+  }
+  return {};
 }
 
 interface OpenCodeModelEntry {
@@ -664,15 +809,6 @@ function buildLaunchCommand(input: {
   return `OPENCODE_CONFIG=${posixShellWord(input.configPath)} ${posixShellWord(binary)}`;
 }
 
-function posixShellWord(value: string): string {
-  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value;
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
-}
-
-function powershellLiteral(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
@@ -691,22 +827,4 @@ function decodeSetupState(raw: string): SetupState {
     throw new Error('invalid setup record');
   }
   return parsed as SetupState;
-}
-
-async function readOptional(path: string): Promise<string | null> {
-  try {
-    return await readFile(path, 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw error;
-  }
-}
-
-async function ensurePrivateDir(path: string): Promise<void> {
-  await mkdir(path, { recursive: true, mode: 0o700 });
-  await chmod(path, 0o700).catch(() => {});
-}
-
-function asError(value: unknown): Error {
-  return value instanceof Error ? value : new Error(String(value));
 }

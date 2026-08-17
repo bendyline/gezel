@@ -114,6 +114,9 @@ describe('AI engagement menu', () => {
   });
 });
 
+/** Same wall-clock formatting the menu uses, so the assertions stay locale-proof. */
+const clock = (d: Date) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
 describe('Night Shift header status', () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -198,6 +201,140 @@ describe('Night Shift header status', () => {
 
     expect(await screen.findByText('No work is running or queued.')).toBeInTheDocument();
     expect(screen.queryByText('Up next')).not.toBeInTheDocument();
+  });
+
+  it('names when the running shift started and when its window closes', async () => {
+    const user = userEvent.setup();
+    const startedAt = new Date(Date.now() - 2 * 60 * 60_000);
+    const windowEnd = new Date(Date.now() + 90 * 60_000);
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({
+      active: true,
+      source: 'scheduled',
+      startedAt: startedAt.toISOString(),
+      window: {
+        start: new Date(Date.now() - 3 * 60 * 60_000).toISOString(),
+        end: windowEnd.toISOString(),
+        open: true,
+      },
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (scheduled)' }));
+
+    expect(
+      await screen.findByText(
+        `Started ${clock(startedAt)} · ends ${clock(windowEnd)} (1h 30m left)`,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('points at the next window while nothing is running', async () => {
+    const user = userEvent.setup();
+    const start = new Date(Date.now() + 4 * 60 * 60_000);
+    const end = new Date(Date.now() + 12 * 60 * 60_000);
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({
+      active: false,
+      source: null,
+      startedAt: null,
+      window: { start: start.toISOString(), end: end.toISOString(), open: false },
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Night Shift: off' }));
+
+    expect(
+      await screen.findByText(`Next window ${clock(start)} – ${clock(end)}`),
+    ).toBeInTheDocument();
+  });
+
+  it('promises no closing time for a manual shift', async () => {
+    const user = userEvent.setup();
+    const startedAt = new Date(Date.now() - 20 * 60_000);
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({
+      active: true,
+      source: 'manual',
+      startedAt: startedAt.toISOString(),
+      window: {
+        start: new Date(Date.now() + 6 * 60 * 60_000).toISOString(),
+        end: new Date(Date.now() + 14 * 60 * 60_000).toISOString(),
+        open: false,
+      },
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (manual)' }));
+
+    expect(
+      await screen.findByText(`Started ${clock(startedAt)} · runs until the work is done`),
+    ).toBeInTheDocument();
+  });
+
+  it('tallies the work of the running shift, skipping the zeroes', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'manual' });
+    vi.mocked(api.getNightShiftTally).mockResolvedValue({
+      since: new Date(Date.now() - 60 * 60_000).toISOString(),
+      until: new Date().toISOString(),
+      live: true,
+      tasksCompleted: 1,
+      stepsCompleted: 4,
+      filesIndexed: 128,
+      filesReviewed: 0,
+      mediaDescribed: 0,
+      filesWritten: 3,
+      documentsCreated: 0,
+      imagesRendered: 0,
+      questionsRaised: 2,
+      toolCalls: 0,
+    });
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (manual)' }));
+
+    expect(await screen.findByText('So far this shift')).toBeInTheDocument();
+    const chips = document.querySelectorAll('.app-nightshift-tally-item');
+    expect([...chips].map((c) => c.textContent)).toEqual([
+      '1 task done',
+      '4 steps finished',
+      '2 questions for you',
+      '128 files indexed',
+      '3 files written',
+    ]);
+  });
+
+  it('calls the review "last night" only once that window has closed', async () => {
+    const user = userEvent.setup();
+    const finished = {
+      ref: 'p1/4',
+      title: 'Sweep the docs',
+      projectId: 'p1',
+      projectName: 'Molen',
+    };
+    // Window still running: this is tonight's work, not last night's.
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: true, source: 'scheduled' });
+    vi.mocked(api.getNightShiftReview).mockResolvedValue({
+      windowKey: '2026-07-29',
+      windowStart: new Date(Date.now() - 3 * 60 * 60_000).toISOString(),
+      windowEnd: new Date(Date.now() + 3 * 60 * 60_000).toISOString(),
+      tasksCompleted: [finished],
+      reports: [],
+    });
+    const running = render(<App />);
+    await user.click(await screen.findByRole('button', { name: 'Night Shift: on (scheduled)' }));
+    expect(await screen.findByText('Finished so far')).toBeInTheDocument();
+    running.unmount();
+
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: false, source: null });
+    vi.mocked(api.getNightShiftReview).mockResolvedValue({
+      windowKey: '2026-07-29',
+      windowStart: new Date(Date.now() - 12 * 60 * 60_000).toISOString(),
+      windowEnd: new Date(Date.now() - 4 * 60 * 60_000).toISOString(),
+      tasksCompleted: [finished],
+      reports: [],
+    });
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: 'Night Shift: off' }));
+    expect(await screen.findByText('Done last night')).toBeInTheDocument();
   });
 
   it('explains a quota-reserve hold and marks the held rows', async () => {

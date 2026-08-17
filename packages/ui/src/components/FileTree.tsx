@@ -200,7 +200,7 @@ function TreeItem({
   const row = (
     <div
       className={`tree-row${selectedPath === node.path ? ' tree-row-selected' : ''}`}
-      style={{ paddingLeft: `${depth * 16 + 4}px` }}
+      style={{ paddingLeft: `${depth * 12 + 2}px` }}
     >
       {canExpand ? (
         <button
@@ -244,7 +244,8 @@ function TreeItem({
           else setExpanded(!expanded);
         }}
       >
-        {iconFor(entry)} {label}
+        {iconFor(entry)}
+        {label}
       </button>
       {trailing && <span className="tree-row-trailing">{trailing}</span>}
       {hasActions && (

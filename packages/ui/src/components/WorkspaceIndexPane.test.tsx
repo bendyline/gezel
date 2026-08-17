@@ -72,6 +72,45 @@ describe('WorkspaceIndexPane Boekwachter lifecycle', () => {
     expect(onFixIssue).toHaveBeenCalledWith(openIssue);
   });
 
+  it('renders the row actions as icon keys in a tray named for the issue', () => {
+    render(
+      <WorkspaceIndexPane
+        path="docs/guide.md"
+        status={null}
+        issues={null}
+        review={{ path: 'docs/guide.md', found: false, trackedIssues: [openIssue] }}
+        loading={false}
+        error={null}
+        onClose={vi.fn()}
+        onFixIssue={vi.fn()}
+        onUpdateIssue={vi.fn()}
+      />,
+    );
+
+    // The ref lives on the toolbar, so the keys inside can keep short labels
+    // without a screen reader hearing "Mark resolved" identically per row.
+    const tray = screen.getByRole('toolbar', { name: 'Actions for BW-8' });
+    expect(tray).toHaveClass('gz-tray');
+
+    const resolve = screen.getByRole('button', { name: 'Mark resolved' });
+    expect(resolve).toHaveClass('gz-key', 'gz-key--icon');
+    expect(resolve.querySelector('i')).toHaveClass('fa-solid', 'fa-check');
+    // Icon-only: no visible text competing with the issue message.
+    expect(resolve.textContent).toBe('');
+    expect(resolve).toHaveAttribute('title', 'Mark resolved');
+
+    expect(screen.getByRole('button', { name: 'Mark read' }).querySelector('i')).toHaveClass(
+      'fa-envelope-open',
+    );
+    expect(screen.getByRole('button', { name: 'Not an issue' }).querySelector('i')).toHaveClass(
+      'fa-ban',
+    );
+
+    const fix = screen.getByRole('button', { name: 'Fix' });
+    expect(fix.querySelector('i')).toHaveClass('fa-wrench');
+    expect(fix).toHaveAttribute('title', 'Create a tracked task for BW-8');
+  });
+
   it('hides closed history until requested and links an in-progress issue to its task', () => {
     const onOpenTask = vi.fn();
     render(
