@@ -80,6 +80,57 @@ describe('Store session CRUD', () => {
     expect(onDisk?.messages.find((m) => m.hidden)?.content).toContain('[Checkers page]');
   });
 
+  /**
+   * Threads written before `ChatMessage.origin` existed still open with a
+   * dispatch seed, and would keep rendering it as the user's own words. A
+   * task-scoped session is always created by the dispatcher *before* its
+   * seed is sent, so its first user message is machine-authored by
+   * construction — inferred structurally rather than by matching seed
+   * wording, which drifts with every copy edit.
+   */
+  it('listTimeline infers system origin for a legacy task seed', async () => {
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-legacy-task',
+        taskRef: 'default/1',
+        stepId: 'oversight',
+        messages: [
+          {
+            role: 'user',
+            content: 'The previous step has been completed and handed step `oversight` to you.',
+            at: '2026-04-14T10:00:00Z',
+          },
+          { role: 'assistant', content: 'On it.', at: '2026-04-14T10:00:02Z' },
+          // A real reply from the user, later in the same task thread.
+          { role: 'user', content: 'looks good, carry on', at: '2026-04-14T10:05:00Z' },
+        ],
+      }),
+    );
+
+    const timeline = await store.listTimeline({ gezelId: 'ada', limit: 50 });
+    const rows = timeline.messages.filter((m) => m.sessionId === 'sess-legacy-task');
+    expect(rows[0]?.origin).toBe('system');
+    expect(rows[1]?.origin).toBeUndefined();
+    // Only the opening seed is machinery — the user's own later turn stays theirs.
+    expect(rows[2]?.origin).toBeUndefined();
+  });
+
+  it('listTimeline leaves an ordinary session untouched by the legacy inference', async () => {
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-plain',
+        messages: [
+          { role: 'user', content: 'hello there', at: '2026-04-14T11:00:00Z' },
+          { role: 'assistant', content: 'hi', at: '2026-04-14T11:00:01Z' },
+        ],
+      }),
+    );
+
+    const timeline = await store.listTimeline({ gezelId: 'ada', limit: 50 });
+    const rows = timeline.messages.filter((m) => m.sessionId === 'sess-plain');
+    expect(rows.every((m) => m.origin === undefined)).toBe(true);
+  });
+
   it('listTimeline scoped to a taskRef drops unrelated sessions in the project', async () => {
     await store.writeSession(
       sessionFixture({

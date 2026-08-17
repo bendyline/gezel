@@ -18,7 +18,7 @@ import { SearchService, fuzzyScore } from './search-service.js';
 function makeService(
   opts: {
     projects?: Array<{ id: string; name: string }>;
-    gezels?: Array<{ id: string; name: string; role?: string }>;
+    gezels?: Array<{ id: string; name: string; role?: string; roleBasedName?: string }>;
     documents?: Array<{ name: string; path: string; isDirectory: boolean }>;
     files?: Record<string, Array<{ path: string; size: number; mtimeMs: number }>>;
     code?: ContentIndex['searchCode'];
@@ -26,6 +26,8 @@ function makeService(
     documentHits?: Array<{ path: string; lineStart: number; snippet: string }>;
     artifactFiles?: Record<string, string[]>;
     artifactHits?: Array<{ path: string; lineStart: number; snippet: string }>;
+    /** Vector-memory rows returned for every scope the fan-out asks about. */
+    memoryHits?: Array<{ text: string; score: number; day: string }>;
   } = {},
 ) {
   const store = {
@@ -56,7 +58,7 @@ function makeService(
   } as unknown as ContentIndex;
 
   const memory = {
-    searchVector: vi.fn(async () => []),
+    searchVector: vi.fn(async () => opts.memoryHits ?? []),
   } as unknown as MemoryManager;
 
   const indexManager = {
@@ -121,6 +123,43 @@ describe('SearchService.quickOpen', () => {
   it('returns nothing for a query that matches no name', async () => {
     const svc = makeService({ projects: [{ id: 'p1', name: 'Space Shooter' }] });
     expect(await svc.quickOpen('zzzzz')).toEqual([]);
+  });
+
+  /**
+   * The product's whole vocabulary is roles — a user reading the Handboek
+   * types "meester", not the random first name that gezel was given. The role
+   * was in the catalog as a display subtitle but was never a match target, so
+   * searching the app's own front-door concept found nothing.
+   */
+  it('finds a gezel by role and by role-based name, not just by first name', async () => {
+    const svc = makeService({
+      gezels: [
+        { id: 'g1', name: 'Ulrike', role: 'Meester', roleBasedName: 'meester' },
+        { id: 'g2', name: 'Senga', role: 'Boekwachter', roleBasedName: 'boekwachter' },
+      ],
+    });
+
+    const byRole = await svc.quickOpen('meester');
+    expect(byRole[0]?.kind).toBe('gezel');
+    expect(byRole[0]?.title).toBe('Ulrike');
+
+    const byOtherRole = await svc.quickOpen('boekwachter');
+    expect(byOtherRole[0]?.title).toBe('Senga');
+
+    // Names still work, and still outrank a role match on the same query.
+    const byName = await svc.quickOpen('ulrike');
+    expect(byName[0]?.title).toBe('Ulrike');
+  });
+
+  it('ranks an exact name match above another gezel matched by role', async () => {
+    const svc = makeService({
+      gezels: [
+        { id: 'g1', name: 'Klerk', role: 'Reviewer' },
+        { id: 'g2', name: 'Bram', role: 'Klerk' },
+      ],
+    });
+    const results = await svc.quickOpen('klerk');
+    expect(results.map((r) => r.title)).toEqual(['Klerk', 'Bram']);
   });
 
   it('invalidateCatalog forces a rebuild so new entities are found immediately', async () => {
@@ -189,6 +228,66 @@ describe('SearchService.search (full)', () => {
     const svc = makeService({ projects: [{ id: 'p1', name: 'Space Shooter' }] });
     await svc.search('space', { mode: 'names' });
     expect(embedMock).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Vector search is nearest-neighbour, so it hands back its top K for any
+   * query at all — including gibberish. Without a floor the palette answered
+   * a nonsense string with three confident-looking memories, and "No results"
+   * became unreachable on any install that had memories at all.
+   */
+  it('drops memory hits below the relevance floor', async () => {
+    const svc = makeService({
+      projects: [{ id: 'p1', name: 'Space Shooter' }],
+      memoryHits: [
+        { text: 'The deployment runbook lives in docs/deploy.md', score: 0.82, day: '2026-08-01' },
+        { text: 'Examples:', score: 0.13, day: '2026-08-01' },
+        { text: 'New messages:', score: 0.33, day: '2026-08-01' },
+      ],
+    });
+
+    const { results } = await svc.search('deployment runbook', { mode: 'full' });
+    const memories = results.filter((r) => r.kind === 'memory');
+    expect(memories).toHaveLength(1);
+    expect(memories[0]?.snippet).toBe('The deployment runbook lives in docs/deploy.md');
+  });
+
+  it('returns nothing at all when only sub-floor memories match', async () => {
+    const svc = makeService({
+      projects: [{ id: 'p1', name: 'Space Shooter' }],
+      memoryHits: [
+        { text: 'Examples:', score: 0.11, day: '2026-08-01' },
+        { text: 'New messages:', score: 0.33, day: '2026-08-01' },
+      ],
+    });
+    const { results } = await svc.search('zzqqxx', { mode: 'full' });
+    expect(results).toEqual([]);
+  });
+
+  /**
+   * A memory id carries its scope and day, so the same sentence remembered by
+   * two gezels (or on two days) cleared the id-based pass and listed twice —
+   * observed four times over in one live query.
+   */
+  it('collapses the same remembered sentence recorded in several scopes', async () => {
+    const svc = makeService({
+      projects: [{ id: 'p1', name: 'Space Shooter' }],
+      gezels: [
+        { id: 'g1', name: 'Ada' },
+        { id: 'g2', name: 'Bram' },
+      ],
+      memoryHits: [
+        { text: 'Sessions are stored as JSON files.', score: 0.86, day: '2026-08-01' },
+        { text: '  sessions ARE stored as JSON files.  ', score: 0.7, day: '2026-08-02' },
+      ],
+    });
+
+    const { results } = await svc.search('where are sessions stored', { mode: 'full' });
+    const memories = results.filter((r) => r.kind === 'memory');
+    expect(memories).toHaveLength(1);
+    // The best-scoring copy survives, keeping its own navigable id.
+    expect(memories[0]?.snippet).toBe('Sessions are stored as JSON files.');
+    expect(memories[0]?.id.startsWith('memory:')).toBe(true);
   });
 
   it('surfaces session transcript hits with gezel/project display names', async () => {

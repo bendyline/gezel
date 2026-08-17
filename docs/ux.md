@@ -421,6 +421,22 @@ message that was delivered from the queue carries a small uppercase
 discards queued nudges; each ghost keeps its own Discard so the user
 decides.
 
+**Only the person's own words are attributed to them.** Task dispatch
+seeds, step handoffs, and page reactions travel as `role: 'user'` messages
+because that is the role a provider accepts mid-conversation — but the user
+never typed them, and a transcript that opens with "YOU · call
+`advance_task_step` to hand off" reads as a bug and quietly undoes the
+warm-companion framing. Any such turn carries `origin: 'system'`
+([`ChatMessage`](../packages/core/src/schemas/gezel.ts)), and every surface
+that names an author must honour it: the bubble reads **System** with a
+small uppercase `automatic` badge (the neutral sibling of `nudged` — same
+`--text-2xs` / `--radius-sm` recipe, `--border` instead of terracotta) and
+drops to the panel tone, because the terracotta fill *is* the signal that
+words came from the user. The rule travels to every author label, not just
+the bubble: the sticky scroll header renders the same verdict, and a new
+one must too. Cross-gezel messages are a separate case already answered by
+`from` — they keep the "Aldric → Maya" handoff bubble.
+
 **Transformation dialog.** AI edits to user text never land silently. The
 editor toolbar's single transform button opens the transformation dialog
 (`TransformDialog`, `gz-transform-*` block in styles.css): an instruction
@@ -458,6 +474,36 @@ link that lands on the same article.
 "generating…") over blocking spinners. A pulsing icon (see
 `.gezel-icon--pulse`) is the canonical "this thing is working in the
 background" signal.
+
+**A search box answers the keystroke, not the query.** The results surface
+mounts as soon as there is something to search for — never on the response —
+because a panel that only appears once data arrives has no way to say
+"working", and the box reads as broken for however long the backend takes.
+The titlebar search is the reference: it opens on the debounced query showing
+*Searching…*, fills with the instant name matches, then keeps a quiet
+`.search-palette-more` line while the slower content fan-out completes. Two
+rules travel with it. **Fast and slow sources are separate phases** — the
+name catalog answers in milliseconds while content search waits on the
+embedding pipeline, and making the user wait for the slow half to see the
+fast half is what produced a 41-second silent box. And **"No results" is a
+claim about the user's data**, so a lookup that *failed* must say that
+instead; the two are different answers and only one of them means "stop
+looking".
+
+**The theme reaches everything on screen, including what we don't style.**
+A project-type Output page renders in a null-origin sandboxed iframe, so our
+CSS variables never reach it, and a page that only knows the OS preference
+becomes a glaring cream slab down the side of a dark workshop. The desktop
+shell therefore pushes the user's Light/Dark/System choice into Chromium's own
+preference (`nativeTheme.themeSource`, set from `applyThemePref` in
+[theme.ts](../packages/ui/src/theme.ts)), which is the one signal that crosses
+the sandbox — a `color-scheme` on the frame element does not, and the
+`window.gezel` theme message only reaches pages that opted into the page API.
+Embedded content is then themed by honouring `prefers-color-scheme`, which is
+the contract documented for page authors in
+[project-types.md](project-types.md). The rule generalises: when a surface is
+a separate document we cannot style, hand it the preference rather than
+assuming it will match by luck.
 
 **Meters name their denominator.** A usage bar is a claim about a physical
 pool, so only a figure measured against that pool may fill it. The engine

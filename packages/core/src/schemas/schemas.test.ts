@@ -263,6 +263,30 @@ describe('ChatMessageSchema', () => {
       }),
     ).toThrow();
   });
+
+  it('marks a machine-authored user turn without disturbing older messages', () => {
+    // A dispatch seed keeps the user role providers require, plus the
+    // marker that stops the UI attributing it to the person.
+    const seed = ChatMessageSchema.parse({
+      role: 'user',
+      content: 'Task p1/1 has advanced to the next step.',
+      at: '2026-01-01',
+      origin: 'system',
+    });
+    expect(seed.origin).toBe('system');
+    // Every session written before the field existed must still parse.
+    expect(
+      ChatMessageSchema.parse({ role: 'user', content: 'hi', at: '2026-01-01' }).origin,
+    ).toBeUndefined();
+    expect(() =>
+      ChatMessageSchema.parse({
+        role: 'user',
+        content: 'hi',
+        at: '2026-01-01',
+        origin: 'assistant',
+      }),
+    ).toThrow();
+  });
 });
 
 describe('ChatEventSchema', () => {

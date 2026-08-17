@@ -146,6 +146,10 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
   // updates config; the main handler only mutates tray state (no echo
   // back), so there's no loop with the mode-set channel below.
   syncConfig: (cfg) => ipcRenderer.send('gezel:tray:sync-config', cfg),
+  // Push the theme preference down to Chromium's own colour-scheme setting.
+  // The sandboxed preview iframe is a null-origin document, so this is the
+  // only route by which a project-type page learns the user picked Dark.
+  setNativeTheme: (pref) => ipcRenderer.send('gezel:set-native-theme', pref),
   // Fired when the tray menu changes the engagement mode, so the in-app
   // header menu reflects it. Mirrors onNavigate's callback-proxy pattern
   // (DOM CustomEvents don't cross the contextIsolation boundary, so the

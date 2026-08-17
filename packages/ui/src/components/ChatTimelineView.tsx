@@ -1654,6 +1654,9 @@ export function ChatTimelineView({
           // renders as a "Yusuf → Leo" handoff instead of "You".
           ...(event.message.from ? { from: event.message.from } : {}),
           ...(event.message.nudge ? { nudge: true } : {}),
+          // Keep a live dispatch seed labelled System — without this the
+          // bubble reads as "You" until the next canonical refresh.
+          ...(event.message.origin === 'system' ? { origin: 'system' as const } : {}),
         };
         const dedupKey = `${sessionId}:${event.message.at}:${event.message.role}`;
         setMessages((prev) => {
@@ -3042,6 +3045,7 @@ export function ChatTimelineView({
         {...(!roleBasedNameOnlyMode && gezel?.role ? { authorRole: gezel.role } : {})}
         {...(m.from ? { from: m.from } : {})}
         {...(m.nudge ? { nudge: true } : {})}
+        {...(m.origin === 'system' ? { origin: 'system' as const } : {})}
         receiverLabel={
           gezel
             ? displayName(
@@ -3795,8 +3799,12 @@ function withinHours(iso: string | undefined, ms: number): boolean {
  * user prompt + the assistant bubble header for whatever's
  * currently being scrolled past. Keeps the conversation context
  * visible while the user reads through a long response.
+ *
+ * Exported for its unit test (same reason as `staleLiveSessionIds`): it is
+ * the second place that decides an author label, so it can drift from the
+ * bubble's without a test holding the two together.
  */
-function ChatStickyHeader({
+export function ChatStickyHeader({
   payload,
   gezels,
 }: {
@@ -3831,7 +3839,12 @@ function ChatStickyHeader({
   return (
     <div className="chat-sticky-header" aria-live="polite">
       <div className="chat-sticky-header-user" title={userMsg.content}>
-        <span className="chat-sticky-header-author">YOU</span>
+        {/* A task dispatch seed rides the user role but is the machinery
+            talking — the bubble labels it System, and the sticky header
+            has to agree or the attribution flips as the user scrolls. */}
+        <span className="chat-sticky-header-author">
+          {userMsg.origin === 'system' ? 'SYSTEM' : 'YOU'}
+        </span>
         <span className="chat-sticky-header-preview">{userPreview}</span>
       </div>
       <div className="chat-sticky-header-assistant" key={assistantGezelId}>

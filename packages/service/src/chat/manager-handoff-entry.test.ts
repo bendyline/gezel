@@ -230,4 +230,37 @@ describe('handoff seed wording', () => {
     const seed = await seedFor({});
     expect(seed).toContain('The previous step has been completed and handed step `report`');
   });
+
+  /**
+   * The seed is a `role: 'user'` message because that is the only role a
+   * provider accepts mid-conversation — but the person never typed it. The
+   * marker is what stops the transcript rendering "YOU · call
+   * `advance_task_step` to hand off" on the Home screen.
+   */
+  it('marks the dispatch seed as system-authored, not the user speaking', async () => {
+    await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: 'p1/1',
+      stepId: 'report',
+      fromGezelName: 'Koray',
+      fromGezelId: 'koray',
+    });
+    await manager.drainBackground();
+    const sessions = await store.listSessions({ gezelId: 'worker' });
+    const workerSession = sessions.find((session) => session.taskRef === 'p1/1');
+    const full = workerSession ? await store.getSession('worker', workerSession.id) : null;
+    const seedMessage = full?.messages[0];
+    expect(seedMessage?.role).toBe('user');
+    expect(seedMessage?.origin).toBe('system');
+
+    // The reply is a real model turn and must stay unmarked.
+    const reply = full?.messages.find((m) => m.role === 'assistant');
+    expect(reply?.origin).toBeUndefined();
+
+    // And it survives the timeline projection the chat UI actually reads.
+    const timeline = await store.listTimeline({ projectId: 'p1', limit: 50 });
+    const seedRow = timeline.messages.find((m) => m.role === 'user');
+    expect(seedRow?.origin).toBe('system');
+  });
 });

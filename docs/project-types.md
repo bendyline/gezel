@@ -255,6 +255,39 @@ read-only cross-source paths in `pages.reads`; the service folds only those trus
 manifest scopes into the capability. The preview surface stays read-only; all writes
 go through scripts/tools.
 
+### Pages follow the app's theme through `prefers-color-scheme`
+
+A page renders in the preview iframe, which is a **null-origin sandboxed
+document**: gezel's CSS variables never reach it, a `color-scheme` on the frame
+element does not cross the sandbox boundary (measured), and the `window.gezel`
+theme message only reaches pages that opted into the page API. What does cross
+is the browser's own colour-scheme preference, so the desktop shell pushes the
+user's Light/Dark/System choice into `nativeTheme.themeSource`
+([main.ts](../packages/app/src/main.ts), fed from `applyThemePref` in
+[theme.ts](../packages/ui/src/theme.ts)).
+
+That makes the ordinary media query the contract, and every page must honour
+it — a page that ships only light colours becomes a glaring white slab down the
+side of a dark workshop:
+
+```css
+:root { color-scheme: light dark; --bg: #faf7f2; --card: #fff; --ink: #2b2620; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #1c1a17; --card: #262320; --ink: #efe9e0; }
+}
+```
+
+Two rules keep it working: declare `color-scheme: light dark` so form controls
+and scrollbars follow too, and drive every colour through the variables rather
+than hardcoding `#fff` in a component rule — a literal in a card background
+survives the media query and stays light. Pages on the v1 API may additionally
+read the pushed theme for finer control, but the media query stays the floor.
+Note where the push does not reach: opened in a real browser ("Open in
+browser"), or served to the web UI, there is no Electron process to move the
+preference, so the page follows the operating system rather than the gezel
+setting. That is the honest ceiling of this mechanism, and the reason pages are
+asked to honour the ordinary media query rather than a gezel-specific hook.
+
 ### The Output Pane API (`window.gezel`) — v1
 
 New pages should be authored against the injected, versioned page API

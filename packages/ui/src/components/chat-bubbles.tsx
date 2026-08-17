@@ -179,6 +179,14 @@ export interface MessageBubbleProps {
    */
   nudge?: boolean;
   /**
+   * The machinery authored this user-role message — a task dispatch seed,
+   * a step handoff, a page reaction. Labels the bubble **System** instead
+   * of "You" and mutes it, so internal instructions ("call
+   * `advance_task_step`…") never read as words the person typed. User
+   * bubbles only.
+   */
+  origin?: 'system';
+  /**
    * Name of the gezel whose session this bubble lives in — used as the
    * receiver label in the "sender → receiver" header. Required when
    * `from` is set.
@@ -393,6 +401,7 @@ export function MessageBubble({
   driftLabel,
   from,
   nudge,
+  origin,
   receiverLabel,
   projectLabel,
   extraClass,
@@ -574,17 +583,29 @@ export function MessageBubble({
     );
   }
   const isUser = role === 'user';
+  // A machine-authored user turn (task dispatch, step handoff) keeps the
+  // user role the provider needs but is never presented as the person's
+  // own words — see `ChatMessage.origin`.
+  const isSystem = isUser && origin === 'system';
   // Header suppression only applies to assistant bubbles — a user
   // bubble's "You" is its alignment anchor and always renders.
   const headerless = suppressHeader && !isUser;
-  const cls = `msg msg-${role}${headerless ? ' msg-headerless' : ''}${extraClass ? ` ${extraClass}` : ''}`;
+  const cls = `msg msg-${role}${isSystem ? ' msg-system' : ''}${headerless ? ' msg-headerless' : ''}${extraClass ? ` ${extraClass}` : ''}`;
   return (
     <div className={cls} data-msg-id={dataMsgId} data-session-id={dataSessionId}>
       {!headerless && (
         <div className="msg-role" title={!isUser ? authorTooltip : undefined}>
           {isUser ? (
             <>
-              {'You'}
+              {isSystem ? 'System' : 'You'}
+              {isSystem && (
+                <span
+                  className="msg-system-chip"
+                  title="Sent by gezel itself to move the task along — you didn't write this"
+                >
+                  automatic
+                </span>
+              )}
               {nudge && (
                 <span className="msg-nudge-chip" title="Sent while the previous turn was running">
                   nudged

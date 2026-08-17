@@ -5419,6 +5419,16 @@ export class Store {
     const rows: TimelineMessage[] = [];
     for (const s of sessions) {
       const handoff = handoffOf.get(s.id);
+      // Sessions written before `ChatMessage.origin` existed carry no marker
+      // on their dispatch seed, so a task thread would still open with the
+      // machinery's words labelled "You". `startHandoffSession` always
+      // creates the session with a taskRef and *then* sends the seed, which
+      // makes "first user message of a task-scoped session" an exact
+      // structural stand-in — no matching on seed wording, which drifts.
+      const legacySeedAt =
+        s.taskRef && !s.messages.some((m) => m.origin)
+          ? s.messages.find((m) => m.role === 'user')?.at
+          : undefined;
       for (const m of s.messages) {
         if (m.role !== 'user' && m.role !== 'assistant') continue;
         // Hidden facilitation seeds (e.g. a project-type page reaction with
@@ -5464,6 +5474,9 @@ export class Store {
           at: m.at,
           ...(m.from ? { from: m.from } : {}),
           ...(m.nudge ? { nudge: true } : {}),
+          ...(m.origin === 'system' || (legacySeedAt !== undefined && m.at === legacySeedAt)
+            ? { origin: 'system' as const }
+            : {}),
           ...(refs && refs.length > 0 ? { referencedFiles: refs } : {}),
           ...(legacyArtifactRefs.length > 0 ? { referencedArtifacts: legacyArtifactRefs } : {}),
           ...(tRefs && tRefs.length > 0 ? { referencedTasks: tRefs } : {}),

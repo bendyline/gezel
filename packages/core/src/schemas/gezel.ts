@@ -652,6 +652,25 @@ export const ChatMessageSchema = z.object({
    */
   nudge: z.boolean().optional(),
   /**
+   * The machinery — not the human — authored this `role: 'user'` message.
+   * Task dispatch seeds, step handoffs, and project-page reaction seeds
+   * all arrive as user turns because that is the only role a provider
+   * will accept mid-conversation, but the person never typed them.
+   *
+   * Display-only marker: the model still sees an ordinary user turn, and
+   * the UI labels the bubble **System** instead of "You". Without it the
+   * flagship Home thread opened with "YOU · call `advance_task_step` to
+   * hand off" — internal plumbing quoted back at the user in their own
+   * voice, which reads as a bug and undoes the warm-companion framing the
+   * whole product rests on.
+   *
+   * Set from the turn's `messageOrigin` (service-side `TurnMessageOrigin`);
+   * an enum rather than a boolean so a future dispatch/reaction split can
+   * widen it without a second field. Messages written before this field
+   * existed are inferred at read time — see `Store.listTimeline`.
+   */
+  origin: z.enum(['system']).optional(),
+  /**
    * Persistent warnings attached to this assistant turn — fabricated
    * tool-use detection, degraded provider state, etc. The streaming
    * `warning` events show during the live render but vanish when the

@@ -37,6 +37,12 @@ export function applyThemePref(pref: ThemePref): void {
   const root = document.documentElement;
   if (pref === 'system') root.removeAttribute('data-theme');
   else root.setAttribute('data-theme', pref);
+  // Push the same choice down to Chromium's own colour-scheme preference.
+  // `data-theme` only reaches surfaces our stylesheet owns; a project-type
+  // page lives in the null-origin preview iframe, where the browser-level
+  // preference is the one signal that crosses. Every caller that changes the
+  // theme routes through here, so this is the one place that has to remember.
+  window.__GEZEL__?.setNativeTheme?.(pref);
 }
 
 /**
@@ -60,10 +66,18 @@ export async function syncThemeFromConfig(): Promise<void> {
     if (t === 'system' || t === 'light' || t === 'dark') serverPref = t;
   } catch {
     /* offline / boot race — keep whatever localStorage says */
+    // Chromium still has to be told, or a stored Dark preference leaves the
+    // preview iframe following the OS until the user next toggles the theme.
+    window.__GEZEL__?.setNativeTheme?.(getThemePref());
     return;
   }
-  if (!serverPref) return;
   const localPref = getThemePref();
+  // The DOM may already be correct from the early-paint script, but the
+  // browser-level preference is set per process and has to be pushed on every
+  // boot — otherwise the common "nothing changed since last launch" path
+  // never reaches `applyThemePref` and project-type pages stay on OS theme.
+  window.__GEZEL__?.setNativeTheme?.(serverPref ?? localPref);
+  if (!serverPref) return;
   if (serverPref === localPref) return;
   try {
     if (serverPref === 'system') localStorage.removeItem(STORAGE_KEY);

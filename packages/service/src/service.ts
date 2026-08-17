@@ -105,6 +105,7 @@ import { registerMailAdapters } from './mail/registry.js';
 import { ensureNightShiftOversightTask } from './meester/night-shift-oversight.js';
 import { MeesterStatusGenerator } from './meester/status-generator.js';
 import { MemoryCompactor } from './memory/compaction.js';
+import { warmEmbeddings } from './memory/embeddings.js';
 import { MemoryHealthMonitor } from './memory/health.js';
 import { MemoryManager } from './memory/manager.js';
 import { createEnsureModelOrchestrator } from './models/ensure.js';
@@ -2880,6 +2881,15 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         /* swallow */
       });
     }, 60_000).unref();
+    // Load the embedding pipeline before an interactive caller needs it. The
+    // titlebar search fans out over content on every query, so without this
+    // the model's one-time load lands on somebody's first keystroke. Deferred
+    // so it never competes with boot or the first-run model download.
+    setTimeout(() => {
+      void warmEmbeddings().then((warmed) => {
+        if (warmed) log.debug('[memory] embedding pipeline warmed');
+      });
+    }, 20_000).unref();
   }
 
   return {

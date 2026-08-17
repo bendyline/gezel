@@ -160,3 +160,38 @@ describe('MessageBubble nudge chip', () => {
     expect(screen.queryByText('nudged')).toBeNull();
   });
 });
+
+describe('MessageBubble system attribution', () => {
+  /**
+   * Task dispatch seeds and step handoffs arrive as user-role messages, but
+   * the person never wrote them — attributing "call `advance_task_step` to
+   * hand off" to "You" reads as a bug on the app's flagship screen.
+   */
+  it('labels a machine-authored user turn System rather than You', () => {
+    const { container } = render(
+      // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.
+      <MessageBubble
+        role="user"
+        content="The previous step has been completed and handed step `oversight` to you."
+        authorLabel="You"
+        authorIcon={null}
+        origin="system"
+      />,
+    );
+    expect(screen.getByText('System')).toBeInTheDocument();
+    expect(screen.queryByText('You')).toBeNull();
+    expect(screen.getByText('automatic')).toBeInTheDocument();
+    // Drops the terracotta "these are your words" treatment.
+    expect(container.querySelector('.msg-system')).not.toBeNull();
+  });
+
+  it('leaves a genuine user message attributed to You', () => {
+    const { container } = render(
+      // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.
+      <MessageBubble role="user" content="ship it" authorLabel="You" authorIcon={null} />,
+    );
+    expect(screen.getByText('You')).toBeInTheDocument();
+    expect(screen.queryByText('System')).toBeNull();
+    expect(container.querySelector('.msg-system')).toBeNull();
+  });
+});

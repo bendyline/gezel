@@ -8,7 +8,7 @@
 // `createRequire` so we go through Electron's patched CJS loader.
 const require = createRequire(import.meta.url);
 // biome-ignore format: `typeof import(...)` cannot be broken across lines
-const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, powerMonitor, powerSaveBlocker, screen, session, shell } = require('electron') as typeof import('electron');
+const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, nativeTheme, powerMonitor, powerSaveBlocker, screen, session, shell } = require('electron') as typeof import('electron');
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
@@ -1627,6 +1627,27 @@ ipcMain.handle('gezel:ambient:open-folder', async (): Promise<string> => {
     return await shell.openPath(dir);
   } catch (err) {
     return err instanceof Error ? err.message : String(err);
+  }
+});
+
+/**
+ * Theme sync: hand the user's Light/Dark/System choice to Chromium itself.
+ *
+ * The app's own surfaces are themed by our CSS variables, but a project-type
+ * page renders inside the preview iframe — a separate, null-origin document
+ * that our stylesheet can never reach. Neither a `color-scheme` on the frame
+ * element nor the page-API theme message helps: the first does not propagate
+ * across the sandbox boundary, and the second only reaches pages that opted
+ * into `window.gezel`. Setting `nativeTheme.themeSource` moves the browser's
+ * own preference, so `prefers-color-scheme` inside every frame answers with
+ * the user's gezel choice — which is what the shipped pages already key on.
+ * It also brings native menus and dialogs along.
+ *
+ * `system` is Electron's default and hands control back to the OS.
+ */
+ipcMain.on('gezel:set-native-theme', (_event, pref?: string) => {
+  if (pref === 'system' || pref === 'light' || pref === 'dark') {
+    nativeTheme.themeSource = pref;
   }
 });
 

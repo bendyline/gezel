@@ -224,6 +224,18 @@ declare global {
         ambientDisplay?: { applyWallpaper?: boolean };
       }) => void;
       /**
+       * Hand the app's theme preference to Chromium itself, so
+       * `prefers-color-scheme` answers with the user's gezel choice rather
+       * than the operating system's.
+       *
+       * This is the only channel that reaches inside the sandboxed preview
+       * iframe. Project-type pages are a separate, null-origin document, so
+       * neither our CSS variables nor a `color-scheme` on the frame element
+       * reach them (both measured); the browser-level preference does. No-op
+       * outside the desktop shell.
+       */
+      setNativeTheme?: (pref: 'system' | 'light' | 'dark') => void;
+      /**
        * Register a callback fired when the engagement mode is changed from
        * the tray menu, so the in-app UI can reflect it. Mirrors
        * `onNavigate`.

@@ -135,6 +135,55 @@ describe('extractMemories routing', () => {
     ]);
   });
 
+  /**
+   * A model that repeats its instructions instead of answering hands back the
+   * prompt's own few-shot examples — correctly tagged, so they parse and save
+   * as if the crew had remembered them, and then ride into later prompts as
+   * recalled context. Wild-caught in unified search, where "Sessions are
+   * stored as JSON files under the data directory." came back four times for
+   * an unrelated query.
+   */
+  it('stores nothing when the reply is the prompt echoed back', async () => {
+    const { memory, saves } = recordingMemory();
+    await extractMemories({
+      messages,
+      extractedUpTo: 0,
+      oneShot: async (prompt) => `Mock reply: ${prompt}`,
+      memory,
+      gezelId: 'ada',
+      projectId: 'proj-1',
+    });
+    expect(saves).toEqual([]);
+  });
+
+  it('rejects the prompt’s own examples when only they come back', async () => {
+    const { memory, saves } = recordingMemory();
+    await extractMemories({
+      messages,
+      extractedUpTo: 0,
+      oneShot: async () =>
+        [
+          'PROJECT/FACT: Sessions are stored as JSON files under the data directory.',
+          'PROJECT/DECISION: Chose sqlite-vec over Vectra for the memory index.',
+          'GEZEL/PREF: The user prefers terse replies without emojis.',
+          'PROJECT/STATUS: The OpenAI API key is currently missing from config.',
+          // The one genuine line in the reply must still survive.
+          'PROJECT/FACT: Deploy pipeline lives in scripts/deploy.sh.',
+        ].join('\n'),
+      memory,
+      gezelId: 'ada',
+      projectId: 'proj-1',
+    });
+    expect(saves).toEqual([
+      {
+        scope: 'project',
+        id: 'proj-1',
+        text: 'Deploy pipeline lives in scripts/deploy.sh.',
+        kind: 'fact',
+      },
+    ]);
+  });
+
   it('saves nothing on NONE', async () => {
     const { memory, saves } = recordingMemory();
     await extractMemories({

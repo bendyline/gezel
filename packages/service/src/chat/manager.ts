@@ -6167,6 +6167,10 @@ export class ChatManager {
       ...(opts?.from ? { from: opts.from } : {}),
       ...(opts?.hidden ? { hidden: true } : {}),
       ...(opts?.nudge ? { nudge: true } : {}),
+      // A dispatch seed or handoff is a user turn only because that is the
+      // role providers accept; mark it so the transcript never attributes
+      // the machinery's words to the person.
+      ...(resolveTurnMessageOrigin(opts) === 'system' ? { origin: 'system' as const } : {}),
     };
     state.record.messages.push(userMessage);
     if (!state.record.title || state.record.title === NEW_THREAD_TITLE) {
@@ -8166,7 +8170,11 @@ export class ChatManager {
   private async runFixedFunctionSend(
     sessionId: string,
     userText: string,
-    opts?: { from?: { gezelId: string; gezelName: string }; hidden?: boolean },
+    opts?: {
+      from?: { gezelId: string; gezelName: string };
+      hidden?: boolean;
+      messageOrigin?: TurnMessageOrigin;
+    },
   ): Promise<ChatMessage> {
     const tag = sessionId.slice(0, 8);
     const fail = (err: unknown): never => {
@@ -8223,6 +8231,7 @@ export class ChatManager {
       at: nowIso(),
       ...(opts?.from ? { from: opts.from } : {}),
       ...(opts?.hidden ? { hidden: true } : {}),
+      ...(resolveTurnMessageOrigin(opts) === 'system' ? { origin: 'system' as const } : {}),
     };
     record.messages.push(userMessage);
     if (!record.title || record.title === NEW_THREAD_TITLE) {

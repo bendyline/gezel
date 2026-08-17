@@ -1115,6 +1115,16 @@ html.embedded-chat #root {
   font-size: 0.85rem;
 }
 
+/* Trailing note while the content fan-out is still running behind the
+   instant name matches — the list is filling, not finished. Quieter than a
+   result row so it never competes with what is already pickable. */
+.search-palette-more {
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
 .search-palette-group + .search-palette-group {
   margin-top: 4px;
 }
@@ -15751,6 +15761,30 @@ button.bench-step-foot:disabled {
   letter-spacing: 0.04em;
   padding: 0 0.3rem;
   border: 1px solid rgba(176, 114, 76, 0.35);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+
+/* Machine-authored user turns — task dispatch seeds, step handoffs, page
+   reactions. They keep the user role the provider requires, so they land
+   in the user column; the terracotta fill is reserved for words the person
+   actually typed, so these drop to the neutral panel tone and muted ink.
+   Paired with the "System" author label — see `ChatMessage.origin`. */
+.msg-system .msg-body {
+  background: var(--panel);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+/* Companion badge to `.msg-nudge-chip`, neutral rather than terracotta:
+   this message did not come from the user at all. Badge, not a control. */
+.msg-system-chip {
+  margin-left: 0.35rem;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-muted);
 }

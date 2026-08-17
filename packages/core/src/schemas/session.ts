@@ -538,6 +538,14 @@ export const TimelineMessageSchema = z.object({
    */
   nudge: z.boolean().optional(),
   /**
+   * Mirrors `ChatMessage.origin` — the machinery authored this user turn
+   * (task dispatch seed, step handoff, reaction seed), so the bubble is
+   * labelled **System** rather than "You". Also set at read time for
+   * sessions written before the field existed: the opening user message
+   * of a task-scoped session is always the dispatch seed.
+   */
+  origin: z.enum(['system']).optional(),
+  /**
    * Mirrors `ChatMessage.referencedFiles` — validated artifact and
    * workspace paths the assistant reply mentioned. Populated on write
    * and backfilled on read for older messages that predate the parser.
