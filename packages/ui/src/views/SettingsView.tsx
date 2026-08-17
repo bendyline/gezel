@@ -524,7 +524,7 @@ export function SettingsView() {
     try {
       const res = await api.updateConfig({ provider });
       setConfig(res);
-      setStatus('');
+      setStatus('saved — open chats restart on their next message.');
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
     }

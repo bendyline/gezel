@@ -3804,12 +3804,19 @@ button.machine-memory-unload-button {
   color: var(--text-muted);
 }
 
-/* The Documents inline file tree sits flush in the list. Pull it back
-   so the document icon aligns under the "D" of the Documents header. */
+/* Pull the Documents tree's row boxes through the group indent so selected
+   rows still connect to the main pane. The tree carries its own caret spacer;
+   offset that content back to align root file/folder icons with the Documents
+   header icon while preserving the row box and deeper tree indentation. */
 .app-sidebar-tree {
   padding-left: 0.4rem;
   margin-left: -27px;
   font-size: 0.82rem;
+}
+
+.app-sidebar-tree .tree-row > .tree-toggle,
+.app-sidebar-tree .tree-row > .tree-toggle-spacer {
+  margin-left: 0.7rem;
 }
 
 .app-sidebar-links {
@@ -11083,7 +11090,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 .history-detail {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--surface);
   overflow: auto;
   min-height: 0;
@@ -11095,11 +11102,153 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   font-size: 0.9rem;
 }
 
-.history-detail .history-details {
+.history-detail-document {
+  min-height: 100%;
+  padding: 1.2rem 1.35rem 1.5rem;
+  color: var(--text);
+  font-size: var(--text-md);
+}
+
+.history-detail-header {
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-detail-eyebrow {
+  margin: 0 0 0.35rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.history-detail-header h3 {
+  margin: 0;
+  font-size: var(--text-xl);
+  line-height: 1.35;
+}
+
+.history-detail-time,
+.history-detail-subtitle {
+  display: block;
+  margin: 0.45rem 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.history-detail-time span {
+  white-space: nowrap;
+}
+
+.history-detail-section {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-detail-section h4 {
+  margin: 0 0 0.55rem;
+  font-size: var(--text-lg);
+}
+
+.history-detail-fields {
+  margin: 0;
+}
+
+.history-detail-field {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 0.34fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+}
+
+.history-detail-field:first-child {
   border-top: none;
-  background: transparent;
-  max-height: none;
-  height: 100%;
+}
+
+.history-detail-field dt {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.history-detail-field dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.history-detail-text {
+  white-space: pre-wrap;
+}
+
+.history-detail-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.history-detail-code,
+.history-detail-reference code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-xs);
+}
+
+.history-detail-code {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.15rem 0.3rem;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.history-detail-nested {
+  padding-left: 0.75rem;
+  border-left: 2px solid color-mix(in srgb, var(--border) 78%, var(--accent));
+}
+
+.history-detail-nested .history-detail-field {
+  grid-template-columns: minmax(6.5rem, 0.34fr) minmax(0, 1fr);
+}
+
+.history-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.history-detail-list .history-detail-fields {
+  margin: 0.2rem 0 0.4rem;
+}
+
+.history-detail-section .thinking-tool-diff {
+  margin-left: 0;
+}
+
+.history-detail-reference {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  padding-top: 1rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+@media (max-width: 760px) {
+  .history-detail-document {
+    padding-inline: 1rem;
+  }
+
+  .history-detail-field,
+  .history-detail-nested .history-detail-field {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
 }
 
 .history-item {
@@ -11191,17 +11340,6 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   font-size: 0.75rem;
   color: var(--muted);
   text-align: right;
-}
-
-.history-details {
-  margin: 0;
-  padding: 0.75rem 1rem;
-  border-top: 1px solid var(--border);
-  background: rgba(0, 0, 0, 0.2);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.78rem;
-  overflow-x: auto;
-  max-height: 24rem;
 }
 
 /* ── Tasks view ── */
@@ -11683,6 +11821,13 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   align-items: flex-start;
   gap: 1rem;
   flex-wrap: wrap;
+}
+
+/* The top-level detail pane otherwise begins exactly on the list seam.
+   Inset its identity + status controls while leaving the workflow bench
+   below full-width for horizontal scrolling. */
+.tasks-view-overall .task-detail-header {
+  padding-inline-start: 1rem;
 }
 
 .task-detail-header > :first-child {
@@ -27668,6 +27813,29 @@ button.boekwachter-pill:focus-visible {
 
 .gz-cleanup-dialog {
   max-width: 44rem;
+  overflow: hidden;
+}
+
+/* Keep the title, explanation, and decisions anchored to the dialog surface.
+   Only the potentially long category list scrolls; otherwise its intrinsic
+   height pushes the action row below the 85vh dialog box, where transparent
+   buttons show the dark overlay through themselves. */
+.gz-cleanup-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 0;
+  padding-right: 0.35rem;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.gz-cleanup-dialog > .gz-dialog-actions {
+  flex: 0 0 auto;
+  margin-top: 0;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
 }
 
 .gz-cleanup-choices {
@@ -27762,6 +27930,22 @@ button.boekwachter-pill:focus-visible {
 
 .gz-backup-tabs button[aria-selected="true"] {
   border-color: var(--accent);
+}
+
+.gz-backup-dialog .gz-backup-exclude {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.gz-backup-dialog .gz-backup-exclude > input[type="checkbox"] {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  cursor: pointer;
 }
 
 .gz-backup-replace {

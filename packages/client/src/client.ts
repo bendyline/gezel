@@ -25,7 +25,9 @@ import type {
   VideoModelPullEvent,
 } from '@bendyline/gezel';
 import type {
+  AmbientDashboardDisplayTarget,
   AmbientDashboardStatusResponse,
+  AmbientDashboardTheme,
   AnswerQuestionRequest,
   AppendTaskNoteRequest,
   AppendTaskNoteResponse,
@@ -1431,6 +1433,8 @@ export interface ConfigResponse {
     enabled?: boolean;
     intervalMinutes?: number;
     resolution?: string;
+    themeId?: AmbientDashboardTheme;
+    displayTarget?: AmbientDashboardDisplayTarget;
     style?: string;
     keep?: number;
   };
@@ -2478,6 +2482,17 @@ export class GezelClient {
    *  arrives on the global SSE stream as an `ambient_dashboard` event. */
   runAmbientDashboard(): Promise<{ started: boolean }> {
     return this.request('POST', '/api/ambient-dashboard/run');
+  }
+
+  /**
+   * Persist the Electron shell's primary-display canvas + safe content area.
+   * The daemon keeps this target for scheduled renders that run while the app
+   * is closed.
+   */
+  setAmbientDashboardDisplayTarget(
+    displayTarget: AmbientDashboardDisplayTarget,
+  ): Promise<{ displayTarget: AmbientDashboardDisplayTarget }> {
+    return this.request('PUT', '/api/ambient-dashboard/display-target', displayTarget);
   }
 
   // ── storage accounting, cleanup & backup ──

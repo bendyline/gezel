@@ -331,6 +331,30 @@ describe('ProviderPool', () => {
     expect(broker.committedBytes()).toBe(10 * GB);
   });
 
+  it('releaseIdle() frees idle models and leaves a busy one streaming', async () => {
+    const made: BusyFakeProvider[] = [];
+    const broker = new CapacityBroker({ budgetBytes: 60 * GB });
+    const pool = new ProviderPool({
+      broker,
+      builders: { mlx: mkBusyBuilder(10 * GB, made) },
+    });
+    await pool.ensure('mlx', 'idle-a', 0, 10 * GB);
+    await pool.ensure('mlx', 'mid-turn', 0, 10 * GB);
+    await pool.ensure('mlx', 'idle-b', 0, 10 * GB);
+    const busyKey = makeEngineKey('mlx', 'mid-turn', 0);
+    made[1]!.busy = true;
+
+    const stillResident = await pool.releaseIdle();
+
+    expect(stillResident).toEqual([busyKey]);
+    expect(pool.has(makeEngineKey('mlx', 'idle-a', 0))).toBe(false);
+    expect(pool.has(makeEngineKey('mlx', 'idle-b', 0))).toBe(false);
+    expect(pool.has(busyKey)).toBe(true);
+    // The turn on the busy engine is untouched — that is the whole point.
+    expect(made[1]?.shutdownCalls).toBe(0);
+    expect(broker.committedBytes()).toBe(10 * GB);
+  });
+
   it('parallel ensure() on the same key collapses to a single build', async () => {
     let buildCount = 0;
     const builder: ProviderBuilder = async ({ modelId, replicaIdx }) => {

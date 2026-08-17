@@ -57,7 +57,10 @@ export function StorageCleanupDialog() {
     setOpen(true);
     void (async () => {
       try {
-        const next = await api.storageSummary({ refresh: true });
+        // Settings already starts this measurement when it mounts. Reuse its
+        // in-flight or one-minute-cached result instead of launching a second
+        // full filesystem walk as soon as the dialog opens.
+        const next = await api.storageSummary();
         setSummary(next);
         if (detail.preselectRedownloadable) {
           setSelected(
@@ -157,77 +160,80 @@ export function StorageCleanupDialog() {
             downloads come back on their own if you keep using Gezel.
           </AlertDialog.Description>
 
-          {!summary && !error && <p className="muted small">Measuring…</p>}
+          <div className="gz-cleanup-body">
+            {!summary && !error && <p className="muted small">Measuring…</p>}
 
-          {summary && !finished && (
-            <>
-              <fieldset className="gz-cleanup-choices" disabled={busy}>
-                <legend>Downloads Gezel can fetch again</legend>
-                {redownloadable.map((category) => (
-                  <CategoryChoice
-                    key={category.id}
-                    category={category}
-                    checked={selected.has(category.id)}
-                    onChange={(on) => toggle(category.id, on)}
-                  />
-                ))}
-                {redownloadable.every((c) => c.bytes === 0) && (
-                  <p className="muted small">Nothing downloaded yet.</p>
+            {summary && !finished && (
+              <>
+                <fieldset className="gz-cleanup-choices" disabled={busy}>
+                  <legend>Downloads Gezel can fetch again</legend>
+                  {redownloadable.map((category) => (
+                    <CategoryChoice
+                      key={category.id}
+                      category={category}
+                      checked={selected.has(category.id)}
+                      onChange={(on) => toggle(category.id, on)}
+                    />
+                  ))}
+                  {redownloadable.every((c) => c.bytes === 0) && (
+                    <p className="muted small">Nothing downloaded yet.</p>
+                  )}
+                </fieldset>
+
+                <div className="gz-cleanup-content-group">
+                  <button
+                    type="button"
+                    className="link-button"
+                    aria-expanded={contentExpanded}
+                    onClick={() => setContentExpanded((v) => !v)}
+                    disabled={busy}
+                  >
+                    {contentExpanded ? 'Hide my content' : 'Delete my content instead…'}
+                  </button>
+                  {contentExpanded && (
+                    <fieldset className="gz-cleanup-choices" disabled={busy}>
+                      <legend>Your content</legend>
+                      <p className="gz-cleanup-warning small" role="alert">
+                        Gezel cannot bring these back. Back them up first if you may want them
+                        again.
+                      </p>
+                      {userContent.map((category) => (
+                        <CategoryChoice
+                          key={category.id}
+                          category={category}
+                          checked={selected.has(category.id)}
+                          onChange={(on) => toggle(category.id, on)}
+                        />
+                      ))}
+                    </fieldset>
+                  )}
+                </div>
+
+                {chosen.some((c) => c.external.length > 0) && (
+                  <p className="muted small">
+                    Folders you chose that live outside Gezel’s own storage are never deleted.
+                  </p>
                 )}
-              </fieldset>
+              </>
+            )}
 
-              <div className="gz-cleanup-content-group">
-                <button
-                  type="button"
-                  className="link-button"
-                  aria-expanded={contentExpanded}
-                  onClick={() => setContentExpanded((v) => !v)}
-                  disabled={busy}
-                >
-                  {contentExpanded ? 'Hide my content' : 'Delete my content instead…'}
-                </button>
-                {contentExpanded && (
-                  <fieldset className="gz-cleanup-choices" disabled={busy}>
-                    <legend>Your content</legend>
-                    <p className="gz-cleanup-warning small" role="alert">
-                      Gezel cannot bring these back. Back them up first if you may want them again.
-                    </p>
-                    {userContent.map((category) => (
-                      <CategoryChoice
-                        key={category.id}
-                        category={category}
-                        checked={selected.has(category.id)}
-                        onChange={(on) => toggle(category.id, on)}
-                      />
-                    ))}
-                  </fieldset>
-                )}
-              </div>
+            {busy && job && (
+              <p className="muted small" aria-live="polite">
+                {job.phase === 'quiesce' && 'Checking nothing is in use…'}
+                {job.phase === 'delete' && `Deleting ${job.currentLabel ?? '…'}`}
+                {job.phase === 'verify-recovery' && 'Tidying up…'}
+                {job.totalItems > 0 && ` (${job.itemsDone}/${job.totalItems})`}
+              </p>
+            )}
 
-              {chosen.some((c) => c.external.length > 0) && (
-                <p className="muted small">
-                  Folders you chose that live outside Gezel’s own storage are never deleted.
-                </p>
-              )}
-            </>
-          )}
+            {finished && job && <CleanupOutcome job={job} />}
 
-          {busy && job && (
-            <p className="muted small" aria-live="polite">
-              {job.phase === 'quiesce' && 'Checking nothing is in use…'}
-              {job.phase === 'delete' && `Deleting ${job.currentLabel ?? '…'}`}
-              {job.phase === 'verify-recovery' && 'Tidying up…'}
-              {job.totalItems > 0 && ` (${job.itemsDone}/${job.totalItems})`}
-            </p>
-          )}
-
-          {finished && job && <CleanupOutcome job={job} />}
-
-          {error && (
-            <p className="gz-dialog-error" role="alert">
-              {error}
-            </p>
-          )}
+            {error && (
+              <p className="gz-dialog-error" role="alert">
+                {error}
+              </p>
+            )}
+          </div>
 
           <AlertDialog.Actions>
             <AlertDialog.Cancel asChild>

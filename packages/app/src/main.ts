@@ -8,7 +8,7 @@
 // `createRequire` so we go through Electron's patched CJS loader.
 const require = createRequire(import.meta.url);
 // biome-ignore format: `typeof import(...)` cannot be broken across lines
-const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, powerMonitor, powerSaveBlocker, session, shell } = require('electron') as typeof import('electron');
+const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, powerMonitor, powerSaveBlocker, screen, session, shell } = require('electron') as typeof import('electron');
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
@@ -33,6 +33,7 @@ import {
   streamAllChatEvents,
 } from '@bendyline/gezel-client/node';
 import { ambientDir } from '@bendyline/gezel/paths';
+import { ambientDashboardDisplayTarget } from './ambient-display/display-target.js';
 import { ambientDisplay } from './ambient-display/index.js';
 import {
   disable as ambientDisable,
@@ -1825,6 +1826,8 @@ let ambientMonitorAbort: AbortController | null = null;
 let ambientApplyEnabled = false;
 let ambientDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let ambientResumeHooked = false;
+let ambientDisplayTargetTimer: ReturnType<typeof setTimeout> | null = null;
+let ambientDisplayTargetHooksInstalled = false;
 
 function gezelHomeDir(): string {
   return process.env.GEZEL_HOME || join(homedir(), '.gezel');
@@ -1859,10 +1862,49 @@ function setAmbientApplyEnabled(next: boolean): void {
   }
 }
 
+async function syncPrimaryDisplayTarget(): Promise<void> {
+  const client = apiClient;
+  if (!client || process.env.GEZEL_E2E === '1') return;
+  try {
+    const displayTarget = ambientDashboardDisplayTarget(screen.getPrimaryDisplay());
+    await client.setAmbientDashboardDisplayTarget(displayTarget);
+  } catch (err) {
+    console.warn(
+      `[ambient] primary display sync failed: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+}
+
+function schedulePrimaryDisplayTargetSync(delayMs = 300): void {
+  if (process.env.GEZEL_E2E === '1') return;
+  if (ambientDisplayTargetTimer) clearTimeout(ambientDisplayTargetTimer);
+  ambientDisplayTargetTimer = setTimeout(() => {
+    ambientDisplayTargetTimer = null;
+    void syncPrimaryDisplayTarget();
+  }, delayMs);
+}
+
+/**
+ * Persist the primary monitor's physical canvas + work-area-safe rectangle.
+ * Hooks live for the app lifetime; daemon reconnects merely replace the API
+ * client, and startAmbientMonitoring schedules a fresh sync for that client.
+ */
+function startPrimaryDisplayTargetSync(): void {
+  if (process.env.GEZEL_E2E === '1') return;
+  if (!ambientDisplayTargetHooksInstalled) {
+    ambientDisplayTargetHooksInstalled = true;
+    screen.on('display-added', () => schedulePrimaryDisplayTargetSync());
+    screen.on('display-removed', () => schedulePrimaryDisplayTargetSync());
+    screen.on('display-metrics-changed', () => schedulePrimaryDisplayTargetSync());
+  }
+  schedulePrimaryDisplayTargetSync(0);
+}
+
 function startAmbientMonitoring(): void {
   stopAmbientMonitoring();
   const client = apiClient;
   if (!client || process.env.GEZEL_E2E === '1') return;
+  startPrimaryDisplayTargetSync();
   const controller = new AbortController();
   ambientMonitorAbort = controller;
   if (!ambientResumeHooked) {
@@ -1893,6 +1935,10 @@ function stopAmbientMonitoring(): void {
   if (ambientDebounceTimer) {
     clearTimeout(ambientDebounceTimer);
     ambientDebounceTimer = null;
+  }
+  if (ambientDisplayTargetTimer) {
+    clearTimeout(ambientDisplayTargetTimer);
+    ambientDisplayTargetTimer = null;
   }
 }
 

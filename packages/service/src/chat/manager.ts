@@ -2765,11 +2765,13 @@ export class ChatManager {
     );
 
     // A hard stop must release resident local engines, not merely interrupt
-    // their current HTTP request. The ordinary live reset path disconnects
-    // bridges/providers and force-evicts the production-owned engine pool;
-    // unlike service shutdown, it leaves ChatManager reusable for the next
-    // explicit user message while Reactive mode blocks autonomous restarts.
-    await this.resetClient();
+    // their current HTTP request — hence `engines: 'force'`, which a live
+    // config reset deliberately does not use. Turns were already cancelled
+    // above, so the force is a backstop for an engine that ignored the
+    // cancel. Unlike service shutdown this leaves ChatManager reusable for
+    // the next explicit user message while Reactive mode blocks autonomous
+    // restarts.
+    await this.resetClient({ engines: 'force' });
 
     return { cancelledTurns, clearedQueuedMessages, clearedDeferredActions };
   }
@@ -9306,9 +9308,22 @@ export class ChatManager {
    * Tear down cached sessions, tool bridges, and provider engines so the
    * next session picks up new config.
    *
-   * Default (hard) mode tears down everything immediately — correct for
-   * credential / provider / endpoint changes, where the old engine state
-   * is unusable and must go now.
+   * Default (hard) mode disconnects every session and disposes every tool
+   * bridge immediately — correct for credential / provider / endpoint /
+   * security-boundary changes, where the old session state and the old MCP
+   * children are unusable and must go now.
+   *
+   * What it does NOT do is kill resident local engines. A pooled engine is
+   * a model process keyed by (provider, modelId, replica): it carries no
+   * credentials and no tool surface, so no config change makes the *process*
+   * unsafe — only the sessions and bridges around it. `engines: 'force'`
+   * (service shutdown, emergency stop) force-evicts the pool without waiting
+   * for in-flight turns; the default `'release-idle'` frees every engine
+   * that is not mid-turn and leaves busy ones to the pool's ordinary
+   * LRU/idle lifecycle. Wild-caught: flipping the security posture in
+   * Settings force-killed both resident 27B models, and a background
+   * craftbook turn four minutes into its first step died with "the
+   * on-device engine dropped the connection", which reads as a crash.
    *
    * `deferBusy` mode is for pure model-preference changes (default chat
    * model, reasoning effort), where the only thing that needs to flow
@@ -9324,10 +9339,16 @@ export class ChatManager {
    * per-session the moment each one returns to idle and rebuilds.
    */
   async resetClient(
-    opts: { deferBusy?: boolean; restoreSeededProviders?: boolean } = {},
+    opts: {
+      deferBusy?: boolean;
+      restoreSeededProviders?: boolean;
+      /** See method doc. Defaults to `'release-idle'` — never severs a live turn. */
+      engines?: 'release-idle' | 'force';
+    } = {},
   ): Promise<void> {
     const deferBusy = opts.deferBusy ?? false;
     const restoreSeededProviders = opts.restoreSeededProviders ?? true;
+    const engines = opts.engines ?? 'release-idle';
     const tearDownSession = (sessionId: string, state: LiveSessionState): void => {
       if (state.session) {
         void state.session.disconnect().catch(() => {
@@ -9384,7 +9405,11 @@ export class ChatManager {
       // their next turn; the engine pool evicts the stale model lazily.
       return;
     }
-    await this.shutdownOwnedEngineRouter();
+    if (engines === 'force') {
+      await this.shutdownOwnedEngineRouter();
+    } else {
+      await this.releaseIdleOwnedEngines();
+    }
     for (const [name, provider] of this.providers) {
       try {
         await provider.shutdown();
@@ -9447,8 +9472,10 @@ export class ChatManager {
     // and fall through to a real provider.
     this.flushDeferredExtractions();
     await this.drainBackground();
-    // Final service teardown must not re-arm injected providers.
-    await this.resetClient({ restoreSeededProviders: false });
+    // Final service teardown must not re-arm injected providers, and must
+    // take the engines with it — a pooled engine left running here outlives
+    // gezeld as a PPID-1 orphan.
+    await this.resetClient({ restoreSeededProviders: false, engines: 'force' });
   }
 
   /** List the models available on the given provider (for the UI dropdown). */
@@ -10237,6 +10264,34 @@ export class ChatManager {
       log.warn(
         `engine router shutdown failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+  }
+
+  /**
+   * Free the memory a live reset can free without severing anything: evict
+   * every resident engine that is idle right now and leave the rest to the
+   * pool's ordinary lifecycle. The router itself stays — dropping it while an
+   * engine is still serving a turn would orphan that process outside the
+   * broker's accounting, which is the reason the old path force-killed
+   * everything instead.
+   *
+   * An explicitly injected {@link engineRouter} remains caller-owned and is
+   * left alone, same rule as {@link shutdownOwnedEngineRouter}. A router
+   * whose construction is still in flight owns no resident engines yet, so
+   * this deliberately does not await it.
+   */
+  private async releaseIdleOwnedEngines(): Promise<void> {
+    const router = this.engineRouterCache;
+    if (!router) return;
+    try {
+      const busy = await router.releaseIdle();
+      if (busy.length > 0) {
+        log.info(
+          `[chat] reset kept ${busy.length} busy engine(s) resident (${busy.join(', ')}) — they unload when their turns finish`,
+        );
+      }
+    } catch (err) {
+      log.warn(`engine release-idle failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

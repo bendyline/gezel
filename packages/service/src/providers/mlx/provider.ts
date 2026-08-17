@@ -564,6 +564,16 @@ export class MlxProvider implements LLMProvider {
     return this.plannedReservation;
   }
 
+  /**
+   * True once {@link shutdown} has been called. A session whose stream dies
+   * reads this to tell "Gezel stopped this engine" from "the engine died on
+   * its own" — the two need different messages, and the flag is set before
+   * the stop so the racing turn always sees it.
+   */
+  get isDisposed(): boolean {
+    return this.disposed;
+  }
+
   async shutdown(): Promise<void> {
     // Poison FIRST so a turn racing the shutdown can't lazily respawn
     // the engine after the stop below. The engine pool evicts replicas
@@ -2126,10 +2136,8 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           // something actionable instead of the cryptic one-word message;
           // the original text still rides along in the persisted warning.
           if (!recoveredFromRamble && isMidStreamConnectionDrop(err)) {
-            const got =
-              turnContent.length > 0 ? `after ${turnContent.length} chars` : 'before any output';
             throw new Error(
-              `[Mac AI] the on-device engine dropped the connection mid-turn (${got}). This usually means the mlx server crashed, ran out of memory, or was restarted while the turn was streaming — this turn's work was lost. Retry the turn; if it keeps happening, restart the engine in Settings → On-device.`,
+              buildMidStreamDropMessage(turnContent.length, this.deps.provider.isDisposed),
             );
           }
           if (!recoveredFromRamble) throw err;
@@ -3697,6 +3705,25 @@ function buildPreFirstByteAbortMessage(
     return `[Mac AI] aborting — still prefilling ${lastPrefill.detail} when the budget ran out. The prompt is large for this model's prefill speed; retry (the cache is warm now) or pick a faster/smaller model.`;
   }
   return '[Mac AI] no first byte from the engine; aborting (model is loading slowly or mlx_vlm.server is unhealthy). Retry the turn; if it keeps happening, restart the engine in Settings → On-device.';
+}
+
+/**
+ * Build the user-facing message for a stream that died mid-turn.
+ *
+ * A planned teardown and a crash are indistinguishable on the wire — both
+ * arrive as undici's bare `TypeError: terminated` — so the message has to
+ * come from our own knowledge of whether we stopped the engine
+ * (`plannedStop`, i.e. the provider was disposed by the pool). Getting this
+ * wrong is expensive in user time: the crash wording sends someone hunting
+ * for an out-of-memory event that never happened, when what actually
+ * occurred is that their own settings change restarted the session.
+ */
+export function buildMidStreamDropMessage(charsReceived: number, plannedStop: boolean): string {
+  const got = charsReceived > 0 ? `after ${charsReceived} chars` : 'before any output';
+  if (plannedStop) {
+    return `[Mac AI] this turn stopped ${got} because Gezel unloaded the on-device engine while it was answering. Changing your settings restarts chat sessions so the new settings apply, and unloading a model in Settings → On-device or quitting the app does the same. The model didn't crash — send the message again to redo this turn.`;
+  }
+  return `[Mac AI] the on-device engine dropped the connection mid-turn (${got}). This usually means the mlx server crashed, ran out of memory, or was restarted while the turn was streaming — this turn's work was lost. Retry the turn; if it keeps happening, restart the engine in Settings → On-device.`;
 }
 
 /**

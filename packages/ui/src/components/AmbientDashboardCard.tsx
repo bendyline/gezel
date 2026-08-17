@@ -1,6 +1,7 @@
-import type { AmbientDashboardStatusResponse } from '@bendyline/gezel';
+import type { AmbientDashboardStatusResponse, AmbientDashboardTheme } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { Select } from '../primitives/index.js';
 
 /**
  * Settings → "Ambient display": the opt-in toggle for the meester's
@@ -46,6 +47,7 @@ export function AmbientDashboardCard() {
   const [status, setStatus] = useState<AmbientDashboardStatusResponse | null>(null);
   const [bridgeStatus, setBridgeStatus] = useState<AmbientBridgeStatus | null>(null);
   const [wallpaperOn, setWallpaperOn] = useState(false);
+  const [themeSaving, setThemeSaving] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const pollTimer = useRef<number | null>(null);
@@ -149,6 +151,28 @@ export function AmbientDashboardCard() {
     }
   }, [pollUntilIdle]);
 
+  const saveTheme = useCallback(
+    async (nextId: string) => {
+      if (!status?.themeId || !status.themes?.some((theme) => theme.id === nextId)) return;
+      const themeId = nextId as AmbientDashboardTheme;
+      const previous = status.themeId;
+      if (themeId === previous) return;
+      setThemeSaving(true);
+      setError(null);
+      setStatus((current) => (current ? { ...current, themeId } : current));
+      try {
+        await api.updateConfig({ ambientDashboard: { themeId } });
+        await refreshStatus();
+      } catch (err) {
+        setStatus((current) => (current ? { ...current, themeId: previous } : current));
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setThemeSaving(false);
+      }
+    },
+    [refreshStatus, status],
+  );
+
   const toggleWallpaper = useCallback(
     async (next: boolean) => {
       if (!ambient) return;
@@ -183,6 +207,7 @@ export function AmbientDashboardCard() {
         : null;
 
   const instructions = platformInstructions(platform);
+  const selectedTheme = status?.themes?.find((theme) => theme.id === status.themeId);
 
   return (
     <section style={{ marginBottom: '2rem' }}>
@@ -211,6 +236,37 @@ export function AmbientDashboardCard() {
             gap: '0.5rem',
           }}
         >
+          {status?.themeId && status.themes && (
+            <div style={{ width: 'min(320px, 100%)', marginBottom: '0.25rem' }}>
+              <span id="ambient-dashboard-theme-label" className="small">
+                Dashboard theme
+              </span>
+              <Select.Root
+                value={status.themeId}
+                onValueChange={(value) => void saveTheme(value)}
+                disabled={themeSaving || status.running}
+              >
+                <Select.Trigger
+                  aria-labelledby="ambient-dashboard-theme-label"
+                  style={{ width: '100%', marginTop: '0.25rem' }}
+                >
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  {status.themes.map((theme) => (
+                    <Select.Item key={theme.id} value={theme.id}>
+                      {theme.name}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
+              <p className="muted small" style={{ margin: '0.25rem 0 0' }}>
+                {themeSaving
+                  ? 'Saving theme…'
+                  : `${selectedTheme?.description ?? 'Squisq dashboard theme.'} Applies to the next generated image.`}
+              </p>
+            </div>
+          )}
           <span className="muted small">
             {status?.running
               ? 'The meester is composing a dashboard…'

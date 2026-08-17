@@ -120,7 +120,11 @@ describe('AmbientDashboardGenerator', () => {
     });
     expect(oneShot.mock.calls[0]?.[0]).toContain(projectId);
     expect(renderer).toHaveBeenCalledTimes(1);
-    expect(renderer.mock.calls[0]?.[0]).toMatchObject({ resolution: 'fhd', style: 'panel' });
+    expect(renderer.mock.calls[0]?.[0]).toMatchObject({
+      resolution: 'fhd',
+      style: 'panel',
+      themeId: 'gezellig',
+    });
 
     const filename = expectedFilename(nowMs);
     const files = await readdir(ambientDir(home));
@@ -153,6 +157,28 @@ describe('AmbientDashboardGenerator', () => {
     expect(oneShot).not.toHaveBeenCalled();
   });
 
+  it('passes the persisted display target and theme to the renderer', async () => {
+    await seedActiveProject();
+    const displayTarget = {
+      width: 3024,
+      height: 1964,
+      safeArea: { x: 24, y: 100, width: 2976, height: 1840 },
+    };
+    await store.writeConfig({
+      ambientDashboard: { enabled: true, displayTarget, themeId: 'tech-dark' },
+    });
+    const renderer = fakeRenderer();
+    const gen = makeGenerator(
+      vi.fn(async () => DASHBOARD_MD),
+      {
+        renderer: renderer as unknown as AmbientDashboardRenderer,
+      },
+    );
+
+    expect(await gen.sweep()).toBe(true);
+    expect(renderer.mock.calls[0]?.[0]).toMatchObject({ displayTarget, themeId: 'tech-dark' });
+  });
+
   it('skips within the interval throttle and while chat is active; runNow bypasses both', async () => {
     await seedActiveProject();
     const oneShot = vi.fn(async () => DASHBOARD_MD);
@@ -183,6 +209,35 @@ describe('AmbientDashboardGenerator', () => {
     nowMs += 2 * 60 * 60_000;
     expect(await gen.sweep()).toBe(false);
     expect(oneShot).toHaveBeenCalledTimes(1);
+  });
+
+  it('regenerates when theme or primary-display geometry changes', async () => {
+    await seedActiveProject();
+    const oneShot = vi.fn(async () => DASHBOARD_MD);
+    const renderer = fakeRenderer();
+    const gen = makeGenerator(oneShot, {
+      renderer: renderer as unknown as AmbientDashboardRenderer,
+    });
+
+    expect(await gen.sweep()).toBe(true);
+
+    nowMs += 2 * HOUR;
+    await store.writeConfig({
+      ambientDashboard: { enabled: true, themeId: 'standard-dark' },
+    });
+    expect(await gen.sweep()).toBe(true);
+    expect(renderer.mock.calls[1]?.[0]).toMatchObject({ themeId: 'standard-dark' });
+
+    nowMs += 2 * HOUR;
+    const displayTarget = {
+      width: 2560,
+      height: 1440,
+      safeArea: { x: 24, y: 60, width: 2512, height: 1356 },
+    };
+    await store.writeConfig({ ambientDashboard: { displayTarget } });
+    expect(await gen.sweep()).toBe(true);
+    expect(renderer.mock.calls[2]?.[0]).toMatchObject({ displayTarget });
+    expect(oneShot).toHaveBeenCalledTimes(3);
   });
 
   it('skips without consuming state when Chromium is not ready', async () => {

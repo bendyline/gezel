@@ -2,8 +2,10 @@ import { z } from 'zod';
 import { PoppetjeSchema } from '../poppetje/schema.js';
 import { ProjectIconIdSchema } from '../project-icons.js';
 import {
+  AmbientDashboardDisplayTargetSchema,
   AmbientDashboardResolutionSchema,
   AmbientDashboardStyleSchema,
+  AmbientDashboardThemeSchema,
 } from './ambient-dashboard.js';
 import {
   type GitAbandonMergeResponse,
@@ -2021,6 +2023,14 @@ export const GezelConfigSchema = z.object({
       intervalMinutes: z.number().int().min(15).optional(),
       /** Squisq dashboard resolution preset id. Default 'fhd' (1920x1080). */
       resolution: AmbientDashboardResolutionSchema.optional(),
+      /** Squisq visual theme. Default 'gezellig' (warm dark). */
+      themeId: AmbientDashboardThemeSchema.optional(),
+      /**
+       * Last physical-pixel primary-display target reported by the Electron
+       * shell. Exact canvas dimensions prevent Fill/Zoom wallpaper modes from
+       * cropping; the safe area keeps content clear of OS chrome.
+       */
+      displayTarget: AmbientDashboardDisplayTargetSchema.optional(),
       /** Squisq dashboard cell style. Default 'panel'. */
       style: AmbientDashboardStyleSchema.optional(),
       /** Dated PNGs retained before pruning. Default 48 (~2 days hourly). */

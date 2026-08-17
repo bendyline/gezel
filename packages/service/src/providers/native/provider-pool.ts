@@ -524,6 +524,35 @@ export class ProviderPool {
   }
 
   /**
+   * Unload every resident engine that is idle right now, leaving busy ones
+   * running. Returns the keys that stayed resident because they were serving
+   * a turn — the caller reports them; the ordinary LRU / idle-retention path
+   * collects them once they go quiet.
+   *
+   * This is what a live config reset uses. {@link shutdown} is the other
+   * shape — it force-evicts busy engines too — and is only correct when the
+   * process is going away (service shutdown, emergency stop), because a
+   * forced eviction kills whatever turn is streaming.
+   */
+  async releaseIdle(): Promise<string[]> {
+    const busy: string[] = [];
+    for (const key of [...this.entries.keys()]) {
+      try {
+        await this.unloadIdle(key);
+      } catch (err) {
+        if (err instanceof EngineBusyError) {
+          busy.push(key);
+          continue;
+        }
+        log.warn(
+          `releaseIdle: ${key} failed to unload: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    return busy;
+  }
+
+  /**
    * Evict a specific entry. Awaits the provider's `shutdown` so the
    * disk-cache flush (Tier 1 prior plan) completes before the broker
    * releases capacity.

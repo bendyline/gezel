@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -29,6 +30,7 @@ import {
 } from '../meester/collect.js';
 import { isChromiumNotReadyError } from '../rendering/managed-browser.js';
 import { type AmbientDashboardRenderer, renderAmbientDashboard } from './dashboard-render.js';
+import { DEFAULT_THEME_ID } from './dashboard-themes.js';
 
 /**
  * The ambient dashboard — the meester periodically composes a squisq
@@ -174,7 +176,7 @@ export class AmbientDashboardGenerator {
 
     const candidates = await this.collectCandidates();
     if (candidates.length === 0) return false;
-    const inputHash = hashProjectContexts(candidates);
+    const inputHash = hashDashboardInputs(candidates, config);
     if (inputHash === state.inputHash) return false;
 
     return this.generate(config, meesterId, candidates, {
@@ -199,7 +201,7 @@ export class AmbientDashboardGenerator {
     return this.generate(config, meesterId, candidates, {
       trigger: 'manual',
       state,
-      inputHash: hashProjectContexts(candidates),
+      inputHash: hashDashboardInputs(candidates, config),
     });
   }
 
@@ -237,6 +239,8 @@ export class AmbientDashboardGenerator {
         markdown,
         outputPath,
         resolution: config.ambientDashboard?.resolution ?? DEFAULT_RESOLUTION,
+        themeId: config.ambientDashboard?.themeId ?? DEFAULT_THEME_ID,
+        displayTarget: config.ambientDashboard?.displayTarget,
         style: config.ambientDashboard?.style ?? DEFAULT_STYLE,
         documentTitle: defaultTitle(now),
       });
@@ -326,6 +330,27 @@ export class AmbientDashboardGenerator {
       if (name.endsWith('.tmp')) await unlink(join(dir, name)).catch(() => undefined);
     }
   }
+}
+
+/**
+ * A monitor, style, or theme change is a meaningful dashboard input even when
+ * the workshop summary itself is unchanged. Folding renderer-owned settings
+ * into the fingerprint prevents an old cropped/light image from remaining the
+ * latest wallpaper indefinitely after those preferences move.
+ */
+function hashDashboardInputs(candidates: ProjectContext[], config: GezelConfig): string {
+  const dashboard = config.ambientDashboard;
+  const renderSettings = JSON.stringify({
+    resolution: dashboard?.resolution ?? DEFAULT_RESOLUTION,
+    themeId: dashboard?.themeId ?? DEFAULT_THEME_ID,
+    displayTarget: dashboard?.displayTarget ?? null,
+    style: dashboard?.style ?? DEFAULT_STYLE,
+  });
+  return createHash('sha256')
+    .update(hashProjectContexts(candidates))
+    .update('\n')
+    .update(renderSettings)
+    .digest('hex');
 }
 
 function datedFilename(now: Date): string {

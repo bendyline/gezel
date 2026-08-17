@@ -89,6 +89,16 @@ describe('StorageCleanupDialog', () => {
     expect(screen.getByRole('button', { name: /^Free/ })).toBeDisabled();
   });
 
+  it('reuses the settings measurement when it opens', async () => {
+    const dialog = await open();
+    await screen.findByText('Downloaded models — 60.0 GB');
+
+    expect(vi.mocked(api.storageSummary)).toHaveBeenCalledWith();
+    expect(dialog.querySelector('.gz-cleanup-body')).toBeInTheDocument();
+    expect(dialog.querySelector('.gz-cleanup-body .gz-dialog-actions')).toBeNull();
+    expect(dialog.querySelector(':scope > .gz-dialog-actions')).toBeInTheDocument();
+  });
+
   it('pre-selects the safe downloads when opened from the uninstall path', async () => {
     await open({ preselectRedownloadable: true });
 

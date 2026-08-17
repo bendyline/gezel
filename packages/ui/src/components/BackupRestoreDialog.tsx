@@ -239,7 +239,7 @@ export function BackupRestoreDialog() {
                     ))}
                   </ul>
                   <p className="muted small">About {formatBytes(plan.totalBytes)} in total.</p>
-                  <label className="debug-toggle">
+                  <label className="gz-backup-exclude">
                     <input
                       type="checkbox"
                       checked={excludeWorkspaces}

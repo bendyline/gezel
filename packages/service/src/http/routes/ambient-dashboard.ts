@@ -1,8 +1,12 @@
 import { readFile } from 'node:fs/promises';
-import type { AmbientDashboardStatusResponse } from '@bendyline/gezel';
+import {
+  AmbientDashboardDisplayTargetSchema,
+  type AmbientDashboardStatusResponse,
+} from '@bendyline/gezel';
 import { ambientDashboardLatestFile } from '@bendyline/gezel/paths';
 import { Hono } from 'hono';
 import { DEFAULT_RESOLUTION } from '../../ambient/dashboard-generator.js';
+import { AMBIENT_DASHBOARD_THEMES, DEFAULT_THEME_ID } from '../../ambient/dashboard-themes.js';
 import type { ServiceContext } from '../context.js';
 
 /**
@@ -19,6 +23,10 @@ import type { ServiceContext } from '../context.js';
  *     User-requested run. Bypasses the throttle/change gates and
  *     returns 202 immediately — completion arrives on the global SSE
  *     stream as an `ambient_dashboard` event.
+ *
+ *   PUT /api/ambient-dashboard/display-target
+ *     Persists the Electron shell's primary-display canvas and safe content
+ *     area for both manual and scheduled renders.
  */
 export function ambientDashboardRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
@@ -34,6 +42,9 @@ export function ambientDashboardRoutes(ctx: ServiceContext): Hono {
       lastGeneratedAt: state.lastRunAt && state.lastFile ? state.lastRunAt : null,
       latestFilename: state.lastFile ?? null,
       resolution: config?.ambientDashboard?.resolution ?? DEFAULT_RESOLUTION,
+      themeId: config?.ambientDashboard?.themeId ?? DEFAULT_THEME_ID,
+      themes: AMBIENT_DASHBOARD_THEMES,
+      displayTarget: config?.ambientDashboard?.displayTarget ?? null,
     };
     return c.json(response);
   });
@@ -45,6 +56,21 @@ export function ambientDashboardRoutes(ctx: ServiceContext): Hono {
       'content-type': 'image/png',
       'cache-control': 'no-cache',
     });
+  });
+
+  app.put('/display-target', async (c) => {
+    const displayTarget = AmbientDashboardDisplayTargetSchema.parse(await c.req.json());
+    const config = await ctx.store.readConfig();
+    const current = config.ambientDashboard?.displayTarget;
+    if (JSON.stringify(current) !== JSON.stringify(displayTarget)) {
+      await ctx.store.writeConfig({
+        ambientDashboard: {
+          ...(config.ambientDashboard ?? {}),
+          displayTarget,
+        },
+      });
+    }
+    return c.json({ displayTarget });
   });
 
   app.post('/run', (c) => {

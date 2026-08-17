@@ -216,6 +216,15 @@ export class EngineRouter {
     await this.pool.reconcile(items, (p, m) => this.resolveBytes(p, m));
   }
 
+  /**
+   * Unload every resident replica that is not mid-turn. Returns the keys left
+   * resident because they were busy. Used by a live config reset, which needs
+   * the memory back but must not sever work in flight.
+   */
+  async releaseIdle(): Promise<string[]> {
+    return this.pool.releaseIdle();
+  }
+
   /** Unload one resident replica immediately, provided it is still idle. */
   async unloadIdle(
     provider: LocalProviderName,

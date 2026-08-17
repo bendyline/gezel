@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,8 +25,10 @@ async function launch(gezelHome: string): Promise<ElectronApplication> {
 // 30s budget. Bump it.
 test.setTimeout(60_000);
 
-test('sidebar selection drives the content pane and persists', async () => {
+test('sidebar selection persists and document icons align with their group header', async () => {
   const gezelHome = await mkdtemp(join(tmpdir(), 'gezel-sidebar-e2e-'));
+  await mkdir(join(gezelHome, 'documents'), { recursive: true });
+  await writeFile(join(gezelHome, 'documents', 'alignment-check.md'), '# Alignment check\n');
   const app = await launch(gezelHome);
   try {
     const page = await app.firstWindow();
@@ -35,6 +37,25 @@ test('sidebar selection drives the content pane and persists', async () => {
     // Wait for the App (and its `gezel:open-tab` listener) to mount. The
     // sidebar rendering is the proxy for "App.tsx finished first render".
     await expect(page.locator('[data-testid="app-sidebar"]')).toBeVisible({ timeout: 10_000 });
+
+    const documentsToggle = page.getByTestId('sidebar-group-toggle-documents');
+    if ((await documentsToggle.getAttribute('aria-expanded')) !== 'true') {
+      await documentsToggle.click();
+    }
+    const documentsHeaderIcon = page.locator(
+      '[data-testid="sidebar-group-documents"] .app-sidebar-item-icon',
+    );
+    const documentRowIcon = page.locator('.app-sidebar-tree .tree-icon').first();
+    await expect(documentRowIcon).toBeVisible();
+    const [headerBox, rowBox] = await Promise.all([
+      documentsHeaderIcon.boundingBox(),
+      documentRowIcon.boundingBox(),
+    ]);
+    expect(headerBox).not.toBeNull();
+    expect(rowBox).not.toBeNull();
+    if (headerBox && rowBox) {
+      expect(rowBox.x + rowBox.width / 2).toBeCloseTo(headerBox.x + headerBox.width / 2, 0);
+    }
 
     // Navigate by the canonical event the listing views / chat surfaces
     // dispatch. This drives `selection` → TabContent renders the area.

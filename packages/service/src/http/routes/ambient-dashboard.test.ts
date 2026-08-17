@@ -55,6 +55,10 @@ describe('GET /api/ambient-dashboard', () => {
     expect(status.lastGeneratedAt).toBeNull();
     expect(status.latestFilename).toBeNull();
     expect(status.resolution).toBe('fhd');
+    expect(status.themeId).toBe('gezellig');
+    expect(status.themes?.map((theme) => theme.id)).toContain('standard-dark');
+    expect(status.themes?.map((theme) => theme.id)).toContain('gezellig');
+    expect(status.displayTarget).toBeNull();
   });
 });
 
@@ -82,7 +86,7 @@ describe('config round-trip', () => {
       method: 'PUT',
       headers: auth(),
       body: JSON.stringify({
-        ambientDashboard: { enabled: true, resolution: '4k' },
+        ambientDashboard: { enabled: true, resolution: '4k', themeId: 'standard-dark' },
         ambientDisplay: { applyWallpaper: true },
       }),
     });
@@ -93,13 +97,18 @@ describe('config round-trip', () => {
       ambientDashboard?: unknown;
       ambientDisplay?: unknown;
     };
-    expect(got.ambientDashboard).toEqual({ enabled: true, resolution: '4k' });
+    expect(got.ambientDashboard).toEqual({
+      enabled: true,
+      resolution: '4k',
+      themeId: 'standard-dark',
+    });
     expect(got.ambientDisplay).toEqual({ applyWallpaper: true });
 
     const status = await httpFetch(`${baseUrl}/api/ambient-dashboard`, { headers: auth() });
     const parsed = AmbientDashboardStatusResponseSchema.parse(await status.json());
     expect(parsed.enabled).toBe(true);
     expect(parsed.resolution).toBe('4k');
+    expect(parsed.themeId).toBe('standard-dark');
   });
 });
 
@@ -111,5 +120,51 @@ describe('POST /api/ambient-dashboard/run', () => {
     });
     expect(res.status).toBe(202);
     expect(await res.json()).toEqual({ started: true });
+  });
+});
+
+describe('PUT /api/ambient-dashboard/display-target', () => {
+  it('persists a primary-display safe area without dropping dashboard settings', async () => {
+    await httpFetch(`${baseUrl}/api/config`, {
+      method: 'PUT',
+      headers: auth(),
+      body: JSON.stringify({ ambientDashboard: { enabled: true, style: 'accent' } }),
+    });
+    const displayTarget = {
+      width: 3024,
+      height: 1964,
+      safeArea: { x: 24, y: 100, width: 2976, height: 1840 },
+    };
+    const put = await httpFetch(`${baseUrl}/api/ambient-dashboard/display-target`, {
+      method: 'PUT',
+      headers: auth(),
+      body: JSON.stringify(displayTarget),
+    });
+    expect(put.status).toBe(200);
+    expect(await put.json()).toEqual({ displayTarget });
+
+    const config = (await (
+      await httpFetch(`${baseUrl}/api/config`, { headers: auth() })
+    ).json()) as { ambientDashboard?: unknown };
+    expect(config.ambientDashboard).toEqual({ enabled: true, style: 'accent', displayTarget });
+
+    const status = AmbientDashboardStatusResponseSchema.parse(
+      await (await httpFetch(`${baseUrl}/api/ambient-dashboard`, { headers: auth() })).json(),
+    );
+    expect(status.displayTarget).toEqual(displayTarget);
+
+    await httpFetch(`${baseUrl}/api/config`, {
+      method: 'PUT',
+      headers: auth(),
+      body: JSON.stringify({ ambientDashboard: { enabled: false } }),
+    });
+    const afterToggle = (await (
+      await httpFetch(`${baseUrl}/api/config`, { headers: auth() })
+    ).json()) as { ambientDashboard?: unknown };
+    expect(afterToggle.ambientDashboard).toEqual({
+      enabled: false,
+      style: 'accent',
+      displayTarget,
+    });
   });
 });

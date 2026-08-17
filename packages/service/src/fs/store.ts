@@ -1454,6 +1454,19 @@ export class Store {
         }
       }
     }
+    // ambientDashboard combines user-authored preferences with the Electron
+    // shell's last-known primary-display target. A settings toggle commonly
+    // patches only `{ enabled }`; merge this object so that action cannot erase
+    // the screen geometry needed by scheduled renders after the app closes.
+    if ('ambientDashboard' in config && config.ambientDashboard !== null) {
+      const incoming = config.ambientDashboard as Record<string, unknown> | undefined;
+      if (incoming) {
+        merged.ambientDashboard = {
+          ...((existing as { ambientDashboard?: Record<string, unknown> }).ambientDashboard ?? {}),
+          ...incoming,
+        };
+      }
+    }
     await writeFileAtomic(p.config, `${JSON.stringify(merged, null, 2)}\n`);
     await tryChmod600(p.config);
     return merged as GezelConfig;

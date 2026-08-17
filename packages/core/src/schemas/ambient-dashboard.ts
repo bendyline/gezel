@@ -35,6 +35,101 @@ export const AmbientDashboardStyleSchema = z.enum(['basic', 'card', 'panel', 'ac
 export type AmbientDashboardStyle = z.infer<typeof AmbientDashboardStyleSchema>;
 
 /**
+ * Built-in Squisq theme ids. Mirrors squisq's theme catalog — core cannot
+ * depend on squisq, so a service-side test guards this list against the real
+ * export. The selected id is persisted in config; human-readable catalog
+ * metadata comes from the daemon rather than being duplicated here.
+ */
+export const AmbientDashboardThemeSchema = z.enum([
+  'standard',
+  'standard-dark',
+  'documentary',
+  'minimalist',
+  'bold',
+  'morning-light',
+  'tech-dark',
+  'magazine',
+  'cinematic',
+  'warm-earth',
+  'gezellig',
+]);
+export type AmbientDashboardTheme = z.infer<typeof AmbientDashboardThemeSchema>;
+
+export const AmbientDashboardThemeSummarySchema = z.object({
+  id: AmbientDashboardThemeSchema,
+  name: z.string(),
+  description: z.string(),
+});
+export type AmbientDashboardThemeSummary = z.infer<typeof AmbientDashboardThemeSummarySchema>;
+
+/**
+ * Custom dashboard-image limits. These mirror squisq-video's PNG export
+ * validator. Keeping them here lets the Electron shell reject an impossible
+ * display target before persisting it for a later background render.
+ */
+export const AMBIENT_DASHBOARD_MIN_DIMENSION = 64;
+export const AMBIENT_DASHBOARD_MAX_DIMENSION = 7_680;
+export const AMBIENT_DASHBOARD_MAX_PIXELS = 33_177_600;
+
+/**
+ * The physical-pixel canvas and usable content rectangle for the primary
+ * display. `safeArea` is derived from the OS work area, with a small breathing
+ * margin, so menu bars, notches, docks, and taskbars do not cover dashboard
+ * content. The surrounding canvas remains full-screen-sized so Fill/Zoom
+ * wallpaper modes do not crop the dashboard to reconcile aspect ratios.
+ */
+export const AmbientDashboardDisplayTargetSchema = z
+  .object({
+    width: z
+      .number()
+      .int()
+      .min(AMBIENT_DASHBOARD_MIN_DIMENSION)
+      .max(AMBIENT_DASHBOARD_MAX_DIMENSION),
+    height: z
+      .number()
+      .int()
+      .min(AMBIENT_DASHBOARD_MIN_DIMENSION)
+      .max(AMBIENT_DASHBOARD_MAX_DIMENSION),
+    safeArea: z.object({
+      x: z.number().int().nonnegative(),
+      y: z.number().int().nonnegative(),
+      width: z
+        .number()
+        .int()
+        .min(AMBIENT_DASHBOARD_MIN_DIMENSION)
+        .max(AMBIENT_DASHBOARD_MAX_DIMENSION),
+      height: z
+        .number()
+        .int()
+        .min(AMBIENT_DASHBOARD_MIN_DIMENSION)
+        .max(AMBIENT_DASHBOARD_MAX_DIMENSION),
+    }),
+  })
+  .superRefine((target, ctx) => {
+    if (target.width * target.height > AMBIENT_DASHBOARD_MAX_PIXELS) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `The dashboard display target may not exceed ${AMBIENT_DASHBOARD_MAX_PIXELS} pixels.`,
+      });
+    }
+    if (target.safeArea.x + target.safeArea.width > target.width) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['safeArea', 'width'],
+        message: 'The safe area must fit inside the display width.',
+      });
+    }
+    if (target.safeArea.y + target.safeArea.height > target.height) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['safeArea', 'height'],
+        message: 'The safe area must fit inside the display height.',
+      });
+    }
+  });
+export type AmbientDashboardDisplayTarget = z.infer<typeof AmbientDashboardDisplayTargetSchema>;
+
+/**
  * `~/.gezel/ambient/state.json` — throttle + idempotency. A failed run
  * still advances `lastRunAt` (chronic failure must not retry every
  * sweep) but keeps the previous `inputHash` so the next allowed run
@@ -55,5 +150,11 @@ export const AmbientDashboardStatusResponseSchema = z.object({
   lastGeneratedAt: z.string().nullable(),
   latestFilename: z.string().nullable(),
   resolution: AmbientDashboardResolutionSchema,
+  /** Squisq theme selected for the next render. Optional for older daemons. */
+  themeId: AmbientDashboardThemeSchema.optional(),
+  /** Live built-in catalog for Settings. Optional for older daemons. */
+  themes: z.array(AmbientDashboardThemeSummarySchema).optional(),
+  /** Exact primary-display target when the Electron shell has reported one. */
+  displayTarget: AmbientDashboardDisplayTargetSchema.nullable().optional(),
 });
 export type AmbientDashboardStatusResponse = z.infer<typeof AmbientDashboardStatusResponseSchema>;

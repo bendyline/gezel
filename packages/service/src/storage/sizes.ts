@@ -15,8 +15,18 @@ import { join, resolve } from 'node:path';
  * or loop forever.
  */
 
-/** Enough parallelism to hide per-entry syscall latency without thrashing. */
+/** Enough parallelism to hide directory-read latency without thrashing. */
 const WALK_CONCURRENCY = 8;
+
+/**
+ * A Dirent does not carry a file's byte size, so every regular file still
+ * needs an lstat. Keep those calls bounded but concurrent: doing them one at
+ * a time made a 100k-file runtime take tens of seconds to measure, while an
+ * unbounded Promise.all can overwhelm the filesystem on package trees.
+ * `readLevel` itself runs at WALK_CONCURRENCY, so the process-wide upper
+ * bound is WALK_CONCURRENCY * FILE_STAT_CONCURRENCY.
+ */
+const FILE_STAT_CONCURRENCY = 8;
 
 export interface TreeSize {
   bytes: number;
@@ -77,6 +87,7 @@ async function readLevel(dir: string): Promise<TreeSize & { dirs: string[] }> {
   let bytes = 0;
   let fileCount = 0;
   const dirs: string[] = [];
+  const files: string[] = [];
   for (const entry of entries) {
     const absolute = join(dir, entry.name);
     if (entry.isSymbolicLink()) continue;
@@ -84,13 +95,25 @@ async function readLevel(dir: string): Promise<TreeSize & { dirs: string[] }> {
       dirs.push(absolute);
       continue;
     }
-    if (!entry.isFile()) continue;
-    try {
-      const info = await lstat(absolute);
-      bytes += info.size;
+    if (entry.isFile()) files.push(absolute);
+  }
+
+  for (let offset = 0; offset < files.length; offset += FILE_STAT_CONCURRENCY) {
+    const batch = files.slice(offset, offset + FILE_STAT_CONCURRENCY);
+    const sizes = await Promise.all(
+      batch.map(async (file) => {
+        try {
+          return (await lstat(file)).size;
+        } catch {
+          // Raced with a delete, or unreadable. Accounting is advisory.
+          return undefined;
+        }
+      }),
+    );
+    for (const size of sizes) {
+      if (size === undefined) continue;
+      bytes += size;
       fileCount += 1;
-    } catch {
-      // Raced with a delete, or unreadable. Accounting is advisory.
     }
   }
   return { bytes, fileCount, dirs };
@@ -104,6 +127,8 @@ async function readLevel(dir: string): Promise<TreeSize & { dirs: string[] }> {
  */
 export class SizeCache {
   private entry?: { value: unknown; at: number };
+  private inFlight?: { promise: Promise<unknown> };
+  private generation = 0;
 
   constructor(private readonly ttlMs = 60_000) {}
 
@@ -112,12 +137,34 @@ export class SizeCache {
     if (!refresh && this.entry && now - this.entry.at < this.ttlMs) {
       return this.entry.value as T;
     }
-    const value = await compute();
-    this.entry = { value, at: now };
-    return value;
+
+    // Settings begins measuring as soon as it mounts. If someone opens the
+    // cleanup dialog before that walk finishes, both callers need the same
+    // result — a second 100k-file traversal only makes each one slower.
+    if (this.inFlight) return this.inFlight.promise as Promise<T>;
+
+    const generation = this.generation;
+    const promise = compute().then((value) => {
+      // `clear` may have invalidated this measurement while it was running
+      // (for example after a cleanup changed the filesystem). Never publish
+      // a result from the old generation as fresh.
+      if (this.generation === generation) {
+        this.entry = { value, at: Date.now() };
+      }
+      return value;
+    });
+    const pending = { promise: promise as Promise<unknown> };
+    this.inFlight = pending;
+    try {
+      return await promise;
+    } finally {
+      if (this.inFlight === pending) this.inFlight = undefined;
+    }
   }
 
   clear(): void {
+    this.generation += 1;
     this.entry = undefined;
+    this.inFlight = undefined;
   }
 }
