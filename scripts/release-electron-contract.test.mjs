@@ -146,6 +146,20 @@ test('Electron release configuration pins the audited packaging contracts', asyn
     /appstreamcli validate packages\/app\/assets\/com\.bendyline\.gezel\.metainfo\.xml/,
   );
 
+  // Deb compression: `compression: zst` and `--deb-compression-level 0` are
+  // only correct together, and neither is self-evidently load-bearing to a
+  // reader tidying the config. fpm hands zstd its level through ZSTD_CLEVEL
+  // with a leading dash, which zstd reads as a NEGATIVE level, so dropping the
+  // `0` silently ships fast-mode output (~1084 MiB rather than ~886 MiB on the
+  // arm64 payload) with nothing in the build to say so. Raising it above 0 is
+  // worse still: `9` becomes level -9.
+  assert.match(builder, /^ {2}compression: zst$/m);
+  assert.match(builder, /- --deb-compression-level\n {4}- '0'/);
+  assert.doesNotMatch(builder, /- --deb-compression-level\n {4}- '[1-9]'/);
+  // The config assertions above cannot see what fpm actually produced, so the
+  // release must also check the artifact itself.
+  assert.match(workflow, /node scripts\/verify-deb-compression\.mjs/);
+
   const productTagline = 'Your team of AI craftsmen';
   const productDescription =
     'Build a crew of named AI companions with distinct roles and tools, then put them to work on your projects. Gezel stores their conversations, memory, and work on your computer as ordinary files.';

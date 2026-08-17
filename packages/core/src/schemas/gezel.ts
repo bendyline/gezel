@@ -493,6 +493,28 @@ export const ChatMessageToolCallSchema = z.object({
 export type ChatMessageToolCall = z.infer<typeof ChatMessageToolCallSchema>;
 
 /**
+ * Which store a referenced file lives in. Documents are deliberately not a
+ * third kind: the shared library is a project (ADR 0006), so its files
+ * arrive as that project's `workspace`.
+ */
+export const ReferencedFileKindSchema = z.enum(['artifact', 'workspace']);
+export type ReferencedFileKind = z.infer<typeof ReferencedFileKindSchema>;
+
+/**
+ * One real file an assistant reply named in its body text. `path` is
+ * relative to the store named by `kind` — the project's `artifacts/`
+ * drawer or its workspace root — and is always the canonical on-disk
+ * spelling, never the model's. Any `:line` / `#Lnn` locator the model
+ * wrote is stripped before matching; the inline link keeps it as label
+ * text, but nothing downstream resolves a path with one attached.
+ */
+export const ReferencedFileSchema = z.object({
+  kind: ReferencedFileKindSchema,
+  path: z.string(),
+});
+export type ReferencedFile = z.infer<typeof ReferencedFileSchema>;
+
+/**
  * A single turn in an agent chat. Stored in memory while a chat session is
  * active; dropped when the session ends or the daemon restarts.
  *
@@ -512,17 +534,27 @@ export const ChatMessageSchema = z.object({
     })
     .optional(),
   /**
-   * Artifact paths (relative to the project's `artifacts/` directory)
-   * the assistant reply referenced in its body text. Populated on save
-   * by the server-side reference parser, and used by the chat UI to
-   * render a chip row under the bubble and to linkify inline code spans
-   * that match a real artifact. Back-stops Copilot's tool-call
-   * blindspot and any "AI wrote a file outside the MCP tools" paths.
+   * Real files the assistant reply named in its body text — artifacts
+   * drawer and workspace tree alike. Populated on save by the
+   * server-side reference parser, and used by the chat UI to render a
+   * chip row under the bubble and to linkify inline code spans that
+   * match a real file. Back-stops Copilot's tool-call blindspot and any
+   * "AI wrote a file outside the MCP tools" path.
+   */
+  referencedFiles: z.array(ReferencedFileSchema).optional(),
+  /**
+   * The artifact-only projection of {@link referencedFiles}, still
+   * written so an older `@bendyline/gezel-cli` (or any out-of-tree
+   * reader) keeps working against a session file this daemon wrote.
+   * Read `referencedFiles` in new code — this field cannot represent a
+   * workspace path.
+   *
+   * @deprecated superseded by `referencedFiles`
    */
   referencedArtifacts: z.array(z.string()).optional(),
   /**
    * Task refs (`<projectId>/<num>`) the assistant reply mentioned. Same
-   * shape as `referencedArtifacts` — populated on save, gated on the
+   * shape as `referencedFiles` — populated on save, gated on the
    * ref actually existing in the task store, surfaced in the chat
    * bubble as click-through chips. Catches the common "I created task
    * gezel-ux-roadmap/2" mention so the user can jump to it without

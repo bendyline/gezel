@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { GATE_MAX_PROGRESS_ATTEMPTS } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ChatEventBus } from '../chat/events.js';
@@ -61,6 +62,12 @@ afterEach(async () => {
 
 async function writeWorkspaceFile(path: string, content: string): Promise<void> {
   const file = join(home, 'projects', 'default', 'workspace', path);
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, content, 'utf8');
+}
+
+async function writeArtifactFile(path: string, content: string): Promise<void> {
+  const file = join(home, 'projects', 'default', 'artifacts', path);
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, content, 'utf8');
 }
@@ -1085,6 +1092,202 @@ describe('completion gates — plateau escalation ladder', () => {
     const notes = await tasks.listNotes('default', task.num, stepId);
     expect(notes.some((n) => n.text.includes('# Gate plateau — paused for help'))).toBe(true);
     expect(notes.some((n) => n.text.includes('content unchanged (frozen resubmit)'))).toBe(true);
+  });
+
+  // A bounded batch loop fails the SAME check every pass by design. Before
+  // `remaining` entered the signature the ladder read that as a plateau: on
+  // the real Pull Request Review run of squisq PR #46 the reviewer went
+  // 25 → 50 of 68 files and got "your last edits did not move the gate …
+  // correct only the section the check names" — a directive whose literal
+  // reading is "append the unread paths to the ledger", which passes the
+  // gate with 18 files never opened.
+  describe('bounded batch loops', () => {
+    const CORPUS = 'data/pr-46';
+    const LEDGER = 'pr-review-coverage.json';
+    const PATHS = ['src/a.ts', 'src/b.ts', 'src/c.ts', 'src/d.ts', 'src/e.ts', 'src/f.ts'];
+    const recordPath = (i: number) => `${CORPUS}/files/${String(i + 1).padStart(3, '0')}--rec.md`;
+    const corpusPaths = (total: number) =>
+      total <= PATHS.length ? PATHS : Array.from({ length: total }, (_, i) => `src/f${i}.ts`);
+
+    async function seedCorpus(total = PATHS.length): Promise<void> {
+      await Promise.all(
+        corpusPaths(total).map((path, i) =>
+          writeArtifactFile(recordPath(i), `---\npath: ${path}\n---\n\npatch for ${path}\n`),
+        ),
+      );
+    }
+
+    async function writeLedger(count: number, total = PATHS.length): Promise<void> {
+      const all = corpusPaths(total);
+      await writeArtifactFile(
+        LEDGER,
+        JSON.stringify({
+          reviewedFiles: all.slice(0, count),
+          reviewedRecords: all.slice(0, count).map((_, i) => recordPath(i)),
+        }),
+      );
+    }
+
+    async function createCoverageTask(maxAttempts = 10) {
+      const task = await tasks.create('default', {
+        title: 'PR review',
+        assignee: { kind: 'user' },
+        steps: gatedSteps({
+          at: 'completion',
+          checks: [{ kind: 'corpusCoverage', file: LEDGER, corpusDir: CORPUS, artifact: true }],
+          maxAttempts,
+        }),
+      });
+      return { task, stepId: task.craftbook.steps[0]!.id };
+    }
+
+    const stepOf = async (num: number, stepId: string) => {
+      const t = await tasks.get('default', num);
+      return t!.craftbook.steps.find((s) => s.id === stepId)!;
+    };
+
+    it('reads a falling coverage count as progress, not a plateau', async () => {
+      await seedCorpus();
+      const { task, stepId } = await createCoverageTask();
+
+      await writeLedger(2);
+      const batch1 = holdOf(
+        await tasks.completeStepChecked('default', task.num, stepId, undefined, {
+          cause: 'model',
+        }),
+      );
+      expect(batch1.escalationStage).toBeUndefined();
+      expect(batch1.message).not.toContain('Progress:');
+
+      await writeLedger(4);
+      const batch2 = holdOf(
+        await tasks.completeStepChecked('default', task.num, stepId, undefined, {
+          cause: 'model',
+        }),
+      );
+      expect(batch2.escalationStage).toBeUndefined();
+      expect(batch2.message).not.toContain('GATE_TARGETED_EDIT');
+      expect(batch2.message).toContain('Progress: 4 more item(s) covered');
+      expect(batch2.message).toContain('4 still outstanding');
+      // The gate's own verdict still rides along under the preamble.
+      expect(batch2.message).toContain('src/e.ts');
+
+      const mid = await tasks.get('default', task.num);
+      const trail = mid!.craftbook.steps.find((s) => s.id === stepId)!.gateAttemptHistory!;
+      expect(trail.map((entry) => entry.remaining)).toEqual([8, 4]);
+      expect(trail[0]!.signatureHash).not.toBe(trail[1]!.signatureHash);
+
+      await writeLedger(PATHS.length);
+      const done = await tasks.completeStepChecked('default', task.num, stepId, undefined, {
+        cause: 'model',
+      });
+      expect(done.status).toBe('advanced');
+    });
+
+    it('still escalates when the count stops falling', async () => {
+      await seedCorpus();
+      const { task, stepId } = await createCoverageTask();
+
+      await writeLedger(2);
+      await tasks.completeStepChecked('default', task.num, stepId, undefined, { cause: 'model' });
+      // Same ledger, same outstanding set: a real stall, and the ladder
+      // must still say so.
+      const stalled = holdOf(
+        await tasks.completeStepChecked('default', task.num, stepId, undefined, {
+          cause: 'model',
+        }),
+      );
+      expect(stalled.escalationStage).toBe(1);
+      expect(stalled.message).toContain('GATE_TARGETED_EDIT');
+      expect(stalled.message).not.toContain('Progress:');
+    });
+
+    // Problem 2: charging converging passes to `maxAttempts` made it a
+    // ceiling on CORPUS SIZE. A PR needing more batches than the budget
+    // paused for help mid-review however well the reviewer worked.
+    it('does not spend the attempt budget while converging', async () => {
+      await seedCorpus();
+      // Two rejections would exhaust this budget under the old accounting.
+      const { task, stepId } = await createCoverageTask(2);
+
+      await writeLedger(2);
+      holdOf(
+        await tasks.completeStepChecked('default', task.num, stepId, undefined, {
+          cause: 'model',
+        }),
+      );
+      expect((await stepOf(task.num, stepId)).gateAttempts).toBe(1);
+
+      await writeLedger(4);
+      const batch2 = holdOf(
+        await tasks.completeStepChecked('default', task.num, stepId, undefined, {
+          cause: 'model',
+        }),
+      );
+      expect(batch2.paused).toBe(false);
+      expect((await tasks.get('default', task.num))?.status).toBe('active');
+      const mid = await stepOf(task.num, stepId);
+      expect(mid.gateAttempts).toBe(1);
+      expect(mid.gateProgressAttempts).toBe(1);
+
+      const notes = await tasks.listNotes('default', task.num, stepId);
+      expect(
+        notes.some((n) => n.text.includes('batch accepted, corpus incomplete (pass 1/24)')),
+      ).toBe(true);
+
+      await writeLedger(PATHS.length);
+      const done = await tasks.completeStepChecked('default', task.num, stepId, undefined, {
+        cause: 'model',
+      });
+      expect(done.status).toBe('advanced');
+    });
+
+    it('charges a stall to the attempt budget even after converging passes', async () => {
+      await seedCorpus();
+      const { task, stepId } = await createCoverageTask(10);
+
+      await writeLedger(2);
+      await tasks.completeStepChecked('default', task.num, stepId, undefined, { cause: 'model' });
+      await writeLedger(4);
+      await tasks.completeStepChecked('default', task.num, stepId, undefined, { cause: 'model' });
+      // Same ledger twice: not converging, so the budget moves again.
+      await tasks.completeStepChecked('default', task.num, stepId, undefined, { cause: 'model' });
+
+      const after = await stepOf(task.num, stepId);
+      expect(after.gateProgressAttempts).toBe(1);
+      expect(after.gateAttempts).toBe(2);
+    });
+
+    // Termination is already guaranteed (the count is a non-negative
+    // integer that must fall each pass), but "one item per pass across a
+    // large corpus" is a runaway to whoever pays for the sessions.
+    it('pauses when the progress budget is spent on a loop that creeps', async () => {
+      const TOTAL = GATE_MAX_PROGRESS_ATTEMPTS + 2;
+      await seedCorpus(TOTAL);
+      const { task, stepId } = await createCoverageTask(10);
+
+      let outcome: Awaited<ReturnType<TaskManager['completeStepChecked']>> | undefined;
+      for (let covered = 1; covered <= GATE_MAX_PROGRESS_ATTEMPTS + 1; covered++) {
+        await writeLedger(covered, TOTAL);
+        outcome = await tasks.completeStepChecked('default', task.num, stepId, undefined, {
+          cause: 'model',
+        });
+        if (holdOf(outcome).paused) break;
+      }
+
+      expect(holdOf(outcome!).paused).toBe(true);
+      expect((await tasks.get('default', task.num))?.status).toBe('paused');
+      const step = await stepOf(task.num, stepId);
+      expect(step.gateProgressAttempts).toBe(GATE_MAX_PROGRESS_ATTEMPTS);
+      // Never a stall — the attempt budget is untouched beyond the opener.
+      expect(step.gateAttempts).toBe(1);
+
+      // The resumer must be pointed at throughput, not at a phantom defect.
+      const notes = await tasks.listNotes('default', task.num, stepId);
+      expect(notes.some((n) => n.text.includes('# Gate progress budget spent'))).toBe(true);
+      expect(notes.some((n) => n.text.includes('This is a throughput problem'))).toBe(true);
+      expect(notes.some((n) => n.text.includes('# Gate plateau — paused for help'))).toBe(false);
+    });
   });
 
   it('churn with the same failing set climbs too; clearing a check resets the ladder', async () => {

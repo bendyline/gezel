@@ -7594,10 +7594,13 @@ button.danger {
   background: var(--surface-hover, var(--surface, transparent));
 }
 
-/* Inline code spans that the parser promoted to `#artifact:` links.
-   Keeps the code-span visual weight (monospace + subtle surface)
-   while tagging them as clickable with the accent underline. */
-.msg-body-rendered a[href^="#artifact:"] {
+/* Inline code spans that the parser promoted to `#artifact:` / `#workspace:`
+   links. Keeps the code-span visual weight (monospace + subtle surface)
+   while tagging them as clickable with the accent underline. Both schemes
+   render identically on purpose: which store a file lives in is the
+   viewer's business, not something to weigh at click time. */
+.msg-body-rendered a[href^="#artifact:"],
+.msg-body-rendered a[href^="#workspace:"] {
   font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 0.92em;
   color: var(--accent);
@@ -7609,7 +7612,8 @@ button.danger {
   cursor: pointer;
 }
 
-.msg-body-rendered a[href^="#artifact:"]:hover {
+.msg-body-rendered a[href^="#artifact:"]:hover,
+.msg-body-rendered a[href^="#workspace:"]:hover {
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   border-bottom-style: solid;
 }
@@ -14903,6 +14907,22 @@ button.bench-step-foot:disabled {
   }
 }
 
+/* Why a failed tool failed, inline under its row. Bounded by
+   `toolErrorSummary` (250 chars); the untruncated text stays in the
+   details drawer and the row's native tooltip. Line breaks are preserved
+   because a completion gate lists its unmet criteria as bullets. */
+.thinking-tool-error {
+  /* Indent past the ✗ so the reason hangs under the tool name. */
+  margin: 0.15rem 0 0.1rem 1.35rem;
+  color: var(--danger);
+  font-size: 0.74rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .thinking-tool-path {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.75rem;
@@ -15193,12 +15213,16 @@ button.bench-step-foot:disabled {
   font-size: 0.72rem;
   min-width: 0;
 }
-/* Hover peek — a floating preview of the top of the blob. */
+/* Hover peek — a floating preview of the top of the blob.
+   Portaled to <body> and positioned in viewport coordinates by
+   `ToolDetailPreview` (top/left arrive inline). It must NOT live inside
+   the chat's scroll container: an absolutely-positioned box there still
+   counts toward `scrollHeight`, so merely showing it made the
+   stick-to-bottom effect scroll the timeline, moving the toggle out
+   from under the cursor — a hover/scroll flicker loop. */
 .thinking-tool-detail-preview {
-  position: absolute;
-  z-index: 20;
-  top: 1.4rem;
-  left: 0;
+  position: fixed;
+  z-index: 60;
   max-width: 38rem;
   max-height: 16rem;
   overflow: hidden;
@@ -15622,6 +15646,50 @@ button.bench-step-foot:disabled {
 
 .msg-tool-history-failed {
   color: #d77070;
+}
+
+/* Unrecovered tool failure, surfaced in the thread above the (closed)
+   step expando. A gate that rejected the work is the user's business —
+   "· 1 failed" behind a disclosure triangle is not enough to act on. */
+.msg-tool-failure {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  align-self: flex-start;
+  max-width: 100%;
+  min-width: 0;
+  margin-bottom: 0.3rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  border-left-width: 2px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.msg-tool-failure-icon {
+  color: var(--danger);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.msg-tool-failure-body {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg-tool-failure-tool {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.msg-tool-failure-tool::after {
+  content: " — ";
+  color: var(--text-muted);
+  font-weight: 400;
 }
 
 .msg-tool-history .thinking-tools {
@@ -16376,8 +16444,8 @@ body.chat-rail-resizing webview {
   min-height: 0;
   min-width: 0;
   /* Own stacking context so the overlays inside (`.chat-sticky-header`
-     at 5, `.thinking-tool-detail-preview` at 20) are ordered against
-     each other and the bubbles they cover — not against the app shell.
+     at 5) are ordered against each other and the bubbles they cover —
+     not against the app shell.
      Without this the viewport is `position: relative` with `z-index:
      auto`, so the sticky header's 5 landed in the ROOT stack and beat
      `.app-header`'s 2, painting over the titlebar's engine/queue

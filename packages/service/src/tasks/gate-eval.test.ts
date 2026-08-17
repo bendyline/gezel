@@ -267,6 +267,85 @@ describe('evaluateGate', () => {
     expect(complete.checks[0]?.detail).toContain('all 2 changed path');
   });
 
+  // Declarative fanout: each batch child is gated on its own slice, so it
+  // can pass without covering files nobody handed it.
+  describe('corpusCoverage expectPaths (fanout batch scoping)', () => {
+    const record = (path: string) => `---\npath: ${path}\nstatus: modified\n---\n`;
+    const artifacts = {
+      'data/github-pulls/pr-52/files/001--a--aaaa1111.md': record('src/a.ts'),
+      'data/github-pulls/pr-52/files/002--b--bbbb2222.md': record('src/b.ts'),
+      'data/github-pulls/pr-52/files/003--c--cccc3333.md': record('src/c.ts'),
+    };
+    const batchCheck = (expectPaths: string) => ({
+      kind: 'corpusCoverage' as const,
+      file: 'coverage-2.json',
+      corpusDir: 'artifacts/data/github-pulls/pr-52',
+      expectPaths,
+    });
+    const ledger = (files: string[], records: string[]) =>
+      splitReader(
+        { 'coverage-2.json': JSON.stringify({ reviewedFiles: files, reviewedRecords: records }) },
+        artifacts,
+      );
+
+    it('passes on the batch slice while the wider corpus is untouched', async () => {
+      const res = await evaluateGate(
+        [batchCheck(JSON.stringify(['src/b.ts', 'src/c.ts']))],
+        ledger(
+          ['src/b.ts', 'src/c.ts'],
+          [
+            'data/github-pulls/pr-52/files/002--b--bbbb2222.md',
+            'data/github-pulls/pr-52/files/003--c--cccc3333.md',
+          ],
+        ),
+      );
+      expect(res.pass).toBe(true);
+      expect(res.checks[0]?.detail).toContain('all 2 changed path(s) in this batch');
+      expect(res.checks[0]?.evidence?.scopedToBatch).toBe(true);
+    });
+
+    it('still names what the batch itself is missing', async () => {
+      const res = await evaluateGate(
+        [batchCheck(JSON.stringify(['src/b.ts', 'src/c.ts']))],
+        ledger(['src/b.ts'], ['data/github-pulls/pr-52/files/002--b--bbbb2222.md']),
+      );
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toContain('this batch covers 2');
+      expect(res.failures[0]).toContain('src/c.ts');
+      // The converging-loop accounting still applies per child.
+      expect(res.checks[0]?.remaining).toBe(2);
+    });
+
+    it('rejects work claimed outside the batch', async () => {
+      const res = await evaluateGate(
+        [batchCheck(JSON.stringify(['src/b.ts']))],
+        ledger(['src/b.ts', 'src/a.ts'], ['data/github-pulls/pr-52/files/002--b--bbbb2222.md']),
+      );
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toContain('Outside this batch: src/a.ts');
+    });
+
+    it('fails closed on an uninterpolated or malformed slice', async () => {
+      const raw = await evaluateGate([batchCheck('{{paths}}')], ledger([], []));
+      expect(raw.pass).toBe(false);
+      expect(raw.failures[0]).toContain('never reached this gate');
+
+      const wrongShape = await evaluateGate([batchCheck('[1, 2]')], ledger([], []));
+      expect(wrongShape.pass).toBe(false);
+      expect(wrongShape.failures[0]).toContain('non-empty JSON array');
+    });
+
+    it('fails closed when the batch names a path the corpus never mirrored', async () => {
+      const res = await evaluateGate(
+        [batchCheck(JSON.stringify(['src/b.ts', 'src/ghost.ts']))],
+        ledger(['src/b.ts'], ['data/github-pulls/pr-52/files/002--b--bbbb2222.md']),
+      );
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toContain('src/ghost.ts');
+      expect(res.failures[0]).toContain('no corpus record');
+    });
+  });
+
   it('corpusCoverage reads an artifact-flagged ledger from the drawer', async () => {
     // Review bookkeeping belongs in the drawer, which is also the only
     // surface a writes-off project leaves writable. The ledger used to be

@@ -150,7 +150,13 @@ import {
   userProjectDir,
 } from '@bendyline/gezel/paths';
 import { applyPatch, parsePatch } from 'diff';
-import { matchReferencedArtifactsInContent } from '../chat/artifact-references.js';
+import {
+  type FileInventoryIndex,
+  artifactPathsOf,
+  buildFileInventoryIndex,
+  matchReferencedFilesWithIndex,
+  referencedFilesFromArtifactPaths,
+} from '../chat/file-references.js';
 import { matchReferencedTasksInContent } from '../chat/task-references.js';
 import { createGitIgnoreResolver } from '../git/ignore.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
@@ -5277,6 +5283,13 @@ export class Store {
     limit: number;
     before?: string;
     includeArchived?: boolean;
+    /**
+     * Indexed workspace paths for a project, used to recognize workspace
+     * files an assistant reply named in prose. Supplied by the caller
+     * because the listing's owner (`WorkspaceIndexManager`) is built on top
+     * of this Store. Omit it and the backfill sees artifacts only.
+     */
+    workspaceFiles?: (projectId: string) => Promise<readonly string[]>;
   }): Promise<{
     messages: TimelineMessage[];
     hasMore: boolean;
@@ -5329,28 +5342,29 @@ export class Store {
       if (best) handoffOf.set(s.id, { gezelId: best.gezelId, sessionId: best.id });
     }
 
-    // Gather one artifact listing per in-scope project so we can
-    // backfill `referencedArtifacts` on assistant messages that predate
-    // the server-side parser. Cheap: one recursive walk per project,
-    // reused across every message in that project's sessions.
-    const projectArtifacts = new Map<string, string[]>();
+    // Gather one file inventory per in-scope project so we can backfill
+    // `referencedFiles` on assistant messages that predate the server-side
+    // parser. One recursive artifact walk plus one read of the indexer's
+    // persisted workspace listing per project, reused across every message
+    // in that project's sessions — the lookup tables are built once here
+    // rather than per message, which is what keeps a 20k-file workspace
+    // affordable on a timeline page.
+    const projectFileIndex = new Map<string, FileInventoryIndex>();
     const uniqueProjects = new Set(sessions.map((s) => s.projectId));
     for (const pid of uniqueProjects) {
-      const hasLegacyAssistant = sessions.some(
+      const hasUnparsedAssistant = sessions.some(
         (s) =>
           s.projectId === pid &&
-          s.messages.some((m) => m.role === 'assistant' && !m.referencedArtifacts),
+          s.messages.some((m) => m.role === 'assistant' && !m.referencedFiles),
       );
-      if (!hasLegacyAssistant) continue;
-      try {
-        const files = await this.listProjectArtifactsRecursive(pid);
-        projectArtifacts.set(
-          pid,
-          files.filter((f) => !f.isDirectory).map((f) => f.path),
-        );
-      } catch {
-        projectArtifacts.set(pid, []);
-      }
+      if (!hasUnparsedAssistant) continue;
+      const [artifacts, workspace] = await Promise.all([
+        this.listProjectArtifactsRecursive(pid)
+          .then((files) => files.filter((f) => !f.isDirectory).map((f) => f.path))
+          .catch(() => [] as string[]),
+        opts.workspaceFiles?.(pid).catch(() => [] as readonly string[]) ?? [],
+      ]);
+      projectFileIndex.set(pid, buildFileInventoryIndex({ artifacts, workspace }));
     }
 
     // Backfill task-refs on assistant messages that predate the
@@ -5381,16 +5395,20 @@ export class Store {
         // surface a transcript bubble.
         if (m.hidden) continue;
         if (before && m.at >= before) continue;
-        // Assistant-only: either forward the persisted list or compute
-        // one on the fly from the project's current artifact inventory.
-        let refs = m.referencedArtifacts;
+        // Assistant-only: either forward the persisted list or compute one
+        // on the fly from the project's current file inventory. A message
+        // carrying only the legacy artifact-only field is recomputed rather
+        // than widened, so existing history gains workspace references too.
+        let refs = m.referencedFiles;
         if (m.role === 'assistant' && !refs) {
-          const artifactPaths = projectArtifacts.get(s.projectId);
-          if (artifactPaths && artifactPaths.length > 0) {
-            const computed = matchReferencedArtifactsInContent(m.content, artifactPaths);
-            if (computed.length > 0) refs = computed;
+          const index = projectFileIndex.get(s.projectId);
+          const computed = index ? matchReferencedFilesWithIndex(m.content, index) : [];
+          if (computed.length > 0) refs = computed;
+          else if (m.referencedArtifacts?.length) {
+            refs = referencedFilesFromArtifactPaths(m.referencedArtifacts);
           }
         }
+        const legacyArtifactRefs = refs ? artifactPathsOf(refs) : [];
         let tRefs = m.referencedTasks;
         if (m.role === 'assistant' && !tRefs && taskRefs && taskRefs.length > 0) {
           const computed = matchReferencedTasksInContent(m.content, taskRefs);
@@ -5415,7 +5433,8 @@ export class Store {
           at: m.at,
           ...(m.from ? { from: m.from } : {}),
           ...(m.nudge ? { nudge: true } : {}),
-          ...(refs && refs.length > 0 ? { referencedArtifacts: refs } : {}),
+          ...(refs && refs.length > 0 ? { referencedFiles: refs } : {}),
+          ...(legacyArtifactRefs.length > 0 ? { referencedArtifacts: legacyArtifactRefs } : {}),
           ...(tRefs && tRefs.length > 0 ? { referencedTasks: tRefs } : {}),
           ...(m.toolCalls && m.toolCalls.length > 0 ? { toolCalls: m.toolCalls } : {}),
           ...(m.intents && m.intents.length > 0 ? { intents: m.intents } : {}),

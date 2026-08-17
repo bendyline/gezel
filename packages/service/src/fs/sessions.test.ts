@@ -156,6 +156,88 @@ describe('Store session CRUD', () => {
     });
   });
 
+  describe('listTimeline reference backfill', () => {
+    const reviewReply = [
+      'Full review in `pr-review.md`.',
+      'The CLI `--title` default is in `packages/cli/src/commands/image.ts:84,230`,',
+      'and `useFrameCapture.ts:1633` drops the style. Minors are two `docs/API.md` omissions.',
+    ].join('\n');
+
+    const writeReply = () =>
+      store.writeSession(
+        sessionFixture({
+          id: 'sess-review',
+          messages: [{ role: 'assistant', content: reviewReply, at: '2026-04-14T10:00:00Z' }],
+        }),
+      );
+
+    it('resolves artifacts, and locator-suffixed workspace paths, from the reply body', async () => {
+      await store.writeProjectArtifact('default', 'pr-review.md', '# review');
+      await writeReply();
+
+      const timeline = await store.listTimeline({
+        gezelId: 'ada',
+        limit: 50,
+        workspaceFiles: async () => [
+          'packages/cli/src/commands/image.ts',
+          'src/hooks/useFrameCapture.ts',
+          'docs/API.md',
+          'src/unmentioned.ts',
+        ],
+      });
+
+      expect(timeline.messages[0]?.referencedFiles).toEqual([
+        { kind: 'artifact', path: 'pr-review.md' },
+        { kind: 'workspace', path: 'docs/API.md' },
+        { kind: 'workspace', path: 'packages/cli/src/commands/image.ts' },
+        { kind: 'workspace', path: 'src/hooks/useFrameCapture.ts' },
+      ]);
+    });
+
+    it('still emits the artifact-only projection for older clients', async () => {
+      await store.writeProjectArtifact('default', 'pr-review.md', '# review');
+      await writeReply();
+
+      const timeline = await store.listTimeline({
+        gezelId: 'ada',
+        limit: 50,
+        workspaceFiles: async () => ['docs/API.md'],
+      });
+      expect(timeline.messages[0]?.referencedArtifacts).toEqual(['pr-review.md']);
+    });
+
+    it('finds artifacts only when no workspace listing is supplied', async () => {
+      await store.writeProjectArtifact('default', 'pr-review.md', '# review');
+      await writeReply();
+
+      const timeline = await store.listTimeline({ gezelId: 'ada', limit: 50 });
+      expect(timeline.messages[0]?.referencedFiles).toEqual([
+        { kind: 'artifact', path: 'pr-review.md' },
+      ]);
+    });
+
+    it('widens a legacy artifact-only message when nothing re-resolves', async () => {
+      await store.writeSession(
+        sessionFixture({
+          id: 'sess-legacy',
+          messages: [
+            {
+              role: 'assistant',
+              content: 'wrote the report',
+              at: '2026-04-14T10:00:00Z',
+              referencedArtifacts: ['since-deleted.md'],
+            },
+          ],
+        }),
+      );
+
+      const timeline = await store.listTimeline({ gezelId: 'ada', limit: 50 });
+      expect(timeline.messages[0]?.referencedFiles).toEqual([
+        { kind: 'artifact', path: 'since-deleted.md' },
+      ]);
+    });
+  });
+
   it('findSessionById locates across gezels', async () => {
     await store.createGezel({ name: 'Boz', role: 'Writer' });
     await store.writeSession(sessionFixture({ id: 'A', gezelId: 'ada' }));

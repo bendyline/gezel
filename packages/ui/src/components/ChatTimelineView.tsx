@@ -6,6 +6,7 @@ import type {
   Project,
   ProviderName,
   Question,
+  ReferencedFile,
   SessionGpuTask,
   TerminalTimelineEntry,
   TimelineMessage,
@@ -428,9 +429,13 @@ export interface ChatTimelineViewProps {
   onArtifactReference?: (path: string, projectId?: string) => void;
   /** Passively remembers parsed artifact mentions for `/open` MRU suggestions. */
   onArtifactSeen?: (path: string, projectId?: string) => void;
-  /** Opens a verified terminal workspace-file reference in the right rail. */
+  /**
+   * Opens a verified workspace-file reference in the right rail — from a
+   * terminal `openFile` event, or from a `#workspace:` chip/link the
+   * reference parser recognized in a reply body.
+   */
   onWorkspaceReference?: (path: string, projectId?: string) => void;
-  /** Passively remembers persisted workspace tool paths for `/open` MRU suggestions. */
+  /** Passively remembers parsed + tool-touched workspace paths for `/open` MRU suggestions. */
   onWorkspaceSeen?: (path: string, projectId?: string) => void;
   /**
    * Forwarded from {@link ChatReferences} so the right rail's "Task" tab
@@ -663,8 +668,9 @@ export function ChatTimelineView({
   useEffect(() => {
     if (!onArtifactSeen && !onWorkspaceSeen) return;
     for (const message of messages) {
-      for (const path of message.referencedArtifacts ?? []) {
-        onArtifactSeen?.(path, message.projectId);
+      for (const file of referencedFilesOf(message)) {
+        if (file.kind === 'workspace') onWorkspaceSeen?.(file.path, message.projectId);
+        else onArtifactSeen?.(file.path, message.projectId);
       }
       for (const tool of message.toolCalls ?? []) {
         if (!tool.success) continue;
@@ -3004,6 +3010,9 @@ export function ChatTimelineView({
     const fontSourceFont = gezels.get(fontSourceId)?.font;
     const fontFamily = resolveGezelFontFamily(fontSourceFont);
     const fontScale = resolveGezelFontScale(fontSourceFont);
+    // Resolved once: the legacy widening allocates, and a fresh array per
+    // render would defeat the bubble's linkify memo.
+    const files = referencedFilesOf(m);
     return (
       <MessageBubble
         key={`msg:${m.sessionId}:${m.at}:${m.role}`}
@@ -3046,7 +3055,7 @@ export function ChatTimelineView({
         {...(project ? { projectLabel: project.name } : {})}
         extraClass={fade ? 'timeline-msg-faded' : undefined}
         mediaProvider={getReadonlyGezelMediaProvider(m.projectId, m.sessionId)}
-        {...(m.referencedArtifacts ? { referencedArtifacts: m.referencedArtifacts } : {})}
+        {...(files.length > 0 ? { referencedFiles: files } : {})}
         {...(m.referencedTasks ? { referencedTasks: m.referencedTasks } : {})}
         {...(m.toolCalls && m.toolCalls.length > 0
           ? { toolCalls: m.toolCalls, projectId: m.projectId }
@@ -3074,8 +3083,13 @@ export function ChatTimelineView({
                 }),
             }
           : {})}
-        {...(onArtifactReference
-          ? { onArtifactReference: (path: string) => onArtifactReference(path, m.projectId) }
+        {...(onArtifactReference || onWorkspaceReference
+          ? {
+              onFileReference: (file: ReferencedFile) => {
+                if (file.kind === 'workspace') onWorkspaceReference?.(file.path, m.projectId);
+                else onArtifactReference?.(file.path, m.projectId);
+              },
+            }
           : {})}
         onTaskReference={(ref) =>
           window.dispatchEvent(new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }))
@@ -3750,6 +3764,20 @@ function bumpIso(iso: string): string {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+const NO_FILES: readonly ReferencedFile[] = [];
+
+/**
+ * The message's referenced files, widening the legacy artifact-only field
+ * for any surface still sending it. `listTimeline` backfills the current
+ * shape on read, so this fallback is for live SSE rows written by an older
+ * daemon — a stable empty array otherwise, to keep the bubble's memos warm.
+ */
+function referencedFilesOf(message: TimelineMessage): readonly ReferencedFile[] {
+  if (message.referencedFiles?.length) return message.referencedFiles;
+  if (!message.referencedArtifacts?.length) return NO_FILES;
+  return message.referencedArtifacts.map((path) => ({ kind: 'artifact' as const, path }));
 }
 
 function withinHours(iso: string | undefined, ms: number): boolean {

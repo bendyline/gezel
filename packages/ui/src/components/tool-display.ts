@@ -336,6 +336,49 @@ export function toolDisplayName(name: string): string {
   return capitalizeFirst(bare.replace(/_/g, ' '));
 }
 
+/** Cap for {@link toolErrorSummary} — long enough for a gate's first
+ *  rejected criterion, short enough that a failed row stays one glance. */
+export const TOOL_ERROR_SUMMARY_MAX = 250;
+
+/** `[gate_rejected] `, `[not_found] ` — the machine code every MCP error
+ *  result carries. Useful to the model, noise in a transcript. */
+const MACHINE_CODE_PREFIX = /^\[[a-z0-9_]+\]\s*/i;
+
+/** `Retryable: true` is a control flag for the caller, not a reason. */
+const RETRYABLE_FLAG = /^retryable:\s*(?:true|false)$/i;
+
+/**
+ * Condense a failed tool call's error into a bounded, readable reason for
+ * the chat thread.
+ *
+ * The raw text is written for the model — a machine code prefix, the
+ * rejection itself, then a `Retryable:` flag. The person reading the
+ * transcript needs the middle part, and needs it without opening the
+ * details drawer: a red ✗ next to "Advance task step" tells them a gate
+ * fired but not what it wanted. Line breaks survive (a gate lists its
+ * unmet criteria as bullets, and running those together is unreadable);
+ * the full untruncated text stays in the details drawer and the row's
+ * native tooltip.
+ */
+export function toolErrorSummary(message: string, maxChars = TOOL_ERROR_SUMMARY_MAX): string {
+  const text = message
+    .replace(MACHINE_CODE_PREFIX, '')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => !RETRYABLE_FLAG.test(line.trim()))
+    .join('\n')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
+  if (text.length <= maxChars) return text;
+  const cut = text.slice(0, maxChars);
+  // Break on the last whitespace so the cut lands between words — unless
+  // that would throw away most of the budget (one long unbroken token),
+  // in which case a mid-word cut is the honest option.
+  const lastSpace = cut.search(/\s\S*$/);
+  const body = lastSpace > maxChars * 0.6 ? cut.slice(0, lastSpace) : cut;
+  return `${body.replace(/[\s.,;:-]+$/, '')}…`;
+}
+
 export function formatDurationShort(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;

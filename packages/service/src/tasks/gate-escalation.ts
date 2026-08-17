@@ -17,11 +17,17 @@
  *   stage 3 — stop: pause with the full attempt trail as diagnosis.
  *
  * The plateau signature hashes failing-check IDENTITY (GateCheckOutcome
- * labels), not prose and not content bytes: byte churn with an unmoved
- * failure set IS the plateau (the eval harness's retryLoopSniffKey
- * lesson), while clearing any single check changes the signature and
- * resets the ladder. Kill-switch: GEZEL_DISABLE_GATE_ESCALATION=1
- * restores the legacy quiet-damper behavior.
+ * labels) plus any outstanding-item count those checks report, not prose
+ * and not content bytes: byte churn with an unmoved failure set IS the
+ * plateau (the eval harness's retryLoopSniffKey lesson), while clearing a
+ * check — or covering more of what a counting check still wants — changes
+ * the signature and resets the ladder. The count matters because some
+ * craftbooks are DESIGNED to fail a gate repeatedly (bounded batch loops
+ * over a corpus too large for one context); identity alone cannot tell
+ * those from a stall, and calling them a stall pushes the assignee toward
+ * the smallest edit that clears the check rather than the work.
+ * Kill-switch: GEZEL_DISABLE_GATE_ESCALATION=1 restores the legacy
+ * quiet-damper behavior.
  */
 
 import { createHash } from 'node:crypto';
@@ -38,9 +44,40 @@ export function escalationDisabled(): boolean {
 }
 
 /**
- * Hash of the failing-check identity set. Sorted so check order never
+ * Outstanding items summed across the failing checks that count in items
+ * at all ({@link GateCheckOutcome.remaining}). `undefined` when no failing
+ * check reports one, which is every gate that isn't a coverage loop.
+ *
+ * A sum is lossy across several counting checks — A 10→5 while B 5→10
+ * holds the total at 15 and reads as no progress. That direction is the
+ * safe one: it under-reports progress and leaves the ladder as it is
+ * today, rather than resetting the plateau on a check that regressed.
+ */
+export function gateRemaining(
+  checkResults: readonly GateCheckOutcome[] | undefined,
+): number | undefined {
+  let total: number | undefined;
+  for (const check of checkResults ?? []) {
+    if (check.ok || check.remaining === undefined) continue;
+    total = (total ?? 0) + check.remaining;
+  }
+  return total;
+}
+
+/**
+ * Hash of the failing-check identity set, plus the outstanding-item count
+ * when the failing checks report one. Sorted so check order never
  * matters; `script:<name>` entries cover script-gate rejects (which
  * carry no failing declarative checks).
+ *
+ * The count is in the hash because identity alone cannot tell a stall
+ * from a bounded batch loop: a craftbook that reviews a 68-file PR 25 at
+ * a time fails the SAME coverage check every pass while genuinely
+ * converging, so the ladder read attempt 2 (25→50 files) as a plateau
+ * and fired the stage-1 targeted-edit directive at a reviewer that was
+ * working correctly. Falling count = the failure moved, ladder resets;
+ * a count frozen across attempts still climbs, which is the real stall.
+ * Checks that report no count behave exactly as before.
  */
 export function gateFailureSignature(
   checkResults: readonly GateCheckOutcome[] | undefined,
@@ -50,8 +87,10 @@ export function gateFailureSignature(
   for (const run of runs) {
     if (run.decision === 'reject' || run.error) labels.push(`script:${run.scriptName}`);
   }
+  const remaining = gateRemaining(checkResults);
   const canonical = [...labels].sort().join('\n');
-  return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
+  const withProgress = remaining === undefined ? canonical : `${canonical}\nremaining:${remaining}`;
+  return createHash('sha256').update(withProgress).digest('hex').slice(0, 16);
 }
 
 /**
@@ -136,6 +175,27 @@ export function deliverableSurface(opts: {
 }
 
 /**
+ * Stage 0, converging — the rejection a bounded batch loop is SUPPOSED to
+ * get. Prefixed to the gate's own verdict when the outstanding-item count
+ * fell against the same failing checks, so the assignee reads "keep going"
+ * rather than inferring a stall from bullets it saw last attempt too. The
+ * surrounding note still says "Gate — not yet met (attempt N/M)", which on
+ * its own reads as failure to a mid-tier local model.
+ *
+ * Deliberately carries no marker any provider turn-mode keys on: this turn
+ * wants the assignee to continue its normal procedure, not to be clamped
+ * to a write-only surface the way GATE_TARGETED_EDIT and GATE_FULL_REWRITE
+ * clamp theirs.
+ */
+export function buildProgressPreamble(opts: {
+  previousRemaining: number;
+  remaining: number;
+}): string {
+  const cleared = opts.previousRemaining - opts.remaining;
+  return `Progress: ${cleared} more item(s) covered since your last attempt — ${opts.remaining} still outstanding. This rejection is the expected loop, not a stall: keep working the same way and do NOT restart, re-plan, or redo what already passed. Continue with the next batch of outstanding items below.`;
+}
+
+/**
  * Stage 1 — smallest-targeted-edit directive. Ports the eval harness's
  * state-aware pre-trigger wording ("your file EXISTS but fails the
  * check; do NOT recreate it"). The GATE_TARGETED_EDIT marker MUST trip
@@ -202,6 +262,32 @@ export function buildStageTwoNudge(opts: {
 ${opts.failingBullets}
 
 Call ${tool}({ path: "${opts.file}", content: <the complete corrected file> }) as your next tool call. No planning prose, no reads first, no partial appends.`;
+}
+
+/**
+ * The converging-loop pause. Distinct from the plateau diagnosis because
+ * the failure is the opposite one: every pass DID move the gate, just not
+ * fast enough to be worth more sessions. Handing the resumer a "failed the
+ * same checks N times without progress" note here would send them hunting
+ * a defect in a deliverable that is steadily getting more correct, when
+ * the actual lever is the batch size (or finishing the tail by hand).
+ */
+export function buildProgressExhaustionNote(opts: {
+  stepName: string;
+  stepId: string;
+  passes: number;
+  remaining: number;
+  lastMessage: string;
+}): string {
+  return `# Gate progress budget spent — paused for help
+
+Step "${opts.stepName}" (${opts.stepId}) advanced on all ${opts.passes} of its passes — the gate was never stalled — but ${opts.remaining} item(s) are still outstanding, so it would need many more sessions to finish at this rate.
+
+Latest verdict:
+
+${opts.lastMessage}
+
+This is a throughput problem, not a stuck assignee. Raise the per-pass batch size in the step procedure, split the work across more steps, cover the remaining items by hand, or accept the partial coverage — then set the task active again.`;
 }
 
 /**

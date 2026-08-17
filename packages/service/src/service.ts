@@ -44,7 +44,7 @@ import { registerLinkedInAdapters } from './connectors/natives/linkedin-posts.js
 import { registerXAdapters } from './connectors/natives/x-posts.js';
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
 import { runConnectorTaskPrep } from './connectors/task-prep.js';
-import { listApplicableCraftbooks } from './craftbook/applicable.js';
+import { listApplicableCraftbooks, projectCraftbookSummaries } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
 import { clearCraftbookSuggestVectorCache } from './craftbook/suggest.js';
 import { DebugFlag } from './debug/flag.js';
@@ -1223,9 +1223,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
 
   // Wire the craftbook resolver: project-local books shadow local
   // templates, which shadow the bundled catalog. Shared with the
-  // project-type install path (craftbook/resolve.ts) so both resolve
-  // through the exact same chain.
-  tasks.setCraftbookResolver(makeCraftbookResolver(store, catalog));
+  // project-type install path (craftbook/resolve.ts) and the command
+  // launcher below so all three resolve through the exact same chain.
+  const craftbookResolver = makeCraftbookResolver(store, catalog);
+  tasks.setCraftbookResolver(craftbookResolver);
 
   const channels = new ChannelManager({ store, secrets, history, debug });
 
@@ -1527,7 +1528,19 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
             for (const item of items) {
               const context: Record<string, string> = {};
               for (const [k, v] of Object.entries(item)) {
-                context[k] = typeof v === 'string' ? v : v == null ? '' : String(v);
+                // Scalars substitute as themselves; anything structural is
+                // JSON so the child can parse it. `String(['a','b'])` gives
+                // `a,b` — readable in a prompt, but a child whose slice of
+                // work IS that array (a batch's `paths`) then has no way to
+                // recover the items, and any path built from it is junk.
+                context[k] =
+                  v == null
+                    ? ''
+                    : typeof v === 'string'
+                      ? v
+                      : typeof v === 'object'
+                        ? JSON.stringify(v)
+                        : String(v);
               }
               const title =
                 context.number && context.client
@@ -1624,11 +1637,15 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // path). If a future change auto-starts the entry step on create,
   // drop both call sites to avoid a double start.
   const craftbookInvoker: CraftbookInvoker = async ({ projectId, craftbookId, params }) => {
-    const detail = await catalog.get('craftbook-template', craftbookId).catch(() => null);
-    if (!detail || detail.manifest.kind !== 'craftbook-template') {
+    // Resolve through the task resolver's chain, not the catalog alone: a
+    // project-local book (`.gezel/craftbooks/`, usually converted from a
+    // repo SKILL.md) is offered by the launcher rail, so a catalog-only
+    // lookup here rejected exactly the books this project defined itself.
+    const resolved = await craftbookResolver.resolve(craftbookId, { projectId }).catch(() => null);
+    if (!resolved) {
       throw new Error(`unknown craftbook "${craftbookId}"`);
     }
-    const m = detail.manifest;
+    const m = resolved.craftbook;
 
     const paramSummary = Object.entries(params)
       .map(([k, v]) => `${k}=${v}`)
@@ -1642,8 +1659,18 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     const entryRole = m.steps.find((s) => s.id === m.entryStepId)?.suggestedRole;
     let assignee: TaskAssignee = { kind: 'user' };
     if (entryRole) {
-      const resolved = await roleResolverClosure(entryRole, projectId).catch(() => null);
-      if (resolved?.gezelId) assignee = { kind: 'gezel', gezelId: resolved.gezelId };
+      const owner = await roleResolverClosure(entryRole, projectId).catch(() => null);
+      if (owner?.gezelId) assignee = { kind: 'gezel', gezelId: owner.gezelId };
+    }
+    if (assignee.kind === 'user') {
+      // A book whose entry step names no role — every SKILL.md conversion
+      // that carried no persona — would otherwise launch owned by the user
+      // and never dispatch: created, active, and inert, which reads to the
+      // user as "I ran it and nothing happened". The voorman is the
+      // project's standing answer to "who picks this up?", and can route it
+      // onward. Falls through to the user only when the project has none.
+      const voormanGezelId = (await store.getProject(projectId).catch(() => null))?.voormanGezelId;
+      if (voormanGezelId) assignee = { kind: 'gezel', gezelId: voormanGezelId };
     }
 
     const task = await tasks.create(projectId, {
@@ -1720,6 +1747,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     contentIndex,
     events: chatEvents,
   });
+  // Same post-construction injection as the content index above: the
+  // indexer takes `chat` as a dependency, so the reference parser can only
+  // reach the workspace listing from this side.
+  chat.setWorkspaceIndex(workspaceIndex);
   // Code reviews: snapshot-driven review tasks kicked off from the GitHub
   // tab's Review panel; records live in per-project code-reviews.json.
   const codeReviews = new CodeReviewManager({
@@ -2066,9 +2097,19 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     history,
     // Only craftbooks applicable to THIS project (requirements met) are
     // recognized as terminal commands — so e.g. `pull-request-review`
-    // isn't a command in a non-GitHub project.
+    // isn't a command in a non-GitHub project. Project-local books are
+    // merged in (shadowing same-id catalog entries) to match what the
+    // launcher rail offers: without them, clicking a book this repo
+    // defined itself staged a line the terminal then tried to run as a
+    // shell command.
     listCraftbookCommands: async (projectId) => {
-      const items = await listApplicableCraftbooks(catalog, store, projectId, { git });
+      const projectItems = await projectCraftbookSummaries(store, projectId, { git });
+      const projectIds = new Set(projectItems.map((it) => it.manifest.id));
+      const catalogItems = await listApplicableCraftbooks(catalog, store, projectId, { git });
+      const items = [
+        ...projectItems,
+        ...catalogItems.filter((it) => !projectIds.has(it.manifest.id)),
+      ];
       return items.flatMap((it) =>
         it.manifest.kind === 'craftbook-template'
           ? [

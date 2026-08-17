@@ -454,8 +454,14 @@ const SHADOW_SKIP: ReadonlySet<string> = new Set([PROJECT_SHADOW_DIR_NAME]);
  * Strip leading `./`, `/`, and repeated `artifacts/` prefixes. Defense
  * in depth: the MCP layer already strips these, but direct HTTP callers
  * that pass the full prefix would otherwise create `artifacts/artifacts/`.
+ *
+ * Exported for the reference routes, which join a caller-supplied path
+ * under the artifacts root themselves instead of going through this
+ * store — a References-pane path carrying the drawer prefix (models copy
+ * it out of craftbook corpus scopes) resolved to `artifacts/artifacts/…`
+ * and 404'd on a file that was plainly on disk.
  */
-function normalizeArtifactPath(p: string): string {
+export function normalizeArtifactPath(p: string): string {
   let out = p.replace(/^\.?\/+/, '').trim();
   while (/^artifacts\/+/i.test(out)) out = out.replace(/^artifacts\/+/i, '');
   return out;

@@ -309,6 +309,21 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     reviewedField: z.string().min(1).optional(),
     recordField: z.string().min(1).optional(),
     artifact: z.boolean().optional(),
+    /**
+     * JSON array of the exact changed paths THIS ledger must cover, as a
+     * string — narrows the check from the whole corpus to one slice of it.
+     * Written for declarative fanout: a child reviewing batch 2 of 3 gets
+     * `"{{paths}}"` from its per-item context and is gated on its own 25
+     * files, not on the 68 nobody handed it. Without this a batch child
+     * can never pass its own gate, and coverage can only be enforced
+     * after a merge — far downstream of the child that under-delivered.
+     *
+     * Fails closed on anything that is not a JSON array of strings,
+     * including an uninterpolated `{{…}}` token: a mis-scoped coverage
+     * check that silently widens back to the full corpus would reject
+     * every child forever with a verdict none of them can act on.
+     */
+    expectPaths: z.string().min(1).optional(),
   }),
   /**
    * The H1 slide titles in `file` must match the numbered slide headings in
@@ -552,6 +567,19 @@ export const StepGateUnionSchema = z.union([StepGateSchema, GateSpecSchema]);
 export type StepGateUnion = z.infer<typeof StepGateUnionSchema>;
 
 export const GATE_DEFAULT_MAX_ATTEMPTS = 4;
+
+/**
+ * Ceiling on CONVERGING gate rejections — passes where the same checks
+ * failed on strictly fewer outstanding items than the pass before. Those
+ * do not spend `maxAttempts` (a bounded batch loop produces one per batch
+ * by design, so charging them there caps corpus size instead of
+ * stalling), but they are not free either: at 25 records a batch this
+ * allows a 600-record corpus, while a loop creeping forward one item at a
+ * time still reaches a human within a day's sessions rather than after
+ * hundreds. Deliberately not author-configurable — a craftbook that needs
+ * more passes than this has a batch-size problem, not a budget problem.
+ */
+export const GATE_MAX_PROGRESS_ATTEMPTS = 24;
 
 /** Uniform runtime view over both gate generations. */
 export interface NormalizedStepGate {

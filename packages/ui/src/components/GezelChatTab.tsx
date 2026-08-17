@@ -220,6 +220,7 @@ function GezelChatBody({
         onToolActivity,
         onArtifactReference,
         onArtifactSeen,
+        onWorkspaceReference,
         onWorkspaceSeen,
         recentReferences,
         onOpenReference,
@@ -240,6 +241,7 @@ function GezelChatBody({
             onToolActivity={onToolActivity}
             onArtifactReference={onArtifactReference}
             onArtifactSeen={onArtifactSeen}
+            onWorkspaceReference={onWorkspaceReference}
             onWorkspaceSeen={onWorkspaceSeen}
             onTaskReference={onTaskReference}
             emptyPlaceholder={emptyPlaceholder}
@@ -318,6 +320,7 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
         onToolActivity,
         onArtifactReference,
         onArtifactSeen,
+        onWorkspaceReference,
         onWorkspaceSeen,
         recentReferences,
         onOpenReference,
@@ -333,6 +336,7 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
             onToolActivity={onToolActivity}
             onArtifactReference={onArtifactReference}
             onArtifactSeen={onArtifactSeen}
+            onWorkspaceReference={onWorkspaceReference}
             onWorkspaceSeen={onWorkspaceSeen}
             onTaskReference={onTaskReference}
             emptyPlaceholder={emptyPlaceholder}

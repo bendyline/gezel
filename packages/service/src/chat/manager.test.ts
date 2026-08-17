@@ -536,6 +536,50 @@ describe('ChatManager — send + persistence', () => {
     expect(timelineAssistant?.reasoningDurationMs).toBe(assistant?.reasoningDurationMs);
   });
 
+  it('records referenced artifacts and workspace files, locators and all', async () => {
+    await store.writeProjectArtifact('default', 'pr-review.md', '# review');
+    manager.setWorkspaceIndex({
+      readFiles: async () => [
+        { path: 'packages/cli/src/commands/image.ts' },
+        { path: 'src/hooks/useFrameCapture.ts' },
+        { path: 'docs/API.md' },
+        { path: 'src/never-mentioned.ts' },
+      ],
+    });
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.script(
+      'Full review in `pr-review.md`. The default lives in ' +
+        '`packages/cli/src/commands/image.ts:84,230`, `useFrameCapture.ts:1633` drops the ' +
+        'style, and `docs/API.md` is missing two entries.',
+    );
+
+    await manager.send(session.id, 'review the PR');
+
+    const disk = await store.getSession('ada', session.id);
+    const assistant = disk?.messages.find((message) => message.role === 'assistant');
+    expect(assistant?.referencedFiles).toEqual([
+      { kind: 'artifact', path: 'pr-review.md' },
+      { kind: 'workspace', path: 'docs/API.md' },
+      { kind: 'workspace', path: 'packages/cli/src/commands/image.ts' },
+      { kind: 'workspace', path: 'src/hooks/useFrameCapture.ts' },
+    ]);
+    // The legacy projection stays artifact-only so an older CLI reading this
+    // session file still resolves every path it is handed.
+    expect(assistant?.referencedArtifacts).toEqual(['pr-review.md']);
+  });
+
+  it('falls back to artifacts alone when no workspace index is wired', async () => {
+    await store.writeProjectArtifact('default', 'pr-review.md', '# review');
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.script('Full review in `pr-review.md`; the bug is `useFrameCapture.ts:1633`.');
+
+    await manager.send(session.id, 'review the PR');
+
+    const disk = await store.getSession('ada', session.id);
+    const assistant = disk?.messages.find((message) => message.role === 'assistant');
+    expect(assistant?.referencedFiles).toEqual([{ kind: 'artifact', path: 'pr-review.md' }]);
+  });
+
   it('skips stale missing-deliverable messages once the workspace file exists', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
     await store.writeProjectWorkspaceFile(

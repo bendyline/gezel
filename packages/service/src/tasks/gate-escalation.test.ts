@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { GateAttemptRecord } from '@bendyline/gezel';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -9,11 +10,14 @@ import {
   GATE_ATTEMPT_TRAIL_CAP,
   appendGateAttempt,
   buildPlateauDiagnosisNote,
+  buildProgressExhaustionNote,
+  buildProgressPreamble,
   buildStageOneNudge,
   buildStageTwoNudge,
   deliverableSurface,
   escalationDisabled,
   gateFailureSignature,
+  gateRemaining,
   plateauScore,
   stageForPlateau,
 } from './gate-escalation.js';
@@ -25,6 +29,13 @@ const outcome = (label: string, ok: boolean, detail = 'detail text'): GateCheckO
   ok,
   detail,
 });
+
+const coverage: GateCheckOutcome = {
+  kind: 'corpusCoverage',
+  label: 'corpusCoverage pr-review-coverage.json',
+  ok: false,
+  detail: 'reviewed 25 path(s), but the connector corpus contains 68.',
+};
 
 const trailEntry = (signatureHash: string, attempt = 1): GateAttemptRecord => ({
   at: '2026-07-06T12:00:00.000Z',
@@ -82,6 +93,91 @@ describe('gateFailureSignature', () => {
     );
     const withoutPass = gateFailureSignature([outcome('contains report.md /Total/', false)], []);
     expect(withPass).toBe(withoutPass);
+  });
+
+  // The Pull Request Review shape: one coverage check that a bounded batch
+  // loop fails once per batch while genuinely converging.
+  it('changes when the outstanding count falls under an unmoved failing check', () => {
+    const at = (remaining: number) => gateFailureSignature([{ ...coverage, remaining }], []);
+    expect(at(43)).not.toBe(at(18));
+    expect(at(18)).toBe(at(18));
+    // A count that regresses is not the same state as one that fell to it.
+    expect(at(43)).not.toBe(at(68));
+  });
+
+  it('leaves count-free checks byte-identical to the legacy signature', () => {
+    const legacy = gateFailureSignature([outcome('contains report.md /Total/', false)], []);
+    expect(legacy).toBe(
+      createHash('sha256').update('contains report.md /Total/').digest('hex').slice(0, 16),
+    );
+  });
+});
+
+describe('gateRemaining', () => {
+  it('sums only failing checks that report a count', () => {
+    expect(gateRemaining(undefined)).toBeUndefined();
+    expect(gateRemaining([outcome('contains report.md /Total/', false)])).toBeUndefined();
+    expect(gateRemaining([{ ...coverage, remaining: 18 }])).toBe(18);
+    expect(
+      gateRemaining([{ ...coverage, remaining: 18 }, outcome('minBytes report.md', false)]),
+    ).toBe(18);
+    // A cleared coverage check contributes nothing, even at remaining 0.
+    expect(gateRemaining([{ ...coverage, ok: true, remaining: 0 }])).toBeUndefined();
+  });
+});
+
+describe('buildProgressPreamble', () => {
+  it('reports what moved and tells the assignee to continue', () => {
+    const text = buildProgressPreamble({ previousRemaining: 43, remaining: 18 });
+    expect(text).toContain('25 more item(s) covered');
+    expect(text).toContain('18 still outstanding');
+    expect(text).toMatch(/do NOT restart/);
+  });
+
+  it('carries no marker that clamps a llama-cpp turn', () => {
+    const text = buildProgressPreamble({ previousRemaining: 43, remaining: 18 });
+    expect(text).not.toContain('GATE_TARGETED_EDIT:');
+    expect(text).not.toContain('GATE_FULL_REWRITE:');
+    expect(isImmediateFileWriteTurn(text, WRITE_FILE_TOOL)).toBe(false);
+    expect(isGateSurgicalEditTurn(text, WRITE_FILE_TOOL)).toBe(false);
+  });
+});
+
+describe('buildProgressExhaustionNote', () => {
+  const note = () =>
+    buildProgressExhaustionNote({
+      stepName: 'Review the next changed-file batch',
+      stepId: 'scan',
+      passes: 24,
+      remaining: 40,
+      lastMessage: 'coverage.json: reviewed 160 path(s), but the corpus contains 200.',
+    });
+
+  it('names throughput as the problem, not a stuck deliverable', () => {
+    const text = note();
+    expect(text).toContain('advanced on all 24 of its passes');
+    expect(text).toContain('40 item(s) are still outstanding');
+    expect(text).toContain('throughput problem');
+    expect(text).toContain('batch size');
+  });
+
+  it('never claims the plateau note’s "without progress"', () => {
+    expect(note()).not.toContain('without progress');
+    expect(
+      buildPlateauDiagnosisNote({
+        stepName: 'Build',
+        stepId: 'build',
+        trail: [
+          {
+            at: '2026-07-06T12:00:00.000Z',
+            attempt: 1,
+            signatureHash: 's',
+            messageFingerprint: 'f',
+          },
+        ],
+        lastMessage: 'nope',
+      }),
+    ).toContain('without progress');
   });
 });
 

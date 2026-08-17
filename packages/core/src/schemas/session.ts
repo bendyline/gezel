@@ -6,6 +6,7 @@ import {
   ChatMessageToolCallSchema,
   ChatTurnErrorDetailSchema,
   ProviderNameSchema,
+  ReferencedFileSchema,
 } from './gezel.js';
 import { TerminalTimelineEntrySchema } from './terminal.js';
 
@@ -537,9 +538,16 @@ export const TimelineMessageSchema = z.object({
    */
   nudge: z.boolean().optional(),
   /**
-   * Mirrors `ChatMessage.referencedArtifacts` — validated artifact paths
-   * the assistant reply mentioned. Populated on write and backfilled on
-   * read for older messages that predate the parser.
+   * Mirrors `ChatMessage.referencedFiles` — validated artifact and
+   * workspace paths the assistant reply mentioned. Populated on write
+   * and backfilled on read for older messages that predate the parser.
+   */
+  referencedFiles: z.array(ReferencedFileSchema).optional(),
+  /**
+   * Mirrors `ChatMessage.referencedArtifacts` — the artifact-only
+   * projection of `referencedFiles`, kept for older clients.
+   *
+   * @deprecated superseded by `referencedFiles`
    */
   referencedArtifacts: z.array(z.string()).optional(),
   /**

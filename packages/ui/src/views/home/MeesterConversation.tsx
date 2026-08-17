@@ -107,6 +107,7 @@ export function MeesterConversation({
           onToolActivity,
           onArtifactReference,
           onArtifactSeen,
+          onWorkspaceReference,
           onWorkspaceSeen,
           recentReferences,
           onOpenReference,
@@ -123,6 +124,7 @@ export function MeesterConversation({
               onToolActivity={onToolActivity}
               onArtifactReference={onArtifactReference}
               onArtifactSeen={onArtifactSeen}
+              onWorkspaceReference={onWorkspaceReference}
               onWorkspaceSeen={onWorkspaceSeen}
               onTaskReference={onTaskReference}
               emptyPlaceholder={emptyPlaceholder}

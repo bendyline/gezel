@@ -120,6 +120,22 @@ function referenceKey(kind: RefKind, scope: string | undefined, path: string): s
   return `${kind}:${scope ?? ''}:${path}`;
 }
 
+/**
+ * Artifact paths reach the rail exactly as the model typed them, and models
+ * routinely include the drawer prefix (`artifacts/data/…`) because that is
+ * how craftbook corpus scopes are authored. The tool call still succeeds —
+ * the artifact store strips the prefix — so the two spellings would split
+ * one file into two chips, and the daemon resolves them against different
+ * roots. Canonicalize on the way in. Workspace and document paths are left
+ * alone: a workspace may own an `artifacts/` folder of its own.
+ */
+function canonicalReferencePath(kind: RefKind, path: string): string {
+  if (kind !== 'artifact') return path;
+  let out = path.trim().replace(/^\.?\/+/, '');
+  while (/^artifacts\/+/i.test(out)) out = out.replace(/^artifacts\/+/i, '');
+  return out;
+}
+
 function classifyTool(name: string): RefKind | null {
   switch (name) {
     case 'read_artifact':
@@ -290,7 +306,8 @@ export function ChatReferences({
   }, [chatKey]);
 
   const rememberReference = useCallback(
-    (kind: RefKind, path: string, messageProjectId?: string): Reference => {
+    (kind: RefKind, rawPath: string, messageProjectId?: string): Reference => {
+      const path = canonicalReferencePath(kind, rawPath);
       const key = referenceKey(kind, messageProjectId, path);
       const firstSeenAt = Date.now();
       const lastSeenOrder = ++seenOrderRef.current;

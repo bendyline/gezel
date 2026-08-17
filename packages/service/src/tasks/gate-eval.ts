@@ -72,6 +72,19 @@ export interface GateCheckOutcome {
   detail: string;
   /** Machine evidence preserved from the rich CheckResults (arrays sliced to ≤10). */
   evidence?: Record<string, unknown>;
+  /**
+   * Discrete items this check still wants, for checks that count in items
+   * at all (unread corpus records, uncovered paths). Folded into the
+   * plateau signature, which is what lets a gate a craftbook is DESIGNED
+   * to fail repeatedly — a bounded batch loop — read as progress instead
+   * of a stall while the count falls.
+   *
+   * Only set this where the count is deterministic for a given
+   * deliverable: a number that jitters on identical content would reset
+   * the ladder forever and hide a real plateau. Leaving it unset keeps
+   * the legacy identity-only behavior exactly.
+   */
+  remaining?: number;
 }
 
 export interface GateCheckResult {
@@ -265,7 +278,7 @@ async function evalCheck(
   ws: GateWorkspaceReader,
   deps?: GateEvalDeps,
 ): Promise<GateCheckOutcome> {
-  const { ok, detail, evidence } = await evalCheckInner(c, ws, deps);
+  const { ok, detail, evidence, remaining } = await evalCheckInner(c, ws, deps);
   const file = checkFile(c);
   return {
     kind: c.kind,
@@ -274,6 +287,7 @@ async function evalCheck(
     ok,
     detail,
     ...(evidence !== undefined ? { evidence } : {}),
+    ...(remaining !== undefined ? { remaining } : {}),
   };
 }
 
@@ -281,6 +295,8 @@ interface InnerOutcome {
   ok: boolean;
   detail: string;
   evidence?: Record<string, unknown>;
+  /** See {@link GateCheckOutcome.remaining}. */
+  remaining?: number;
 }
 
 async function evalCheckInner(
@@ -682,7 +698,35 @@ async function evalCheckInner(
           detail: `${c.file}: no changed-file records were found under artifacts/${filePrefix} — the PR corpus is missing or incomplete.`,
         };
       }
+      // Fanout slice, when the check carries one. Parsed before any record
+      // is read so a mis-scoped child fails on its own configuration
+      // rather than on a corpus it was never given.
+      let slice: Set<string> | undefined;
+      if (c.expectPaths !== undefined) {
+        let parsedSlice: unknown;
+        try {
+          parsedSlice = JSON.parse(c.expectPaths);
+        } catch {
+          return {
+            ok: false,
+            detail: `${c.file}: expectPaths is not valid JSON (${c.expectPaths.slice(0, 80)}) — the batch slice never reached this gate, so its coverage cannot be scoped (fail-closed).`,
+          };
+        }
+        if (
+          !Array.isArray(parsedSlice) ||
+          parsedSlice.length === 0 ||
+          parsedSlice.some((value) => typeof value !== 'string' || value.trim() === '')
+        ) {
+          return {
+            ok: false,
+            detail: `${c.file}: expectPaths must be a non-empty JSON array of exact changed-path strings (fail-closed).`,
+          };
+        }
+        slice = new Set((parsedSlice as string[]).map((path) => path.trim()));
+      }
+
       const expected = new Set<string>();
+      const scopedRecords: string[] = [];
       for (const record of records) {
         const content = await ws.readArtifact(record);
         if (content === null) {
@@ -698,8 +742,20 @@ async function evalCheckInner(
             detail: `${c.file}: connector record artifacts/${record} has no authoritative path frontmatter.`,
           };
         }
+        if (slice && !slice.has(path)) continue;
         expected.add(path);
+        scopedRecords.push(record);
       }
+      if (slice) {
+        const absent = [...slice].filter((path) => !expected.has(path)).sort();
+        if (absent.length > 0) {
+          return {
+            ok: false,
+            detail: `${c.file}: this batch names ${absent.length} path(s) with no corpus record under artifacts/${filePrefix}: ${absent.slice(0, 10).join(', ')}. The batch manifest and the mirrored corpus disagree — no assignee can reconcile that (fail-closed).`,
+          };
+        }
+      }
+      const records_ = slice ? scopedRecords : records;
 
       const reviewed = new Set(
         (reviewedRaw as string[]).map((path) => path.trim()).filter(Boolean),
@@ -709,7 +765,7 @@ async function evalCheckInner(
           .replace(/\\/g, '/')
           .replace(/^\.?\/+/, '')
           .replace(/^artifacts\/+/, '');
-      const expectedRecords = new Set(records.map(normalizeRecordPath));
+      const expectedRecords = new Set(records_.map(normalizeRecordPath));
       const reviewedRecords = new Set(
         (reviewedRecordsRaw as string[])
           .map((path) => normalizeRecordPath(path.trim()))
@@ -730,7 +786,9 @@ async function evalCheckInner(
         unknownRecords.length > 0
       ) {
         const parts = [
-          `${c.file}: reviewed ${reviewed.size} path(s), but the connector corpus contains ${expected.size}.`,
+          slice
+            ? `${c.file}: reviewed ${reviewed.size} path(s), but this batch covers ${expected.size}.`
+            : `${c.file}: reviewed ${reviewed.size} path(s), but the connector corpus contains ${expected.size}.`,
         ];
         if (missing.length > 0) {
           parts.push(
@@ -739,7 +797,9 @@ async function evalCheckInner(
         }
         if (unknown.length > 0) {
           parts.push(
-            `Not in PR: ${unknown.slice(0, 10).join(', ')}${unknown.length > 10 ? ` (+${unknown.length - 10} more)` : ''}.`,
+            slice
+              ? `Outside this batch: ${unknown.slice(0, 10).join(', ')}${unknown.length > 10 ? ` (+${unknown.length - 10} more)` : ''}.`
+              : `Not in PR: ${unknown.slice(0, 10).join(', ')}${unknown.length > 10 ? ` (+${unknown.length - 10} more)` : ''}.`,
           );
         }
         if (missingRecords.length > 0) {
@@ -763,16 +823,29 @@ async function evalCheckInner(
             missingRecords: capList(missingRecords),
             unknownRecords: capList(unknownRecords),
           },
+          // Bounded-batch craftbooks (Pull Request Review) fail this gate
+          // by design once per batch. Counting what is still outstanding
+          // is what separates "batch 2 of 3 landed" from a real stall —
+          // without it the ladder saw one unmoved failing label, called a
+          // 25→50 file jump a plateau, and told the reviewer to make "the
+          // smallest change" to the coverage JSON: a directive that reads
+          // as "just append the unread paths" and passes the gate with 18
+          // files unreviewed.
+          remaining:
+            missing.length + unknown.length + missingRecords.length + unknownRecords.length,
         };
       }
       return {
         ok: true,
-        detail: `${c.file}: coverage complete for all ${expected.size} changed path(s) and ${expectedRecords.size} per-file record(s) in artifacts/${filePrefix}.`,
+        detail: slice
+          ? `${c.file}: coverage complete for all ${expected.size} changed path(s) in this batch and its ${expectedRecords.size} record(s).`
+          : `${c.file}: coverage complete for all ${expected.size} changed path(s) and ${expectedRecords.size} per-file record(s) in artifacts/${filePrefix}.`,
         evidence: {
           expected: expected.size,
           reviewed: reviewed.size,
           expectedRecords: expectedRecords.size,
           reviewedRecords: reviewedRecords.size,
+          ...(slice ? { scopedToBatch: true } : {}),
         },
       };
     }

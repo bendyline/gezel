@@ -2,6 +2,7 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { ReferencePreviewRequestSchema, ReferencePreviewResponseSchema } from '@bendyline/gezel';
 import { Hono } from 'hono';
+import { normalizeArtifactPath } from '../../fs/project-artifacts-store.js';
 import { realpathContained, safeJoin } from '../../fs/safe-paths.js';
 import {
   adjacentDocFilesPaths,
@@ -75,7 +76,10 @@ export function referencePreviewRoutes(ctx: ServiceContext): Hono {
         : request.kind === 'workspace'
           ? await ctx.store.projectWorkspaceDir(projectId)
           : ctx.store.documentsDir();
-    const joined = safeJoin(base, request.path);
+    // Only the artifacts drawer: a workspace tree may legitimately own an
+    // `artifacts/` folder of its own.
+    const path = request.kind === 'artifact' ? normalizeArtifactPath(request.path) : request.path;
+    const joined = safeJoin(base, path);
     if (!joined || !(await realpathContained(base, joined))) {
       return c.json({ error: 'path traversal' }, 400);
     }
@@ -89,12 +93,12 @@ export function referencePreviewRoutes(ctx: ServiceContext): Hono {
       return c.json({ error: 'not found' }, 404);
     }
 
-    const media = mediaKind(request.path);
+    const media = mediaKind(path);
     if (media) {
       return c.json(ReferencePreviewResponseSchema.parse({ mode: 'media', mediaKind: media }));
     }
 
-    if (isConvertibleDoc(extname(request.path))) {
+    if (isConvertibleDoc(extname(path))) {
       if (request.kind === 'workspace') {
         // Workspace sources share the indexer's shadow cache under
         // artifacts/shadow — one sidecar per doc, wherever it's requested
@@ -102,7 +106,7 @@ export function referencePreviewRoutes(ctx: ServiceContext): Hono {
         const converted = await ensureShadowDocSidecar(
           sourcePath,
           ctx.store.projectArtifactsDir(projectId),
-          request.path,
+          path,
         );
         if (converted?.markdown != null) {
           return c.json(
@@ -115,7 +119,7 @@ export function referencePreviewRoutes(ctx: ServiceContext): Hono {
         }
         return c.json(ReferencePreviewResponseSchema.parse({ mode: 'binary' }));
       }
-      const paths = adjacentDocFilesPaths(base, request.path);
+      const paths = adjacentDocFilesPaths(base, path);
       if (!(await realpathContained(base, paths.mdPath))) {
         return c.json({ error: 'sidecar path traversal' }, 400);
       }

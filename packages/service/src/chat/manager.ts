@@ -212,7 +212,16 @@ import {
   summarizeToolArgs,
   summarizeToolResult,
 } from './args-summary.js';
-import { extractReferencedArtifacts } from './artifact-references.js';
+import { artifactPathsOf, extractReferencedFiles } from './file-references.js';
+
+/**
+ * The slice of `WorkspaceIndexManager` the reference parser needs. Narrowed
+ * to a structural type so the dependency stays one-way — the indexer already
+ * takes this manager, and importing its class here would close the loop.
+ */
+export interface WorkspaceFileSource {
+  readFiles(projectId: string): Promise<Array<{ path: string }>>;
+}
 import { type ResidentModel, selectBackgroundEngine } from './background-routing.js';
 import { evaluateDeliverableContract } from './deliverable-contract.js';
 import { deliverableWrittenThisTurn, evaluateDeliverableGate } from './deliverable-gate.js';
@@ -1442,6 +1451,34 @@ export class ChatManager {
     this.contentIndexRef = index;
   }
   private contentIndexRef?: import('../index-store/content-index.js').ContentIndex;
+
+  /**
+   * Workspace file index, used to recognize workspace paths an assistant
+   * reply named in prose. Injected by `service.ts` after both exist (the
+   * indexer takes this manager as a dependency, so the wiring points both
+   * ways). When unset — unit tests, and any project the indexer has not
+   * reached — the reference parser sees artifacts only, which is exactly
+   * its pre-workspace behavior.
+   */
+  setWorkspaceIndex(index: WorkspaceFileSource): void {
+    this.workspaceIndexRef = index;
+  }
+  private workspaceIndexRef?: WorkspaceFileSource;
+
+  /**
+   * The project's indexed workspace paths. Reads the indexer's persisted
+   * listing rather than walking the tree — a turn must never pay for a
+   * recursive stat of a repo checkout just to linkify a filename.
+   */
+  private async workspaceInventory(projectId: string): Promise<string[] | undefined> {
+    if (!this.workspaceIndexRef) return undefined;
+    try {
+      const files = await this.workspaceIndexRef.readFiles(projectId);
+      return files.length > 0 ? files.map((f) => f.path) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
   /**
    * Wire the Keurmeester supervision engine. Set by `service.ts` after
@@ -6780,20 +6817,25 @@ export class ChatManager {
         if (attemptedToolCalls && attemptedToolCalls.length > 0) {
           assistantMessage.attemptedToolCalls = attemptedToolCalls;
         }
-        // Parse the reply for references to real project artifact files.
-        // Serves as a backstop when tool calls are invisible (Copilot)
-        // and for any AI that writes files outside the MCP tool path.
-        // Failures are non-fatal — we'd rather ship the message than
-        // fail the turn because the parser threw.
+        // Parse the reply for references to real project files — artifacts
+        // drawer and workspace tree alike. Serves as a backstop when tool
+        // calls are invisible (Copilot) and for any AI that writes files
+        // outside the MCP tool path. Failures are non-fatal — we'd rather
+        // ship the message than fail the turn because the parser threw.
         try {
-          const refs = await extractReferencedArtifacts(
+          const refs = await extractReferencedFiles(
             this.store,
             state.record.projectId,
             finalContent,
+            { workspaceFiles: await this.workspaceInventory(state.record.projectId) },
           );
-          if (refs.length > 0) assistantMessage.referencedArtifacts = refs;
+          if (refs.length > 0) {
+            assistantMessage.referencedFiles = refs;
+            const artifacts = artifactPathsOf(refs);
+            if (artifacts.length > 0) assistantMessage.referencedArtifacts = artifacts;
+          }
         } catch (err) {
-          log.warn('artifact-ref extraction failed:', err instanceof Error ? err.message : err);
+          log.warn('file-ref extraction failed:', err instanceof Error ? err.message : err);
         }
         // Same backstop for task refs the model mentioned (created /
         // updated / asked the user about). Validates against the

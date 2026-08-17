@@ -42,6 +42,7 @@ export {
   isLegacyGateSpec,
   gateEdgeTargets,
   GATE_DEFAULT_MAX_ATTEMPTS,
+  GATE_MAX_PROGRESS_ATTEMPTS,
   StepSniffSchema,
   type StepSniff,
 } from './gate.js';

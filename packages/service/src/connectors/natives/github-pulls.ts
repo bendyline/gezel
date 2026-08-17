@@ -230,6 +230,14 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
       const slice = files.slice(start, start + 25);
       return {
         number: index + 1,
+        // Fanout name-collision guard. A declarative fanout lands each
+        // item's fields as `{{key}}` in the child recipe, and launch
+        // params interpolate FIRST — so a craftbook launched with
+        // `number` = the PR number can never address the batch's
+        // `number`, and `{{number}}` silently resolves to the PR
+        // everywhere the child meant its own batch. `number` stays for
+        // existing readers; `batchNumber` is what a fanout addresses.
+        batchNumber: index + 1,
         start: start + 1,
         end: start + slice.length,
         paths: slice.map((file) => file.filename),

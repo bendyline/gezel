@@ -45,6 +45,7 @@ import {
   ArtifactPathNotFoundError,
   ConnectorCorpusWriteDeniedError,
   ShadowPathWriteDeniedError,
+  normalizeArtifactPath,
 } from '../../fs/project-artifacts-store.js';
 import {
   PathSafetyError,
@@ -878,7 +879,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         : request.kind === 'workspace'
           ? await ctx.store.projectWorkspaceDir(id)
           : ctx.store.documentsDir();
-    const joined = safeJoin(base, request.path);
+    const joined = safeJoin(base, referenceRelativePath(request));
     if (!joined || !(await realpathContained(base, joined))) {
       return c.json({ error: 'path traversal' }, 400);
     }
@@ -904,7 +905,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         : request.kind === 'workspace'
           ? await ctx.store.projectWorkspaceDir(id)
           : ctx.store.documentsDir();
-    const joined = safeJoin(base, request.path);
+    const joined = safeJoin(base, referenceRelativePath(request));
     if (!joined || !(await realpathContained(base, joined))) {
       return c.json({ error: 'path traversal' }, 400);
     }
@@ -960,7 +961,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const filePath = c.req.query('path');
     if (!filePath) return c.json({ error: 'missing ?path=' }, 400);
     if (c.req.query('raw') === '1') {
-      return serveRawFile(c, ctx.store.projectArtifactsDir(id), filePath);
+      return serveRawFile(c, ctx.store.projectArtifactsDir(id), normalizeArtifactPath(filePath));
     }
     const content = await ctx.store.readProjectArtifact(id, filePath);
     if (content === null) return c.json({ error: 'not found' }, 404);
@@ -2384,6 +2385,18 @@ function playwrightTestConfigSource(scriptAbs: string): string {
     '};',
     '',
   ].join('\n');
+}
+
+/**
+ * Artifact references routinely arrive with the drawer prefix already on
+ * them (`artifacts/data/…`) — craftbook corpus scopes are authored that way
+ * and the model writes the path straight back. Store reads strip it; these
+ * reference routes join the path themselves, so without this a file plainly
+ * on disk resolves to `artifacts/artifacts/…` and 404s. Workspace and
+ * document paths are left alone: a workspace may own an `artifacts/` folder.
+ */
+function referenceRelativePath(request: { kind: string; path: string }): string {
+  return request.kind === 'artifact' ? normalizeArtifactPath(request.path) : request.path;
 }
 
 async function serveRawFile(c: import('hono').Context, base: string, filePath: string) {

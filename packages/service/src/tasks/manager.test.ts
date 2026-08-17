@@ -265,6 +265,86 @@ describe('TaskManager', () => {
     expect(JSON.stringify(gate)).not.toContain('{{');
   });
 
+  it('interpolates the fanout half of the recipe too, and hands children the host’s needs', async () => {
+    // Same miss as the gate walk above, one level out: `interpolateStepsContext`
+    // walks the HOST's steps, so `spawn.overFile` and every child-template
+    // step kept their raw `{{…}}`. A batch fanout whose corpus lives at
+    // `…/pr-{{number}}/…` reads a path that cannot exist, finds no items,
+    // and logs "skipping fanout" while the host sails on to a collect
+    // barrier with no children to wait for — a silent no-op review.
+    await installProjectToolset('usb-camera');
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            id,
+            name: 'Pull Request Review',
+            toolsets: [{ toolsetId: 'usb-camera', autoAllow: true, reason: 'read the PR' }],
+            steps: [
+              { id: 'scan', name: 'Scan', spawnFanout: true },
+              { id: 'collect', name: 'Collect', terminal: true },
+            ],
+            entryStepId: 'scan',
+            spawn: {
+              overFile:
+                'data/github-pull-requests/pr-{{number}}/attachments/001/pr-{{number}}-files.json',
+              overArtifact: true,
+              itemsPath: 'batches',
+              entryStepId: 'review-batch',
+              steps: [
+                {
+                  id: 'review-batch',
+                  name: 'Review batch {{number}}',
+                  prompt: 'Review PR #{{number}} batch {{batchNumber}}.',
+                  gate: {
+                    at: 'completion',
+                    checks: [
+                      {
+                        kind: 'corpusCoverage',
+                        file: 'pr-review/coverage-{{batchNumber}}.json',
+                        corpusDir: 'artifacts/data/github-pull-requests/pr-{{number}}',
+                        expectPaths: '{{paths}}',
+                        artifact: true,
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+            createdAt: '2026-08-16T00:00:00Z',
+            updatedAt: '2026-08-16T00:00:00Z',
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+    const created = await tasks.create('website', {
+      title: 'Review PR 46',
+      assignee: { kind: 'user' },
+      craftbookId: 'pull-request-review',
+      craftbookParams: { number: '46' },
+    });
+
+    // The file the fanout actually reads.
+    expect(created.craftbook.spawn?.overFile).toBe(
+      'data/github-pull-requests/pr-46/attachments/001/pr-46-files.json',
+    );
+    // Child-template steps carry the launch params as well; the per-item
+    // `{{batchNumber}}`/`{{paths}}` stay for spawnChild to fill in.
+    const child = created.spawnsCraftbook?.steps[0];
+    expect(child?.prompt).toBe('Review PR #46 batch {{batchNumber}}.');
+    const childCheck = (child?.gate as { checks?: Array<Record<string, unknown>> })?.checks?.[0];
+    expect(childCheck?.corpusDir).toBe('artifacts/data/github-pull-requests/pr-46');
+    expect(childCheck?.file).toBe('pr-review/coverage-{{batchNumber}}.json');
+
+    // Children do the host's work on a slice of it, so they inherit its
+    // toolset needs — the chat session's auto-allow reads them off the task.
+    expect(created.spawnsCraftbook?.toolsets).toEqual([
+      { toolsetId: 'usb-camera', autoAllow: true, reason: 'read the PR' },
+    ]);
+  });
+
   it('emits task.created history', async () => {
     await tasks.create('website', {
       title: 'Ship',

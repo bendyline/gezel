@@ -521,6 +521,23 @@ use toasts for errors. If the operation is dismissable, show the error
 until the next user action; if it blocks something, show it until the user
 fixes it.
 
+**A failed tool says why, in the thread.** A red ✗ on a tool row is a
+status, not an explanation, and burying the reason in a tooltip or behind
+the collapsed step expando makes a gezel look stuck for no stated cause —
+a completion gate would reject the same step six times while the user
+watched a counter climb. Every failed row carries a bounded reason under
+it, and any failure the turn never recovered from (no later success of the
+same tool) is repeated above the expando where a closed disclosure can't
+hide it. Bound the text — 250 characters, cut on a word boundary — and
+strip what was written for the model, not the reader: the `[code]` prefix
+and the `Retryable:` flag. Line breaks survive, because a gate lists its
+unmet criteria. The exact untruncated text stays one click away in the
+details drawer. Failures the model corrected itself stay quiet; a
+self-healed turn must not read as a broken one.
+[toolErrorSummary](../packages/ui/src/components/tool-display.ts) and
+[unresolvedToolFailures](../packages/ui/src/components/chat-bubbles.tsx)
+own the two rules.
+
 **Reporting an error.** A clear *system* error may carry a "Report error on
 GitHub…" link beside it ([ReportErrorLink](../packages/ui/src/components/ReportErrorLink.tsx)),
 and Settings → About carries a permanent one. It opens a dialog holding the

@@ -91,8 +91,16 @@ function referencesFromMessage(message: ChatMessage, projectId: string): CliOpen
   }
   // Tool rows precede the assistant body in the transcript. Body references
   // are therefore observed last and belong at the front of the MRU.
-  for (const path of message.referencedArtifacts ?? []) {
-    references.push(reference('artifact', path, projectId));
+  // `referencedArtifacts` is the legacy artifact-only projection — read it
+  // only when the daemon that wrote this message predates `referencedFiles`.
+  if (message.referencedFiles?.length) {
+    for (const file of message.referencedFiles) {
+      references.push(reference(file.kind, file.path, projectId));
+    }
+  } else {
+    for (const path of message.referencedArtifacts ?? []) {
+      references.push(reference('artifact', path, projectId));
+    }
   }
   return references;
 }

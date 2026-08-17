@@ -7176,6 +7176,22 @@ export class GezelClient {
     });
   }
 
+  /**
+   * Run a discovered workspace skill: creates the triage → run → verify
+   * task and hands the entry step to the project's voorman. `started`
+   * is false when the kickoff was withheld (an inactive project, no
+   * voorman to resolve) — the task exists either way, and `reason` says
+   * which guard tripped.
+   */
+  invokeProjectSkill(
+    projectId: string,
+    skillSource: string,
+  ): Promise<{ task: Task; started: boolean; assigneeName?: string; reason?: string }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/skills/invoke`, {
+      skillSource,
+    });
+  }
+
   createCraftbook(body: CreateCraftbookRequest): Promise<CraftbookResponse> {
     return this.request('POST', '/api/craftbooks', body);
   }

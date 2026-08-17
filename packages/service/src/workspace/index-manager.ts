@@ -1,4 +1,4 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type CommandShape,
@@ -119,6 +119,17 @@ export class WorkspaceIndexManager {
   /** Per-project promise chain so two concurrent scans on the same
    *  project serialize rather than racing on the disk. */
   private readonly locks = new Map<string, Promise<unknown>>();
+  /**
+   * Parsed `files.json` per project, revalidated against the file's own
+   * mtime + size so it can never go stale. `files.json` runs to megabytes
+   * on a real checkout and its readers are all hot — terminal path
+   * autocomplete on every keystroke, the chat reference parser on every
+   * turn, the timeline backfill on every page.
+   */
+  private readonly filesCache = new Map<
+    string,
+    { mtimeMs: number; size: number; files: WorkspaceFile[] }
+  >();
 
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -253,12 +264,17 @@ export class WorkspaceIndexManager {
    */
   async readFiles(projectId: string): Promise<WorkspaceFile[]> {
     if (!(await this.isIndexingEnabled(projectId))) return [];
-    const dir = projectIndexDir(this.home, projectId);
+    const file = join(projectIndexDir(this.home, projectId), FILES_FILE);
     try {
-      const raw = await readFile(join(dir, FILES_FILE), 'utf8');
-      const parsed = JSON.parse(raw) as WorkspaceFile[];
-      return Array.isArray(parsed) ? parsed : [];
+      const { mtimeMs, size } = await stat(file);
+      const cached = this.filesCache.get(projectId);
+      if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return cached.files;
+      const parsed = JSON.parse(await readFile(file, 'utf8')) as WorkspaceFile[];
+      const files = Array.isArray(parsed) ? parsed : [];
+      this.filesCache.set(projectId, { mtimeMs, size, files });
+      return files;
     } catch {
+      this.filesCache.delete(projectId);
       return [];
     }
   }

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import * as tar from 'tar';
@@ -307,7 +307,7 @@ describe('extractBundleIfNeeded', () => {
     expect(sentinel.trim()).toBe(sha);
   });
 
-  it('force-extracts regardless of version or sha', async () => {
+  it('force-extracts over a newer install (the installer is authoritative)', async () => {
     const sha = await seedTarballBundle(root, tarballPath, metaPath, { version: '0.1.0' });
     await seedInstalledTree(
       installDir,
@@ -324,6 +324,90 @@ describe('extractBundleIfNeeded', () => {
     // Sentinel updated.
     const sentinel = await readFile(join(installDir, '.gezel-bundle.sha256'), 'utf8');
     expect(sentinel.trim()).toBe(sha);
+  });
+
+  it('force skips the re-extract when the tree already carries the shipped sha', async () => {
+    // Re-running the same installer — the common case for a repair, a
+    // reinstall, or an upgrade whose service bundle did not change. A tree
+    // cannot hold a matching sentinel unless a complete extraction committed
+    // it, so there is nothing for force to repair and ~33k files not to
+    // rewrite. This is one half of a 15-minute deb postinstall on arm64.
+    const sha = await seedTarballBundle(root, tarballPath, metaPath, { version: '0.1.0' });
+    await seedInstalledTree(installDir, '0.1.0', { path: 'keep.txt', content: 'untouched' }, sha);
+
+    const res = await extractBundleIfNeeded({ tarballPath, metaPath, installDir, force: true });
+
+    expect(res.action).toBe('up-to-date');
+    expect(res.filesExtracted).toBeNull();
+    // Not a fresh unpack: a file the tarball does not contain is still there.
+    expect(await readFile(join(installDir, 'keep.txt'), 'utf8')).toBe('untouched');
+  });
+
+  it('reports elapsed time and file count for an extraction', async () => {
+    // Without these there is one log line at the start of an extraction and
+    // silence until the daemon answers, which is how a slow unpack reads as a
+    // hang and cannot be attributed afterwards.
+    await seedTarballBundle(root, tarballPath, metaPath, { version: '0.1.0' });
+    const res = await extractBundleIfNeeded({ tarballPath, metaPath, installDir });
+
+    expect(res.filesExtracted).toBe(2);
+    expect(res.elapsedMs).toBeGreaterThanOrEqual(0);
+    expect(Number.isFinite(res.elapsedMs)).toBe(true);
+  });
+
+  it('counts hardlinked entries the way the release build counts them', async () => {
+    // pnpm deploy trees contain hardlinks, so `meta.fileCount` (computed from
+    // a readdir walk of the source tree) counts them as files. The extractor
+    // now counts entries as they stream past instead of re-walking the result,
+    // and a `Link` entry that did not count would fail every real install.
+    const staging = join(root, 'hardlink-src');
+    await mkdir(join(staging, 'dist', 'bin'), { recursive: true });
+    await writeFile(
+      join(staging, 'package.json'),
+      JSON.stringify({ name: '@bendyline/gezel-service', version: '0.1.0' }),
+    );
+    await writeFile(join(staging, 'dist', 'bin', 'gezeld.js'), '#!/usr/bin/env node\n');
+    const { link } = await import('node:fs/promises');
+    await link(join(staging, 'package.json'), join(staging, 'package.copy.json'));
+    tar.create({ gzip: true, file: tarballPath, cwd: staging, sync: true, strict: true }, ['.']);
+    await writeFile(
+      metaPath,
+      JSON.stringify({
+        version: '0.1.0',
+        sha256: createHash('sha256')
+          .update(await readFile(tarballPath))
+          .digest('hex'),
+        sizeBytes: (await stat(tarballPath)).size,
+        fileCount: 3,
+      }),
+    );
+
+    const res = await extractBundleIfNeeded({ tarballPath, metaPath, installDir });
+
+    expect(res.action).toBe('fresh-install');
+    expect(res.filesExtracted).toBe(3);
+  });
+
+  it('never commits a staging tree whose bytes do not hash to the sidecar sha', async () => {
+    // The hash now runs as the archive streams into the untar rather than in a
+    // separate pass before it, so this is the check that keeps the ordering
+    // honest: unverified bytes may reach a private staging dir, but they must
+    // never reach the install dir.
+    await seedTarballBundle(root, tarballPath, metaPath, { version: '0.2.0' });
+    const meta = JSON.parse(await readFile(metaPath, 'utf8')) as { sha256: string };
+    meta.sha256 = 'cc'.repeat(32);
+    await writeFile(metaPath, JSON.stringify(meta));
+    await seedInstalledTree(installDir, '0.1.0', { path: 'still-live.txt', content: 'good' });
+
+    await expect(extractBundleIfNeeded({ tarballPath, metaPath, installDir })).rejects.toThrow(
+      /sha mismatch/,
+    );
+    expect(await readFile(join(installDir, 'still-live.txt'), 'utf8')).toBe('good');
+    const installedPkg = JSON.parse(await readFile(join(installDir, 'package.json'), 'utf8'));
+    expect(installedPkg.version).toBe('0.1.0');
+    // And no staging tree is left behind holding those bytes.
+    const siblings = await readdir(root);
+    expect(siblings.filter((name) => name.includes('.staging-'))).toEqual([]);
   });
 
   it('keeps the live install untouched when staged validation fails', async () => {

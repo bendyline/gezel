@@ -27,6 +27,7 @@ export * from './model-attribution.js';
 export * from './fitness-badge.js';
 export * from './recommendation.js';
 export * from './tool-names.js';
+export * from './file-refs.js';
 export * from './names.js';
 export * from './voices.js';
 export * from './poppetje/index.js';

@@ -304,10 +304,18 @@ assert_not_symlink "$SHARED_DIR" "Gezel machine-shared data directory"
 # symlinks into user-controlled targets, and make the daemon the trusted owner.
 # Physical, same-filesystem walks avoid following planted descendant symlinks
 # or crossing a mounted tree while privileged ownership/mode changes run.
-find -x "$DATA_DIR" -exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} +
+#
+# $SERVICE_TREE is pruned from all three sweeps: step 2b replaces that ~33k-file
+# tree wholesale and then sets its ownership and modes directly, so walking it
+# here is three extra traversals of the largest directory under $DATA_DIR to fix
+# up files that are about to be deleted. It is also the one subtree that ends up
+# readable rather than private, so the `go-rwx` sweep would fight step 2b on
+# every upgrade.
+find -x "$DATA_DIR" -path "$SERVICE_TREE" -prune -o \
+  -exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} +
 # `chmod go-rwx` alone does not reliably remove named macOS ACL entries.
-find -x "$DATA_DIR" ! -type l -exec chmod -N {} +
-find -x "$DATA_DIR" ! -type l -exec chmod go-rwx {} +
+find -x "$DATA_DIR" -path "$SERVICE_TREE" -prune -o ! -type l -exec chmod -N {} +
+find -x "$DATA_DIR" -path "$SERVICE_TREE" -prune -o ! -type l -exec chmod go-rwx {} +
 chmod 711 "$DATA_DIR"
 chmod 755 "$DATA_DIR/runtime"
 chmod 700 "$DATA_DIR/logs"
@@ -349,10 +357,11 @@ rm -f \
 # 2b. Extract the shipped service bundle (gezeld + node_modules) into
 # ${SERVICE_TREE}. We use the bundled Electron exe in Node mode
 # (ELECTRON_RUN_AS_NODE=1) to run our bundled CLI; same approach as the
-# Windows installer. `--force` skips the version compare since a fresh
-# install should always populate the tree, even if a partial previous
-# install left something behind. Stderr is left untouched so any failure
-# surfaces in /var/log/install.log.
+# Windows installer. `--force` keeps this hook authoritative over the tree's
+# contents — a partial previous install, content drift, or a deliberate
+# downgrade all get replaced — while an exact sha match short-circuits, so
+# re-running the same installer no longer re-unpacks ~33k files for nothing.
+# Stderr is left untouched so any failure surfaces in /var/log/install.log.
 echo "[gezel postinstall] extracting service bundle"
 if [ ! -f "$BUNDLE_TARBALL" ] || [ ! -f "$EXTRACT_CLI" ]; then
   echo "[gezel postinstall] ERROR: shipped bundle missing (tarball=$BUNDLE_TARBALL cli=$EXTRACT_CLI)" >&2
@@ -363,8 +372,22 @@ ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$EXTRACT_CLI" \
   --meta="$BUNDLE_META" \
   --dest="$SERVICE_TREE" \
   --force
+# Readable, not private. This tree is the only thing under $DATA_DIR that is not
+# the daemon's private state: it is product code, the exact bytes of the
+# world-readable tarball inside /Applications/Gezel.app that produced it.
+# Publishing it lets each account's user daemon execute this copy instead of
+# unpacking a byte-identical second one into its own home — one ~33k-file
+# extraction per machine rather than one per account (see
+# supervisor/shared-service-tree.ts). $DATA_DIR stays 0711, so the directory is
+# reachable by path but not listable.
+#
+# `go=u-w` grants group/other exactly what the owner has, minus write, so
+# executables keep their exec bits and write access stays the daemon account's
+# alone. That last part is the property that matters: the supervisor refuses to
+# adopt a tree the calling account could rewrite.
 find -x "$SERVICE_TREE" -exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} +
-find -x "$SERVICE_TREE" ! -type l -exec chmod go-rwx {} +
+find -x "$SERVICE_TREE" ! -type l -exec chmod -N {} +
+find -x "$SERVICE_TREE" ! -type l -exec chmod go=u-w {} +
 
 # 3. Install the LaunchDaemon plist (root:wheel 644 — Apple convention).
 if [ ! -f "$PLIST_SRC" ]; then
