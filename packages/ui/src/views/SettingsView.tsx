@@ -3368,7 +3368,7 @@ export function SettingsView() {
 
         {section === 'ds4' && (
           <section className="provider-card">
-            <Ds4Settings config={config} onConfigChanged={setConfig} />
+            <Ds4Settings config={config} onConfigChanged={setConfig} health={health} />
           </section>
         )}
 

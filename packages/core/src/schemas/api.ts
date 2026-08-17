@@ -206,6 +206,28 @@ export const HealthResponseSchema = z.object({
    */
   llamaCppQuarantinedBackends: z.array(z.enum(['cuda', 'vulkan', 'metal', 'cpu'])).optional(),
   /**
+   * Whether a `ds4-server` binary resolved for this host — the honest answer
+   * to "can DwarfStar run here", since it ships exactly one build per
+   * supported platform (Metal on darwin-arm64, CUDA on linux-x64/arm64,
+   * nothing on darwin-x64 or win32) and `discoverNativeBinaries` only stamps
+   * `GEZEL_DS4_SERVER_BIN` when that build is actually on disk. An operator
+   * pointing the env var at their own build counts too, which is correct: it
+   * still means a ds4 engine exists on this machine.
+   *
+   * Reported because the client had no way to ask. The ds4 Settings panel
+   * classified the device from `navigator.platform` alone, so **every** Linux
+   * machine — DGX Spark included — read "requires NVIDIA / CUDA" while the
+   * llama.cpp tab beside it correctly reported `cuda` from a real probe.
+   *
+   * Deliberately sent as an explicit `false` rather than omitted when absent:
+   * the client must tell "no ds4 build for this host" (a verdict) apart from
+   * "this daemon predates the field" (unknown), and those collapse into one
+   * if falsy values are dropped. Pair it with `llamaCppDetectedBackend` /
+   * `llamaCppDetectedVendor` on Linux — the binary proves the build exists,
+   * the probe proves the NVIDIA driver does.
+   */
+  ds4ServerBundled: z.boolean().optional(),
+  /**
    * Whether the daemon may create child processes, probed once at boot.
    *
    * `denied` is a whole-daemon condition rather than one feature's problem:

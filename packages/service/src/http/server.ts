@@ -470,6 +470,12 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
       ...(llamaCppDetectedBackend ? { llamaCppDetectedBackend } : {}),
       ...(llamaCppDetectedVendor ? { llamaCppDetectedVendor } : {}),
       ...(llamaCppQuarantinedBackends.length > 0 ? { llamaCppQuarantinedBackends } : {}),
+      // Sent unconditionally, unlike the fields above: `false` is a verdict
+      // ("no ds4 build for this platform") the ds4 panel needs to tell apart
+      // from a daemon too old to report it. `discoverNativeBinaries` stamps
+      // this env var only when the binary is on disk, so its presence is the
+      // same fact the provider itself launches from.
+      ds4ServerBundled: Boolean(process.env.GEZEL_DS4_SERVER_BIN),
       // Boot probe rather than an env var: this one is a property of the
       // running process's own token, not something a supervisor could have
       // told us. `null` (non-Windows) is omitted, not sent as a value —

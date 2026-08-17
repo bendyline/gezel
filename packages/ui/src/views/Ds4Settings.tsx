@@ -1,3 +1,4 @@
+import type { HealthResponse } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { useCallback, useState } from 'react';
 import { api } from '../api.js';
@@ -8,6 +9,12 @@ import { detectDs4Availability } from './ds4-availability.js';
 interface Props {
   config: ConfigResponse | null;
   onConfigChanged: (cfg: ConfigResponse) => void;
+  /**
+   * From `/api/health` — carries whether a ds4-server binary resolved for this
+   * host plus the GPU probe. Without it the availability gate falls back to
+   * guessing the device from `navigator`, which cannot see a GPU at all.
+   */
+  health?: HealthResponse | null;
 }
 
 /**
@@ -19,11 +26,15 @@ interface Props {
  * service keeps SSD streaming on by default and rejects overrides that cannot
  * safely fit.
  */
-export function Ds4Settings({ config }: Props) {
+export function Ds4Settings({ config, health }: Props) {
   const totalRamBytes = useTotalRamBytes();
   const availability = detectDs4Availability({
     externalBaseUrl: config?.ds4BaseUrl,
     totalRamBytes: totalRamBytes ?? undefined,
+    ds4ServerBundled: health?.ds4ServerBundled,
+    serverPlatform: health?.platform,
+    detectedBackend: health?.llamaCppDetectedBackend,
+    gpuVendor: health?.llamaCppDetectedVendor,
   });
 
   return (
@@ -62,8 +73,9 @@ export function Ds4Settings({ config }: Props) {
         </div>
         {availability.status === 'available' && (
           <p className="muted small" style={{ marginTop: '0.4rem' }}>
-            This means the engine can launch on this Mac. Each model below still has its own disk
-            and memory requirements.
+            This means the engine can launch on this{' '}
+            {availability.backend === 'metal' ? 'Mac' : 'machine'}. Each model below still has its
+            own disk and memory requirements.
           </p>
         )}
         {(availability.status === 'unavailable' || availability.status === 'requires-cuda') && (
