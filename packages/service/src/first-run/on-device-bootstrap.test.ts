@@ -189,6 +189,36 @@ describe('bootstrapOnDeviceFirstRun', () => {
     expect(llamaCalls).toEqual([]);
   });
 
+  it("adopts the machine's only installed model when the pin never finished downloading", async () => {
+    // Wild-caught: a 122 GB host pinned qwen3.6-27b-q8, the download died at
+    // 257 MB, gemma4-e4b-q4 was installed instead, and every boot re-resolved
+    // the SAME unavailable tier — so the pin stayed phantom, chat failed on
+    // `model_not_loaded`, and the Settings default-model picker that would fix
+    // it stays hidden below two installed models. With exactly one model on
+    // disk there is nothing to guess about, so it takes the pin.
+    await store.writeConfig({
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'qwen3.6-27b-q8' },
+      firstRunCompleted: true,
+      firstRunInstallError: 'stale error from the abandoned install',
+    });
+    const { manager: llama, calls: llamaCalls } = fakeModelManager([], [{ id: 'gemma4-e4b-q4' }]);
+    const { manager: mlx } = fakeMlxManager();
+    await bootstrapOnDeviceFirstRun({
+      store,
+      llamaCppModels: llama,
+      mlxModels: mlx,
+      catalog: new CatalogService(),
+      platformOverride: 'win32',
+      archOverride: 'x64',
+    });
+    const config = await store.readConfig();
+    expect(config.defaultModel?.['llama-cpp']).toBe('gemma4-e4b-q4');
+    expect(config.firstRunInstallError).toBeUndefined();
+    // Still no install fired — adopting what's on disk is the whole point.
+    expect(llamaCalls).toEqual([]);
+  });
+
   it('leaves the pin alone when the same model is already installed on disk', async () => {
     // User finished an E2B install successfully — even if a new tier
     // is now available, we don't tear down their working setup. The

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CapacityDeniedError } from '../native/capacity-broker.js';
 import {
   DEFAULT_REMOTE_CONCURRENCY,
+  ModelNotLoadedRemotelyError,
   REMOTE_ADMISSION_CACHE_TTL_MS,
   RemoteGezelProvider,
 } from './provider.js';
@@ -269,7 +270,46 @@ describe('RemoteGezelProvider', () => {
       defaultModel: 'llama-cpp:missing.gguf',
     });
 
-    await expect(provider.prepareContextWindow()).rejects.toThrow(/model_not_loaded/);
+    const rejection = provider.prepareContextWindow();
+    await expect(rejection).rejects.toBeInstanceOf(ModelNotLoadedRemotelyError);
+    await expect(rejection).rejects.not.toBeInstanceOf(CapacityDeniedError);
+  });
+
+  it('reports a missing model in words the user can act on, not an HTTP status', async () => {
+    // A raw `[remote] /v1/remote/admit returned HTTP 404
+    // {"error":"model_not_loaded",...}` landed in the composer for a user whose
+    // install default named a download that never finished. It is the one
+    // broker rejection an ordinary person can actually fix.
+    const fetchImpl = (async () =>
+      Response.json(
+        { error: 'model_not_loaded', model: 'llama-cpp:qwen3.6-27b-q8' },
+        { status: 404 },
+      )) as typeof fetch;
+    const provider = new RemoteGezelProvider({
+      remoteId: 'this-machine',
+      label: 'This Linux device',
+      baseUrl: 'https://127.0.0.1:6228',
+      token: 'token',
+      fetch: fetchImpl,
+      modelPrefix: 'llama-cpp',
+      defaultModel: 'qwen3.6-27b-q8',
+    });
+
+    let caught: unknown;
+    try {
+      await provider.prepareContextWindow();
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(ModelNotLoadedRemotelyError);
+    const error = caught as ModelNotLoadedRemotelyError;
+    expect(error.brokerModelId).toBe('llama-cpp:qwen3.6-27b-q8');
+    expect(error.message).toContain('This Linux device');
+    // The model half only — engine namespaces are our plumbing, not theirs.
+    expect(error.message).toContain('"qwen3.6-27b-q8"');
+    expect(error.message).toMatch(/Settings → Artificial Intelligence/);
+    expect(error.message).not.toMatch(/404|model_not_loaded|admit/);
   });
 
   it('waits through tenant saturation during context admission', async () => {

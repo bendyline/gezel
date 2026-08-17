@@ -88,6 +88,7 @@ import type {
   ResolvedModelProfile,
   TurnCtx,
 } from '../model-profile/types.js';
+import { reconcileDefaultModel } from '../models/default-model-fallback.js';
 import { type PreviewLogBuffer, formatPreviewLogPrelude } from '../preview-log/buffer.js';
 import {
   reconcileScriptTools,
@@ -161,6 +162,7 @@ import {
 } from '../providers/native/capacity-broker.js';
 import {
   type LocalProviderName,
+  isLocalProvider as isNativeLocalProvider,
   makeEngineKey,
   parseEngineKey,
 } from '../providers/native/engine-key.js';
@@ -1697,11 +1699,125 @@ export class ChatManager {
     record: ChatSession,
     gezel?: { parsed: { frontmatter: { model?: string } } } | null,
   ): Promise<string | undefined> {
-    return effectiveSessionModel({
+    const config = await this.store.readConfig();
+    const resolved = effectiveSessionModel({
       record,
       frontmatterModel: gezel?.parsed.frontmatter.model,
-      config: await this.store.readConfig(),
+      config,
     });
+    // The native guard, not core's — core counts Ollama as local, and Ollama
+    // manages its own inventory rather than one of our model stores.
+    if (!resolved || !isNativeLocalProvider(record.providerName)) return resolved;
+    // Every consumer of the effective model — provider binding, broker
+    // admission, tier/tuning resolution, the runtime snapshot the UI reads —
+    // funnels through here, so this is the one place a dead id can be
+    // corrected without the layers drifting apart from each other.
+    return this.ensureServableLocalModel(record.providerName, resolved, config);
+  }
+
+  /** The on-device model store backing a local provider, when one is wired. */
+  private localModelStore(
+    name: LocalProviderName,
+  ):
+    | import('../providers/llama-cpp/index.js').LlamaCppModelManager
+    | import('../providers/mlx/index.js').MlxModelManager
+    | undefined {
+    return name === 'llama-cpp'
+      ? this.llamaCppModels
+      : name === 'mlx'
+        ? this.mlxModels
+        : this.ds4Models;
+  }
+
+  /** Dead pins already repinned this process, keyed `provider\0deadModelId`. */
+  private readonly repinnedDeadDefaults = new Set<string>();
+
+  /**
+   * Substitute an installed model for a local model id the engine cannot
+   * serve.
+   *
+   * A `config.defaultModel` pin can name weights that never landed — first-run
+   * pins the hardware recommendation *before* the download, so an abandoned
+   * multi-gigabyte fetch leaves the install pointing at a phantom model. The
+   * pooled-router path catches that with `ModelNotInstalledError`, but the
+   * machine-engine path forwards whatever string it is handed straight to the
+   * broker, which answers `model_not_loaded` on every turn including the
+   * background one-shots. Chat is then dead until someone edits config.json by
+   * hand, because the Settings picker that would fix it stays hidden while
+   * fewer than two models are installed.
+   *
+   * Deliberately additive: with nothing installed to fall back to, the id
+   * passes through unchanged so the existing downstream errors (and the
+   * first-run download banner) behave exactly as before. We only intervene
+   * when we have something strictly better to offer.
+   */
+  private async ensureServableLocalModel(
+    name: LocalProviderName,
+    modelId: string,
+    config: GezelConfig,
+  ): Promise<string> {
+    const store = this.localModelStore(name);
+    if (!store) return modelId;
+    try {
+      if (await store.resolveModel(modelId)) return modelId;
+      // ds4 resolves weights outside the model store too — an explicit gguf
+      // path or an external server. Those installs are legitimately absent
+      // from the inventory, so a listing must never overrule them.
+      if (
+        name === 'ds4' &&
+        (process.env.GEZEL_DS4_MODEL ||
+          process.env.GEZEL_DS4_SERVER_URL ||
+          config.ds4ModelPath ||
+          config.ds4BaseUrl)
+      ) {
+        return modelId;
+      }
+      const installed = await store.listInstalled();
+      const reconciled = reconcileDefaultModel({ pinned: modelId, installed });
+      if (reconciled.kind !== 'substitute') return modelId;
+      log.warn(
+        `[chat] ${name} model "${modelId}" is not installed; using "${reconciled.modelId}" instead ` +
+          `(${installed.length} installed model(s) available)`,
+      );
+      await this.repinDeadDefaultModel(name, modelId, reconciled.modelId, config);
+      return reconciled.modelId;
+    } catch (err) {
+      // Inventory trouble must not take chat down — leave the id alone and let
+      // the provider report whatever it reports today.
+      log.warn(`[chat] could not verify ${name} model "${modelId}": ${(err as Error).message}`);
+      return modelId;
+    }
+  }
+
+  /**
+   * Persist a substitution when the dead id was the install default, so the
+   * repair outlives the turn and Settings, the engine pill, and the session
+   * switcher stop disagreeing about which model is in play. A dead value that
+   * came from gezel frontmatter or a capability route is substituted for this
+   * turn but left in place — rewriting someone's explicit pin is a bigger
+   * decision than keeping chat alive.
+   */
+  private async repinDeadDefaultModel(
+    name: LocalProviderName,
+    deadModelId: string,
+    replacement: string,
+    config: GezelConfig,
+  ): Promise<void> {
+    if (config.defaultModel?.[name] !== deadModelId) return;
+    const key = `${name}\0${deadModelId}`;
+    if (this.repinnedDeadDefaults.has(key)) return;
+    this.repinnedDeadDefaults.add(key);
+    try {
+      await this.store.writeConfig({
+        defaultModel: { ...config.defaultModel, [name]: replacement },
+      });
+      log.warn(
+        `[chat] repinned config.defaultModel.${name} from "${deadModelId}" to "${replacement}" — the pinned model is not installed on this machine`,
+      );
+    } catch (err) {
+      this.repinnedDeadDefaults.delete(key);
+      log.warn(`[chat] could not repin config.defaultModel.${name}: ${(err as Error).message}`);
+    }
   }
 
   /**
@@ -9353,14 +9469,7 @@ export class ChatManager {
     // Settings block for minutes (and previously triggered macOS's python3
     // developer-tools dialog). The engine still initializes lazily on the
     // first real inference request, where a provisioning/load error belongs.
-    const localManager =
-      name === 'llama-cpp'
-        ? this.llamaCppModels
-        : name === 'mlx'
-          ? this.mlxModels
-          : name === 'ds4'
-            ? this.ds4Models
-            : undefined;
+    const localManager = isNativeLocalProvider(name) ? this.localModelStore(name) : undefined;
     if (localManager) {
       try {
         const installed = await localManager.listInstalled();
@@ -9576,6 +9685,17 @@ export class ChatManager {
       if (gezel?.parsed.frontmatter.reasoningEffort) {
         reasoningEffort = gezel.parsed.frontmatter.reasoningEffort;
       }
+    }
+
+    // An inherited model — the install default or a persona pin — can name
+    // weights that never landed, and one-shots are the loudest victims: index
+    // enrichment fires them every couple of minutes, so a dead default fills
+    // the log with broker rejections and silently drops every ambient chore.
+    // Reconcile it exactly as a session would. A model the CALLER named is
+    // left to fail, because a chore that asked for one specific model must not
+    // quietly answer from another.
+    if (model && !opts.model && isNativeLocalProvider(providerName)) {
+      model = await wait(this.ensureServableLocalModel(providerName, model, config));
     }
 
     // Cross-engine background routing: when this chore would run on the
@@ -10671,8 +10791,15 @@ export class ChatManager {
       if (!resolved) {
         throw new Error(`No ${name} model is selected for the machine engine service`);
       }
+      // Match the pooled path below: a caller who names a model must get
+      // `404 model_not_found`, not a silent swap to something else. Only the
+      // config-default fallback is allowed to reconcile itself — otherwise a
+      // dead install default takes every `/v1` request down with a raw broker
+      // `model_not_loaded`, exactly as it does for UI sessions.
+      const servable = await this.ensureServableLocalModel(name, resolved, config);
+      if (modelId && servable !== modelId) throw new ModelNotInstalledError(name, modelId);
       return this.getRemoteProvider(
-        makeRemoteModelId(machineRemoteId, `${name}:${resolved}`),
+        makeRemoteModelId(machineRemoteId, `${name}:${servable}`),
         name,
       );
     }

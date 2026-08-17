@@ -46,6 +46,32 @@ export const DEFAULT_REMOTE_CONCURRENCY = DEFAULT_TENANT_MAX_CONCURRENT;
  */
 export const REMOTE_ADMISSION_CACHE_TTL_MS = 1_000;
 
+/**
+ * The broker has no weights for the requested model. Distinct from a capacity
+ * denial (that model could run once memory frees; this one cannot run at all
+ * until it is installed) and carried as a class so callers can branch on it
+ * instead of pattern-matching a message.
+ */
+export class ModelNotLoadedRemotelyError extends Error {
+  readonly code = 'model-not-loaded-remotely';
+  readonly remoteId: string;
+  /** The `<provider>:<model>` id as the broker was asked for it. */
+  readonly brokerModelId: string;
+
+  constructor(message: string, remoteId: string, brokerModelId: string) {
+    super(message);
+    this.name = 'ModelNotLoadedRemotelyError';
+    this.remoteId = remoteId;
+    this.brokerModelId = brokerModelId;
+  }
+}
+
+/** Strip the engine namespace so user-facing copy reads `qwen3.6-27b-q8`. */
+function modelNameFromBrokerId(brokerModelId: string): string {
+  const separator = brokerModelId.indexOf(':');
+  return separator === -1 ? brokerModelId : brokerModelId.slice(separator + 1);
+}
+
 export interface RemoteGezelProviderOpts {
   /** Stable id of the paired server this provider talks to. */
   remoteId: string;
@@ -198,6 +224,17 @@ export class RemoteGezelProvider implements LLMProvider {
       if (res.status === 404 && code !== 'model_not_loaded') {
         throw new CapacityDeniedError(
           `[remote] ${this.opts.label} predates context admission and cannot prove that ${bLocal} meets Gezel's ${MIN_VIABLE_LOCAL_CONTEXT_TOKENS.toLocaleString('en-US')}-token minimum. Upgrade or restart the machine engine before using this model.`,
+        );
+      }
+      // The one broker rejection an ordinary user can act on, so it must not
+      // reach them as an HTTP status and a JSON body. It fires when a model id
+      // outlives its weights — an abandoned download, a model deleted on the
+      // host, or a pin that never matched this machine.
+      if (code === 'model_not_loaded') {
+        throw new ModelNotLoadedRemotelyError(
+          `${this.opts.label} doesn't have the model "${modelNameFromBrokerId(bLocal)}" ready to run. Choose a model that is installed on it in Settings → Artificial Intelligence, or download this one there.`,
+          this.opts.remoteId,
+          bLocal,
         );
       }
       throw new Error(

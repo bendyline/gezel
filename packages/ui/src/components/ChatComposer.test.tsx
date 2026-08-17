@@ -923,6 +923,40 @@ describe('ChatComposer transport resilience', () => {
     expect(screen.queryByText(/network error/i)).toBeNull();
   });
 
+  it('names an unavailable model plainly instead of showing the broker JSON', async () => {
+    // Wild-caught: an install default pinned a download that never finished, so
+    // every send painted `[remote] /v1/remote/admit returned HTTP 404
+    // {"error":"model_not_loaded","model":"llama-cpp:qwen3.6-27b-q8"}` in red
+    // under the composer. The service humanizes this at its source now; the
+    // composer is the backstop for older daemons and other paths that
+    // stringify the rejection.
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+    vi.mocked(streamChatEvents).mockImplementation(() =>
+      (async function* rejectedTurn() {
+        yield {
+          type: 'error' as const,
+          error:
+            '[remote] /v1/remote/admit returned HTTP 404 {"error":"model_not_loaded","model":"llama-cpp:qwen3.6-27b-q8"}',
+        };
+      })(),
+    );
+
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+
+    const message = await screen.findByText(/isn't available on this device/i, undefined, {
+      timeout: 3_000,
+    });
+    expect(message.textContent).toContain('qwen3.6-27b-q8');
+    expect(message.textContent).toMatch(/Settings → Artificial Intelligence/);
+    expect(screen.queryByText(/model_not_loaded/)).toBeNull();
+    expect(screen.queryByText(/HTTP 404/)).toBeNull();
+  });
+
   it('gives up after repeated transport failures with a readable message, not the raw error', async () => {
     vi.useFakeTimers();
     try {
