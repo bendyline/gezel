@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveSharedServiceTree } from './shared-service-tree.js';
 
 const SHIPPED_SHA = createHash('sha256').update('shipped bundle').digest('hex');
@@ -50,9 +50,21 @@ describe('resolveSharedServiceTree', () => {
     await seedMeta();
     await seedTree(SHIPPED_SHA);
 
-    expect(await resolveSharedServiceTree({ metaPath, serviceHome, platform: 'linux' })).toBe(
-      treeDir,
-    );
+    // The fixture is necessarily owned by the account running Vitest. Model
+    // the production relationship instead: the desktop user is distinct from
+    // the installer/service account that owns the shared tree.
+    const fixtureOwnerUid = process.getuid?.();
+    if (fixtureOwnerUid === undefined) throw new Error('POSIX test requires process.getuid');
+    const desktopUid = fixtureOwnerUid === 1 ? 2 : 1;
+    const getuid = vi.spyOn(process, 'getuid').mockReturnValue(desktopUid);
+
+    try {
+      expect(await resolveSharedServiceTree({ metaPath, serviceHome, platform: 'linux' })).toBe(
+        treeDir,
+      );
+    } finally {
+      getuid.mockRestore();
+    }
   });
 
   posixOnly('declines a tree built from a different bundle', async () => {
