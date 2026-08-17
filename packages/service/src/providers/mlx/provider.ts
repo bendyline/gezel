@@ -40,6 +40,11 @@ import { familyToToolGrammarHint } from '../../model-profile/tool-grammar.js';
 import { MLX_TUNING_MAP, applyTuning } from '../../model-profile/tuning.js';
 import type { ResolvedModelProfile } from '../../model-profile/types.js';
 import { prepareSalvagedCodeBlocks } from '../code-block-salvage.js';
+import {
+  applyConstrainedTurnShape,
+  isImmediateFileWriteTurn,
+  writeFileOnlyTools,
+} from '../constrained-turn.js';
 import { DeliverableReadPaceTracker } from '../deliverable-read-pacing.js';
 import {
   appendTruncationHintToToolResult,
@@ -237,19 +242,6 @@ interface ChatCompletionChunk {
 
 function chatCompletionToolName(tool: ChatCompletionTool): string | undefined {
   return tool.function.name;
-}
-
-function isImmediateFileWriteTurn(
-  prompt: string,
-  tools: ChatCompletionTool[] | undefined,
-): boolean {
-  if (!tools || tools.length !== 1) return false;
-  if (chatCompletionToolName(tools[0]!) !== 'write_file') return false;
-  return (
-    prompt.includes('There is still **no `index.html`** in the workspace') ||
-    prompt.includes('Do not end your turn until `write_file`') ||
-    prompt.includes('write_file({ path:')
-  );
 }
 
 function setChatTemplateKwarg(body: Record<string, unknown>, key: string, value: unknown): void {
@@ -1422,6 +1414,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           'tools.mlx-template-fix',
         );
         if (templateFix?.template) body.chat_template_override = templateFix.template;
+        // Tool surface actually sent this turn. Defaults to the full roster;
+        // constrained turns narrow it below.
+        let requestTools = tools;
         const immediateFileWriteTurn = isImmediateFileWriteTurn(prompt, tools);
         if (immediateFileWriteTurn) {
           if (
@@ -1430,21 +1425,23 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           ) {
             userMsg.content += IMMEDIATE_FILE_WRITE_PROMPT_SUFFIX;
           }
-          const currentMax = typeof body.max_tokens === 'number' ? body.max_tokens : 0;
-          body.max_tokens = Math.max(currentMax, FILE_WRITE_MIN_TOKENS);
-          body.temperature = 0.2;
-          body.top_p = 0.8;
-          setChatTemplateKwarg(body, 'enable_thinking', false);
+          const shaped = applyConstrainedTurnShape(body);
+          // Narrow to write_file alone, matching llama-cpp. Without this the
+          // model keeps the full roster on a turn whose only acceptable move
+          // is the write, and wanders back into reads and delegation.
+          const narrowed = writeFileOnlyTools(tools);
+          if (narrowed.length > 0) requestTools = narrowed;
           // The switch alone is not enough. Qwen 3.8's HF template resolves
           // `reasoning_effort|default('xhigh')` inside its thinking branch, so
           // a turn that isn't fully suppressed reasons at the model's most
           // expensive setting and truncates the write_file body it was asked
           // for. llama-cpp has downgraded depth here for a while; MLX did not,
           // which is the whole of the measured engine divergence.
-          const downgraded = downgradeReasoningDepthKwargs(body);
           log.debug(
-            `turn#${seq}.${turn} immediate-write mode: write_file-only surface, thinking disabled${
-              downgraded.length > 0 ? `, reasoning depth -> low (${downgraded.join(', ')})` : ''
+            `turn#${seq}.${turn} immediate-write mode: write_file-only surface (${narrowed.length} tool), thinking disabled${
+              shaped.reasoningDepthDowngraded.length > 0
+                ? `, reasoning depth -> low (${shaped.reasoningDepthDowngraded.join(', ')})`
+                : ''
             }, max_tokens=${body.max_tokens}`,
           );
         }
@@ -1454,7 +1451,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         ) {
           body.max_tokens = FILE_WRITE_MIN_TOKENS;
         }
-        if (tools && tools.length > 0) body.tools = tools;
+        if (requestTools && requestTools.length > 0) body.tools = requestTools;
         // Tool-schema size breakdown (opt-in: GEZEL_PROMPT_BREAKDOWN=1). The
         // companion to buildInstructions' system-text breakdown — the tool JSON
         // schemas are prefilled alongside the system prompt, so this shows the
