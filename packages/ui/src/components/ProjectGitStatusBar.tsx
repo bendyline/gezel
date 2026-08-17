@@ -30,7 +30,7 @@ interface Props {
   managedWorkspaceWritable?: boolean;
   /**
    * Flip the per-project write switch. When provided, the bar renders an
-   * explicitly scoped "Tools: Can edit/Read-only" dropdown next to the
+   * explicitly labelled "Can edit/Read-only" dropdown next to the
    * status select.
    * The caller owns the external-dir confirmation flow (enabling writes
    * on a user-supplied folder must confirm first).
@@ -980,7 +980,6 @@ export function ProjectGitStatusBar({
                 <span className="project-writes-select-icon" aria-hidden>
                   <EditsLockIcon unlocked={managedWritesOn} />
                 </span>
-                <span className="project-permission-scope">Tools:</span>
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>

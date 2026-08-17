@@ -218,6 +218,20 @@ describe('Sidebar', () => {
     expect(screen.queryByText('Buried')).not.toBeInTheDocument();
   });
 
+  it('hides the current project from primary navigation once it is archived', async () => {
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [
+        { id: 'p1', name: 'Alpha' } as Project,
+        { id: 'p2', name: 'Buried', archived: true, status: 'inactive' } as Project,
+      ],
+    } as never);
+    const selection: RecentTab = { kind: 'project', id: 'p2', at: 0, order: 0 };
+    render(<Sidebar selection={selection} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    expect(await screen.findByText('Alpha')).toBeInTheDocument();
+    expect(screen.queryByText('Buried')).not.toBeInTheDocument();
+  });
+
   it('lists projects (group expanded by default) and selects one on click', async () => {
     const onSelect = vi.fn();
     render(<Sidebar selection={null} onSelect={onSelect} onOpenArea={vi.fn()} />);

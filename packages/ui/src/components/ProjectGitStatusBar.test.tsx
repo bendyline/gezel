@@ -304,7 +304,7 @@ describe('ProjectGitStatusBar', () => {
       screen.getByRole('combobox', {
         name: 'Built-in tool workspace access for this project',
       }),
-    ).toHaveTextContent('Tools:Read-only');
+    ).toHaveTextContent(/^Read-only$/);
   });
 
   it('keeps managed tools independently configurable alongside Codex access', async () => {
@@ -324,7 +324,7 @@ describe('ProjectGitStatusBar', () => {
       name: 'Built-in tool workspace access for this project',
     });
     expect(managedControl).toBeEnabled();
-    expect(managedControl).toHaveTextContent('Tools:Read-only');
+    expect(managedControl).toHaveTextContent(/^Read-only$/);
 
     const codexControl = screen.getByRole('combobox', {
       name: 'Codex execution mode for this project',
@@ -356,7 +356,7 @@ describe('ProjectGitStatusBar', () => {
       screen.getByRole('combobox', {
         name: 'Built-in tool workspace access for this project',
       }),
-    ).toHaveTextContent('Tools:Read-only');
+    ).toHaveTextContent(/^Read-only$/);
     const claudeControl = screen.getByRole('combobox', {
       name: 'Claude execution mode for this project',
     });

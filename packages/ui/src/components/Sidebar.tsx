@@ -217,7 +217,7 @@ export function Sidebar({
   const visibleProjects = useMemo(
     () =>
       projects.filter(
-        (p) => p.id === selectedProjectId || (!HIDDEN_PROJECT_IDS.has(p.id) && !p.archived),
+        (p) => !p.archived && (p.id === selectedProjectId || !HIDDEN_PROJECT_IDS.has(p.id)),
       ),
     [projects, selectedProjectId],
   );
