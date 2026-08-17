@@ -1,5 +1,5 @@
 import type { Task } from '@bendyline/gezel';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ServiceContext } from '../context.js';
 import { nightShiftRoutes } from './night-shift.js';
 
@@ -229,11 +229,15 @@ describe('night-shift status', () => {
 describe('night-shift tally', () => {
   function tallyCtx(events: Array<{ kind: string; at: string; details?: unknown }>) {
     let historyCalls = 0;
+    // A real running shift keeps one persisted start time. Capture it once so
+    // consecutive requests describe the same tally period even when the test
+    // crosses a millisecond boundary.
+    const startedAt = new Date(Date.now() - 60 * 60_000).toISOString();
     const ctx = {
       nightShift: {
         isActive: () => true,
         currentWindow: () => ({ startHour: 22, endHour: 6 }),
-        startedAtIso: () => new Date(Date.now() - 60 * 60_000).toISOString(),
+        startedAtIso: () => startedAt,
       },
       history: {
         listEvents: async () => {
@@ -278,10 +282,17 @@ describe('night-shift tally', () => {
   // The menu polls every 5s; the build behind it sweeps the audit log and
   // opens every project's index.
   it('memoizes the build across a poll cadence', async () => {
-    const { ctx, calls } = tallyCtx([]);
-    const routes = nightShiftRoutes(ctx);
-    await routes.request('/tally');
-    await routes.request('/tally');
-    expect(calls()).toBe(1);
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-08-17T23:00:00.000Z'));
+      const { ctx, calls } = tallyCtx([]);
+      const routes = nightShiftRoutes(ctx);
+      await routes.request('/tally');
+      vi.advanceTimersByTime(5_000);
+      await routes.request('/tally');
+      expect(calls()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
