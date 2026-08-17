@@ -34,7 +34,10 @@ async function fixture(
     models?: ModelInfo[];
   } = {},
 ) {
-  const root = await mkdtemp(join(tmpdir(), 'gezel-pi-setup-'));
+  // The space is deliberate. A Windows home is routinely `C:\Users\Mike Smith`,
+  // and it is the only reason the launch command quotes at all — a fixture
+  // rooted at a bare path exercises the shell-quoting branch on no platform.
+  const root = await mkdtemp(join(tmpdir(), 'gezel pi setup '));
   roots.push(root);
   const home = join(root, 'gezel');
   const integrationDir = join(home, 'integrations', 'pi');
@@ -131,7 +134,9 @@ describe('PiSetupManager', () => {
   });
 
   it('publishes a roster and an extension the launch command points at', async () => {
-    const f = await fixture({ gezels: [maya] });
+    // Pin the platform: the launch command's quoting is platform-conditional,
+    // and an unpinned fixture asserts whatever the developer happens to run on.
+    const f = await fixture({ gezels: [maya], platform: 'darwin' });
 
     const status = await f.manager.configure({ model: `gezel:${maya.id}` });
 
@@ -153,7 +158,7 @@ describe('PiSetupManager', () => {
     expect(token).not.toMatch(/\s$/);
     expect(await readFile(f.rosterPath, 'utf8')).not.toContain(token);
 
-    expect(status.launchCommand).toBe(`/usr/local/bin/pi -e ${f.extensionPath}`);
+    expect(status.launchCommand).toBe(`/usr/local/bin/pi -e '${f.extensionPath}'`);
     expect(existsSync(f.extensionPath)).toBe(true);
     // Command mode must leave pi's own directory completely alone.
     expect(existsSync(f.piAgentDir)).toBe(false);
@@ -161,13 +166,19 @@ describe('PiSetupManager', () => {
     expect(status.state).toBe('configured');
   });
 
-  it('builds a PowerShell launch command on Windows', async () => {
-    const f = await fixture({ gezels: [maya], platform: 'win32' });
+  it('builds the launch command for each platform', async () => {
+    // Each branch is reached on exactly one platform in production, so whichever
+    // one the developer runs is the only one an unpinned fixture would cover.
+    const posix = await fixture({ gezels: [maya], platform: 'darwin' });
+    const windows = await fixture({ gezels: [maya], platform: 'win32' });
 
-    const status = await f.manager.status();
+    const posixStatus = await posix.manager.status();
+    const windowsStatus = await windows.manager.status();
 
-    expect(status.launchCommand).toContain('& ');
-    expect(status.launchCommand).toContain('-e ');
+    expect(posixStatus.launchCommand).toBe(`/usr/local/bin/pi -e '${posix.extensionPath}'`);
+    // PowerShell needs the call operator before a quoted executable path, and
+    // the whole thing is one line the user pastes — so assert it whole.
+    expect(windowsStatus.launchCommand).toBe(`& '/usr/local/bin/pi' -e '${windows.extensionPath}'`);
   });
 
   it('adds the extension to pi only when asked', async () => {
