@@ -25,6 +25,7 @@ import type {
   VideoModelPullEvent,
 } from '@bendyline/gezel';
 import type {
+  AmbientDashboardStatusResponse,
   AnswerQuestionRequest,
   AppendTaskNoteRequest,
   AppendTaskNoteResponse,
@@ -1422,6 +1423,22 @@ export interface ConfigResponse {
   gildeUpdates?: {
     enabled?: boolean;
   };
+  /**
+   * Opt-in ambient dashboard (Settings → Ambient display). Default off.
+   * See `GezelConfig.ambientDashboard` in core schemas.
+   */
+  ambientDashboard?: {
+    enabled?: boolean;
+    intervalMinutes?: number;
+    resolution?: string;
+    style?: string;
+    keep?: number;
+  };
+  /** Whether the Electron shell keeps the wallpaper set to the latest
+   *  dashboard. See `GezelConfig.ambientDisplay` in core schemas. */
+  ambientDisplay?: {
+    applyWallpaper?: boolean;
+  };
   /** Remote model execution: serving this device's models to paired clients. */
   remoteServing?: {
     enabled?: boolean;
@@ -2444,6 +2461,23 @@ export class GezelClient {
    *  arrives on the global SSE stream as a `meester_status` event. */
   runMeesterStatus(): Promise<{ started: boolean }> {
     return this.request('POST', '/api/meester-status/run');
+  }
+
+  // ---------- ambient dashboard ----------
+
+  getAmbientDashboard(): Promise<AmbientDashboardStatusResponse> {
+    return this.request('GET', '/api/ambient-dashboard');
+  }
+
+  /** Authed URL of the newest dashboard PNG (404s before the first run). */
+  ambientDashboardLatestUrl(): string {
+    return `${this.baseUrl}/api/ambient-dashboard/latest.png`;
+  }
+
+  /** Kick a user-requested dashboard run. Returns immediately; completion
+   *  arrives on the global SSE stream as an `ambient_dashboard` event. */
+  runAmbientDashboard(): Promise<{ started: boolean }> {
+    return this.request('POST', '/api/ambient-dashboard/run');
   }
 
   // ── storage accounting, cleanup & backup ──

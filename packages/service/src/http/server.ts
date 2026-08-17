@@ -19,6 +19,7 @@ import { openAiErrorEnvelope } from './openai-compat/error-envelope.js';
 import { requireOpenAiEndpointsEnabled } from './openai-endpoints-gate.js';
 import { PreviewCapabilityStore } from './preview-capability.js';
 import { aiRoutes } from './routes/ai.js';
+import { ambientDashboardRoutes } from './routes/ambient-dashboard.js';
 import { askRoutes } from './routes/asks.js';
 import { audioRoutes } from './routes/audio.js';
 import { cacheRoutes } from './routes/cache.js';
@@ -629,6 +630,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/system', systemRoutes(ctx));
   app.route('/api/night-shift', nightShiftRoutes(ctx));
   app.route('/api/meester-status', meesterStatusRoutes(ctx));
+  app.route('/api/ambient-dashboard', ambientDashboardRoutes(ctx));
   app.route('/api/system-toolsets', systemToolsetRoutes(ctx));
   app.route('/api/gilde-updates', gildeUpdateRoutes(ctx));
   app.route('/api/codex-setup', codexSetupRoutes(ctx));

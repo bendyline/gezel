@@ -12,6 +12,8 @@ Gezel uses two local service roles in packaged installs:
 | Native engine processes and residency | Proxies | Owns |
 | GPU/RAM admission and native queues | Merges broker telemetry into its local product snapshot | Owns |
 | Electron UI/API | Serves | Not mounted |
+| Ambient dashboard PNGs (`~/.gezel/ambient/`) | Owns (generator; never starts in machine-engine role) | None |
+| Wallpaper / lock-screen apply | Never — user-session APIs only; the Electron main process applies (see ADR 0007) | Never |
 
 The roles use the same service package so engine/provider implementations stay shared, but
 `serviceRole` changes the startup work, credential scopes, and—most importantly—the HTTP route

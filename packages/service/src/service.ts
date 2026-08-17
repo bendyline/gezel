@@ -25,6 +25,7 @@ import {
 } from '@bendyline/gezel/native';
 import { gezelHome, gezelPaths, readConfigRaw } from '@bendyline/gezel/paths';
 import { type ServerType, serve } from '@hono/node-server';
+import { AmbientDashboardGenerator } from './ambient/dashboard-generator.js';
 import { defaultCacheBudgetMb } from './cache/budget.js';
 import { SessionCacheController } from './cache/controller.js';
 import { ChannelManager } from './channels/manager.js';
@@ -2280,6 +2281,21 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     events: chatEvents,
   });
 
+  // The ambient dashboard — PNG workshop snapshots for the OS
+  // wallpaper integration. The one-shot is enqueued `ambient: true`
+  // so local engines hold it behind interactive work.
+  const ambientDashboard = new AmbientDashboardGenerator({
+    home,
+    store,
+    history,
+    activity: activityTracker,
+    oneShot: (prompt, timeoutMs, opts) =>
+      chat.oneShotCompletion(prompt, timeoutMs, { ...opts, ambient: true }),
+    isNightShiftActive: () => nightShift.isActive(),
+    isChatActive: () => chat.isAnyActive(),
+    events: chatEvents,
+  });
+
   const handboek = createHandboekEngine({
     catalog,
     device: createDaemonDeviceInfo({ store, chat }),
@@ -2309,6 +2325,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     nightShift,
     indexEnrichment,
     meesterStatus,
+    ambientDashboard,
     scriptRunner,
     catalog,
     gildeUpdates,
@@ -2808,6 +2825,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   if (serviceRole !== 'machine-engine') {
     activityTracker.start();
     meesterStatus.start();
+    ambientDashboard.start();
   }
 
   // Keurmeester harvest digest: aggregates supervision case records into
@@ -2886,6 +2904,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       gildeUpdates.stop();
       keurmeesterDigest.stop();
       meesterStatus.stop();
+      ambientDashboard.stop();
       await activityTracker.stop();
       workspaceIndex.stop();
       workspaceWatch.stop();

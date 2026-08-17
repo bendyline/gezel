@@ -1310,6 +1310,19 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     generatedAt: z.string().optional(),
   }),
   /**
+   * Global signal from the ambient dashboard generator. `ended` means a
+   * fresh PNG landed on disk (filename is the dated file under
+   * `~/.gezel/ambient/`); the Electron shell reacts to it by re-applying
+   * the wallpaper when the user opted in, and the Settings card
+   * refreshes its preview.
+   */
+  z.object({
+    type: z.literal('ambient_dashboard'),
+    state: z.enum(['started', 'ended', 'failed']),
+    generatedAt: z.string().optional(),
+    filename: z.string().optional(),
+  }),
+  /**
    * Global (history-free) heartbeat from the boekwachter indexing loops —
    * workspace scans, AI enrichment batches, weekly digests. Drives the live
    * indicator pill; complements (doesn't replace) the polled per-project

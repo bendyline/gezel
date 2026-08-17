@@ -16,6 +16,7 @@ import type {
 } from '@bendyline/gezel-client';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { AmbientDashboardCard } from '../components/AmbientDashboardCard.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ConnectedAppsPanel } from '../components/ConnectedAppsPanel.js';
 import { CopilotInstallCard } from '../components/CopilotInstallCard.js';
@@ -1680,6 +1681,9 @@ export function SettingsView() {
                 </label>
               </section>
             )}
+            <div style={{ marginTop: '2rem' }}>
+              <AmbientDashboardCard />
+            </div>
           </>
         )}
 

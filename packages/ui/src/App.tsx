@@ -259,6 +259,7 @@ function FullApp() {
             showSystemTray?: boolean;
             quitOnClose?: boolean;
             securityPolicy?: SecurityPolicy;
+            ambientDisplay?: { applyWallpaper?: boolean };
           }
         | undefined;
       if (detail?.aiEngagementMode) {
@@ -277,6 +278,7 @@ function FullApp() {
           showSystemTray: detail.showSystemTray,
           quitOnClose: detail.quitOnClose,
           securityPolicy: detail.securityPolicy,
+          ambientDisplay: detail.ambientDisplay,
         });
       }
     };

@@ -1,5 +1,6 @@
 import type { ProviderName, ServiceRole } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import type { AmbientDashboardGenerator } from '../ambient/dashboard-generator.js';
 import type { ChannelManager } from '../channels/manager.js';
 import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
@@ -90,6 +91,12 @@ export interface ServiceContext {
    * manual run.
    */
   meesterStatus: MeesterStatusGenerator;
+  /**
+   * The meester's ambient dashboard (PNG workshop snapshots under
+   * `~/.gezel/ambient/`). In context so `/api/ambient-dashboard` can
+   * report status and kick manual runs.
+   */
+  ambientDashboard: AmbientDashboardGenerator;
   scriptRunner: ScriptRunner;
   catalog: CatalogService;
   /**

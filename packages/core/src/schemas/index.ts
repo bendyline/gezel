@@ -23,6 +23,7 @@ export * from './history.js';
 export * from './gilde-updates.js';
 export * from './keurmeester.js';
 export * from './meester-status.js';
+export * from './ambient-dashboard.js';
 export * from './file-review.js';
 export * from './api.js';
 export * from './village-file.js';

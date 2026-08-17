@@ -203,6 +203,7 @@ export const HistoryEventKindSchema = z.enum([
    */
   'project.index.reviewed',
   'meester.status.generated',
+  'meester.dashboard.generated',
   'gezel.level.up',
   'gezel.trait.adopted',
   'gezel.trait.removed',

@@ -2,6 +2,10 @@ import { z } from 'zod';
 import { PoppetjeSchema } from '../poppetje/schema.js';
 import { ProjectIconIdSchema } from '../project-icons.js';
 import {
+  AmbientDashboardResolutionSchema,
+  AmbientDashboardStyleSchema,
+} from './ambient-dashboard.js';
+import {
   type GitAbandonMergeResponse,
   GitAbandonMergeResponseSchema,
   type GitAiMergeRequest,
@@ -2000,6 +2004,38 @@ export const GezelConfigSchema = z.object({
       maxRunsPerDay: z.number().int().min(1).max(24).optional(),
       /** How recent project activity must be to count as "changed". Default 24. */
       changeWindowHours: z.number().positive().optional(),
+    })
+    .optional(),
+  /**
+   * The ambient dashboard — the meester periodically composes a squisq
+   * dashboard (6-9 markdown blocks) summarizing the whole workshop and
+   * renders it to a PNG under `~/.gezel/ambient/` for the OS
+   * ambient-display integration (wallpaper / lock-screen rotation).
+   * Default OFF: it burns an LLM call plus a Chromium render every
+   * interval, so showing it is an explicit choice.
+   */
+  ambientDashboard: z
+    .object({
+      enabled: z.boolean().optional(),
+      /** Minimum minutes between automatic runs. Default 60. */
+      intervalMinutes: z.number().int().min(15).optional(),
+      /** Squisq dashboard resolution preset id. Default 'fhd' (1920x1080). */
+      resolution: AmbientDashboardResolutionSchema.optional(),
+      /** Squisq dashboard cell style. Default 'panel'. */
+      style: AmbientDashboardStyleSchema.optional(),
+      /** Dated PNGs retained before pruning. Default 48 (~2 days hourly). */
+      keep: z.number().int().min(1).max(200).optional(),
+    })
+    .optional(),
+  /**
+   * OS ambient display — whether the Electron shell keeps the desktop
+   * wallpaper set to the latest ambient dashboard PNG. Applied from the
+   * app's user session (never the machine service). Default OFF; the
+   * enable flow captures the previous wallpaper for restore-on-disable.
+   */
+  ambientDisplay: z
+    .object({
+      applyWallpaper: z.boolean().optional(),
     })
     .optional(),
   /**

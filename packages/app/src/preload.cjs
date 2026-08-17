@@ -67,6 +67,15 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
     install: () => ipcRenderer.invoke('gezel:autostart:install'),
     uninstall: () => ipcRenderer.invoke('gezel:autostart:uninstall'),
   },
+  // Ambient display (wallpaper). The renderer never supplies paths — the
+  // main process resolves everything from GEZEL_HOME.
+  ambient: {
+    status: () => ipcRenderer.invoke('gezel:ambient:status'),
+    enable: () => ipcRenderer.invoke('gezel:ambient:enable'),
+    disable: () => ipcRenderer.invoke('gezel:ambient:disable'),
+    applyNow: () => ipcRenderer.invoke('gezel:ambient:apply-now'),
+    openFolder: () => ipcRenderer.invoke('gezel:ambient:open-folder'),
+  },
   // macOS PKG uninstall. The renderer sends only boolean data-retention
   // choices; the main process resolves the signed bundled script and owns the
   // administrator prompt. The menu uses the push callback to open the same

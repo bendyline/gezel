@@ -634,6 +634,30 @@ export function meesterStatusStateFile(root: string): string {
   return join(meesterStatusDir(root), 'state.json');
 }
 
+/**
+ * Home for the ambient dashboard — meester-generated PNG snapshots of the
+ * whole workshop, written for the OS ambient-display integration (wallpaper
+ * rotation points here). Holds dated `dashboard-*.png` files, a stable
+ * `latest.png` copy, the generator's `state.json`, and the Electron
+ * applier's `display-state.json` + `applied-a/b.png` slots. Per-user only —
+ * never under machineSharedHome: wallpaper is user-session state.
+ */
+export function ambientDir(root: string): string {
+  return join(root, 'ambient');
+}
+
+export function ambientDashboardStateFile(root: string): string {
+  return join(ambientDir(root), 'state.json');
+}
+
+export function ambientDashboardLatestFile(root: string): string {
+  return join(ambientDir(root), 'latest.png');
+}
+
+export function ambientDisplayStateFile(root: string): string {
+  return join(ambientDir(root), 'display-state.json');
+}
+
 export function projectTasksDir(
   root: string,
   projectId: string,

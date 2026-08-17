@@ -99,6 +99,37 @@ declare global {
         uninstall(): Promise<{ ok: true } | { ok: false; error: string }>;
       };
       /**
+       * Ambient display (wallpaper) surface. Absent outside Electron —
+       * the web UI shows the folder path and manual instructions only.
+       * The renderer never supplies paths; the main process resolves
+       * everything from GEZEL_HOME.
+       */
+      ambient?: {
+        status(): Promise<
+          | {
+              ok: true;
+              capability: {
+                supported: boolean;
+                reason?: 'unsupported-platform' | 'unknown-desktop' | 'command-missing';
+                desktop?: string;
+                canRestore: boolean;
+              };
+              enabled: boolean;
+              folder: string;
+              lastApplied: { source: string; slot: string; mtimeMs: number } | null;
+              latestImageAt: string | null;
+            }
+          | { ok: false; error: string }
+        >;
+        enable(): Promise<{ ok: true; applied: boolean } | { ok: false; error: string }>;
+        disable(): Promise<
+          | { ok: true; restored: boolean; reason?: 'nothing-captured' | 'restore-failed' }
+          | { ok: false; error: string }
+        >;
+        applyNow(): Promise<{ ok: true; applied: boolean } | { ok: false; error: string }>;
+        openFolder(): Promise<string>;
+      };
+      /**
        * macOS PKG uninstall surface. Boolean choices are intentionally the
        * entire renderer contract; paths and privileged arguments are resolved
        * by the Electron main process from the signed app bundle.
@@ -190,6 +221,7 @@ declare global {
         showSystemTray?: boolean;
         quitOnClose?: boolean;
         securityPolicy?: SecurityPolicy;
+        ambientDisplay?: { applyWallpaper?: boolean };
       }) => void;
       /**
        * Register a callback fired when the engagement mode is changed from
