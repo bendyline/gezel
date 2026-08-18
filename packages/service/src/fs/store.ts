@@ -1155,9 +1155,18 @@ export class Store {
   /**
    * Ensure `config.meesterGezelId` points at a valid gezel. Order of preference:
    *   1. Existing pointer → a live gezel: no-op.
-   *   2. Any other gezels exist: auto-pick the first alphabetically.
-   *   3. No gezels at all: create a fresh Meester with a random name and the
+   *   2. A gezel whose role is already Meester: designate it.
+   *   3. Any other gezels exist: auto-pick the first alphabetically.
+   *   4. No gezels at all: create a fresh Meester with a random name and the
    *      curated about.md from packages/service/src/meester/prompt.ts.
+   *
+   * Step 2 exists because the roster is sorted by name, so taking the first
+   * entry crowned whoever sorted earliest — a Klerk named Ilse ahead of a real
+   * Meester named Ulrike. The badge is only half the job: a Meester's power is
+   * its curated about.md teaching the team-management tools, which a Klerk
+   * does not have, so the front door silently lost its abilities. Reachable
+   * whenever the pointer goes stale (a deleted gezel, a restored backup) and
+   * on any install that mounts a machine-shared roster.
    */
   async ensureDefaultMeester(): Promise<void> {
     const config = await this.readConfig();
@@ -1171,10 +1180,11 @@ export class Store {
 
     const existing = await this.listGezels();
     if (existing.length > 0) {
-      const first = existing[0]!;
-      await this.writeConfig({ meesterGezelId: first.id });
-      log.info(`[meester] auto-designated ${first.id} as meester`);
-      await this.refreshStaleMeesterAbout(first.id);
+      const chosen =
+        existing.find((g) => g.role?.trim().toLowerCase() === 'meester') ?? existing[0]!;
+      await this.writeConfig({ meesterGezelId: chosen.id });
+      log.info(`[meester] auto-designated ${chosen.id} as meester`);
+      await this.refreshStaleMeesterAbout(chosen.id);
       return;
     }
 

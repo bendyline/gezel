@@ -15,6 +15,7 @@ import { ScriptsView } from '../views/ScriptsView.js';
 import { SettingsView } from '../views/SettingsView.js';
 import { TaskTabContent } from '../views/TaskTabContent.js';
 import { TasksView } from '../views/TasksView.js';
+import { useDebugMode } from './useDebugMode.js';
 
 interface TabContentProps {
   tab: RecentTab;
@@ -23,6 +24,7 @@ interface TabContentProps {
 }
 
 export function TabContent({ tab, activeProjectsByGezel, activeTurnsReady }: TabContentProps) {
+  const debugMode = useDebugMode();
   switch (tab.kind) {
     case 'project':
       return <ProjectDetailView projectId={tab.id} />;
@@ -68,7 +70,12 @@ export function TabContent({ tab, activeProjectsByGezel, activeTurnsReady }: Tab
         case 'handboek':
           return <HandboekView />;
         case 'benchmarks':
-          return <BenchmarksView />;
+          // Developer surface, not a shipped one: unstyled selects, inline
+          // hex colours, and a runner that cannot execute in a packaged
+          // install. Settings hides its tab behind debugMode, but this route
+          // had no gate, so a restored selection from before it moved could
+          // drop an ordinary user straight onto the raw panel.
+          return debugMode ? <BenchmarksView /> : <SettingsView />;
         case 'settings':
           return <SettingsView />;
       }

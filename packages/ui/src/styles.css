@@ -23688,9 +23688,14 @@ button.gz-npd-repo-cancel {
   align-items: stretch;
   gap: 0;
   /* Follow the roster + timeline content gutter instead of letting the
-   * composer frame sit flush against the project pane's left edge. Keep the
-   * right edge untouched so the attached @/> tabs retain their alignment. */
+   * composer frame sit flush against the project pane's left edge. */
   margin-left: 0.75rem;
+  /* The @/> mode tabs hang off the right edge with 2px of clearance, and the
+   * scroll container they sit in has no padding and ends at the window frame.
+   * Anything painted outside their border box was therefore clipped — most
+   * visibly the 4px :focus-visible ring, so keyboard focus drew a half ring.
+   * A small gutter gives the tabs and their ring somewhere to land. */
+  margin-right: 0.5rem;
   /* Keep the framed control from sitting directly on the project pane's
    * bottom edge. This belongs to the shell so it clears both the composer
    * and its attached chat/terminal tabs without adding space inside them. */
@@ -23865,7 +23870,11 @@ button.gz-npd-repo-cancel {
 }
 
 .project-chat-compose-toggle button {
-  background: var(--surface);
+  /* `--surface` sits 3/255 from `--panel` in dark, so an inactive tab was
+   * drawn only by its 1px border and read as a clipped fragment rather than a
+   * key. `--key-bg` is the token the rest of the app's keys already use and
+   * separates from the pane in both themes. */
+  background: var(--key-bg, var(--surface));
   color: var(--text-muted);
   border: 1px solid var(--compose-frame-border);
   border-radius: 0 var(--radius-md) var(--radius-md) 0;

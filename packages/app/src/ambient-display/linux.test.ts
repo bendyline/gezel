@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { capability, detectDesktop, getCurrentWallpaper, setWallpaper } from './linux.js';
 
@@ -37,12 +38,21 @@ describe('detectDesktop', () => {
 describe('linux setWallpaper', () => {
   it('sets light + dark + options via gsettings with a file URI on GNOME', async () => {
     const { exec, calls } = recordingExec();
-    await setWallpaper('/home/test user/.gezel/ambient/applied-a.png', {
+    const imagePath = '/home/test user/.gezel/ambient/applied-a.png';
+    await setWallpaper(imagePath, {
       exec,
       env: { XDG_CURRENT_DESKTOP: 'ubuntu:GNOME' },
     });
     const gsettings = calls.filter((c) => c.command === 'gsettings');
-    const uri = 'file:///home/test%20user/.gezel/ambient/applied-a.png';
+    // `pathToFileURL` is platform-relative: on win32 it resolves the rooted
+    // POSIX literal against the current drive, yielding `file:///D:/home/...`.
+    // setWallpaper only ever runs on Linux (index.ts dispatches by platform),
+    // so derive the expectation the same way the source does and assert the
+    // contract that actually matters — a file:// URI with the space escaped —
+    // rather than pinning a POSIX-only string that fails on a Windows checkout.
+    const uri = pathToFileURL(imagePath).href;
+    expect(uri.startsWith('file:///')).toBe(true);
+    expect(uri.endsWith('/test%20user/.gezel/ambient/applied-a.png')).toBe(true);
     expect(gsettings.map((c) => c.args)).toEqual([
       ['set', 'org.gnome.desktop.background', 'picture-uri', uri],
       ['set', 'org.gnome.desktop.background', 'picture-uri-dark', uri],

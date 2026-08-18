@@ -254,22 +254,19 @@ describe('TaskDetail', () => {
     });
   });
 
-  it('saving the description bubbles dirty → saving → updateTask', async () => {
+  it('autosaves the description with no Save button to press', async () => {
+    // The Description editor used to require an explicit Save, and the panel
+    // unmounts on a tab switch or step selection — so an edit that was never
+    // committed was discarded with no warning. It now autosaves like every
+    // other long-form editor in the app.
     const onChanged = vi.fn();
     render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={onChanged} />);
 
-    // Description Save button starts disabled.
-    const saveBtn = screen.getByRole('button', { name: /^Save$/ }) as HTMLButtonElement;
-    expect(saveBtn).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /^Save$/ })).not.toBeInTheDocument();
 
     // Emit a change in the description editor (first editor).
     const editors = screen.getAllByTestId('editor-emit');
     fireEvent.click(editors[0]!);
-
-    await waitFor(() => {
-      expect(saveBtn).toBeEnabled();
-    });
-    fireEvent.click(saveBtn);
 
     await waitFor(() => {
       expect(api.updateTask).toHaveBeenCalledWith(

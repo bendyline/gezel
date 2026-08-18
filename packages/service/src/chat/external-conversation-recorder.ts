@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { isAbsolute, normalize, resolve } from 'node:path';
+import { isAbsolute, normalize } from 'node:path';
 import type {
   ChatMessage,
   ChatMessageToolCall,
@@ -469,7 +469,7 @@ function externalSessionId(sourceId: string, externalId: string, gezelId: string
 function normalizeWorkingDirectory(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   if (!trimmed || !isAbsolute(trimmed)) return undefined;
-  const normalized = normalize(resolve(trimmed));
+  const normalized = normalize(trimmed);
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 

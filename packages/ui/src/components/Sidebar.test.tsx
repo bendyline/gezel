@@ -232,6 +232,32 @@ describe('Sidebar', () => {
     expect(screen.queryByText('No projects yet.')).not.toBeInTheDocument();
   });
 
+  /**
+   * Scripts is hidden unless "show advanced features" is on, but the Home
+   * "Save a routine" tip navigates there regardless. The rail derives its
+   * active row by matching the selection against the rendered roster, so a
+   * hidden destination matched nothing and the rail showed no active row at
+   * all — silently disagreeing with the canvas.
+   */
+  it('surfaces a hidden area as a transient row while it is the destination', async () => {
+    const selection: RecentTab = { kind: 'area', area: 'scripts', at: 0, order: 0 };
+    render(<Sidebar selection={selection} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    const row = await screen.findByRole('button', { name: 'Scripts' });
+    expect(row).toHaveClass('active');
+  });
+
+  it('does not add a transient row for an area that already has a group header', async () => {
+    const selection: RecentTab = { kind: 'area', area: 'documents', at: 0, order: 0 };
+    render(<Sidebar selection={selection} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    // The group header is the destination indicator; a transient plain link
+    // would render a second control with the same name.
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /^Documents$/i })).toHaveLength(1);
+    });
+  });
+
   it('hides archived projects from the primary navigation list', async () => {
     vi.mocked(api.listProjects).mockResolvedValue({
       projects: [

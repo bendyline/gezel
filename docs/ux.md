@@ -355,6 +355,17 @@ forking it. **Every file editor autosaves** through
 in a file pane is a bug, because a mutation elsewhere in the panel flushes the
 lane rather than racing it.
 
+The rule generalises past file panes: **any long-form prose editor autosaves**,
+wherever it lives. A gezel's `about.md`, a project's about/mission, a document,
+a memory, and a task's description are all the same shape — a body of text the
+reader edits in place — and the panel hosting one can unmount on a tab switch
+or a selection change without warning. The task description was the last
+holdout and the one that proved the point: it carried a Save button, its
+comment claimed a blur flush that did not exist, and any edit not explicitly
+committed was discarded silently. An explicit button stays correct only where
+the action publishes a discrete thing rather than saving a document — posting a
+note, recording an outcome.
+
 **The pane's own edges are the only edges.** One rounded border belongs to the
 panel as a whole (`.project-files-layout`, or the app frame when a view is
 full-bleed); whatever fills the viewer pane runs flush to it and draws no border

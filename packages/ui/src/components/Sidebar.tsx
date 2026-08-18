@@ -138,6 +138,11 @@ const DEFAULT_GROUPS: Record<GroupId, boolean> = {
 // last). Scripts/History live here as plain links per the nav design rather
 // than under a "More" group. Benchmarks is intentionally absent — it now
 // lives behind the debug-gated "Benchmarks" tab in Settings.
+// Areas that render as an expandable Group rather than a plain link. They
+// already light their own header when selected, so the transient-row rule
+// below must skip them.
+const GROUP_BACKED_AREAS: ReadonlySet<RecentTabArea> = new Set(['projects', 'documents', 'gezels']);
+
 const AREA_LINKS: RecentTabArea[] = [
   'tasks',
   'craftbooks',
@@ -253,10 +258,22 @@ export function Sidebar({
       : 'Home';
   // "Scripts" is a power-user surface — gated behind Settings → About →
   // Advanced → "Show advanced features".
-  const areaLinks = useMemo(
-    () => AREA_LINKS.filter((area) => area !== 'scripts' || showAdvancedFeatures),
-    [showAdvancedFeatures],
-  );
+  const currentArea = selection?.kind === 'area' ? selection.area : null;
+  const areaLinks = useMemo(() => {
+    const links = AREA_LINKS.filter((area) => area !== 'scripts' || showAdvancedFeatures);
+    // A hidden area that is nevertheless the current destination gets a
+    // transient row, the same way HIDDEN_PROJECT_IDS surfaces the Default
+    // project while it is selected. Without it the rail matches nothing and
+    // renders no active row at all, so it silently disagrees with the canvas —
+    // reachable by default through the Home "Save a routine" tip, which routes
+    // to Scripts while Scripts is gated off. Group-backed areas are excluded:
+    // they light their own Group header instead and would double-render.
+    if (currentArea && !links.includes(currentArea) && !GROUP_BACKED_AREAS.has(currentArea)) {
+      const settingsAt = links.indexOf('settings');
+      links.splice(settingsAt < 0 ? links.length : settingsAt, 0, currentArea);
+    }
+    return links;
+  }, [showAdvancedFeatures, currentArea]);
   // Installation and updater notices live beneath Settings, which is the
   // lower corner of the rail in the default right-sidebar layout. Routine
   // "up to date" feedback clears after a moment; download and ready states
