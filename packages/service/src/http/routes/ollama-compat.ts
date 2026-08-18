@@ -1,3 +1,4 @@
+import { externalGezelModelId } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { stream as honoStream } from 'hono/streaming';
 import { ZodError, z } from 'zod';
@@ -10,6 +11,7 @@ import type {
   TurnUsage,
 } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
+import { profileForCallerOwnedInference } from '../openai-compat/caller-owned-profile.js';
 import type { ChatTarget } from '../openai-compat/chat-target.js';
 import { resolveChatTarget } from '../openai-compat/chat-target.js';
 import {
@@ -421,8 +423,8 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
         const gezel = await ctx.store.getGezel(servingGezelId).catch(() => null);
         if (gezel) {
           servingEntry.push({
-            name: `gezel:${gezel.name}`,
-            model: `gezel:${gezel.name}`,
+            name: externalGezelModelId(gezel),
+            model: externalGezelModelId(gezel),
             modified_at: now,
             size: 0,
             digest: '',
@@ -597,7 +599,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       ...(target.model ? { model: target.model } : {}),
       ...(tuning ? { tuning } : {}),
       ...(defaults && endpointsConfig.supportingBehaviors !== false
-        ? { profile: defaults.profile }
+        ? { profile: profileForCallerOwnedInference(defaults.profile) }
         : {}),
     });
     const usageRef: { value: TurnUsage | null } = { value: null };
@@ -748,7 +750,8 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
 
     // Same session defaults as /v1/chat/completions: tuning always
     // (with the request's options/format overlaid on top), behavior
-    // profile gated by the Connected Apps switch.
+    // profile gated by the Connected Apps switch. Caller-owned inference
+    // keeps compatibility behaviors without Gezel action-loop enforcement.
     const defaults = await ctx.chat
       .resolveModelSessionDefaults(target.provider, target.model, target.tuningOverrides ?? {})
       .catch(() => null);
@@ -764,7 +767,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       ...(externalTools && externalTools.length > 0 ? { externalTools } : {}),
       ...(tuning ? { tuning } : {}),
       ...(defaults && endpointsConfig.supportingBehaviors !== false
-        ? { profile: defaults.profile }
+        ? { profile: profileForCallerOwnedInference(defaults.profile) }
         : {}),
     });
 

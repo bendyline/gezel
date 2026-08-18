@@ -751,9 +751,10 @@ export interface LLMSession {
   onDelta(handler: (chunk: string) => void): () => void;
   /**
    * Subscribe to live private-reasoning deltas, streamed separately from
-   * the visible reply so they never enter the committed body or the
-   * external API-compat forwarders. Optional — only providers with a
-   * distinct reasoning channel (llama-cpp/ds4) fire it.
+   * the visible reply so they never enter the committed body. API-compat
+   * forwarders omit this private channel unless their client contract opts
+   * in explicitly. Optional — only providers with a distinct reasoning
+   * channel (llama-cpp/ds4) fire it.
    */
   onReasoningDelta?(handler: (chunk: string) => void): () => void;
   onUsage(handler: (usage: TurnUsage) => void): () => void;

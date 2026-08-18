@@ -1,5 +1,6 @@
 import type {
   ChatEventEnvelope,
+  ChatSessionSource,
   ChatTurnErrorDetail,
   GezelSummary,
   ListTimelineResponse,
@@ -285,6 +286,8 @@ interface LiveSlot {
    */
   sessionProviderName?: ProviderName;
   sessionModel?: string;
+  /** External owner for a live read-only thread. */
+  sessionSource?: ChatSessionSource;
   taskRef?: string;
   /**
    * Set when the turn ended in error (context overflow, provider crash,
@@ -1644,6 +1647,11 @@ export function ChatTimelineView({
           // with at this moment. The canonical row from the post-
           // `complete` refresh overwrites this.
           sessionProviderName: lastForSession?.sessionProviderName ?? defaultProvider,
+          ...(lastForSession?.sessionSource
+            ? { sessionSource: lastForSession.sessionSource }
+            : env.sessionSource
+              ? { sessionSource: env.sessionSource }
+              : {}),
           ...(lastForSession?.sessionModel ? { sessionModel: lastForSession.sessionModel } : {}),
           ...(lastForSession?.taskRef ? { taskRef: lastForSession.taskRef } : {}),
           ...(lastForSession?.stepId ? { stepId: lastForSession.stepId } : {}),
@@ -1727,6 +1735,11 @@ export function ChatTimelineView({
                     : {}),
                 }
               : {}),
+            ...(lastForSession?.sessionSource
+              ? { sessionSource: lastForSession.sessionSource }
+              : env.sessionSource
+                ? { sessionSource: env.sessionSource }
+                : {}),
             ...(lastForSession?.taskRef ? { taskRef: lastForSession.taskRef } : {}),
           });
           setLiveBump((n) => n + 1);
@@ -2234,6 +2247,11 @@ export function ChatTimelineView({
           ...(lastForSession ? { sessionTitle: lastForSession.sessionTitle } : {}),
           ...(lastForSession ? { sessionCreatedAt: lastForSession.sessionCreatedAt } : {}),
           ...(lastForSession?.taskRef ? { taskRef: lastForSession.taskRef } : {}),
+          ...(lastForSession?.sessionSource
+            ? { sessionSource: lastForSession.sessionSource }
+            : env.sessionSource
+              ? { sessionSource: env.sessionSource }
+              : {}),
         };
       }
     },
@@ -3148,29 +3166,33 @@ export function ChatTimelineView({
             : providerForGezel(slot.gezelId) === 'ds4'
               ? { localEngine: 'ds4' as const }
               : {})}
-        onCancel={async () => {
-          try {
-            await api.cancelChatSessionTurn(sessionId);
-          } catch (err) {
-            console.warn('[timeline] failed to cancel turn:', err);
-          }
-        }}
-        onReEngage={async () => {
-          // Cancel first: a wedged turn holds the session lock, so a
-          // nudge sent while it runs would queue behind it forever.
-          try {
-            await api.cancelChatSessionTurn(sessionId);
-          } catch (err) {
-            console.warn('[timeline] re-engage: cancel failed:', err);
-          }
-          try {
-            await api.sendToChatSession(sessionId, {
-              message: 'Please continue where you left off and finish the work you started.',
-            });
-          } catch (err) {
-            console.warn('[timeline] re-engage: send failed:', err);
-          }
-        }}
+        {...(slot.sessionSource
+          ? {}
+          : {
+              onCancel: async () => {
+                try {
+                  await api.cancelChatSessionTurn(sessionId);
+                } catch (err) {
+                  console.warn('[timeline] failed to cancel turn:', err);
+                }
+              },
+              onReEngage: async () => {
+                // Cancel first: a wedged turn holds the session lock, so a
+                // nudge sent while it runs would queue behind it forever.
+                try {
+                  await api.cancelChatSessionTurn(sessionId);
+                } catch (err) {
+                  console.warn('[timeline] re-engage: cancel failed:', err);
+                }
+                try {
+                  await api.sendToChatSession(sessionId, {
+                    message: 'Please continue where you left off and finish the work you started.',
+                  });
+                } catch (err) {
+                  console.warn('[timeline] re-engage: send failed:', err);
+                }
+              },
+            })}
         {...(fontFamily ? { fontFamily } : {})}
         {...(fontScale !== 1 ? { fontScale } : {})}
         {...(slot.error ? { error: slot.error } : {})}
@@ -3631,6 +3653,7 @@ function renderDivider(args: {
       ? row.msg.sessionCreatedAt
       : (row.slot.sessionCreatedAt ?? new Date(row.slot.startedAt).toISOString());
   const taskRef = row.kind === 'message' ? row.msg.taskRef : row.slot.taskRef;
+  const source = row.kind === 'message' ? row.msg.sessionSource : row.slot.sessionSource;
   const handoff = row.kind === 'message' ? row.msg.handoffFrom : undefined;
   const handoffName = handoff
     ? (() => {
@@ -3652,7 +3675,11 @@ function renderDivider(args: {
         continuing ? ' timeline-session-divider-continuing' : ''
       }`}
       onClick={() => onFocusSession?.(sessionId, gezelId, projectId)}
-      title="Focus this thread — composer will post here"
+      title={
+        source
+          ? `View this read-only thread from ${source.appName}`
+          : 'Focus this thread — composer will post here'
+      }
     >
       <GezelIcon
         svg={gezel?.icon ?? null}
@@ -3666,6 +3693,13 @@ function renderDivider(args: {
           <>
             ↩ continuing with {gezelName}
             {project && <> · in {project.name}</>}
+            {source && <> · from {source.appName} · read-only</>}
+          </>
+        ) : source ? (
+          <>
+            external thread with {gezelName} · from {source.appName} · read-only
+            {project && <> · in {project.name}</>}
+            {' · '}started {formatRelativeTime(createdAt)}
           </>
         ) : (
           <>

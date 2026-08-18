@@ -25,6 +25,7 @@ export function modelBundleRoutes(ctx: ServiceContext): Hono {
       const bundle = await bundles.export(engine, c.req.param('id'));
       c.header('Content-Type', 'application/vnd.gezel.model+zip');
       c.header('Content-Disposition', `attachment; filename="${bundle.filename}"`);
+      c.header('X-Gezel-Model-Bytes', String(bundle.manifest.approxSizeBytes));
       c.header('X-Content-Type-Options', 'nosniff');
       return c.body(Readable.toWeb(bundle.stream as Readable) as ReadableStream<Uint8Array>);
     } catch (err) {

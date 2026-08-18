@@ -1212,7 +1212,11 @@ class BatchEngine:
         if grammar is not None:
             # Accepts a single processor or a list (grammar + think-budget).
             procs = list(procs) + (grammar if isinstance(grammar, list) else [grammar])
-        return procs or None
+        # BatchGenerator receives one processor list per sequence. A mixed
+        # wave (for example cache warm + pi tool call) must use [] for the
+        # unconstrained sequence: mlx_lm iterates every per-sequence entry and
+        # crashes on None with "'NoneType' object is not iterable".
+        return list(procs or [])
 
     def _seed_args(self, sub):
         """Plan cache reuse for this sub: longest-common-prefix with

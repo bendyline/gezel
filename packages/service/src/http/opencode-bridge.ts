@@ -2,6 +2,11 @@ import { createLogger } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { bearerAuth, requireScope } from './auth.js';
 import type { ServiceContext } from './context.js';
+import {
+  EXTERNAL_CONVERSATION_ID_HEADER,
+  EXTERNAL_PROJECT_HEADER,
+  EXTERNAL_WORKING_DIRECTORY_HEADER,
+} from './external-conversation-headers.js';
 import { hostGuard } from './host-guard.js';
 import {
   type LocalBridgeController,
@@ -54,7 +59,18 @@ export function buildOpenCodeBridgeApp(ctx: ServiceContext): Hono {
   app.use('*', hostGuard());
 
   mountAuthenticatedRoute(app, '/v1/chat', ctx);
-  app.route('/v1/chat', v1ChatRoutes(ctx));
+  app.route(
+    '/v1/chat',
+    v1ChatRoutes(ctx, {
+      externalConversation: {
+        sourceId: 'opencode',
+        sourceName: 'OpenCode',
+        sessionIdHeaders: [EXTERNAL_CONVERSATION_ID_HEADER],
+        workingDirectoryHeader: EXTERNAL_WORKING_DIRECTORY_HEADER,
+        projectHeader: EXTERNAL_PROJECT_HEADER,
+      },
+    }),
+  );
 
   mountAuthenticatedRoute(app, '/v1/models', ctx);
   app.route('/v1/models', v1ModelsRoutes(ctx));

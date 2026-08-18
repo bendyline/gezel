@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import {
   AmbientDashboardDisplayTargetSchema,
   type AmbientDashboardStatusResponse,
@@ -32,14 +32,20 @@ export function ambientDashboardRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
   app.get('/', async (c) => {
-    const [state, config] = await Promise.all([
+    const [state, config, latestInfo] = await Promise.all([
       ctx.ambientDashboard.readState(),
       ctx.store.readConfig().catch(() => null),
+      stat(ambientDashboardLatestFile(ctx.home)).catch(() => null),
     ]);
     const response: AmbientDashboardStatusResponse = {
       enabled: config?.ambientDashboard?.enabled === true,
       running: ctx.ambientDashboard.isRunning(),
-      lastGeneratedAt: state.lastRunAt && state.lastFile ? state.lastRunAt : null,
+      // Old state files predate `lastGeneratedAt`; the stable PNG's mtime is
+      // the authoritative migration fallback and cannot be confused by a
+      // newer failed attempt.
+      lastGeneratedAt: state.lastGeneratedAt ?? latestInfo?.mtime.toISOString() ?? null,
+      lastFailedAt: state.lastFailedAt ?? null,
+      lastError: state.lastError ?? null,
       latestFilename: state.lastFile ?? null,
       resolution: config?.ambientDashboard?.resolution ?? DEFAULT_RESOLUTION,
       themeId: config?.ambientDashboard?.themeId ?? DEFAULT_THEME_ID,

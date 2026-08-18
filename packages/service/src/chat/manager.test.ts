@@ -1781,6 +1781,32 @@ describe('ChatManager — inflight visibility + cancel', () => {
     expect(manager.inflightInfo(session.id)).toBeNull();
   });
 
+  it('includes caller-owned external conversations in the in-flight snapshot', async () => {
+    const turn = await manager.beginExternalConversation({
+      sourceId: 'pi',
+      sourceName: 'Pi',
+      externalConversationId: 'pi-live-turn',
+      gezelId: 'ada',
+      providerName: 'copilot',
+      messages: [{ role: 'user', content: 'Build the rally game.' }],
+    });
+
+    expect(manager.listInflight()).toEqual([
+      expect.objectContaining({
+        sessionId: turn.sessionId,
+        gezelId: 'ada',
+        projectId: 'default',
+        userText: 'Build the rally game.',
+      }),
+    ]);
+    expect(manager.isGezelActive('ada')).toBe(true);
+    expect(manager.isProjectActive('default')).toBe(true);
+
+    await turn.finish({ content: 'Partial answer.', finishReason: 'length' });
+    expect(manager.listInflight()).toHaveLength(0);
+    expect(manager.isGezelActive('ada')).toBe(false);
+  });
+
   // The old "send() throws 'already in flight' when a turn is already
   // running" path is gone — `send()` now enqueues via SessionQueue
   // instead. The per-session queue tests below exercise that path.
@@ -3921,9 +3947,21 @@ describe('ChatManager — one-shot attribution', () => {
 
     const send = mock.calls.find((call) => call.kind === 'send');
     expect(send?.sendOpts?.queue).toMatchObject({
+      lane: 'background',
       actorLabel: 'System',
       job: 'maintenance',
     });
+  });
+
+  it('forwards an explicit interactive lane to one-shot provider work', async () => {
+    mock.script('done');
+
+    await manager.oneShotCompletion('generate the requested wallpaper', 1_000, {
+      lane: 'interactive',
+    });
+
+    const send = mock.calls.find((call) => call.kind === 'send');
+    expect(send?.sendOpts?.queue?.lane).toBe('interactive');
   });
 
   it('forwards a cancellation signal to one-shot provider work', async () => {

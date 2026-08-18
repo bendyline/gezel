@@ -48,8 +48,11 @@ describe('bearerAuth', () => {
       headers: { Authorization: 'Bearer ROOT-TOKEN' },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { auth: { appId: string; scopes: string[] } };
+    const body = (await res.json()) as {
+      auth: { appId: string; appName: string; scopes: string[] };
+    };
     expect(body.auth.appId).toBe('root');
+    expect(body.auth.appName).toBe('Gezel (root)');
     expect(body.auth.scopes).toEqual(['root']);
   });
 
@@ -81,8 +84,11 @@ describe('bearerAuth', () => {
       headers: { Authorization: `Bearer ${issued.token}` },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { auth: { appId: string; scopes: string[] } };
+    const body = (await res.json()) as {
+      auth: { appId: string; appName: string; scopes: string[] };
+    };
     expect(body.auth.appId).toBe('docblocks');
+    expect(body.auth.appName).toBe('DocBlocks');
     expect(body.auth.scopes).toEqual(['openai']);
   });
 

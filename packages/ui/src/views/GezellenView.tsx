@@ -12,9 +12,16 @@ import { GezelDetail as GezelDetailView } from './GezelDetail.js';
 
 type NewGezelTab = 'scratch' | 'template';
 
-export function GezellenView() {
+export function GezellenView({
+  activeProjectsByGezel,
+  activeTurnsReady,
+}: {
+  activeProjectsByGezel?: ReadonlyMap<string, ReadonlySet<string>>;
+  activeTurnsReady?: boolean;
+}) {
   const [agents, setAgents] = useState<GezelSummary[]>([]);
   const [meesterId, setMeesterId] = useState<string | undefined>(undefined);
+  const [boringMode, setBoringMode] = useState(false);
   const [selectedGezelId, setSelectedGezelId] = useState<string | undefined>(undefined);
   // Consume a pending "+" intent from the sidebar synchronously on first
   // render (covers the just-opened case; the event below covers the
@@ -36,6 +43,7 @@ export function GezellenView() {
     try {
       const config = await api.getConfig();
       setMeesterId(config.meesterGezelId);
+      setBoringMode(config.roleBasedNameOnlyMode ?? false);
     } catch {
       /* keep the last known badge while the service is unavailable */
     }
@@ -45,6 +53,17 @@ export function GezellenView() {
     void refresh();
     void refreshMeester();
   }, [refresh, refreshMeester]);
+
+  useEffect(() => {
+    const onConfigUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ roleBasedNameOnlyMode?: boolean }>).detail;
+      if (typeof detail?.roleBasedNameOnlyMode === 'boolean') {
+        setBoringMode(detail.roleBasedNameOnlyMode);
+      }
+    };
+    window.addEventListener('gezel:config-updated', onConfigUpdated);
+    return () => window.removeEventListener('gezel:config-updated', onConfigUpdated);
+  }, []);
 
   // Default-select the first gezel once the listing arrives so the
   // detail pane has something to show. If the previously-selected
@@ -117,6 +136,18 @@ export function GezellenView() {
   const selectGezel = useCallback((id: string) => {
     setSelectedGezelId(id);
   }, []);
+
+  const openGezel = useCallback(
+    (id: string) => {
+      selectGezel(id);
+      if ((activeProjectsByGezel?.get(id)?.size ?? 0) > 0) {
+        window.dispatchEvent(
+          new CustomEvent('gezel:prefer-working-project', { detail: { gezelId: id } }),
+        );
+      }
+    },
+    [activeProjectsByGezel, selectGezel],
+  );
 
   const kickOffBackgroundGeneration = useCallback(
     (gezel: GezelDetail, iconPrompt: string) => {
@@ -196,12 +227,13 @@ export function GezellenView() {
           {agents.map((a) => {
             const isGenerating = generatingIcons.has(a.id);
             const isActive = a.id === selectedGezelId;
+            const isWorking = (activeProjectsByGezel?.get(a.id)?.size ?? 0) > 0;
             return (
               <li key={a.id} className={`gezel-row-shell${isActive ? ' active' : ''}`}>
                 <button
                   type="button"
                   className={`gezel-row${isActive ? ' active' : ''}`}
-                  onClick={() => selectGezel(a.id)}
+                  onClick={() => openGezel(a.id)}
                 >
                   <GezelIcon
                     svg={a.icon ?? null}
@@ -260,7 +292,20 @@ export function GezellenView() {
                     )}
                   </span>
                 </button>
-                <GezelActionsMenu gezel={a} compact />
+                {isWorking && (
+                  <button
+                    type="button"
+                    className="project-row-thinking gezel-row-thinking"
+                    onClick={() => openGezel(a.id)}
+                    title={`${a.name} is working — open`}
+                    aria-label={`${a.name} is working. Open gezel.`}
+                  >
+                    <span className="project-row-thinking-dot" aria-hidden="true" />
+                    <span className="project-row-thinking-dot" aria-hidden="true" />
+                    <span className="project-row-thinking-dot" aria-hidden="true" />
+                  </button>
+                )}
+                <GezelActionsMenu gezel={a} compact boringMode={boringMode} />
               </li>
             );
           })}
@@ -269,7 +314,12 @@ export function GezellenView() {
       </aside>
       <section>
         {selectedGezelId ? (
-          <GezelDetailView key={selectedGezelId} gezelId={selectedGezelId} />
+          <GezelDetailView
+            key={selectedGezelId}
+            gezelId={selectedGezelId}
+            workingProjectIds={activeProjectsByGezel?.get(selectedGezelId)}
+            activeTurnsReady={activeTurnsReady}
+          />
         ) : (
           <p className="placeholder">No gezellen yet — create one to get started.</p>
         )}

@@ -858,7 +858,7 @@ describe('ProviderQueue — ambient admission control', () => {
     (await pAmbient3)();
   });
 
-  it('holds ambient while ANY non-ambient work is running, regardless of elapsed time', async () => {
+  it('holds ambient while only one foreground slot remains, then uses capacity when it opens', async () => {
     const clock = fakeClock();
     const q = new ProviderQueue({ concurrency: 2, ambientQuietMs: 1000, now: clock.now });
     const fg = await q.acquire({ lane: 'interactive' });
@@ -875,16 +875,48 @@ describe('ProviderQueue — ambient admission control', () => {
     await flush();
     expect(ambientRan).toBe(false);
     fg();
-    // Release refreshed the clock — still held.
-    await flush();
-    expect(ambientRan).toBe(false);
-    clock.advance(1001);
-    const poke2 = q.acquire({ lane: 'background', ambient: true });
+    // Releasing the foreground turn opens two physical slots. Ambient may
+    // use one immediately while the other remains protected for chat.
     await flush();
     expect(ambientRan).toBe(true);
     (await pAmbient)();
     (await poke)();
-    (await poke2)();
+  });
+
+  it('runs ambient work in spare multi-slot capacity while preserving one foreground slot', async () => {
+    const clock = fakeClock();
+    // Four physical interactive slots plus the provider's one logical
+    // deadlock-breaking queue lane. Ambient work may bring total running
+    // leases to three, leaving one physical slot ready for another chat.
+    const q = new ProviderQueue({
+      concurrency: 5,
+      interactiveConcurrency: 4,
+      backgroundConcurrency: 3,
+      ambientQuietMs: 1000,
+      now: clock.now,
+    });
+    const foreground = await q.acquire({ lane: 'interactive' });
+    const firstAmbient = q.acquire({ lane: 'background', ambient: true });
+    const secondAmbient = q.acquire({ lane: 'background', ambient: true });
+    let thirdAmbientRan = false;
+    const thirdAmbient = q.acquire({ lane: 'background', ambient: true }).then((release) => {
+      thirdAmbientRan = true;
+      return release;
+    });
+    await flush();
+
+    expect(q.snapshot().running).toBe(3);
+    expect(q.describe().ambientHeld).toBe(1);
+    expect(thirdAmbientRan).toBe(false);
+
+    // Freeing one physical lease admits the held ambient item immediately;
+    // it does not wait for the quiet clock because protected headroom exists.
+    foreground();
+    await flush();
+    expect(thirdAmbientRan).toBe(true);
+    (await firstAmbient)();
+    (await secondAmbient)();
+    (await thirdAmbient)();
   });
 
   it('non-ambient background (mid-turn compaction) is never gated', async () => {

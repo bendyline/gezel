@@ -43,6 +43,10 @@ export default function (pi) {
       baseUrl: provider.baseUrl,
       api: provider.api,
       apiKey,
+      headers: {
+        ...(provider.headers || {}),
+        "x-gezel-working-directory": process.cwd(),
+      },
       models: provider.models,
     })
   } catch {

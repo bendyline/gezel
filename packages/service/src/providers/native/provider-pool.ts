@@ -201,6 +201,32 @@ function emptyPooledQueueSummary(): PooledQueueSummary {
   };
 }
 
+function positiveConcurrency(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 1) return undefined;
+  return Math.floor(value);
+}
+
+/**
+ * Concurrent generation width the provider can serve right now.
+ *
+ * A supervised native launch is the strongest source: its retained `slots`
+ * diagnostic is the exact `--parallel` / server-width value of the live
+ * process. Older or wrapper providers may expose only `batch` or the queue's
+ * interactive cap, so use the widest of those compatible signals as the
+ * fallback. Never use total queue concurrency here — local queues carry an
+ * extra logical background lease that is not a native generation slot.
+ */
+export function liveProviderConcurrency(provider: LLMProvider): number {
+  const launchedSlots = positiveConcurrency(provider.engineLaunchSnapshot?.()?.diagnostics?.slots);
+  if (launchedSlots !== undefined) return launchedSlots;
+
+  return Math.max(
+    1,
+    positiveConcurrency(provider.batch?.maxConcurrency) ?? 0,
+    positiveConcurrency(provider.queue?.interactiveConcurrency) ?? 0,
+  );
+}
+
 interface PoolEntry {
   parsed: ParsedEngineKey;
   provider: LLMProvider;
@@ -994,7 +1020,7 @@ export class ProviderPool {
       cur.concurrency += d.concurrency;
       cur.interactiveConcurrency += d.interactiveConcurrency;
       cur.backgroundConcurrency += d.backgroundConcurrency;
-      cur.maxConcurrency += entry.provider.batch?.maxConcurrency ?? 1;
+      cur.maxConcurrency += liveProviderConcurrency(entry.provider);
       cur.active.push(...d.active);
       cur.pending.push(...d.pending);
       out.set(name, cur);

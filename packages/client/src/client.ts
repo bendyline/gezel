@@ -3268,10 +3268,15 @@ export class GezelClient {
   // ── portable `.gezmodel` bundles ──
 
   /** Fetch a streaming model export response. Callers must consume the body. */
-  async exportModelBundle(engine: GezmodelEngine, id: string): Promise<Response> {
+  async exportModelBundle(
+    engine: GezmodelEngine,
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<Response> {
     const url = `${this.baseUrl}/api/model-bundles/${encodeURIComponent(engine)}/${encodeURIComponent(id)}/export`;
     const res = await this.fetchImpl(url, {
       headers: { Authorization: `Bearer ${this.token}` },
+      signal,
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');

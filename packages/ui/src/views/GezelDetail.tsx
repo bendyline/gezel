@@ -36,6 +36,7 @@ import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
 import { useGenerationEngineLabel } from '../components/generation-engine-label.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
+import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { type ItemSlot, Poppetje, PoppetjeItem } from '../poppetje/index.js';
 import { Dialog, Select, Tabs } from '../primitives/index.js';
@@ -46,14 +47,22 @@ type DetailTab = 'about' | 'appearance' | 'growth' | 'chat' | 'toolsets' | 'memo
 interface GezelDetailProps {
   gezelId: string;
   onDeleted?: (gezelId: string) => void;
+  workingProjectIds?: ReadonlySet<string>;
+  activeTurnsReady?: boolean;
 }
 
 function broadcastUpdate(detail: GezelDetailData) {
   window.dispatchEvent(new CustomEvent('gezel:gezel-updated', { detail }));
 }
 
-export function GezelDetail({ gezelId, onDeleted }: GezelDetailProps) {
+export function GezelDetail({
+  gezelId,
+  onDeleted,
+  workingProjectIds,
+  activeTurnsReady,
+}: GezelDetailProps) {
   const editorTheme = useEffectiveTheme();
+  const boringMode = useRoleBasedNameOnlyMode();
   const [selected, setSelected] = useState<GezelDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string>('');
@@ -269,7 +278,7 @@ export function GezelDetail({ gezelId, onDeleted }: GezelDetailProps) {
             'saved'
           ) : null}
         </output>
-        <GezelActionsMenu gezel={selected} onDeleted={onDeleted} />
+        <GezelActionsMenu gezel={selected} onDeleted={onDeleted} boringMode={boringMode} />
       </header>
       <IterateIconDialog
         open={showIterate}
@@ -405,7 +414,12 @@ export function GezelDetail({ gezelId, onDeleted }: GezelDetailProps) {
         </div>
       )}
       {activeDetailTab === 'chat' && (
-        <GezelChatTab gezel={selected} engineLabel={generationEngineLabel} />
+        <GezelChatTab
+          gezel={selected}
+          engineLabel={generationEngineLabel}
+          workingProjectIds={workingProjectIds}
+          activeTurnsReady={activeTurnsReady}
+        />
       )}
       {!isFixedFunction && activeDetailTab === 'memories' && (
         <MemoriesTree gezelId={selected.id} gezelName={selected.name} />

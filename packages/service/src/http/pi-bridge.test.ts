@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MockProvider } from '../providers/mock.js';
 import type { ServiceContext } from './context.js';
 import {
   PI_BRIDGE_MARKER_HEADER,
@@ -6,7 +7,13 @@ import {
   createPiBridgeController,
 } from './pi-bridge.js';
 
-function context(opts: { enabled?: boolean } = {}): ServiceContext {
+function context(
+  opts: {
+    enabled?: boolean;
+    provider?: MockProvider;
+    beginExternalConversation?: (...args: unknown[]) => Promise<unknown>;
+  } = {},
+): ServiceContext {
   const records = new Map([
     [
       'openai-token',
@@ -39,11 +46,28 @@ function context(opts: { enabled?: boolean } = {}): ServiceContext {
     },
     store: {
       readConfig: async () => ({ openaiEndpoints }),
-      listGezels: async () => [],
+      listGezels: async () => [{ id: 'sipho', name: 'Sipho' }],
+      getGezel: async (id: string) =>
+        id === 'sipho'
+          ? {
+              id: 'sipho',
+              name: 'Sipho',
+              about: 'You are Sipho.',
+              parsed: { frontmatter: {} },
+            }
+          : null,
     },
     chat: {
       listModelsForProvider: async () => [],
+      getProviderForModel: async () => opts.provider!,
+      providerForGezel: async () => 'copilot',
+      resolveModelSessionDefaults: async () => null,
+      recordExternalUsage: () => undefined,
+      ...(opts.beginExternalConversation
+        ? { beginExternalConversation: opts.beginExternalConversation }
+        : {}),
     },
+    history: { log: async () => undefined },
   } as unknown as ServiceContext;
 }
 
@@ -108,6 +132,110 @@ describe('buildPiBridgeApp', () => {
     // Codex's bridge answers `{ models: [...] }`; pi reads its roster
     // from the managed config and expects the ordinary OpenAI envelope here.
     await expect(listed.json()).resolves.toMatchObject({ object: 'list' });
+  });
+
+  it('streams the provider reasoning channel as pi thinking deltas', async () => {
+    const provider = new MockProvider();
+    provider.scriptReasoning('Checking ', 'the files.');
+    provider.script('The files look good.');
+    const app = buildPiBridgeApp(context({ provider }));
+
+    const response = await app.request('http://127.0.0.1/v1/chat/completions', {
+      method: 'POST',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'copilot:mock-reasoning',
+        messages: [{ role: 'user', content: 'Inspect the files' }],
+        stream: true,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const chunks = (await response.text())
+      .split('\n')
+      .filter((line) => line.startsWith('data: ') && line !== 'data: [DONE]')
+      .map((line) => JSON.parse(line.slice('data: '.length)) as Record<string, unknown>);
+    const deltas = chunks.flatMap((chunk) => {
+      const choices = chunk.choices as Array<{ delta?: Record<string, unknown> }> | undefined;
+      return choices?.map((choice) => choice.delta ?? {}) ?? [];
+    });
+
+    expect(deltas.map((delta) => delta.reasoning_content ?? '').join('')).toBe(
+      'Checking the files.',
+    );
+    expect(deltas.map((delta) => delta.content ?? '').join('')).toBe('The files look good.');
+  });
+
+  it('sends SSE comment keepalives while a pi model is silent', async () => {
+    const provider = new MockProvider();
+    provider.scriptSendDelay(30);
+    provider.script('Eventually visible.');
+    const app = buildPiBridgeApp(context({ provider }), { keepaliveIntervalMs: 5 });
+
+    const response = await app.request('http://127.0.0.1/v1/chat/completions', {
+      method: 'POST',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'copilot:mock-fast',
+        messages: [{ role: 'user', content: 'Take your time' }],
+        stream: true,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toContain(': keepalive\n\n');
+    const visible = body
+      .split('\n')
+      .filter((line) => line.startsWith('data: {'))
+      .map((line) => JSON.parse(line.slice('data: '.length)))
+      .map((chunk) => chunk.choices?.[0]?.delta?.content ?? '')
+      .join('');
+    expect(visible).toBe('Eventually visible.');
+    expect(body.trimEnd().endsWith('data: [DONE]')).toBe(true);
+  });
+
+  it('forwards Pi session affinity and working-directory hints to the mirror', async () => {
+    const provider = new MockProvider();
+    provider.script('Mirrored reply.');
+    const finish = vi.fn(async () => undefined);
+    const beginExternalConversation = vi.fn(async () => ({
+      sessionId: 'external-pi-test',
+      projectId: 'default',
+      onContentDelta: vi.fn(),
+      onReasoningDelta: vi.fn(),
+      onToolArgsDelta: vi.fn(),
+      finish,
+      fail: vi.fn(async () => undefined),
+    }));
+    const app = buildPiBridgeApp(context({ provider, beginExternalConversation }));
+
+    const response = await app.request('http://127.0.0.1/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        ...auth(),
+        'content-type': 'application/json',
+        'x-session-affinity': 'pi-session-42',
+        'x-gezel-working-directory': '/work/racing-game',
+      },
+      body: JSON.stringify({
+        model: 'gezel:sipho',
+        messages: [{ role: 'user', content: 'Build a racing game' }],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(beginExternalConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceId: 'pi',
+        sourceName: 'Pi',
+        externalConversationId: 'pi-session-42',
+        workingDirectory: '/work/racing-game',
+        gezelId: 'sipho',
+        messages: [{ role: 'user', content: 'Build a racing game' }],
+      }),
+    );
+    expect(finish).toHaveBeenCalledWith({ content: 'Mirrored reply.', finishReason: 'stop' });
   });
 
   it('applies the Connected Apps master switch before inference', async () => {

@@ -21,6 +21,7 @@ import {
   asError,
   createMutationQueue,
   ensurePrivateDir,
+  findHarnessModel,
   harnessBridgeSnapshot,
   harnessTokenRecord,
   isExactHarnessToken,
@@ -60,6 +61,8 @@ const MAX_OUTPUT_LIMIT = 32_768;
 interface SetupState {
   version: 1;
   model: string;
+  /** Stable identity behind a human-readable gezel model id. */
+  gezelId?: string;
   createdAt: string;
   updatedAt: string;
   /**
@@ -208,7 +211,7 @@ export function createPiSetupManager(opts: CreatePiSetupManagerOptions): PiSetup
       message = 'Gezel found damaged pi setup state and left the existing files untouched.';
     } else if (state) {
       if (!endpointsEnabled) reasons.push('Connected-app model serving is turned off.');
-      if (!models.some((model) => model.id === state.model)) {
+      if (!findHarnessModel(models, state.model, state.gezelId)) {
         reasons.push('The configured gezel or local model is no longer available.');
       }
       if (managedRoster === null) reasons.push('The managed pi model list is missing.');
@@ -218,7 +221,7 @@ export function createPiSetupManager(opts: CreatePiSetupManagerOptions): PiSetup
         reasons.push('The managed pi credential file needs repair.');
       }
       if (managedRoster !== null) {
-        const selected = models.find((model) => model.id === state.model);
+        const selected = findHarnessModel(models, state.model, state.gezelId);
         if (selected) {
           const expected = buildRoster({
             model: selected,
@@ -271,7 +274,12 @@ export function createPiSetupManager(opts: CreatePiSetupManagerOptions): PiSetup
       status: {
         state: statusState,
         models,
-        ...(state ? { configuredModel: state.model } : {}),
+        ...(state
+          ? {
+              configuredModel:
+                findHarnessModel(models, state.model, state.gezelId)?.id ?? state.model,
+            }
+          : {}),
         ...(recommendedModel ? { recommendedModel } : {}),
         reasons,
         ...(message ? { message } : {}),
@@ -329,7 +337,7 @@ export function createPiSetupManager(opts: CreatePiSetupManagerOptions): PiSetup
           before.status.message ?? `${rosterPath} is not managed by Gezel.`,
         );
       }
-      const selected = before.models.find((model) => model.id === input.model);
+      const selected = findHarnessModel(before.models, input.model);
       if (!selected) {
         throw new PiSetupError(
           'model_not_available',
@@ -386,6 +394,7 @@ export function createPiSetupManager(opts: CreatePiSetupManagerOptions): PiSetup
         const nextState: SetupState = {
           version: PI_SETUP_REVISION,
           model: selected.id,
+          ...(selected.kind === 'gezel' ? { gezelId: selected.gezelId } : {}),
           createdAt,
           updatedAt: now().toISOString(),
           configDigest: sha256(managedRoster),
@@ -602,7 +611,7 @@ export function createPiSetupManager(opts: CreatePiSetupManagerOptions): PiSetup
         return;
       }
       const models = await listEligibleModels(config);
-      const selected = models.find((model) => model.id === state.model);
+      const selected = findHarnessModel(models, state.model, state.gezelId);
       if (!selected) {
         await opts.bridge.stop();
         return;
@@ -618,7 +627,17 @@ export function createPiSetupManager(opts: CreatePiSetupManagerOptions): PiSetup
       await writeFileAtomic(rosterPath, next, { mode: 0o600, durable: true });
       await writeSecurityJson(
         statePath,
-        `${JSON.stringify({ ...state, updatedAt: now().toISOString(), configDigest: sha256(next) }, null, 2)}\n`,
+        `${JSON.stringify(
+          {
+            ...state,
+            model: selected.id,
+            gezelId: selected.kind === 'gezel' ? selected.gezelId : undefined,
+            updatedAt: now().toISOString(),
+            configDigest: sha256(next),
+          },
+          null,
+          2,
+        )}\n`,
       );
     });
 
@@ -644,6 +663,9 @@ interface PiRosterModel {
   cost: { input: number; output: number };
   contextWindow: number;
   maxTokens: number;
+  compat: {
+    sendSessionAffinityHeaders: true;
+  };
 }
 
 /**
@@ -683,6 +705,12 @@ export function buildRoster(input: {
           1,
           Math.min(MAX_OUTPUT_LIMIT, Math.floor(context * OUTPUT_LIMIT_SHARE)),
         ),
+        // Pi sends its stable conversation id only when affinity headers are
+        // enabled for the model. The dedicated bridge uses that id to mirror
+        // one Pi chat into one read-only Gezel session.
+        compat: {
+          sendSessionAffinityHeaders: true as const,
+        },
       };
     });
 

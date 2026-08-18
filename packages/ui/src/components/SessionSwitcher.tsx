@@ -24,6 +24,8 @@ interface Props {
    */
   gezelName?: string;
   onSessionIdChange: (next: string | undefined) => void;
+  /** Reports the selected record so parents can enforce external read-only UI. */
+  onActiveSessionChange?: (session: ChatSessionSummary | null) => void;
   /** Runs after "+ New" has created and selected a fresh session. */
   onNewSessionCreated?: (sessionId: string) => void;
   /** Bumped by the parent after a write it wants the switcher to re-read
@@ -60,6 +62,7 @@ export function SessionSwitcher({
   sessionId,
   gezelName,
   onSessionIdChange,
+  onActiveSessionChange,
   onNewSessionCreated,
   refreshKey,
   taskRef,
@@ -69,6 +72,7 @@ export function SessionSwitcher({
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
   const [busy, setBusy] = useState(false);
   const autoPickedFor = useRef<string | null>(null);
+  const refreshedUnknownSession = useRef<string | null>(null);
 
   // The (gezel, project, task) triple the list is scoped to. Stamped onto
   // the loaded list so the auto-pick below can tell "this list is for the
@@ -150,6 +154,25 @@ export function SessionSwitcher({
     autoPickedFor.current = key;
     onSessionIdChange(sessions[0]!.id);
   }, [sessions, sessionsScope, sessionId, scopeKey, onSessionIdChange]);
+
+  useEffect(() => {
+    if (sessionsScope !== scopeKey) return;
+    const active = sessions.find((session) => session.id === sessionId);
+    // A live external session can appear after this list loaded. Keep the
+    // parent's current safety state until the one-shot refresh below has had
+    // a chance to fetch its provenance.
+    if (sessionId && !active) return;
+    onActiveSessionChange?.(active ?? null);
+  }, [sessions, sessionsScope, sessionId, scopeKey, onActiveSessionChange]);
+
+  useEffect(() => {
+    if (sessionsScope !== scopeKey || !sessionId) return;
+    if (sessions.some((session) => session.id === sessionId)) return;
+    const key = `${scopeKey}:${sessionId}`;
+    if (refreshedUnknownSession.current === key) return;
+    refreshedUnknownSession.current = key;
+    void refresh();
+  }, [sessions, sessionsScope, sessionId, scopeKey, refresh]);
 
   const createNew = useCallback(async () => {
     setBusy(true);
@@ -264,6 +287,7 @@ function renderTitleWithMentions(title: string): ReactNode {
 // The engine/model suffix shown after the relative time. `engineLabel`
 // (fixed-function generators) wins; otherwise it's the chat provider + model.
 function engineSuffix(s: ChatSessionSummary, engineLabel?: string | null): string {
+  if (s.source?.kind === 'external') return `From ${s.source.appName} · read-only`;
   if (engineLabel) return engineLabel;
   const provider = resolveProviderLabel(s.providerName, window.__GEZEL__?.platform);
   return `${provider}${s.model ? ` (${s.model})` : ''}`;

@@ -12,6 +12,7 @@ import {
 } from '../../providers/types.js';
 import type { LLMSession } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
+import { profileForCallerOwnedInference } from '../openai-compat/caller-owned-profile.js';
 import { type ChatTarget, resolveChatTarget } from '../openai-compat/chat-target.js';
 import {
   runResponsesNonStreaming,
@@ -187,7 +188,11 @@ export function v1ResponsesRoutes(ctx: ServiceContext): Hono {
             : target.tuningOverrides?.reasoningEffort
               ? { reasoningEffort: target.tuningOverrides.reasoningEffort }
               : {}),
-          ...(defaults && supportingBehaviors ? { profile: defaults.profile } : {}),
+          // Codex owns this action loop. Keep model compatibility behavior,
+          // but never apply Gezel's must-use-a-tool ramble intervention.
+          ...(defaults && supportingBehaviors
+            ? { profile: profileForCallerOwnedInference(defaults.profile) }
+            : {}),
         };
         session = await provider.createSession(sessionOpts);
 
@@ -357,7 +362,7 @@ async function resolveResponsesTarget(model: string, ctx: ServiceContext): Promi
   }
 
   throw new Error(
-    `Unknown model "${model}". Use an explicit <provider>:<model> id or gezel:<id-or-name>.`,
+    `Unknown model "${model}". Use an explicit <provider>:<model> id or advertised gezel:<role>-<name> alias.`,
   );
 }
 

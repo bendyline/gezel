@@ -1,9 +1,10 @@
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
-import type {
-  GezelConfig,
-  GezelSummary,
-  LocalHarnessModelOption,
-  ProviderName,
+import {
+  type GezelConfig,
+  type GezelSummary,
+  type LocalHarnessModelOption,
+  type ProviderName,
+  externalGezelModelId,
 } from '@bendyline/gezel';
 import type { LocalBridgeController } from '../http/local-bridge.js';
 import type { TokenRecord, TokenStore } from '../http/token-store.js';
@@ -117,7 +118,7 @@ export async function listEligibleHarnessModels(
         if (!backingModel) return null;
 
         return {
-          id: `gezel:${gezel.id}`,
+          id: externalGezelModelId(gezel),
           label: gezel.name,
           description: [gezel.role, backingModel.label].filter(Boolean).join(' · '),
           kind: 'gezel',
@@ -160,6 +161,27 @@ export function recommendedHarnessModel(
     models.find((model) => model.kind === 'gezel' && model.gezelId === meesterGezelId)?.id ??
     models.find((model) => model.kind === 'gezel')?.id ??
     models[0]?.id
+  );
+}
+
+/**
+ * Resolve a currently advertised harness model while retaining support for the
+ * old `gezel:<persisted-id>` references already stored by existing setups and
+ * for a prior role-name alias when stable setup metadata identifies the gezel.
+ */
+export function findHarnessModel(
+  models: LocalHarnessModelOption[],
+  ref: string,
+  gezelId?: string,
+): LocalHarnessModelOption | undefined {
+  return (
+    models.find((model) => model.id === ref) ??
+    (gezelId
+      ? models.find((model) => model.kind === 'gezel' && model.gezelId === gezelId)
+      : undefined) ??
+    models.find(
+      (model) => model.kind === 'gezel' && model.gezelId && ref === `gezel:${model.gezelId}`,
+    )
   );
 }
 

@@ -108,6 +108,12 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
   /** Tracks which prefixes we've already warmed in this process so
    *  back-to-back session opens don't issue redundant warm requests. */
   private readonly warmedPrefixes = new Set<string>();
+  /**
+   * Prefix warms already in progress. `warmedPrefixes` is only populated after
+   * the HTTP request succeeds, so without this single-flight map two app turns
+   * arriving together can submit duplicate warm sequences into one MLX wave.
+   */
+  private readonly warmingPrefixes = new Map<string, Promise<void>>();
 
   constructor(opts: MlxCacheAdapterOptions = { resolveBaseUrl: async () => null }) {
     this.resolveBaseUrl = opts.resolveBaseUrl;
@@ -289,6 +295,22 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
    * line per session open).
    */
   async warmPrefix(prefixId: string, systemPrompt: string): Promise<void> {
+    if (this.warmedPrefixes.has(prefixId)) return;
+    const existing = this.warmingPrefixes.get(prefixId);
+    if (existing) return existing;
+
+    const warming = this.warmPrefixOnce(prefixId, systemPrompt);
+    this.warmingPrefixes.set(prefixId, warming);
+    try {
+      await warming;
+    } finally {
+      if (this.warmingPrefixes.get(prefixId) === warming) {
+        this.warmingPrefixes.delete(prefixId);
+      }
+    }
+  }
+
+  private async warmPrefixOnce(prefixId: string, systemPrompt: string): Promise<void> {
     if (this.warmedPrefixes.has(prefixId)) return;
     const baseUrl = await this.resolveBaseUrl().catch(() => null);
     if (!baseUrl) return;

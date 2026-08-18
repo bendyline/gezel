@@ -120,6 +120,49 @@ describe('SessionSwitcher', () => {
     expect(screen.queryByText(/Night-shift oversight/)).not.toBeInTheDocument();
   });
 
+  it('labels and reports a read-only thread mirrored from Pi', async () => {
+    mockSessions([
+      {
+        id: 'external-pi-1',
+        gezelId: 'g1',
+        projectId: 'p1',
+        title: 'Build a racing game',
+        createdAt: new Date().toISOString(),
+        lastActivityAt: new Date().toISOString(),
+        providerName: 'mlx',
+        archived: false,
+        source: {
+          kind: 'external',
+          appId: 'pi',
+          appName: 'Pi',
+          externalConversationId: 'pi-session-1',
+          readOnly: true,
+        },
+      },
+    ]);
+    const onActiveSessionChange = vi.fn();
+
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="external-pi-1"
+        onSessionIdChange={vi.fn()}
+        onActiveSessionChange={onActiveSessionChange}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/From Pi · read-only/)).toBeInTheDocument();
+      expect(onActiveSessionChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'external-pi-1',
+          source: expect.objectContaining({ appId: 'pi' }),
+        }),
+      );
+    });
+  });
+
   it('does not auto-pick from the previous scope while the new scope loads', async () => {
     // The regression: a scope change (here, gaining a taskRef) used to let
     // the auto-pick run against the OLD scope's list, because clearing

@@ -38,7 +38,7 @@
  * — no wasted work. Already-running entries abort normally via the
  * same signal.
  *
- * ## Ambient admission control (single-lane engine protection)
+ * ## Ambient admission control (foreground-capacity protection)
  *
  * On a local engine, a housekeeping turn (scheduler nudge, memory
  * extraction, icon/about generation) occupies the GPU for minutes.
@@ -48,17 +48,19 @@
  * engine is idle while the user READS, ambient work sneaks in, and
  * the user's move then waits out a 3-minute nudge turn).
  *
- * When `ambientQuietMs > 0`, entries marked `ambient: true` dispatch
- * only when BOTH hold: no non-ambient work is running or pending, and
- * no non-ambient activity (enqueue, dispatch, or release, any lane)
- * happened within the last `ambientQuietMs`. Reading time counts as
- * engagement: page reactions and tool-loop turns are non-ambient, so
- * an active game holds the gate closed between moves. Ambient entries
- * are exempt from the anti-starvation guard while gated — deferring
- * them indefinitely during active use is the feature, not a bug; they
- * run when the user steps away. The gate never touches non-ambient
- * work, so mid-turn compaction (which a foreground turn awaits) and
- * user-facing background turns are unaffected.
+ * When an engine has more than one interactive slot, ambient work may
+ * use otherwise-idle capacity immediately, but only while at least one
+ * physical slot stays free for a newly-arriving foreground chat. On a
+ * single-slot engine — or once a multi-slot engine reaches that protected
+ * headroom — entries marked `ambient: true` dispatch only when BOTH hold:
+ * no non-ambient work is running or pending, and no non-ambient activity
+ * (enqueue, dispatch, or release, any lane) happened within the last
+ * `ambientQuietMs`. Reading time counts as engagement: page reactions and
+ * tool-loop turns are non-ambient, so an active game holds the gate closed
+ * between moves when there is no safe spare capacity. Ambient entries are
+ * exempt from the anti-starvation guard while gated. The gate never touches
+ * non-ambient work, so mid-turn compaction (which a foreground turn awaits)
+ * and user-facing background turns are unaffected.
  */
 
 export type Lane = 'interactive' | 'background';
@@ -69,9 +71,10 @@ export interface EnqueueRequest {
    * Marks truly-deferrable housekeeping (scheduler nudges, memory
    * extraction, icon/about generation, digests, night-shift chores).
    * When the queue was built with {@link ProviderQueueOptions.ambientQuietMs},
-   * ambient entries dispatch only after a quiet window with no
-   * NON-ambient activity — see "Ambient admission control" in the
-   * class header. Distinct from `lane: 'background'`: background
+   * ambient entries use safe spare capacity immediately, or otherwise
+   * wait for a quiet window with no NON-ambient activity — see "Ambient
+   * admission control" in the class header. Distinct from `lane:
+   * 'background'`: background
    * covers anything that shouldn't cut in front of a typed chat turn,
    * which includes user-facing work (checkers page reactions, mid-turn
    * compaction a foreground turn awaits) that must NEVER be held.
@@ -224,10 +227,12 @@ export interface ProviderQueueOptions {
   maxWaitMs?: number;
   /**
    * Quiet window for ambient admission control — see the class header.
-   * Entries marked `ambient: true` dispatch only after this many ms
-   * with no non-ambient activity (and none running or pending). 0 or
-   * unset disables the gate (ambient entries behave like plain
-   * background). Local single-GPU engines pass
+   * On a multi-slot engine, entries marked `ambient: true` may dispatch
+   * sooner while one physical foreground slot remains protected. Once
+   * that headroom is reached, they wait for this many ms with no
+   * non-ambient activity (and none running or pending). 0 or unset
+   * disables the gate (ambient entries behave like plain background).
+   * Local single-GPU engines pass
    * {@link defaultAmbientQuietMs}; cloud queues leave it off.
    */
   ambientQuietMs?: number;
@@ -236,9 +241,9 @@ export interface ProviderQueueOptions {
 }
 
 /**
- * Default ambient quiet window for local engine queues: dispatch
- * housekeeping only after this long with no user-facing activity on
- * the engine. 3 minutes covers "the user is reading the reply /
+ * Default ambient quiet window for local engine queues when protected
+ * spare capacity is unavailable. 3 minutes covers "the user is reading
+ * the reply /
  * thinking about their move" without deferring chores much beyond an
  * active session's natural end. Override with `GEZEL_AMBIENT_QUIET_MS`
  * (milliseconds; `0` disables ambient gating entirely).
@@ -617,12 +622,20 @@ export class ProviderQueue {
   }
 
   /**
-   * True when ambient entries may dispatch: gate disabled, or no
-   * non-ambient work anywhere on the queue AND the quiet window has
-   * fully elapsed since the last non-ambient activity.
+   * True when ambient entries may dispatch.
+   *
+   * A multi-slot engine may spend spare capacity immediately while keeping
+   * one of its physical interactive slots unused. `running` is deliberately
+   * compared with `interactiveConcurrency - 1`, rather than with the queue's
+   * total `concurrency`: local queues carry one extra logical background lane
+   * for deadlock-breaking one-shots, but that lane is not another native KV
+   * slot. Once protected headroom is exhausted, the ordinary quiet-window
+   * rule applies.
    */
   private ambientGateOpen(now: number): boolean {
     if (this.ambientQuietMs <= 0) return true;
+    const protectedAmbientCeiling = this.interactiveConcurrency - 1;
+    if (protectedAmbientCeiling > 0 && this.running < protectedAmbientCeiling) return true;
     for (const ctx of this.runningContexts.values()) if (!ctx.ambient) return false;
     for (const p of this.pending) if (!p.ambient) return false;
     return now - this.lastNonAmbientActivityAt >= this.ambientQuietMs;

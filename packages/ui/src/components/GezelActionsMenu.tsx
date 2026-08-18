@@ -32,11 +32,14 @@ export function GezelActionsMenu({
   gezel,
   onDeleted,
   compact = false,
+  boringMode = false,
 }: {
   gezel: { id: string; name: string; storageScope?: 'user' | 'machine-shared' };
   onDeleted?: (gezelId: string) => void;
   /** Row menus are smaller and reveal on row hover/focus. */
   compact?: boolean;
+  /** Suppress playful, name-bearing copy when role-based names are enabled. */
+  boringMode?: boolean;
 }) {
   // Pick once per mounted detail pane: playful on each visit, stable while
   // the user moves between tabs or reads the confirmation.
@@ -71,6 +74,8 @@ export function GezelActionsMenu({
   };
 
   const personalized = personalizeEuphemism(euphemism, gezel.name);
+  const actionLabel = boringMode ? 'Remove this gezel' : personalized;
+  const menuLabel = boringMode ? actionLabel : `${actionLabel}… (Remove this gezel)`;
 
   return (
     <>
@@ -79,7 +84,7 @@ export function GezelActionsMenu({
           <button
             type="button"
             className={`gezel-actions-trigger${compact ? ' gezel-actions-trigger--row' : ''}`}
-            aria-label={`Actions for ${gezel.name}`}
+            aria-label={boringMode ? 'Actions for this gezel' : `Actions for ${gezel.name}`}
             title="Gezel actions"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -96,7 +101,7 @@ export function GezelActionsMenu({
             align="end"
           >
             <DropdownMenu.Item className="app-nav-menu-item danger" onSelect={openConfirm}>
-              {euphemism}…
+              {menuLabel}
             </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
@@ -104,15 +109,16 @@ export function GezelActionsMenu({
 
       <ConfirmDialog
         open={confirming}
-        title={`${personalized}?`}
+        title={`${actionLabel}?`}
         message={
           <>
-            This will permanently remove {gezel.name}, including their chats, memories, and
-            settings, from your system. You won't be able to get this gezel back.
+            This will permanently remove {boringMode ? 'this gezel' : gezel.name}, including their
+            chats, memories, and settings, from your system. You won't be able to get this gezel
+            back.
             {error && <span className="gezel-delete-error">{error}</span>}
           </>
         }
-        confirmLabel={personalized}
+        confirmLabel={actionLabel}
         danger
         onConfirm={removeGezel}
         onCancel={() => setConfirming(false)}

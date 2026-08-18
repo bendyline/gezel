@@ -1,6 +1,6 @@
 import type { GezmodelEngine, GezmodelImportReview } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from '../api.js';
+import { type ModelBundleExportProgress, api } from '../api.js';
 import { announceModelInventoryChanged } from '../model-inventory.js';
 import { Dialog } from '../primitives/index.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
@@ -9,6 +9,21 @@ interface OpenedBundleRequest {
   requestId: string;
   filename: string;
 }
+
+export type ModelBundleExportState =
+  | { phase: 'idle' }
+  | ({ phase: 'preparing' } & Pick<ModelBundleExportProgress, 'filename'>)
+  | ({ phase: 'writing' | 'verifying' } & Pick<
+      Extract<ModelBundleExportProgress, { phase: 'writing' | 'verifying' }>,
+      'filename' | 'bytesCompleted' | 'bytesTotal'
+    >)
+  | {
+      phase: 'complete';
+      filename: string;
+      bytesWritten: number;
+      verified: boolean;
+    }
+  | { phase: 'error'; filename: string; message: string };
 
 /** Small Models-screen affordance; the global controller owns the file input. */
 export function ImportModelBundleButton({ className }: { className?: string }) {
@@ -31,29 +46,132 @@ export function ImportModelBundleButton({ className }: { className?: string }) {
 export function useExportModelBundle(
   engine: GezmodelEngine,
   id: string,
-): { run: () => Promise<void>; busy: boolean; error: string | null } {
+): {
+  run: () => Promise<void>;
+  busy: boolean;
+  canceling: boolean;
+  error: string | null;
+  progress: ModelBundleExportState;
+  cancel: () => Promise<void>;
+  dismissProgress: () => void;
+} {
   const [busy, setBusy] = useState(false);
+  const [canceling, setCanceling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<ModelBundleExportState>({ phase: 'idle' });
+  const exportIdRef = useRef<string | null>(null);
+  const browserAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    const subscribe = window.__GEZEL__?.onModelBundleExportProgress;
+    if (!subscribe) return;
+    return subscribe((next) => {
+      if (next.exportId !== exportIdRef.current) return;
+      if (next.phase === 'preparing') {
+        setProgress({ phase: next.phase, filename: next.filename });
+      } else {
+        setProgress({
+          phase: next.phase,
+          filename: next.filename,
+          bytesCompleted: next.bytesCompleted,
+          ...(next.bytesTotal === undefined ? {} : { bytesTotal: next.bytesTotal }),
+        });
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      browserAbortRef.current?.abort();
+      const exportId = exportIdRef.current;
+      if (exportId) void window.__GEZEL__?.cancelModelBundleExport?.(exportId);
+    };
+  }, []);
+
   const run = useCallback(async () => {
     if (busy) return;
     setBusy(true);
+    setCanceling(false);
     setError(null);
+    const filename = `${portableFilename(id)}.gezmodel`;
     try {
       const native = window.__GEZEL__?.exportModelBundle;
       if (native) {
-        const result = await native(engine, id);
+        const exportId = globalThis.crypto.randomUUID();
+        exportIdRef.current = exportId;
+        const result = await native(engine, id, exportId);
         if (!result.ok) throw new Error(result.error);
+        if (result.canceled) {
+          setProgress({ phase: 'idle' });
+          return;
+        }
+        setProgress({
+          phase: 'complete',
+          filename: result.path.split(/[\\/]/).pop() || filename,
+          bytesWritten: result.bytesWritten,
+          verified: result.verified,
+        });
         return;
       }
-      const response = await api.exportModelBundle(engine, id);
-      await saveInBrowser(response, `${portableFilename(id)}.gezmodel`);
+
+      const controller = new AbortController();
+      browserAbortRef.current = controller;
+      setProgress({ phase: 'preparing', filename });
+      const response = await api.exportModelBundle(engine, id, controller.signal);
+      const saved = await saveInBrowser(
+        response,
+        filename,
+        (bytesCompleted, bytesTotal) => {
+          setProgress({ phase: 'writing', filename, bytesCompleted, bytesTotal });
+        },
+        controller.signal,
+      );
+      setProgress({
+        phase: 'complete',
+        filename,
+        bytesWritten: saved.bytesWritten,
+        verified: false,
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (err && typeof err === 'object' && 'name' in err && err.name === 'AbortError') {
+        setProgress({ phase: 'idle' });
+        return;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      setProgress({ phase: 'error', filename, message });
     } finally {
+      browserAbortRef.current = null;
+      exportIdRef.current = null;
+      setCanceling(false);
       setBusy(false);
     }
   }, [busy, engine, id]);
-  return { run, busy, error };
+
+  const cancel = useCallback(async () => {
+    if (!busy || canceling) return;
+    setCanceling(true);
+    const exportId = exportIdRef.current;
+    try {
+      if (exportId) {
+        const nativeCancel = window.__GEZEL__?.cancelModelBundleExport;
+        if (!nativeCancel) throw new Error('This version of Gezel cannot cancel native exports.');
+        const result = await nativeCancel(exportId);
+        if (!result.ok) throw new Error(result.error);
+      } else {
+        browserAbortRef.current?.abort();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setCanceling(false);
+    }
+  }, [busy, canceling]);
+
+  const dismissProgress = useCallback(() => {
+    setProgress({ phase: 'idle' });
+    setError(null);
+  }, []);
+  return { run, busy, canceling, error, progress, cancel, dismissProgress };
 }
 
 /** Per-installed-model export link with native streaming-save support. */
@@ -64,7 +182,10 @@ export function ExportModelBundleButton({
   engine: GezmodelEngine;
   id: string;
 }) {
-  const { run, busy, error } = useExportModelBundle(engine, id);
+  const { run, busy, canceling, error, progress, cancel, dismissProgress } = useExportModelBundle(
+    engine,
+    id,
+  );
 
   return (
     <>
@@ -76,7 +197,149 @@ export function ExportModelBundleButton({
           {error}
         </span>
       )}
+      <ModelBundleExportProgressDialog
+        state={progress}
+        canceling={canceling}
+        onCancel={cancel}
+        onDismiss={dismissProgress}
+      />
     </>
+  );
+}
+
+export function ModelBundleExportProgressDialog({
+  state,
+  canceling,
+  onCancel,
+  onDismiss,
+}: {
+  state: ModelBundleExportState;
+  canceling: boolean;
+  onCancel: () => Promise<void>;
+  onDismiss: () => void;
+}) {
+  if (state.phase === 'idle') return null;
+  const active =
+    state.phase === 'preparing' || state.phase === 'writing' || state.phase === 'verifying';
+  const meter =
+    (state.phase === 'writing' || state.phase === 'verifying') &&
+    state.bytesTotal !== undefined &&
+    state.bytesTotal > 0
+      ? {
+          max: state.bytesTotal,
+          value: Math.min(state.bytesCompleted, state.bytesTotal),
+        }
+      : null;
+  const progressLabel =
+    state.phase === 'preparing'
+      ? 'Preparing model bundle'
+      : state.phase === 'writing'
+        ? 'Model bundle write progress'
+        : state.phase === 'verifying'
+          ? 'Model bundle verification progress'
+          : undefined;
+
+  return (
+    <Dialog.Root open>
+      <Dialog.Portal>
+        <Dialog.Overlay />
+        <Dialog.Content
+          className="model-export-dialog"
+          onEscapeKeyDown={(event) => {
+            if (active) event.preventDefault();
+          }}
+          onPointerDownOutside={(event) => {
+            if (active) event.preventDefault();
+          }}
+        >
+          <Dialog.Title asChild>
+            <h3>
+              {state.phase === 'complete'
+                ? 'Model exported'
+                : state.phase === 'error'
+                  ? 'Model could not be exported'
+                  : `Exporting ${state.filename}`}
+            </h3>
+          </Dialog.Title>
+          <Dialog.Description asChild>
+            <div className="model-export-dialog-body">
+              {state.phase === 'preparing' && (
+                <p>
+                  Preparing and hashing the model before writing the bundle. Large models can take
+                  several minutes before the first bytes are ready.
+                </p>
+              )}
+              {state.phase === 'writing' && (
+                <p>
+                  Writing the bundle to the selected file. Keep Gezel open until verification
+                  finishes.
+                </p>
+              )}
+              {state.phase === 'verifying' && (
+                <p>
+                  The file is written. Gezel is reading it back and checking every file against its
+                  SHA-256 checksum.
+                </p>
+              )}
+              {active && (
+                <>
+                  <progress
+                    className="model-export-progress"
+                    aria-label={progressLabel}
+                    {...(meter ?? {})}
+                  />
+                  <span className="model-export-progress-copy">
+                    {state.phase === 'preparing'
+                      ? 'Inspecting model files…'
+                      : `${formatBytes(state.bytesCompleted)}${
+                          state.bytesTotal === undefined
+                            ? ''
+                            : ` of ${state.phase === 'writing' ? 'about ' : ''}${formatBytes(
+                                state.bytesTotal,
+                              )}`
+                        } · ${state.phase === 'writing' ? 'writing' : 'verified'}`}
+                  </span>
+                </>
+              )}
+              {state.phase === 'complete' && (
+                <output className="model-export-complete">
+                  <strong>{state.filename}</strong>
+                  <span>
+                    {state.verified
+                      ? `Export complete. Gezel wrote ${formatBytes(
+                          state.bytesWritten,
+                        )} and verified every bundled file.`
+                      : `Export complete. The browser wrote ${formatBytes(
+                          state.bytesWritten,
+                        )}; Gezel will perform full checksum verification when the bundle is imported.`}
+                  </span>
+                </output>
+              )}
+              {state.phase === 'error' && (
+                <p className="error" role="alert">
+                  {state.message}
+                </p>
+              )}
+            </div>
+          </Dialog.Description>
+          {active ? (
+            <Dialog.Actions>
+              <button type="button" disabled={canceling} onClick={() => void onCancel()}>
+                {canceling ? 'Canceling…' : 'Cancel'}
+              </button>
+            </Dialog.Actions>
+          ) : (
+            <Dialog.Actions>
+              <Dialog.Close asChild>
+                <button type="button" onClick={onDismiss}>
+                  Close
+                </button>
+              </Dialog.Close>
+            </Dialog.Actions>
+          )}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -251,7 +514,12 @@ function ImportReview({ review, error }: { review: GezmodelImportReview; error: 
   );
 }
 
-async function saveInBrowser(response: Response, suggestedName: string): Promise<void> {
+async function saveInBrowser(
+  response: Response,
+  suggestedName: string,
+  onProgress: (bytesCompleted: number, bytesTotal?: number) => void,
+  signal?: AbortSignal,
+): Promise<{ bytesWritten: number }> {
   const picker = (
     window as typeof window & {
       showSaveFilePicker?: (opts: {
@@ -270,19 +538,53 @@ async function saveInBrowser(response: Response, suggestedName: string): Promise
         },
       ],
     });
-    await response.body.pipeTo(await handle.createWritable());
-    return;
+    const writable = await handle.createWritable();
+    const reader = response.body.getReader();
+    const writer = writable.getWriter();
+    const bytesTotal = responseModelBytes(response);
+    let bytesWritten = 0;
+    onProgress(bytesWritten, bytesTotal);
+    try {
+      while (true) {
+        signal?.throwIfAborted();
+        const next = await reader.read();
+        if (next.done) break;
+        bytesWritten += next.value.byteLength;
+        await writer.write(next.value);
+        onProgress(bytesWritten, bytesTotal);
+      }
+      await writer.close();
+    } catch (error) {
+      await writer.abort(error).catch(() => {});
+      throw error;
+    }
+    return { bytesWritten };
   }
 
   // Compatibility fallback for browsers without the File System Access API.
   // The Electron shell and Chromium desktop path above both stream to disk.
+  signal?.throwIfAborted();
   const blob = await response.blob();
+  signal?.throwIfAborted();
+  onProgress(blob.size, responseModelBytes(response));
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = suggestedName;
+  document.body.appendChild(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+  anchor.remove();
+  // Revoking synchronously can race the browser's download handoff and leave
+  // a zero-byte file. Give the compatibility download time to retain the URL.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  return { bytesWritten: blob.size };
+}
+
+function responseModelBytes(response: Response): number | undefined {
+  const raw = response.headers.get('x-gezel-model-bytes');
+  if (!raw || !/^\d+$/.test(raw)) return undefined;
+  const bytes = Number(raw);
+  return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : undefined;
 }
 
 function portableFilename(id: string): string {

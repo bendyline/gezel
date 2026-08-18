@@ -18,14 +18,22 @@ import { TasksView } from '../views/TasksView.js';
 
 interface TabContentProps {
   tab: RecentTab;
+  activeProjectsByGezel?: ReadonlyMap<string, ReadonlySet<string>>;
+  activeTurnsReady?: boolean;
 }
 
-export function TabContent({ tab }: TabContentProps) {
+export function TabContent({ tab, activeProjectsByGezel, activeTurnsReady }: TabContentProps) {
   switch (tab.kind) {
     case 'project':
       return <ProjectDetailView projectId={tab.id} />;
     case 'gezel':
-      return <GezelDetail gezelId={tab.id} />;
+      return (
+        <GezelDetail
+          gezelId={tab.id}
+          workingProjectIds={activeProjectsByGezel?.get(tab.id)}
+          activeTurnsReady={activeTurnsReady}
+        />
+      );
     case 'document':
       return <DocumentDetail path={tab.path} />;
     case 'task':
@@ -41,7 +49,12 @@ export function TabContent({ tab }: TabContentProps) {
         case 'projects':
           return <ProjectsView />;
         case 'gezels':
-          return <GezellenView />;
+          return (
+            <GezellenView
+              activeProjectsByGezel={activeProjectsByGezel}
+              activeTurnsReady={activeTurnsReady}
+            />
+          );
         case 'documents':
           return <DocumentsView />;
         case 'tasks':

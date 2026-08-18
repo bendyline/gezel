@@ -1,3 +1,4 @@
+import { externalGezelModelId } from '@bendyline/gezel';
 import type {
   GezelApp,
   ChatMessage as SdkChatMessage,
@@ -14,10 +15,10 @@ import type { Logger } from './log.js';
  *
  *   - We register a SINGLE provider vendor (`gezel`); each gezel
  *     surfaces as a distinct `LanguageModelChatInformation` entry
- *     (id = `gezel:<gezelId>`, family = the gezel's underlying provider).
+ *     (id = `gezel:<role>-<name>`, family = the gezel's underlying provider).
  *   - VS Code calls `provideLanguageModelChatResponse` when the user
  *     picks a gezel and sends a message. We forward through the SDK's
- *     `app.chat({ model: 'gezel:<id>', ... })`, which makes the daemon
+ *     `app.chat({ model: 'gezel:<role>-<name>', ... })`, which makes the daemon
  *     load the gezel's persona + provider before invoking inference.
  *   - The provider auto-refreshes its model list via
  *     `onDidChangeLanguageModelChatInformation` when the gezel roster
@@ -36,6 +37,8 @@ import type { Logger } from './log.js';
  */
 interface GezelEntry {
   id: string;
+  /** Advertised model id from current daemons; older daemons omit it. */
+  modelId?: string;
   name: string;
   description?: string;
   role?: string;
@@ -168,7 +171,7 @@ export class GezelLanguageModelProvider implements vscode.LanguageModelChatProvi
     }
     const sdkTools = vscodeToolsToSdk(options.tools);
     const stream = await this.app.chat({
-      model: model.id, // already `gezel:<gezelId>`
+      model: model.id, // already `gezel:<role>-<name>`
       messages: sdkMessages,
       stream: true,
       ...(sdkTools && sdkTools.length > 0 ? { tools: sdkTools } : {}),
@@ -327,7 +330,7 @@ export class GezelLanguageModelProvider implements vscode.LanguageModelChatProvi
  * expects.
  *
  *   - `id` is what we route the eventual `chat()` call against.
- *     Format: `gezel:<gezelId>` — the same string the public
+ *     Format: `gezel:<role>-<name>` — the same string the public
  *     `/v1/chat/completions` route accepts.
  *   - `family` carries the gezel's effective provider (after install
  *     defaults) so VS Code's selector matching (`{family: 'copilot'}`)
@@ -357,7 +360,7 @@ function toChatInformation(g: GezelEntry): vscode.LanguageModelChatInformation {
     tooltipParts.push(`Provider: ${effectiveProvider}`);
   }
   return {
-    id: `gezel:${g.id}`,
+    id: g.modelId ?? externalGezelModelId(g),
     name: `Gezel: ${g.name}`,
     family: effectiveProvider,
     version: '1',

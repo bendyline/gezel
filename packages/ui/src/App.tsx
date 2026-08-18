@@ -76,6 +76,11 @@ function readStoredSelection(): RecentTab | null {
 
 type EngagementMode = 'proactive' | 'scheduled' | 'reactive' | 'off';
 
+type ActiveTurnAddress = {
+  projectId: string;
+  gezelId: string;
+};
+
 /**
  * Embedded-mode detector. Read once at module load; the URL doesn't
  * change without a full reload, so a stable value avoids hooks-rules
@@ -146,6 +151,10 @@ function FullApp() {
   // global SSE stream + the same listQuestions call the Home badge makes — no
   // extra endpoints or connections.
   const [activeProjectIds, setActiveProjectIds] = useState<Set<string>>(new Set());
+  const [activeProjectsByGezel, setActiveProjectsByGezel] = useState<Map<string, Set<string>>>(
+    new Map(),
+  );
+  const [activeTurnsReady, setActiveTurnsReady] = useState(false);
   const [pendingByProject, setPendingByProject] = useState<Map<string, number>>(new Map());
   // Projects with a "poisoned" session — last turn aborted, awaiting a user
   // turn to clear. Durable (survives reload) so it's seeded from a real fetch,
@@ -153,17 +162,41 @@ function FullApp() {
   const [poisonedProjects, setPoisonedProjects] = useState<
     Map<string, { sessionId: string; gezelId: string; error: string }>
   >(new Map());
-  // sessionId → projectId for every turn currently mid-flight. Recomputed into
-  // `activeProjectIds` only when project membership actually changes, so a
-  // burst of `delta` events doesn't thrash the sidebar.
-  const activeSessionsRef = useRef<Map<string, string>>(new Map());
-  const recomputeActiveProjects = useCallback(() => {
-    const next = new Set(activeSessionsRef.current.values());
+  // sessionId → gezel/project address for every turn currently mid-flight.
+  // Recomputed into navigation-friendly indexes only when turn membership
+  // changes, so a burst of `delta` events doesn't thrash the sidebar.
+  const activeSessionsRef = useRef<Map<string, ActiveTurnAddress>>(new Map());
+  const recomputeActiveTurns = useCallback(() => {
+    const next = new Set<string>();
+    const nextByGezel = new Map<string, Set<string>>();
+    for (const turn of activeSessionsRef.current.values()) {
+      next.add(turn.projectId);
+      const projects = nextByGezel.get(turn.gezelId) ?? new Set<string>();
+      projects.add(turn.projectId);
+      nextByGezel.set(turn.gezelId, projects);
+    }
     setActiveProjectIds((prev) => {
       if (prev.size === next.size && [...prev].every((id) => next.has(id))) return prev;
       return next;
     });
+    setActiveProjectsByGezel((prev) => {
+      const unchanged =
+        prev.size === nextByGezel.size &&
+        [...prev].every(([gezelId, projectIds]) => {
+          const nextProjectIds = nextByGezel.get(gezelId);
+          return (
+            nextProjectIds !== undefined &&
+            projectIds.size === nextProjectIds.size &&
+            [...projectIds].every((projectId) => nextProjectIds.has(projectId))
+          );
+        });
+      return unchanged ? prev : nextByGezel;
+    });
   }, []);
+  const activeGezelIds = useMemo(
+    () => new Set(activeProjectsByGezel.keys()),
+    [activeProjectsByGezel],
+  );
   const [engagementMode, setEngagementMode] = useState<EngagementMode>('proactive');
   const [nightShift, setNightShift] = useState<{
     active: boolean;
@@ -445,13 +478,16 @@ function FullApp() {
     api
       .listInflightTurns()
       .then(({ inflight }) => {
-        const m = new Map<string, string>();
-        for (const t of inflight) m.set(t.sessionId, t.projectId);
+        const m = new Map<string, ActiveTurnAddress>();
+        for (const t of inflight) {
+          m.set(t.sessionId, { projectId: t.projectId, gezelId: t.gezelId });
+        }
         activeSessionsRef.current = m;
-        recomputeActiveProjects();
+        recomputeActiveTurns();
+        setActiveTurnsReady(true);
       })
-      .catch(() => {});
-  }, [recomputeActiveProjects]);
+      .catch(() => setActiveTurnsReady(true));
+  }, [recomputeActiveTurns]);
   const refreshPoisoned = useCallback(() => {
     api
       .listPoisonedProjects()
@@ -497,10 +533,13 @@ function FullApp() {
           // and closes on done/error/cancelled. Mount seed + 20s reconcile cover turns we
           // joined mid-flight.
           if (ev.type === 'user_message') {
-            activeSessionsRef.current.set(env.sessionId, env.projectId);
-            recomputeActiveProjects();
+            activeSessionsRef.current.set(env.sessionId, {
+              projectId: env.projectId,
+              gezelId: env.gezelId,
+            });
+            recomputeActiveTurns();
           } else if (ev.type === 'done' || ev.type === 'error' || ev.type === 'cancelled') {
-            if (activeSessionsRef.current.delete(env.sessionId)) recomputeActiveProjects();
+            if (activeSessionsRef.current.delete(env.sessionId)) recomputeActiveTurns();
           }
           // Poisoned tracking: a failed turn poisons the session (optimistic
           // paint now, since the persisted lastTurnError lands a beat later);
@@ -589,7 +628,7 @@ function FullApp() {
       }
     })();
     return () => ctrl.abort();
-  }, [refreshPendingCount, recomputeActiveProjects, refreshPoisoned]);
+  }, [refreshPendingCount, recomputeActiveTurns, refreshPoisoned]);
 
   useEffect(() => {
     const platform = window.__GEZEL__?.platform;
@@ -747,6 +786,7 @@ function FullApp() {
           onSelect={commitSelection}
           onOpenArea={openArea}
           activeProjectIds={activeProjectIds}
+          activeGezelIds={activeGezelIds}
           pendingByProject={pendingByProject}
           poisonedProjects={poisonedProjects}
         />
@@ -761,7 +801,11 @@ function FullApp() {
             />
           ) : (
             <TabErrorBoundary key={tabKey(selection)} resetKey={tabKey(selection)}>
-              <TabContent tab={selection} />
+              <TabContent
+                tab={selection}
+                activeProjectsByGezel={activeProjectsByGezel}
+                activeTurnsReady={activeTurnsReady}
+              />
             </TabErrorBoundary>
           )}
         </main>

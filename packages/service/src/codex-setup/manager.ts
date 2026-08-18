@@ -23,6 +23,7 @@ import {
   asError,
   createMutationQueue,
   ensurePrivateDir,
+  findHarnessModel,
   harnessBridgeSnapshot,
   harnessTokenRecord,
   isExactHarnessToken,
@@ -48,6 +49,8 @@ const MINIMUM_CODEX_VERSION = [0, 147, 0] as const;
 interface SetupState {
   version: 1;
   model: string;
+  /** Stable identity behind a human-readable gezel model id. */
+  gezelId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -192,7 +195,7 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
     } else if (state) {
       if (!endpointsEnabled) reasons.push('Connected-app model serving is turned off.');
       if (!versionSupported) reasons.push(codexVersionReason(detection));
-      if (!models.some((model) => model.id === state.model)) {
+      if (!findHarnessModel(models, state.model, state.gezelId)) {
         reasons.push('The configured gezel or local model is no longer available.');
       }
       if (profile === null) reasons.push('The managed Codex profile is missing.');
@@ -202,7 +205,7 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         reasons.push('The managed Codex credential file needs repair.');
       }
       if (profile !== null) {
-        const selected = models.find((model) => model.id === state.model);
+        const selected = findHarnessModel(models, state.model, state.gezelId);
         if (selected) {
           const expected = buildProfile({
             model: selected,
@@ -242,7 +245,12 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
       status: {
         state: statusState,
         models,
-        ...(state ? { configuredModel: state.model } : {}),
+        ...(state
+          ? {
+              configuredModel:
+                findHarnessModel(models, state.model, state.gezelId)?.id ?? state.model,
+            }
+          : {}),
         ...(recommendedModel ? { recommendedModel } : {}),
         reasons,
         ...(message ? { message } : {}),
@@ -304,7 +312,7 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
           before.status.message ?? `${profilePath} is not managed by Gezel.`,
         );
       }
-      const selected = before.models.find((model) => model.id === input.model);
+      const selected = findHarnessModel(before.models, input.model);
       if (!selected) {
         throw new CodexSetupError(
           'model_not_available',
@@ -356,6 +364,7 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         const nextState: SetupState = {
           version: CODEX_SETUP_REVISION,
           model: selected.id,
+          ...(selected.kind === 'gezel' ? { gezelId: selected.gezelId } : {}),
           createdAt,
           updatedAt: now().toISOString(),
         };
@@ -469,7 +478,7 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         return;
       }
       const models = await listEligibleModels(config);
-      const selected = models.find((model) => model.id === state.model);
+      const selected = findHarnessModel(models, state.model, state.gezelId);
       if (!selected) {
         await opts.bridge.stop();
         return;
@@ -498,6 +507,22 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         }),
         { mode: 0o600, durable: true },
       );
+      const selectedGezelId = selected.kind === 'gezel' ? selected.gezelId : undefined;
+      if (state.model !== selected.id || state.gezelId !== selectedGezelId) {
+        await writeSecurityJson(
+          statePath,
+          `${JSON.stringify(
+            {
+              ...state,
+              model: selected.id,
+              gezelId: selectedGezelId,
+              updatedAt: now().toISOString(),
+            },
+            null,
+            2,
+          )}\n`,
+        );
+      }
     });
 
   return {

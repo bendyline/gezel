@@ -136,7 +136,13 @@ export type AmbientDashboardDisplayTarget = z.infer<typeof AmbientDashboardDispl
  * retries the same input.
  */
 export const AmbientDashboardStateSchema = z.object({
+  /** Most recent attempt, successful or not. Used for automatic-run throttling. */
   lastRunAt: z.string().optional(),
+  /** Most recent successful PNG render. Kept separate so failed attempts cannot masquerade as output. */
+  lastGeneratedAt: z.string().optional(),
+  /** Most recent failed attempt and its user-facing reason. Cleared by the next successful render. */
+  lastFailedAt: z.string().optional(),
+  lastError: z.string().optional(),
   inputHash: z.string().optional(),
   /** Filename (not path) of the newest dated PNG, e.g. `dashboard-20260817-1400.png`. */
   lastFile: z.string().optional(),
@@ -148,6 +154,9 @@ export const AmbientDashboardStatusResponseSchema = z.object({
   enabled: z.boolean(),
   running: z.boolean(),
   lastGeneratedAt: z.string().nullable(),
+  /** Latest failed attempt. Optional for compatibility with older daemons. */
+  lastFailedAt: z.string().nullable().optional(),
+  lastError: z.string().nullable().optional(),
   latestFilename: z.string().nullable(),
   resolution: AmbientDashboardResolutionSchema,
   /** Squisq theme selected for the next render. Optional for older daemons. */

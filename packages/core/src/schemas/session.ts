@@ -4,6 +4,7 @@ import { GateCheckSchema, GateScriptRefSchema } from './gate.js';
 import {
   ChatMessageSchema,
   ChatMessageToolCallSchema,
+  ChatSessionSourceSchema,
   ChatTurnErrorDetailSchema,
   ProviderNameSchema,
   ReferencedFileSchema,
@@ -100,6 +101,8 @@ export const ChatSessionSchema = z.object({
   createdAt: z.string(),
   lastActivityAt: z.string(),
   archived: z.boolean().optional(),
+  /** Provenance for a read-only conversation mirrored from another app. */
+  source: ChatSessionSourceSchema.optional(),
   messages: z.array(ChatMessageSchema),
   providerState: z.object({
     copilotSessionId: z.string().optional(),
@@ -334,6 +337,7 @@ export const ChatSessionSummarySchema = ChatSessionSchema.pick({
   createdAt: true,
   lastActivityAt: true,
   archived: true,
+  source: true,
   // Surfaced so callers that only have the summary (e.g. the ambient-nudge
   // scheduler) can tell whether a session's last turn aborted without
   // loading the full record. Set on abort, cleared on the next successful
@@ -498,6 +502,8 @@ export const TimelineMessageSchema = z.object({
   sessionCreatedAt: z.string(),
   sessionLastActivityAt: z.string(),
   sessionArchived: z.boolean().optional(),
+  /** Provenance for a read-only conversation mirrored from another app. */
+  sessionSource: ChatSessionSourceSchema.optional(),
   /**
    * Session-pinned provider (from `ChatSession.providerName`). Captured
    * at session creation from the gezel-override-then-config-default

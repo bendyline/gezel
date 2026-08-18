@@ -100,6 +100,33 @@ describe('Sidebar', () => {
     expect(await screen.findByRole('button', { name: 'Actions for Maya' })).toBeInTheDocument();
   });
 
+  it('shows a working indicator on an active gezel and opens that gezel from it', async () => {
+    window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ gezels: true }));
+    const onSelect = vi.fn();
+    const preferWorking = vi.fn();
+    window.addEventListener('gezel:prefer-working-project', preferWorking);
+    render(
+      <Sidebar
+        selection={null}
+        onSelect={onSelect}
+        onOpenArea={vi.fn()}
+        activeGezelIds={new Set(['g1'])}
+      />,
+    );
+
+    const working = await screen.findByRole('button', {
+      name: 'Maya is working. Open gezel.',
+    });
+    expect(working.querySelectorAll('.project-row-thinking-dot')).toHaveLength(3);
+
+    fireEvent.click(working);
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ kind: 'gezel', id: 'g1' }));
+    expect(preferWorking).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: { gezelId: 'g1' } }),
+    );
+    window.removeEventListener('gezel:prefer-working-project', preferWorking);
+  });
+
   it('labels Home with the configured Meester name', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'mock',

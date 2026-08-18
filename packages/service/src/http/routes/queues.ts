@@ -14,6 +14,7 @@
  */
 
 import { Hono } from 'hono';
+import { liveProviderConcurrency } from '../../providers/native/provider-pool.js';
 import type { ServiceContext } from '../context.js';
 import {
   MACHINE_ENGINE_PROVIDER_NAMES,
@@ -62,7 +63,7 @@ export function queueRoutes(ctx: ServiceContext): Hono {
       // The EngineStatusPill surfaces it as "N concurrent sessions".
       providers[name] = {
         ...provider.queue.describe(),
-        maxConcurrency: provider.batch?.maxConcurrency ?? 1,
+        maxConcurrency: liveProviderConcurrency(provider),
       };
     }
     // Fold in pooled local-engine replicas. Local providers (llama-cpp /
@@ -223,6 +224,8 @@ function sanitizeBrokerProviderQueue(value: unknown): Record<string, unknown> | 
   const queuedInteractive = finiteNumber(value.queuedInteractive);
   const queuedBackground = finiteNumber(value.queuedBackground);
   const concurrency = finiteNumber(value.concurrency);
+  const interactiveConcurrency = finiteNumber(value.interactiveConcurrency);
+  const reportedMaxConcurrency = finiteNumber(value.maxConcurrency);
   if (
     running === undefined ||
     queuedInteractive === undefined ||
@@ -279,14 +282,18 @@ function sanitizeBrokerProviderQueue(value: unknown): Record<string, unknown> | 
     ...(finiteNumber(value.ambientHeld) !== undefined
       ? { ambientHeld: finiteNumber(value.ambientHeld) }
       : {}),
-    ...(finiteNumber(value.interactiveConcurrency) !== undefined
-      ? { interactiveConcurrency: finiteNumber(value.interactiveConcurrency) }
-      : {}),
+    ...(interactiveConcurrency !== undefined ? { interactiveConcurrency } : {}),
     ...(finiteNumber(value.backgroundConcurrency) !== undefined
       ? { backgroundConcurrency: finiteNumber(value.backgroundConcurrency) }
       : {}),
-    ...(finiteNumber(value.maxConcurrency) !== undefined
-      ? { maxConcurrency: finiteNumber(value.maxConcurrency) }
+    ...(reportedMaxConcurrency !== undefined || interactiveConcurrency !== undefined
+      ? {
+          // Tolerate a rolling-upgrade broker that reports a stale serial
+          // batch fallback beside a wider live interactive queue. The queue
+          // cap is never the extra logical background lane, so it is safe to
+          // use as the compatible floor for the displayed engine width.
+          maxConcurrency: Math.max(1, reportedMaxConcurrency ?? 0, interactiveConcurrency ?? 0),
+        }
       : {}),
     active,
     pending,

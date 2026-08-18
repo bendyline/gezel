@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { vi } from 'vitest';
+import { MockProvider } from '../providers/mock.js';
 import type { ServiceContext } from './context.js';
 import {
   OPENCODE_BRIDGE_MARKER_HEADER,
@@ -6,7 +8,13 @@ import {
   createOpenCodeBridgeController,
 } from './opencode-bridge.js';
 
-function context(opts: { enabled?: boolean } = {}): ServiceContext {
+function context(
+  opts: {
+    enabled?: boolean;
+    provider?: MockProvider;
+    beginExternalConversation?: (...args: unknown[]) => Promise<unknown>;
+  } = {},
+): ServiceContext {
   const records = new Map([
     [
       'openai-token',
@@ -39,11 +47,28 @@ function context(opts: { enabled?: boolean } = {}): ServiceContext {
     },
     store: {
       readConfig: async () => ({ openaiEndpoints }),
-      listGezels: async () => [],
+      listGezels: async () => [{ id: 'sipho', name: 'Sipho' }],
+      getGezel: async (id: string) =>
+        id === 'sipho'
+          ? {
+              id: 'sipho',
+              name: 'Sipho',
+              about: 'You are Sipho.',
+              parsed: { frontmatter: {} },
+            }
+          : null,
     },
     chat: {
       listModelsForProvider: async () => [],
+      getProviderForModel: async () => opts.provider!,
+      providerForGezel: async () => 'copilot',
+      resolveModelSessionDefaults: async () => null,
+      recordExternalUsage: () => undefined,
+      ...(opts.beginExternalConversation
+        ? { beginExternalConversation: opts.beginExternalConversation }
+        : {}),
     },
+    history: { log: async () => undefined },
   } as unknown as ServiceContext;
 }
 
@@ -108,6 +133,51 @@ describe('buildOpenCodeBridgeApp', () => {
     // Codex's bridge answers `{ models: [...] }`; OpenCode reads its roster
     // from the managed config and expects the ordinary OpenAI envelope here.
     await expect(listed.json()).resolves.toMatchObject({ object: 'list' });
+  });
+
+  it('mirrors the OpenCode session under the selected gezel and working project', async () => {
+    const provider = new MockProvider();
+    provider.script('Mirrored reply.');
+    const finish = vi.fn(async () => undefined);
+    const beginExternalConversation = vi.fn(async () => ({
+      sessionId: 'external-opencode-test',
+      projectId: 'racing-game',
+      onContentDelta: vi.fn(),
+      onReasoningDelta: vi.fn(),
+      onToolArgsDelta: vi.fn(),
+      finish,
+      fail: vi.fn(async () => undefined),
+    }));
+    const app = buildOpenCodeBridgeApp(context({ provider, beginExternalConversation }));
+
+    const response = await app.request('http://127.0.0.1/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        ...auth(),
+        'content-type': 'application/json',
+        'x-gezel-external-conversation-id': 'opencode-session-42',
+        'x-gezel-working-directory': '/work/racing-game',
+      },
+      body: JSON.stringify({
+        model: 'gezel:sipho',
+        messages: [{ role: 'user', content: 'Build a racing game' }],
+        stream: true,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('data: [DONE]');
+    expect(beginExternalConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceId: 'opencode',
+        sourceName: 'OpenCode',
+        externalConversationId: 'opencode-session-42',
+        workingDirectory: '/work/racing-game',
+        gezelId: 'sipho',
+        messages: [{ role: 'user', content: 'Build a racing game' }],
+      }),
+    );
+    expect(finish).toHaveBeenCalledWith({ content: 'Mirrored reply.', finishReason: 'stop' });
   });
 
   it('applies the Connected Apps master switch before inference', async () => {

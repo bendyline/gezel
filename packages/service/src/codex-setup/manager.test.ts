@@ -121,14 +121,12 @@ describe('CodexSetupManager', () => {
       model: 'coder.gguf',
       updatedAt: '2026-08-10T00:00:00.000Z',
     };
+    const mayaModelId = 'gezel:developer-maya';
     const f = await fixture({ gezels: [maya], meesterGezelId: maya.id });
 
     const before = await f.manager.status();
-    expect(before.recommendedModel).toBe(`gezel:${maya.id}`);
-    expect(before.models.map((model) => model.id)).toEqual([
-      `gezel:${maya.id}`,
-      'llama-cpp:coder.gguf',
-    ]);
+    expect(before.recommendedModel).toBe(mayaModelId);
+    expect(before.models.map((model) => model.id)).toEqual([mayaModelId, 'llama-cpp:coder.gguf']);
     expect(before.models[0]).toMatchObject({
       kind: 'gezel',
       label: 'Maya',
@@ -138,18 +136,18 @@ describe('CodexSetupManager', () => {
       contextWindow: 16_384,
     });
 
-    await f.manager.configure({ model: `gezel:${maya.id}` });
+    await f.manager.configure({ model: mayaModelId });
     const profile = await readFile(
       join(f.codexHome, `${CODEX_SETUP_PROFILE_NAME}.config.toml`),
       'utf8',
     );
-    expect(profile).toContain(`model = "gezel:${maya.id}"`);
+    expect(profile).toContain(`model = "${mayaModelId}"`);
 
     const catalog = JSON.parse(
       await readFile(join(f.home, 'integrations', 'codex', 'models.json'), 'utf8'),
     ) as { models: Array<Record<string, unknown>> };
     expect(catalog.models[0]).toMatchObject({
-      slug: `gezel:${maya.id}`,
+      slug: mayaModelId,
       display_name: 'Maya',
       context_window: 16_384,
     });

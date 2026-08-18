@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AmbientDashboardDisplayTargetSchema,
+  AmbientDashboardStateSchema,
   AmbientDashboardStatusResponseSchema,
   AmbientDashboardThemeSchema,
 } from './ambient-dashboard.js';
@@ -48,6 +49,8 @@ describe('ambient dashboard themes', () => {
       enabled: true,
       running: false,
       lastGeneratedAt: null,
+      lastFailedAt: null,
+      lastError: null,
       latestFilename: null,
       resolution: 'fhd',
       themeId: 'gezellig',
@@ -71,5 +74,23 @@ describe('ambient dashboard themes', () => {
         resolution: 'fhd',
       }),
     ).not.toHaveProperty('themeId');
+  });
+});
+
+describe('AmbientDashboardStateSchema', () => {
+  it('keeps successful output metadata separate from a later failed attempt', () => {
+    expect(
+      AmbientDashboardStateSchema.parse({
+        lastRunAt: '2026-08-17T23:49:00.000Z',
+        lastGeneratedAt: '2026-08-17T22:53:00.000Z',
+        lastFailedAt: '2026-08-17T23:49:00.000Z',
+        lastError: 'one-shot timed out',
+        lastFile: 'dashboard-20260817-1552.png',
+      }),
+    ).toMatchObject({
+      lastGeneratedAt: '2026-08-17T22:53:00.000Z',
+      lastFailedAt: '2026-08-17T23:49:00.000Z',
+      lastError: 'one-shot timed out',
+    });
   });
 });

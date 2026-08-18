@@ -81,6 +81,7 @@ function mkDesc(partial: Partial<Describe>): Describe {
 class QueueFakeProvider extends FakeProvider {
   desc: Describe = mkDesc({});
   batchWidth = 1;
+  launchedSlots: number | undefined;
   readonly queue = {
     describe: () => this.desc,
     snapshot: () => ({
@@ -98,6 +99,14 @@ class QueueFakeProvider extends FakeProvider {
   } as unknown as import('../queue.js').ProviderQueue;
   get batch(): import('../types.js').BatchCapability {
     return { maxConcurrency: this.batchWidth } as unknown as import('../types.js').BatchCapability;
+  }
+  engineLaunchSnapshot() {
+    return this.launchedSlots === undefined
+      ? undefined
+      : {
+          startedAt: 1_700_000_000_000,
+          diagnostics: { slots: this.launchedSlots },
+        };
   }
 }
 
@@ -830,6 +839,26 @@ describe('ProviderPool', () => {
     expect(s.maxConcurrency).toBe(6);
     expect(s.active.map((a) => a.job)).toEqual(['digest · client-project']);
     expect(s.pending.map((p) => p.job)).toEqual(['memory']);
+  });
+
+  it('queueSummaries reports the live launch width instead of a stale serial batch fallback', async () => {
+    const made: QueueFakeProvider[] = [];
+    const broker = new CapacityBroker({ budgetBytes: 64 * GB });
+    const pool = new ProviderPool({
+      broker,
+      builders: { 'llama-cpp': mkQueueBuilder(5 * GB, made) },
+    });
+    await pool.ensure('llama-cpp', 'qwen', 0, 5 * GB);
+
+    made[0]!.batchWidth = 1;
+    made[0]!.desc = mkDesc({
+      concurrency: 5,
+      interactiveConcurrency: 4,
+      backgroundConcurrency: 3,
+    });
+    made[0]!.launchedSlots = 4;
+
+    expect(pool.queueSummaries().get('llama-cpp')!.maxConcurrency).toBe(4);
   });
 
   it('queueSummaries returns an empty map for an empty pool', () => {

@@ -518,6 +518,34 @@ afterEach(() => {
 });
 
 describe('LlamaCppProvider physical request gate', () => {
+  it('uses every supervised launch slot for interactive batching by default', () => {
+    const supervisor = {
+      async ensureRunning() {
+        return { command: 'fake', args: [], baseUrl: 'http://llama.test' };
+      },
+      markUsed() {},
+      async stop() {},
+    } as unknown as NativeEngineSupervisor;
+    const provider = new LlamaCppProvider({
+      supervisor,
+      concurrency: 4,
+    });
+
+    expect(provider.batch.maxConcurrency).toBe(4);
+    expect(provider.queue.interactiveConcurrency).toBe(4);
+    expect(provider.getLaunchedSlots()).toBe(4);
+  });
+
+  it('keeps an external server serial unless its batch width is explicit', () => {
+    const provider = new LlamaCppProvider({
+      baseUrl: 'http://llama.test',
+      concurrency: 4,
+    });
+
+    expect(provider.batch.maxConcurrency).toBe(1);
+    expect(provider.queue.interactiveConcurrency).toBe(1);
+  });
+
   it('serializes cache preparation and streaming at one launched slot while preserving the background queue lane', async () => {
     let releaseFirstFetch!: () => void;
     const firstFetchBlocked = new Promise<void>((resolve) => {

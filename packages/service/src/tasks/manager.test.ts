@@ -1449,6 +1449,92 @@ describe('TaskManager craftbookParams interpolation', () => {
     expect(overridden.craftbookParams).toEqual({ reviewId: 'release-candidate' });
   });
 
+  it('provides per-task runtime placeholders and expands only declared defaults', async () => {
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            ...bookWithPlaceholders,
+            id,
+            paramSchema: {
+              type: 'object',
+              properties: {
+                workPath: { type: 'string', default: 'powerpoint/task-{{task.num}}' },
+                outputPath: { type: 'string', default: '{{workPath}}/deck.pptx' },
+                content: { type: 'string', default: '' },
+              },
+            },
+            steps: [
+              {
+                id: 'report',
+                name: 'Write {{task.ref}} for {{task.projectId}}',
+                prompt:
+                  'Write {{workPath}}/outline.md, then preserve this source: {{content}}.',
+                advanceWhen: {
+                  file: '{{workPath}}/outline.md',
+                  artifact: true,
+                  minBytes: 400,
+                },
+                gate: {
+                  at: 'completion' as const,
+                  checks: [
+                    {
+                      kind: 'minBytes' as const,
+                      file: '{{workPath}}/outline.md',
+                      bytes: 400,
+                      artifact: true,
+                    },
+                  ],
+                  onReject: 'report',
+                  maxAttempts: 3,
+                },
+                next: 'done',
+              },
+              { id: 'done', name: 'Done', terminal: true },
+            ],
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+    const task = await tasks.create('website', {
+      title: 'Named deck',
+      craftbookId: 'powerpoint-deck',
+      assignee: { kind: 'user' },
+      craftbookParams: { content: 'Keep {{topic}} literal.' },
+    });
+
+    const step = task.craftbook.steps[0]!;
+    expect(step.name).toBe(`Write website/${task.num} for website`);
+    expect(step.prompt).toContain(`powerpoint/task-${task.num}/outline.md`);
+    expect(step.prompt).toContain('Keep {{topic}} literal.');
+    expect(step.advanceWhen?.file).toBe(`powerpoint/task-${task.num}/outline.md`);
+    expect((step.gate?.checks?.[0] as { file?: string }).file).toBe(
+      `powerpoint/task-${task.num}/outline.md`,
+    );
+    expect(task.craftbookParams).toEqual({
+      workPath: `powerpoint/task-${task.num}`,
+      outputPath: `powerpoint/task-${task.num}/deck.pptx`,
+      content: 'Keep {{topic}} literal.',
+    });
+    expect(task.craftbookParams).not.toHaveProperty('task.num');
+
+    const nextTask = await tasks.create('website', {
+      title: 'Another deck',
+      craftbookId: 'powerpoint-deck',
+      assignee: { kind: 'user' },
+    });
+    expect(nextTask.num).not.toBe(task.num);
+    expect(nextTask.craftbook.steps[0]?.advanceWhen?.file).toBe(
+      `powerpoint/task-${nextTask.num}/outline.md`,
+    );
+    expect(nextTask.craftbookParams?.outputPath).toBe(
+      `powerpoint/task-${nextTask.num}/deck.pptx`,
+    );
+    expect(nextTask.craftbookParams?.workPath).not.toBe(task.craftbookParams?.workPath);
+  });
+
   it('leaves the snapshot byte-identical when no params are given', async () => {
     tasks.setCraftbookResolver({
       async resolve(id) {

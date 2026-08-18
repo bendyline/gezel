@@ -187,6 +187,34 @@ describe('QueueMeter — preparing window', () => {
     expect(stop).toHaveTextContent('Stopping…');
   });
 
+  it('names the connected app that owns an in-flight request without a Gezel stop target', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      ...ACTIVE_STATUS,
+      providers: {
+        'llama-cpp': {
+          ...ACTIVE_STATUS.providers['llama-cpp']!,
+          active: [
+            {
+              gezelId: 'gez-1',
+              actorLabel: 'pi (Gezel local models)',
+              job: 'pi (Gezel local models)',
+              runningForMs: 12_000,
+            },
+          ],
+        },
+      },
+    });
+
+    render(<QueueMeter />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
+
+    const status = await screen.findByText('In flight via pi');
+    expect(status).toHaveAttribute('title', 'pi controls this request. Stop it from pi.');
+    expect(screen.queryByRole('button', { name: /Stop active chat/ })).not.toBeInTheDocument();
+  });
+
   it('keeps provider labels and plain status markers in boring mode', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'llama-cpp',
@@ -454,6 +482,72 @@ describe('QueueMeter — preparing window', () => {
     expect(screen.queryByText(/2 queued/)).not.toBeInTheDocument();
     expect(screen.getAllByText(/deferred until idle/)).toHaveLength(3);
   });
+
+  it('uses the live interactive width when a stale broker batch fallback says 1', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      providers: {
+        'llama-cpp': {
+          running: 1,
+          runningInteractive: 1,
+          queuedInteractive: 0,
+          queuedBackground: 1,
+          concurrency: 5,
+          interactiveConcurrency: 4,
+          backgroundConcurrency: 3,
+          maxConcurrency: 1,
+          active: [{ gezelId: 'gez-1', runningForMs: 5000 }],
+          pending: [{ id: 2, lane: 'background', waitedMs: 1000 }],
+        },
+      },
+      taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+      sessions: [],
+      cache: [],
+      at: '',
+    });
+
+    render(<QueueMeter />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
+
+    expect(await screen.findByText('1 / 4 in flight · 1 queued')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Chats can use all 4 slots. Background work takes at most 3, so a chat can always start.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows only the active count when every known item is in flight', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      providers: {
+        'llama-cpp': {
+          running: 2,
+          queuedInteractive: 0,
+          queuedBackground: 0,
+          concurrency: 1,
+          maxConcurrency: 1,
+          active: [
+            { gezelId: 'gez-1', runningForMs: 5000 },
+            { gezelId: 'gez-1', runningForMs: 3000 },
+          ],
+          pending: [],
+        },
+      },
+      taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+      sessions: [],
+      cache: [],
+      at: '',
+    });
+
+    render(<QueueMeter />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
+
+    expect(await screen.findByText('2 in flight')).toBeInTheDocument();
+    expect(screen.queryByText('2 / 1 in flight')).not.toBeInTheDocument();
+  });
 });
 
 describe('QueueMeter — cloud and CLI providers', () => {
@@ -535,7 +629,7 @@ describe('QueueMeter — running vs waiting rows', () => {
     );
 
     const panel = await screen.findByLabelText('AI chat queue');
-    expect(within(panel).getByText('1 / 4 in flight')).toBeInTheDocument();
+    expect(within(panel).getByText('1 in flight')).toBeInTheDocument();
     expect(within(panel).queryByText('Running')).not.toBeInTheDocument();
     expect(within(panel).queryByText('Waiting')).not.toBeInTheDocument();
   });

@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { externalGezelModelId } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MockProvider } from '../../providers/mock.js';
@@ -192,16 +193,18 @@ describe('servingGezelId fallback', () => {
       }>;
     };
     expect(body.data[0]).toMatchObject({
-      id: 'gezel:Poortwachter',
+      id: 'gezel:concierge-poortwachter',
       owned_by: 'gezel',
       name: 'Poortwachter',
       role: 'Concierge',
       is_fallback: true,
     });
     const gezelList = await call('GET', '/v1/gezels', { token: rootToken });
-    const gezelBody = (await gezelList.json()) as { data: Array<{ name: string }> };
+    const gezelBody = (await gezelList.json()) as {
+      data: Array<{ id: string; name: string; role?: string }>;
+    };
     for (const gezel of gezelBody.data) {
-      expect(body.data.some((entry) => entry.id === `gezel:${gezel.name}`)).toBe(true);
+      expect(body.data.some((entry) => entry.id === externalGezelModelId(gezel))).toBe(true);
     }
   });
 });
@@ -233,11 +236,15 @@ describe('session defaults — tuning always, profile gated by supportingBehavio
     return (create?.opts ?? {}) as unknown as Record<string, unknown>;
   }
 
-  it('passes resolved tuning AND profile by default (switch unset)', async () => {
+  it('passes tuning and a caller-safe profile by default (switch unset)', async () => {
     await setEndpointsConfig({});
     const opts = await lastCreateOpts();
     expect(opts.tuning).toBeDefined();
     expect(opts.profile).toBeDefined();
+    const behaviorIds = (opts.profile as { behaviors?: Array<{ id: string }> }).behaviors?.map(
+      (entry) => entry.id,
+    );
+    expect(behaviorIds).not.toContain('turn.ramble-detection');
   });
 
   it('supportingBehaviors: false keeps tuning but drops the behavior profile', async () => {

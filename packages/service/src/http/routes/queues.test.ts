@@ -158,9 +158,12 @@ describe('GET /api/queues', () => {
                 queuedInteractive: 1,
                 queuedBackground: 0,
                 ambientHeld: 0,
-                concurrency: 2,
-                interactiveConcurrency: 1,
-                backgroundConcurrency: 1,
+                concurrency: 5,
+                interactiveConcurrency: 4,
+                backgroundConcurrency: 3,
+                // Simulate the stale denominator from the screenshot: the
+                // broker's queue already knows it can run four chats, but an
+                // older batch-capability path still says serial.
                 maxConcurrency: 1,
                 active: [
                   {
@@ -206,7 +209,11 @@ describe('GET /api/queues', () => {
     const body = (await response.json()) as {
       providers: Record<
         string,
-        { active: Array<Record<string, unknown>>; pending: Array<Record<string, unknown>> }
+        {
+          maxConcurrency: number;
+          active: Array<Record<string, unknown>>;
+          pending: Array<Record<string, unknown>>;
+        }
       >;
       sessions: unknown[];
       taskRunner: Record<string, unknown>;
@@ -221,6 +228,7 @@ describe('GET /api/queues', () => {
       projectId: 'project-a',
     });
     expect(body.providers['llama-cpp']!.pending[0]!.sessionId).toBe('queued-session');
+    expect(body.providers['llama-cpp']!.maxConcurrency).toBe(4);
     expect(body.sessions).toEqual([
       { sessionId: 'user-session', depth: 1, nextPreview: 'hello', entries: [] },
     ]);

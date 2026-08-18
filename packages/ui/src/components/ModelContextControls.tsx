@@ -22,7 +22,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { announceModelInventoryChanged } from '../model-inventory.js';
 import { DropdownMenu } from '../primitives/index.js';
-import { useExportModelBundle } from './ModelBundleControls.js';
+import { ModelBundleExportProgressDialog, useExportModelBundle } from './ModelBundleControls.js';
 import { formatContextWindow } from './model-context.js';
 import { formatBytes } from './model-memory-copy.js';
 
@@ -136,12 +136,7 @@ export function ModelActionsMenu({
             <DropdownMenu.Item
               className="app-nav-menu-item"
               disabled={exporter.busy}
-              onSelect={(event) => {
-                // Keep the menu open-close default but let the async export
-                // run detached; the trigger row shows the error if any.
-                event.preventDefault();
-                void exporter.run();
-              }}
+              onSelect={() => void exporter.run()}
             >
               {exporter.busy ? 'Exporting…' : 'Export'}
             </DropdownMenu.Item>
@@ -168,6 +163,12 @@ export function ModelActionsMenu({
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
       {exporter.error && <span className="error small">{exporter.error}</span>}
+      <ModelBundleExportProgressDialog
+        state={exporter.progress}
+        canceling={exporter.canceling}
+        onCancel={exporter.cancel}
+        onDismiss={exporter.dismissProgress}
+      />
     </>
   );
 }

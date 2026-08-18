@@ -1,6 +1,10 @@
 import { createLogger } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import type { ServiceContext } from './context.js';
+import {
+  EXTERNAL_PROJECT_HEADER,
+  EXTERNAL_WORKING_DIRECTORY_HEADER,
+} from './external-conversation-headers.js';
 import { hostGuard } from './host-guard.js';
 import {
   type LocalBridgeController,
@@ -25,6 +29,12 @@ const PI_BRIDGE_IDENTITY: LocalBridgeIdentity = {
 };
 
 const log = createLogger(PI_BRIDGE_IDENTITY.channel);
+const PI_STREAM_KEEPALIVE_INTERVAL_MS = 15_000;
+
+export interface PiBridgeAppOptions {
+  /** Test seam; production uses a 15-second body-idle keepalive. */
+  keepaliveIntervalMs?: number;
+}
 
 /**
  * The inference surface pi talks to, on its own fixed loopback address.
@@ -35,7 +45,7 @@ const log = createLogger(PI_BRIDGE_IDENTITY.channel);
  * scope. A separate listener and credential per harness is what lets the user
  * revoke pi without disturbing Codex or OpenCode.
  */
-export function buildPiBridgeApp(ctx: ServiceContext): Hono {
+export function buildPiBridgeApp(ctx: ServiceContext, opts: PiBridgeAppOptions = {}): Hono {
   const app = new Hono();
 
   // Hardening first: its marker and security headers must reach the host
@@ -46,7 +56,28 @@ export function buildPiBridgeApp(ctx: ServiceContext): Hono {
 
   mountAuthenticatedRoute(app, '/v1/chat', ctx);
   mountAuthenticatedRoute(app, '/v1/models', ctx);
-  app.route('/v1/chat', v1ChatRoutes(ctx));
+  // pi's OpenAI-completions adapter turns `delta.reasoning_content` into
+  // live thinking blocks. Keep this extension scoped to the dedicated pi
+  // listener so the general /v1 and OpenCode contracts remain unchanged.
+  app.route(
+    '/v1/chat',
+    v1ChatRoutes(ctx, {
+      includeReasoning: true,
+      keepaliveIntervalMs: opts.keepaliveIntervalMs ?? PI_STREAM_KEEPALIVE_INTERVAL_MS,
+      externalConversation: {
+        sourceId: 'pi',
+        sourceName: 'Pi',
+        sessionIdHeaders: [
+          'x-session-affinity',
+          'x-client-request-id',
+          'session_id',
+          'x-session-id',
+        ],
+        workingDirectoryHeader: EXTERNAL_WORKING_DIRECTORY_HEADER,
+        projectHeader: EXTERNAL_PROJECT_HEADER,
+      },
+    }),
+  );
   app.route('/v1/models', v1ModelsRoutes(ctx));
 
   app.all('*', (c) =>

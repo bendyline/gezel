@@ -22,6 +22,7 @@ import {
   asError,
   createMutationQueue,
   ensurePrivateDir,
+  findHarnessModel,
   harnessBridgeSnapshot,
   harnessTokenRecord,
   isExactHarnessToken,
@@ -64,6 +65,8 @@ const MAX_OUTPUT_LIMIT = 32_768;
 interface SetupState {
   version: 1;
   model: string;
+  /** Stable identity behind a human-readable gezel model id. */
+  gezelId?: string;
   createdAt: string;
   updatedAt: string;
   /**
@@ -234,7 +237,7 @@ export function createOpenCodeSetupManager(
       message = 'Gezel found damaged OpenCode setup state and left the existing files untouched.';
     } else if (state) {
       if (!endpointsEnabled) reasons.push('Connected-app model serving is turned off.');
-      if (!models.some((model) => model.id === state.model)) {
+      if (!findHarnessModel(models, state.model, state.gezelId)) {
         reasons.push('The configured gezel or local model is no longer available.');
       }
       if (managedConfig === null) reasons.push('The managed OpenCode config is missing.');
@@ -244,7 +247,7 @@ export function createOpenCodeSetupManager(
         reasons.push('The managed OpenCode credential file needs repair.');
       }
       if (managedConfig !== null) {
-        const selected = models.find((model) => model.id === state.model);
+        const selected = findHarnessModel(models, state.model, state.gezelId);
         if (selected) {
           const expected = buildConfig({
             model: selected,
@@ -301,7 +304,12 @@ export function createOpenCodeSetupManager(
       status: {
         state: statusState,
         models,
-        ...(state ? { configuredModel: state.model } : {}),
+        ...(state
+          ? {
+              configuredModel:
+                findHarnessModel(models, state.model, state.gezelId)?.id ?? state.model,
+            }
+          : {}),
         ...(recommendedModel ? { recommendedModel } : {}),
         reasons,
         ...(message ? { message } : {}),
@@ -358,7 +366,7 @@ export function createOpenCodeSetupManager(
           before.status.message ?? `${configPath} is not managed by Gezel.`,
         );
       }
-      const selected = before.models.find((model) => model.id === input.model);
+      const selected = findHarnessModel(before.models, input.model);
       if (!selected) {
         throw new OpenCodeSetupError(
           'model_not_available',
@@ -417,6 +425,7 @@ export function createOpenCodeSetupManager(
         const nextState: SetupState = {
           version: OPENCODE_SETUP_REVISION,
           model: selected.id,
+          ...(selected.kind === 'gezel' ? { gezelId: selected.gezelId } : {}),
           createdAt,
           updatedAt: now().toISOString(),
           configDigest: sha256(managedConfig),
@@ -661,7 +670,7 @@ export function createOpenCodeSetupManager(
         return;
       }
       const models = await listEligibleModels(config);
-      const selected = models.find((model) => model.id === state.model);
+      const selected = findHarnessModel(models, state.model, state.gezelId);
       if (!selected) {
         await opts.bridge.stop();
         return;
@@ -682,7 +691,17 @@ export function createOpenCodeSetupManager(
       await writeFileAtomic(configPath, next, { mode: 0o600, durable: true });
       await writeSecurityJson(
         statePath,
-        `${JSON.stringify({ ...state, updatedAt: now().toISOString(), configDigest: sha256(next) }, null, 2)}\n`,
+        `${JSON.stringify(
+          {
+            ...state,
+            model: selected.id,
+            gezelId: selected.kind === 'gezel' ? selected.gezelId : undefined,
+            updatedAt: now().toISOString(),
+            configDigest: sha256(next),
+          },
+          null,
+          2,
+        )}\n`,
       );
     });
 

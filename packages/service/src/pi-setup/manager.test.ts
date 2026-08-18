@@ -117,6 +117,7 @@ const maya: GezelSummary = {
   model: 'coder.gguf',
   updatedAt: '2026-08-16T00:00:00.000Z',
 };
+const mayaModelId = 'gezel:developer-maya';
 
 describe('PiSetupManager', () => {
   it('offers eligible gezels ahead of raw models and drops tool-less ones', async () => {
@@ -126,11 +127,8 @@ describe('PiSetupManager', () => {
 
     expect(PiSetupStatusResponseSchema.parse(before)).toBeTruthy();
     expect(before.state).toBe('not-configured');
-    expect(before.recommendedModel).toBe(`gezel:${maya.id}`);
-    expect(before.models.map((model) => model.id)).toEqual([
-      `gezel:${maya.id}`,
-      'llama-cpp:coder.gguf',
-    ]);
+    expect(before.recommendedModel).toBe(mayaModelId);
+    expect(before.models.map((model) => model.id)).toEqual([mayaModelId, 'llama-cpp:coder.gguf']);
   });
 
   it('publishes a roster and an extension the launch command points at', async () => {
@@ -138,7 +136,7 @@ describe('PiSetupManager', () => {
     // and an unpinned fixture asserts whatever the developer happens to run on.
     const f = await fixture({ gezels: [maya], platform: 'darwin' });
 
-    const status = await f.manager.configure({ model: `gezel:${maya.id}` });
+    const status = await f.manager.configure({ model: mayaModelId });
 
     const roster = JSON.parse(await readFile(f.rosterPath, 'utf8')) as {
       provider: { id: string; api: string; baseUrl: string; models: Array<{ id: string }> };
@@ -148,10 +146,10 @@ describe('PiSetupManager', () => {
     expect(roster.provider.api).toBe('openai-completions');
     expect(roster.provider.baseUrl).toBe('http://127.0.0.1:24680/v1');
     expect(roster.provider.models.map((model) => model.id)).toEqual([
-      `gezel:${maya.id}`,
+      mayaModelId,
       'llama-cpp:coder.gguf',
     ]);
-    expect(roster.defaultModel).toBe(`gezel:${maya.id}`);
+    expect(roster.defaultModel).toBe(mayaModelId);
 
     // The credential is referenced by path, never copied into the roster.
     const token = await readFile(f.tokenPath, 'utf8');
@@ -183,7 +181,7 @@ describe('PiSetupManager', () => {
 
   it('adds the extension to pi only when asked', async () => {
     const f = await fixture({ gezels: [maya] });
-    await f.manager.configure({ model: `gezel:${maya.id}` });
+    await f.manager.configure({ model: mayaModelId });
 
     const status = await f.manager.installExtension({});
 
@@ -207,7 +205,7 @@ describe('PiSetupManager', () => {
 
   it('refuses to add the extension when pi is not on this computer', async () => {
     const f = await fixture({ gezels: [maya], piInstalled: false });
-    await f.manager.configure({ model: `gezel:${maya.id}` });
+    await f.manager.configure({ model: mayaModelId });
 
     expect((await f.manager.status()).extension.state).toBe('unsupported');
     await expect(f.manager.installExtension({})).rejects.toMatchObject({
@@ -217,7 +215,7 @@ describe('PiSetupManager', () => {
 
   it('adding twice is idempotent', async () => {
     const f = await fixture({ gezels: [maya] });
-    await f.manager.configure({ model: `gezel:${maya.id}` });
+    await f.manager.configure({ model: mayaModelId });
     await f.manager.installExtension({});
     const first = await stat(f.installedPath);
 
@@ -229,7 +227,7 @@ describe('PiSetupManager', () => {
 
   it('leaves a foreign extension alone without blocking the rest of the card', async () => {
     const f = await fixture({ gezels: [maya] });
-    await f.manager.configure({ model: `gezel:${maya.id}` });
+    await f.manager.configure({ model: mayaModelId });
     await mkdir(join(f.piAgentDir, 'extensions'), { recursive: true });
     await writeFile(f.installedPath, '// someone else wrote this\n', 'utf8');
 
@@ -254,7 +252,7 @@ describe('PiSetupManager', () => {
 
   it('replaces a foreign extension only when asked, keeping a backup', async () => {
     const f = await fixture({ gezels: [maya] });
-    await f.manager.configure({ model: `gezel:${maya.id}` });
+    await f.manager.configure({ model: mayaModelId });
     await mkdir(join(f.piAgentDir, 'extensions'), { recursive: true });
     await writeFile(f.installedPath, '// someone else wrote this\n', 'utf8');
 
@@ -272,9 +270,9 @@ describe('PiSetupManager', () => {
     roots.push(shared);
     const first = await fixture({ gezels: [maya], piAgentDir: shared });
     const second = await fixture({ gezels: [maya], piAgentDir: shared });
-    await first.manager.configure({ model: `gezel:${maya.id}` });
+    await first.manager.configure({ model: mayaModelId });
     await first.manager.installExtension({});
-    await second.manager.configure({ model: `gezel:${maya.id}` });
+    await second.manager.configure({ model: mayaModelId });
 
     expect((await second.manager.status()).extension.state).toBe('conflict');
     await expect(second.manager.removeExtension()).rejects.toMatchObject({
@@ -287,7 +285,7 @@ describe('PiSetupManager', () => {
 
   it('repairs a stale extension without recreating a deleted one', async () => {
     const f = await fixture({ gezels: [maya] });
-    await f.manager.configure({ model: `gezel:${maya.id}` });
+    await f.manager.configure({ model: mayaModelId });
     await f.manager.installExtension({});
     const published = await readFile(f.installedPath, 'utf8');
     await writeFile(
@@ -313,7 +311,7 @@ describe('PiSetupManager', () => {
 
   it('removes the installed extension along with the rest of the setup', async () => {
     const f = await fixture({ gezels: [maya] });
-    await f.manager.configure({ model: `gezel:${maya.id}` });
+    await f.manager.configure({ model: mayaModelId });
     await f.manager.installExtension({});
 
     const status = await f.manager.remove();
@@ -327,7 +325,7 @@ describe('PiSetupManager', () => {
 
   it('refuses to serve when the managed roster was tampered with', async () => {
     const f = await fixture({ gezels: [maya] });
-    await f.manager.configure({ model: `gezel:${maya.id}` });
+    await f.manager.configure({ model: mayaModelId });
     await writeFile(f.rosterPath, '{"provider":{"id":"someone-else"}}\n', 'utf8');
 
     await f.manager.reconcile();
@@ -339,7 +337,7 @@ describe('PiSetupManager', () => {
   it('does not publish while connected-app serving is off', async () => {
     const f = await fixture({ gezels: [maya], endpointsEnabled: false });
 
-    await expect(f.manager.configure({ model: `gezel:${maya.id}` })).rejects.toMatchObject({
+    await expect(f.manager.configure({ model: mayaModelId })).rejects.toMatchObject({
       code: 'openai_endpoints_disabled',
     });
     expect(existsSync(f.rosterPath)).toBe(false);

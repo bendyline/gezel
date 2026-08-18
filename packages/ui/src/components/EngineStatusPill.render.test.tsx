@@ -647,11 +647,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       name: /Model capacity: about 98\.0 GB of 112\.0 GB reserved/i,
     });
     expect(capacityMeter).toHaveAccessibleName(/System reserve about 16\.0 GB/i);
-    expect(
-      screen.getByText(
-        'Scale: ~112.0 GB model capacity + ~16.0 GB system reserve = 128.0 GB unified memory',
-      ),
-    ).toBeVisible();
+    expect(screen.queryByText(/^Scale:/)).not.toBeInTheDocument();
     expect(capacityMeter.querySelector('.machine-memory-reservation-pool-ram')).toHaveStyle({
       width: '87.5%',
     });

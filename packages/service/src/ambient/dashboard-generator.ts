@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, readdir, unlink } from 'node:fs/promises';
+import { mkdir, readFile, readdir, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type AmbientDashboardResolution,
@@ -42,16 +42,16 @@ import { DEFAULT_THEME_ID } from './dashboard-themes.js';
  * gated by config + engagement + chat-idle, idempotent via an input
  * hash. Opt-in (default OFF) — every run burns an LLM call plus a
  * Chromium render — and throttled by `intervalMinutes` instead of a
- * daily budget: the interval is the budget. The LLM call is enqueued
- * with `ambient: true` (wired in service.ts), so on local engines it
- * additionally yields to any interactive work.
+ * daily budget: the interval is the budget. Scheduled work is ambient;
+ * an explicit Generate now request uses the interactive lane.
  */
 
 const log = createLogger('ambient-dashboard');
 
 const STARTUP_DELAY_MS = 10 * 60_000;
 const SWEEP_INTERVAL_MS = 15 * 60_000;
-const ONE_SHOT_TIMEOUT_MS = 180_000;
+const AUTO_ONE_SHOT_TIMEOUT_MS = 180_000;
+const MANUAL_ONE_SHOT_TIMEOUT_MS = 15 * 60_000;
 const PROMPT_INPUT_CAP = 12_000;
 
 export const DEFAULT_INTERVAL_MINUTES = 60;
@@ -71,7 +71,13 @@ const EXCLUDED_EVENT_KINDS = ['meester.dashboard.generated', 'meester.status.gen
 export type DashboardOneShot = (
   prompt: string,
   timeoutMs: number,
-  opts: { gezelId: string; jobLabel: string },
+  opts: {
+    gezelId: string;
+    jobLabel: string;
+    tuningProfileId: 'instruct';
+    lane: 'interactive' | 'background';
+    ambient: boolean;
+  },
 ) => Promise<string>;
 
 export interface AmbientDashboardGeneratorOptions {
@@ -149,7 +155,15 @@ export class AmbientDashboardGenerator {
   async readState(): Promise<AmbientDashboardState> {
     try {
       const raw = await readFile(ambientDashboardStateFile(this.home), 'utf8');
-      return AmbientDashboardStateSchema.parse(JSON.parse(raw));
+      const state = AmbientDashboardStateSchema.parse(JSON.parse(raw));
+      if (state.lastGeneratedAt || !state.lastFile) return state;
+
+      // State written before `lastGeneratedAt` used `lastRunAt` for both
+      // attempts and successes. Once a failed attempt followed a successful
+      // image that became ambiguous, so recover the actual success time from
+      // the stable output instead of propagating the failed-attempt timestamp.
+      const latestInfo = await stat(ambientDashboardLatestFile(this.home)).catch(() => null);
+      return latestInfo ? { ...state, lastGeneratedAt: latestInfo.mtime.toISOString() } : state;
     } catch {
       return {};
     }
@@ -216,15 +230,26 @@ export class AmbientDashboardGenerator {
     try {
       const now = this.now();
       const prompt = buildDashboardPrompt(candidates, now);
-      const raw = await this.oneShot(prompt, ONE_SHOT_TIMEOUT_MS, {
-        gezelId: meesterId,
-        jobLabel: 'ambient dashboard',
-      });
+      const manual = opts.trigger === 'manual';
+      const raw = await this.oneShot(
+        prompt,
+        manual ? MANUAL_ONE_SHOT_TIMEOUT_MS : AUTO_ONE_SHOT_TIMEOUT_MS,
+        {
+          gezelId: meesterId,
+          jobLabel: 'ambient dashboard',
+          tuningProfileId: 'instruct',
+          lane: manual ? 'interactive' : 'background',
+          ambient: !manual,
+        },
+      );
 
       const markdown = extractMarkdown(raw);
       if (!markdown) {
         log.warn('model output had no usable markdown — keeping prior dashboard');
-        await this.writeState(opts, now, { preserveInputHash: true });
+        await this.writeState(opts, now, {
+          preserveInputHash: true,
+          error: 'The Meester returned no usable dashboard content.',
+        });
         this.events?.publishGlobalEvent({ type: 'ambient_dashboard', state: 'failed' });
         return false;
       }
@@ -279,7 +304,10 @@ export class AmbientDashboardGenerator {
         return false;
       }
       log.warn(`dashboard run failed: ${describe(err)}`);
-      await this.writeState(opts, this.now(), { preserveInputHash: true }).catch(() => undefined);
+      await this.writeState(opts, this.now(), {
+        preserveInputHash: true,
+        error: describe(err),
+      }).catch(() => undefined);
       this.events?.publishGlobalEvent({ type: 'ambient_dashboard', state: 'failed' });
       return false;
     } finally {
@@ -295,11 +323,18 @@ export class AmbientDashboardGenerator {
   private async writeState(
     opts: { state: AmbientDashboardState; inputHash: string },
     now: Date,
-    extra: { preserveInputHash?: boolean; lastFile?: string } = {},
+    extra: { preserveInputHash?: boolean; lastFile?: string; error?: string } = {},
   ): Promise<void> {
     await mkdir(ambientDir(this.home), { recursive: true });
+    const timestamp = now.toISOString();
+    const priorGeneratedAt = opts.state.lastGeneratedAt;
+    const succeeded = extra.lastFile !== undefined;
+    const failed = extra.error !== undefined;
     const next: AmbientDashboardState = {
-      lastRunAt: now.toISOString(),
+      lastRunAt: timestamp,
+      lastGeneratedAt: succeeded ? timestamp : priorGeneratedAt,
+      lastFailedAt: failed ? timestamp : undefined,
+      lastError: extra.error,
       inputHash: extra.preserveInputHash ? opts.state.inputHash : opts.inputHash,
       lastFile: extra.lastFile ?? opts.state.lastFile,
     };

@@ -12,6 +12,8 @@ declare module 'hono' {
      */
     auth: {
       appId: string;
+      /** Human-readable connected-app name, used for audit and queue labels. */
+      appName?: string;
       scopes: readonly string[];
       /** Present on session-scoped tokens (a gezel's MCP subprocess); the
        *  scope-guard confines them to this project unless `team`. */
@@ -51,6 +53,7 @@ export function bearerAuth(
     store.touch(supplied);
     c.set('auth', {
       appId: record.appId,
+      appName: record.appName,
       scopes: record.scopes,
       ...(record.projectId !== undefined ? { projectId: record.projectId } : {}),
       ...(record.gezelId !== undefined ? { gezelId: record.gezelId } : {}),

@@ -2096,7 +2096,11 @@ export class LlamaCppProvider implements LLMProvider {
     const slots = opts.concurrency ?? 2;
     this.launchedSlots = slots;
     this.engineRequestWidth = slots;
-    const batchMax = Math.max(1, opts.batchMaxConcurrency ?? 1);
+    // A supervised engine's `concurrency` is the exact `--parallel` launch
+    // width, so it is also the safe interactive batch width. Keep external
+    // base-URL mode conservative: we may be configured with several client
+    // queue sockets without knowing how many native slots that server owns.
+    const batchMax = Math.max(1, opts.batchMaxConcurrency ?? (opts.supervisor ? slots : 1));
     this.batchMaxConcurrency = batchMax;
     // Slots are one fungible pool: chats may fill all of them. Background work
     // is the only capped lane (`backgroundLaneCap` = width - 1), so a live turn

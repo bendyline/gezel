@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { MockProvider } from '../../providers/mock.js';
 import { type RunningService, startService } from '../../service.js';
 
 let svc: RunningService;
@@ -10,6 +11,7 @@ let baseUrl: string;
 let rootToken: string;
 let home: string;
 let httpFetch: typeof fetch;
+let mockCopilot: MockProvider;
 
 const priorMockFlag = process.env.GEZEL_MOCK_PROVIDER;
 
@@ -21,6 +23,9 @@ beforeAll(async () => {
   baseUrl = `${scheme}://127.0.0.1:${svc.port}`;
   rootToken = svc.context.token;
   httpFetch = svc.cert ? createTrustingFetch({ cert: svc.cert.certPem }) : fetch;
+  const provider = await svc.context.chat.getProvider('copilot');
+  if (!(provider instanceof MockProvider)) throw new Error('expected mock copilot provider');
+  mockCopilot = provider;
 }, 30_000);
 
 afterAll(async () => {
@@ -34,6 +39,7 @@ interface ApiOpts {
   body?: unknown;
   token?: string;
   accept?: string;
+  headers?: Record<string, string>;
 }
 
 function v1(method: string, path: string, opts: ApiOpts = {}): Promise<Response> {
@@ -43,6 +49,7 @@ function v1(method: string, path: string, opts: ApiOpts = {}): Promise<Response>
       ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
       ...(opts.accept ? { Accept: opts.accept } : {}),
       ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
+      ...opts.headers,
     },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
@@ -145,21 +152,70 @@ describe('POST /v1/chat/completions — non-streaming', () => {
     expect(body.usage.total_tokens).toBe(body.usage.prompt_tokens + body.usage.completion_tokens);
   });
 
+  it('mirrors an authenticated app conversation when the caller supplies a stable id', async () => {
+    const token = await registerAndApproveApp('thread-mirror');
+    const gezel = (await svc.context.store.listGezels())[0]!;
+
+    const res = await v1('POST', '/v1/chat/completions', {
+      body: {
+        model: `gezel:${gezel.id}`,
+        messages: [{ role: 'user', content: 'Keep this external thread visible.' }],
+      },
+      token,
+      headers: { 'x-gezel-external-conversation-id': 'external-thread-42' },
+    });
+
+    expect(res.status).toBe(200);
+    const mirrored = (await svc.context.store.listSessions({ gezelId: gezel.id })).find(
+      (session) => session.source?.externalConversationId === 'external-thread-42',
+    );
+    expect(mirrored).toMatchObject({
+      projectId: 'default',
+      source: {
+        kind: 'external',
+        appId: 'thread-mirror',
+        appName: 'thread-mirror App',
+        externalConversationId: 'external-thread-42',
+        readOnly: true,
+      },
+    });
+  });
+
   it('works through a per-app token issued via the consent flow', async () => {
     const token = await registerAndApproveApp('chat-app-1');
+    const callStart = mockCopilot.calls.length;
     const res = await v1('POST', '/v1/chat/completions', {
       body: {
         model: 'copilot:mock-fast',
-        messages: [{ role: 'user', content: 'ping' }],
+        messages: [
+          { role: 'system', content: 'be concise' },
+          { role: 'user', content: 'ping' },
+        ],
       },
       token,
     });
     expect(res.status).toBe(200);
+
+    const calls = mockCopilot.calls.slice(callStart);
+    const create = calls.find((call) => call.kind === 'create');
+    const send = calls.find((call) => call.kind === 'send');
+    expect(create?.opts?.systemPromptLayers).toEqual({
+      gezel: 'be concise',
+      project: 'be concise',
+    });
+    expect(send?.sendOpts?.queue).toMatchObject({
+      lane: 'interactive',
+      actorLabel: 'chat-app-1 App',
+      job: 'chat-app-1 App',
+    });
+    expect(send?.sendOpts?.queue?.sessionId).toBeUndefined();
+    expect(send?.sendOpts?.queue?.signal).toBeInstanceOf(AbortSignal);
   });
 });
 
 describe('POST /v1/chat/completions — streaming', () => {
   it('streams OpenAI-shaped chunks terminated by [DONE]', async () => {
+    const callStart = mockCopilot!.calls.length;
     const res = await v1('POST', '/v1/chat/completions', {
       body: {
         model: 'copilot:mock-fast',
@@ -193,6 +249,39 @@ describe('POST /v1/chat/completions — streaming', () => {
     expect(contentChunks.length).toBeGreaterThan(0);
     const reassembled = contentChunks.map((c) => c.choices[0]?.delta?.content ?? '').join('');
     expect(reassembled).toContain('tell me a tale');
+
+    const send = mockCopilot!.calls.slice(callStart).find((call) => call.kind === 'send');
+    expect(send?.sendOpts?.queue).toMatchObject({
+      lane: 'interactive',
+      actorLabel: 'Gezel (root)',
+      job: 'Gezel (root)',
+    });
+    expect(send?.sendOpts?.queue?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('keeps private reasoning off the general OpenAI-compatible endpoint', async () => {
+    mockCopilot.scriptReasoning('This stays private.');
+    mockCopilot.script('This is visible.');
+    const res = await v1('POST', '/v1/chat/completions', {
+      body: {
+        model: 'copilot:mock-reasoning',
+        messages: [{ role: 'user', content: 'think, then answer' }],
+        stream: true,
+      },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+
+    const dataLines = (await res.text())
+      .split(/\n/)
+      .filter((line) => line.startsWith('data: ') && line !== 'data: [DONE]')
+      .map((line) => JSON.parse(line.slice('data: '.length)));
+    expect(
+      dataLines.some((chunk) => chunk.choices?.[0]?.delta?.reasoning_content !== undefined),
+    ).toBe(false);
+    expect(dataLines.map((chunk) => chunk.choices?.[0]?.delta?.content ?? '').join('')).toBe(
+      'This is visible.',
+    );
   });
 });
 

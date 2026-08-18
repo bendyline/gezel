@@ -493,6 +493,28 @@ export const ChatMessageToolCallSchema = z.object({
 export type ChatMessageToolCall = z.infer<typeof ChatMessageToolCallSchema>;
 
 /**
+ * Provenance for a chat thread whose interaction loop is owned by another
+ * application. Gezel mirrors these threads for visibility, history, and
+ * memory extraction, but must never accept composer sends into them.
+ */
+export const ChatSessionSourceSchema = z.object({
+  kind: z.literal('external'),
+  /** Stable integration id, e.g. `pi`. */
+  appId: z.string().min(1),
+  /** Human-facing application name, e.g. `Pi`. */
+  appName: z.string().min(1),
+  /** The external application's stable conversation/session identifier. */
+  externalConversationId: z.string().min(1),
+  /** External threads are ledger views; the owning app controls replies. */
+  readOnly: z.literal(true),
+  /** Working-directory hint supplied by the external app, when available. */
+  workingDirectory: z.string().optional(),
+  /** Project id/name hint supplied by the external app, when available. */
+  projectHint: z.string().optional(),
+});
+export type ChatSessionSource = z.infer<typeof ChatSessionSourceSchema>;
+
+/**
  * Which store a referenced file lives in. Documents are deliberately not a
  * third kind: the shared library is a project (ADR 0006), so its files
  * arrive as that project's `workspace`.
@@ -1372,6 +1394,8 @@ export const ChatEventEnvelopeSchema = z.object({
   sessionId: z.string(),
   gezelId: z.string(),
   projectId: z.string(),
+  /** Present for externally-owned read-only threads, including live turns. */
+  sessionSource: ChatSessionSourceSchema.optional(),
   event: ChatEventSchema,
 });
 export type ChatEventEnvelope = z.infer<typeof ChatEventEnvelopeSchema>;

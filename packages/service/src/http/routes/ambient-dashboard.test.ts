@@ -1,9 +1,13 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AmbientDashboardStatusResponseSchema } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
-import { ambientDashboardLatestFile, ambientDir } from '@bendyline/gezel/paths';
+import {
+  ambientDashboardLatestFile,
+  ambientDashboardStateFile,
+  ambientDir,
+} from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type RunningService, startService } from '../../service.js';
 
@@ -53,12 +57,32 @@ describe('GET /api/ambient-dashboard', () => {
     expect(status.enabled).toBe(false);
     expect(status.running).toBe(false);
     expect(status.lastGeneratedAt).toBeNull();
+    expect(status.lastFailedAt).toBeNull();
+    expect(status.lastError).toBeNull();
     expect(status.latestFilename).toBeNull();
     expect(status.resolution).toBe('fhd');
     expect(status.themeId).toBe('gezellig');
     expect(status.themes?.map((theme) => theme.id)).toContain('standard-dark');
     expect(status.themes?.map((theme) => theme.id)).toContain('gezellig');
     expect(status.displayTarget).toBeNull();
+  });
+
+  it('uses the PNG time for legacy state after a newer failed attempt', async () => {
+    const generatedAt = new Date('2026-08-17T22:53:00.000Z');
+    await mkdir(ambientDir(home), { recursive: true });
+    await writeFile(ambientDashboardLatestFile(home), Buffer.from('png-bytes'));
+    await utimes(ambientDashboardLatestFile(home), generatedAt, generatedAt);
+    await writeFile(
+      ambientDashboardStateFile(home),
+      JSON.stringify({
+        lastRunAt: '2026-08-17T23:49:00.000Z',
+        lastFile: 'dashboard-20260817-1552.png',
+      }),
+    );
+
+    const res = await httpFetch(`${baseUrl}/api/ambient-dashboard`, { headers: auth() });
+    const status = AmbientDashboardStatusResponseSchema.parse(await res.json());
+    expect(status.lastGeneratedAt).toBe(generatedAt.toISOString());
   });
 });
 

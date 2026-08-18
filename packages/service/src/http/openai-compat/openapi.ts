@@ -178,8 +178,32 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
           summary: 'OpenAI-compatible chat completion (streaming + non-streaming).',
           description:
             'Stateless inference with caller-executed function tools, per-request tuning, ' +
-            'structured outputs, and streaming via `stream: true`.',
+            'structured outputs, and streaming via `stream: true`. Connected apps may opt ' +
+            'into a read-only Gezel transcript by sending a stable ' +
+            '`x-gezel-external-conversation-id`; optional working-directory and project ' +
+            'headers route that thread to one unambiguous project.',
           security: [{ bearerAuth: ['openai'] }],
+          parameters: [
+            {
+              name: 'x-gezel-external-conversation-id',
+              in: 'header',
+              required: false,
+              schema: { type: 'string', maxLength: 512 },
+              description: 'Stable caller-owned conversation id used for a read-only mirror.',
+            },
+            {
+              name: 'x-gezel-working-directory',
+              in: 'header',
+              required: false,
+              schema: { type: 'string', maxLength: 4096 },
+            },
+            {
+              name: 'x-gezel-project',
+              in: 'header',
+              required: false,
+              schema: { type: 'string', maxLength: 256 },
+            },
+          ],
           requestBody: {
             required: true,
             content: {
@@ -547,7 +571,8 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
           properties: {
             model: {
               type: 'string',
-              description: 'Qualified `<provider>:<model>` or `gezel:<id-or-name>`.',
+              description:
+                'Qualified `<provider>:<model>` or advertised `gezel:<role>-<name>` alias (legacy ids and names are also accepted).',
             },
             instructions: { type: ['string', 'null'] },
             input: {

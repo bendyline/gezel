@@ -30,6 +30,18 @@ export type UpdateState =
       message: string;
     };
 
+export type ModelBundleExportProgress = {
+  exportId: string;
+  filename: string;
+} & (
+  | { phase: 'preparing' }
+  | {
+      phase: 'writing' | 'verifying';
+      bytesCompleted: number;
+      bytesTotal?: number;
+    }
+);
+
 /**
  * Build a client against the daemon that served this HTML. When the Electron
  * shell hosts us, it injects a preload variable with the token; otherwise we
@@ -191,7 +203,25 @@ declare global {
       exportModelBundle?: (
         engine: GezmodelEngine,
         id: string,
-      ) => Promise<{ ok: true; path?: string } | { ok: false; error: string }>;
+        exportId: string,
+      ) => Promise<
+        | { ok: true; canceled: true }
+        | {
+            ok: true;
+            canceled?: false;
+            path: string;
+            bytesWritten: number;
+            verified: true;
+          }
+        | { ok: false; error: string }
+      >;
+      /** Stop an active native export and remove its unpublished partial file. */
+      cancelModelBundleExport?: (
+        exportId: string,
+      ) => Promise<{ ok: true } | { ok: false; error: string }>;
+      onModelBundleExportProgress?: (
+        callback: (progress: ModelBundleExportProgress) => void,
+      ) => () => void;
       /**
        * Scan an OS-opened bundle identified by an opaque main-process request
        * id. The renderer never receives an arbitrary local filesystem path.

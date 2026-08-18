@@ -682,7 +682,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.use('/v1/chat/*', openaiEndpointsGate);
   app.use('/v1/chat/*', bearerAuth(ctx.tokenStore));
   app.use('/v1/chat/*', requireScope('openai'));
-  app.route('/v1/chat', v1ChatRoutes(ctx));
+  // A connected app that supplies Gezel's stable conversation header gets a
+  // read-only transcript mirror under the selected gezel. Requests without the
+  // header remain the ordinary stateless inference surface.
+  app.route('/v1/chat', v1ChatRoutes(ctx, { externalConversation: { sourceFromAuth: true } }));
 
   // Codex custom model providers use the Responses wire protocol. Keep this
   // on the authenticated per-user listener: the response facade is inference

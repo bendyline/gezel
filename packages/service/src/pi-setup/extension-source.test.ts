@@ -111,6 +111,7 @@ describe('buildPiExtensionSource', () => {
       api: 'openai-completions',
       baseUrl: 'http://127.0.0.1:24680/v1',
       apiKey: TOKEN,
+      headers: { 'x-gezel-working-directory': process.cwd() },
     });
     const models = registered[0]?.config.models as Array<Record<string, unknown>>;
     expect(models).toHaveLength(1);
@@ -119,6 +120,9 @@ describe('buildPiExtensionSource', () => {
       contextWindow: 262_144,
       reasoning: true,
       cost: { input: 0, output: 0 },
+      compat: {
+        sendSessionAffinityHeaders: true,
+      },
     });
   });
 

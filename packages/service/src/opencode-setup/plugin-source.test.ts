@@ -17,6 +17,10 @@ afterEach(async () => {
 
 interface LoadedPlugin {
   config?: (config: Record<string, unknown>) => Promise<void>;
+  'chat.headers'?: (
+    input: Record<string, unknown>,
+    output: { headers: Record<string, string> },
+  ) => Promise<void>;
 }
 
 /**
@@ -24,12 +28,19 @@ interface LoadedPlugin {
  * and hand back its hooks. Proves the emitted text is valid, loadable JS
  * without needing OpenCode itself.
  */
-async function loadPlugin(source: string, dir: string, name = 'gezel.js'): Promise<LoadedPlugin> {
+async function loadPlugin(
+  source: string,
+  dir: string,
+  name = 'gezel.js',
+  pluginInput: Record<string, unknown> = {},
+): Promise<LoadedPlugin> {
   const path = join(dir, name);
   await writeFile(path, source, 'utf8');
   const module = (await import(`${pathToFileURL(path).href}?v=${name}`)) as Record<string, unknown>;
-  const factory = module.GezelLocalModels as () => Promise<LoadedPlugin>;
-  return factory();
+  const factory = module.GezelLocalModels as (
+    input?: Record<string, unknown>,
+  ) => Promise<LoadedPlugin>;
+  return factory(pluginInput);
 }
 
 async function fixture(input?: { managedConfig?: string; token?: string | null }) {
@@ -120,6 +131,51 @@ describe('buildOpenCodePluginSource', () => {
     const provider = (config.provider as Record<string, Record<string, unknown>>).gezel ?? {};
     expect(provider.name).toBe('My own gezel entry');
     expect(provider.npm).toBe('@ai-sdk/openai-compatible');
+  });
+
+  it('forwards OpenCode session and directory provenance only for the Gezel provider', async () => {
+    const { source, dir } = await fixture();
+    const plugin = await loadPlugin(source, dir, 'headers.js', {
+      directory: '/work/racing-game',
+    });
+    const gezelOutput = { headers: { existing: 'kept' } };
+
+    await plugin['chat.headers']?.(
+      {
+        sessionID: 'opencode-session-42',
+        agent: 'build',
+        provider: { info: { id: 'gezel' } },
+      },
+      gezelOutput,
+    );
+
+    expect(gezelOutput.headers).toEqual({
+      existing: 'kept',
+      'x-gezel-external-conversation-id': 'opencode-session-42',
+      'x-gezel-working-directory': '/work/racing-game',
+    });
+
+    const otherOutput = { headers: {} };
+    await plugin['chat.headers']?.(
+      {
+        sessionID: 'do-not-mirror',
+        agent: 'build',
+        provider: { info: { id: 'anthropic' } },
+      },
+      otherOutput,
+    );
+    expect(otherOutput.headers).toEqual({});
+
+    const titleOutput = { headers: {} };
+    await plugin['chat.headers']?.(
+      {
+        sessionID: 'opencode-session-42',
+        agent: 'title',
+        provider: { info: { id: 'gezel' } },
+      },
+      titleOutput,
+    );
+    expect(titleOutput.headers).toEqual({});
   });
 
   it('reads the config shape the manager actually publishes', async () => {

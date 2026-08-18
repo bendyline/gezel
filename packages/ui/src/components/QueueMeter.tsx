@@ -230,6 +230,15 @@ function queueJobContext(
   return label;
 }
 
+/** Connected apps identify themselves this way on the OpenAI-compatible
+ * surface. Their requests have no Gezel-owned session to cancel, so the
+ * queue row names the app that owns the request instead of leaving the
+ * action column mysteriously blank. */
+function connectedAppName(actorLabel: string | undefined): string | undefined {
+  const match = /^(.+?)\s+\(Gezel local models\)$/.exec(actorLabel?.trim() ?? '');
+  return match?.[1]?.trim() || undefined;
+}
+
 function formatMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const s = Math.floor(ms / 1000);
@@ -860,7 +869,27 @@ function QueueMeterPanel({
         // The engine's real width, not `concurrency` — that carries an extra
         // logical lane so a mid-turn one-shot can enter the queue, and using
         // it as a denominator advertises a slot no turn can occupy.
-        const slots = state.maxConcurrency ?? state.concurrency;
+        // `interactiveConcurrency` is the queue's live foreground width and
+        // provides a rolling-upgrade fallback when an older broker reports a
+        // stale serial `maxConcurrency`. Never use total queue concurrency as
+        // the first fallback: local queues include one logical background
+        // lease that is not a physical engine slot.
+        const slots = Math.max(
+          1,
+          state.maxConcurrency ?? 0,
+          state.interactiveConcurrency ?? 0,
+          state.maxConcurrency === undefined && state.interactiveConcurrency === undefined
+            ? state.concurrency
+            : 0,
+        );
+        // Capacity only answers a useful question while something is waiting.
+        // When every known item is already running, prefer the plain count —
+        // besides reading more naturally, it avoids an impossible-looking
+        // `2 / 1` during a rolling-upgrade snapshot with stale capacity data.
+        const inFlightLabel =
+          queued > 0 && running <= slots
+            ? `${running} / ${slots} in flight`
+            : `${running} in flight`;
         const backgroundCap = state.backgroundConcurrency;
         const laneNote =
           backgroundCap !== undefined && slots > 1 && backgroundCap < slots
@@ -876,7 +905,7 @@ function QueueMeterPanel({
             <header className="queue-meter-panel-provider">
               <span className="queue-meter-panel-provider-name">{getPlatformPillLabel(name)}</span>
               <span className="muted small">
-                {running} / {slots} in flight
+                {inFlightLabel}
                 {readyQueued > 0 ? ` · ${readyQueued} queued` : ''}
                 {deferred > 0 ? ` · ${deferred} deferred until idle` : ''}
               </span>
@@ -912,6 +941,7 @@ function QueueMeterPanel({
                   const actor = describeActor(a.gezelId, a.actorLabel, gezels, boringMode);
                   const activeSessionId =
                     a.sessionId && !a.sessionId.startsWith('dev:') ? a.sessionId : undefined;
+                  const connectedApp = connectedAppName(a.actorLabel);
                   const stopping = activeSessionId
                     ? stoppingSessionIds.has(activeSessionId)
                     : false;
@@ -961,6 +991,18 @@ function QueueMeterPanel({
                           >
                             {stopping ? 'Stopping…' : '■ Stop'}
                           </button>
+                        </span>
+                      )}
+                      {!activeSessionId && (
+                        <span
+                          className="queue-meter-panel-active-status muted"
+                          title={
+                            connectedApp
+                              ? `${connectedApp} controls this request. Stop it from ${connectedApp}.`
+                              : 'This work has no chat session to stop from this queue.'
+                          }
+                        >
+                          {connectedApp ? `In flight via ${connectedApp}` : 'In flight'}
                         </span>
                       )}
                     </li>

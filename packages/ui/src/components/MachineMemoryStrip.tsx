@@ -582,7 +582,7 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
               />
             )}
           </div>
-          {capacityPoolSummary && (
+          {capacityPoolSummary && !usesPhysicalMemoryScale && (
             <div className="machine-memory-reservation-pools-label">{capacityPoolSummary}</div>
           )}
           {residentModels.length > 0 && (

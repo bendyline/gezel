@@ -74,6 +74,22 @@ describe('ChatSessionSchema', () => {
     });
     expect(out.modelSource).toBe('capability-routing');
   });
+
+  it('preserves read-only external conversation provenance', () => {
+    const source = {
+      kind: 'external' as const,
+      appId: 'pi',
+      appName: 'Pi',
+      externalConversationId: 'pi-session-1',
+      readOnly: true as const,
+      workingDirectory: '/work/racing-game',
+    };
+    const session = ChatSessionSchema.parse({ ...validSession, source });
+    const summary = ChatSessionSummarySchema.parse({ ...validSession, source });
+
+    expect(session.source).toEqual(source);
+    expect(summary.source).toEqual(source);
+  });
 });
 
 describe('ChatSessionSummarySchema', () => {

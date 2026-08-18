@@ -104,6 +104,9 @@ interface SidebarProps {
   /** Project ids with a gezel currently mid-turn — drives the animated
    *  "thinking" indicator on the row (replaces the status dot). */
   activeProjectIds?: Set<string>;
+  /** Gezel ids currently mid-turn — drives the same animated "thinking"
+   *  indicator on gezel rows. */
+  activeGezelIds?: Set<string>;
   /** projectId → count of pending questions — drives the "needs input"
    *  affordance that opens the resolution dialog. */
   pendingByProject?: Map<string, number>;
@@ -207,6 +210,7 @@ export function Sidebar({
   onSelect,
   onOpenArea,
   activeProjectIds,
+  activeGezelIds,
   pendingByProject,
   poisonedProjects,
 }: SidebarProps) {
@@ -876,6 +880,7 @@ export function Sidebar({
           ) : (
             gezels.map((g) => {
               const key = tabKey({ kind: 'gezel', id: g.id });
+              const isWorking = activeGezelIds?.has(g.id) ?? false;
               const name = displayName(
                 { name: g.name, roleBasedName: g.roleBasedName },
                 roleBasedNameOnly,
@@ -890,6 +895,16 @@ export function Sidebar({
               // description — where regular-name users learn what a role does.
               let title = !roleBasedNameOnly && roleLabel ? `${name} — ${roleLabel}` : name;
               if (description) title += ` · ${description}`;
+              const select = () => {
+                onSelect(toRecentTab({ kind: 'gezel', id: g.id }));
+                if (isWorking) {
+                  window.dispatchEvent(
+                    new CustomEvent('gezel:prefer-working-project', {
+                      detail: { gezelId: g.id },
+                    }),
+                  );
+                }
+              };
               return (
                 <li
                   key={g.id}
@@ -898,7 +913,7 @@ export function Sidebar({
                   <button
                     type="button"
                     className={`app-sidebar-item app-sidebar-subitem app-sidebar-gezel${activeKey === key ? ' active' : ''}`}
-                    onClick={() => onSelect(toRecentTab({ kind: 'gezel', id: g.id }))}
+                    onClick={select}
                     title={title}
                   >
                     <span className="app-sidebar-item-icon">
@@ -928,7 +943,20 @@ export function Sidebar({
                       {subtitle && <span className="app-sidebar-item-role">{subtitle}</span>}
                     </span>
                   </button>
-                  <GezelActionsMenu gezel={g} compact />
+                  {isWorking && (
+                    <button
+                      type="button"
+                      className="project-row-thinking app-sidebar-gezel-thinking"
+                      onClick={select}
+                      title={`${name} is working — open`}
+                      aria-label={`${name} is working. Open gezel.`}
+                    >
+                      <span className="project-row-thinking-dot" aria-hidden="true" />
+                      <span className="project-row-thinking-dot" aria-hidden="true" />
+                      <span className="project-row-thinking-dot" aria-hidden="true" />
+                    </button>
+                  )}
+                  <GezelActionsMenu gezel={g} compact boringMode={roleBasedNameOnly} />
                 </li>
               );
             })

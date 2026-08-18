@@ -54,6 +54,11 @@ import {
   isPreviewDocumentUrl,
 } from './electron-boundaries.js';
 import { mainProcessIssueUrl } from './main-process-errors.js';
+import {
+  modelBytesFromResponse,
+  verifyModelBundleArchive,
+  writeModelBundleResponse,
+} from './model-bundle-export.js';
 import { findGezmodelArguments, portableGezmodelFilename } from './model-bundle-files.js';
 import { QuitCoordinator } from './quit-coordinator.js';
 import { rendererConnectionSnapshot } from './renderer-connection.js';
@@ -110,6 +115,10 @@ let trayActivityAbort: AbortController | null = null;
 // Cert-aware client for talking to the service from the main process —
 // rebuilt whenever the supervisor rotates the token/cert on restart.
 let apiClient: GezelClient | null = null;
+const activeModelBundleExports = new Map<
+  string,
+  { controller: AbortController; webContentsId: number }
+>();
 let rendererNetworkPolicyEpoch = 0;
 let rendererNetworkPermissionRead: {
   epoch: number;
@@ -1300,36 +1309,156 @@ ipcMain.handle(
   'gezel:export-model-bundle',
   async (
     event,
-    args?: { engine?: 'llama-cpp' | 'mlx' | 'ds4'; id?: string },
-  ): Promise<{ ok: true; path?: string } | { ok: false; error: string }> => {
+    args?: {
+      engine?: 'llama-cpp' | 'mlx' | 'ds4';
+      id?: string;
+      exportId?: string;
+    },
+  ): Promise<
+    | { ok: true; canceled: true }
+    | { ok: true; canceled?: false; path: string; bytesWritten: number; verified: true }
+    | { ok: false; error: string }
+  > => {
     const engines = new Set(['llama-cpp', 'mlx', 'ds4']);
-    if (!args?.engine || !engines.has(args.engine) || !args.id || args.id.length > 64) {
+    if (
+      !args?.engine ||
+      !engines.has(args.engine) ||
+      !args.id ||
+      args.id.length > 64 ||
+      !args.exportId ||
+      !/^[a-zA-Z0-9-]{1,80}$/.test(args.exportId)
+    ) {
       return { ok: false, error: 'invalid model export request' };
     }
-    if (!apiClient) return { ok: false, error: 'service is unavailable' };
-    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-    const picked = await dialog.showSaveDialog(win as Electron.BrowserWindow, {
-      title: 'Export model',
-      defaultPath: portableGezmodelFilename(args.id),
-      filters: [{ name: 'Gezel model bundle', extensions: ['gezmodel'] }],
-    });
-    if (picked.canceled || !picked.filePath) return { ok: true };
-    const partial = `${picked.filePath}.partial-${randomUUID()}`;
-    try {
-      const response = await apiClient.exportModelBundle(args.engine, args.id);
-      if (!response.body) throw new Error('service returned an empty export');
-      await pipeline(
-        Readable.fromWeb(response.body as import('node:stream/web').ReadableStream<Uint8Array>),
-        createWriteStream(partial, { flags: 'wx' }),
-      );
-      // Preserve an existing file until the complete replacement has landed.
-      await rm(picked.filePath, { force: true });
-      await rename(partial, picked.filePath);
-      return { ok: true, path: picked.filePath };
-    } catch (err) {
-      await rm(partial, { force: true }).catch(() => {});
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    const client = apiClient;
+    if (!client) return { ok: false, error: 'service is unavailable' };
+    if (activeModelBundleExports.has(args.exportId)) {
+      return { ok: false, error: 'model export request is already active' };
     }
+    const controller = new AbortController();
+    const activeExport = { controller, webContentsId: event.sender.id };
+    activeModelBundleExports.set(args.exportId, activeExport);
+    const abortOnRendererClose = () => controller.abort();
+    event.sender.once('destroyed', abortOnRendererClose);
+    let partial: string | undefined;
+    try {
+      const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const picked = await dialog.showSaveDialog(win as Electron.BrowserWindow, {
+        title: 'Export model',
+        defaultPath: portableGezmodelFilename(args.id),
+        filters: [{ name: 'Gezel model bundle', extensions: ['gezmodel'] }],
+      });
+      if (picked.canceled || !picked.filePath) return { ok: true, canceled: true };
+      controller.signal.throwIfAborted();
+      partial = `${picked.filePath}.partial-${randomUUID()}`;
+      let lastProgressAt = 0;
+      let lastProgressPhase = '';
+      const publishProgress = (
+        progress:
+          | { phase: 'preparing'; filename: string }
+          | {
+              phase: 'writing' | 'verifying';
+              filename: string;
+              bytesCompleted: number;
+              bytesTotal?: number;
+            },
+        force = false,
+      ) => {
+        const now = Date.now();
+        if (!force && progress.phase === lastProgressPhase && now - lastProgressAt < 200) return;
+        lastProgressAt = now;
+        lastProgressPhase = progress.phase;
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('gezel:model-bundle-export-progress', {
+            exportId: args.exportId,
+            ...progress,
+          });
+        }
+      };
+      const filename = basename(picked.filePath);
+      publishProgress({ phase: 'preparing', filename }, true);
+      const response = await client.exportModelBundle(args.engine, args.id, controller.signal);
+      const modelBytes = modelBytesFromResponse(response);
+      const bytesWritten = await writeModelBundleResponse(
+        response,
+        partial,
+        (progress) => {
+          publishProgress({ phase: 'writing', filename, ...progress });
+        },
+        controller.signal,
+      );
+      publishProgress(
+        {
+          phase: 'writing',
+          filename,
+          bytesCompleted: bytesWritten,
+          ...(modelBytes === undefined ? {} : { bytesTotal: modelBytes }),
+        },
+        true,
+      );
+
+      publishProgress(
+        {
+          phase: 'verifying',
+          filename,
+          bytesCompleted: 0,
+          ...(modelBytes === undefined ? {} : { bytesTotal: modelBytes }),
+        },
+        true,
+      );
+      let latestVerified = { bytesCompleted: 0, bytesTotal: modelBytes };
+      await verifyModelBundleArchive(
+        partial,
+        (progress) => {
+          latestVerified = progress;
+          publishProgress({ phase: 'verifying', filename, ...progress });
+        },
+        controller.signal,
+      );
+      publishProgress({ phase: 'verifying', filename, ...latestVerified }, true);
+
+      // Keep an existing export recoverable until the verified replacement is
+      // in place. Renaming the backup is cheap even for an 80 GB bundle.
+      controller.signal.throwIfAborted();
+      const backup = `${picked.filePath}.backup-${randomUUID()}`;
+      let backedUp = false;
+      try {
+        backedUp = (await stat(picked.filePath)).isFile();
+      } catch {
+        backedUp = false;
+      }
+      if (backedUp) await rename(picked.filePath, backup);
+      try {
+        controller.signal.throwIfAborted();
+        await rename(partial, picked.filePath);
+      } catch (error) {
+        if (backedUp) await rename(backup, picked.filePath).catch(() => {});
+        throw error;
+      }
+      if (backedUp) await rm(backup, { force: true }).catch(() => {});
+      return { ok: true, path: picked.filePath, bytesWritten, verified: true };
+    } catch (err) {
+      if (partial) await rm(partial, { force: true }).catch(() => {});
+      if (controller.signal.aborted) return { ok: true, canceled: true };
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      event.sender.removeListener('destroyed', abortOnRendererClose);
+      if (activeModelBundleExports.get(args.exportId) === activeExport) {
+        activeModelBundleExports.delete(args.exportId);
+      }
+    }
+  },
+);
+
+ipcMain.handle(
+  'gezel:cancel-model-bundle-export',
+  (event, exportId?: string): { ok: true } | { ok: false; error: string } => {
+    if (!exportId || !/^[a-zA-Z0-9-]{1,80}$/.test(exportId)) {
+      return { ok: false, error: 'invalid model export cancellation request' };
+    }
+    const active = activeModelBundleExports.get(exportId);
+    if (active?.webContentsId === event.sender.id) active.controller.abort();
+    return { ok: true };
   },
 );
 

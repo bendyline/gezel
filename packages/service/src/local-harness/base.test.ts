@@ -1,5 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import { posixShellWord, powershellLiteral } from './base.js';
+import { findHarnessModel, posixShellWord, powershellLiteral } from './base.js';
+
+describe('findHarnessModel', () => {
+  it('accepts a legacy persisted-id ref for a newly advertised role-name model', () => {
+    const advertised = {
+      id: 'gezel:developer-maya',
+      label: 'Maya',
+      kind: 'gezel' as const,
+      provider: 'llama-cpp' as const,
+      gezelId: 'maya-stable-id',
+      supportsTools: true,
+    };
+
+    expect(findHarnessModel([advertised], 'gezel:maya-stable-id')).toBe(advertised);
+  });
+
+  it('uses stable gezel metadata when a renamed gezel gets a new advertised id', () => {
+    const renamed = {
+      id: 'gezel:lead-developer-maya-jones',
+      label: 'Maya Jones',
+      kind: 'gezel' as const,
+      provider: 'llama-cpp' as const,
+      gezelId: 'maya-stable-id',
+      supportsTools: true,
+    };
+
+    expect(findHarnessModel([renamed], 'gezel:developer-maya', 'maya-stable-id')).toBe(renamed);
+  });
+});
 
 /**
  * Every harness launch command is assembled from these two helpers, and each

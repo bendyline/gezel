@@ -240,6 +240,33 @@ function craftbookParamDefaults(paramSchema: Craftbook['paramSchema']): Record<s
 }
 
 /**
+ * Resolve placeholders inside declared string defaults against explicit launch
+ * params plus the task's reserved runtime context. Only defaults are expanded:
+ * user-supplied values can legitimately contain `{{…}}` (inline templates,
+ * examples, source text) and must remain byte-for-byte authoritative.
+ *
+ * Defaults may reference other defaults, so resolve in a small bounded loop.
+ * Unknown or cyclic placeholders remain visible and are rejected later if they
+ * land in a gate path; they are never silently blanked.
+ */
+function resolveCraftbookParamDefaults(
+  defaults: Record<string, string>,
+  overrides: Record<string, string>,
+  runtime: Record<string, string>,
+): Record<string, string> {
+  let resolved = { ...defaults };
+  for (let pass = 0; pass < 8; pass += 1) {
+    const context = { ...resolved, ...overrides, ...runtime };
+    const next = Object.fromEntries(
+      Object.entries(resolved).map(([key, value]) => [key, interpolateContext(value, context)]),
+    );
+    if (Object.entries(next).every(([key, value]) => resolved[key] === value)) return next;
+    resolved = next;
+  }
+  return resolved;
+}
+
+/**
  * Substitute `{{ key }}` placeholders with per-child context values.
  * Plain string substitution only — no templating engine (mirrors the
  * `TaskVariation.context` contract). Unknown placeholders are left intact
@@ -991,9 +1018,11 @@ export class TaskManager {
     // the snapshot is written, so gates and observable-progress see the
     // resolved paths. Unknown placeholders survive untouched; books
     // without `{{}}` are unaffected.
-    const effectiveCraftbookParams = {
-      ...craftbookParamDefaults(mainBook.paramSchema),
-      ...(input.craftbookParams ?? {}),
+    const declaredCraftbookDefaults = craftbookParamDefaults(mainBook.paramSchema);
+    const craftbookParamOverrides = { ...(input.craftbookParams ?? {}) };
+    let effectiveCraftbookParams = {
+      ...declaredCraftbookDefaults,
+      ...craftbookParamOverrides,
     };
     // Connector prep runs BEFORE interpolation, which is the whole reason
     // it lives at launch rather than at step activation: the corpus paths
@@ -1027,13 +1056,35 @@ export class TaskManager {
           connectors: mainBook.connectors,
           params: effectiveCraftbookParams,
         });
-        Object.assign(effectiveCraftbookParams, prep.params ?? {});
+        Object.assign(craftbookParamOverrides, prep.params ?? {});
+        effectiveCraftbookParams = {
+          ...declaredCraftbookDefaults,
+          ...craftbookParamOverrides,
+        };
         connectorPrepNote = prep.note;
       }
     }
-    if (Object.keys(effectiveCraftbookParams).length > 0) {
-      interpolateStepsContext(craftbook.steps, effectiveCraftbookParams);
-    }
+    const runtimeCraftbookContext = {
+      'task.num': String(num),
+      'task.ref': buildTaskRef(projectId, num),
+      'task.projectId': projectId,
+    };
+    effectiveCraftbookParams = {
+      ...resolveCraftbookParamDefaults(
+        declaredCraftbookDefaults,
+        craftbookParamOverrides,
+        runtimeCraftbookContext,
+      ),
+      ...craftbookParamOverrides,
+    };
+    const craftbookInterpolationContext = {
+      ...effectiveCraftbookParams,
+      // Reserved runtime values win if a caller tries to spoof one as a
+      // craftbook param. They are interpolation context, not invocation
+      // params, so they are not persisted in `craftbookParams` below.
+      ...runtimeCraftbookContext,
+    };
+    interpolateStepsContext(craftbook.steps, craftbookInterpolationContext);
     // A previous run may have left the same deliverable path behind. An
     // existence-only observable gate would then advance this brand-new task
     // before its assignee changed anything. Preserve explicit author intent
@@ -1065,13 +1116,11 @@ export class TaskManager {
     // `spawnBook`/`mainBook`, which may still be the resolver's cached
     // template — writing through would leak one task's params into the
     // next launch of the same craftbook.
-    if (Object.keys(effectiveCraftbookParams).length > 0) {
-      if (spawnsCraftbook) {
-        interpolateStepsContext(spawnsCraftbook.steps, effectiveCraftbookParams);
-      }
-      if (craftbook.spawn) {
-        craftbook.spawn = interpolateContextDeep(craftbook.spawn, effectiveCraftbookParams);
-      }
+    if (spawnsCraftbook) {
+      interpolateStepsContext(spawnsCraftbook.steps, craftbookInterpolationContext);
+    }
+    if (craftbook.spawn) {
+      craftbook.spawn = interpolateContextDeep(craftbook.spawn, craftbookInterpolationContext);
     }
     const activeStepId = craftbook.entryStepId;
     if (!isDraft) {

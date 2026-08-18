@@ -387,7 +387,12 @@ export class MlxProvider implements LLMProvider {
    * requests reach the sidecar for one static batched wave.
    */
   private engineGateActive = 0;
-  private readonly engineGateWaiters: Array<() => void> = [];
+  private readonly engineGateWaiters: Array<{
+    resolve: () => void;
+    reject: (reason?: unknown) => void;
+    signal?: AbortSignal;
+    onAbort?: () => void;
+  }> = [];
   private readonly batchMaxConcurrency: number;
 
   constructor(opts: {
@@ -512,7 +517,10 @@ export class MlxProvider implements LLMProvider {
     return this.supervisor?.lifecycleSnapshot();
   }
 
-  async acquireExclusiveEngineRequest(label: string): Promise<() => void> {
+  async acquireExclusiveEngineRequest(label: string, signal?: AbortSignal): Promise<() => void> {
+    if (signal?.aborted)
+      throw new DOMException(`MLX engine request ${label} aborted`, 'AbortError');
+
     const width = this.batchMaxConcurrency;
     const waitStartedAt = Date.now();
     if (this.engineGateActive < width) {
@@ -522,7 +530,24 @@ export class MlxProvider implements LLMProvider {
       // stays at `width` across the handoff, so we never exceed it — at
       // Width 1 is a strict provider-side FIFO; the sidecar still uses its
       // singleton BatchGenerator path for cache snapshots.
-      await new Promise<void>((resolve) => this.engineGateWaiters.push(resolve));
+      await new Promise<void>((resolve, reject) => {
+        const waiter: (typeof this.engineGateWaiters)[number] = {
+          resolve,
+          reject,
+          ...(signal ? { signal } : {}),
+        };
+        if (signal) {
+          waiter.onAbort = () => {
+            const idx = this.engineGateWaiters.indexOf(waiter);
+            if (idx === -1) return;
+            this.engineGateWaiters.splice(idx, 1);
+            signal.removeEventListener('abort', waiter.onAbort!);
+            reject(new DOMException(`MLX engine request ${label} aborted`, 'AbortError'));
+          };
+          signal.addEventListener('abort', waiter.onAbort, { once: true });
+        }
+        this.engineGateWaiters.push(waiter);
+      });
     }
     const waitedMs = Date.now() - waitStartedAt;
     if (waitedMs > 1_000) {
@@ -534,8 +559,11 @@ export class MlxProvider implements LLMProvider {
       released = true;
       const next = this.engineGateWaiters.shift();
       if (next) {
+        if (next.signal && next.onAbort) {
+          next.signal.removeEventListener('abort', next.onAbort);
+        }
         // Hand our slot straight to the next waiter — active count unchanged.
-        next();
+        next.resolve();
       } else {
         this.engineGateActive--;
       }
@@ -1039,15 +1067,17 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         Object.assign(body, adapter.buildRequestExtras(opts.sessionId));
       }
     }
+    const requestSignal = AbortSignal.timeout(opts?.timeoutMs ?? 10 * 60_000);
     const releaseEngineRequest = await this.deps.provider.acquireExclusiveEngineRequest(
       `cache-warm:${opts?.sessionId ?? 'anonymous'}`,
+      requestSignal,
     );
     try {
       const res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(opts?.timeoutMs ?? 10 * 60_000),
+        signal: requestSignal,
       });
       if (!res.ok) {
         const detail = await res.text().catch(() => '');
@@ -1371,6 +1401,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // post-move analysis wall reached the visible reply (wild-caught:
     // gemma4-12b checkers, ~1,000 tokens where one line belonged).
     let actionFiredEarlierThisTurn = false;
+    // The physical request lease must outlive all per-iteration setup, but it
+    // must never outlive this send. In particular, a fetch-level AbortError
+    // happens before the SSE-body `finally`; keeping the active release here
+    // lets the outer `finally` recover the slot from every exit path.
+    let releaseActiveEngineRequest: (() => void) | null = null;
 
     try {
       for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
@@ -1554,15 +1589,45 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           );
         }
 
-        const releaseEngineRequest = await this.deps.provider.acquireExclusiveEngineRequest(
-          `turn#${seq}.${turn}`,
-        );
-        if (Date.now() >= deadline) {
+        const externalSignal = opts?.queue?.signal;
+        const engineWaitRemaining = deadline - Date.now();
+        if (engineWaitRemaining <= 0) {
+          throw new Error(`[Mac AI] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
+        }
+        const engineDeadlineSignal = AbortSignal.timeout(engineWaitRemaining);
+        const engineWaitSignal = externalSignal
+          ? AbortSignal.any([externalSignal, engineDeadlineSignal])
+          : engineDeadlineSignal;
+        let releaseEngineRequest: () => void;
+        try {
+          releaseEngineRequest = await this.deps.provider.acquireExclusiveEngineRequest(
+            `turn#${seq}.${turn}`,
+            engineWaitSignal,
+          );
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') {
+            if (externalSignal?.aborted) {
+              throw new Error('[Mac AI] turn cancelled by caller');
+            }
+            if (engineDeadlineSignal.aborted) {
+              throw new Error(`[Mac AI] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
+            }
+          }
+          throw err;
+        }
+        let engineRequestReleased = false;
+        const releaseEngineRequestOnce = () => {
+          if (engineRequestReleased) return;
+          engineRequestReleased = true;
+          releaseActiveEngineRequest = null;
           releaseEngineRequest();
+        };
+        releaseActiveEngineRequest = releaseEngineRequestOnce;
+        if (Date.now() >= deadline) {
+          releaseEngineRequestOnce();
           throw new Error(`[Mac AI] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
         }
         const ctrl = new AbortController();
-        const externalSignal = opts?.queue?.signal;
         // Tag which trigger fired the abort — distinguishes the
         // hard-timer vs caller-cancel paths in the log so a hang
         // diagnosed via "turn#N FETCH-ABORT timer" reads unambiguously
@@ -1703,6 +1768,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           clearInterval(deadlineTicker);
           clearTimeout(idleTimer);
           this.currentTurnIdleReset = null;
+          releaseEngineRequestOnce();
           externalSignal?.removeEventListener('abort', onExternalAbort);
         };
 
@@ -2144,7 +2210,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         } finally {
           cleanupTurn();
           this.deps.markUsed();
-          releaseEngineRequest();
         }
 
         // Drain any safely-buffered tail from the marker stripper. If
@@ -3439,6 +3504,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
       );
       throw err;
     } finally {
+      releaseActiveEngineRequest?.();
       clearInterval(statusHeartbeat);
       this.deps.provider._deregisterActiveSession(this);
     }

@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { externalGezelModelId } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MockProvider } from '../../providers/mock.js';
@@ -64,6 +65,21 @@ describe('GET /ollama/v1/tags', () => {
     const names = body.models.map((m) => m.name);
     expect(names).toContain('copilot:mock-fast');
     expect(names).toContain('openai:mock-fast');
+  });
+
+  it('lists the serving gezel by role and name', async () => {
+    const gezel = (await svc.context.store.listGezels())[0]!;
+    await svc.context.store.writeConfig({
+      openaiEndpoints: { servingGezelId: gezel.id },
+    });
+    try {
+      const res = await call('GET', '/ollama/v1/tags', { token: rootToken });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { models: Array<{ name: string }> };
+      expect(body.models[0]?.name).toBe(externalGezelModelId(gezel));
+    } finally {
+      await svc.context.store.writeConfig({ openaiEndpoints: {} });
+    }
   });
 });
 

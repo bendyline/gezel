@@ -114,9 +114,13 @@ describe('AmbientDashboardGenerator', () => {
 
     expect(await gen.sweep()).toBe(true);
     expect(oneShot).toHaveBeenCalledTimes(1);
+    expect(oneShot.mock.calls[0]?.[1]).toBe(180_000);
     expect(oneShot.mock.calls[0]?.[2]).toMatchObject({
       gezelId: meesterId,
       jobLabel: 'ambient dashboard',
+      tuningProfileId: 'instruct',
+      lane: 'background',
+      ambient: true,
     });
     expect(oneShot.mock.calls[0]?.[0]).toContain(projectId);
     expect(renderer).toHaveBeenCalledTimes(1);
@@ -134,6 +138,9 @@ describe('AmbientDashboardGenerator', () => {
 
     const state = await gen.readState();
     expect(state.lastFile).toBe(filename);
+    expect(state.lastGeneratedAt).toBe(new Date(nowMs).toISOString());
+    expect(state.lastFailedAt).toBeUndefined();
+    expect(state.lastError).toBeUndefined();
     expect(state.inputHash).toBeTruthy();
 
     const events = await history.listEvents({ kinds: ['meester.dashboard.generated'] });
@@ -181,7 +188,10 @@ describe('AmbientDashboardGenerator', () => {
 
   it('skips within the interval throttle and while chat is active; runNow bypasses both', async () => {
     await seedActiveProject();
-    const oneShot = vi.fn(async () => DASHBOARD_MD);
+    const oneShot = vi.fn(
+      async (_prompt: string, _timeoutMs: number, _opts: Parameters<DashboardOneShot>[2]) =>
+        DASHBOARD_MD,
+    );
 
     const gen = makeGenerator(oneShot);
     expect(await gen.sweep()).toBe(true);
@@ -198,6 +208,12 @@ describe('AmbientDashboardGenerator', () => {
 
     expect(await gen.runNow()).toBe(true);
     expect(oneShot).toHaveBeenCalledTimes(2);
+    expect(oneShot.mock.calls[1]?.[1]).toBe(15 * 60_000);
+    expect(oneShot.mock.calls[1]?.[2]).toMatchObject({
+      tuningProfileId: 'instruct',
+      lane: 'interactive',
+      ambient: false,
+    });
   });
 
   it('is idempotent on an unchanged workshop', async () => {
@@ -271,6 +287,9 @@ describe('AmbientDashboardGenerator', () => {
     expect(await gen.sweep()).toBe(false);
     const state = await gen.readState();
     expect(state.lastRunAt).toBe(new Date(nowMs).toISOString());
+    expect(state.lastFailedAt).toBe(new Date(nowMs).toISOString());
+    expect(state.lastError).toBe('boom');
+    expect(state.lastGeneratedAt).toBeUndefined();
     expect(state.inputHash).toBeUndefined();
     expect(state.lastFile).toBeUndefined();
   });
@@ -287,7 +306,35 @@ describe('AmbientDashboardGenerator', () => {
     expect(renderer).not.toHaveBeenCalled();
     const state = await gen.readState();
     expect(state.lastRunAt).toBeTruthy();
+    expect(state.lastFailedAt).toBe(state.lastRunAt);
+    expect(state.lastError).toBe('The Meester returned no usable dashboard content.');
     expect(state.inputHash).toBeUndefined();
+  });
+
+  it('preserves the last successful image metadata when a later render fails', async () => {
+    await seedActiveProject();
+    const renderer = fakeRenderer();
+    const gen = makeGenerator(
+      vi.fn(async () => DASHBOARD_MD),
+      {
+        renderer: renderer as unknown as AmbientDashboardRenderer,
+      },
+    );
+
+    expect(await gen.sweep()).toBe(true);
+    const generatedAt = new Date(nowMs).toISOString();
+    const lastFile = (await gen.readState()).lastFile;
+
+    nowMs += 2 * HOUR;
+    activity.stamp((await store.listProjects())[0]!.id, nowMs);
+    renderer.mockRejectedValueOnce(new Error('render failed'));
+    expect(await gen.sweep()).toBe(false);
+
+    const state = await gen.readState();
+    expect(state.lastGeneratedAt).toBe(generatedAt);
+    expect(state.lastFile).toBe(lastFile);
+    expect(state.lastFailedAt).toBe(new Date(nowMs).toISOString());
+    expect(state.lastError).toBe('render failed');
   });
 
   it('prunes dated files beyond keep, never latest.png or applied slots', async () => {

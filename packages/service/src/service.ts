@@ -2283,15 +2283,14 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   });
 
   // The ambient dashboard — PNG workshop snapshots for the OS
-  // wallpaper integration. The one-shot is enqueued `ambient: true`
-  // so local engines hold it behind interactive work.
+  // wallpaper integration. Scheduled passes are ambient/background; a
+  // user-clicked Generate now pass carries interactive priority instead.
   const ambientDashboard = new AmbientDashboardGenerator({
     home,
     store,
     history,
     activity: activityTracker,
-    oneShot: (prompt, timeoutMs, opts) =>
-      chat.oneShotCompletion(prompt, timeoutMs, { ...opts, ambient: true }),
+    oneShot: (prompt, timeoutMs, opts) => chat.oneShotCompletion(prompt, timeoutMs, opts),
     isNightShiftActive: () => nightShift.isActive(),
     isChatActive: () => chat.isAnyActive(),
     events: chatEvents,

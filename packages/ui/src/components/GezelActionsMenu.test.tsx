@@ -28,7 +28,7 @@ describe('GezelActionsMenu', () => {
     const onDeleted = vi.fn();
     render(<GezelActionsMenu gezel={{ id: 'maya', name: 'Maya' }} onDeleted={onDeleted} />);
 
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Retire gezel…' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Retire Maya… (Remove this gezel)' }));
     expect(screen.getByRole('heading', { name: 'Retire Maya?' })).toBeInTheDocument();
     expect(screen.getByText(/permanently remove Maya/)).toBeInTheDocument();
     expect(screen.getByText(/won't be able to get this gezel back/)).toBeInTheDocument();
@@ -36,6 +36,16 @@ describe('GezelActionsMenu', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retire Maya' }));
     await waitFor(() => expect(api.deleteGezel).toHaveBeenCalledWith('maya'));
     expect(onDeleted).toHaveBeenCalledWith('maya');
+  });
+
+  it('uses plain removal copy in boring mode', async () => {
+    render(<GezelActionsMenu gezel={{ id: 'maya', name: 'Maya' }} boringMode />);
+
+    const removeItem = screen.getByRole('menuitem', { name: 'Remove this gezel' });
+    fireEvent.click(removeItem);
+    expect(screen.getByRole('heading', { name: 'Remove this gezel?' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove this gezel' })).toBeInTheDocument();
+    expect(screen.queryByText(/Maya|Retire/)).not.toBeInTheDocument();
   });
 
   it('does not offer account-local removal for a machine-shared gezel', () => {

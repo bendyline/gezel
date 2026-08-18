@@ -24,7 +24,20 @@ vi.mock('./components/ModelBundleControls.js', () => ({
 }));
 vi.mock('./components/NeedsInputPanel.js', () => ({ NeedsInputPanel: () => null }));
 vi.mock('./components/QueueMeter.js', () => ({ QueueMeter: () => null }));
-vi.mock('./components/Sidebar.js', () => ({ Sidebar: () => null }));
+vi.mock('./components/Sidebar.js', () => ({
+  Sidebar: ({
+    activeProjectIds,
+    activeGezelIds,
+  }: {
+    activeProjectIds?: Set<string>;
+    activeGezelIds?: Set<string>;
+  }) => (
+    <div data-testid="sidebar-active-turns">
+      <span data-testid="active-project-ids">{[...(activeProjectIds ?? [])].sort().join(',')}</span>
+      <span data-testid="active-gezel-ids">{[...(activeGezelIds ?? [])].sort().join(',')}</span>
+    </div>
+  ),
+}));
 vi.mock('./components/TabContent.js', () => ({
   TabContent: ({ tab }: { tab: { kind: string; id?: string } }) => (
     <div>{`${tab.kind}:${tab.id ?? ''}`}</div>
@@ -529,5 +542,28 @@ describe('quota meter', () => {
     await waitFor(() => expect(api.getQueueStatus).toHaveBeenCalled());
 
     expect(screen.queryByRole('button', { name: /1239\/1500/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('active navigation indicators', () => {
+  it('indexes in-flight turns by both project and gezel', async () => {
+    vi.mocked(api.listInflightTurns).mockResolvedValue({
+      inflight: [
+        {
+          sessionId: 's1',
+          projectId: 'p2',
+          gezelId: 'g1',
+          providerName: 'mock',
+          userText: 'Work on this',
+          startedAt: Date.now(),
+          elapsedMs: 50,
+        },
+      ],
+    } as never);
+
+    render(<App />);
+
+    await waitFor(() => expect(screen.getByTestId('active-project-ids')).toHaveTextContent('p2'));
+    expect(screen.getByTestId('active-gezel-ids')).toHaveTextContent('g1');
   });
 });

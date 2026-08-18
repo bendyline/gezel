@@ -6,7 +6,14 @@ import { primitivesMock } from '../test-utils/primitivesMock.js';
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
 vi.mock('./ModelBundleControls.js', () => ({
-  useExportModelBundle: () => ({ run: async () => {}, busy: false, error: null }),
+  ModelBundleExportProgressDialog: () => null,
+  useExportModelBundle: () => ({
+    run: async () => {},
+    busy: false,
+    error: null,
+    progress: { phase: 'idle' },
+    dismissProgress: () => {},
+  }),
 }));
 
 const { ModelActionsMenu, ModelContextSliderPanel } = await import('./ModelContextControls.js');

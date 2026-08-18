@@ -1,7 +1,7 @@
 import type { AmbientDashboardStatusResponse, AmbientDashboardTheme } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { Select } from '../primitives/index.js';
+import { AmbientDashboardThemeSelect } from './AmbientDashboardThemeSelect.js';
 
 /**
  * Settings → "Ambient display": the opt-in toggle for the meester's
@@ -100,7 +100,9 @@ export function AmbientDashboardCard() {
   // daemon can't leave the card polling forever.
   const pollUntilIdle = useCallback(() => {
     if (pollTimer.current !== null) return;
-    let remaining = 120;
+    // Manual runs have an intentionally generous deadline: they may be
+    // waiting for a single-lane local model turn to finish before dispatch.
+    let remaining = 480;
     const tick = async () => {
       pollTimer.current = null;
       const next = await refreshStatus();
@@ -208,6 +210,14 @@ export function AmbientDashboardCard() {
 
   const instructions = platformInstructions(platform);
   const selectedTheme = status?.themes?.find((theme) => theme.id === status.themeId);
+  const latestGenerationFailed = Boolean(
+    status?.lastError &&
+      status.lastFailedAt &&
+      (!status.lastGeneratedAt ||
+        Date.parse(status.lastFailedAt) >= Date.parse(status.lastGeneratedAt)),
+  );
+  const visibleError =
+    error ?? (latestGenerationFailed ? `Dashboard generation failed: ${status?.lastError}` : null);
 
   return (
     <section style={{ marginBottom: '2rem' }}>
@@ -241,25 +251,13 @@ export function AmbientDashboardCard() {
               <span id="ambient-dashboard-theme-label" className="small">
                 Dashboard theme
               </span>
-              <Select.Root
+              <AmbientDashboardThemeSelect
                 value={status.themeId}
-                onValueChange={(value) => void saveTheme(value)}
+                themes={status.themes}
                 disabled={themeSaving || status.running}
-              >
-                <Select.Trigger
-                  aria-labelledby="ambient-dashboard-theme-label"
-                  style={{ width: '100%', marginTop: '0.25rem' }}
-                >
-                  <Select.Value />
-                </Select.Trigger>
-                <Select.Content>
-                  {status.themes.map((theme) => (
-                    <Select.Item key={theme.id} value={theme.id}>
-                      {theme.name}
-                    </Select.Item>
-                  ))}
-                </Select.Content>
-              </Select.Root>
+                labelledBy="ambient-dashboard-theme-label"
+                onValueChange={(value) => void saveTheme(value)}
+              />
               <p className="muted small" style={{ margin: '0.25rem 0 0' }}>
                 {themeSaving
                   ? 'Saving theme…'
@@ -323,7 +321,7 @@ export function AmbientDashboardCard() {
           ))}
         </ul>
       </details>
-      {error && <p className="error small">{error}</p>}
+      {visibleError && <p className="error small">{visibleError}</p>}
     </section>
   );
 }

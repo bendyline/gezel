@@ -214,6 +214,11 @@ import {
   summarizeToolArgs,
   summarizeToolResult,
 } from './args-summary.js';
+import {
+  type BeginExternalConversationInput,
+  ExternalConversationRecorder,
+  type ExternalConversationTurn,
+} from './external-conversation-recorder.js';
 import { artifactPathsOf, extractReferencedFiles } from './file-references.js';
 
 /**
@@ -1280,6 +1285,7 @@ export class ChatManager {
   private readonly activeMemoryExtractions = new Map<string, { rerunRequested: boolean }>();
   private readonly store: Store;
   private readonly events: ChatEventBus;
+  private readonly externalConversations: ExternalConversationRecorder;
   private readonly memory: MemoryManager;
   private readonly historyManager?: import('../history/manager.js').HistoryManager;
   private readonly catalog: CatalogService;
@@ -1325,6 +1331,11 @@ export class ChatManager {
   constructor(opts: ChatManagerOptions) {
     this.store = opts.store;
     this.events = opts.events;
+    this.externalConversations = new ExternalConversationRecorder({
+      store: this.store,
+      events: this.events,
+      onFinalTurn: (sessionId) => this.scheduleExternalMemoryExtraction(sessionId),
+    });
     // GPU swaps are published by the image/video routes straight onto the
     // bus, not through this manager — the global subscription is the only
     // session-scoped view of that work.
@@ -2216,14 +2227,16 @@ export class ChatManager {
       const state = this.states.get(sessionId);
       if (state && state.record.projectId === projectId) return true;
     }
-    return false;
+    return this.externalConversations
+      .listActive()
+      .some((activity) => activity.projectId === projectId);
   }
 
   /** True when ANY session has a turn in flight — the session-idle gate for
    *  background work (the boekwachter enrichment loop) that should never
    *  compete with live chat. */
   isAnyActive(): boolean {
-    return this.inflight.size > 0;
+    return this.inflight.size > 0 || this.externalConversations.listActive().length > 0;
   }
 
   /** True while a specific session is running or has an unstarted send. */
@@ -2243,7 +2256,7 @@ export class ChatManager {
       const state = this.states.get(sessionId);
       if (state && state.record.gezelId === gezelId) return true;
     }
-    return false;
+    return this.externalConversations.listActive().some((activity) => activity.gezelId === gezelId);
   }
 
   /**
@@ -2332,6 +2345,11 @@ export class ChatManager {
           ? { lastProgressAgoMs: now - currentTurnProgressAt }
           : {}),
       });
+    }
+    const nativeSessionIds = new Set(out.map((entry) => entry.sessionId));
+    for (const activity of this.externalConversations.listActive()) {
+      if (nativeSessionIds.has(activity.sessionId)) continue;
+      out.push(activity);
     }
     return out;
   }
@@ -2854,6 +2872,19 @@ export class ChatManager {
     const cached = this.states.get(sessionId)?.record;
     if (cached) return cached;
     return this.store.findSessionById(sessionId);
+  }
+
+  /**
+   * Begin one request in a caller-owned conversation loop (currently Pi).
+   * The recorder reconciles the caller's authoritative transcript into a
+   * read-only Gezel session and returns live-event hooks for this response.
+   */
+  async beginExternalConversation(
+    input: BeginExternalConversationInput,
+  ): Promise<ExternalConversationTurn> {
+    const turn = await this.externalConversations.begin(input);
+    this.cancelDeferredExtraction(turn.sessionId);
+    return turn;
   }
 
   /**
@@ -9643,6 +9674,8 @@ export class ChatManager {
        * expansion) — those must keep today's plain-background behavior.
        */
       ambient?: boolean;
+      /** Override the background default for explicitly user-awaited utility work. */
+      lane?: Lane;
       /**
        * Live streaming hooks for callers that surface progress (the
        * transform dialog's metacommentary feed). `onDelta` is the
@@ -9822,16 +9855,15 @@ export class ChatManager {
       ? session.onReasoningDelta?.(opts.onReasoningDelta)
       : undefined;
     try {
-      // One-shot completions (icon / about generation, summarization,
-      // rewrites) are background work — they shouldn't cut in front of
-      // a user's active chat turn. Also thread gezelId where available
-      // so the affinity bonus keeps the KV cache warm when a gezel is
-      // mid-batch of tasks.
+      // One-shot completions default to background work so they do not cut
+      // in front of active chat. Explicitly user-awaited utilities can opt
+      // into the interactive lane. Also thread gezelId where available so
+      // the affinity bonus keeps the KV cache warm when a gezel is mid-batch.
       const content = await wait(
         session.sendAndWait(prompt, {
           timeoutMs: Math.max(1, deadlineAt - Date.now()),
           queue: {
-            lane: 'background',
+            lane: opts.lane ?? 'background',
             signal: oneShotSignal,
             ...(opts.ambient ? { ambient: true } : {}),
             ...(gezelId ? { gezelId } : {}),
@@ -10057,6 +10089,95 @@ export class ChatManager {
 
   // Internal
   // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * External sessions never enter `states`, so the ordinary post-send memory
+   * hook cannot see them. Re-read their durable transcript and use the same
+   * cadence, ambient lane, cursor, and debounce policy as first-party chats.
+   */
+  private scheduleExternalMemoryExtraction(sessionId: string): void {
+    const prepare = this.store
+      .findSessionById(sessionId)
+      .then((record) => {
+        if (!record?.source || !this.shouldRunMemoryExtraction(record)) return;
+        const fire = (): void => {
+          const run = (async () => {
+            const active = this.activeMemoryExtractions.get(sessionId);
+            if (active) {
+              active.rerunRequested = true;
+              return;
+            }
+            const snap = await this.store.findSessionById(sessionId);
+            if (!snap?.source || !this.shouldRunMemoryExtraction(snap)) return;
+            const messagesAtTime = snap.messages.length;
+            const transcriptFingerprint = createHash('sha256')
+              .update(JSON.stringify(snap.messages))
+              .digest('hex');
+            const marker = { rerunRequested: false };
+            this.activeMemoryExtractions.set(sessionId, marker);
+            try {
+              await extractMemories({
+                messages: snap.messages,
+                extractedUpTo: snap.extractedUpTo ?? 0,
+                oneShot: (prompt, timeoutMs) =>
+                  this.oneShotCompletion(prompt, timeoutMs, {
+                    gezelId: snap.gezelId,
+                    ambient: true,
+                    ...(isLocalProvider(snap.providerName)
+                      ? {}
+                      : {
+                          providerName: snap.providerName,
+                          ...(snap.model ? { model: snap.model } : {}),
+                        }),
+                    jobLabel: `memory · ${snap.id.slice(0, 8)}`,
+                  }),
+                memory: this.memory,
+                gezelId: snap.gezelId,
+                projectId: snap.projectId,
+                debug: this.debug,
+              });
+              const fresh = await this.store.getSession(snap.gezelId, snap.id);
+              if (fresh) {
+                const freshFingerprint = createHash('sha256')
+                  .update(JSON.stringify(fresh.messages.slice(0, messagesAtTime)))
+                  .digest('hex');
+                if (freshFingerprint === transcriptFingerprint) {
+                  fresh.extractedUpTo = Math.min(messagesAtTime, fresh.messages.length);
+                  await this.store.writeSession(fresh);
+                } else {
+                  // Pi branched or retried while extraction was running. Do
+                  // not advance the cursor over a suffix we did not inspect.
+                  marker.rerunRequested = true;
+                }
+              }
+            } catch (err) {
+              memLog.warn(
+                `external extraction failed for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            } finally {
+              if (this.activeMemoryExtractions.get(sessionId) === marker) {
+                this.activeMemoryExtractions.delete(sessionId);
+                if (marker.rerunRequested && !this.shuttingDown) {
+                  this.scheduleExternalMemoryExtraction(sessionId);
+                }
+              }
+            }
+          })();
+          this.trackBackground(run);
+        };
+        if (this.isHeavyExtractionProvider(record.providerName)) {
+          this.scheduleHeavyExtraction(sessionId, fire);
+        } else {
+          fire();
+        }
+      })
+      .catch((err) => {
+        memLog.warn(
+          `external extraction scheduling failed for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+    this.trackBackground(prepare);
+  }
 
   /**
    * Whether the post-turn memory extraction should fire now. The

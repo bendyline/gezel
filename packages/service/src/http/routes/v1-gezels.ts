@@ -1,3 +1,4 @@
+import { externalGezelModelId } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import type { ServiceContext } from '../context.js';
 
@@ -7,13 +8,13 @@ import type { ServiceContext } from '../context.js';
  *
  * The VS Code Language Model Chat Provider is the primary consumer:
  * it calls this endpoint, then registers one model entry per gezel
- * (`gezel:<id>`) so Copilot Chat's model picker shows them alongside
+ * (`gezel:<role>-<name>`) so Copilot Chat's model picker shows them alongside
  * raw provider models.
  *
  * Slim shape on purpose — apps don't need the full GezelDetail (which
  * includes the markdown source, sections, poppetje, etc.). Each entry
  * tells the caller "here's a gezel; its effective provider is X; you
- * can address it via `gezel:<id>` in /v1/chat/completions".
+ * can address it via a role-name alias in /v1/chat/completions".
  *
  * `provider` / `model` are the gezel's frontmatter override — present
  * only when the gezel explicitly opted out of the install default.
@@ -26,6 +27,8 @@ import type { ServiceContext } from '../context.js';
  */
 interface PublicGezelEntry {
   id: string;
+  /** Human-readable id accepted by the external inference routes. */
+  modelId: string;
   name: string;
   description?: string;
   role?: string;
@@ -79,6 +82,7 @@ export function v1GezelsRoutes(ctx: ServiceContext): Hono {
       const eff = effectiveById.get(g.id);
       return {
         id: g.id,
+        modelId: externalGezelModelId(g),
         name: g.name,
         ...(g.description ? { description: g.description } : {}),
         ...(g.role ? { role: g.role } : {}),

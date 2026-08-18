@@ -146,4 +146,13 @@ describe('MLX sidecar cache seeding', () => {
     expect(warm).not.toMatch(/stream_generate\(/);
     expect(warm).not.toMatch(/serial_reset_needed\(/);
   });
+
+  it('uses an iterable processor list for every sequence in a mixed batch wave', () => {
+    const batch = sliceBlock(SERVER_SRC, 'class BatchEngine:');
+    // Cache-warm sequences have no grammar while connected-app tool turns do.
+    // mlx_lm iterates each per-sequence entry, so `None` in that mixed list
+    // crashes the entire wave with "NoneType object is not iterable".
+    expect(batch).toMatch(/return list\(procs or \[\]\)/);
+    expect(batch).not.toMatch(/return procs or None/);
+  });
 });
