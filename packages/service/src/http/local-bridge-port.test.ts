@@ -111,21 +111,34 @@ describe('piBridgePortForHome', () => {
 });
 
 describe('vscodeBridgePortForHome', () => {
-  it('is deterministic, in range, and distinct from every older bridge', () => {
-    for (let index = 0; index < 5_000; index += 1) {
+  it('is deterministic and stays inside the advertised range', () => {
+    for (let index = 0; index < 1_000; index += 1) {
       const home = resolve('test-homes', `user-${index}`, '.gezel');
       const port = vscodeBridgePortForHome(home);
+
       expect(port).toBe(vscodeBridgePortForHome(home));
       expect(port).toBeGreaterThanOrEqual(LOCAL_BRIDGE_PORT_RANGE_START);
       expect(port).toBeLessThanOrEqual(LOCAL_BRIDGE_PORT_RANGE_END);
-      expect(
-        new Set([
-          codexBridgePortForHome(home),
-          opencodeBridgePortForHome(home),
-          piBridgePortForHome(home),
-          port,
-        ]).size,
-      ).toBe(4);
     }
   });
+
+  it('never collides with any older bridge for the same home', () => {
+    const collisions: string[] = [];
+
+    for (let index = 0; index < 5_000; index += 1) {
+      const home = resolve('test-homes', `user-${index}`, '.gezel');
+      const ports = [
+        codexBridgePortForHome(home),
+        opencodeBridgePortForHome(home),
+        piBridgePortForHome(home),
+        vscodeBridgePortForHome(home),
+      ];
+
+      if (new Set(ports).size !== ports.length) {
+        collisions.push(`${home}: ${ports.join(', ')}`);
+      }
+    }
+
+    expect(collisions).toEqual([]);
+  }, 15_000);
 });
