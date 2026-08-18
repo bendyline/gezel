@@ -6265,11 +6265,12 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
   });
 
   it('uses captured caller evidence for external debug snapshots', async () => {
+    const workingDirectory = join(tmpdir(), 'external-project');
     const turn = await manager.beginExternalConversation({
       sourceId: 'opencode',
       sourceName: 'OpenCode',
       externalConversationId: 'opencode-debug-turn',
-      workingDirectory: '/tmp/external-project',
+      workingDirectory,
       gezelId: 'ada',
       providerName: 'mlx',
       model: 'qwen-test',
@@ -6297,7 +6298,8 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     expect(snap.externalConversation).toMatchObject({
       appId: 'opencode',
       appName: 'OpenCode',
-      workingDirectory: '/tmp/external-project',
+      workingDirectory:
+        process.platform === 'win32' ? workingDirectory.toLowerCase() : workingDirectory,
       request: {
         messageCount: 4,
         actionLedger: '[Gezel caller-owned action ledger]\n- write -> `index.html`',

@@ -472,6 +472,7 @@ function ProjectChatBody({
                 <ChatComposer
                   gezelId={selectedGezel.id}
                   gezelName={selectedGezel.name}
+                  gezelRoleBasedName={selectedGezel.roleBasedName}
                   gezelRole={selectedGezel.role}
                   gezelIcon={selectedGezel.icon ?? null}
                   gezelPoppetje={selectedGezel.poppetje}

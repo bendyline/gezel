@@ -161,12 +161,13 @@ describe('ChatComposer To line', () => {
     expect(screen.getByText('Scheepstimmerman')).toBeTruthy();
   });
 
-  it('omits the role in boring mode, where the name already is the role', () => {
+  it('replaces the friendly name with the role-based name in boring mode', () => {
     roleBasedNameOnly.value = true;
     render(
       <ChatComposer
         gezelId="tomas"
-        gezelName="scheepstimmerman"
+        gezelName="Tomas"
+        gezelRoleBasedName="scheepstimmerman"
         gezelRole="Scheepstimmerman"
         projectId="default"
         sessionId="session-1"
@@ -174,6 +175,7 @@ describe('ChatComposer To line', () => {
     );
 
     expect(screen.getByText('scheepstimmerman')).toBeTruthy();
+    expect(screen.queryByText('Tomas')).toBeNull();
     expect(screen.queryByText('Scheepstimmerman')).toBeNull();
   });
 });

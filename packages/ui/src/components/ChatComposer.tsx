@@ -78,8 +78,10 @@ export function queueComposerPrefill(projectId: string, markdown: string): void 
 
 export interface ChatComposerProps {
   gezelId: string;
-  /** The primary recipient's display name — rendered in the "To:" pill. */
+  /** The primary recipient's friendly name. */
   gezelName: string;
+  /** The primary recipient's boring-mode identifier (for example, `reviewer`). */
+  gezelRoleBasedName?: string;
   /**
    * The primary recipient's role, rendered under the name on the "To:" line.
    * Suppressed in boring mode, where the rendered name is already the role.
@@ -214,6 +216,7 @@ export interface ChatComposerProps {
 export function ChatComposer({
   gezelId,
   gezelName,
+  gezelRoleBasedName,
   gezelRole,
   gezelIcon,
   gezelPoppetje,
@@ -250,6 +253,10 @@ export function ChatComposer({
   }, [focusRequestKey]);
   const editorTheme = useEffectiveTheme();
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
+  const primaryRecipientName = displayName(
+    { name: gezelName, roleBasedName: gezelRoleBasedName },
+    roleBasedNameOnlyMode,
+  );
   const [streaming, setStreaming] = useState(false);
   // The local SSE is only one view of a turn. Navigation, remounts, and a
   // renderer reconnect can drop it while the service keeps generating.
@@ -1119,11 +1126,11 @@ export function ChatComposer({
           svg={gezelIcon ?? null}
           poppetje={gezelPoppetje}
           iconOverride={gezelIconOverride}
-          name={gezelName}
+          name={primaryRecipientName}
           size={18}
         />
         <span className="chat-composer-to-text">
-          <span className="chat-composer-to-name">{gezelName}</span>
+          <span className="chat-composer-to-name">{primaryRecipientName}</span>
           {!roleBasedNameOnlyMode && gezelRole && (
             <span className="chat-composer-to-role">{gezelRole}</span>
           )}

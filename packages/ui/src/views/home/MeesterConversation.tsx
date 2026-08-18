@@ -132,6 +132,7 @@ export function MeesterConversation({
             <ChatComposer
               gezelId={activeGezelId}
               gezelName={activeGezelName}
+              gezelRoleBasedName={selectedGezel?.roleBasedName}
               gezelRole={activeGezelRole}
               gezelIcon={activeGezelIcon}
               gezelPoppetje={activeGezelPoppetje}
