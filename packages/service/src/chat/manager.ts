@@ -6450,7 +6450,7 @@ export class ChatManager {
           ...(typeof ev.tokensPerSec === 'number' ? { tokensPerSec: ev.tokensPerSec } : {}),
         });
       });
-      // turn_stats — llama-cpp + Ollama per-turn token counts +
+      // turn_stats — local-engine per-turn token counts +
       // tokens/sec, for the UI engine-pill's stats dropdown.
       const unsubTurnStats = (
         s as unknown as {
@@ -9897,6 +9897,69 @@ export class ChatManager {
     const unsubReasoning = opts.onReasoningDelta
       ? session.onReasoningDelta?.(opts.onReasoningDelta)
       : undefined;
+    // One-shots still occupy the same local engine and must be visible in the
+    // header telemetry. Give the ephemeral session a bus-only scope so global
+    // engine-pill listeners receive its phases and terminal stats without
+    // creating or mutating a persisted chat session.
+    const oneShotScope: PublishScope = {
+      sessionId: `one-shot:${randomUUID()}`,
+      gezelId: gezelId ?? '',
+      projectId: '',
+    };
+    const oneShotModel = session.model ?? model;
+    let publishedEngineTelemetry = false;
+    const telemetrySession = session as unknown as {
+      onEnginePhase?: (
+        handler: (ev: import('../providers/streaming-session.js').EnginePhaseEvent) => void,
+      ) => () => void;
+      onTurnStats?: (
+        handler: (ev: import('../providers/streaming-session.js').TurnStatsEvent) => void,
+      ) => () => void;
+    };
+    const unsubEnginePhase = telemetrySession.onEnginePhase?.((ev) => {
+      if (
+        ev.phase !== 'starting' &&
+        ev.phase !== 'loading_model' &&
+        ev.phase !== 'prefill' &&
+        ev.phase !== 'generating' &&
+        ev.phase !== 'ready'
+      ) {
+        return;
+      }
+      publishedEngineTelemetry = true;
+      const telemetryProvider = effectiveProviderName === 'ds4' ? 'ds4' : ev.provider;
+      this.events.publish(oneShotScope, {
+        type: 'engine_phase',
+        provider: telemetryProvider,
+        phase: ev.phase,
+        ...(ev.detail ? { detail: ev.detail } : {}),
+        ...(typeof ev.progress === 'number' ? { progress: ev.progress } : {}),
+        ...(typeof ev.ttftMs === 'number' ? { ttftMs: ev.ttftMs } : {}),
+        ...(typeof ev.outputTokens === 'number' ? { outputTokens: ev.outputTokens } : {}),
+        ...(typeof ev.tokensPerSec === 'number' ? { tokensPerSec: ev.tokensPerSec } : {}),
+      });
+    });
+    const unsubTurnStats = telemetrySession.onTurnStats?.((ev) => {
+      const telemetryProvider = effectiveProviderName === 'ds4' ? 'ds4' : ev.provider;
+      if (
+        telemetryProvider !== 'llama-cpp' &&
+        telemetryProvider !== 'ollama' &&
+        telemetryProvider !== 'mlx' &&
+        telemetryProvider !== 'ds4'
+      ) {
+        return;
+      }
+      publishedEngineTelemetry = true;
+      this.events.publish(oneShotScope, {
+        type: 'turn_stats',
+        provider: telemetryProvider,
+        ...(oneShotModel ? { model: oneShotModel } : {}),
+        promptTokens: ev.promptTokens,
+        completionTokens: ev.completionTokens,
+        durationMs: ev.durationMs,
+        ...(typeof ev.tokensPerSec === 'number' ? { tokensPerSec: ev.tokensPerSec } : {}),
+      });
+    });
     try {
       // One-shot completions default to background work so they do not cut
       // in front of active chat. Explicitly user-awaited utilities can opt
@@ -9922,6 +9985,9 @@ export class ChatManager {
       unsubUsage();
       unsubDelta?.();
       unsubReasoning?.();
+      unsubEnginePhase?.();
+      unsubTurnStats?.();
+      if (publishedEngineTelemetry) this.events.publish(oneShotScope, { type: 'done' });
       void session.disconnect().catch((err) => {
         oneShotLog.warn('disconnect error:', err);
       });

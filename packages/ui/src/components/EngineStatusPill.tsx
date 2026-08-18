@@ -395,6 +395,10 @@ function EngineStatusPillForProvider({
   >([]);
   // Rolling window of recent turn_stats events, newest-last.
   const [recentTurns, setRecentTurns] = useState<TurnStats[]>([]);
+  // Most recently completed turn is daemon-backed rather than derived from
+  // the one-minute rolling window, so it survives both quiet periods and a
+  // page reload.
+  const [lastTurn, setLastTurn] = useState<TurnStats | undefined>(undefined);
   // Per-model generation speed, median over every turn the DAEMON has served.
   // Deliberately not accumulated in the page: the 60s rolling window empties
   // the moment the machine goes quiet — precisely when a user opens the
@@ -611,13 +615,29 @@ function EngineStatusPillForProvider({
   const refreshModelSpeeds = useCallback(() => {
     if (!onDeviceProvider) {
       setModelSpeeds([]);
+      setLastTurn(undefined);
       return;
     }
     void api
       .getUsage()
       .then((usage) => {
         if (!mountedRef.current) return;
-        setModelSpeeds(usage.providers[onDeviceProvider]?.modelSpeeds ?? []);
+        const providerUsage = usage.providers[onDeviceProvider];
+        setModelSpeeds(providerUsage?.modelSpeeds ?? []);
+        const latest = providerUsage?.lastTurn;
+        if (!latest) return;
+        const at = Date.parse(latest.at);
+        const entry: TurnStats = {
+          at: Number.isFinite(at) ? at : Date.now(),
+          ...(latest.model ? { model: latest.model } : {}),
+          promptTokens: latest.inputTokens,
+          completionTokens: latest.outputTokens,
+          durationMs: latest.durationMs,
+          ...(typeof latest.outputTokensPerSec === 'number'
+            ? { tokensPerSec: latest.outputTokensPerSec }
+            : {}),
+        };
+        setLastTurn((current) => (!current || entry.at >= current.at ? entry : current));
       })
       .catch(() => {});
   }, [onDeviceProvider]);
@@ -634,9 +654,13 @@ function EngineStatusPillForProvider({
   useEffect(() => {
     if (!onDeviceProvider) {
       setRecentTurns([]);
+      setLastTurn(undefined);
       setRamAllocBytes(undefined);
       return;
     }
+    setRecentTurns([]);
+    setLastTurn(undefined);
+    setRamAllocBytes(undefined);
     const ctrl = new AbortController();
     void (async () => {
       try {
@@ -667,6 +691,7 @@ function EngineStatusPillForProvider({
                 ? next.slice(next.length - STATS_MAX_ENTRIES)
                 : next;
             });
+            setLastTurn(entry);
             refreshModelSpeeds();
           } else if (event.type === 'engine_stats') {
             if (event.provider !== onDeviceProvider) continue;
@@ -750,7 +775,6 @@ function EngineStatusPillForProvider({
     [recentTurns],
   );
   const modelSpeedRows = useMemo(() => modelSpeeds.slice(0, 4), [modelSpeeds]);
-  const lastTurn = recentTurns.length > 0 ? recentTurns[recentTurns.length - 1] : undefined;
 
   // Most-recent active media-engine job, if any. Takes visual precedence
   // over the chat engine: while an image/video renders, the chat model is

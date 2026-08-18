@@ -1168,8 +1168,8 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     tokensPerSec: z.number().nonnegative().optional(),
   }),
   /**
-   * Per-turn telemetry for locally-hosted providers (llama-cpp +
-   * Ollama). Emitted once at turn end with the concrete token counts
+   * Per-turn telemetry for locally-hosted providers (llama-cpp, Ollama,
+   * MLX, and DS4). Emitted once at turn end with the concrete token counts
    * the UI needs for a speed readout — input tokens, output tokens,
    * wall-clock duration, and tokens-per-second on the generation
    * phase. UI accumulates these in a rolling window to show an

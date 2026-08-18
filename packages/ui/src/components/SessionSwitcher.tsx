@@ -3,6 +3,7 @@ import { parseTaskRef } from '@bendyline/gezel';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
+import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 import { providerLabel as resolveProviderLabel } from './provider-label.js';
 import {
   MENTION_RE,
@@ -44,6 +45,13 @@ interface Props {
    */
   engineLabel?: string | null;
 }
+
+/**
+ * Coalesce the user-message + done pair (and bursts of concurrent external
+ * turns) into one session-list read. This is deliberately much shorter than
+ * a polling interval: the event itself is the invalidation signal.
+ */
+const LIVE_SESSION_REFRESH_DEBOUNCE_MS = 150;
 
 /**
  * Inline session picker + "+ New" / "Archive" controls, scoped to a
@@ -173,6 +181,63 @@ export function SessionSwitcher({
     refreshedUnknownSession.current = key;
     void refresh();
   }, [sessions, sessionsScope, sessionId, scopeKey, refresh]);
+
+  // Sessions can be created or resumed outside this renderer (OpenCode, Pi,
+  // another external client, scheduled work). The interleaved timeline sees
+  // those turns immediately through the shared project stream, but this
+  // switcher used to retain the list it fetched on mount until a local action
+  // bumped `refreshKey`. Subscribe to the same shared stream and treat durable
+  // turn boundaries as list invalidations. We intentionally do not select the
+  // arriving session: background work should appear in the menu without
+  // stealing the conversation the user is currently addressing.
+  useEffect(() => {
+    const ctrl = new AbortController();
+    let refreshTimer: number | null = null;
+    let stopped = false;
+
+    const scheduleRefresh = () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        void refresh();
+      }, LIVE_SESSION_REFRESH_DEBOUNCE_MS);
+    };
+
+    void (async () => {
+      let backoffMs = 250;
+      while (!stopped) {
+        try {
+          for await (const envelope of streamSharedProjectChatEvents({
+            url: api.projectEventsUrl(projectId),
+            headers: api.authHeader(),
+            signal: ctrl.signal,
+            fetch: api.getFetch(),
+          })) {
+            if (stopped) return;
+            if (envelope.projectId !== projectId || envelope.gezelId !== gezelId) continue;
+            const { event } = envelope;
+            if (event.type === 'user_message' || event.type === 'done') scheduleRefresh();
+            backoffMs = 250;
+          }
+        } catch (err) {
+          if (stopped || (err as Error).name === 'AbortError') return;
+          console.warn(
+            `[SessionSwitcher] chat event stream error (reconnecting in ${backoffMs}ms):`,
+            err,
+          );
+        }
+        if (stopped) return;
+        await new Promise<void>((resolve) => window.setTimeout(resolve, backoffMs));
+        backoffMs = Math.min(backoffMs * 2, 5_000);
+      }
+    })();
+
+    return () => {
+      stopped = true;
+      ctrl.abort();
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+    };
+  }, [gezelId, projectId, refresh]);
 
   const createNew = useCallback(async () => {
     setBusy(true);

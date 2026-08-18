@@ -68,6 +68,12 @@ export interface V1ChatRoutesOptions {
    */
   keepaliveIntervalMs?: number;
   /**
+   * Forward live provider tool-argument fragments as incremental OpenAI
+   * `delta.tool_calls` chunks. Reserved for agent clients that render tool
+   * input while it is being generated.
+   */
+  streamToolCallDeltas?: boolean;
+  /**
    * Opt-in durable mirror for an external app bridge or authenticated generic
    * `/v1` caller. A mirror is created only when a stable conversation header
    * and a concrete gezel target are both present.
@@ -531,6 +537,10 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
                 ...(opts.includeReasoning === true ? { includeReasoning: true } : {}),
                 ...(opts.keepaliveIntervalMs !== undefined
                   ? { keepaliveIntervalMs: opts.keepaliveIntervalMs }
+                  : {}),
+                ...(opts.streamToolCallDeltas === true ? { streamToolCallDeltas: true } : {}),
+                ...(opts.streamToolCallDeltas === true && externalTools
+                  ? { toolCallNames: externalTools.map((tool) => tool.name) }
                   : {}),
                 diagnostics,
                 ...(externalTools && externalTools.length > 0

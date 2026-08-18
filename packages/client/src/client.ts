@@ -461,7 +461,21 @@ export interface ProviderUsage {
    * predates the field still typechecks.
    */
   modelSpeeds?: ModelSpeed[];
+  /** Most recently completed turn; optional for rolling upgrades from older daemons. */
+  lastTurn?: UsageTurnSummary | null;
   lastUpdated: string | null;
+}
+
+/** Durable last-turn snapshot returned by the daemon usage tracker. */
+export interface UsageTurnSummary {
+  model: string;
+  inputTokens: number;
+  cachedInputTokens?: number;
+  outputTokens: number;
+  cost: number;
+  durationMs: number;
+  outputTokensPerSec?: number;
+  at: string;
 }
 
 /** Per-model decode-rate rollup inside {@link ProviderUsage}. */

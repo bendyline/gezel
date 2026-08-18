@@ -1,10 +1,50 @@
+import type { ChatEventEnvelope } from '@bendyline/gezel';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 import * as primitivesMock from '../test-utils/primitivesMock.js';
 
+const stream = vi.hoisted(() => {
+  interface Consumer {
+    pending: ChatEventEnvelope[];
+    wake: (() => void) | null;
+  }
+  const consumers = new Set<Consumer>();
+  return {
+    push(envelope: ChatEventEnvelope) {
+      for (const consumer of consumers) {
+        consumer.pending.push(envelope);
+        consumer.wake?.();
+        consumer.wake = null;
+      }
+    },
+    reset() {
+      consumers.clear();
+    },
+    async *consume(): AsyncGenerator<ChatEventEnvelope> {
+      const consumer: Consumer = { pending: [], wake: null };
+      consumers.add(consumer);
+      try {
+        while (true) {
+          while (consumer.pending.length > 0) {
+            yield consumer.pending.shift() as ChatEventEnvelope;
+          }
+          await new Promise<void>((resolve) => {
+            consumer.wake = resolve;
+          });
+        }
+      } finally {
+        consumers.delete(consumer);
+      }
+    },
+  };
+});
+
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
+vi.mock('../shared-chat-events.js', () => ({
+  streamSharedProjectChatEvents: () => stream.consume(),
+}));
 
 const { SessionSwitcher } = await import('./SessionSwitcher.js');
 const { api } = await import('../api.js');
@@ -16,6 +56,7 @@ function mockSessions(sessions: unknown[]) {
 describe('SessionSwitcher', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    stream.reset();
   });
 
   it('scopes the empty state to the gezel when a name is provided', async () => {
@@ -161,6 +202,73 @@ describe('SessionSwitcher', () => {
         }),
       );
     });
+  });
+
+  it('adds an externally-created thread when its first live event arrives', async () => {
+    const prior = {
+      id: 'external-pi-1',
+      gezelId: 'g1',
+      projectId: 'p1',
+      title: 'Build a racing game',
+      createdAt: new Date(Date.now() - 60_000).toISOString(),
+      lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
+      providerName: 'mlx',
+      archived: false,
+      source: {
+        kind: 'external',
+        appId: 'pi',
+        appName: 'Pi',
+        externalConversationId: 'pi-session-1',
+        readOnly: true,
+      },
+    };
+    mockSessions([prior]);
+
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId="external-pi-1"
+        onSessionIdChange={vi.fn()}
+      />,
+    );
+    await screen.findByText(/Build a racing game/);
+    const callsAfterMount = vi.mocked(api.listChatSessions).mock.calls.length;
+
+    const flight = {
+      ...prior,
+      id: 'external-opencode-1',
+      title: 'Create a flight simulator',
+      source: {
+        kind: 'external',
+        appId: 'opencode',
+        appName: 'OpenCode',
+        externalConversationId: 'opencode-session-1',
+        readOnly: true,
+      },
+    };
+    mockSessions([flight, prior]);
+    stream.push({
+      sessionId: flight.id,
+      gezelId: 'g1',
+      projectId: 'p1',
+      sessionSource: flight.source,
+      event: {
+        type: 'user_message',
+        message: {
+          role: 'user',
+          content: 'Can you create a basic 3d flight simulator for the web?',
+          at: new Date().toISOString(),
+        },
+      },
+    } as ChatEventEnvelope);
+
+    expect(await screen.findByText(/Create a flight simulator/)).toBeInTheDocument();
+    expect(screen.getByText(/From OpenCode · read-only/)).toBeInTheDocument();
+    expect(vi.mocked(api.listChatSessions).mock.calls.length).toBeGreaterThan(callsAfterMount);
+    // A live external thread joins the choices without hijacking the current
+    // Pi selection; the parent can opt into it when the user clicks the row.
+    expect(screen.getByRole('combobox')).toHaveValue('external-pi-1');
   });
 
   it('does not auto-pick from the previous scope while the new scope loads', async () => {

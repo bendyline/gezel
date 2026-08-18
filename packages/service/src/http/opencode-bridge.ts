@@ -32,6 +32,12 @@ const OPENCODE_BRIDGE_IDENTITY: LocalBridgeIdentity = {
 };
 
 const log = createLogger(OPENCODE_BRIDGE_IDENTITY.channel);
+const OPENCODE_STREAM_KEEPALIVE_INTERVAL_MS = 15_000;
+
+export interface OpenCodeBridgeAppOptions {
+  /** Test seam; production uses a 15-second body-idle keepalive. */
+  keepaliveIntervalMs?: number;
+}
 
 /**
  * The deliberately tiny HTTP app served by the OpenCode bridge listener.
@@ -51,7 +57,10 @@ const log = createLogger(OPENCODE_BRIDGE_IDENTITY.channel);
  * sessions, files, and every other internal route are absent by construction.
  * OpenCode owns its own tools, sandbox, and conversation loop.
  */
-export function buildOpenCodeBridgeApp(ctx: ServiceContext): Hono {
+export function buildOpenCodeBridgeApp(
+  ctx: ServiceContext,
+  opts: OpenCodeBridgeAppOptions = {},
+): Hono {
   const app = new Hono();
 
   app.use('*', localBridgeHardening(OPENCODE_BRIDGE_IDENTITY));
@@ -62,6 +71,13 @@ export function buildOpenCodeBridgeApp(ctx: ServiceContext): Hono {
   app.route(
     '/v1/chat',
     v1ChatRoutes(ctx, {
+      // OpenCode's OpenAI-chat protocol turns reasoning_content into its
+      // reasoning lifecycle and incremental tool_calls into the live tool UI.
+      // Keepalive comments cover model prefill and textual-tool fallback
+      // stretches where there is no client-visible delta yet.
+      includeReasoning: true,
+      keepaliveIntervalMs: opts.keepaliveIntervalMs ?? OPENCODE_STREAM_KEEPALIVE_INTERVAL_MS,
+      streamToolCallDeltas: true,
       externalConversation: {
         sourceId: 'opencode',
         sourceName: 'OpenCode',

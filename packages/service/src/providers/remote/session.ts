@@ -580,7 +580,10 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           this.emitReasoningDelta(frame.text);
           break;
         case 'tool_args_delta':
-          this.emitToolArgsDelta(frame.name, frame.text);
+          this.emitToolArgsDelta(frame.name, frame.text, {
+            ...(frame.index !== undefined ? { index: frame.index } : {}),
+            ...(frame.id ? { id: frame.id } : {}),
+          });
           break;
         case 'wire_pulse':
           this.emitWirePulse();

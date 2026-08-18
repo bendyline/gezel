@@ -135,6 +135,107 @@ describe('buildOpenCodeBridgeApp', () => {
     await expect(listed.json()).resolves.toMatchObject({ object: 'list' });
   });
 
+  it('streams reasoning_content so OpenCode can render live thinking', async () => {
+    const provider = new MockProvider();
+    provider.scriptReasoning('Checking ', 'the workspace.');
+    provider.script('Ready to continue.');
+    const app = buildOpenCodeBridgeApp(context({ provider }));
+
+    const response = await app.request('http://127.0.0.1/v1/chat/completions', {
+      method: 'POST',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'copilot:mock-reasoning',
+        messages: [{ role: 'user', content: 'Inspect the workspace' }],
+        stream: true,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const chunks = (await response.text())
+      .split('\n')
+      .filter((line) => line.startsWith('data: ') && line !== 'data: [DONE]')
+      .map((line) => JSON.parse(line.slice('data: '.length)) as Record<string, unknown>);
+    const deltas = chunks.flatMap((chunk) => {
+      const choices = chunk.choices as Array<{ delta?: Record<string, unknown> }> | undefined;
+      return choices?.map((choice) => choice.delta ?? {}) ?? [];
+    });
+
+    expect(deltas.map((delta) => delta.reasoning_content ?? '').join('')).toBe(
+      'Checking the workspace.',
+    );
+    expect(deltas.map((delta) => delta.content ?? '').join('')).toBe('Ready to continue.');
+  });
+
+  it('sends SSE comment keepalives while an OpenCode model is silent', async () => {
+    const provider = new MockProvider();
+    provider.scriptSendDelay(30);
+    provider.script('Eventually visible.');
+    const app = buildOpenCodeBridgeApp(context({ provider }), { keepaliveIntervalMs: 5 });
+
+    const response = await app.request('http://127.0.0.1/v1/chat/completions', {
+      method: 'POST',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'copilot:mock-fast',
+        messages: [{ role: 'user', content: 'Take your time' }],
+        stream: true,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toContain(': keepalive\n\n');
+    expect(body.trimEnd().endsWith('data: [DONE]')).toBe(true);
+  });
+
+  it('streams tool-call arguments into OpenCode without replaying the final JSON', async () => {
+    const provider = new MockProvider();
+    const args = '{"path":"game.js","content":"startGame()"}';
+    provider.scriptExternalToolCallDeltas([
+      { name: 'write', chunk: '{"path":"game.js",' },
+      { name: 'write', chunk: '"content":"startGame()"}' },
+    ]);
+    provider.scriptExternalToolCalls([{ id: 'provider-write-1', name: 'write', arguments: args }]);
+    const app = buildOpenCodeBridgeApp(context({ provider }));
+
+    const response = await app.request('http://127.0.0.1/v1/chat/completions', {
+      method: 'POST',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'copilot:mock-fast',
+        messages: [{ role: 'user', content: 'Write the game entry point' }],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'write',
+              description: 'Write a file',
+              parameters: { type: 'object', properties: {} },
+            },
+          },
+        ],
+        stream: true,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const chunks = (await response.text())
+      .split('\n')
+      .filter((line) => line.startsWith('data: ') && line !== 'data: [DONE]')
+      .map((line) => JSON.parse(line.slice('data: '.length)));
+    const toolDeltas = chunks.flatMap((chunk) => chunk.choices?.[0]?.delta?.tool_calls ?? []);
+
+    expect(toolDeltas).toHaveLength(2);
+    expect(toolDeltas[0]).toMatchObject({
+      index: 0,
+      type: 'function',
+      function: { name: 'write' },
+    });
+    expect(toolDeltas.map((delta) => delta.function?.arguments ?? '').join('')).toBe(args);
+    expect(chunks.at(-1)?.choices?.[0]?.finish_reason).toBe('tool_calls');
+  });
+
   it('mirrors the OpenCode session under the selected gezel and working project', async () => {
     const provider = new MockProvider();
     provider.script('Mirrored reply.');

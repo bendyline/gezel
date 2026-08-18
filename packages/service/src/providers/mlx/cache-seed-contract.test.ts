@@ -116,6 +116,17 @@ describe('MLX sidecar cache seeding', () => {
     expect(matches.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('measures per-request batch throughput instead of hardcoding zero', () => {
+    const run = sliceBlock(SERVER_SRC, 'async def _run(');
+    const iter = sliceBlock(SERVER_SRC, 'async def _batched_stream_iter(');
+    expect(run).toMatch(/sub\.prefill_started_at = time\.perf_counter\(\)/);
+    expect(run).toMatch(/step_ended_at = time\.perf_counter\(\)/);
+    expect(run).toMatch(/sub\.generation_tps = generated_intervals \/ generation_seconds/);
+    expect(iter).toMatch(/"prompt_tps": prompt_tps/);
+    expect(iter).toMatch(/"generation_tps": generation_tps/);
+    expect(iter).not.toMatch(/"(?:prompt|generation)_tps": 0\.0/);
+  });
+
   it('uses the cache-safe BatchGenerator path for singleton queues', () => {
     const chat = sliceBlock(SERVER_SRC, 'async def chat_completions(');
     // Memory pressure commonly clamps large Qwen models to concurrency=1.

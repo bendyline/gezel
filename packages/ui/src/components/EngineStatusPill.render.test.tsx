@@ -107,6 +107,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     vi.mocked(api.listLlamaCppModels).mockResolvedValue({
       models: [{ id: 'talkie-1930-13b-q4', name: 'Talkie 1930 13B' } as never],
     });
+    vi.mocked(api.getUsage).mockResolvedValue({ providers: {}, lastUpdated: null });
   });
 
   it('keeps the idle DwarfStar pill and adds a busy llama.cpp/Talkie pill', async () => {
@@ -125,6 +126,43 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(talkie).toHaveClass('engine-pill-busy');
     expect(talkie).toHaveTextContent(providerLabel('llama-cpp', window.__GEZEL__?.platform));
     expect(talkie.querySelector('.engine-pill-progress')).toBeInTheDocument();
+  });
+
+  it('restores the last completed turn from daemon usage after a page load', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getUsage).mockResolvedValue({
+      providers: {
+        'llama-cpp': {
+          quotaBuckets: [],
+          todayTurns: 1,
+          todayTokensIn: 1_234,
+          todayTokensOut: 56,
+          todayCost: 0,
+          totalTurns: 1,
+          totalTokensIn: 1_234,
+          totalTokensOut: 56,
+          totalCost: 0,
+          modelSpeeds: [],
+          lastTurn: {
+            model: 'talkie-1930-13b-q4',
+            inputTokens: 1_234,
+            outputTokens: 56,
+            cost: 0,
+            durationMs: 2_000,
+            outputTokensPerSec: 28,
+            at: '2026-08-18T12:00:00.000Z',
+          },
+          lastUpdated: '2026-08-18T12:00:00.000Z',
+        },
+      },
+      lastUpdated: '2026-08-18T12:00:00.000Z',
+    });
+
+    render(<EngineStatusPill />);
+    await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
+
+    expect(await screen.findByText('Last turn')).toBeInTheDocument();
+    expect(screen.getByText(/1,234 in/)).toHaveTextContent('1,234 in · 56 out · 28 tok/s');
   });
 
   it('distinguishes chat caches from shared prefixes in engine telemetry', async () => {

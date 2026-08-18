@@ -84,6 +84,69 @@ function toOpenAIToolCalls(
   }));
 }
 
+function textualToolName(body: string, allowedNames: ReadonlySet<string>): string | undefined {
+  const candidates: string[] = [];
+  const jsonName = body.match(/"(?:name|tool|tool_name)"\s*:\s*"((?:\\.|[^"\\])*)"/i)?.[1];
+  if (jsonName !== undefined) {
+    try {
+      candidates.push(JSON.parse(`"${jsonName}"`) as string);
+    } catch {
+      /* incomplete JSON string */
+    }
+  }
+  const patterns = [
+    /<function=([a-zA-Z_][a-zA-Z0-9_.-]*)\s*>/i,
+    /<invoke\s+name=["']([a-zA-Z_][a-zA-Z0-9_.-]*)["']/i,
+    /(?:^|\s)call\s*:\s*([a-zA-Z_][a-zA-Z0-9_.-]*)\s*\{/i,
+    /^\s*([a-zA-Z_][a-zA-Z0-9_.-]*)\s*(?:\{|<arg_key>|[a-zA-Z_]\w*\s*=)/i,
+  ];
+  for (const pattern of patterns) {
+    const candidate = body.match(pattern)?.[1];
+    if (candidate) candidates.push(candidate);
+  }
+  return candidates.find((candidate) => allowedNames.has(candidate));
+}
+
+function textualJsonArgumentsStart(body: string): number | undefined {
+  const match = /"(?:arguments|parameters|args)"\s*:\s*/i.exec(body);
+  if (!match) return undefined;
+  const start = match.index + match[0].length;
+  return body[start] === '{' ? start : undefined;
+}
+
+/**
+ * Return the currently safe end of an object-valued JSON fragment. Before the
+ * object closes every received byte belongs to the arguments value; after it
+ * closes, stop before the outer tool envelope's own `}`.
+ */
+function streamedJsonObjectEnd(body: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < body.length; i += 1) {
+    const char = body[i]!;
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+    } else if (char === '{') {
+      depth += 1;
+    } else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return body.length;
+}
+
 /**
  * Translate a single `sendAndWait` round-trip into an OpenAI chat
  * completion response. Usage tokens come from `LLMSession.onUsage`;
@@ -202,6 +265,15 @@ export interface RunStreamingOpts {
   onContentDelta?: (content: string) => void;
   onReasoningDelta?: (content: string) => void;
   onToolArgsDelta?: (name: string, content: string) => void;
+  /**
+   * Forward live provider tool-argument fragments as standard streamed
+   * `delta.tool_calls` chunks. The final captured calls are reconciled with
+   * what was already sent so OpenAI-compatible clients do not accumulate the
+   * arguments twice.
+   */
+  streamToolCallDeltas?: boolean;
+  /** Tool names supplied by the caller; gates early textual-call detection. */
+  toolCallNames?: readonly string[];
 }
 
 export interface RunStreamingResult {
@@ -245,6 +317,8 @@ export async function runStreaming(
     onContentDelta,
     onReasoningDelta,
     onToolArgsDelta,
+    streamToolCallDeltas = false,
+    toolCallNames = [],
   } = opts;
   const id = `chatcmpl-${randomUUID()}`;
   if (diagnostics) diagnostics.responseId = id;
@@ -272,7 +346,136 @@ export async function runStreaming(
   const usageRef: { value: TurnUsage | null } = { value: null };
   let visibleContent = '';
   let reasoningContent = '';
-  const toolCallFilter = suppressTextualToolCalls ? new ToolCallStreamFilter() : null;
+  interface LiveToolCall {
+    index: number;
+    id: string;
+    name: string;
+    arguments: string;
+  }
+  const liveToolCalls: LiveToolCall[] = [];
+  let activeLiveToolCall: LiveToolCall | undefined;
+  let unnamedToolArguments = '';
+  const indexedUnnamedToolArguments = new Map<number, string>();
+  // Provider callbacks are synchronous while Hono's stream writer is async.
+  // Serialize callback-originated writes and drain them before the terminal
+  // tool/finish frames so a fast provider cannot close the response ahead of
+  // its final reasoning/content/tool-argument delta.
+  let callbackWrites = Promise.resolve();
+  const enqueueSSE = (
+    message: { data: string; event?: string },
+    kind: StreamingOutboundKind,
+  ): void => {
+    callbackWrites = callbackWrites
+      .then(() => writeSSE(message, kind))
+      .catch(() => {
+        /* stream closed by client */
+      });
+  };
+  const nextLiveToolIndex = (): number =>
+    liveToolCalls.reduce((highest, call) => Math.max(highest, call.index), -1) + 1;
+  const openLiveToolCall = (
+    name: string,
+    argumentsChunk: string,
+    meta: { index?: number; id?: string } = {},
+  ): LiveToolCall => {
+    const call: LiveToolCall = {
+      index: meta.index ?? nextLiveToolIndex(),
+      id: meta.id ?? `call_${randomUUID()}`,
+      name,
+      arguments: argumentsChunk,
+    };
+    liveToolCalls.push(call);
+    activeLiveToolCall = call;
+    enqueueSSE(
+      {
+        data: JSON.stringify({
+          id,
+          object: 'chat.completion.chunk',
+          created,
+          model: echoModel,
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: call.index,
+                    id: call.id,
+                    type: 'function',
+                    function: { name: call.name, arguments: call.arguments },
+                  },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+          ...nullUsage,
+        }),
+      },
+      'tool_calls',
+    );
+    return call;
+  };
+  const appendLiveToolArguments = (call: LiveToolCall, chunk: string): void => {
+    if (!chunk) return;
+    call.arguments += chunk;
+    enqueueSSE(
+      {
+        data: JSON.stringify({
+          id,
+          object: 'chat.completion.chunk',
+          created,
+          model: echoModel,
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [{ index: call.index, function: { arguments: chunk } }],
+              },
+              finish_reason: null,
+            },
+          ],
+          ...nullUsage,
+        }),
+      },
+      'tool_calls',
+    );
+  };
+
+  const allowedToolCallNames = new Set(toolCallNames);
+  let textualToolBody = '';
+  let textualLiveCall: LiveToolCall | undefined;
+  let textualArgumentsStart: number | undefined;
+  let textualArgumentsSent = 0;
+  const resetTextualToolProgress = (): void => {
+    textualToolBody = '';
+    textualLiveCall = undefined;
+    textualArgumentsStart = undefined;
+    textualArgumentsSent = 0;
+  };
+  const toolCallFilter = suppressTextualToolCalls
+    ? new ToolCallStreamFilter({
+        onStart: resetTextualToolProgress,
+        onBodyDelta: (chunk) => {
+          if (!streamToolCallDeltas || allowedToolCallNames.size === 0) return;
+          textualToolBody += chunk;
+          if (!textualLiveCall) {
+            const name = textualToolName(textualToolBody, allowedToolCallNames);
+            if (name) textualLiveCall = openLiveToolCall(name, '');
+          }
+          if (!textualLiveCall) return;
+          textualArgumentsStart ??= textualJsonArgumentsStart(textualToolBody);
+          if (textualArgumentsStart === undefined) return;
+          const safeEnd = streamedJsonObjectEnd(textualToolBody, textualArgumentsStart);
+          const sentThrough = textualArgumentsStart + textualArgumentsSent;
+          if (safeEnd <= sentThrough) return;
+          const delta = textualToolBody.slice(sentThrough, safeEnd);
+          textualArgumentsSent += delta.length;
+          appendLiveToolArguments(textualLiveCall, delta);
+        },
+        onEnd: resetTextualToolProgress,
+      })
+    : null;
   const unsubUsage = session.onUsage((u) => {
     usageRef.value = u;
   });
@@ -283,11 +486,8 @@ export async function runStreaming(
     if (!visibleChunk) return;
     visibleContent += visibleChunk;
     onContentDelta?.(visibleChunk);
-    // Fire-and-forget: SSE writes are async but we can't await inside
-    // a synchronous callback. Order is preserved because every write
-    // serializes through the underlying stream's queue. Errors close
-    // the stream — caught at the route level.
-    void writeSSE(
+    // The callback is synchronous; enqueueSSE serializes the async writes.
+    enqueueSSE(
       {
         data: JSON.stringify({
           id,
@@ -305,9 +505,7 @@ export async function runStreaming(
         }),
       },
       'content',
-    ).catch(() => {
-      /* stream closed by client */
-    });
+    );
   });
   const unsubReasoning =
     includeReasoning || diagnostics || onReasoningDelta
@@ -321,7 +519,7 @@ export async function runStreaming(
           // turns it into a separate thinking_delta. Never fold this into
           // `content`: it must not enter the visible assistant reply or the
           // textual tool-call filter.
-          void writeSSE(
+          enqueueSSE(
             {
               data: JSON.stringify({
                 id,
@@ -339,18 +537,57 @@ export async function runStreaming(
               }),
             },
             'reasoning',
-          ).catch(() => {
-            /* stream closed by client */
-          });
+          );
         })
       : undefined;
   const unsubToolArgs =
-    diagnostics || onToolArgsDelta
-      ? session.onToolArgsDelta?.((name, chunk) => {
-          if (chunk) {
+    diagnostics || onToolArgsDelta || streamToolCallDeltas
+      ? session.onToolArgsDelta?.((name, chunk, meta) => {
+          if (name || chunk) {
             noteStreamingProviderActivity(diagnostics, 'tool_arguments');
             onToolArgsDelta?.(name, chunk);
           }
+          if (!streamToolCallDeltas || (!name && !chunk)) return;
+
+          const indexedCall =
+            meta?.index !== undefined
+              ? liveToolCalls.find((call) => call.index === meta.index)
+              : undefined;
+
+          if (!name && !indexedCall) {
+            // A few compatible servers put argument bytes in the chunk before
+            // the first fragment carrying function.name. Hold those bytes
+            // until the call can be announced in a schema-valid frame.
+            if (meta?.index !== undefined) {
+              indexedUnnamedToolArguments.set(
+                meta.index,
+                (indexedUnnamedToolArguments.get(meta.index) ?? '') + chunk,
+              );
+            } else {
+              unnamedToolArguments += chunk;
+            }
+            return;
+          }
+
+          const continuedCall =
+            indexedCall ??
+            (meta?.index === undefined && activeLiveToolCall?.name === name
+              ? activeLiveToolCall
+              : undefined);
+          if (!continuedCall) {
+            const index = meta?.index ?? nextLiveToolIndex();
+            const buffered = (indexedUnnamedToolArguments.get(index) ?? '') + unnamedToolArguments;
+            indexedUnnamedToolArguments.delete(index);
+            unnamedToolArguments = '';
+            openLiveToolCall(name, buffered + chunk, {
+              index,
+              ...(meta?.id ? { id: meta.id } : {}),
+            });
+            return;
+          }
+
+          activeLiveToolCall = continuedCall;
+          appendLiveToolArguments(activeLiveToolCall, chunk);
         })
       : undefined;
   const unsubWirePulse = diagnostics
@@ -412,6 +649,7 @@ export async function runStreaming(
           }
         : undefined;
     await session.sendAndWait(prompt, sendOpts);
+    await callbackWrites;
 
     // A marker-like prefix is held across chunks so split tags cannot leak.
     // Once generation ends, release any tail that proved to be ordinary text.
@@ -445,35 +683,123 @@ export async function runStreaming(
     const hasToolCalls = captured.length > 0;
 
     if (hasToolCalls) {
-      // Emit the full tool_calls payload as a single delta chunk so
-      // OpenAI SDKs accumulate it correctly. Each call gets `index: i`
-      // per the streaming spec.
-      await writeSSE(
-        {
-          data: JSON.stringify({
-            id,
-            object: 'chat.completion.chunk',
-            created,
-            model: echoModel,
-            choices: [
-              {
-                index: 0,
-                delta: {
-                  tool_calls: captured.map((c, i) => ({
-                    index: i,
-                    id: c.id,
-                    type: 'function',
-                    function: { name: c.name, arguments: c.arguments },
-                  })),
+      if (!streamToolCallDeltas || liveToolCalls.length === 0) {
+        // Providers without a live tool-arguments channel retain the ordinary
+        // single full-call chunk.
+        await writeSSE(
+          {
+            data: JSON.stringify({
+              id,
+              object: 'chat.completion.chunk',
+              created,
+              model: echoModel,
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    tool_calls: captured.map((c, i) => ({
+                      index: i,
+                      id: c.id,
+                      type: 'function',
+                      function: { name: c.name, arguments: c.arguments },
+                    })),
+                  },
+                  finish_reason: null,
                 },
-                finish_reason: null,
+              ],
+              ...nullUsage,
+            }),
+          },
+          'tool_calls',
+        );
+      } else {
+        // Match the provider's authoritative captured calls to the live
+        // streams by provider id when available, then by tool name. Send only
+        // any suffix that did not arrive live; never replay the complete
+        // arguments, which would make clients concatenate invalid JSON.
+        const matchedLive = new Set<LiveToolCall>();
+        for (const call of captured) {
+          const live = liveToolCalls.find(
+            (candidate) =>
+              !matchedLive.has(candidate) &&
+              (candidate.id === call.id || candidate.name === call.name),
+          );
+          if (!live) {
+            const index =
+              liveToolCalls.reduce((highest, candidate) => Math.max(highest, candidate.index), -1) +
+              1;
+            liveToolCalls.push({
+              index,
+              id: call.id,
+              name: call.name,
+              arguments: call.arguments,
+            });
+            await writeSSE(
+              {
+                data: JSON.stringify({
+                  id,
+                  object: 'chat.completion.chunk',
+                  created,
+                  model: echoModel,
+                  choices: [
+                    {
+                      index: 0,
+                      delta: {
+                        tool_calls: [
+                          {
+                            index,
+                            id: call.id,
+                            type: 'function',
+                            function: { name: call.name, arguments: call.arguments },
+                          },
+                        ],
+                      },
+                      finish_reason: null,
+                    },
+                  ],
+                  ...nullUsage,
+                }),
               },
-            ],
-            ...nullUsage,
-          }),
-        },
-        'tool_calls',
-      );
+              'tool_calls',
+            );
+            continue;
+          }
+
+          matchedLive.add(live);
+          if (call.arguments.startsWith(live.arguments)) {
+            const suffix = call.arguments.slice(live.arguments.length);
+            if (suffix) {
+              live.arguments += suffix;
+              await writeSSE(
+                {
+                  data: JSON.stringify({
+                    id,
+                    object: 'chat.completion.chunk',
+                    created,
+                    model: echoModel,
+                    choices: [
+                      {
+                        index: 0,
+                        delta: {
+                          tool_calls: [
+                            {
+                              index: live.index,
+                              function: { arguments: suffix },
+                            },
+                          ],
+                        },
+                        finish_reason: null,
+                      },
+                    ],
+                    ...nullUsage,
+                  }),
+                },
+                'tool_calls',
+              );
+            }
+          }
+        }
+      }
     }
 
     // Final content chunk: finish_reason=stop (or tool_calls).

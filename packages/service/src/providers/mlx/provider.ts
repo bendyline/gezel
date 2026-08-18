@@ -1376,6 +1376,60 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
       cached_tokens?: number;
     } | null = null;
     let firstTokenAt: number | null = null;
+    let lastIterationStartedAt = start;
+    let lastIterationFirstTokenAt: number | null = null;
+    let lastIterationFinishedAt: number | null = null;
+    let turnFailed = false;
+
+    // Every successful terminal path must publish the same usage + turn
+    // snapshot. Keeping this in the outer finally covers ordinary replies,
+    // external tool capture, synthesized terminal closings, question cards,
+    // and one-shot sessions without duplicating subtly different accounting
+    // at each return site.
+    const emitTerminalTelemetry = (): void => {
+      if (!lastUsage || (lastUsage.prompt_tokens <= 0 && lastUsage.completion_tokens <= 0)) return;
+
+      const finishedAt = Date.now();
+      const durationMs = finishedAt - start;
+      const generationStartedAt = lastIterationFirstTokenAt ?? lastIterationStartedAt;
+      const generationFinishedAt = lastIterationFinishedAt ?? finishedAt;
+      const generationMs = Math.max(1, generationFinishedAt - generationStartedAt);
+      const wallTps =
+        lastUsage.completion_tokens > 0
+          ? lastUsage.completion_tokens / (generationMs / 1000)
+          : undefined;
+      const tokensPerSec =
+        lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
+          ? lastUsage.generation_tps
+          : wallTps;
+      const at = new Date(finishedAt).toISOString();
+      const usage: TurnUsage = {
+        model: this.deps.model,
+        inputTokens: lastUsage.prompt_tokens,
+        outputTokens: lastUsage.completion_tokens,
+        ...(lastUsage.cached_tokens !== undefined
+          ? { cachedInputTokens: lastUsage.cached_tokens }
+          : {}),
+        ...(tokensPerSec !== undefined ? { outputTokensPerSec: tokensPerSec } : {}),
+        durationMs,
+        at,
+      };
+      this.emitUsage(usage);
+      this.emitTurnStats({
+        provider: 'mlx',
+        promptTokens: lastUsage.prompt_tokens,
+        completionTokens: lastUsage.completion_tokens,
+        durationMs,
+        ...(firstTokenAt !== null ? { ttftMs: Math.max(0, firstTokenAt - start) } : {}),
+        ...(lastUsage.prompt_tps !== undefined && lastUsage.prompt_tps > 0
+          ? { promptTokensPerSec: lastUsage.prompt_tps }
+          : {}),
+        ...(lastUsage.cached_tokens !== undefined
+          ? { cachedPromptTokens: lastUsage.cached_tokens }
+          : {}),
+        ...(tokensPerSec !== undefined ? { tokensPerSec } : {}),
+      });
+    };
     this.deps.provider._registerActiveSession(this);
 
     // Status heartbeat. The pre-first-token window — cache warm (prepareForSend)
@@ -1413,6 +1467,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // Skip the first iteration; from iteration 2 a freshly pushed
         // tool result can tip a healthy turn over the slot ctx.
         if (turn > 0) await this.maybeCompactMidLoop();
+
+        lastIterationStartedAt = Date.now();
+        lastIterationFirstTokenAt = null;
+        lastIterationFinishedAt = null;
 
         const remaining = deadline - Date.now();
         if (remaining <= 0) {
@@ -1963,8 +2021,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             // A structured-tool response may never emit visible `content`.
             // Count its first argument fragment as model activity so TTFT is
             // still observable and the engine phase advances to generating.
+            if ((hasContent || hasToolCalls) && lastIterationFirstTokenAt === null) {
+              lastIterationFirstTokenAt = Date.now();
+            }
             if ((hasContent || hasToolCalls) && firstTokenAt === null) {
-              firstTokenAt = Date.now();
+              firstTokenAt = lastIterationFirstTokenAt ?? Date.now();
               const ttft = firstTokenAt - start;
               log.info(`TTFT ${ttft}ms (session model=${this.deps.model})`);
               // First-token detail folds in the prefill speed when
@@ -1981,6 +2042,25 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               });
               lastPhaseAt = firstTokenAt;
             }
+            if ((hasContent || hasToolCalls) && firstTokenAt !== null) {
+              const now = Date.now();
+              if (now - lastPhaseAt >= PHASE_EMIT_MIN_INTERVAL_MS) {
+                this.emitEnginePhase({
+                  provider: 'mlx',
+                  phase: 'generating',
+                  detail: mlxGenerationPhaseDetail(generationTps, completionTokens),
+                  // Same numbers the detail string carries, as fields the
+                  // UI can render without scraping prose out of the label.
+                  ...(completionTokens !== undefined && completionTokens > 0
+                    ? { outputTokens: completionTokens }
+                    : {}),
+                  ...(generationTps !== undefined && generationTps > 0
+                    ? { tokensPerSec: generationTps }
+                    : {}),
+                });
+                lastPhaseAt = now;
+              }
+            }
             if (hasContent) {
               // Run the raw chunk through the marker stripper before
               // it lands anywhere user-visible. The TTFT / generating
@@ -1991,25 +2071,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               // visible output is empty.
               const safeContent = stripper.push(delta!.content!);
               if (safeContent.length > 0) turnContent += safeContent;
-              if (firstTokenAt !== null) {
-                const now = Date.now();
-                if (now - lastPhaseAt >= PHASE_EMIT_MIN_INTERVAL_MS) {
-                  this.emitEnginePhase({
-                    provider: 'mlx',
-                    phase: 'generating',
-                    detail: mlxGenerationPhaseDetail(generationTps, completionTokens),
-                    // Same numbers the detail string carries, as fields the
-                    // UI can render without scraping prose out of the label.
-                    ...(completionTokens !== undefined && completionTokens > 0
-                      ? { outputTokens: completionTokens }
-                      : {}),
-                    ...(generationTps !== undefined && generationTps > 0
-                      ? { tokensPerSec: generationTps }
-                      : {}),
-                  });
-                  lastPhaseAt = now;
-                }
-              }
               {
                 // Watchdog heartbeat to the daemon log (see decl above).
                 const now = Date.now();
@@ -2054,7 +2115,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 if (tc.function?.name) liveToolArgsName = tc.function.name;
                 const argChunk = tc.function?.arguments ?? '';
                 if (tc.function?.name || argChunk.length > 0) {
-                  this.emitToolArgsDelta(liveToolArgsName, argChunk);
+                  this.emitToolArgsDelta(liveToolArgsName, argChunk, {
+                    index: tc.index,
+                    ...(tc.id ? { id: tc.id } : {}),
+                  });
                 }
               }
             }
@@ -2208,6 +2272,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           }
           if (!recoveredFromRamble) throw err;
         } finally {
+          lastIterationFinishedAt = Date.now();
           cleanupTurn();
           this.deps.markUsed();
         }
@@ -2823,21 +2888,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             content: turnContent || null,
             tool_calls: toolCalls,
           });
-          if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
-            this.emitUsage({
-              model: this.deps.model,
-              inputTokens: lastUsage.prompt_tokens,
-              outputTokens: lastUsage.completion_tokens,
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedInputTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
-                ? { outputTokensPerSec: lastUsage.generation_tps }
-                : {}),
-              durationMs: Date.now() - start,
-              at: new Date().toISOString(),
-            });
-          }
           return fullText;
         }
 
@@ -3055,53 +3105,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
 
         if (toolCalls.length === 0) {
           this.messages.push({ role: 'assistant', content: turnContent });
-          if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
-            const durationMs = Date.now() - start;
-            const usage: TurnUsage = {
-              model: this.deps.model,
-              inputTokens: lastUsage.prompt_tokens,
-              outputTokens: lastUsage.completion_tokens,
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedInputTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
-                ? { outputTokensPerSec: lastUsage.generation_tps }
-                : {}),
-              durationMs,
-              at: new Date().toISOString(),
-            };
-            this.emitUsage(usage);
-            // Prefer the engine's own `generation_tps` over a wall-
-            // clock estimate when it's available — it's measured
-            // inside the generate loop and excludes Node-side SSE
-            // overhead, queue dispatch, and tool-call back-and-forth.
-            // Fall back to wall-clock for older engines or any chunk
-            // shape that didn't carry the field.
-            const generationMs =
-              firstTokenAt !== null ? Math.max(1, Date.now() - firstTokenAt) : durationMs;
-            const wallTps =
-              lastUsage.completion_tokens > 0 && generationMs > 0
-                ? lastUsage.completion_tokens / (generationMs / 1000)
-                : undefined;
-            const tokensPerSec =
-              lastUsage.generation_tps && lastUsage.generation_tps > 0
-                ? lastUsage.generation_tps
-                : wallTps;
-            this.emitTurnStats({
-              provider: 'mlx',
-              promptTokens: lastUsage.prompt_tokens,
-              completionTokens: lastUsage.completion_tokens,
-              durationMs,
-              ...(firstTokenAt !== null ? { ttftMs: Math.max(0, firstTokenAt - start) } : {}),
-              ...(lastUsage.prompt_tps !== undefined && lastUsage.prompt_tps > 0
-                ? { promptTokensPerSec: lastUsage.prompt_tps }
-                : {}),
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedPromptTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(tokensPerSec !== undefined ? { tokensPerSec } : {}),
-            });
-          }
           if (finishReason === 'length') {
             this.emitWarning(
               'Model output was cut off at the length limit. The last turn may be incomplete.',
@@ -3340,21 +3343,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           // under it; persist one short line and release the turn.
           this.messages.push({ role: 'assistant', content: terminalActionClosing });
           fullText = terminalActionClosing;
-          if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
-            this.emitUsage({
-              model: this.deps.model,
-              inputTokens: lastUsage.prompt_tokens,
-              outputTokens: lastUsage.completion_tokens,
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedInputTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
-                ? { outputTokensPerSec: lastUsage.generation_tps }
-                : {}),
-              durationMs: Date.now() - start,
-              at: new Date().toISOString(),
-            });
-          }
           log.info(
             `turn#${seq} END terminal-tool-bail afterMs=${Date.now() - start} loopTurns=${turn + 1}`,
           );
@@ -3379,21 +3367,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           const closingText = immediateFileWriteClosing(immediateFileWritePaths);
           this.messages.push({ role: 'assistant', content: closingText });
           fullText = closingText;
-          if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
-            this.emitUsage({
-              model: this.deps.model,
-              inputTokens: lastUsage.prompt_tokens,
-              outputTokens: lastUsage.completion_tokens,
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedInputTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
-                ? { outputTokensPerSec: lastUsage.generation_tps }
-                : {}),
-              durationMs: Date.now() - start,
-              at: new Date().toISOString(),
-            });
-          }
           log.info(
             `turn#${seq} END immediate-write-bail afterMs=${Date.now() - start} ` +
               `paths=${immediateFileWritePaths.join(',') || '(unknown)'} loopTurns=${turn + 1}` +
@@ -3405,21 +3378,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           const closingText = asyncFileHandoffClosing(asyncFileHandoffCount);
           this.messages.push({ role: 'assistant', content: closingText });
           fullText = closingText;
-          if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
-            this.emitUsage({
-              model: this.deps.model,
-              inputTokens: lastUsage.prompt_tokens,
-              outputTokens: lastUsage.completion_tokens,
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedInputTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
-                ? { outputTokensPerSec: lastUsage.generation_tps }
-                : {}),
-              durationMs: Date.now() - start,
-              at: new Date().toISOString(),
-            });
-          }
           log.info(
             `turn#${seq} END async-file-handoff-bail afterMs=${Date.now() - start} ` +
               `handoffs=${asyncFileHandoffCount} loopTurns=${turn + 1}`,
@@ -3441,47 +3399,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           );
           this.messages.push({ role: 'assistant', content: forceProjectMacroBail.closingText });
           fullText = forceProjectMacroBail.closingText;
-          if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
-            const durationMs = Date.now() - start;
-            const usage: TurnUsage = {
-              model: this.deps.model,
-              inputTokens: lastUsage.prompt_tokens,
-              outputTokens: lastUsage.completion_tokens,
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedInputTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
-                ? { outputTokensPerSec: lastUsage.generation_tps }
-                : {}),
-              durationMs,
-              at: new Date().toISOString(),
-            };
-            this.emitUsage(usage);
-            const generationMs =
-              firstTokenAt !== null ? Math.max(1, Date.now() - firstTokenAt) : durationMs;
-            const wallTps =
-              lastUsage.completion_tokens > 0 && generationMs > 0
-                ? lastUsage.completion_tokens / (generationMs / 1000)
-                : undefined;
-            const tokensPerSec =
-              lastUsage.generation_tps && lastUsage.generation_tps > 0
-                ? lastUsage.generation_tps
-                : wallTps;
-            this.emitTurnStats({
-              provider: 'mlx',
-              promptTokens: lastUsage.prompt_tokens,
-              completionTokens: lastUsage.completion_tokens,
-              durationMs,
-              ...(firstTokenAt !== null ? { ttftMs: Math.max(0, firstTokenAt - start) } : {}),
-              ...(lastUsage.prompt_tps !== undefined && lastUsage.prompt_tps > 0
-                ? { promptTokensPerSec: lastUsage.prompt_tps }
-                : {}),
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedPromptTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(tokensPerSec !== undefined ? { tokensPerSec } : {}),
-            });
-          }
           this.emitWarning(
             `On-device model emitted ${projectMacroInterceptCount + 1} \`${startedProjectOrJobThisTurn?.tool ?? 'start_project'}\` attempts in one turn after the first one succeeded. The runtime ended the turn for you — the project is real and the lead is on it. Consider switching the Meester to a cloud model if this recurs.`,
           );
@@ -3498,12 +3415,24 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         `[mlx] too many tool-call loops (>${MAX_TOOL_LOOP_TURNS}); aborting to prevent runaway`,
       );
     } catch (err) {
+      turnFailed = true;
       log.info(
         `turn#${seq} END throw afterMs=${Date.now() - start} ` +
           `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
       );
       throw err;
     } finally {
+      if (!turnFailed) {
+        try {
+          emitTerminalTelemetry();
+        } catch (err) {
+          // Telemetry must never turn a completed model response into a
+          // failed user turn. Preserve the reply and leave a diagnostic.
+          log.warn(
+            `turn#${seq} terminal telemetry failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
       releaseActiveEngineRequest?.();
       clearInterval(statusHeartbeat);
       this.deps.provider._deregisterActiveSession(this);

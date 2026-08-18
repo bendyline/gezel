@@ -58,6 +58,33 @@ describe('UsageTracker decode-rate aggregation', () => {
     expect(p?.totalTokensIn).toBe(50_500);
     expect(p?.totalTokensOut).toBe(158);
   });
+
+  it('retains the most recently completed turn independently of rolling UI state', () => {
+    const t = new UsageTracker();
+    t.recordTurn(
+      'mlx',
+      turn({
+        model: 'qwen-27b',
+        inputTokens: 12_345,
+        cachedInputTokens: 12_000,
+        outputTokens: 87,
+        outputTokensPerSec: 24.5,
+        durationMs: 4_200,
+        at: '2026-08-18T10:00:00.000Z',
+      }),
+    );
+
+    expect(t.summary().providers.mlx?.lastTurn).toEqual({
+      model: 'qwen-27b',
+      inputTokens: 12_345,
+      cachedInputTokens: 12_000,
+      outputTokens: 87,
+      cost: 0,
+      durationMs: 4_200,
+      outputTokensPerSec: 24.5,
+      at: '2026-08-18T10:00:00.000Z',
+    });
+  });
 });
 
 /**
@@ -140,6 +167,7 @@ describe('UsageTracker standalone quota snapshots', () => {
           quotaBuckets: [{ name: 'five_hour', used: 42 }],
           todayTurns: 0,
           totalTurns: 0,
+          lastTurn: null,
           lastUpdated: at,
         },
       },

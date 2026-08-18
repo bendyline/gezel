@@ -5026,7 +5026,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 if (tc.function?.name) liveToolArgsName = tc.function.name;
                 const argChunk = tc.function?.arguments ?? '';
                 if (tc.function?.name || argChunk.length > 0) {
-                  this.emitToolArgsDelta(liveToolArgsName, argChunk);
+                  this.emitToolArgsDelta(liveToolArgsName, argChunk, {
+                    index: tc.index,
+                    ...(tc.id ? { id: tc.id } : {}),
+                  });
                 }
               }
               if (

@@ -1058,7 +1058,8 @@ class _Sub:
         "http_request", "uid", "queue", "cancelled", "token_ids", "emitted",
         "pinned_cache_ids", "prefill_total", "first_token_seen",
         "reused_tokens", "seed_mode", "prompt_snapshot", "snapshot_target",
-        "saved_cache_state",
+        "saved_cache_state", "prefill_started_at", "generation_started_at",
+        "prompt_tps", "generation_tps",
     )
 
     def __init__(
@@ -1100,6 +1101,15 @@ class _Sub:
         # reference for immediate persistence even if the memory-budget pass
         # evicts the just-built entry from the global LRU.
         self.saved_cache_state = None
+        # BatchGenerator does not expose per-sequence timing. Track wall-clock
+        # timing per subscription so the OpenAI-compatible usage frames retain
+        # the same prompt/decode speed fields as the serial stream_generate
+        # path. Values are snapshotted into queue items because the worker can
+        # advance again before the SSE coroutine consumes them.
+        self.prefill_started_at = None
+        self.generation_started_at = None
+        self.prompt_tps = 0.0
+        self.generation_tps = 0.0
 
 
 class BatchEngine:
@@ -1386,6 +1396,7 @@ class BatchEngine:
                     continue
                 for uid, sub in zip(uids, batch):
                     sub.uid = uid
+                    sub.prefill_started_at = time.perf_counter()
                     self._subs[uid] = sub
                 # Arm prefill-liveness for the wave: total new tokens to
                 # prefill across its subs (authoritative — from the seed
@@ -1411,6 +1422,7 @@ class BatchEngine:
                 self._emit_prefill_liveness()
                 try:
                     prompt_responses, responses = self._gen.next()
+                    step_ended_at = time.perf_counter()
                 except Exception as exc:  # noqa: BLE001
                     print(f"[batch] step failed: {exc}", flush=True)
                     traceback.print_exc()
@@ -1456,8 +1468,27 @@ class BatchEngine:
                     sub = self._subs.get(r.uid)
                     if sub is None:
                         continue
+                    if sub.generation_started_at is None:
+                        # The step that yields the first token is the closest
+                        # boundary BatchGenerator exposes between prefill and
+                        # decode. Count it with prefill/TTFT, then measure decode
+                        # from the inter-token intervals that follow; otherwise
+                        # a short prompt can produce a near-zero denominator and
+                        # a wildly inflated first-token rate.
+                        sub.generation_started_at = step_ended_at
+                        prefill_started_at = sub.prefill_started_at or step_ended_at
+                        prefill_seconds = max(
+                            step_ended_at - prefill_started_at,
+                            1e-9,
+                        )
+                        if sub.prefill_total > 0:
+                            sub.prompt_tps = sub.prefill_total / prefill_seconds
                     sub.first_token_seen = True
                     sub.token_ids.append(int(r.token))
+                    generated_intervals = len(sub.token_ids) - 1
+                    generation_seconds = step_ended_at - sub.generation_started_at
+                    if generated_intervals > 0 and generation_seconds > 0:
+                        sub.generation_tps = generated_intervals / generation_seconds
                     self._emit_delta(sub)
                     if r.finish_reason is not None:
                         self._finish(sub, r)
@@ -1524,12 +1555,28 @@ class BatchEngine:
         if not delta:
             return
         sub.emitted = len(full)
-        sub.queue.put_nowait(("tok", delta, len(sub.token_ids)))
+        sub.queue.put_nowait(
+            (
+                "tok",
+                delta,
+                len(sub.token_ids),
+                sub.prompt_tps,
+                sub.generation_tps,
+            )
+        )
 
     def _finish(self, sub, r):
         full = _scrub_leaked_markers(self._tok.decode(sub.token_ids))
         if len(full) > sub.emitted:
-            sub.queue.put_nowait(("tok", full[sub.emitted :], len(sub.token_ids)))
+            sub.queue.put_nowait(
+                (
+                    "tok",
+                    full[sub.emitted :],
+                    len(sub.token_ids),
+                    sub.prompt_tps,
+                    sub.generation_tps,
+                )
+            )
             sub.emitted = len(full)
         try:
             if sub.request.cache_id:
@@ -1600,7 +1647,9 @@ class BatchEngine:
                 )
         except Exception as exc:  # noqa: BLE001
             print(f"[batch] cache save failed: {exc}", flush=True)
-        sub.queue.put_nowait(("done", r.finish_reason))
+        sub.queue.put_nowait(
+            ("done", r.finish_reason, sub.prompt_tps, sub.generation_tps)
+        )
 
 
 async def _batched_stream_iter(sub: "_Sub"):
@@ -1614,7 +1663,7 @@ async def _batched_stream_iter(sub: "_Sub"):
             item = await sub.queue.get()
             kind = item[0]
             if kind == "tok":
-                _, delta, out_count = item
+                _, delta, out_count, prompt_tps, generation_tps = item
                 if await sub.http_request.is_disconnected():
                     sub.cancelled = True
                     return
@@ -1635,8 +1684,8 @@ async def _batched_stream_iter(sub: "_Sub"):
                             "input_tokens": in_toks,
                             "output_tokens": out_count,
                             "total_tokens": in_toks + out_count,
-                            "prompt_tps": 0.0,
-                            "generation_tps": 0.0,
+                            "prompt_tps": prompt_tps,
+                            "generation_tps": generation_tps,
                             # Cache tokens actually served per the seed
                             # plan — parity with the serial path so the
                             # TS session's cachedInputTokens works on
@@ -1646,7 +1695,7 @@ async def _batched_stream_iter(sub: "_Sub"):
                     }
                 ) + "\n\n"
             elif kind == "done":
-                reason = item[1]
+                _, reason, prompt_tps, generation_tps = item
                 yield "data: " + json.dumps(
                     {
                         "id": rid,
@@ -1664,8 +1713,8 @@ async def _batched_stream_iter(sub: "_Sub"):
                             "input_tokens": in_toks,
                             "output_tokens": len(sub.token_ids),
                             "total_tokens": in_toks + len(sub.token_ids),
-                            "prompt_tps": 0.0,
-                            "generation_tps": 0.0,
+                            "prompt_tps": prompt_tps,
+                            "generation_tps": generation_tps,
                             "cached_tokens": sub.reused_tokens,
                         },
                     }

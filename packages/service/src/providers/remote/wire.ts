@@ -177,6 +177,8 @@ export const ToolArgsDeltaFrameSchema = z.object({
   type: z.literal('tool_args_delta'),
   name: z.string(),
   text: z.string(),
+  index: z.number().int().nonnegative().optional(),
+  id: z.string().optional(),
 });
 /** B received a non-content SSE frame from its native engine. */
 export const WirePulseFrameSchema = z.object({ type: z.literal('wire_pulse') });

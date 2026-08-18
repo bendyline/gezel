@@ -45,9 +45,17 @@ function markerPrefixStart(source: string, markers: readonly string[]): number {
   return lower.length;
 }
 
+export interface ToolCallStreamObserver {
+  onStart(): void;
+  onBodyDelta(chunk: string): void;
+  onEnd(): void;
+}
+
 export class ToolCallStreamFilter {
   private buffer = '';
   private insideToolCall = false;
+
+  constructor(private readonly observer?: ToolCallStreamObserver) {}
 
   /** Add one model-content delta and return the portion safe to expose. */
   push(chunk: string): string {
@@ -62,6 +70,8 @@ export class ToolCallStreamFilter {
    */
   flush(): string {
     if (this.insideToolCall) {
+      if (this.buffer) this.observer?.onBodyDelta(this.buffer);
+      this.observer?.onEnd();
       this.buffer = '';
       this.insideToolCall = false;
       return '';
@@ -77,14 +87,20 @@ export class ToolCallStreamFilter {
       if (this.insideToolCall) {
         const close = earliestMarker(this.buffer, CLOSE_MARKERS);
         if (close) {
+          const body = this.buffer.slice(0, close.index);
+          if (body) this.observer?.onBodyDelta(body);
           this.buffer = this.buffer.slice(close.index + close.length);
           this.insideToolCall = false;
+          this.observer?.onEnd();
           continue;
         }
 
         // Drop body bytes that cannot form the beginning of a split closing
         // marker, retaining only the ambiguous suffix for the next chunk.
-        this.buffer = this.buffer.slice(markerPrefixStart(this.buffer, CLOSE_MARKERS));
+        const holdback = markerPrefixStart(this.buffer, CLOSE_MARKERS);
+        const body = this.buffer.slice(0, holdback);
+        if (body) this.observer?.onBodyDelta(body);
+        this.buffer = this.buffer.slice(holdback);
         return output;
       }
 
@@ -93,6 +109,7 @@ export class ToolCallStreamFilter {
         output += this.buffer.slice(0, open.index);
         this.buffer = this.buffer.slice(open.index + open.length);
         this.insideToolCall = true;
+        this.observer?.onStart();
         continue;
       }
 

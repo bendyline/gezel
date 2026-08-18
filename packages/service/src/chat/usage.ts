@@ -80,6 +80,8 @@ export interface ProviderUsage {
    * the client-side rolling window is empty.
    */
   modelSpeeds: ModelSpeed[];
+  /** Most recently completed turn, retained independently of the UI's rolling window. */
+  lastTurn: UsageTurn | null;
   lastUpdated: string | null;
 }
 
@@ -169,8 +171,8 @@ export class UsageTracker {
     let overallLast: string | null = null;
     for (const [name, state] of this.byProvider) {
       const todayTurns = state.turns.filter((t) => t.at.startsWith(today));
-      const lastTurn = state.turns.length > 0 ? state.turns[state.turns.length - 1]!.at : null;
-      const last = laterTimestamp(lastTurn, state.quotaUpdatedAt);
+      const latestTurn = state.turns.length > 0 ? state.turns[state.turns.length - 1]! : null;
+      const last = laterTimestamp(latestTurn?.at ?? null, state.quotaUpdatedAt);
       if (last && (!overallLast || last > overallLast)) overallLast = last;
       providers[name] = {
         quotaBuckets: state.latestQuotaBuckets,
@@ -190,6 +192,7 @@ export class UsageTracker {
             .filter((v): v is number => typeof v === 'number' && v > 0),
         ),
         modelSpeeds: rollUpModelSpeeds(state.turns),
+        lastTurn: latestTurn ? { ...latestTurn } : null,
         lastUpdated: last,
       };
     }

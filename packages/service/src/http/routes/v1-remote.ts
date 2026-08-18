@@ -500,8 +500,15 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
         session.onReasoningDelta?.((text) => send({ type: 'reasoning_delta', text })) ?? (() => {}),
       );
       unsubs.push(
-        session.onToolArgsDelta?.((name, text) => send({ type: 'tool_args_delta', name, text })) ??
-          (() => {}),
+        session.onToolArgsDelta?.((name, text, meta) =>
+          send({
+            type: 'tool_args_delta',
+            name,
+            text,
+            ...(meta?.index !== undefined ? { index: meta.index } : {}),
+            ...(meta?.id ? { id: meta.id } : {}),
+          }),
+        ) ?? (() => {}),
       );
       unsubs.push(session.onWirePulse?.(() => send({ type: 'wire_pulse' })) ?? (() => {}));
       unsubs.push(

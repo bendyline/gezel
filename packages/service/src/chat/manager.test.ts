@@ -3964,6 +3964,37 @@ describe('ChatManager — one-shot attribution', () => {
     expect(send?.sendOpts?.queue?.lane).toBe('interactive');
   });
 
+  it('fans ephemeral local-engine telemetry out to the global engine pill feed', async () => {
+    const received: Array<{ sessionId: string; event: { type: string } }> = [];
+    const unsubscribe = events.subscribeAll((envelope) => received.push(envelope));
+    mock.script('done');
+    mock.scriptEngineTelemetry({
+      phases: [
+        {
+          provider: 'mlx',
+          phase: 'generating',
+          detail: 'Generating · 4 tok · 20 tok/s',
+          outputTokens: 4,
+          tokensPerSec: 20,
+        },
+      ],
+      turnStats: {
+        provider: 'mlx',
+        promptTokens: 100,
+        completionTokens: 4,
+        durationMs: 250,
+        tokensPerSec: 20,
+      },
+    });
+
+    await manager.oneShotCompletion('background summary', 1_000);
+
+    expect(received.map(({ event }) => event.type)).toEqual(['engine_phase', 'turn_stats', 'done']);
+    expect(received[0]?.sessionId).toMatch(/^one-shot:/);
+    expect(received[1]?.sessionId).toBe(received[0]?.sessionId);
+    unsubscribe();
+  });
+
   it('forwards a cancellation signal to one-shot provider work', async () => {
     mock.script('done');
     const controller = new AbortController();

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ExternalToolCall, LLMSession, TurnUsage } from '../../providers/types.js';
+import type {
+  ExternalToolCall,
+  LLMSession,
+  ToolArgsDeltaMeta,
+  TurnUsage,
+} from '../../providers/types.js';
 import { createStreamingDiagnostics, snapshotStreamingDiagnostics } from './streaming-telemetry.js';
 import { type SSEWriter, runStreaming } from './streaming.js';
 import { ToolCallStreamFilter } from './tool-call-stream-filter.js';
@@ -7,12 +12,16 @@ import { ToolCallStreamFilter } from './tool-call-stream-filter.js';
 function fakeSession(input: {
   chunks: string[];
   reasoningChunks?: string[];
+  toolArgChunks?: Array<{ name: string; chunk: string; meta?: ToolArgsDeltaMeta }>;
   calls?: ExternalToolCall[];
   sendGate?: Promise<void>;
   lifecycle?: { activeReasoningSubscriptions: number; reasoningSubscribeCalls: number };
 }): LLMSession {
   const deltaHandlers = new Set<(chunk: string) => void>();
   const reasoningHandlers = new Set<(chunk: string) => void>();
+  const toolArgHandlers = new Set<
+    (name: string, chunk: string, meta?: ToolArgsDeltaMeta) => void
+  >();
   const usageHandlers = new Set<(usage: TurnUsage) => void>();
 
   return {
@@ -20,6 +29,9 @@ function fakeSession(input: {
       await input.sendGate;
       for (const chunk of input.reasoningChunks ?? []) {
         for (const handler of reasoningHandlers) handler(chunk);
+      }
+      for (const { name, chunk, meta } of input.toolArgChunks ?? []) {
+        for (const handler of toolArgHandlers) handler(name, chunk, meta);
       }
       for (const chunk of input.chunks) {
         for (const handler of deltaHandlers) handler(chunk);
@@ -44,6 +56,12 @@ function fakeSession(input: {
     onUsage(handler: (usage: TurnUsage) => void): () => void {
       usageHandlers.add(handler);
       return () => usageHandlers.delete(handler);
+    },
+    onToolArgsDelta(
+      handler: (name: string, chunk: string, meta?: ToolArgsDeltaMeta) => void,
+    ): () => void {
+      toolArgHandlers.add(handler);
+      return () => toolArgHandlers.delete(handler);
     },
     capturedToolCalls(): ExternalToolCall[] {
       return input.calls ?? [];
@@ -118,6 +136,30 @@ describe('ToolCallStreamFilter', () => {
     const filter = new ToolCallStreamFilter();
     expect(filter.push('a<|tool_call|>{"name":"bash"}<tool_call>b') + filter.flush()).toBe('ab');
   });
+
+  it('reports suppressed tool-call bodies incrementally without exposing them as content', () => {
+    const events: string[] = [];
+    const filter = new ToolCallStreamFilter({
+      onStart: () => events.push('start'),
+      onBodyDelta: (chunk) => events.push(`body:${chunk}`),
+      onEnd: () => events.push('end'),
+    });
+
+    const visible =
+      filter.push('Before<tool_call>{"name":"write",') +
+      filter.push('"arguments":{"path":"a"}}</tool_call>After') +
+      filter.flush();
+
+    expect(visible).toBe('BeforeAfter');
+    expect(events[0]).toBe('start');
+    expect(events.at(-1)).toBe('end');
+    expect(
+      events
+        .filter((event) => event.startsWith('body:'))
+        .join('')
+        .replaceAll('body:', ''),
+    ).toBe('{"name":"write","arguments":{"path":"a"}}');
+  });
 });
 
 describe('runStreaming textual tool-call suppression', () => {
@@ -162,6 +204,169 @@ describe('runStreaming textual tool-call suppression', () => {
 
     const content = frames.map((frame) => choice(frame)?.delta?.content ?? '').join('');
     expect(content).toBe('Show <tool_call>example</tool_call> literally.');
+  });
+});
+
+describe('runStreaming live tool calls', () => {
+  it('promotes a suppressed canonical textual call into live tool progress', async () => {
+    const finalArguments = '{"path":"game.js","content":"startGame()"}';
+    const session = fakeSession({
+      chunks: [
+        '<tool_call>{"name":"write","arguments":{"path":"game.js",',
+        '"content":"startGame()"}}</tool_call>',
+      ],
+      calls: [{ id: 'repaired-write', name: 'write', arguments: finalArguments }],
+    });
+    const { sink, frames } = collectingSink();
+
+    await runStreaming(session, 'write it', 'gezel:test', sink, () => 123, {
+      suppressTextualToolCalls: true,
+      streamToolCallDeltas: true,
+      toolCallNames: ['write'],
+    });
+
+    const deltas = frames.flatMap((frame) => choice(frame)?.delta?.tool_calls ?? []) as Array<{
+      id?: string;
+      function?: { name?: string; arguments?: string };
+    }>;
+    expect(deltas.length).toBeGreaterThanOrEqual(2);
+    expect(deltas[0]).toMatchObject({ function: { name: 'write' } });
+    expect(deltas.map((delta) => delta.function?.arguments ?? '').join('')).toBe(finalArguments);
+    expect(frames.map((frame) => choice(frame)?.delta?.content ?? '').join('')).toBe('');
+  });
+
+  it('announces a Hermes textual call early and reconciles its arguments at completion', async () => {
+    const finalArguments = '{"command":"pwd"}';
+    const session = fakeSession({
+      chunks: [
+        '<tool_call><function=bash><parameter=command>pw',
+        'd</parameter></function></tool_call>',
+      ],
+      calls: [{ id: 'repaired-bash', name: 'bash', arguments: finalArguments }],
+    });
+    const { sink, frames } = collectingSink();
+
+    await runStreaming(session, 'inspect it', 'gezel:test', sink, () => 123, {
+      suppressTextualToolCalls: true,
+      streamToolCallDeltas: true,
+      toolCallNames: ['bash'],
+    });
+
+    const deltas = frames.flatMap((frame) => choice(frame)?.delta?.tool_calls ?? []) as Array<{
+      function?: { name?: string; arguments?: string };
+    }>;
+    expect(deltas[0]).toMatchObject({ function: { name: 'bash', arguments: '' } });
+    expect(deltas.map((delta) => delta.function?.arguments ?? '').join('')).toBe(finalArguments);
+  });
+
+  it('streams argument fragments and does not duplicate them in the final captured call', async () => {
+    const finalArguments = '{"path":"app.js","content":"console.log(1)"}';
+    const session = fakeSession({
+      chunks: [],
+      toolArgChunks: [
+        { name: 'write_file', chunk: '{"path":"app.js",' },
+        { name: 'write_file', chunk: '"content":"console.log(1)"}' },
+      ],
+      calls: [{ id: 'provider-call-1', name: 'write_file', arguments: finalArguments }],
+    });
+    const { sink, frames } = collectingSink();
+
+    await runStreaming(session, 'write it', 'gezel:test', sink, () => 123, {
+      streamToolCallDeltas: true,
+    });
+
+    const deltas = frames
+      .flatMap((frame) => choice(frame)?.delta?.tool_calls ?? [])
+      .map(
+        (call) =>
+          call as {
+            index: number;
+            id?: string;
+            type?: string;
+            function?: { name?: string; arguments?: string };
+          },
+      );
+    expect(deltas).toHaveLength(2);
+    expect(deltas[0]).toMatchObject({
+      index: 0,
+      type: 'function',
+      function: { name: 'write_file' },
+    });
+    expect(deltas[0]?.id).toMatch(/^call_/);
+    expect(deltas[1]).toMatchObject({
+      index: 0,
+      function: { arguments: '"content":"console.log(1)"}' },
+    });
+    expect(deltas.map((delta) => delta.function?.arguments ?? '').join('')).toBe(finalArguments);
+    expect(choice(frames.at(-1)!)?.finish_reason).toBe('tool_calls');
+  });
+
+  it('holds argument bytes that precede the first tool name', async () => {
+    const session = fakeSession({
+      chunks: [],
+      toolArgChunks: [
+        { name: '', chunk: '{"path":' },
+        { name: 'read_file', chunk: '"README.md"}' },
+      ],
+      calls: [{ id: 'provider-call-2', name: 'read_file', arguments: '{"path":"README.md"}' }],
+    });
+    const { sink, frames } = collectingSink();
+
+    await runStreaming(session, 'read it', 'gezel:test', sink, () => 123, {
+      streamToolCallDeltas: true,
+    });
+
+    const toolDelta = frames
+      .map((frame) => choice(frame)?.delta?.tool_calls?.[0])
+      .find(Boolean) as {
+      function: { name: string; arguments: string };
+    };
+    expect(toolDelta.function).toEqual({
+      name: 'read_file',
+      arguments: '{"path":"README.md"}',
+    });
+  });
+
+  it('keeps parallel calls to the same tool separated by provider index and id', async () => {
+    const session = fakeSession({
+      chunks: [],
+      toolArgChunks: [
+        { name: 'read_file', chunk: '{"path":"a.md"}', meta: { index: 0, id: 'call_a' } },
+        { name: 'read_file', chunk: '{"path":"b.md"}', meta: { index: 1, id: 'call_b' } },
+      ],
+      calls: [
+        { id: 'call_a', name: 'read_file', arguments: '{"path":"a.md"}' },
+        { id: 'call_b', name: 'read_file', arguments: '{"path":"b.md"}' },
+      ],
+    });
+    const { sink, frames } = collectingSink();
+
+    await runStreaming(session, 'read both', 'gezel:test', sink, () => 123, {
+      streamToolCallDeltas: true,
+    });
+
+    const calls = frames
+      .flatMap((frame) => choice(frame)?.delta?.tool_calls ?? [])
+      .map(
+        (call) =>
+          call as {
+            index: number;
+            id?: string;
+            function?: { name?: string; arguments?: string };
+          },
+      );
+    expect(calls).toMatchObject([
+      {
+        index: 0,
+        id: 'call_a',
+        function: { name: 'read_file', arguments: '{"path":"a.md"}' },
+      },
+      {
+        index: 1,
+        id: 'call_b',
+        function: { name: 'read_file', arguments: '{"path":"b.md"}' },
+      },
+    ]);
   });
 });
 
