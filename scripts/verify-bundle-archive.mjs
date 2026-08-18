@@ -4,12 +4,13 @@
  * The loose deployment tree can be healthy while the archive or its extraction
  * is incomplete. That is exactly the boundary the packaged application uses,
  * so compare the extracted archive with the loose source before an installer is
- * allowed to ship. Paths and sizes are sufficient here: the archive's SHA-256
- * protects its bytes afterward, while this pass proves that every source entry
- * actually rode into those bytes and came back out through the same `tar`
- * implementation used by the supervisor.
+ * allowed to ship. Each regular file's SHA-256 is part of the tree inventory,
+ * so equal-size substitutions are caught too. The archive's own SHA-256 then
+ * protects those verified bytes afterward.
  */
 
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { mkdtemp, readdir, readlink, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
@@ -19,9 +20,33 @@ function slash(path) {
   return path.replace(/\\/g, '/');
 }
 
+async function sha256(path) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest('hex');
+}
+
+async function mapWithConcurrency(items, concurrency, visit) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await visit(items[index]);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
 /** Inventory regular files and symlinks without following symlinked directories. */
 export async function inventoryBundleTree(root) {
   const entries = [];
+  const files = [];
 
   async function walk(dir) {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -32,7 +57,7 @@ export async function inventoryBundleTree(root) {
       } else if (entry.isDirectory()) {
         await walk(full);
       } else if (entry.isFile()) {
-        entries.push({ path, kind: 'file', size: (await stat(full)).size });
+        files.push({ path, full });
       } else {
         throw new Error(`[bundle-archive] unsupported filesystem entry: ${path}`);
       }
@@ -40,6 +65,12 @@ export async function inventoryBundleTree(root) {
   }
 
   await walk(root);
+  entries.push(
+    ...(await mapWithConcurrency(files, 32, async ({ path, full }) => {
+      const [fileStat, digest] = await Promise.all([stat(full), sha256(full)]);
+      return { path, kind: 'file', size: fileStat.size, sha256: digest };
+    })),
+  );
   entries.sort((a, b) => a.path.localeCompare(b.path));
   return entries;
 }
@@ -55,13 +86,31 @@ export async function inventoryBundleTree(root) {
  * exits 0 with a truncated archive. pnpm deployment trees use hardlinks on
  * Windows and Linux, so archive synchronously until the upstream async Pack
  * invariant is fixed: https://github.com/isaacs/node-tar/issues/460
+ *
+ * Do not let node-tar encode hardlinks, even in synchronous mode. It keys its
+ * hardlink cache by the numeric `dev` and `ino` values returned by `fs.stat`.
+ * NTFS file IDs can exceed Number.MAX_SAFE_INTEGER, making distinct files
+ * collide after rounding and causing one archive entry to link to unrelated
+ * content. The service runtime does not rely on hardlink identity, so storing
+ * each pathname as a full file is the portable and deterministic contract.
  */
 export function createBundleArchive({ sourceDir, archivePath }) {
+  const disabledHardlinkCache = new (class extends Map {
+    get() {
+      return undefined;
+    }
+
+    set() {
+      return this;
+    }
+  })();
+
   tar.create(
     {
       cwd: sourceDir,
       file: archivePath,
       gzip: true,
+      linkCache: disabledHardlinkCache,
       strict: true,
       sync: true,
     },
@@ -69,20 +118,31 @@ export function createBundleArchive({ sourceDir, archivePath }) {
   );
 }
 
-/** List filesystem-entry paths encoded in an archive, excluding directories. */
-export async function inventoryBundleArchivePaths(archivePath) {
-  const paths = [];
+/** Inventory filesystem entries encoded in an archive, excluding directories. */
+export async function inventoryBundleArchiveEntries(archivePath) {
+  const entries = [];
   await tar.list({
     file: archivePath,
     strict: true,
     onReadEntry(entry) {
       if (entry.type === 'Directory') return;
       const path = slash(entry.path).replace(/^\.\//, '').replace(/\/$/, '');
-      if (path) paths.push(path);
+      if (path) {
+        entries.push({
+          path,
+          type: entry.type,
+          ...(entry.linkpath ? { linkpath: slash(entry.linkpath) } : {}),
+        });
+      }
     },
   });
-  paths.sort((a, b) => a.localeCompare(b));
-  return paths;
+  entries.sort((a, b) => a.path.localeCompare(b.path));
+  return entries;
+}
+
+/** List filesystem-entry paths encoded in an archive, excluding directories. */
+export async function inventoryBundleArchivePaths(archivePath) {
+  return (await inventoryBundleArchiveEntries(archivePath)).map((entry) => entry.path);
 }
 
 function describePathDifferences(source, archivedPaths) {
@@ -134,13 +194,24 @@ export async function verifyBundleArchiveRoundTrip({
 }) {
   const extractedDir = await mkdtemp(join(tmpdir(), 'gezel-bundle-verify-'));
   try {
-    const [source, archivedPaths] = await Promise.all([
+    const [source, archivedEntries] = await Promise.all([
       inventoryBundleTree(sourceDir),
-      inventoryBundleArchivePaths(archivePath),
+      inventoryBundleArchiveEntries(archivePath),
     ]);
+    const archivedPaths = archivedEntries.map((entry) => entry.path);
     if (source.length !== expectedFileCount) {
       throw new Error(
         `[bundle-archive] source file count ${source.length} does not match metadata ${expectedFileCount}`,
+      );
+    }
+    const hardlinks = archivedEntries.filter((entry) => entry.type === 'Link');
+    if (hardlinks.length > 0) {
+      const sample = hardlinks
+        .slice(0, 8)
+        .map((entry) => `${entry.path} -> ${entry.linkpath ?? '(unknown)'}`)
+        .join(', ');
+      throw new Error(
+        `[bundle-archive] archive contains ${hardlinks.length} hardlink entries; every bundled pathname must carry independent file content: ${sample}`,
       );
     }
     const archiveDifferences = describePathDifferences(source, archivedPaths);
