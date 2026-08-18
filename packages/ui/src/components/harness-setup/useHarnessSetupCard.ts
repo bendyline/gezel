@@ -35,6 +35,8 @@ export interface UseHarnessSetupCardOptions<S extends HarnessSetupStatusLike, C 
   errorPrefix: (confirmation: C, state: LocalHarnessSetupState | undefined) => string;
   /** Surface a `.backup` path the last action moved aside. */
   backupNotice?: (status: S) => string | null;
+  /** False for integrations that publish the whole roster with no default model. */
+  modelSelection?: boolean;
   onChanged?: () => void | Promise<void>;
 }
 
@@ -108,7 +110,8 @@ export function useHarnessSetupCard<S extends HarnessSetupStatusLike, C extends 
     status.bridge.listening &&
     opts.endpointsEnabled &&
     localDesktopMode;
-  const modelChanged = configured && model !== status?.configuredModel;
+  const modelSelection = opts.modelSelection !== false;
+  const modelChanged = modelSelection && configured && model !== status?.configuredModel;
   const repairable = status?.state === 'conflict' && status.canRepair;
   const needsConfigure =
     status?.state === 'not-configured' ||
@@ -120,7 +123,11 @@ export function useHarnessSetupCard<S extends HarnessSetupStatusLike, C extends 
   const canPublish =
     status?.state === 'conflict' ? status.canRepair : (status?.canConfigure ?? false);
   const configureDisabled =
-    busy || !localDesktopMode || !opts.endpointsEnabled || !canPublish || !model;
+    busy ||
+    !localDesktopMode ||
+    !opts.endpointsEnabled ||
+    !canPublish ||
+    (modelSelection && !model);
   const selectionDisabled = busy || !localDesktopMode || !opts.endpointsEnabled || !canPublish;
 
   const runConfirmedAction = useCallback(async () => {

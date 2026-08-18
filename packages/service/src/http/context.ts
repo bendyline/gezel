@@ -63,6 +63,7 @@ import type { TaskRunner } from '../tasks/runner.js';
 import type { TaskScheduler } from '../tasks/scheduler.js';
 import type { TerminalEventBus } from '../terminal/events.js';
 import type { TerminalManager } from '../terminal/manager.js';
+import type { VSCodeSetupManager } from '../vscode-setup/manager.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
 import type { OllamaEmulationController } from './ollama-emulation.js';
 import type { TokenStore } from './token-store.js';
@@ -264,6 +265,8 @@ export interface ServiceContext {
   opencodeSetup: OpenCodeSetupManager;
   /** Gezel-owned pi extension, model list, credential, and loopback bridge lifecycle. */
   piSetup: PiSetupManager;
+  /** VS Code custom endpoint, scoped credential, profile merge, and bridge lifecycle. */
+  vscodeSetup: VSCodeSetupManager;
   /**
    * Hex SHA-256 of the daemon's current TLS cert DER, when serving HTTPS.
    * `/v1/identity` signs this with the device identity key so a paired client

@@ -10777,6 +10777,25 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   font-size: var(--text-xs);
 }
 
+.project-index-panel-error-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.project-index-panel-error-link:hover:not(:disabled) {
+  text-decoration: none;
+}
+
+.project-index-panel-error-link:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 /* Always-visible project status dropdown — moved out of the project Settings tab into
    the status bar so the active/paused state is visible from every tab. Sized
    to sit flush with the index chip and tab row to its sides. */

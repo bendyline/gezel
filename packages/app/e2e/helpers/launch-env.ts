@@ -1,3 +1,6 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 /**
  * Build the env object for `electron.launch({ env })` in E2E tests.
  *
@@ -28,6 +31,27 @@
  * Pass the test-specific overrides as `extras`; they merge over the
  * scrubbed `process.env` clone.
  */
+
+/**
+ * A machine-shared root this path never has, so `activeMachineSharedHome()`
+ * finds no trust marker and returns null.
+ *
+ * A developer machine that has ever run a packaged install carries a real
+ * shared root under ProgramData (or /Users/Shared, /var/lib/gezel). The daemon
+ * mounts it by design — shared gezels appear in every account's roster, and a
+ * project whose `storageScope` is `machine-shared` resolves its workspace
+ * there rather than under `GEZEL_HOME`. That is correct in production and
+ * ruinous in tests: a spec's freshly-made `GEZEL_HOME` is then not fresh, so
+ * "first run" specs inherit whatever this machine accumulated. It cost two
+ * reproducible local failures — `meester.spec` crowned an imported gezel
+ * instead of provisioning one, and `preview-egress` 404'd because the file it
+ * wrote into the local default project was never the file the daemon served.
+ * Both pass on CI, which has no shared root, so the rot is invisible there.
+ *
+ * A spec that genuinely wants a shared root passes its own value in `extras`.
+ */
+const NO_MACHINE_SHARED_ROOT = join(tmpdir(), 'gezel-e2e-absent-machine-shared-root');
+
 export function buildLaunchEnv(extras: Record<string, string>): NodeJS.ProcessEnv {
   const { ELECTRON_RUN_AS_NODE: _ern, ELECTRON_NO_ATTACH_CONSOLE: _enac, ...base } = process.env;
   // GEZEL_E2E=1 flips the macOS Electron app into `accessory` activation
@@ -41,6 +65,7 @@ export function buildLaunchEnv(extras: Record<string, string>): NodeJS.ProcessEn
     ...base,
     GEZEL_E2E: '1',
     GEZEL_SKIP_BUNDLED_RUNTIME_INSTALL: '1',
+    GEZEL_MACHINE_SHARED_HOME: NO_MACHINE_SHARED_ROOT,
     // The embedded service shares Electron's process, whose execPath points
     // at electron.exe rather than Node. Script-backed project pages still
     // need a real development Node binary after provisioning is skipped.

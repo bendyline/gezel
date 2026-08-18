@@ -6,6 +6,7 @@ import { CodexSetupCard } from './CodexSetupCard.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { OpenCodeSetupCard } from './OpenCodeSetupCard.js';
 import { PiSetupCard } from './PiSetupCard.js';
+import { VSCodeSetupCard } from './VSCodeSetupCard.js';
 import {
   approvalErrorMessage,
   formatVerificationCode,
@@ -367,6 +368,12 @@ export function ConnectedAppsPanel() {
 
       <CodexSetupCard
         key={`codex-${harnessSetupRefreshKey}`}
+        endpointsEnabled={endpointsEnabled}
+        onChanged={refresh}
+      />
+
+      <VSCodeSetupCard
+        key={`vscode-${harnessSetupRefreshKey}`}
         endpointsEnabled={endpointsEnabled}
         onChanged={refresh}
       />

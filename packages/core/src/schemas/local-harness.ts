@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 /**
  * Shapes shared by Gezel's managed agent-harness integrations (Codex,
- * OpenCode, pi). Each harness owns its own tools, sandbox, approvals, and
+ * VS Code, OpenCode, pi). Each harness owns its own tools, sandbox, approvals, and
  * conversation loop; Gezel supplies inference over an authenticated loopback
  * bridge, plus a managed config file it alone writes.
  *

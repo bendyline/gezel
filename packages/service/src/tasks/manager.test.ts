@@ -1468,8 +1468,7 @@ describe('TaskManager craftbookParams interpolation', () => {
               {
                 id: 'report',
                 name: 'Write {{task.ref}} for {{task.projectId}}',
-                prompt:
-                  'Write {{workPath}}/outline.md, then preserve this source: {{content}}.',
+                prompt: 'Write {{workPath}}/outline.md, then preserve this source: {{content}}.',
                 advanceWhen: {
                   file: '{{workPath}}/outline.md',
                   artifact: true,
@@ -1529,9 +1528,7 @@ describe('TaskManager craftbookParams interpolation', () => {
     expect(nextTask.craftbook.steps[0]?.advanceWhen?.file).toBe(
       `powerpoint/task-${nextTask.num}/outline.md`,
     );
-    expect(nextTask.craftbookParams?.outputPath).toBe(
-      `powerpoint/task-${nextTask.num}/deck.pptx`,
-    );
+    expect(nextTask.craftbookParams?.outputPath).toBe(`powerpoint/task-${nextTask.num}/deck.pptx`);
     expect(nextTask.craftbookParams?.workPath).not.toBe(task.craftbookParams?.workPath);
   });
 

@@ -65,6 +65,23 @@ export function piBridgePortForHome(home: string): number {
   return port;
 }
 
+/**
+ * The extension-free VS Code endpoint yields to every older integration whose
+ * deterministic address may already be present in a published config file.
+ */
+export function vscodeBridgePortForHome(home: string): number {
+  const taken = new Set([
+    codexBridgePortForHome(home),
+    opencodeBridgePortForHome(home),
+    piBridgePortForHome(home),
+  ]);
+  let port = bridgePortForHome(home, 'vscode');
+  while (taken.has(port)) {
+    port = port === LOCAL_BRIDGE_PORT_RANGE_END ? LOCAL_BRIDGE_PORT_RANGE_START : port + 1;
+  }
+  return port;
+}
+
 function canonicalPath(path: string): string {
   try {
     return realpathSync(path);

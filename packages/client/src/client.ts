@@ -60,6 +60,7 @@ import type {
   ConfigureCodexRequest,
   ConfigureOpenCodeRequest,
   ConfigurePiRequest,
+  ConfigureVSCodeRequest,
   CopilotAvailability,
   CopyArtifactToWorkspaceRequest,
   CopyArtifactToWorkspaceResponse,
@@ -356,6 +357,7 @@ import type {
   UpdateTaskRequest,
   UpdateTaskStepRequest,
   UpdateTaskStepResponse,
+  VSCodeSetupStatusResponse,
   WebSearchRequest,
   WebSearchResponse,
   WikipediaSearchRequest,
@@ -2340,6 +2342,20 @@ export class GezelClient {
 
   removePiExtension(): Promise<PiSetupStatusResponse> {
     return this.request('DELETE', '/api/pi-setup/extension');
+  }
+
+  // ---------- VS Code built-in custom-endpoint setup ----------
+
+  getVSCodeSetupStatus(): Promise<VSCodeSetupStatusResponse> {
+    return this.request('GET', '/api/vscode-setup');
+  }
+
+  configureVSCode(body: ConfigureVSCodeRequest): Promise<VSCodeSetupStatusResponse> {
+    return this.request('PUT', '/api/vscode-setup', body);
+  }
+
+  removeVSCodeSetup(): Promise<VSCodeSetupStatusResponse> {
+    return this.request('DELETE', '/api/vscode-setup');
   }
 
   // ---------- live gilde content updates ----------

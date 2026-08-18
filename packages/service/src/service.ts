@@ -75,6 +75,7 @@ import {
   codexBridgePortForHome,
   opencodeBridgePortForHome,
   piBridgePortForHome,
+  vscodeBridgePortForHome,
 } from './http/local-bridge-port.js';
 import {
   buildOllamaEmulationApp,
@@ -91,6 +92,7 @@ import { buildRemoteApp } from './http/remote-server.js';
 import { invalidateModelsCache } from './http/routes/models.js';
 import { type UnexpectedHttpErrorHandler, buildApp, buildPreviewApp } from './http/server.js';
 import { createTokenStore } from './http/token-store.js';
+import { buildVSCodeBridgeApp, createVSCodeBridgeController } from './http/vscode-bridge.js';
 import { ContentIndex } from './index-store/content-index.js';
 import { IndexEnrichmentManager } from './index-store/enrichment-manager.js';
 import { GlobalIndexManager } from './index-store/global-index-manager.js';
@@ -166,6 +168,7 @@ import { evaluateStepGate } from './tasks/step-gate.js';
 import { TerminalEventBus } from './terminal/events.js';
 import { type CraftbookInvoker, TerminalManager } from './terminal/manager.js';
 import { HF_CACHE_DIR_ENV, transformersCacheDir } from './transformers-cache.js';
+import { createVSCodeSetupManager } from './vscode-setup/manager.js';
 import { WorkspaceIndexManager } from './workspace/index-manager.js';
 import { WorkspaceWatchManager } from './workspace/watch-manager.js';
 
@@ -280,6 +283,10 @@ export interface StartServiceOptions {
   piBridgePort?: number;
   /** Override pi's own agent directory. Tests must never write to a real one. */
   piAgentDir?: string;
+  /** Override VS Code's fixed loopback bridge port. Tests bind ephemeral ports. */
+  vscodeBridgePort?: number;
+  /** Override VS Code's User/profile directory. Tests must never write to a real one. */
+  vscodeUserDir?: string;
 }
 
 export interface RunningService {
@@ -2266,6 +2273,30 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     listModels: listCodexSetupModels,
   });
 
+  // VS Code's built-in custom-endpoint provider uses chat completions too.
+  // It gets an independent port and credential so its plaintext profile token
+  // can be revoked without disturbing any other connected app.
+  const vscodeBridgeFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
+  const vscodeBridge = createVSCodeBridgeController({
+    fetch: () => {
+      if (!vscodeBridgeFetchRef.value) {
+        throw new Error('VS Code bridge cannot start before the HTTP app is ready');
+      }
+      return vscodeBridgeFetchRef.value;
+    },
+    port: opts.vscodeBridgePort ?? vscodeBridgePortForHome(home),
+  });
+  const vscodeSetup = createVSCodeSetupManager({
+    home,
+    ...(opts.vscodeUserDir !== undefined ? { vscodeUserDir: opts.vscodeUserDir } : {}),
+    tokenStore,
+    bridge: vscodeBridge,
+    readConfig: () => store.readConfig(),
+    listGezels: () => store.listGezels(),
+    providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
+    listModels: listCodexSetupModels,
+  });
+
   // The meester's occasional status report — dynamic Home greeting +
   // dashboard + follow-up draft tasks. Constructed before the context
   // literal so the run-now HTTP route can reach it; started with the
@@ -2369,6 +2400,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     codexSetup,
     opencodeSetup,
     piSetup,
+    vscodeSetup,
     ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
     ensureModel,
     startedAt: nowIso(),
@@ -2410,6 +2442,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   opencodeBridgeFetchRef.value = opencodeBridgeApp.fetch.bind(opencodeBridgeApp);
   const piBridgeApp = buildPiBridgeApp(context);
   piBridgeFetchRef.value = piBridgeApp.fetch.bind(piBridgeApp);
+  const vscodeBridgeApp = buildVSCodeBridgeApp(context);
+  vscodeBridgeFetchRef.value = vscodeBridgeApp.fetch.bind(vscodeBridgeApp);
 
   // Port selection, by caller intent:
   //   - explicit `opts.port` (from `--port` / `GEZEL_PORT`): bind exactly
@@ -2684,6 +2718,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         `[service] pi local-model bridge not started: ${err instanceof Error ? err.message : err}`,
       );
     });
+    await vscodeSetup.reconcile().catch((err) => {
+      log.warn(
+        `[service] VS Code local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+      );
+    });
   }
 
   if (serviceRole !== 'machine-engine') {
@@ -2941,6 +2980,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       await codexSetup.stop();
       await opencodeSetup.stop();
       await piSetup.stop();
+      await vscodeSetup.stop();
       await machineEngine?.stop();
       await closePairedRemoteFetches(remotes);
       if (previewServer) {

@@ -108,6 +108,7 @@ import { v1OpenApiRoutes } from './routes/v1-openapi.js';
 import { v1RemoteRoutes } from './routes/v1-remote.js';
 import { v1ResponsesRoutes } from './routes/v1-responses.js';
 import { videoGenRoutes } from './routes/video-gen.js';
+import { vscodeSetupRoutes } from './routes/vscode-setup.js';
 import {
   gezelScopeGuard,
   projectScopeGuard,
@@ -636,6 +637,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/codex-setup', codexSetupRoutes(ctx));
   app.route('/api/opencode-setup', opencodeSetupRoutes(ctx));
   app.route('/api/pi-setup', piSetupRoutes(ctx));
+  app.route('/api/vscode-setup', vscodeSetupRoutes(ctx));
   app.route('/api/history', historyRoutes(ctx));
   app.route('/api/handboek', handboekRoutes(ctx));
   app.route('/api/channels', channelRoutes(ctx));

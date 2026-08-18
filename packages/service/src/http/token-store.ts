@@ -63,6 +63,9 @@ export const OPENCODE_SETUP_RESERVED_APP_ID = 'gezel.opencode.local-model-bridge
 /** App id owned by the Settings-managed pi bridge. Same contract as Codex's. */
 export const PI_SETUP_RESERVED_APP_ID = 'gezel.pi.local-model-bridge';
 
+/** App id owned by the extension-free VS Code bridge. Same contract as Codex's. */
+export const VSCODE_SETUP_RESERVED_APP_ID = 'gezel.vscode.local-model-bridge';
+
 /** App ids owned by the daemon itself rather than the public grant flow. */
 export function isReservedTokenAppId(appId: string): boolean {
   return (
@@ -80,7 +83,8 @@ export function isReservedPublicGrantAppId(appId: string): boolean {
     isReservedTokenAppId(appId) ||
     appId === CODEX_SETUP_RESERVED_APP_ID ||
     appId === OPENCODE_SETUP_RESERVED_APP_ID ||
-    appId === PI_SETUP_RESERVED_APP_ID
+    appId === PI_SETUP_RESERVED_APP_ID ||
+    appId === VSCODE_SETUP_RESERVED_APP_ID
   );
 }
 

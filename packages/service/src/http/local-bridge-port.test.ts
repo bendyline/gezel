@@ -7,6 +7,7 @@ import {
   codexBridgePortForHome,
   opencodeBridgePortForHome,
   piBridgePortForHome,
+  vscodeBridgePortForHome,
 } from './local-bridge-port.js';
 
 describe('codexBridgePortForHome', () => {
@@ -106,5 +107,25 @@ describe('piBridgePortForHome', () => {
     const bob = piBridgePortForHome(resolve('test-homes', 'bob', '.gezel'));
 
     expect(alice).not.toBe(bob);
+  });
+});
+
+describe('vscodeBridgePortForHome', () => {
+  it('is deterministic, in range, and distinct from every older bridge', () => {
+    for (let index = 0; index < 5_000; index += 1) {
+      const home = resolve('test-homes', `user-${index}`, '.gezel');
+      const port = vscodeBridgePortForHome(home);
+      expect(port).toBe(vscodeBridgePortForHome(home));
+      expect(port).toBeGreaterThanOrEqual(LOCAL_BRIDGE_PORT_RANGE_START);
+      expect(port).toBeLessThanOrEqual(LOCAL_BRIDGE_PORT_RANGE_END);
+      expect(
+        new Set([
+          codexBridgePortForHome(home),
+          opencodeBridgePortForHome(home),
+          piBridgePortForHome(home),
+          port,
+        ]).size,
+      ).toBe(4);
+    }
   });
 });

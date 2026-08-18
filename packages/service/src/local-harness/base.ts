@@ -12,7 +12,7 @@ import type { ModelInfo } from '../providers/types.js';
 
 /**
  * The mechanical layer shared by every local-harness setup manager (Codex,
- * OpenCode, pi).
+ * VS Code, OpenCode, pi).
  *
  * What lives here is what is genuinely identical between them. What does not:
  * `configure`, `inspect`, and `reconcile`. Those diverge in ways that are

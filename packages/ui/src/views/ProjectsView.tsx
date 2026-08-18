@@ -3273,6 +3273,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                 workspaceAccess.claudeInUse ? saveClaudePermissionMode : undefined
               }
               onOpenGitHub={selected.github?.url ? () => setTab('github') : undefined}
+              onAddBoekwachter={
+                boekwachterGezelId ? () => addProjectGezel(boekwachterGezelId) : undefined
+              }
               status={selected.status ?? 'active'}
               statusLocked={selected.archived === true}
               onStatusChange={async (v) => {

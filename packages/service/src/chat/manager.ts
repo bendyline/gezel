@@ -333,6 +333,13 @@ const TURN_LIBRARY_RECALL_TOP_K = 2;
 /** "ok", "yes", "go on" carry no retrievable topic — skip the search. */
 const TURN_LIBRARY_RECALL_MIN_CHARS = 15;
 
+/**
+ * Upper bound on {@link ChatManager.drainBackground}. Long enough that an
+ * ordinary persist or memory extraction finishes, short enough that quitting
+ * the app never reads as a hang.
+ */
+const BACKGROUND_DRAIN_TIMEOUT_MS = 15_000;
+
 const log = createLogger('chat');
 const memLog = createLogger('memory');
 const oneShotLog = createLogger('one-shot');
@@ -3145,10 +3152,46 @@ export class ChatManager {
     );
   }
 
-  /** Await every currently-tracked background promise, then return. */
-  async drainBackground(): Promise<void> {
+  /**
+   * Await every currently-tracked background promise, then return.
+   *
+   * Bounded, because every caller is a shutdown path and the work being
+   * awaited can legitimately take minutes. A first run creates the Meester
+   * and kicks off its about.md + icon generation; if the configured provider
+   * cannot answer — no credential, a cold cloud session — those one-shots sit
+   * on their own 120s budget while this loop waits. Unbounded, that stalls
+   * `service.stop()`, and neither the Electron quit coordinator nor an
+   * embedded caller imposes a deadline of its own, so the window simply hangs.
+   * Wild-caught as an intermittent 60s teardown timeout in
+   * `security-compliance.spec.ts` once its home stopped inheriting a
+   * machine-shared roster and started genuinely provisioning a Meester.
+   *
+   * Abandoning a task is safe here: these are fire-and-forget writes whose
+   * own error handling already runs independently of this await. The warning
+   * names the count so a real shutdown stall stays diagnosable instead of
+   * looking like a clean exit.
+   */
+  async drainBackground(timeoutMs: number = BACKGROUND_DRAIN_TIMEOUT_MS): Promise<void> {
+    const deadline = Date.now() + Math.max(0, timeoutMs);
     while (this.backgroundPromises.size > 0) {
-      await Promise.allSettled(Array.from(this.backgroundPromises));
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        log.warn(
+          `[chat] background drain timed out with ${this.backgroundPromises.size} task(s) still running; abandoning them`,
+        );
+        return;
+      }
+      const pending = Array.from(this.backgroundPromises);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const expiry = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, remaining);
+        timer.unref?.();
+      });
+      try {
+        await Promise.race([Promise.allSettled(pending), expiry]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     }
   }
 

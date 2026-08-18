@@ -20,7 +20,7 @@ Apps speak to gezel using the same "OpenAI-style" language most AI tools already
 
 ## Codex and other agent harnesses
 
-The authenticated address also serves the OpenAI **Responses API** at `/v1/responses`. That lets a harness such as Codex keep ownership of its coding tools, sandbox, approvals, and conversation loop while a model installed in gezel supplies the inference. OpenCode and [pi](https://pi.dev) connect the same way through the chat endpoint — see [OpenCode](#opencode) and [pi](#pi) below.
+The authenticated address also serves the OpenAI **Responses API** at `/v1/responses`. That lets a harness such as Codex keep ownership of its coding tools, sandbox, approvals, and conversation loop while a model installed in gezel supplies the inference. VS Code, OpenCode, and [pi](https://pi.dev) connect the same way through the chat endpoint — see [VS Code](#vs-code), [OpenCode](#opencode), and [pi](#pi) below.
 
 For Codex, use **Use Gezel in Codex** in this Settings screen. Gezel creates an isolated `gezel-local` Codex profile, a model catalog, and a dedicated revocable credential. It does not edit Codex's main configuration, authentication, conversations, sandbox rules, or approval settings. Start Codex with the command shown on the card (`codex --profile gezel-local`).
 
@@ -39,6 +39,18 @@ The setup card puts eligible gezels first. Choosing one gives Codex that gezel's
 The gezel you choose on the card is the profile's *default*, not its only option: gezel writes a model catalog listing every eligible gezel and local model, so Codex's own model picker shows the whole crew and you can switch between them inside a Codex session.
 
 A gezel appears here only when its effective local model is installed and can participate in Codex's caller-executed tool loop. The facade does not attach Gezel chat sessions, memories, project context, or MCP tools, and it does not silently route unknown aliases through the fallback gezel. It also refuses `codex-cli:` / `anthropic-cli:` targets because those are full nested agent harnesses rather than inference providers.
+
+## VS Code
+
+**Use Gezel in VS Code** uses VS Code's built-in custom-endpoint support, so it does not install or require the Gezel VSIX. Gezel adds one provider named `Gezel` to the selected VS Code profile's `chatLanguageModels.json`. Every eligible gezel and raw local model then appears in VS Code's native model picker while VS Code keeps control of its agent tools, permissions, and conversations.
+
+This is a shared profile file, so setup uses a narrow merge: entries belonging to other providers are preserved, and **Remove setup** removes only Gezel's entry. Named VS Code profiles have separate files; choose the profile you want before setup. To move the integration later, clear it and set up the other profile.
+
+There is one important tradeoff. Without an extension, VS Code cannot give Gezel access to its encrypted extension secret store. The dedicated VS Code credential is therefore written as plain text in `chatLanguageModels.json`. Gezel limits the effect of that exposure: the credential has inference-only scope, talks to a VS Code-only listener on `127.0.0.1`, reaches only chat completions and model discovery, and is individually revocable. It cannot read Gezel projects, files, terminals, chats, or settings. The profile file is written with private file permissions where the operating system supports them.
+
+The listener's port stays stable even though the ordinary Gezel daemon port can rotate. Keep Gezel running while VS Code uses the models; daemon autostart makes that available without keeping the desktop window open. Gezel periodically reconciles the provider entry, so installing or removing a model, changing a gezel, or changing an effective context limit updates VS Code's model picker automatically.
+
+If the card says **Needs attention**, Gezel could not prove it owns the existing provider entry or could not safely parse the shared file. **Repair VS Code setup** first saves the complete existing file beside it as `chatLanguageModels.json.backup`, then replaces the conflicting Gezel entry. Other parseable provider entries remain in place. If the entire file is damaged, the backup is the recoverable original and the repaired file contains only the working Gezel provider.
 
 ## OpenCode
 

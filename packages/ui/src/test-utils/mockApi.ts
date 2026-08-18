@@ -213,6 +213,28 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     canRemove: false,
     canRepair: false,
   },
+  getVSCodeSetupStatus: {
+    state: 'not-configured',
+    models: [],
+    reasons: [],
+    vscodeInstalled: false,
+    endpointsEnabled: true,
+    providerId: 'customendpoint',
+    profiles: [
+      {
+        id: 'code:default',
+        label: 'Default profile',
+        product: 'code',
+        configPath: '/tmp/Code/User/chatLanguageModels.json',
+      },
+    ],
+    configPath: '/tmp/Code/User/chatLanguageModels.json',
+    launchCommand: 'code',
+    bridge: { baseUrl: 'http://127.0.0.1:24567/v1', listening: true, port: 24567 },
+    canConfigure: false,
+    canRemove: false,
+    canRepair: false,
+  },
   getPiSetupStatus: {
     state: 'not-configured',
     models: [],
