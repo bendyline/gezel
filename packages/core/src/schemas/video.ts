@@ -120,6 +120,12 @@ export const InstalledVideoModelSchema = z.object({
   approxSizeBytes: z.number().int().nonnegative(),
   installedAt: z.string(),
   kind: z.enum(['local', 'cloud']).optional(),
+  /**
+   * True when the model is supplied machine-wide by the read-only asset
+   * store — deleting it from a user-context daemon is refused (409), so the
+   * UI labels it "Machine-wide" instead of offering Delete.
+   */
+  readOnly: z.boolean().optional(),
 });
 export type InstalledVideoModel = z.infer<typeof InstalledVideoModelSchema>;
 

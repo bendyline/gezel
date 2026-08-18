@@ -1,4 +1,3 @@
-import type { GezelClient } from '@bendyline/gezel-client';
 import { resolveOutsideInLayout } from './outside-in.js';
 
 const TEXT_DOCUMENT_EXTENSIONS = new Set([
@@ -106,8 +105,19 @@ export function canDropDocumentFile(file: Pick<File, 'name'>): boolean {
   return DROPPABLE_DOCUMENT_EXTENSION_SET.has(extensionOf(file.name));
 }
 
+/**
+ * Where a drop lands. Any tree the shared file browser can write to supplies
+ * this pair — the documents library, a project's artifacts drawer, or a
+ * writable workspace — so drag-and-drop import is not a documents-only
+ * feature.
+ */
+export interface DroppedFileTarget {
+  writeText(path: string, content: string): Promise<void>;
+  writeBinary(path: string, data: Blob, mimeType: string): Promise<void>;
+}
+
 async function writeOutsideInImport(
-  client: GezelClient,
+  target: DroppedFileTarget,
   file: File,
   targetPath: string,
 ): Promise<string[]> {
@@ -118,7 +128,7 @@ async function writeOutsideInImport(
   // permission to edit via Markdown. Selecting the new file imports a
   // read-only companion for preview. The recovery copy + editable flag are
   // created only after the explicit outside-in editing opt-in.
-  await client.writeDocumentBinary(layout.targetPath, file, mimeTypeFor(targetPath, file.type));
+  await target.writeBinary(layout.targetPath, file, mimeTypeFor(targetPath, file.type));
   return [];
 }
 
@@ -129,15 +139,16 @@ export interface DroppedDocumentImportResult {
 }
 
 /**
- * Import OS-dropped files into the shared Documents library.
+ * Import OS-dropped files into a file tree — the Documents library, a
+ * project's artifacts drawer, or a writable workspace.
  *
  * Existing names are never overwritten: Finder/Explorer-style numeric
  * suffixes are assigned deterministically across both existing files and the
  * current batch. Rendered Office/PDF/HTML inputs use the outside-in companion
  * contract; text documents are written directly.
  */
-export async function importDroppedDocumentFiles(options: {
-  client: GezelClient;
+export async function importDroppedFiles(options: {
+  target: DroppedFileTarget;
   files: readonly File[];
   destination?: string;
   existingPaths: readonly string[];
@@ -163,9 +174,9 @@ export async function importDroppedDocumentFiles(options: {
     const targetPath = uniqueTargetPath(destination, filename, occupied);
     try {
       if (resolveOutsideInLayout(targetPath)) {
-        result.warnings.push(...(await writeOutsideInImport(options.client, file, targetPath)));
+        result.warnings.push(...(await writeOutsideInImport(options.target, file, targetPath)));
       } else if (TEXT_DOCUMENT_EXTENSIONS.has(extensionOf(filename))) {
-        await options.client.writeDocument(targetPath, await file.text());
+        await options.target.writeText(targetPath, await file.text());
       } else {
         throw new Error('Unsupported document type');
       }

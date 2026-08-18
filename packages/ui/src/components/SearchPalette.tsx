@@ -7,6 +7,12 @@ interface SearchPaletteProps {
   /** Index into the flattened (visual-order) list of the highlighted option. */
   activeIndex: number;
   loading: boolean;
+  /**
+   * The lookup itself failed (not "matched nothing"). Distinguished because
+   * "No results" is a claim about the user's data, and making it while the
+   * daemon is unreachable sends them hunting for something that is there.
+   */
+  failed?: boolean;
   onPick: (result: UnifiedSearchResult) => void;
   onHover: (index: number) => void;
 }
@@ -20,6 +26,7 @@ export function SearchPalette({
   groups,
   activeIndex,
   loading,
+  failed = false,
   onPick,
   onHover,
 }: SearchPaletteProps) {
@@ -44,7 +51,9 @@ export function SearchPalette({
   if (total === 0) {
     return (
       <div className="search-palette" data-testid="search-palette">
-        <div className="search-palette-empty">No results</div>
+        <div className="search-palette-empty">
+          {failed ? "Search isn't responding — try again in a moment" : 'No results'}
+        </div>
       </div>
     );
   }
@@ -102,6 +111,13 @@ export function SearchPalette({
           })}
         </div>
       ))}
+      {/* Names land first and content follows, so say the list is still
+          filling rather than letting it look finished and then jump. */}
+      {loading ? (
+        <div className="search-palette-more" aria-live="polite">
+          Searching your files and memories…
+        </div>
+      ) : null}
     </div>
   );
 }

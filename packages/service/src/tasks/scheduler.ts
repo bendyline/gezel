@@ -658,20 +658,10 @@ export class TaskScheduler {
       // project's known status. No diagnostic value — stay silent.
       return;
     }
-    // A completion-oriented Meester check-in is counterproductive when
-    // gezels can't edit this project's files: an external workingDir
-    // without the explicit opt-in, or a project the user set to "edits
-    // off". Internal workspaces are writable by default (see
-    // projectManagedWorkspaceWritable) — a fresh internal project keeps its
-    // nudges even under super-lockdown.
-    if (!projectManagedWorkspaceWritable(project)) {
-      trace('skip — gezel file edits disabled for this project');
-      return;
-    }
     // Don't nudge the Meester themselves — meester-as-voorman is a
     // legitimate setup but the self-message case loops.
     if (project.voormanGezelId === meesterGezelId) {
-      trace('skip — voorman is the Meester');
+      trace('skip meester nudge — voorman is the Meester');
       return;
     }
 
@@ -680,7 +670,10 @@ export class TaskScheduler {
       // This is a durable steady state and it never produces `lastNudgedAt`,
       // so the ordinary first-nudge trace would repeat every 30 seconds
       // forever. Keep it available in explicit debug mode only.
-      if (debugOn) log.info(`[scheduler] ${project.id}: skip — nudges disabled for this project`);
+      if (debugOn)
+        log.info(
+          `[scheduler] ${project.id}: skip meester nudge — nudges disabled for this project`,
+        );
       return;
     }
     // Skip the nudge if either (a) someone's mid-turn anywhere in this
@@ -689,11 +682,11 @@ export class TaskScheduler {
     // at a time; nudging a voorman who is currently processing a
     // message on a different project just throws "already in flight".
     if (this.chat.isProjectActive(project.id)) {
-      trace('skip — a session in this project is mid-turn');
+      trace('skip meester nudge — a session in this project is mid-turn');
       return;
     }
     if (this.chat.isGezelActive(project.voormanGezelId)) {
-      trace(`skip — voorman ${project.voormanGezelId} is mid-turn elsewhere`);
+      trace(`skip meester nudge — voorman ${project.voormanGezelId} is mid-turn elsewhere`);
       return;
     }
     // One task listing serves three gates: the at-rest self-heal and the
@@ -714,7 +707,7 @@ export class TaskScheduler {
     // The user's next message can create the first task; until then there is
     // nothing deterministic for the scheduler to advance.
     if (projectTasks.length === 0) {
-      trace('skip — project has no tasks to advance');
+      trace('skip meester nudge — project has no tasks to advance');
       return;
     }
 
@@ -732,11 +725,35 @@ export class TaskScheduler {
       // finished project: don't stabilize it, and don't nudge the voorman
       // about a plan that isn't running yet — just skip this tick.
       if (projectTasks.some((t) => t.status === 'draft')) {
-        trace('skip — only draft task(s) await activation; not nudging or stabilizing');
+        trace(
+          'skip meester nudge — only draft task(s) await activation; not nudging or stabilizing',
+        );
         return;
       }
       await this.manager.maybeStabilizeProject(project.id);
-      trace('skip — no active tasks; project brought to rest (stable) instead of nudged');
+      trace(
+        'skip meester nudge — no active tasks; project brought to rest (stable) instead of nudged',
+      );
+      return;
+    }
+
+    // "Gezel file edits off" is not "nothing to do": the artifacts drawer
+    // is deliberately exempt from that policy, so nightly reports, code
+    // reviews and analyses all complete normally on a writes-off project.
+    // Only skip the check-in when every active task's current step owes a
+    // workspace file nobody can write — there the voorman genuinely has
+    // no move and the nudge is noise.
+    //
+    // This deliberately sits BELOW the at-rest self-heal above. As a
+    // blanket top-of-function gate it also swallowed
+    // `maybeStabilizeProject`, so a writes-off project whose tasks had
+    // all closed could never be brought to rest and stayed `active`
+    // forever.
+    if (
+      !projectManagedWorkspaceWritable(project) &&
+      (await this.manager.allActiveStepsBlockedByWorkspaceWrites(project.id, activeTasks))
+    ) {
+      trace('skip meester nudge — every active task needs workspace writes, which are off');
       return;
     }
 
@@ -755,7 +772,7 @@ export class TaskScheduler {
         this.chat?.isGezelActive(t.assignee.gezelId) === true,
     );
     if (busy && busy.assignee.kind === 'gezel') {
-      trace(`skip — assignee ${busy.assignee.gezelId} is mid-turn on ${busy.ref}`);
+      trace(`skip meester nudge — assignee ${busy.assignee.gezelId} is mid-turn on ${busy.ref}`);
       return;
     }
     // Queue backpressure: if the voorman's provider already has
@@ -781,7 +798,7 @@ export class TaskScheduler {
       const snap = provider?.queue?.snapshot();
       if (snap && snap.queuedInteractive >= 2) {
         trace(
-          `skip — voorman's provider (${providerName}) has ${snap.queuedInteractive} interactive item(s) queued`,
+          `skip meester nudge — voorman's provider (${providerName}) has ${snap.queuedInteractive} interactive item(s) queued`,
         );
         return;
       }
@@ -798,7 +815,7 @@ export class TaskScheduler {
     const pendingQuestions = await this.store.listProjectQuestions(project.id).catch(() => []);
     if (pendingQuestions.some((q) => !q.answer)) {
       trace(
-        `skip — ${pendingQuestions.filter((q) => !q.answer).length} unanswered question(s) pending`,
+        `skip meester nudge — ${pendingQuestions.filter((q) => !q.answer).length} unanswered question(s) pending`,
       );
       return;
     }
@@ -868,7 +885,7 @@ export class TaskScheduler {
       const idleMs = nowMs - voormanSessionLastActivityMs;
       if (voormanSessionLastActivityMs === 0 || idleMs < POISONED_REVIVAL_IDLE_MS) {
         trace(
-          `skip — voorman's most-recent session aborted last turn (poisoned; retrying after ${Math.round(POISONED_REVIVAL_IDLE_MS / 60_000)} min idle or a user turn)`,
+          `skip meester nudge — voorman's most-recent session aborted last turn (poisoned; retrying after ${Math.round(POISONED_REVIVAL_IDLE_MS / 60_000)} min idle or a user turn)`,
         );
         return;
       }
@@ -893,7 +910,7 @@ export class TaskScheduler {
         const ageMs = nowMs - projectCreatedMs;
         if (ageMs < cfg.firstNudgeGraceMs) {
           trace(
-            `skip — project age ${Math.max(0, Math.round(ageMs / 60_000))} min < ` +
+            `skip meester nudge — project age ${Math.max(0, Math.round(ageMs / 60_000))} min < ` +
               `first-nudge grace ${Math.round(cfg.firstNudgeGraceMs / 60_000)} min`,
           );
           return;
@@ -935,7 +952,7 @@ export class TaskScheduler {
 
     if (nowMs - lastNudgedMs < interval) {
       trace(
-        `skip — ${Math.round((nowMs - lastNudgedMs) / 1000)}s since last nudge, ` +
+        `skip meester nudge — ${Math.round((nowMs - lastNudgedMs) / 1000)}s since last nudge, ` +
           `need ${Math.round(interval / 1000)}s (${inRapidMode ? 'rapid' : 'slow'} mode)`,
       );
       return;

@@ -1,4 +1,9 @@
-import { type GezelDetail, type HistoryEvent, createLogger } from '@bendyline/gezel';
+import {
+  type GezelDetail,
+  type HistoryEvent,
+  createLogger,
+  isSharedLibraryProject,
+} from '@bendyline/gezel';
 import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
@@ -262,9 +267,25 @@ export class IndexEnrichmentManager {
     }
   }
 
+  private async isSharedLibrary(projectId: string): Promise<boolean> {
+    // Guarded rather than optional-chained on the call alone: a store that
+    // does not expose `getProject` (narrow test doubles) would otherwise
+    // throw synchronously here and take the whole drive down with it.
+    if (typeof this.store.getProject !== 'function') return false;
+    const meta = await this.store.getProject(projectId).catch(() => null);
+    return meta ? isSharedLibraryProject(meta) : false;
+  }
+
   private async runDrive(projectId: string, opts: DriveOptions): Promise<void> {
     const full = opts.intensity === 'full';
-    const reviews = opts.reviews !== false;
+    // The review tier judges files against code-shaped rubrics (structure,
+    // dead code, test coverage). Pointed at a policy document or a style
+    // guide it produces confident nonsense, so the library gets the tiers
+    // that transfer — media shadows, summaries, embeddings — and not this
+    // one. Forced here rather than at the call sites so every path (idle
+    // tick, night shift, manual drive) inherits it.
+    const libraryScope = await this.isSharedLibrary(projectId);
+    const reviews = opts.reviews !== false && !libraryScope;
     if (await this.isPaused()) return;
     if (!(await this.store.projectIndexingEnabled(projectId).catch(() => true))) return;
     const label = (state: 'started' | 'ended', detail: string) =>

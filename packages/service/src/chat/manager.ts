@@ -31,8 +31,10 @@ import {
   decodeProjectGezelId,
   deriveThreadTitleFromMessages,
   displayName,
+  estimateLlamaCppResidentBytes,
   isEngagementAllowed,
   isLocalProvider,
+  isOutsideInInternalPath,
   isProactiveAllowed,
   leaksUntaggedReasoning,
   normalizeCodexPermissionMode,
@@ -86,6 +88,7 @@ import type {
   ResolvedModelProfile,
   TurnCtx,
 } from '../model-profile/types.js';
+import { reconcileDefaultModel } from '../models/default-model-fallback.js';
 import { type PreviewLogBuffer, formatPreviewLogPrelude } from '../preview-log/buffer.js';
 import {
   reconcileScriptTools,
@@ -141,11 +144,12 @@ import {
 } from '../providers/llama-cpp/offload-planner.js';
 import { extractReasoning, stripReasoningTags } from '../providers/local-tool-call-salvage.js';
 import { McpBridgePool } from '../providers/mcp-bridge-pool.js';
-import type { OpenAIFunctionTool } from '../providers/mcp-bridge.js';
+import type { OpenAIFunctionTool, StdioMcpServerSpec } from '../providers/mcp-bridge.js';
 import {
   hasLocalPreviewBrowserNetworkOverride,
   localPreviewBrowserLaunchArgs,
 } from '../providers/mcp-wrappers/playwright-arg-validator.js';
+import { isPlaywrightMcp } from '../providers/mcp-wrappers/playwright-snapshot.js';
 import { buildMlxProvider, resolveMlxEffectiveNumCtx } from '../providers/mlx/build-provider.js';
 import { readMlxModelGeometry } from '../providers/mlx/model-geometry.js';
 import {
@@ -158,6 +162,7 @@ import {
 } from '../providers/native/capacity-broker.js';
 import {
   type LocalProviderName,
+  isLocalProvider as isNativeLocalProvider,
   makeEngineKey,
   parseEngineKey,
 } from '../providers/native/engine-key.js';
@@ -209,7 +214,21 @@ import {
   summarizeToolArgs,
   summarizeToolResult,
 } from './args-summary.js';
-import { extractReferencedArtifacts } from './artifact-references.js';
+import {
+  type BeginExternalConversationInput,
+  ExternalConversationRecorder,
+  type ExternalConversationTurn,
+} from './external-conversation-recorder.js';
+import { artifactPathsOf, extractReferencedFiles } from './file-references.js';
+
+/**
+ * The slice of `WorkspaceIndexManager` the reference parser needs. Narrowed
+ * to a structural type so the dependency stays one-way — the indexer already
+ * takes this manager, and importing its class here would close the loop.
+ */
+export interface WorkspaceFileSource {
+  readFiles(projectId: string): Promise<Array<{ path: string }>>;
+}
 import { type ResidentModel, selectBackgroundEngine } from './background-routing.js';
 import { evaluateDeliverableContract } from './deliverable-contract.js';
 import { deliverableWrittenThisTurn, evaluateDeliverableGate } from './deliverable-gate.js';
@@ -302,6 +321,24 @@ const DEFAULT_PROJECT_ID = 'default';
  * a tool-heavy turn is cut short.
  */
 const ABORT_SALVAGE_CONTENT_CAP = 32 * 1024;
+
+/**
+ * Per-turn shared-library recall (see `resolveTurnLibraryRecall`). The floor
+ * is higher than turn-1 recall's because this fires on every user turn: a
+ * mediocre match that interrupts an unrelated conversation costs more than a
+ * missed one, which the model can still reach with `search_documents`.
+ */
+const TURN_LIBRARY_RECALL_MIN_SCORE = 0.55;
+const TURN_LIBRARY_RECALL_TOP_K = 2;
+/** "ok", "yes", "go on" carry no retrievable topic — skip the search. */
+const TURN_LIBRARY_RECALL_MIN_CHARS = 15;
+
+/**
+ * Upper bound on {@link ChatManager.drainBackground}. Long enough that an
+ * ordinary persist or memory extraction finishes, short enough that quitting
+ * the app never reads as a hang.
+ */
+const BACKGROUND_DRAIN_TIMEOUT_MS = 15_000;
 
 const log = createLogger('chat');
 const memLog = createLogger('memory');
@@ -565,6 +602,13 @@ export type TaskBudgetPauseFn = (
 interface LiveSessionState {
   /** Persisted session metadata + messages. Always in sync with disk after each turn. */
   record: ChatSession;
+  /**
+   * Library documents already offered by the per-turn recall prelude in this
+   * session. In-memory only: the point is to avoid repeating an offer inside
+   * one conversation, and a fresh process is a fresh conversation for the
+   * model too.
+   */
+  libraryRecallPaths?: Set<string>;
   /** Live LLM session. May be rebuilt on provider reset or resume failure. */
   session: LLMSession | null;
   /** Model shared by provider binding, prompt construction, and live telemetry. */
@@ -1248,6 +1292,7 @@ export class ChatManager {
   private readonly activeMemoryExtractions = new Map<string, { rerunRequested: boolean }>();
   private readonly store: Store;
   private readonly events: ChatEventBus;
+  private readonly externalConversations: ExternalConversationRecorder;
   private readonly memory: MemoryManager;
   private readonly historyManager?: import('../history/manager.js').HistoryManager;
   private readonly catalog: CatalogService;
@@ -1293,6 +1338,11 @@ export class ChatManager {
   constructor(opts: ChatManagerOptions) {
     this.store = opts.store;
     this.events = opts.events;
+    this.externalConversations = new ExternalConversationRecorder({
+      store: this.store,
+      events: this.events,
+      onFinalTurn: (sessionId) => this.scheduleExternalMemoryExtraction(sessionId),
+    });
     // GPU swaps are published by the image/video routes straight onto the
     // bus, not through this manager — the global subscription is the only
     // session-scoped view of that work.
@@ -1421,6 +1471,34 @@ export class ChatManager {
     this.contentIndexRef = index;
   }
   private contentIndexRef?: import('../index-store/content-index.js').ContentIndex;
+
+  /**
+   * Workspace file index, used to recognize workspace paths an assistant
+   * reply named in prose. Injected by `service.ts` after both exist (the
+   * indexer takes this manager as a dependency, so the wiring points both
+   * ways). When unset — unit tests, and any project the indexer has not
+   * reached — the reference parser sees artifacts only, which is exactly
+   * its pre-workspace behavior.
+   */
+  setWorkspaceIndex(index: WorkspaceFileSource): void {
+    this.workspaceIndexRef = index;
+  }
+  private workspaceIndexRef?: WorkspaceFileSource;
+
+  /**
+   * The project's indexed workspace paths. Reads the indexer's persisted
+   * listing rather than walking the tree — a turn must never pay for a
+   * recursive stat of a repo checkout just to linkify a filename.
+   */
+  private async workspaceInventory(projectId: string): Promise<string[] | undefined> {
+    if (!this.workspaceIndexRef) return undefined;
+    try {
+      const files = await this.workspaceIndexRef.readFiles(projectId);
+      return files.length > 0 ? files.map((f) => f.path) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
   /**
    * Wire the Keurmeester supervision engine. Set by `service.ts` after
@@ -1639,11 +1717,125 @@ export class ChatManager {
     record: ChatSession,
     gezel?: { parsed: { frontmatter: { model?: string } } } | null,
   ): Promise<string | undefined> {
-    return effectiveSessionModel({
+    const config = await this.store.readConfig();
+    const resolved = effectiveSessionModel({
       record,
       frontmatterModel: gezel?.parsed.frontmatter.model,
-      config: await this.store.readConfig(),
+      config,
     });
+    // The native guard, not core's — core counts Ollama as local, and Ollama
+    // manages its own inventory rather than one of our model stores.
+    if (!resolved || !isNativeLocalProvider(record.providerName)) return resolved;
+    // Every consumer of the effective model — provider binding, broker
+    // admission, tier/tuning resolution, the runtime snapshot the UI reads —
+    // funnels through here, so this is the one place a dead id can be
+    // corrected without the layers drifting apart from each other.
+    return this.ensureServableLocalModel(record.providerName, resolved, config);
+  }
+
+  /** The on-device model store backing a local provider, when one is wired. */
+  private localModelStore(
+    name: LocalProviderName,
+  ):
+    | import('../providers/llama-cpp/index.js').LlamaCppModelManager
+    | import('../providers/mlx/index.js').MlxModelManager
+    | undefined {
+    return name === 'llama-cpp'
+      ? this.llamaCppModels
+      : name === 'mlx'
+        ? this.mlxModels
+        : this.ds4Models;
+  }
+
+  /** Dead pins already repinned this process, keyed `provider\0deadModelId`. */
+  private readonly repinnedDeadDefaults = new Set<string>();
+
+  /**
+   * Substitute an installed model for a local model id the engine cannot
+   * serve.
+   *
+   * A `config.defaultModel` pin can name weights that never landed — first-run
+   * pins the hardware recommendation *before* the download, so an abandoned
+   * multi-gigabyte fetch leaves the install pointing at a phantom model. The
+   * pooled-router path catches that with `ModelNotInstalledError`, but the
+   * machine-engine path forwards whatever string it is handed straight to the
+   * broker, which answers `model_not_loaded` on every turn including the
+   * background one-shots. Chat is then dead until someone edits config.json by
+   * hand, because the Settings picker that would fix it stays hidden while
+   * fewer than two models are installed.
+   *
+   * Deliberately additive: with nothing installed to fall back to, the id
+   * passes through unchanged so the existing downstream errors (and the
+   * first-run download banner) behave exactly as before. We only intervene
+   * when we have something strictly better to offer.
+   */
+  private async ensureServableLocalModel(
+    name: LocalProviderName,
+    modelId: string,
+    config: GezelConfig,
+  ): Promise<string> {
+    const store = this.localModelStore(name);
+    if (!store) return modelId;
+    try {
+      if (await store.resolveModel(modelId)) return modelId;
+      // ds4 resolves weights outside the model store too — an explicit gguf
+      // path or an external server. Those installs are legitimately absent
+      // from the inventory, so a listing must never overrule them.
+      if (
+        name === 'ds4' &&
+        (process.env.GEZEL_DS4_MODEL ||
+          process.env.GEZEL_DS4_SERVER_URL ||
+          config.ds4ModelPath ||
+          config.ds4BaseUrl)
+      ) {
+        return modelId;
+      }
+      const installed = await store.listInstalled();
+      const reconciled = reconcileDefaultModel({ pinned: modelId, installed });
+      if (reconciled.kind !== 'substitute') return modelId;
+      log.warn(
+        `[chat] ${name} model "${modelId}" is not installed; using "${reconciled.modelId}" instead ` +
+          `(${installed.length} installed model(s) available)`,
+      );
+      await this.repinDeadDefaultModel(name, modelId, reconciled.modelId, config);
+      return reconciled.modelId;
+    } catch (err) {
+      // Inventory trouble must not take chat down — leave the id alone and let
+      // the provider report whatever it reports today.
+      log.warn(`[chat] could not verify ${name} model "${modelId}": ${(err as Error).message}`);
+      return modelId;
+    }
+  }
+
+  /**
+   * Persist a substitution when the dead id was the install default, so the
+   * repair outlives the turn and Settings, the engine pill, and the session
+   * switcher stop disagreeing about which model is in play. A dead value that
+   * came from gezel frontmatter or a capability route is substituted for this
+   * turn but left in place — rewriting someone's explicit pin is a bigger
+   * decision than keeping chat alive.
+   */
+  private async repinDeadDefaultModel(
+    name: LocalProviderName,
+    deadModelId: string,
+    replacement: string,
+    config: GezelConfig,
+  ): Promise<void> {
+    if (config.defaultModel?.[name] !== deadModelId) return;
+    const key = `${name}\0${deadModelId}`;
+    if (this.repinnedDeadDefaults.has(key)) return;
+    this.repinnedDeadDefaults.add(key);
+    try {
+      await this.store.writeConfig({
+        defaultModel: { ...config.defaultModel, [name]: replacement },
+      });
+      log.warn(
+        `[chat] repinned config.defaultModel.${name} from "${deadModelId}" to "${replacement}" — the pinned model is not installed on this machine`,
+      );
+    } catch (err) {
+      this.repinnedDeadDefaults.delete(key);
+      log.warn(`[chat] could not repin config.defaultModel.${name}: ${(err as Error).message}`);
+    }
   }
 
   /**
@@ -2042,14 +2234,16 @@ export class ChatManager {
       const state = this.states.get(sessionId);
       if (state && state.record.projectId === projectId) return true;
     }
-    return false;
+    return this.externalConversations
+      .listActive()
+      .some((activity) => activity.projectId === projectId);
   }
 
   /** True when ANY session has a turn in flight — the session-idle gate for
    *  background work (the boekwachter enrichment loop) that should never
    *  compete with live chat. */
   isAnyActive(): boolean {
-    return this.inflight.size > 0;
+    return this.inflight.size > 0 || this.externalConversations.listActive().length > 0;
   }
 
   /** True while a specific session is running or has an unstarted send. */
@@ -2069,7 +2263,7 @@ export class ChatManager {
       const state = this.states.get(sessionId);
       if (state && state.record.gezelId === gezelId) return true;
     }
-    return false;
+    return this.externalConversations.listActive().some((activity) => activity.gezelId === gezelId);
   }
 
   /**
@@ -2158,6 +2352,11 @@ export class ChatManager {
           ? { lastProgressAgoMs: now - currentTurnProgressAt }
           : {}),
       });
+    }
+    const nativeSessionIds = new Set(out.map((entry) => entry.sessionId));
+    for (const activity of this.externalConversations.listActive()) {
+      if (nativeSessionIds.has(activity.sessionId)) continue;
+      out.push(activity);
     }
     return out;
   }
@@ -2591,11 +2790,13 @@ export class ChatManager {
     );
 
     // A hard stop must release resident local engines, not merely interrupt
-    // their current HTTP request. The ordinary live reset path disconnects
-    // bridges/providers and force-evicts the production-owned engine pool;
-    // unlike service shutdown, it leaves ChatManager reusable for the next
-    // explicit user message while Reactive mode blocks autonomous restarts.
-    await this.resetClient();
+    // their current HTTP request — hence `engines: 'force'`, which a live
+    // config reset deliberately does not use. Turns were already cancelled
+    // above, so the force is a backstop for an engine that ignored the
+    // cancel. Unlike service shutdown this leaves ChatManager reusable for
+    // the next explicit user message while Reactive mode blocks autonomous
+    // restarts.
+    await this.resetClient({ engines: 'force' });
 
     return { cancelledTurns, clearedQueuedMessages, clearedDeferredActions };
   }
@@ -2681,6 +2882,19 @@ export class ChatManager {
   }
 
   /**
+   * Begin one request in a caller-owned conversation loop (currently Pi).
+   * The recorder reconciles the caller's authoritative transcript into a
+   * read-only Gezel session and returns live-event hooks for this response.
+   */
+  async beginExternalConversation(
+    input: BeginExternalConversationInput,
+  ): Promise<ExternalConversationTurn> {
+    const turn = await this.externalConversations.begin(input);
+    this.cancelDeferredExtraction(turn.sessionId);
+    return turn;
+  }
+
+  /**
    * The set of tool names a session's active craftbook pre-authorizes
    * (its `autoAllow` toolsets' tools). The Claude-CLI permission broker
    * (`/api/permissions/request-and-wait`) consults this to skip the
@@ -2748,11 +2962,10 @@ export class ChatManager {
    * effort). Surfaced via `GET /api/sessions/:id/debug` and consumed
    * by the UI's debug-mode "copy debug bundle" button.
    *
-   * This re-runs `buildSessionOpts` rather than reading whatever was
-   * captured at session-creation time — the *current* prompt is what
-   * matters when an engineer is investigating "why did the model do
-   * X right now". Recent edits to the gezel's about, project context,
-   * or local-model-tuning rules show up immediately.
+   * Native sessions re-run `buildSessionOpts` because the *current* prompt
+   * matters when investigating "why did the model do X right now". External
+   * mirrors instead surface the latest captured caller-owned request; a native
+   * Gezel prompt reconstructed later is not execution evidence for that loop.
    *
    * `atMessageTimestamp`: when set (ISO string from `ChatMessage.at`),
    * slice messages whose `at <= atMessageTimestamp` so the bundle
@@ -2777,9 +2990,23 @@ export class ChatManager {
     // therefore the accurate cold-session capability evidence.
     const liveSession = this.states.get(sessionId)?.session;
     const liveRegisteredTools = liveSession?.getRegisteredToolNames?.();
-    const registeredTools = liveRegisteredTools ?? [
-      ...new Set((record.scriptTools ?? []).map((tool) => tool.name)),
-    ];
+    const persistedScriptTools = [...new Set((record.scriptTools ?? []).map((tool) => tool.name))];
+    const externalRequest =
+      record.source?.kind === 'external' ? record.externalRequestDiagnostics : undefined;
+    const registeredTools =
+      externalRequest?.toolNames ?? liveRegisteredTools ?? persistedScriptTools;
+    // An empty list means three very different things, and collapsing
+    // them sent one investigation chasing a bridge that had never
+    // dropped: the bundle said "Registered tools: none" for an aborted
+    // turn whose own system prompt listed ~80 wired tools. Only the
+    // `live` branch is evidence of absence.
+    const registeredToolsSource: 'live' | 'persisted' | 'unavailable' | 'caller' = externalRequest
+      ? 'caller'
+      : liveRegisteredTools
+        ? 'live'
+        : persistedScriptTools.length > 0
+          ? 'persisted'
+          : 'unavailable';
     // Build the prompt with the live tools when available — same
     // refresh logic the runtime applies right after session creation
     // (see `refreshSystemPromptForLiveTools`). This makes the debug
@@ -2787,7 +3014,7 @@ export class ChatManager {
     // sees after the post-spawn refresh, rather than the predicted
     // pre-spawn version.
     const toolsOverride =
-      registeredTools.length > 0
+      record.source?.kind !== 'external' && registeredTools.length > 0
         ? await this.buildToolsOverrideForLiveSession(record, registeredTools)
         : undefined;
     const cachedProvider = this.providers.get(record.providerName);
@@ -2868,7 +3095,8 @@ export class ChatManager {
     // auto-injected listing. Trim-then-empty-check matches the
     // renderer's behavior, so the debug bundle's flag aligns with
     // what actually fired in the prompt.
-    const customToolsMd = (gezel.toolsMd ?? '').trim().length > 0;
+    const customToolsMd =
+      record.source?.kind !== 'external' && (gezel.toolsMd ?? '').trim().length > 0;
 
     // On-disk pointers for deeper digging than the bundle can hold: the
     // full session transcript + the logs dir, plus the engine-log glob
@@ -2891,15 +3119,36 @@ export class ChatManager {
       leaksUntaggedReasoning: leaksUntaggedReasoning(modelId),
       ...(sessionOpts.reasoningEffort ? { reasoningEffort: sessionOpts.reasoningEffort } : {}),
       ...(sessionOpts.numCtx ? { numCtx: sessionOpts.numCtx } : {}),
-      systemPrompt: sessionOpts.systemMessage ?? '',
-      ...(sessionOpts.volatileContext ? { volatileContext: sessionOpts.volatileContext } : {}),
+      systemPrompt:
+        record.source?.kind === 'external'
+          ? (externalRequest?.systemMessage ?? '')
+          : (sessionOpts.systemMessage ?? ''),
+      ...(record.source?.kind !== 'external' && sessionOpts.volatileContext
+        ? { volatileContext: sessionOpts.volatileContext }
+        : {}),
       customToolsMd,
       registeredTools,
-      turnStatus: this.inflight.has(sessionId)
-        ? 'in-progress'
-        : (this.pendingSends.get(sessionId)?.length ?? 0) > 0
-          ? 'queued'
-          : 'idle',
+      registeredToolsSource,
+      ...(record.source?.kind === 'external'
+        ? {
+            externalConversation: {
+              appId: record.source.appId,
+              appName: record.source.appName,
+              externalConversationId: record.source.externalConversationId,
+              ...(record.source.workingDirectory
+                ? { workingDirectory: record.source.workingDirectory }
+                : {}),
+              ...(externalRequest ? { request: externalRequest } : {}),
+            },
+          }
+        : {}),
+      turnStatus:
+        this.inflight.has(sessionId) ||
+        this.externalConversations.listActive().some((activity) => activity.sessionId === sessionId)
+          ? 'in-progress'
+          : (this.pendingSends.get(sessionId)?.length ?? 0) > 0
+            ? 'queued'
+            : 'idle',
       recentMessages,
       diagnostics: {
         sessionRecordPath: this.store.sessionRecordPath(record.gezelId, sessionId),
@@ -2928,10 +3177,46 @@ export class ChatManager {
     );
   }
 
-  /** Await every currently-tracked background promise, then return. */
-  async drainBackground(): Promise<void> {
+  /**
+   * Await every currently-tracked background promise, then return.
+   *
+   * Bounded, because every caller is a shutdown path and the work being
+   * awaited can legitimately take minutes. A first run creates the Meester
+   * and kicks off its about.md + icon generation; if the configured provider
+   * cannot answer — no credential, a cold cloud session — those one-shots sit
+   * on their own 120s budget while this loop waits. Unbounded, that stalls
+   * `service.stop()`, and neither the Electron quit coordinator nor an
+   * embedded caller imposes a deadline of its own, so the window simply hangs.
+   * Wild-caught as an intermittent 60s teardown timeout in
+   * `security-compliance.spec.ts` once its home stopped inheriting a
+   * machine-shared roster and started genuinely provisioning a Meester.
+   *
+   * Abandoning a task is safe here: these are fire-and-forget writes whose
+   * own error handling already runs independently of this await. The warning
+   * names the count so a real shutdown stall stays diagnosable instead of
+   * looking like a clean exit.
+   */
+  async drainBackground(timeoutMs: number = BACKGROUND_DRAIN_TIMEOUT_MS): Promise<void> {
+    const deadline = Date.now() + Math.max(0, timeoutMs);
     while (this.backgroundPromises.size > 0) {
-      await Promise.allSettled(Array.from(this.backgroundPromises));
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        log.warn(
+          `[chat] background drain timed out with ${this.backgroundPromises.size} task(s) still running; abandoning them`,
+        );
+        return;
+      }
+      const pending = Array.from(this.backgroundPromises);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const expiry = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, remaining);
+        timer.unref?.();
+      });
+      try {
+        await Promise.race([Promise.allSettled(pending), expiry]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     }
   }
 
@@ -5981,6 +6266,10 @@ export class ChatManager {
       ...(opts?.from ? { from: opts.from } : {}),
       ...(opts?.hidden ? { hidden: true } : {}),
       ...(opts?.nudge ? { nudge: true } : {}),
+      // A dispatch seed or handoff is a user turn only because that is the
+      // role providers accept; mark it so the transcript never attributes
+      // the machinery's words to the person.
+      ...(resolveTurnMessageOrigin(opts) === 'system' ? { origin: 'system' as const } : {}),
     };
     state.record.messages.push(userMessage);
     if (!state.record.title || state.record.title === NEW_THREAD_TITLE) {
@@ -6182,9 +6471,11 @@ export class ChatManager {
           ...(ev.detail ? { detail: ev.detail } : {}),
           ...(typeof ev.progress === 'number' ? { progress: ev.progress } : {}),
           ...(typeof ev.ttftMs === 'number' ? { ttftMs: ev.ttftMs } : {}),
+          ...(typeof ev.outputTokens === 'number' ? { outputTokens: ev.outputTokens } : {}),
+          ...(typeof ev.tokensPerSec === 'number' ? { tokensPerSec: ev.tokensPerSec } : {}),
         });
       });
-      // turn_stats — llama-cpp + Ollama per-turn token counts +
+      // turn_stats — local-engine per-turn token counts +
       // tokens/sec, for the UI engine-pill's stats dropdown.
       const unsubTurnStats = (
         s as unknown as {
@@ -6204,6 +6495,7 @@ export class ChatManager {
         this.events.publish(scope, {
           type: 'turn_stats',
           provider,
+          ...(state.record.model ? { model: state.record.model } : {}),
           promptTokens: ev.promptTokens,
           completionTokens: ev.completionTokens,
           durationMs: ev.durationMs,
@@ -6350,7 +6642,13 @@ export class ChatManager {
       // build-request — see migration plan). New behaviors land
       // here without manager.ts changes.
       const messageOrigin = resolveTurnMessageOrigin(opts);
-      const preludeForTurn = await this.resolveUserPromptPrelude(state, userText, messageOrigin);
+      const libraryRecall = await this.resolveTurnLibraryRecall(state, userText, messageOrigin);
+      const preludeForTurn = await this.resolveUserPromptPrelude(
+        state,
+        userText,
+        messageOrigin,
+        libraryRecall,
+      );
       if (preludeForTurn) {
         // Prepend onto `promptForTurn`, NOT `userText` — the latter silently
         // discarded anything already spliced in above (image digests today,
@@ -6740,20 +7038,25 @@ export class ChatManager {
         if (attemptedToolCalls && attemptedToolCalls.length > 0) {
           assistantMessage.attemptedToolCalls = attemptedToolCalls;
         }
-        // Parse the reply for references to real project artifact files.
-        // Serves as a backstop when tool calls are invisible (Copilot)
-        // and for any AI that writes files outside the MCP tool path.
-        // Failures are non-fatal — we'd rather ship the message than
-        // fail the turn because the parser threw.
+        // Parse the reply for references to real project files — artifacts
+        // drawer and workspace tree alike. Serves as a backstop when tool
+        // calls are invisible (Copilot) and for any AI that writes files
+        // outside the MCP tool path. Failures are non-fatal — we'd rather
+        // ship the message than fail the turn because the parser threw.
         try {
-          const refs = await extractReferencedArtifacts(
+          const refs = await extractReferencedFiles(
             this.store,
             state.record.projectId,
             finalContent,
+            { workspaceFiles: await this.workspaceInventory(state.record.projectId) },
           );
-          if (refs.length > 0) assistantMessage.referencedArtifacts = refs;
+          if (refs.length > 0) {
+            assistantMessage.referencedFiles = refs;
+            const artifacts = artifactPathsOf(refs);
+            if (artifacts.length > 0) assistantMessage.referencedArtifacts = artifacts;
+          }
         } catch (err) {
-          log.warn('artifact-ref extraction failed:', err instanceof Error ? err.message : err);
+          log.warn('file-ref extraction failed:', err instanceof Error ? err.message : err);
         }
         // Same backstop for task refs the model mentioned (created /
         // updated / asked the user about). Validates against the
@@ -7966,7 +8269,11 @@ export class ChatManager {
   private async runFixedFunctionSend(
     sessionId: string,
     userText: string,
-    opts?: { from?: { gezelId: string; gezelName: string }; hidden?: boolean },
+    opts?: {
+      from?: { gezelId: string; gezelName: string };
+      hidden?: boolean;
+      messageOrigin?: TurnMessageOrigin;
+    },
   ): Promise<ChatMessage> {
     const tag = sessionId.slice(0, 8);
     const fail = (err: unknown): never => {
@@ -8023,6 +8330,7 @@ export class ChatManager {
       at: nowIso(),
       ...(opts?.from ? { from: opts.from } : {}),
       ...(opts?.hidden ? { hidden: true } : {}),
+      ...(resolveTurnMessageOrigin(opts) === 'system' ? { origin: 'system' as const } : {}),
     };
     record.messages.push(userMessage);
     if (!record.title || record.title === NEW_THREAD_TITLE) {
@@ -8512,6 +8820,9 @@ export class ChatManager {
         config,
         memory: this.memory,
         ...(this.contentIndexRef ? { contentIndex: this.contentIndexRef } : {}),
+        // The library is install-wide knowledge, so it is searched for every
+        // session regardless of which project the session belongs to.
+        libraryProjectId: await this.store.sharedProjectId().catch(() => null),
         ...(gezel?.parsed.frontmatter.autoRecall !== undefined
           ? { gezelOptIn: gezel.parsed.frontmatter.autoRecall }
           : {}),
@@ -9105,9 +9416,22 @@ export class ChatManager {
    * Tear down cached sessions, tool bridges, and provider engines so the
    * next session picks up new config.
    *
-   * Default (hard) mode tears down everything immediately — correct for
-   * credential / provider / endpoint changes, where the old engine state
-   * is unusable and must go now.
+   * Default (hard) mode disconnects every session and disposes every tool
+   * bridge immediately — correct for credential / provider / endpoint /
+   * security-boundary changes, where the old session state and the old MCP
+   * children are unusable and must go now.
+   *
+   * What it does NOT do is kill resident local engines. A pooled engine is
+   * a model process keyed by (provider, modelId, replica): it carries no
+   * credentials and no tool surface, so no config change makes the *process*
+   * unsafe — only the sessions and bridges around it. `engines: 'force'`
+   * (service shutdown, emergency stop) force-evicts the pool without waiting
+   * for in-flight turns; the default `'release-idle'` frees every engine
+   * that is not mid-turn and leaves busy ones to the pool's ordinary
+   * LRU/idle lifecycle. Wild-caught: flipping the security posture in
+   * Settings force-killed both resident 27B models, and a background
+   * craftbook turn four minutes into its first step died with "the
+   * on-device engine dropped the connection", which reads as a crash.
    *
    * `deferBusy` mode is for pure model-preference changes (default chat
    * model, reasoning effort), where the only thing that needs to flow
@@ -9123,10 +9447,16 @@ export class ChatManager {
    * per-session the moment each one returns to idle and rebuilds.
    */
   async resetClient(
-    opts: { deferBusy?: boolean; restoreSeededProviders?: boolean } = {},
+    opts: {
+      deferBusy?: boolean;
+      restoreSeededProviders?: boolean;
+      /** See method doc. Defaults to `'release-idle'` — never severs a live turn. */
+      engines?: 'release-idle' | 'force';
+    } = {},
   ): Promise<void> {
     const deferBusy = opts.deferBusy ?? false;
     const restoreSeededProviders = opts.restoreSeededProviders ?? true;
+    const engines = opts.engines ?? 'release-idle';
     const tearDownSession = (sessionId: string, state: LiveSessionState): void => {
       if (state.session) {
         void state.session.disconnect().catch(() => {
@@ -9183,7 +9513,11 @@ export class ChatManager {
       // their next turn; the engine pool evicts the stale model lazily.
       return;
     }
-    await this.shutdownOwnedEngineRouter();
+    if (engines === 'force') {
+      await this.shutdownOwnedEngineRouter();
+    } else {
+      await this.releaseIdleOwnedEngines();
+    }
     for (const [name, provider] of this.providers) {
       try {
         await provider.shutdown();
@@ -9246,8 +9580,10 @@ export class ChatManager {
     // and fall through to a real provider.
     this.flushDeferredExtractions();
     await this.drainBackground();
-    // Final service teardown must not re-arm injected providers.
-    await this.resetClient({ restoreSeededProviders: false });
+    // Final service teardown must not re-arm injected providers, and must
+    // take the engines with it — a pooled engine left running here outlives
+    // gezeld as a PPID-1 orphan.
+    await this.resetClient({ restoreSeededProviders: false, engines: 'force' });
   }
 
   /** List the models available on the given provider (for the UI dropdown). */
@@ -9268,14 +9604,7 @@ export class ChatManager {
     // Settings block for minutes (and previously triggered macOS's python3
     // developer-tools dialog). The engine still initializes lazily on the
     // first real inference request, where a provisioning/load error belongs.
-    const localManager =
-      name === 'llama-cpp'
-        ? this.llamaCppModels
-        : name === 'mlx'
-          ? this.mlxModels
-          : name === 'ds4'
-            ? this.ds4Models
-            : undefined;
+    const localManager = isNativeLocalProvider(name) ? this.localModelStore(name) : undefined;
     if (localManager) {
       try {
         const installed = await localManager.listInstalled();
@@ -9413,6 +9742,8 @@ export class ChatManager {
        * expansion) — those must keep today's plain-background behavior.
        */
       ambient?: boolean;
+      /** Override the background default for explicitly user-awaited utility work. */
+      lane?: Lane;
       /**
        * Live streaming hooks for callers that surface progress (the
        * transform dialog's metacommentary feed). `onDelta` is the
@@ -9491,6 +9822,17 @@ export class ChatManager {
       if (gezel?.parsed.frontmatter.reasoningEffort) {
         reasoningEffort = gezel.parsed.frontmatter.reasoningEffort;
       }
+    }
+
+    // An inherited model — the install default or a persona pin — can name
+    // weights that never landed, and one-shots are the loudest victims: index
+    // enrichment fires them every couple of minutes, so a dead default fills
+    // the log with broker rejections and silently drops every ambient chore.
+    // Reconcile it exactly as a session would. A model the CALLER named is
+    // left to fail, because a chore that asked for one specific model must not
+    // quietly answer from another.
+    if (model && !opts.model && isNativeLocalProvider(providerName)) {
+      model = await wait(this.ensureServableLocalModel(providerName, model, config));
     }
 
     // Cross-engine background routing: when this chore would run on the
@@ -9580,17 +9922,79 @@ export class ChatManager {
     const unsubReasoning = opts.onReasoningDelta
       ? session.onReasoningDelta?.(opts.onReasoningDelta)
       : undefined;
+    // One-shots still occupy the same local engine and must be visible in the
+    // header telemetry. Give the ephemeral session a bus-only scope so global
+    // engine-pill listeners receive its phases and terminal stats without
+    // creating or mutating a persisted chat session.
+    const oneShotScope: PublishScope = {
+      sessionId: `one-shot:${randomUUID()}`,
+      gezelId: gezelId ?? '',
+      projectId: '',
+    };
+    const oneShotModel = session.model ?? model;
+    let publishedEngineTelemetry = false;
+    const telemetrySession = session as unknown as {
+      onEnginePhase?: (
+        handler: (ev: import('../providers/streaming-session.js').EnginePhaseEvent) => void,
+      ) => () => void;
+      onTurnStats?: (
+        handler: (ev: import('../providers/streaming-session.js').TurnStatsEvent) => void,
+      ) => () => void;
+    };
+    const unsubEnginePhase = telemetrySession.onEnginePhase?.((ev) => {
+      if (
+        ev.phase !== 'starting' &&
+        ev.phase !== 'loading_model' &&
+        ev.phase !== 'prefill' &&
+        ev.phase !== 'generating' &&
+        ev.phase !== 'ready'
+      ) {
+        return;
+      }
+      publishedEngineTelemetry = true;
+      const telemetryProvider = effectiveProviderName === 'ds4' ? 'ds4' : ev.provider;
+      this.events.publish(oneShotScope, {
+        type: 'engine_phase',
+        provider: telemetryProvider,
+        phase: ev.phase,
+        ...(ev.detail ? { detail: ev.detail } : {}),
+        ...(typeof ev.progress === 'number' ? { progress: ev.progress } : {}),
+        ...(typeof ev.ttftMs === 'number' ? { ttftMs: ev.ttftMs } : {}),
+        ...(typeof ev.outputTokens === 'number' ? { outputTokens: ev.outputTokens } : {}),
+        ...(typeof ev.tokensPerSec === 'number' ? { tokensPerSec: ev.tokensPerSec } : {}),
+      });
+    });
+    const unsubTurnStats = telemetrySession.onTurnStats?.((ev) => {
+      const telemetryProvider = effectiveProviderName === 'ds4' ? 'ds4' : ev.provider;
+      if (
+        telemetryProvider !== 'llama-cpp' &&
+        telemetryProvider !== 'ollama' &&
+        telemetryProvider !== 'mlx' &&
+        telemetryProvider !== 'ds4'
+      ) {
+        return;
+      }
+      publishedEngineTelemetry = true;
+      this.events.publish(oneShotScope, {
+        type: 'turn_stats',
+        provider: telemetryProvider,
+        ...(oneShotModel ? { model: oneShotModel } : {}),
+        promptTokens: ev.promptTokens,
+        completionTokens: ev.completionTokens,
+        durationMs: ev.durationMs,
+        ...(typeof ev.tokensPerSec === 'number' ? { tokensPerSec: ev.tokensPerSec } : {}),
+      });
+    });
     try {
-      // One-shot completions (icon / about generation, summarization,
-      // rewrites) are background work — they shouldn't cut in front of
-      // a user's active chat turn. Also thread gezelId where available
-      // so the affinity bonus keeps the KV cache warm when a gezel is
-      // mid-batch of tasks.
+      // One-shot completions default to background work so they do not cut
+      // in front of active chat. Explicitly user-awaited utilities can opt
+      // into the interactive lane. Also thread gezelId where available so
+      // the affinity bonus keeps the KV cache warm when a gezel is mid-batch.
       const content = await wait(
         session.sendAndWait(prompt, {
           timeoutMs: Math.max(1, deadlineAt - Date.now()),
           queue: {
-            lane: 'background',
+            lane: opts.lane ?? 'background',
             signal: oneShotSignal,
             ...(opts.ambient ? { ambient: true } : {}),
             ...(gezelId ? { gezelId } : {}),
@@ -9606,6 +10010,9 @@ export class ChatManager {
       unsubUsage();
       unsubDelta?.();
       unsubReasoning?.();
+      unsubEnginePhase?.();
+      unsubTurnStats?.();
+      if (publishedEngineTelemetry) this.events.publish(oneShotScope, { type: 'done' });
       void session.disconnect().catch((err) => {
         oneShotLog.warn('disconnect error:', err);
       });
@@ -9816,6 +10223,95 @@ export class ChatManager {
 
   // Internal
   // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * External sessions never enter `states`, so the ordinary post-send memory
+   * hook cannot see them. Re-read their durable transcript and use the same
+   * cadence, ambient lane, cursor, and debounce policy as first-party chats.
+   */
+  private scheduleExternalMemoryExtraction(sessionId: string): void {
+    const prepare = this.store
+      .findSessionById(sessionId)
+      .then((record) => {
+        if (!record?.source || !this.shouldRunMemoryExtraction(record)) return;
+        const fire = (): void => {
+          const run = (async () => {
+            const active = this.activeMemoryExtractions.get(sessionId);
+            if (active) {
+              active.rerunRequested = true;
+              return;
+            }
+            const snap = await this.store.findSessionById(sessionId);
+            if (!snap?.source || !this.shouldRunMemoryExtraction(snap)) return;
+            const messagesAtTime = snap.messages.length;
+            const transcriptFingerprint = createHash('sha256')
+              .update(JSON.stringify(snap.messages))
+              .digest('hex');
+            const marker = { rerunRequested: false };
+            this.activeMemoryExtractions.set(sessionId, marker);
+            try {
+              await extractMemories({
+                messages: snap.messages,
+                extractedUpTo: snap.extractedUpTo ?? 0,
+                oneShot: (prompt, timeoutMs) =>
+                  this.oneShotCompletion(prompt, timeoutMs, {
+                    gezelId: snap.gezelId,
+                    ambient: true,
+                    ...(isLocalProvider(snap.providerName)
+                      ? {}
+                      : {
+                          providerName: snap.providerName,
+                          ...(snap.model ? { model: snap.model } : {}),
+                        }),
+                    jobLabel: `memory · ${snap.id.slice(0, 8)}`,
+                  }),
+                memory: this.memory,
+                gezelId: snap.gezelId,
+                projectId: snap.projectId,
+                debug: this.debug,
+              });
+              const fresh = await this.store.getSession(snap.gezelId, snap.id);
+              if (fresh) {
+                const freshFingerprint = createHash('sha256')
+                  .update(JSON.stringify(fresh.messages.slice(0, messagesAtTime)))
+                  .digest('hex');
+                if (freshFingerprint === transcriptFingerprint) {
+                  fresh.extractedUpTo = Math.min(messagesAtTime, fresh.messages.length);
+                  await this.store.writeSession(fresh);
+                } else {
+                  // Pi branched or retried while extraction was running. Do
+                  // not advance the cursor over a suffix we did not inspect.
+                  marker.rerunRequested = true;
+                }
+              }
+            } catch (err) {
+              memLog.warn(
+                `external extraction failed for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            } finally {
+              if (this.activeMemoryExtractions.get(sessionId) === marker) {
+                this.activeMemoryExtractions.delete(sessionId);
+                if (marker.rerunRequested && !this.shuttingDown) {
+                  this.scheduleExternalMemoryExtraction(sessionId);
+                }
+              }
+            }
+          })();
+          this.trackBackground(run);
+        };
+        if (this.isHeavyExtractionProvider(record.providerName)) {
+          this.scheduleHeavyExtraction(sessionId, fire);
+        } else {
+          fire();
+        }
+      })
+      .catch((err) => {
+        memLog.warn(
+          `external extraction scheduling failed for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+    this.trackBackground(prepare);
+  }
 
   /**
    * Whether the post-turn memory extraction should fire now. The
@@ -10032,6 +10528,34 @@ export class ChatManager {
       log.warn(
         `engine router shutdown failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+  }
+
+  /**
+   * Free the memory a live reset can free without severing anything: evict
+   * every resident engine that is idle right now and leave the rest to the
+   * pool's ordinary lifecycle. The router itself stays — dropping it while an
+   * engine is still serving a turn would orphan that process outside the
+   * broker's accounting, which is the reason the old path force-killed
+   * everything instead.
+   *
+   * An explicitly injected {@link engineRouter} remains caller-owned and is
+   * left alone, same rule as {@link shutdownOwnedEngineRouter}. A router
+   * whose construction is still in flight owns no resident engines yet, so
+   * this deliberately does not await it.
+   */
+  private async releaseIdleOwnedEngines(): Promise<void> {
+    const router = this.engineRouterCache;
+    if (!router) return;
+    try {
+      const busy = await router.releaseIdle();
+      if (busy.length > 0) {
+        log.info(
+          `[chat] reset kept ${busy.length} busy engine(s) resident (${busy.join(', ')}) — they unload when their turns finish`,
+        );
+      }
+    } catch (err) {
+      log.warn(`engine release-idle failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -10389,7 +10913,11 @@ export class ChatManager {
       const cm = match?.manifest as
         | {
             kind: 'chat-model';
-            llamaCpp?: { residentBytes?: number; approxSizeBytes?: number };
+            llamaCpp?: {
+              residentBytes?: number;
+              approxSizeBytes?: number;
+              mmproj?: { sizeBytes?: number };
+            };
             mlx?: { residentBytes?: number; approxSizeBytes?: number };
             ds4?: {
               residentBytes?: number;
@@ -10449,7 +10977,12 @@ export class ChatManager {
           }
         } else if (block?.approxSizeBytes) {
           const { CapacityBroker } = await import('../providers/native/capacity-broker.js');
-          bytes = CapacityBroker.estimateResidentBytes(provider, block.approxSizeBytes);
+          // `approxSizeBytes` is the weights alone; a multimodal entry also
+          // loads its projector, which the catalog sizes separately.
+          const mmprojBytes = provider === 'llama-cpp' ? (cm.llamaCpp?.mmproj?.sizeBytes ?? 0) : 0;
+          bytes = CapacityBroker.estimateResidentBytes(provider, block.approxSizeBytes, {
+            mmprojBytes,
+          });
         }
       }
     } catch {
@@ -10577,8 +11110,15 @@ export class ChatManager {
       if (!resolved) {
         throw new Error(`No ${name} model is selected for the machine engine service`);
       }
+      // Match the pooled path below: a caller who names a model must get
+      // `404 model_not_found`, not a silent swap to something else. Only the
+      // config-default fallback is allowed to reconcile itself — otherwise a
+      // dead install default takes every `/v1` request down with a raw broker
+      // `model_not_loaded`, exactly as it does for UI sessions.
+      const servable = await this.ensureServableLocalModel(name, resolved, config);
+      if (modelId && servable !== modelId) throw new ModelNotInstalledError(name, modelId);
       return this.getRemoteProvider(
-        makeRemoteModelId(machineRemoteId, `${name}:${resolved}`),
+        makeRemoteModelId(machineRemoteId, `${name}:${servable}`),
         name,
       );
     }
@@ -10921,12 +11461,20 @@ export class ChatManager {
    * pool replica. This is the broker-side half of remote admission: focusing a
    * chat needs the live memory clamp so the user daemon can size its prompt,
    * but it must not load the model or evict somebody else's resident engine.
+   *
+   * `standalone` is for callers writing the answer somewhere durable rather
+   * than spending it on one turn. Live pricing charges the model for whatever
+   * else happens to be resident, so a preview taken while another engine is
+   * warm collapses to the local context floor — fine for a decision
+   * made and discarded in the same second, wrong for a config file read back
+   * days later. See {@link previewLocalEnginePlan}'s `standalone` note.
    */
   async previewContextWindowForModel(
     name: LocalProviderName,
     modelId: string,
+    opts: { standalone?: boolean } = {},
   ): Promise<number | undefined> {
-    return (await this.previewLocalEnginePlan(name, modelId)).contextWindow;
+    return (await this.previewLocalEnginePlan(name, modelId, opts)).contextWindow;
   }
 
   /**
@@ -11437,7 +11985,9 @@ export class ChatManager {
         ctx,
       );
       if (perSlotF16 === undefined) return undefined;
-      const weightsBytes = installed.approxSizeBytes * 1.2;
+      const weightsBytes = estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
+        mmprojBytes: installed.mmprojSizeBytes,
+      });
       const perSlotBytes = perSlotF16 * kvQuantScale(kv);
       return {
         single: Math.round(weightsBytes + perSlotBytes),
@@ -11516,7 +12066,9 @@ export class ChatManager {
               plannedResidentBytes: planned.single,
               reservedResidentBytes: planned.reserved,
               plannedSlots: planned.slots,
-              weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
+              weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
+                mmprojBytes: installed.mmprojSizeBytes,
+              }),
             }
           : {}),
         ...(installed.contextWindow ? { nativeContextWindow: installed.contextWindow } : {}),
@@ -11655,7 +12207,9 @@ export class ChatManager {
           slots,
           minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
           kvBytesPerToken,
-          weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
+          weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
+            mmprojBytes: installed.mmprojSizeBytes,
+          }),
           budgetBytes: admissionBudgetBytes,
           committedOtherBytes,
           ...previewLiveRam,
@@ -11705,7 +12259,10 @@ export class ChatManager {
               minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
               kvBytesPerToken: windowed.bytesPerToken,
               weightsResidentBytes:
-                Math.round(installed.approxSizeBytes * 1.2) + windowed.fixedBytes * slots,
+                estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
+                  mmprojBytes: installed.mmprojSizeBytes,
+                }) +
+                windowed.fixedBytes * slots,
               budgetBytes: admissionBudgetBytes,
               committedOtherBytes,
               ...previewLiveRam,
@@ -11743,7 +12300,9 @@ export class ChatManager {
             slots,
             kvBytesPerToken: ladderKvLinearization.bytesPerToken,
             kvFixedPerSlotBytes: ladderKvLinearization.fixedPerSlotBytes,
-            weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
+            weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
+              mmprojBytes: installed.mmprojSizeBytes,
+            }),
             fastBudgetBytes,
             committedOtherBytes,
             budgetKind: brokerSnap?.enforced ? brokerSnap.pools.kind : liveBudget.kind,
@@ -11801,7 +12360,9 @@ export class ChatManager {
             plannedResidentBytes: planned.single,
             reservedResidentBytes: planned.reserved,
             plannedSlots: planned.slots,
-            weightsResidentBytes: Math.round(installed.approxSizeBytes * 1.2),
+            weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
+              mmprojBytes: installed.mmprojSizeBytes,
+            }),
           }
         : {}),
       ...(installed.contextWindow ? { nativeContextWindow: installed.contextWindow } : {}),
@@ -12175,10 +12736,64 @@ export class ChatManager {
     }
   }
 
+  /**
+   * Shared-library documents bearing on THIS message.
+   *
+   * The turn-1 recall snapshot is frozen for the session (per the KV-cache
+   * rationale on `record.recall`), so a topic that arrives later — "what's
+   * our refund policy" on turn eight — would otherwise reach the model with
+   * no retrieval at all. This runs on the user-message channel instead,
+   * where per-turn content belongs.
+   *
+   * Quiet by construction: real user turns only, a high score floor, and a
+   * per-session dedupe so the same document is offered once and then left
+   * alone. No hits means no prelude and no tokens.
+   */
+  private async resolveTurnLibraryRecall(
+    state: LiveSessionState,
+    userText: string,
+    messageOrigin: TurnMessageOrigin,
+  ): Promise<Array<{ path: string; snippet: string; score: number }>> {
+    if (messageOrigin !== 'direct-user') return [];
+    if (!this.contentIndexRef?.searchLibrary) return [];
+    const text = userText.trim();
+    if (text.length < TURN_LIBRARY_RECALL_MIN_CHARS) return [];
+    const libraryId = await this.store.sharedProjectId().catch(() => null);
+    if (!libraryId) return [];
+    // A session scoped to the library already lists these files as its
+    // workspace; offering them back as "recalled" is noise.
+    if (state.record.projectId === libraryId) return [];
+    try {
+      const found = await this.contentIndexRef.searchLibrary(libraryId, text, {
+        maxResults: TURN_LIBRARY_RECALL_TOP_K * 3,
+      });
+      const already = state.libraryRecallPaths ?? new Set<string>();
+      const picked: Array<{ path: string; snippet: string; score: number }> = [];
+      for (const hit of found.results) {
+        const score = hit.score ?? 0;
+        if (score < TURN_LIBRARY_RECALL_MIN_SCORE) continue;
+        if (already.has(hit.path)) continue;
+        // The frozen turn-1 snapshot already put these in the system prompt.
+        if (state.record.recall?.hits.some((h) => h.text.includes(`\`${hit.path}\``))) continue;
+        picked.push({ path: hit.path, snippet: hit.snippet, score });
+        if (picked.length >= TURN_LIBRARY_RECALL_TOP_K) break;
+      }
+      if (picked.length > 0) {
+        for (const hit of picked) already.add(hit.path);
+        state.libraryRecallPaths = already;
+      }
+      return picked;
+    } catch (err) {
+      log.warn('[library-recall] search failed:', err instanceof Error ? err.message : err);
+      return [];
+    }
+  }
+
   private async resolveUserPromptPrelude(
     state: LiveSessionState,
     userText: string,
     messageOrigin: TurnMessageOrigin,
+    libraryRecall: ReadonlyArray<{ path: string; snippet: string; score: number }> = [],
   ): Promise<{ behaviorId: string; text: string } | null> {
     const profile = state.profile;
     if (!profile) return null;
@@ -12195,6 +12810,7 @@ export class ChatManager {
       drained: [],
       assistantContent: '',
       continuationCount: 0,
+      ...(libraryRecall.length > 0 ? { libraryRecall } : {}),
     };
     for (const entry of profile.behaviors) {
       const hook = entry.behavior.userPromptPrelude;
@@ -13020,7 +13636,22 @@ export class ChatManager {
     // every time anyone (including a parallel gezel) writes one, and a
     // baked-in listing goes stale immediately. The prompt teaches the
     // model to call `list_artifacts` (recursive by default) instead.
-    const documentFiles = await this.store.listDocuments('');
+    // Recursive: a foldered library rendered only its top-level folder rows,
+    // so anything filed under one was invisible to the model. Outside-in
+    // companion dirs (`report.docx_files/report.md`) are derived twins of a
+    // document already in the listing — showing both invites the model to
+    // read the wrong one.
+    // A session scoped to the library itself already lists these files under
+    // `### Workspace files` — its workspace IS the library — so the shared
+    // block would render the same inventory twice.
+    const libraryProjectId = await this.store.sharedProjectId().catch(() => null);
+    const sessionIsLibrary = libraryProjectId !== null && record.projectId === libraryProjectId;
+    const documentListing = sessionIsLibrary
+      ? { entries: [], truncated: false }
+      : await this.store.listDocumentsRecursiveDetailed();
+    const documentFiles = documentListing.entries.filter(
+      (entry) => !isOutsideInInternalPath(entry.path),
+    );
     const gezel = await this.store.getGezel(record.gezelId);
     const config = await this.store.readConfig();
     // Curated cross-project lessons distilled by the memory compactor's
@@ -13193,6 +13824,15 @@ export class ChatManager {
       project && profileHasBehavior(modelProfile, 'prompt.workspace-gestalt')
         ? await this.buildWorkspaceGestalt(record.projectId)
         : '';
+    const documentDescriptions =
+      documentFiles.length > 0 &&
+      libraryProjectId &&
+      this.contentIndexRef?.libraryDescriptions &&
+      profileHasBehavior(modelProfile, 'prompt.documents-summaries')
+        ? await this.contentIndexRef
+            .libraryDescriptions(libraryProjectId)
+            .catch(() => new Map<string, string>())
+        : new Map<string, string>();
 
     // Resolve per-model tuning: gezel-frontmatter override (sparse)
     // on top of the install-wide override on top of the catalog
@@ -13226,34 +13866,31 @@ export class ChatManager {
     // separate q8_0-KV-on-Gemma bug, since fixed by deriving f16 for the
     // family). `isInstalled` stays version-blind on purpose — we don't
     // auto-trigger a multi-GB re-download; the user reinstalls from the
-    // model manager. Compares the installed model's recorded catalog version
-    // against the catalog's current version; resolves from whichever backend
-    // has the model (the recorded version is backend-agnostic).
+    // model manager. The question is asked of the PAYLOAD, not of the version
+    // string: each engine manager compares the catalog's pinned files against
+    // the copy on disk, so a metadata-only catalog edit (retuning, sizing
+    // hints, wording) — which the runtime has already picked up by resolving
+    // from the current catalog — never tells the user to go download tens of
+    // gigabytes for a change that isn't in the weights.
     if (
       resolvedCatalogId &&
       catalogDetail?.manifest.kind === 'chat-model' &&
       !this.warnedStaleModelSessions.has(record.id)
     ) {
       let settingsSection: 'llamaCpp' | 'ds4' | 'mlx' = 'llamaCpp';
-      let installed: { catalogVersion?: string; quantization?: string } | null =
-        (await this.llamaCppModels?.resolveModel(resolvedCatalogId).catch(() => null)) ?? null;
-      if (!installed) {
+      let status = await this.llamaCppModels?.getUpdateStatus(resolvedCatalogId).catch(() => null);
+      if (!status) {
         settingsSection = 'ds4';
-        installed =
-          (await this.ds4Models?.resolveModel(resolvedCatalogId).catch(() => null)) ?? null;
+        status = await this.ds4Models?.getUpdateStatus(resolvedCatalogId).catch(() => null);
       }
-      if (!installed) {
+      if (!status) {
         settingsSection = 'mlx';
-        installed =
-          (await this.mlxModels?.resolveModel(resolvedCatalogId).catch(() => null)) ?? null;
+        status = await this.mlxModels?.getUpdateStatus(resolvedCatalogId).catch(() => null);
       }
-      const installedVersion = installed?.catalogVersion;
-      const currentVersion = catalogDetail.manifest.version;
-      if (installed && installedVersion && currentVersion && installedVersion !== currentVersion) {
+      if (status?.updateAvailable) {
         this.warnedStaleModelSessions.add(record.id);
-        const installedQuant = installed.quantization ? ` (${installed.quantization})` : '';
         log.warn(
-          `[chat] stale model "${resolvedCatalogId}": installed at catalog v${installedVersion}${installedQuant}, catalog now v${currentVersion} — older build, runs but superseded. Notifying user (session ${record.id.slice(0, 8)}).`,
+          `[chat] stale model "${resolvedCatalogId}": catalog now v${status.availableVersion} — ${status.reason ?? 'the files on disk differ from the ones it pins'}. Notifying user (session ${record.id.slice(0, 8)}).`,
         );
         const scope: PublishScope = {
           sessionId: record.id,
@@ -13631,6 +14268,8 @@ export class ChatManager {
       workspaceFiles,
       ...(workspaceListing.truncated ? { workspaceFilesTruncated: true } : {}),
       documentFiles,
+      ...(documentListing.truncated ? { documentFilesTruncated: true } : {}),
+      ...(documentDescriptions.size > 0 ? { documentDescriptions } : {}),
       voormanName: voorman?.name,
       ...(voorman?.roleBasedName ? { voormanRoleBasedName: voorman.roleBasedName } : {}),
       ...(voorman?.parsed.frontmatter.gender
@@ -14456,6 +15095,7 @@ export class ChatManager {
           extras.push({
             id: reserveExtraServerId(t.runtime.serverName, t.toolsetId),
             ...spec,
+            toolsetId: t.toolsetId,
           });
         } catch (error) {
           log.warn(
@@ -14474,6 +15114,7 @@ export class ChatManager {
         if (headers === null) continue; // required field missing — skip with warning
         extras.push({
           id: reserveExtraServerId(t.toolsetId, t.toolsetId),
+          toolsetId: t.toolsetId,
           kind: 'http',
           transport: t.runtime.transport,
           url: t.runtime.url,
@@ -14593,14 +15234,27 @@ export class ChatManager {
       // a post-install symlink swap must not turn a catalog entry into an
       // arbitrary host executable.
       const runtimeEntry = await resolveInside(t.installPath, t.runtime.entry);
-      const extraServerId = reserveExtraServerId(t.toolsetId, t.toolsetId);
-      extras.push({
-        id: extraServerId,
+      const spec: StdioMcpServerSpec = {
+        toolsetId: t.toolsetId,
         kind: 'stdio',
         command: 'node',
         args: [runtimeEntry, ...t.runtime.args, ...extraArgs],
         env,
-      });
+      };
+      // The local-preview posture lives in the wrapper: `decorateTools`
+      // prunes the surface to `LOCAL_PREVIEW_BROWSER_TOOLS`, and `preProcess`
+      // rewrites `file:` navigation and refuses every non-preview origin. A
+      // spec the wrapper does not recognize would advertise a browser with
+      // none of that, so refuse it rather than silently ship the weaker one
+      // on the strength of the Chromium proxy flags alone.
+      if (isLocalPreviewBrowser && !isPlaywrightMcp(spec)) {
+        log.warn(
+          'security: refusing local-preview Playwright because its spawn spec is not recognized by the browser wrapper layer',
+        );
+        continue;
+      }
+      const extraServerId = reserveExtraServerId(t.toolsetId, t.toolsetId);
+      extras.push({ id: extraServerId, ...spec });
       if (isLocalPreviewBrowser) localPreviewBrowserExtraIds.add(extraServerId);
       if (
         isTrustedConstrainedToolset({

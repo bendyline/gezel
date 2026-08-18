@@ -144,6 +144,29 @@ Rules:
   its state is already understood by: play, pause, check, circle-slash. This
   holds only for states the app colors elsewhere; a preference group with no
   meaningful ends stays on the accent.
+- **Icon-only keys are sanctioned for tight panel headers and toolbars**
+  where 2–5 modes must fit beside a title — use `gz-key gz-key--icon`
+  (near-square padding, no label gap) inside the usual `role="radiogroup"`
+  tray, and give every key both `title` and `aria-label` since there is no
+  visible text. The file-panel view switch (`FileViewModeKeys`) is the
+  reference implementation. This is still a keys case, not Tabs: the same
+  content is being re-presented (sorted, flattened), not swapped for a
+  different panel.
+- **A tray may also hold actions, not just modes** — the same icon keys in a
+  `role="toolbar"` (or `role="presentation"` when the group needs no name)
+  instead of a radiogroup, with nothing latched. Reach for it when a compact
+  row of verbs repeats down a list and the words would out-shout the content
+  they act on: the Boekwachter issue rows are the reference, where *Mark
+  read · Not an issue · Mark resolved · Fix* sat as four text links beside
+  every issue and left the message wrapping four words to a line. Three rules
+  travel with it. Put the tray on its own row under the content rather than
+  in a second column — a side rail of controls is what squeezed the text in
+  the first place. **Name the group after the row's subject**
+  (`aria-label="Actions for BW-8"`) so the keys can keep short labels instead
+  of a screen reader hearing "Mark resolved" once per row with nothing to
+  tell them apart. And when one action is more consequential than its
+  neighbours (Fix creates a task), give it the accent ink — never a second
+  latched-looking fill.
 - **Native `<input type="radio">` stays native** in dense config forms
   (folder scopes, engine settings) — the round dot is a true circle and
   keeps its shape. Reach for keys when the choice is prominent enough to
@@ -297,6 +320,62 @@ halves on one straight seam and keep `--radius-md` only on the outside corners.
 Menu items should name the variant and may carry one short hint line. The Tasks
 screen's New task / scheduled / Night Shift control is the reference.
 
+**Resizable splits.** A two-pane split that a user might want to rebalance
+gets a grip, not a fixed track: a full-height `role="separator"` element with
+`.chat-rail-grip` between the panes, whose twin rails only appear on hover or
+focus. The drag persists to `localStorage` (globally, not per project) and the
+grip answers Arrow / Shift+Arrow / Home / End so it works without a mouse. Store
+a **fraction** when the split is about balance (the chat rail, the project
+output pane) and **pixels** when the useful size is set by content rather than
+by window width — a file tree is sized by how long filenames are. Pixel splits
+also get a **collapsed rail**: dragging past the point where the pane stops
+being readable snaps it to a ~2rem strip carrying a chevron and the pane's name
+set in `writing-mode: vertical-rl`, which is also the way back. Collapse is a
+snap, never a sliver — never leave a pane too narrow to read. The Workspace /
+Artifacts file tree is the reference.
+
+**One file browser, everywhere.** Any surface that browses a tree of files —
+the project Workspace, the project Artifacts drawer, the shared Documents
+library — renders
+[`FileBrowserPane`](../packages/ui/src/components/file-browser/FileBrowserPane.tsx)
+against a `FileBrowserSource`. That is the whole panel: the resizable +
+collapsible tree, the view-mode keys, the show-hidden key, the create keys,
+per-row rename/delete, OS drag-and-drop import, the truncation notice, and the
+media/binary previews. Do not hand-roll a second file pane; add to this one.
+
+The source adapter is what varies, and capabilities are declared by presence:
+an adapter with no `mkdir` gets no New folder key, one with `canWrite: false`
+(a workspace whose write policy says no) gets no mutations at all, and one with
+no `reveal` gets no Open button. Anything genuinely specific to a surface
+arrives as a slot — `headerExtra`, `notices`, `trailingForEntry`,
+`customList`, `extraPane` — which is how the Workspace hangs its index state,
+issue badges, triage lists, and Boekwachter pane off the shared panel without
+forking it. **Every file editor autosaves** through
+`useSerializedAutosave` with the dirty state in the status bar; a Save button
+in a file pane is a bug, because a mutation elsewhere in the panel flushes the
+lane rather than racing it.
+
+The rule generalises past file panes: **any long-form prose editor autosaves**,
+wherever it lives. A gezel's `about.md`, a project's about/mission, a document,
+a memory, and a task's description are all the same shape — a body of text the
+reader edits in place — and the panel hosting one can unmount on a tab switch
+or a selection change without warning. The task description was the last
+holdout and the one that proved the point: it carried a Save button, its
+comment claimed a blur flush that did not exist, and any edit not explicitly
+committed was discarded silently. An explicit button stays correct only where
+the action publishes a discrete thing rather than saving a document — posting a
+note, recording an outcome.
+
+**The pane's own edges are the only edges.** One rounded border belongs to the
+panel as a whole (`.project-files-layout`, or the app frame when a view is
+full-bleed); whatever fills the viewer pane runs flush to it and draws no border
+or radius of its own. A second rounded box a hairline inside the first reads as
+a rendering fault, and its left edge doubles the seam the tree's `border-right`
+already draws — the editor should butt straight against the tree. Card-shaped
+hosts are the contrast that makes the rule clear: a project's about/mission
+field or a gezel's `about.md` is a bordered card sitting *in* a form, and keeps
+its border.
+
 **Forms.** Raw `<input>`, `<textarea>`, `<fieldset>` are fine — Radix
 doesn't ship form primitives and we don't need them. Schema-driven Squisq
 forms use the shared `GezelJsonEditor` wrapper. It keeps Squisq's built-in
@@ -353,6 +432,22 @@ message that was delivered from the queue carries a small uppercase
 discards queued nudges; each ghost keeps its own Discard so the user
 decides.
 
+**Only the person's own words are attributed to them.** Task dispatch
+seeds, step handoffs, and page reactions travel as `role: 'user'` messages
+because that is the role a provider accepts mid-conversation — but the user
+never typed them, and a transcript that opens with "YOU · call
+`advance_task_step` to hand off" reads as a bug and quietly undoes the
+warm-companion framing. Any such turn carries `origin: 'system'`
+([`ChatMessage`](../packages/core/src/schemas/gezel.ts)), and every surface
+that names an author must honour it: the bubble reads **System** with a
+small uppercase `automatic` badge (the neutral sibling of `nudged` — same
+`--text-2xs` / `--radius-sm` recipe, `--border` instead of terracotta) and
+drops to the panel tone, because the terracotta fill *is* the signal that
+words came from the user. The rule travels to every author label, not just
+the bubble: the sticky scroll header renders the same verdict, and a new
+one must too. Cross-gezel messages are a separate case already answered by
+`from` — they keep the "Aldric → Maya" handoff bubble.
+
 **Transformation dialog.** AI edits to user text never land silently. The
 editor toolbar's single transform button opens the transformation dialog
 (`TransformDialog`, `gz-transform-*` block in styles.css): an instruction
@@ -390,6 +485,36 @@ link that lands on the same article.
 "generating…") over blocking spinners. A pulsing icon (see
 `.gezel-icon--pulse`) is the canonical "this thing is working in the
 background" signal.
+
+**A search box answers the keystroke, not the query.** The results surface
+mounts as soon as there is something to search for — never on the response —
+because a panel that only appears once data arrives has no way to say
+"working", and the box reads as broken for however long the backend takes.
+The titlebar search is the reference: it opens on the debounced query showing
+*Searching…*, fills with the instant name matches, then keeps a quiet
+`.search-palette-more` line while the slower content fan-out completes. Two
+rules travel with it. **Fast and slow sources are separate phases** — the
+name catalog answers in milliseconds while content search waits on the
+embedding pipeline, and making the user wait for the slow half to see the
+fast half is what produced a 41-second silent box. And **"No results" is a
+claim about the user's data**, so a lookup that *failed* must say that
+instead; the two are different answers and only one of them means "stop
+looking".
+
+**The theme reaches everything on screen, including what we don't style.**
+A project-type Output page renders in a null-origin sandboxed iframe, so our
+CSS variables never reach it, and a page that only knows the OS preference
+becomes a glaring cream slab down the side of a dark workshop. The desktop
+shell therefore pushes the user's Light/Dark/System choice into Chromium's own
+preference (`nativeTheme.themeSource`, set from `applyThemePref` in
+[theme.ts](../packages/ui/src/theme.ts)), which is the one signal that crosses
+the sandbox — a `color-scheme` on the frame element does not, and the
+`window.gezel` theme message only reaches pages that opted into the page API.
+Embedded content is then themed by honouring `prefers-color-scheme`, which is
+the contract documented for page authors in
+[project-types.md](project-types.md). The rule generalises: when a surface is
+a separate document we cannot style, hand it the preference rather than
+assuming it will match by luck.
 
 **Meters name their denominator.** A usage bar is a claim about a physical
 pool, so only a figure measured against that pool may fill it. The engine
@@ -463,6 +588,23 @@ use toasts for errors. If the operation is dismissable, show the error
 until the next user action; if it blocks something, show it until the user
 fixes it.
 
+**A failed tool says why, in the thread.** A red ✗ on a tool row is a
+status, not an explanation, and burying the reason in a tooltip or behind
+the collapsed step expando makes a gezel look stuck for no stated cause —
+a completion gate would reject the same step six times while the user
+watched a counter climb. Every failed row carries a bounded reason under
+it, and any failure the turn never recovered from (no later success of the
+same tool) is repeated above the expando where a closed disclosure can't
+hide it. Bound the text — 250 characters, cut on a word boundary — and
+strip what was written for the model, not the reader: the `[code]` prefix
+and the `Retryable:` flag. Line breaks survive, because a gate lists its
+unmet criteria. The exact untruncated text stays one click away in the
+details drawer. Failures the model corrected itself stay quiet; a
+self-healed turn must not read as a broken one.
+[toolErrorSummary](../packages/ui/src/components/tool-display.ts) and
+[unresolvedToolFailures](../packages/ui/src/components/chat-bubbles.tsx)
+own the two rules.
+
 **Reporting an error.** A clear *system* error may carry a "Report error on
 GitHub…" link beside it ([ReportErrorLink](../packages/ui/src/components/ReportErrorLink.tsx)),
 and Settings → About carries a permanent one. It opens a dialog holding the
@@ -513,6 +655,18 @@ tray. Derivation lives in
 [system-notices.ts](../packages/ui/src/system-notices.ts), so the rail and
 Settings can never drift apart. The one update outcome that *is* worth
 interrupting for — a verified update waiting to install — also stays a banner.
+
+**Rows that differ only by state need the state named.** When one list holds
+items in two states that share a row shape — a queue's running turns above its
+waiting ones — the row itself says nothing: same figure, same job, same
+duration column. Split the groups with an uppercase eyebrow
+(`--text-2xs`, weight 700, `0.06em`, `--text-muted`) naming each state, and draw
+it only when both groups are present, since a single-state list is already
+answered by the section's own counts. Animation is not the signal: a 24px
+pulsing poppetje is too quiet to carry the distinction on its own. Supporting
+cues stay on the artwork, not the words — a waiting row's figure sits back to
+`opacity: 0.6` while its text keeps full contrast. The QueueMeter's provider
+sections are the reference.
 
 **Scheduled work is not a backlog.** A count in the chrome says "there is
 something here you are waiting on." Work that is deliberately parked until

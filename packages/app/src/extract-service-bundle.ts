@@ -58,8 +58,13 @@ async function main(): Promise<void> {
     force: args.force,
     logger,
   });
+  // The elapsed time lands in the package manager's own transcript (apt's
+  // "Setting up gezel", /var/log/install.log, the NSIS log), which is the only
+  // record that exists when someone reports a slow install.
   process.stdout.write(
-    `[extract-service-bundle] ${result.action}: shipped=${result.shippedVersion} installed=${result.installedVersion}\n`,
+    `[extract-service-bundle] ${result.action}: shipped=${result.shippedVersion} ` +
+      `installed=${result.installedVersion} elapsed=${result.elapsedMs}ms` +
+      `${result.filesExtracted === null ? '' : ` files=${result.filesExtracted}`}\n`,
   );
 }
 

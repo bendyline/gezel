@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ProjectIconIdSchema } from '../project-icons.js';
 
 /**
  * Project-type taxonomy — a broad, deliberately expandable catalog of the
@@ -63,6 +64,8 @@ export const ProjectTypeSchema = z.object({
   id: z.string(),
   label: z.string(),
   description: z.string(),
+  /** Small monochrome maker's mark used by type and project-instance UI. */
+  icon: ProjectIconIdSchema,
   detect: ProjectTypeDetectSchema,
   /** Craftbook tags that mark a book "suggested" for this project type. */
   craftbookTags: z.array(z.string()),
@@ -79,6 +82,7 @@ export const PROJECT_TYPES: ProjectType[] = [
   {
     id: 'browser-game',
     label: 'Browser Game',
+    icon: 'die',
     description:
       'An interactive game that runs in the browser — HTML/Canvas, sprites, input loops.',
     detect: {
@@ -131,6 +135,7 @@ export const PROJECT_TYPES: ProjectType[] = [
   {
     id: 'web-app',
     label: 'Web App',
+    icon: 'code',
     description: 'An interactive web application — components, routes, forms, an API it talks to.',
     detect: {
       extensions: ['tsx', 'jsx', 'ts', 'js', 'css', 'html', 'vue', 'svelte'],
@@ -186,6 +191,7 @@ export const PROJECT_TYPES: ProjectType[] = [
   {
     id: 'static-site',
     label: 'Static Site',
+    icon: 'globe',
     description:
       'A content-first website — landing pages, blog, marketing copy, mostly static HTML.',
     detect: {
@@ -222,6 +228,7 @@ export const PROJECT_TYPES: ProjectType[] = [
   {
     id: 'data-analysis',
     label: 'Data Analysis',
+    icon: 'chart',
     description: 'Analysis of a dataset — notebooks, scripts, charts, reports, SQL.',
     detect: {
       extensions: ['py', 'ipynb', 'csv', 'tsv', 'r', 'sql', 'parquet'],
@@ -272,6 +279,7 @@ export const PROJECT_TYPES: ProjectType[] = [
   {
     id: 'api-service',
     label: 'API / Backend Service',
+    icon: 'server',
     description: 'A server-side service — REST/GraphQL endpoints, a database, background jobs.',
     detect: {
       extensions: ['ts', 'js', 'py', 'go', 'rs', 'java', 'rb'],
@@ -317,6 +325,7 @@ export const PROJECT_TYPES: ProjectType[] = [
   {
     id: 'cli-tool',
     label: 'CLI / Tooling',
+    icon: 'terminal',
     description: 'A command-line tool, script, or automation utility.',
     detect: {
       extensions: ['ts', 'js', 'py', 'go', 'rs', 'sh', 'bash'],
@@ -342,6 +351,7 @@ export const PROJECT_TYPES: ProjectType[] = [
   {
     id: 'library',
     label: 'Library / SDK',
+    icon: 'package',
     description: 'A reusable library, package, or SDK consumed by other code.',
     detect: {
       extensions: ['ts', 'js', 'py', 'go', 'rs'],
@@ -380,6 +390,7 @@ export const PROJECT_TYPES: ProjectType[] = [
   {
     id: 'content-writing',
     label: 'Writing / Content',
+    icon: 'quill',
     description: 'Long-form writing — articles, docs, copy, newsletters.',
     detect: {
       extensions: ['md', 'mdx', 'txt', 'docx', 'rst'],
@@ -431,6 +442,7 @@ export const PROJECT_TYPES: ProjectType[] = [
   {
     id: 'media-production',
     label: 'Media Production',
+    icon: 'camera',
     description: 'Audio, video, or image production — assets, captions, transcripts.',
     detect: {
       extensions: ['png', 'jpg', 'jpeg', 'svg', 'gif', 'mp3', 'wav', 'mp4', 'mov'],
@@ -472,6 +484,7 @@ export const PROJECT_TYPES: ProjectType[] = [
   {
     id: 'design-prototype',
     label: 'Design / Prototype',
+    icon: 'palette',
     description: 'A visual design or UI prototype — mockups, hero sections, branding.',
     detect: {
       extensions: ['html', 'css', 'svg', 'fig'],
@@ -507,6 +520,7 @@ export const PROJECT_TYPES: ProjectType[] = [
     // reception of posts on feeds like Bluesky, X, Instagram, and LinkedIn.
     id: 'social-media',
     label: 'Social Media',
+    icon: 'bubbles',
     description:
       'A public posting presence — drafting, approving, publishing, and reading reception across social feeds.',
     detect: {
@@ -553,6 +567,7 @@ export const PROJECT_TYPES: ProjectType[] = [
     // different serialization granularity and different craftbooks.
     id: 'email',
     label: 'Email / Inbox',
+    icon: 'envelope',
     description:
       'Email threads synced into the project — triage, drafting, summarizing, and correspondence.',
     detect: {
@@ -584,6 +599,7 @@ export const PROJECT_TYPES: ProjectType[] = [
     // are unused elsewhere and light up exactly the career books.
     id: 'job-hunt',
     label: 'Job Hunt',
+    icon: 'briefcase',
     description:
       'A job-search campaign — tracked applications, tailored materials, interviews, offers.',
     detect: {

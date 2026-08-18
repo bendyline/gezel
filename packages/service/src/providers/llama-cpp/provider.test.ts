@@ -24,6 +24,7 @@ import {
   isLlamaCppGrammarParseError,
   isRecoverableImmediateFileWriteError,
   isScenarioFileRepairTurn,
+  llamaCppReasoningRequestDiagnostic,
   mergeSystemMessagesIntoFirst,
   normalizeJsonSchemaForLlamaCpp,
   normalizeMalformedStructuredToolCalls,
@@ -39,6 +40,22 @@ import {
   tryParseToolCallParseError,
   tryRepairMalformedWriteToolArguments,
 } from './provider.js';
+
+describe('llama.cpp reasoning request diagnostics', () => {
+  it('reports only effective chat-template reasoning controls', () => {
+    expect(
+      llamaCppReasoningRequestDiagnostic({
+        messages: [{ role: 'user', content: 'secret' }],
+        chat_template_kwargs: {
+          enable_thinking: true,
+          reasoning_effort: 'xhigh',
+          unrelated: 'ignored',
+        },
+      }),
+    ).toEqual({ enableThinking: true, reasoningEffort: 'xhigh' });
+    expect(llamaCppReasoningRequestDiagnostic({ messages: [] })).toBeNull();
+  });
+});
 
 describe('llama.cpp JSON Schema compatibility', () => {
   it('normalizes RegExp.source slash escapes in nested URI patterns without mutating the source', () => {
@@ -501,6 +518,34 @@ afterEach(() => {
 });
 
 describe('LlamaCppProvider physical request gate', () => {
+  it('uses every supervised launch slot for interactive batching by default', () => {
+    const supervisor = {
+      async ensureRunning() {
+        return { command: 'fake', args: [], baseUrl: 'http://llama.test' };
+      },
+      markUsed() {},
+      async stop() {},
+    } as unknown as NativeEngineSupervisor;
+    const provider = new LlamaCppProvider({
+      supervisor,
+      concurrency: 4,
+    });
+
+    expect(provider.batch.maxConcurrency).toBe(4);
+    expect(provider.queue.interactiveConcurrency).toBe(4);
+    expect(provider.getLaunchedSlots()).toBe(4);
+  });
+
+  it('keeps an external server serial unless its batch width is explicit', () => {
+    const provider = new LlamaCppProvider({
+      baseUrl: 'http://llama.test',
+      concurrency: 4,
+    });
+
+    expect(provider.batch.maxConcurrency).toBe(1);
+    expect(provider.queue.interactiveConcurrency).toBe(1);
+  });
+
   it('serializes cache preparation and streaming at one launched slot while preserving the background queue lane', async () => {
     let releaseFirstFetch!: () => void;
     const firstFetchBlocked = new Promise<void>((resolve) => {
@@ -1088,6 +1133,56 @@ describe('LlamaCppProvider constructor', () => {
     expect(phases).toEqual(['prefill', 'generating']);
   });
 
+  /**
+   * `timings_per_token` puts llama-server's running counters on every chunk.
+   * Publishing them is what lets the status readouts state a token count and
+   * a decode rate as fact instead of estimating both from streamed characters
+   * and hedging the result with "≈".
+   */
+  it('publishes llama-server running timings on the generating phase', async () => {
+    globalThis.fetch = (async () => {
+      return sseResponse([
+        {
+          choices: [{ index: 0, delta: { content: 'hello' } }],
+          timings: { predicted_n: 1, predicted_per_second: 61.4 },
+        },
+        {
+          choices: [{ index: 0, delta: { content: ' there' } }],
+          timings: { predicted_n: 59, predicted_per_second: 24.4 },
+        },
+        {
+          choices: [{ index: 0, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 59 },
+        },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const session = (await provider.createSession({
+      systemMessage: 'sys',
+    })) as unknown as {
+      onEnginePhase: (
+        h: (ev: {
+          phase: string;
+          outputTokens?: number;
+          tokensPerSec?: number;
+        }) => void,
+      ) => () => void;
+      sendAndWait: (prompt: string) => Promise<string>;
+    };
+    const counted: Array<{ outputTokens?: number; tokensPerSec?: number }> = [];
+    session.onEnginePhase((ev) => {
+      if (ev.phase === 'generating' && ev.outputTokens !== undefined) {
+        counted.push({ outputTokens: ev.outputTokens, tokensPerSec: ev.tokensPerSec });
+      }
+    });
+    await session.sendAndWait('hi');
+    // The 300ms throttle decides how many of a fast stream's readings get
+    // through, so only the first emission is deterministic here.
+    expect(counted[0]).toEqual({ outputTokens: 1, tokensPerSec: 61.4 });
+    expect(counted.every((c) => typeof c.outputTokens === 'number')).toBe(true);
+  });
+
   it('fan-outs supervisor-classified phase events to active sessions', async () => {
     // Turn stays running (hangs on stream) until we trigger phase emission
     // from the provider side, then ends naturally.
@@ -1558,6 +1653,250 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     expect(toolResultMessage).toContain('max_tokens=8192');
     expect(toolResultMessage).toContain('replace_in_file');
     expect(warnings.some((w) => w.includes('output-token cap'))).toBe(true);
+  });
+
+  it('steers a cap-truncated insert_at_marker whose arguments never parsed', async () => {
+    // The Vampire Survivors overhaul incident: qwen3.8-27b spent all 16384
+    // tokens of its `thinking-coding` cap inside one tool call's arguments,
+    // so the args JSON never parsed and the call arrived sanitized to `{}`.
+    // Two gaps compounded: the cap hint required `args.content` (erased by
+    // that same sanitization) and `insert_at_marker` wasn't recognized as
+    // payload-carrying at all. The model got "malformed JSON — emit one new
+    // compact call", retried the whole-file rewrite twice more, and the user
+    // saw no warning naming the cap.
+    const bodies: Array<{
+      max_tokens?: number;
+      messages?: Array<{ role: string; content?: string | null }>;
+    }> = [];
+    const toolCalls: string[] = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as (typeof bodies)[number];
+      bodies.push(body);
+      if (bodies.length === 1) {
+        return sseResponse([
+          {
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call_cut_insert',
+                      type: 'function',
+                      function: {
+                        name: 'insert_at_marker',
+                        // Cut mid-arguments: no closing quote, no closing
+                        // brace. `path` is still readable in the prefix.
+                        arguments:
+                          '{"path":"index.html","marker":"</script>","content":"' +
+                          '<script>class Projectile { update(dt) { this.x += this.vx * ',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          {
+            choices: [{ index: 0, finish_reason: 'length' }],
+            usage: { prompt_tokens: 33000, completion_tokens: 16384 },
+          },
+          '[DONE]',
+        ]);
+      }
+      return sseResponse([
+        { choices: [{ index: 0, delta: { content: 'Switching to targeted edits.' } }] },
+        {
+          choices: [{ index: 0, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 34000, completion_tokens: 20 },
+        },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({
+      baseUrl: 'http://ds4.test',
+      includeUsageInStream: true,
+    });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'qwen3.8-27b-q4',
+      tuning: {
+        sampling: { maxTokens: 16384 },
+        reasoning: {},
+        output: {},
+        promptTags: {},
+        wasThinking: false,
+      },
+    });
+    const internal = session as unknown as {
+      deps: {
+        bridges: {
+          isEmpty: () => boolean;
+          getOpenAITools: () => Array<{
+            name: string;
+            description: string;
+            parameters: Record<string, unknown>;
+          }>;
+          hasTool: (name: string) => boolean;
+          callTool: (name: string, args: Record<string, unknown>) => Promise<string>;
+        };
+      };
+    };
+    internal.deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () =>
+        ['insert_at_marker', 'replace_in_file', 'replace_lines', 'read_file'].map((name) => ({
+          name,
+          description: `${name} tool`,
+          parameters: { type: 'object' },
+        })),
+      hasTool: () => true,
+      callTool: async (name: string) => {
+        toolCalls.push(name);
+        return 'unexpected dispatch';
+      },
+    };
+    const warnings: string[] = [];
+    session.onWarning?.((msg) => warnings.push(msg));
+
+    await expect(
+      session.sendAndWait('The bullets do not hurt the vampires and the graphics are basic.'),
+    ).resolves.toBe('Switching to targeted edits.');
+
+    expect(bodies).toHaveLength(2);
+    // Sanitized args are never dispatched — the loop short-circuits to an
+    // ERROR result, which is what the hint attaches to.
+    expect(toolCalls).toEqual([]);
+    const toolResultMessage =
+      (bodies[1]?.messages ?? []).find((m) => m.role === 'tool')?.content ?? '';
+    expect(toolResultMessage).toContain('hit the per-turn output token cap');
+    expect(toolResultMessage).toContain('max_tokens=16384');
+    // Path recovered from the unparseable prefix, so the steer can name
+    // the file instead of a placeholder.
+    expect(toolResultMessage).toContain('replace_in_file(path="index.html"');
+    expect(warnings.some((w) => w.includes('output-token cap'))).toBe(true);
+    expect(warnings.some((w) => w.includes('insert_at_marker'))).toBe(true);
+  });
+
+  it('does not steer an over-cap write_artifact at edit tools the turn never wired', async () => {
+    // The PR-review scope-step incident: a craftbook step needed a 25 KB
+    // derived JSON artifact under a 6144-token cap on a writes-off project,
+    // so the only payload tool wired was `write_artifact`. The hint named
+    // `replace_in_file` / `replace_lines` unconditionally — absent from the
+    // roster AND pointed at the wrong drawer — so the model spent a whole
+    // turn planning a six-turn replace sequence and the task died.
+    const bodies: Array<{
+      max_tokens?: number;
+      messages?: Array<{ role: string; content?: string | null }>;
+    }> = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as (typeof bodies)[number];
+      bodies.push(body);
+      if (bodies.length === 1) {
+        return sseResponse([
+          {
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call_cut_artifact',
+                      type: 'function',
+                      function: {
+                        name: 'write_artifact',
+                        arguments:
+                          '{"path":"pr-review/batches.json","content":"[{\\"batchNumber\\":1,' +
+                          '\\"start\\":1,\\"end\\":25,\\"paths\\":[\\"packages/core/src/schemas/',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          {
+            choices: [{ index: 0, finish_reason: 'length' }],
+            usage: { prompt_tokens: 86000, completion_tokens: 6144 },
+          },
+          '[DONE]',
+        ]);
+      }
+      return sseResponse([
+        { choices: [{ index: 0, delta: { content: 'Reporting the blocker.' } }] },
+        {
+          choices: [{ index: 0, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 87000, completion_tokens: 20 },
+        },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({
+      baseUrl: 'http://ds4.test',
+      includeUsageInStream: true,
+    });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'qwen3.8-27b-q4',
+      tuning: {
+        sampling: { maxTokens: 6144 },
+        reasoning: {},
+        output: {},
+        promptTags: {},
+        wasThinking: false,
+      },
+    });
+    const internal = session as unknown as {
+      deps: {
+        bridges: {
+          isEmpty: () => boolean;
+          getOpenAITools: () => Array<{
+            name: string;
+            description: string;
+            parameters: Record<string, unknown>;
+          }>;
+          hasTool: (name: string) => boolean;
+          callTool: (name: string, args: Record<string, unknown>) => Promise<string>;
+        };
+      };
+    };
+    internal.deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () =>
+        [
+          'write_artifact',
+          'read_artifact',
+          'list_artifacts',
+          'write_task_note',
+          'set_task_status',
+        ].map((name) => ({
+          name,
+          description: `${name} tool`,
+          parameters: { type: 'object' },
+        })),
+      hasTool: () => true,
+      callTool: async () => 'unexpected dispatch',
+    };
+
+    await expect(session.sendAndWait('Publish the fanout batches.')).resolves.toBe(
+      'Reporting the blocker.',
+    );
+
+    const toolResultMessage =
+      (bodies[1]?.messages ?? []).find((m) => m.role === 'tool')?.content ?? '';
+    expect(toolResultMessage).toContain('hit the per-turn output token cap');
+    expect(toolResultMessage).toContain('max_tokens=6144');
+    expect(toolResultMessage).toContain('pr-review/batches.json');
+    expect(toolResultMessage).not.toContain('replace_in_file');
+    expect(toolResultMessage).not.toContain('replace_lines');
+    expect(toolResultMessage).toContain('No incremental edit tool is wired this turn');
+    // Routed to the honest exit, using the task tools that ARE wired.
+    expect(toolResultMessage).toContain('write_task_note');
+    expect(toolResultMessage).toContain('set_task_status');
   });
 
   it('gate-surgical-edit turns get a low-temp patch-only surface on the first move', async () => {

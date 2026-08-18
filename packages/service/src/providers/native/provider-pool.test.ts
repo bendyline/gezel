@@ -58,6 +58,8 @@ type Describe = ReturnType<import('../queue.js').ProviderQueue['describe']>;
 function mkDesc(partial: Partial<Describe>): Describe {
   return {
     running: 0,
+    runningInteractive: 0,
+    runningBackground: 0,
     queuedInteractive: 0,
     queuedBackground: 0,
     ambientHeld: 0,
@@ -79,6 +81,7 @@ function mkDesc(partial: Partial<Describe>): Describe {
 class QueueFakeProvider extends FakeProvider {
   desc: Describe = mkDesc({});
   batchWidth = 1;
+  launchedSlots: number | undefined;
   readonly queue = {
     describe: () => this.desc,
     snapshot: () => ({
@@ -96,6 +99,14 @@ class QueueFakeProvider extends FakeProvider {
   } as unknown as import('../queue.js').ProviderQueue;
   get batch(): import('../types.js').BatchCapability {
     return { maxConcurrency: this.batchWidth } as unknown as import('../types.js').BatchCapability;
+  }
+  engineLaunchSnapshot() {
+    return this.launchedSlots === undefined
+      ? undefined
+      : {
+          startedAt: 1_700_000_000_000,
+          diagnostics: { slots: this.launchedSlots },
+        };
   }
 }
 
@@ -326,6 +337,30 @@ describe('ProviderPool', () => {
     await expect(pool.unloadIdle(key)).rejects.toThrow(/currently serving requests/);
     expect(pool.has(key)).toBe(true);
     expect(made[0]?.shutdownCalls).toBe(0);
+    expect(broker.committedBytes()).toBe(10 * GB);
+  });
+
+  it('releaseIdle() frees idle models and leaves a busy one streaming', async () => {
+    const made: BusyFakeProvider[] = [];
+    const broker = new CapacityBroker({ budgetBytes: 60 * GB });
+    const pool = new ProviderPool({
+      broker,
+      builders: { mlx: mkBusyBuilder(10 * GB, made) },
+    });
+    await pool.ensure('mlx', 'idle-a', 0, 10 * GB);
+    await pool.ensure('mlx', 'mid-turn', 0, 10 * GB);
+    await pool.ensure('mlx', 'idle-b', 0, 10 * GB);
+    const busyKey = makeEngineKey('mlx', 'mid-turn', 0);
+    made[1]!.busy = true;
+
+    const stillResident = await pool.releaseIdle();
+
+    expect(stillResident).toEqual([busyKey]);
+    expect(pool.has(makeEngineKey('mlx', 'idle-a', 0))).toBe(false);
+    expect(pool.has(makeEngineKey('mlx', 'idle-b', 0))).toBe(false);
+    expect(pool.has(busyKey)).toBe(true);
+    // The turn on the busy engine is untouched — that is the whole point.
+    expect(made[1]?.shutdownCalls).toBe(0);
     expect(broker.committedBytes()).toBe(10 * GB);
   });
 
@@ -804,6 +839,26 @@ describe('ProviderPool', () => {
     expect(s.maxConcurrency).toBe(6);
     expect(s.active.map((a) => a.job)).toEqual(['digest · client-project']);
     expect(s.pending.map((p) => p.job)).toEqual(['memory']);
+  });
+
+  it('queueSummaries reports the live launch width instead of a stale serial batch fallback', async () => {
+    const made: QueueFakeProvider[] = [];
+    const broker = new CapacityBroker({ budgetBytes: 64 * GB });
+    const pool = new ProviderPool({
+      broker,
+      builders: { 'llama-cpp': mkQueueBuilder(5 * GB, made) },
+    });
+    await pool.ensure('llama-cpp', 'qwen', 0, 5 * GB);
+
+    made[0]!.batchWidth = 1;
+    made[0]!.desc = mkDesc({
+      concurrency: 5,
+      interactiveConcurrency: 4,
+      backgroundConcurrency: 3,
+    });
+    made[0]!.launchedSlots = 4;
+
+    expect(pool.queueSummaries().get('llama-cpp')!.maxConcurrency).toBe(4);
   });
 
   it('queueSummaries returns an empty map for an empty pool', () => {

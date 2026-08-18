@@ -6,8 +6,8 @@ import * as vscode from 'vscode';
  *
  *   user picks a Gezel model in Copilot Chat
  *      → extension's `provideLanguageModelChatResponse`
- *      → SDK `app.chat({model: 'gezel:<id>', ...})`
- *      → daemon `POST /v1/chat/completions` with `model: 'gezel:<id>'`
+ *      → SDK `app.chat({model: 'gezel:<role>-<name>', ...})`
+ *      → daemon `POST /v1/chat/completions` with the same model id
  *      → daemon resolves to the gezel's underlying provider (MockProvider here)
  *      → response streams back to the user as `LanguageModelTextPart`
  *

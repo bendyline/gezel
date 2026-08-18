@@ -30,6 +30,18 @@ export type UpdateState =
       message: string;
     };
 
+export type ModelBundleExportProgress = {
+  exportId: string;
+  filename: string;
+} & (
+  | { phase: 'preparing' }
+  | {
+      phase: 'writing' | 'verifying';
+      bytesCompleted: number;
+      bytesTotal?: number;
+    }
+);
+
 /**
  * Build a client against the daemon that served this HTML. When the Electron
  * shell hosts us, it injects a preload variable with the token; otherwise we
@@ -99,6 +111,37 @@ declare global {
         uninstall(): Promise<{ ok: true } | { ok: false; error: string }>;
       };
       /**
+       * Ambient display (wallpaper) surface. Absent outside Electron —
+       * the web UI shows the folder path and manual instructions only.
+       * The renderer never supplies paths; the main process resolves
+       * everything from GEZEL_HOME.
+       */
+      ambient?: {
+        status(): Promise<
+          | {
+              ok: true;
+              capability: {
+                supported: boolean;
+                reason?: 'unsupported-platform' | 'unknown-desktop' | 'command-missing';
+                desktop?: string;
+                canRestore: boolean;
+              };
+              enabled: boolean;
+              folder: string;
+              lastApplied: { source: string; slot: string; mtimeMs: number } | null;
+              latestImageAt: string | null;
+            }
+          | { ok: false; error: string }
+        >;
+        enable(): Promise<{ ok: true; applied: boolean } | { ok: false; error: string }>;
+        disable(): Promise<
+          | { ok: true; restored: boolean; reason?: 'nothing-captured' | 'restore-failed' }
+          | { ok: false; error: string }
+        >;
+        applyNow(): Promise<{ ok: true; applied: boolean } | { ok: false; error: string }>;
+        openFolder(): Promise<string>;
+      };
+      /**
        * macOS PKG uninstall surface. Boolean choices are intentionally the
        * entire renderer contract; paths and privileged arguments are resolved
        * by the Electron main process from the signed app bundle.
@@ -110,6 +153,15 @@ declare global {
           removeCurrentUserData: boolean;
         }): Promise<{ ok: true } | { ok: false; error: string; canceled?: boolean }>;
         onShowRequested(callback: () => void): () => void;
+      };
+      /**
+       * Where a content backup should be written or read from. The renderer
+       * only resolves a path; the daemon streams the archive itself, so a
+       * multi-gigabyte file never passes through this process.
+       */
+      backupFile?: {
+        chooseSavePath(defaultName?: string): Promise<{ path?: string }>;
+        chooseOpenPath(): Promise<{ path?: string }>;
       };
       /**
        * App update status from the Electron shell. On macOS `install` opens a
@@ -151,7 +203,25 @@ declare global {
       exportModelBundle?: (
         engine: GezmodelEngine,
         id: string,
-      ) => Promise<{ ok: true; path?: string } | { ok: false; error: string }>;
+        exportId: string,
+      ) => Promise<
+        | { ok: true; canceled: true }
+        | {
+            ok: true;
+            canceled?: false;
+            path: string;
+            bytesWritten: number;
+            verified: true;
+          }
+        | { ok: false; error: string }
+      >;
+      /** Stop an active native export and remove its unpublished partial file. */
+      cancelModelBundleExport?: (
+        exportId: string,
+      ) => Promise<{ ok: true } | { ok: false; error: string }>;
+      onModelBundleExportProgress?: (
+        callback: (progress: ModelBundleExportProgress) => void,
+      ) => () => void;
       /**
        * Scan an OS-opened bundle identified by an opaque main-process request
        * id. The renderer never receives an arbitrary local filesystem path.
@@ -181,7 +251,20 @@ declare global {
         showSystemTray?: boolean;
         quitOnClose?: boolean;
         securityPolicy?: SecurityPolicy;
+        ambientDisplay?: { applyWallpaper?: boolean };
       }) => void;
+      /**
+       * Hand the app's theme preference to Chromium itself, so
+       * `prefers-color-scheme` answers with the user's gezel choice rather
+       * than the operating system's.
+       *
+       * This is the only channel that reaches inside the sandboxed preview
+       * iframe. Project-type pages are a separate, null-origin document, so
+       * neither our CSS variables nor a `color-scheme` on the frame element
+       * reach them (both measured); the browser-level preference does. No-op
+       * outside the desktop shell.
+       */
+      setNativeTheme?: (pref: 'system' | 'light' | 'dark') => void;
       /**
        * Register a callback fired when the engagement mode is changed from
        * the tray menu, so the in-app UI can reflect it. Mirrors

@@ -37,7 +37,6 @@ export {
   openGlobalCollection,
   type GlobalCollectionId,
   type SessionSearchHit,
-  type DocumentSearchHit,
   type GlobalIndexStatus,
 } from './global-index.js';
 export {

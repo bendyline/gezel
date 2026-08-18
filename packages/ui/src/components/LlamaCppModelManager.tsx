@@ -2,6 +2,7 @@ import type { CatalogItemSummary, ChatModelManifest, RecoDevice } from '@bendyli
 import {
   composeFitnessBadge,
   computeModelFit,
+  estimateLlamaCppResidentBytes,
   estimateManifestKvBytes,
   hardwareHint,
   isMoEFromTags,
@@ -23,15 +24,16 @@ import {
 } from '../model-inventory.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { HuggingFaceRepoLink, huggingFaceRepoUrl } from './HuggingFaceRepoLink.js';
 import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { LicenseButton } from './LicenseButton.js';
 import { ImportModelBundleButton } from './ModelBundleControls.js';
 import { ModelActionsMenu, ModelContextSliderPanel } from './ModelContextControls.js';
-import { RecommendedBadge } from './RecommendedBadge.js';
+import { ModelSizeCell } from './ModelSizeCell.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { UnrecognizedModels } from './UnrecognizedModels.js';
 import { formatContextWindow } from './model-context.js';
-import { formatBytes, modelMemoryHeadline, modelSizeTitle } from './model-memory-copy.js';
+import { formatBytes } from './model-memory-copy.js';
 import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
 
 interface MemoryProfile {
@@ -47,8 +49,6 @@ interface MemoryProfile {
    */
   budgetBytes?: number;
 }
-
-const MEMORY_OVERHEAD_FACTOR = 1.2;
 
 /**
  * The machine half of a {@link computeModelFit} call. Every fit check on this
@@ -722,7 +722,10 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                     // because of slot count. Pricing the fleet here would flag
                     // models as too big that the daemon would happily run.
                     const installedResidentBytes =
-                      m.predictedResidentBytes ?? m.approxSizeBytes * MEMORY_OVERHEAD_FACTOR;
+                      m.predictedResidentBytes ??
+                      estimateLlamaCppResidentBytes(m.approxSizeBytes, {
+                        mmprojBytes: m.mmprojSizeBytes,
+                      });
                     const ramFit = memory
                       ? computeModelFit({
                           residentBytes: installedResidentBytes,
@@ -770,9 +773,10 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                                   <span
                                     className="home-status-pill home-status-warn"
                                     title={
-                                      m.availableVersion
-                                        ? `A newer build is available in the catalog (→ v${m.availableVersion}). Update re-downloads and replaces it in place.`
-                                        : 'A newer build is available in the catalog.'
+                                      m.updateReason ??
+                                      (m.availableVersion
+                                        ? `A newer build is available in the catalog (→ v${m.availableVersion}). Updating downloads only the files that differ.`
+                                        : 'A newer build is available in the catalog.')
                                     }
                                   >
                                     update available
@@ -781,14 +785,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                               </div>
                             </div>
                           </td>
-                          <td title={modelSizeTitle(m)}>
-                            {formatBytes(m.approxSizeBytes)}
-                            {modelMemoryHeadline(m) ? (
-                              <span className="muted small model-memory-headline">
-                                {modelMemoryHeadline(m)}
-                              </span>
-                            ) : null}
-                          </td>
+                          <ModelSizeCell model={m} />
                           <td title={quantizationTitle(m.quantization)}>
                             {approximateQuantizationLabel(m.quantization)}
                           </td>
@@ -946,7 +943,9 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
               // which wrongly buried offloadable MoE models.
               const fit = computeModelFit({
                 residentBytes:
-                  m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR + fitKvBytes(m, memory),
+                  estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes, {
+                    mmprojBytes: m.llamaCpp.mmproj?.sizeBytes,
+                  }) + fitKvBytes(m, memory),
                 isMoE: isMoEFromTags(item.manifest.tags),
                 ...fitMachine(memory),
               });
@@ -967,7 +966,8 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
             const fit = memory
               ? computeModelFit({
                   residentBytes:
-                    m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR + fitKvBytes(m, memory),
+                    estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes) +
+                    fitKvBytes(m, memory),
                   isMoE: isMoEFromTags(item.manifest.tags),
                   ...fitMachine(memory),
                 })
@@ -976,7 +976,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
               <div className="catalog-ollama-action">
                 <div className="catalog-ollama-meta">
                   <div className="catalog-ollama-specs muted small">
-                    <code>{m.llamaCpp.huggingfaceRepo}</code>
+                    <HuggingFaceRepoLink repo={m.llamaCpp.huggingfaceRepo} />
                     <span>·</span>
                     <span>{m.parameterSize}</span>
                     <span>·</span>
@@ -989,8 +989,10 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                     )}
                   </div>
                   <div className="catalog-ollama-pills">
-                    <LicenseButton manifest={m} />
-                    <RecommendedBadge manifest={m} />
+                    <LicenseButton
+                      manifest={m}
+                      fallbackHref={huggingFaceRepoUrl(m.llamaCpp.huggingfaceRepo)}
+                    />
                     {fit && fit.tier !== 'fits' && (
                       <span
                         className={`home-status-pill ${fit.tier === 'fits-offload' ? 'home-status-ok' : 'home-status-warn'}`}
@@ -1006,7 +1008,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                               isMoE: isMoEFromTags(item.manifest.tags),
                               fitTier: fit.tier,
                               residentBytes:
-                                m.llamaCpp.approxSizeBytes * MEMORY_OVERHEAD_FACTOR +
+                                estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes) +
                                 fitKvBytes(m, memory),
                             })
                           : null;

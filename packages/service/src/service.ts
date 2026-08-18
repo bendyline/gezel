@@ -25,13 +25,13 @@ import {
 } from '@bendyline/gezel/native';
 import { gezelHome, gezelPaths, readConfigRaw } from '@bendyline/gezel/paths';
 import { type ServerType, serve } from '@hono/node-server';
+import { AmbientDashboardGenerator } from './ambient/dashboard-generator.js';
 import { defaultCacheBudgetMb } from './cache/budget.js';
 import { SessionCacheController } from './cache/controller.js';
 import { ChannelManager } from './channels/manager.js';
 import { ChatEventBus } from './chat/events.js';
 import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
 import { createCodexSetupManager } from './codex-setup/manager.js';
-import { createCodexSetupModelSource } from './codex-setup/model-source.js';
 import { ConnectorActionManager } from './connectors/actions.js';
 import { ProjectLocks } from './connectors/lock.js';
 import { ConnectorManager } from './connectors/manager.js';
@@ -45,7 +45,7 @@ import { registerLinkedInAdapters } from './connectors/natives/linkedin-posts.js
 import { registerXAdapters } from './connectors/natives/x-posts.js';
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
 import { runConnectorTaskPrep } from './connectors/task-prep.js';
-import { listApplicableCraftbooks } from './craftbook/applicable.js';
+import { listApplicableCraftbooks, projectCraftbookSummaries } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
 import { clearCraftbookSuggestVectorCache } from './craftbook/suggest.js';
 import { DebugFlag } from './debug/flag.js';
@@ -69,13 +69,20 @@ import { GrowthEngine } from './growth/engine.js';
 import { createDaemonDeviceInfo } from './handboek/daemon-device.js';
 import { createHandboekEngine } from './handboek/engine.js';
 import { type LoopbackCert, generateLoopbackCert } from './http/cert.js';
-import { codexBridgePortForHome } from './http/codex-bridge-port.js';
 import { buildCodexBridgeApp, createCodexBridgeController } from './http/codex-bridge.js';
 import type { ServiceContext } from './http/context.js';
+import {
+  codexBridgePortForHome,
+  opencodeBridgePortForHome,
+  piBridgePortForHome,
+  vscodeBridgePortForHome,
+} from './http/local-bridge-port.js';
 import {
   buildOllamaEmulationApp,
   createOllamaEmulationController,
 } from './http/ollama-emulation.js';
+import { buildOpenCodeBridgeApp, createOpenCodeBridgeController } from './http/opencode-bridge.js';
+import { buildPiBridgeApp, createPiBridgeController } from './http/pi-bridge.js';
 import {
   PreviewCapabilityStore,
   normalizePreviewPath,
@@ -85,6 +92,7 @@ import { buildRemoteApp } from './http/remote-server.js';
 import { invalidateModelsCache } from './http/routes/models.js';
 import { type UnexpectedHttpErrorHandler, buildApp, buildPreviewApp } from './http/server.js';
 import { createTokenStore } from './http/token-store.js';
+import { buildVSCodeBridgeApp, createVSCodeBridgeController } from './http/vscode-bridge.js';
 import { ContentIndex } from './index-store/content-index.js';
 import { IndexEnrichmentManager } from './index-store/enrichment-manager.js';
 import { GlobalIndexManager } from './index-store/global-index-manager.js';
@@ -93,11 +101,13 @@ import { readImageStaticMeta } from './index-store/image-meta.js';
 import { IndexingJobControl, ensureIndexingJobTask } from './index-store/indexing-job.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
+import { createLocalHarnessModelSource } from './local-harness/model-source.js';
 import { startMachineEngineBridge } from './machine-engine/bridge.js';
 import { registerMailAdapters } from './mail/registry.js';
 import { ensureNightShiftOversightTask } from './meester/night-shift-oversight.js';
 import { MeesterStatusGenerator } from './meester/status-generator.js';
 import { MemoryCompactor } from './memory/compaction.js';
+import { warmEmbeddings } from './memory/embeddings.js';
 import { MemoryHealthMonitor } from './memory/health.js';
 import { MemoryManager } from './memory/manager.js';
 import { createEnsureModelOrchestrator } from './models/ensure.js';
@@ -107,8 +117,10 @@ import {
   modelStorageRoots,
   reclaimAbandonedModelDownloads,
 } from './models/storage-roots.js';
+import { createOpenCodeSetupManager } from './opencode-setup/manager.js';
 import { discoverManagedScriptRuntimes } from './packages/managed-runtimes.js';
 import { normalizeBundledPnpmPath } from './packages/pnpm.js';
+import { createPiSetupManager } from './pi-setup/manager.js';
 import { PreviewLogBuffer } from './preview-log/buffer.js';
 import { recoverTypedProjectCreations } from './project-type/create.js';
 import { SpeechToTextProviderManager } from './providers/audio/stt-manager.js';
@@ -147,6 +159,7 @@ import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-cap
 import { dispatchTaskEntry } from './tasks/entry-dispatch.js';
 import type { GateWorkspaceReader } from './tasks/gate-eval.js';
 import { TaskManager } from './tasks/manager.js';
+import { NightShiftQuotaGate } from './tasks/night-quota-gate.js';
 import { buildNightShiftReview, nightShiftReportAttachmentPath } from './tasks/night-review.js';
 import { NightShiftManager } from './tasks/night-shift-manager.js';
 import { TaskRunner } from './tasks/runner.js';
@@ -155,10 +168,18 @@ import { evaluateStepGate } from './tasks/step-gate.js';
 import { TerminalEventBus } from './terminal/events.js';
 import { type CraftbookInvoker, TerminalManager } from './terminal/manager.js';
 import { HF_CACHE_DIR_ENV, transformersCacheDir } from './transformers-cache.js';
+import { createVSCodeSetupManager } from './vscode-setup/manager.js';
 import { WorkspaceIndexManager } from './workspace/index-manager.js';
 import { WorkspaceWatchManager } from './workspace/watch-manager.js';
 
 const log = createLogger('service');
+
+/**
+ * Collapses an editor autosave burst (or a gezel writing several documents in
+ * one turn) into a single library re-index. Long enough to batch, short
+ * enough that a document is searchable while the user is still looking at it.
+ */
+const LIBRARY_REFRESH_DEBOUNCE_MS = 3_000;
 
 /**
  * Canonical fixed port for the Gezel daemon. `6228` spells "MAAT" on a
@@ -256,6 +277,16 @@ export interface StartServiceOptions {
   codexHome?: string;
   /** Exact Codex bridge port override (`0` = ephemeral); production derives one from `home`. */
   codexBridgePort?: number;
+  /** Exact OpenCode bridge port override (`0` = ephemeral); production derives one from `home`. */
+  opencodeBridgePort?: number;
+  /** Override pi's fixed loopback bridge port. Tests bind ephemeral ports. */
+  piBridgePort?: number;
+  /** Override pi's own agent directory. Tests must never write to a real one. */
+  piAgentDir?: string;
+  /** Override VS Code's fixed loopback bridge port. Tests bind ephemeral ports. */
+  vscodeBridgePort?: number;
+  /** Override VS Code's User/profile directory. Tests must never write to a real one. */
+  vscodeUserDir?: string;
 }
 
 export interface RunningService {
@@ -413,8 +444,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   const store = new Store({ home, history, external, serviceRole, privateUserHome });
   if (serviceRole !== 'machine-engine') await recoverTypedProjectCreations(store);
   await store.ensureLayout();
+  let sharedProject: { id: string; created: boolean } | null = null;
   if (serviceRole !== 'machine-engine') {
     await store.ensureDefaultProject();
+    sharedProject = await store.ensureSharedProject();
     await store.ensureDefaultMeester();
     await store.ensureDefaultKlerk();
   }
@@ -542,7 +575,17 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // The Boekwachter is a full, catalog-backed gezel. This runs after catalog
   // construction (unlike the Store-owned Meester/Klerk ensures above) so the
   // canonical gilde about.md and template provenance are preserved.
-  if (serviceRole !== 'machine-engine') await ensureDefaultBoekwachter(store, catalog);
+  if (serviceRole !== 'machine-engine') {
+    // The shared library's AI tier (summaries, media shadows) is gated on a
+    // Boekwachter being on its roster, so a freshly created library opts in
+    // once here. An install that already has the seat filled recruits only
+    // this project; nothing else is re-broadened.
+    await ensureDefaultBoekwachter(
+      store,
+      catalog,
+      sharedProject?.created ? { recruitProjectIds: [sharedProject.id] } : {},
+    );
+  }
   const secrets = await openSecretStore(home);
   log.info(`[secrets] backend=${secrets.backend}`);
   // The engine broker needs its device-identity key, but must never ingest
@@ -920,10 +963,21 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     tasks.collapseCraftbookForTier(projectId, num, opts),
   );
 
+  // Quota reserve for cloud-subscription night work — one verdict source
+  // shared by the runner's per-handoff admission gate and the manager's
+  // activeness/status classification, so the two can never disagree.
+  const nightQuotaGate = new NightShiftQuotaGate({ store, usage: chat.usageTracker, home });
+
   // NightShiftManager owns the Night Shift ON/OFF state (nightly window +
   // manual shifts). Its `isActive` read gates deferred night-shift work in
   // the scheduler, runner, and enrichment loop below.
-  const nightShift = new NightShiftManager({ store, manager: tasks, events: chatEvents });
+  const nightShift = new NightShiftManager({
+    store,
+    manager: tasks,
+    events: chatEvents,
+    quotaGate: nightQuotaGate,
+    resolveProviderName: (gezelId, opts) => chat.providerForGezel(gezelId, opts),
+  });
 
   // Per-project last-activity stamps, fed by the history + chat buses.
   // The nudge scheduler and the meester status generator both read it
@@ -964,6 +1018,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     isNightShiftActive: () => nightShift.isActive(),
     isNightShiftPending: (task) => nightShift.isPendingToday(task),
     isIndexCatchUpActive: () => indexEnrichmentRef?.isCatchUpActive() ?? false,
+    nightQuotaHold: (provider) => nightQuotaGate.holdFor(provider),
     ...(config.taskRunner?.tickIntervalMs
       ? { tickIntervalMs: config.taskRunner.tickIntervalMs }
       : {}),
@@ -1177,9 +1232,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
 
   // Wire the craftbook resolver: project-local books shadow local
   // templates, which shadow the bundled catalog. Shared with the
-  // project-type install path (craftbook/resolve.ts) so both resolve
-  // through the exact same chain.
-  tasks.setCraftbookResolver(makeCraftbookResolver(store, catalog));
+  // project-type install path (craftbook/resolve.ts) and the command
+  // launcher below so all three resolve through the exact same chain.
+  const craftbookResolver = makeCraftbookResolver(store, catalog);
+  tasks.setCraftbookResolver(craftbookResolver);
 
   const channels = new ChannelManager({ store, secrets, history, debug });
 
@@ -1481,7 +1537,19 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
             for (const item of items) {
               const context: Record<string, string> = {};
               for (const [k, v] of Object.entries(item)) {
-                context[k] = typeof v === 'string' ? v : v == null ? '' : String(v);
+                // Scalars substitute as themselves; anything structural is
+                // JSON so the child can parse it. `String(['a','b'])` gives
+                // `a,b` — readable in a prompt, but a child whose slice of
+                // work IS that array (a batch's `paths`) then has no way to
+                // recover the items, and any path built from it is junk.
+                context[k] =
+                  v == null
+                    ? ''
+                    : typeof v === 'string'
+                      ? v
+                      : typeof v === 'object'
+                        ? JSON.stringify(v)
+                        : String(v);
               }
               const title =
                 context.number && context.client
@@ -1578,11 +1646,15 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // path). If a future change auto-starts the entry step on create,
   // drop both call sites to avoid a double start.
   const craftbookInvoker: CraftbookInvoker = async ({ projectId, craftbookId, params }) => {
-    const detail = await catalog.get('craftbook-template', craftbookId).catch(() => null);
-    if (!detail || detail.manifest.kind !== 'craftbook-template') {
+    // Resolve through the task resolver's chain, not the catalog alone: a
+    // project-local book (`.gezel/craftbooks/`, usually converted from a
+    // repo SKILL.md) is offered by the launcher rail, so a catalog-only
+    // lookup here rejected exactly the books this project defined itself.
+    const resolved = await craftbookResolver.resolve(craftbookId, { projectId }).catch(() => null);
+    if (!resolved) {
       throw new Error(`unknown craftbook "${craftbookId}"`);
     }
-    const m = detail.manifest;
+    const m = resolved.craftbook;
 
     const paramSummary = Object.entries(params)
       .map(([k, v]) => `${k}=${v}`)
@@ -1596,8 +1668,18 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     const entryRole = m.steps.find((s) => s.id === m.entryStepId)?.suggestedRole;
     let assignee: TaskAssignee = { kind: 'user' };
     if (entryRole) {
-      const resolved = await roleResolverClosure(entryRole, projectId).catch(() => null);
-      if (resolved?.gezelId) assignee = { kind: 'gezel', gezelId: resolved.gezelId };
+      const owner = await roleResolverClosure(entryRole, projectId).catch(() => null);
+      if (owner?.gezelId) assignee = { kind: 'gezel', gezelId: owner.gezelId };
+    }
+    if (assignee.kind === 'user') {
+      // A book whose entry step names no role — every SKILL.md conversion
+      // that carried no persona — would otherwise launch owned by the user
+      // and never dispatch: created, active, and inert, which reads to the
+      // user as "I ran it and nothing happened". The voorman is the
+      // project's standing answer to "who picks this up?", and can route it
+      // onward. Falls through to the user only when the project has none.
+      const voormanGezelId = (await store.getProject(projectId).catch(() => null))?.voormanGezelId;
+      if (voormanGezelId) assignee = { kind: 'gezel', gezelId: voormanGezelId };
     }
 
     const task = await tasks.create(projectId, {
@@ -1651,6 +1733,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
 
   const { JobManager: FolderJobManager } = await import('./folders/job-manager.js');
   const folderJobs = new FolderJobManager();
+  const { StorageJobManager } = await import('./storage/job-manager.js');
+  const storageJobs = new StorageJobManager();
   const { detectInterruptedMove } = await import('./folders/recovery.js');
   void detectInterruptedMove(home);
 
@@ -1672,6 +1756,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     contentIndex,
     events: chatEvents,
   });
+  // Same post-construction injection as the content index above: the
+  // indexer takes `chat` as a dependency, so the reference parser can only
+  // reach the workspace listing from this side.
+  chat.setWorkspaceIndex(workspaceIndex);
   // Code reviews: snapshot-driven review tasks kicked off from the GitHub
   // tab's Review panel; records live in per-project code-reviews.json.
   const codeReviews = new CodeReviewManager({
@@ -1814,8 +1902,30 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // HistoryManager itself.
   const globalIndex = new GlobalIndex(home);
   const globalIndexManager = new GlobalIndexManager({ store, history });
+
+  let libraryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleLibraryRefresh = (): void => {
+    if (!sharedProject) return;
+    if (libraryRefreshTimer) clearTimeout(libraryRefreshTimer);
+    libraryRefreshTimer = setTimeout(() => {
+      libraryRefreshTimer = null;
+      void workspaceIndex
+        .refresh(sharedProject!.id)
+        .catch((err) =>
+          log.warn(`[library] refresh failed: ${err instanceof Error ? err.message : err}`),
+        );
+    }, LIBRARY_REFRESH_DEBOUNCE_MS);
+    libraryRefreshTimer.unref?.();
+  };
+
   store.onSessionChange((ev) => globalIndexManager.enqueueSession(ev));
-  store.onDocumentChange((ev) => globalIndexManager.enqueueDocument(ev));
+  store.onDocumentChange((ev) => {
+    globalIndexManager.enqueueDocument(ev);
+    // An in-app document write is the one library change we learn about
+    // immediately; the watcher covers edits made outside. Debounced so an
+    // editor autosave burst collapses into one pass.
+    scheduleLibraryRefresh();
+  });
   history.subscribe((event) => globalIndexManager.enqueueHistory(event));
   history.setQueryBackend((f) => globalIndex.searchHistory(f));
   history.setRewriteBackend(() => globalIndexManager.rebuildHistoryMirror());
@@ -1892,6 +2002,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     store,
     indexManager: workspaceIndex,
     onProjectMcpConfigChanged: (projectId) => chat.resetProjectToolsets(projectId),
+    // The library never opens as a project tab, so it can never earn an MRU
+    // watcher slot — yet it is the one workspace that routinely changes from
+    // outside the app (a sync client landing a file from another device).
+    pinnedProjects: () => (sharedProject ? [sharedProject.id] : []),
   });
 
   // Connectors: mail, calendar, and wiki natives plus the generic drivers,
@@ -1949,6 +2063,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       if (!project) throw new Error(`project ${projectId} not found`);
       return project;
     },
+    // Degrades to the link's pinned branch rather than failing the launch
+    // when the checkout is missing or git is unreadable.
+    currentBranch: async (project) => (await git.status(project).catch(() => null))?.branch,
   });
   tasks.setConnectorPrepHook(
     async ({ projectId, craftbookId, connectors: needs, params }) => {
@@ -1956,8 +2073,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         {
           getProject: (id) => store.getProject(id),
           sync: (project, bindingId, opts) => connectors.syncBinding(project, bindingId, opts),
-          allowExternalServices: async () =>
-            resolveSecurityPolicy(await store.readConfig()).allowExternalServices,
+          allowConnectorData: async () =>
+            resolveSecurityPolicy(await store.readConfig()).allowConnectorData,
           ensureBinding: async (project, need) => {
             if (need.typeId !== 'github-pulls') return null;
             if (!project.github?.url) return null;
@@ -1989,9 +2106,19 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     history,
     // Only craftbooks applicable to THIS project (requirements met) are
     // recognized as terminal commands — so e.g. `pull-request-review`
-    // isn't a command in a non-GitHub project.
+    // isn't a command in a non-GitHub project. Project-local books are
+    // merged in (shadowing same-id catalog entries) to match what the
+    // launcher rail offers: without them, clicking a book this repo
+    // defined itself staged a line the terminal then tried to run as a
+    // shell command.
     listCraftbookCommands: async (projectId) => {
-      const items = await listApplicableCraftbooks(catalog, store, projectId, { git });
+      const projectItems = await projectCraftbookSummaries(store, projectId, { git });
+      const projectIds = new Set(projectItems.map((it) => it.manifest.id));
+      const catalogItems = await listApplicableCraftbooks(catalog, store, projectId, { git });
+      const items = [
+        ...projectItems,
+        ...catalogItems.filter((it) => !projectIds.has(it.manifest.id)),
+      ];
       return items.flatMap((it) =>
         it.manifest.kind === 'craftbook-template'
           ? [
@@ -2067,7 +2194,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     },
     port: opts.codexBridgePort ?? codexBridgePortForHome(home),
   });
-  const listCodexSetupModels = createCodexSetupModelSource({
+  const listCodexSetupModels = createLocalHarnessModelSource({
     catalog,
     listModels: (provider, signal) => chat.listModelsForProvider(provider, signal),
     resolveNativeContextWindow: async (provider, modelId, signal) => {
@@ -2078,7 +2205,12 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
           remoteProvider.getContextWindow?.()
         );
       }
-      return chat.previewContextWindowForModel(provider, modelId);
+      // Standalone, because this number is published to a Codex profile on
+      // disk and read back on every launch for days. Live pricing charged the
+      // model for whatever else was resident at setup time, so every entry
+      // came out at the 64K floor even on a host admitting 128K+ — Codex then
+      // compacted at 90% of the wrong figure, repeatedly, mid-task.
+      return chat.previewContextWindowForModel(provider, modelId, { standalone: true });
     },
   });
   const codexSetup = createCodexSetupManager({
@@ -2086,6 +2218,79 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     ...(opts.codexHome !== undefined ? { codexHome: opts.codexHome } : {}),
     tokenStore,
     bridge: codexBridge,
+    readConfig: () => store.readConfig(),
+    listGezels: () => store.listGezels(),
+    providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
+    listModels: listCodexSetupModels,
+  });
+
+  // OpenCode needs the same stable plain-HTTP origin as Codex, on its own port
+  // so neither integration's lifecycle can take the other's listener down. Its
+  // provider speaks chat completions rather than the Responses API, hence a
+  // separate app over the same authenticated route stack.
+  const opencodeBridgeFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
+  const opencodeBridge = createOpenCodeBridgeController({
+    fetch: () => {
+      if (!opencodeBridgeFetchRef.value) {
+        throw new Error('OpenCode bridge cannot start before the HTTP app is ready');
+      }
+      return opencodeBridgeFetchRef.value;
+    },
+    port: opts.opencodeBridgePort ?? opencodeBridgePortForHome(home),
+  });
+  const opencodeSetup = createOpenCodeSetupManager({
+    home,
+    tokenStore,
+    bridge: opencodeBridge,
+    readConfig: () => store.readConfig(),
+    listGezels: () => store.listGezels(),
+    providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
+    // The same proven-capability model source Codex uses: a coding harness
+    // cannot fall back gracefully from a model that turns out not to do tools.
+    listModels: listCodexSetupModels,
+  });
+
+  // pi speaks the same chat-completions dialect as OpenCode, on its own port
+  // and credential so revoking one harness never disturbs the others.
+  const piBridgeFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
+  const piBridge = createPiBridgeController({
+    fetch: () => {
+      if (!piBridgeFetchRef.value) {
+        throw new Error('pi bridge cannot start before the HTTP app is ready');
+      }
+      return piBridgeFetchRef.value;
+    },
+    port: opts.piBridgePort ?? piBridgePortForHome(home),
+  });
+  const piSetup = createPiSetupManager({
+    home,
+    ...(opts.piAgentDir !== undefined ? { piAgentDir: opts.piAgentDir } : {}),
+    tokenStore,
+    bridge: piBridge,
+    readConfig: () => store.readConfig(),
+    listGezels: () => store.listGezels(),
+    providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
+    listModels: listCodexSetupModels,
+  });
+
+  // VS Code's built-in custom-endpoint provider uses chat completions too.
+  // It gets an independent port and credential so its plaintext profile token
+  // can be revoked without disturbing any other connected app.
+  const vscodeBridgeFetchRef: { value?: Parameters<typeof serve>[0]['fetch'] } = {};
+  const vscodeBridge = createVSCodeBridgeController({
+    fetch: () => {
+      if (!vscodeBridgeFetchRef.value) {
+        throw new Error('VS Code bridge cannot start before the HTTP app is ready');
+      }
+      return vscodeBridgeFetchRef.value;
+    },
+    port: opts.vscodeBridgePort ?? vscodeBridgePortForHome(home),
+  });
+  const vscodeSetup = createVSCodeSetupManager({
+    home,
+    ...(opts.vscodeUserDir !== undefined ? { vscodeUserDir: opts.vscodeUserDir } : {}),
+    tokenStore,
+    bridge: vscodeBridge,
     readConfig: () => store.readConfig(),
     listGezels: () => store.listGezels(),
     providerForGezel: (gezelId) => chat.providerForGezel(gezelId),
@@ -2105,6 +2310,20 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     isNightShiftActive: () => nightShift.isActive(),
     isChatActive: () => chat.isAnyActive(),
     osIdleSeconds: () => systemIdle.osIdleSeconds(),
+    events: chatEvents,
+  });
+
+  // The ambient dashboard — PNG workshop snapshots for the OS
+  // wallpaper integration. Scheduled passes are ambient/background; a
+  // user-clicked Generate now pass carries interactive priority instead.
+  const ambientDashboard = new AmbientDashboardGenerator({
+    home,
+    store,
+    history,
+    activity: activityTracker,
+    oneShot: (prompt, timeoutMs, opts) => chat.oneShotCompletion(prompt, timeoutMs, opts),
+    isNightShiftActive: () => nightShift.isActive(),
+    isChatActive: () => chat.isAnyActive(),
     events: chatEvents,
   });
 
@@ -2137,6 +2356,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     nightShift,
     indexEnrichment,
     meesterStatus,
+    ambientDashboard,
     scriptRunner,
     catalog,
     gildeUpdates,
@@ -2178,12 +2398,17 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     remoteTenantLimits,
     ollamaEmulation,
     codexSetup,
+    opencodeSetup,
+    piSetup,
+    vscodeSetup,
     ...(cert ? { tlsCertSha256: cert.sha256Hex, tlsCertPem: cert.certPem } : {}),
     ensureModel,
     startedAt: nowIso(),
     childProcessSpawn,
     uiDir: serviceRole === 'machine-engine' ? undefined : opts.uiDir,
     folderJobs,
+    storageJobs,
+    invalidateModelsCache,
     workspaceIndex,
     contentIndex,
     globalIndex,
@@ -2213,6 +2438,12 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     models: () => codexSetup.codexModelCatalog(),
   });
   codexBridgeFetchRef.value = codexBridgeApp.fetch.bind(codexBridgeApp);
+  const opencodeBridgeApp = buildOpenCodeBridgeApp(context);
+  opencodeBridgeFetchRef.value = opencodeBridgeApp.fetch.bind(opencodeBridgeApp);
+  const piBridgeApp = buildPiBridgeApp(context);
+  piBridgeFetchRef.value = piBridgeApp.fetch.bind(piBridgeApp);
+  const vscodeBridgeApp = buildVSCodeBridgeApp(context);
+  vscodeBridgeFetchRef.value = vscodeBridgeApp.fetch.bind(vscodeBridgeApp);
 
   // Port selection, by caller intent:
   //   - explicit `opts.port` (from `--port` / `GEZEL_PORT`): bind exactly
@@ -2477,6 +2708,21 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         `[service] Codex local-model bridge not started: ${err instanceof Error ? err.message : err}`,
       );
     });
+    await opencodeSetup.reconcile().catch((err) => {
+      log.warn(
+        `[service] OpenCode local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+      );
+    });
+    await piSetup.reconcile().catch((err) => {
+      log.warn(
+        `[service] pi local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+      );
+    });
+    await vscodeSetup.reconcile().catch((err) => {
+      log.warn(
+        `[service] VS Code local-model bridge not started: ${err instanceof Error ? err.message : err}`,
+      );
+    });
   }
 
   if (serviceRole !== 'machine-engine') {
@@ -2618,6 +2864,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   if (serviceRole !== 'machine-engine') {
     activityTracker.start();
     meesterStatus.start();
+    ambientDashboard.start();
   }
 
   // Keurmeester harvest digest: aggregates supervision case records into
@@ -2672,6 +2919,15 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         /* swallow */
       });
     }, 60_000).unref();
+    // Load the embedding pipeline before an interactive caller needs it. The
+    // titlebar search fans out over content on every query, so without this
+    // the model's one-time load lands on somebody's first keystroke. Deferred
+    // so it never competes with boot or the first-run model download.
+    setTimeout(() => {
+      void warmEmbeddings().then((warmed) => {
+        if (warmed) log.debug('[memory] embedding pipeline warmed');
+      });
+    }, 20_000).unref();
   }
 
   return {
@@ -2696,11 +2952,14 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       gildeUpdates.stop();
       keurmeesterDigest.stop();
       meesterStatus.stop();
+      ambientDashboard.stop();
       await activityTracker.stop();
       workspaceIndex.stop();
       workspaceWatch.stop();
       indexEnrichment.stop();
       globalIndexManager.stop();
+      // An open document-edit window would otherwise lose its audit event.
+      await store.flushDocumentAudit().catch(() => {});
       connectorSync.stop();
       cacheController.stop();
       imagePulls.clear();
@@ -2719,6 +2978,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       await remoteServing.stop();
       await ollamaEmulation.stop();
       await codexSetup.stop();
+      await opencodeSetup.stop();
+      await piSetup.stop();
+      await vscodeSetup.stop();
       await machineEngine?.stop();
       await closePairedRemoteFetches(remotes);
       if (previewServer) {

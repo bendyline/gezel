@@ -89,6 +89,7 @@ export async function reuseVerifiedElectronNativeBinaries(
 
   const failures: string[] = [];
   for (const candidate of opts.candidates) {
+    const startedAt = Date.now();
     try {
       await verifyCandidate({
         root: candidate,
@@ -101,9 +102,14 @@ export async function reuseVerifiedElectronNativeBinaries(
       return {
         reused: true,
         nativeBinDir: resolve(candidate),
+        // The elapsed time is load-bearing diagnostics, not decoration: this
+        // is pre-bind boot work whose cost scales with the payload, and on a
+        // CUDA host it is the largest single read the daemon ever does at
+        // startup. Without it in the log there is nothing to attribute a slow
+        // launch to.
         reason: `verified ${
           opts.allowStandaloneMacPayload ? 'standalone' : 'Electron'
-        } native release ${release}`,
+        } native release ${release} in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
       };
     } catch (error) {
       failures.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
@@ -151,7 +157,16 @@ async function verifyCandidate(opts: {
       ...actual.symlinks.keys(),
     ]);
 
-    for (const [relativePath, pin] of Object.entries(platformPin.files)) {
+    // Hash several files at once. This runs on the boot path of every daemon
+    // — before the HTTP bind — and on a CUDA host the pinned set is dominated
+    // by NVIDIA redistributables: libcublasLt.so alone is 717 MB, libcublas.so
+    // another 111 MB. Serially, that is a gigabyte of streaming SHA-256 in
+    // front of the first request on every single launch. The work is I/O bound
+    // on a handful of very large files, so a small pool collapses most of it
+    // into the time of the largest member; a bigger pool just queues seeks.
+    // Semantics are unchanged: any rejection still fails the candidate, and
+    // the first one to fail wins the message.
+    await mapWithConcurrency(Object.entries(platformPin.files), 4, async ([relativePath, pin]) => {
       if (!isSafeRelativePath(relativePath)) {
         throw new Error(`unsafe pinned native path: ${relativePath}`);
       }
@@ -160,6 +175,8 @@ async function verifyCandidate(opts: {
       if (!info.isFile() || info.isSymbolicLink()) {
         throw new Error(`pinned file is missing or not regular: ${platformKey}/${relativePath}`);
       }
+      // Cheap discriminator first: a size mismatch means the sha cannot match,
+      // so a wrong release is rejected without reading a byte of it.
       if (info.size !== pin.sizeBytes) {
         throw new Error(`size mismatch: ${platformKey}/${relativePath}`);
       }
@@ -181,7 +198,7 @@ async function verifyCandidate(opts: {
           );
         }
       }
-    }
+    });
 
     for (const [relativePath, target] of Object.entries(platformPin.symlinks)) {
       if (!isSafeRelativePath(relativePath)) {
@@ -256,6 +273,28 @@ async function listNativeEntries(
     files: files.sort(),
     symlinks: new Map([...symlinks].sort(([a], [b]) => a.localeCompare(b))),
   };
+}
+
+/**
+ * Run `worker` over `items` with at most `limit` in flight, rejecting with the
+ * first failure. Workers already in flight are allowed to settle; nothing here
+ * mutates state, so an abandoned hash is inert.
+ */
+async function mapWithConcurrency<T>(
+  items: readonly T[],
+  limit: number,
+  worker: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = next++;
+      const item = items[index];
+      if (index >= items.length || item === undefined) return;
+      await worker(item);
+    }
+  });
+  await Promise.all(runners);
 }
 
 function isLoadableNativeFile(platform: NodeJS.Platform, name: string, mode: number): boolean {

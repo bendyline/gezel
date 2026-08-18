@@ -1,4 +1,5 @@
 import {
+  type ClaudePermissionMode,
   type CodexPermissionMode,
   type GezelSummary,
   type HealthResponse,
@@ -15,6 +16,7 @@ import type {
 } from '@bendyline/gezel-client';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { AmbientDashboardCard } from '../components/AmbientDashboardCard.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ConnectedAppsPanel } from '../components/ConnectedAppsPanel.js';
 import { CopilotInstallCard } from '../components/CopilotInstallCard.js';
@@ -24,9 +26,10 @@ import { GildeUpdatesCard } from '../components/GildeUpdatesCard.js';
 import { HealthStrip } from '../components/HealthStrip.js';
 import { InstallModelTuningEditor } from '../components/InstallModelTuningEditor.js';
 import { requestMacUninstall } from '../components/MacUninstallDialog.js';
-import { EffortPicker, ModelPicker } from '../components/ModelPicker.js';
+import { EffortPicker, EffortTray, ModelPicker } from '../components/ModelPicker.js';
 import { RemoteServersPanel } from '../components/RemoteServersPanel.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
+import { StorageUsageCard } from '../components/StorageUsageCard.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
 import { useCopilotAvailability } from '../components/useCopilotAvailability.js';
 import { useTotalRamBytes } from '../components/useTotalRamBytes.js';
@@ -56,8 +59,36 @@ type CodexCliReasoningEffort = NonNullable<
   NonNullable<ConfigResponse['codexCli']>['defaultReasoningEffort']
 >;
 
+const CLAUDE_PERMISSION_CHOICES: ReadonlyArray<{
+  id: ClaudePermissionMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: 'plan',
+    label: 'Plan only',
+    description: 'Read and review without making changes.',
+  },
+  {
+    id: 'default',
+    label: 'Standard prompts',
+    description: "Use Claude Code's normal permission prompts.",
+  },
+  {
+    id: 'acceptEdits',
+    label: 'Accept edits',
+    description: 'Approve file changes; ask before commands and other actions.',
+  },
+  {
+    id: 'bypassPermissions',
+    label: 'Full access',
+    description: 'Approve every tool automatically, including shell commands.',
+  },
+];
+
 type SectionId =
   | 'general'
+  | 'deviceIntegration'
   | 'team'
   | 'folders'
   | 'defaults'
@@ -115,9 +146,17 @@ function clampHour(value: string, fallback: number): number {
   return Math.min(23, Math.max(0, n));
 }
 
+/** Parse a percent input, clamping to 0–100 and falling back on garbage. */
+function clampPercent(value: string, fallback: number): number {
+  const n = Number.parseInt(value, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(100, Math.max(0, n));
+}
+
 function buildSections(platform: string | undefined): SettingsSection[] {
   return [
     { id: 'general', label: 'General' },
+    { id: 'deviceIntegration', label: 'Device Integration' },
     { id: 'team', label: 'Your Team' },
     { id: 'folders', label: 'Folders' },
     { id: 'securityCompliance', label: 'Security & Compliance' },
@@ -279,6 +318,7 @@ export function SettingsView() {
   useEffect(() => {
     const valid = new Set<SectionId>([
       'general',
+      'deviceIntegration',
       'team',
       'folders',
       'defaults',
@@ -307,6 +347,15 @@ export function SettingsView() {
     window.addEventListener('gezel:navigate', onNav);
     return () => window.removeEventListener('gezel:navigate', onNav);
   }, []);
+
+  // Channels sits in the work-in-progress bucket, so a deep link or a
+  // still-open Channels panel can outlive the opt-in it depends on. Wait for
+  // config to load before deciding, or the first paint bounces the user out.
+  useEffect(() => {
+    if (section === 'channels' && config && config.showWorkInProgressFeatures !== true) {
+      setSection('general');
+    }
+  }, [section, config]);
 
   const setMeester = useCallback(async (id: string) => {
     setStatus('saving…');
@@ -475,7 +524,7 @@ export function SettingsView() {
     try {
       const res = await api.updateConfig({ provider });
       setConfig(res);
-      setStatus('');
+      setStatus('saved — open chats restart on their next message.');
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
     }
@@ -618,6 +667,10 @@ export function SettingsView() {
         provider?: ProviderName;
         model?: string;
       };
+      quotaReserve?: {
+        overall?: { enabled?: boolean; percent?: number };
+        perDay?: { enabled?: boolean; percent?: number };
+      };
     }) => {
       setStatus('saving…');
       try {
@@ -647,6 +700,18 @@ export function SettingsView() {
       });
     },
     [config?.nightShift?.modelOverride, config?.provider, saveNightShift],
+  );
+
+  const saveNightShiftQuotaReserve = useCallback(
+    async (rule: 'overall' | 'perDay', patch: { enabled?: boolean; percent?: number }) => {
+      // Spread every level: the store merges config shallowly, so the whole
+      // nested object must round-trip with the sibling rule intact.
+      const current = config?.nightShift?.quotaReserve ?? {};
+      await saveNightShift({
+        quotaReserve: { ...current, [rule]: { ...(current[rule] ?? {}), ...patch } },
+      });
+    },
+    [config?.nightShift?.quotaReserve, saveNightShift],
   );
 
   const saveRoleBasedNameOnlyMode = useCallback(async (roleBasedNameOnlyMode: boolean) => {
@@ -1198,6 +1263,9 @@ export function SettingsView() {
       // Benchmarks is a debug-only surface — hidden until the user turns on
       // Debug mode under the About tab.
       if (s.id === 'benchmarks' && config?.debugMode !== true) return false;
+      // Channels is in the work-in-progress bucket alongside connectors —
+      // hidden until the user opts in under About.
+      if (s.id === 'channels' && config?.showWorkInProgressFeatures !== true) return false;
       return true;
     });
   }, [
@@ -1208,6 +1276,7 @@ export function SettingsView() {
     showOpenaiProvider,
     showAnthropicProvider,
     config?.debugMode,
+    config?.showWorkInProgressFeatures,
   ]);
 
   const activeSectionGroup = useMemo(
@@ -1365,65 +1434,6 @@ export function SettingsView() {
                 })()}
               </div>
             </section>
-            <section>
-              <h3>System tray</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Keep a Gezel icon in the {isDarwin ? 'menu bar' : 'system tray'} for at-a-glance
-                status, notifications, and a quick engagement-mode toggle. When on
-                {isDarwin
-                  ? ''
-                  : ', closing the window keeps Gezel running in the tray (quit from the tray menu)'}
-                .
-              </p>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <input
-                  type="checkbox"
-                  checked={config?.showSystemTray !== false}
-                  onChange={(e) => void saveShowSystemTray(e.target.checked)}
-                />
-                <span>Show the tray icon</span>
-              </label>
-              {/* Close-to-tray opt-out. Only relevant when the tray is on, and
-                  only on Windows/Linux — macOS keeps the app alive on close
-                  regardless, so the toggle would be a no-op there. */}
-              {config?.showSystemTray !== false && !isDarwin && (
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    marginTop: '0.5rem',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={config?.quitOnClose === true}
-                    onChange={(e) => void saveQuitOnClose(e.target.checked)}
-                  />
-                  <span>Remove the tray icon on close.</span>
-                </label>
-              )}
-            </section>
-            {/* Mac-only: by convention macOS keeps the app running after the
-                window closes. This opt-in makes the red X quit Gezel entirely,
-                matching Windows. Off by default; independent of the tray. */}
-            {isDarwin && (
-              <section style={{ marginTop: '2rem' }}>
-                <h3>Close button</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  By default macOS keeps Gezel running when you close the window. Turn this on to
-                  quit Gezel entirely when you click the red close button.
-                </p>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={config?.quitOnClose === true}
-                    onChange={(e) => void saveQuitOnClose(e.target.checked)}
-                  />
-                  <span>Quit Gezel when the window is closed.</span>
-                </label>
-              </section>
-            )}
             <section style={{ marginTop: '2rem' }}>
               <h3>Night Shift</h3>
               <p className="muted" style={{ marginTop: 0 }}>
@@ -1524,6 +1534,79 @@ export function SettingsView() {
               )}
             </section>
             <section style={{ marginTop: '2rem' }}>
+              <h3>Night shift cloud quota reserve</h3>
+              <p className="muted" style={{ marginTop: 0 }}>
+                For Claude, Codex, and Copilot subscriptions, run the night shift only until:
+              </p>
+              <label
+                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}
+              >
+                <input
+                  type="checkbox"
+                  checked={config?.nightShift?.quotaReserve?.overall?.enabled !== false}
+                  onChange={(e) =>
+                    void saveNightShiftQuotaReserve('overall', { enabled: e.target.checked })
+                  }
+                  aria-label="Stop night work near my overall quota"
+                />
+                <span>I’m within</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={config?.nightShift?.quotaReserve?.overall?.percent ?? 20}
+                  onChange={(e) =>
+                    void saveNightShiftQuotaReserve('overall', {
+                      percent: clampPercent(e.target.value, 20),
+                    })
+                  }
+                  style={{ width: '2.5rem' }}
+                  disabled={config?.nightShift?.quotaReserve?.overall?.enabled === false}
+                  aria-label="Overall quota floor percent"
+                />
+                <span>% of my overall quota</span>
+              </label>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  flexWrap: 'wrap',
+                  marginTop: '0.4rem',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={config?.nightShift?.quotaReserve?.perDay?.enabled === true}
+                  onChange={(e) =>
+                    void saveNightShiftQuotaReserve('perDay', { enabled: e.target.checked })
+                  }
+                  aria-label="Reserve a share of my quota per day until reset"
+                />
+                <span>It would dip into a reserve of</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={config?.nightShift?.quotaReserve?.perDay?.percent ?? 10}
+                  onChange={(e) =>
+                    void saveNightShiftQuotaReserve('perDay', {
+                      percent: clampPercent(e.target.value, 10),
+                    })
+                  }
+                  style={{ width: '2.5rem' }}
+                  disabled={config?.nightShift?.quotaReserve?.perDay?.enabled !== true}
+                  aria-label="Daily quota reserve percent"
+                />
+                <span>% of my quota per day until it resets</span>
+              </label>
+              <p className="muted small" style={{ margin: '0.35rem 0 0 1.5rem' }}>
+                The daily reserve scales with the time left: 10% a day with 4 days until reset keeps
+                the last 40% for you. Work already running finishes; held work resumes when your
+                quota frees up. Gezels on local models are never held.
+              </p>
+            </section>
+            <section style={{ marginTop: '2rem' }}>
               <h3>Gezel templates</h3>
               <p className="muted" style={{ marginTop: 0 }}>
                 Restore every gezel created from a template back to the <code>about.md</code> their
@@ -1537,8 +1620,82 @@ export function SettingsView() {
           </>
         )}
 
+        {section === 'deviceIntegration' && (
+          <>
+            <section>
+              <h3>System tray</h3>
+              <p className="muted" style={{ marginTop: 0 }}>
+                Keep a Gezel icon in the {isDarwin ? 'menu bar' : 'system tray'} for at-a-glance
+                status, notifications, and a quick engagement-mode toggle. When on
+                {isDarwin
+                  ? ''
+                  : ', closing the window keeps Gezel running in the tray (quit from the tray menu)'}
+                .
+              </p>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <input
+                  type="checkbox"
+                  checked={config?.showSystemTray !== false}
+                  onChange={(e) => void saveShowSystemTray(e.target.checked)}
+                />
+                <span>Show the tray icon</span>
+              </label>
+              {/* Close-to-tray opt-out. Only relevant when the tray is on, and
+                  only on Windows/Linux — macOS keeps the app alive on close
+                  regardless, so the toggle would be a no-op there. */}
+              {config?.showSystemTray !== false && !isDarwin && (
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    marginTop: '0.5rem',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={config?.quitOnClose === true}
+                    onChange={(e) => void saveQuitOnClose(e.target.checked)}
+                  />
+                  <span>Remove the tray icon on close</span>
+                </label>
+              )}
+            </section>
+            {/* Mac-only: by convention macOS keeps the app running after the
+                window closes. This opt-in makes the red X quit Gezel entirely,
+                matching Windows. Off by default; independent of the tray. */}
+            {isDarwin && (
+              <section style={{ marginTop: '2rem' }}>
+                <h3>Close button</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  By default macOS keeps Gezel running when you close the window. Turn this on to
+                  quit Gezel entirely when you click the red close button.
+                </p>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={config?.quitOnClose === true}
+                    onChange={(e) => void saveQuitOnClose(e.target.checked)}
+                  />
+                  <span>Quit Gezel when the window is closed.</span>
+                </label>
+              </section>
+            )}
+            <div style={{ marginTop: '2rem' }}>
+              <AmbientDashboardCard />
+            </div>
+          </>
+        )}
+
         {section === 'team' && (
           <>
+            <EngagementModePanel
+              mode={config?.aiEngagementMode ?? 'proactive'}
+              tempo={config?.workshopTempo ?? 'bedrijvig'}
+              onChange={saveEngagementMode}
+              onTempoChange={saveWorkshopTempo}
+            />
+
             <section style={{ marginBottom: '2rem' }}>
               <h3>Meester</h3>
               <p className="muted" style={{ marginTop: 0 }}>
@@ -2076,13 +2233,6 @@ export function SettingsView() {
                 )}
               </section>
             )}
-
-            <EngagementModePanel
-              mode={config?.aiEngagementMode ?? 'proactive'}
-              tempo={config?.workshopTempo ?? 'bedrijvig'}
-              onChange={saveEngagementMode}
-              onTempoChange={saveWorkshopTempo}
-            />
           </>
         )}
 
@@ -2501,7 +2651,7 @@ export function SettingsView() {
                 primary CLI card. */}
             <section className="provider-card">
               <h3 style={{ margin: 0 }}>
-                Alternative Signin Method: Use a Personal Access Token
+                Alternative sign-in: GitHub token
                 {hasGithubToken && copilotProbe.kind === 'ok' && copilotLogin && (
                   <span
                     className="muted small"
@@ -2536,16 +2686,13 @@ export function SettingsView() {
                       rel="noreferrer"
                       style={{ color: 'var(--accent)' }}
                     >
-                      Personal Access Token
+                      GitHub personal access token
                     </a>{' '}
                     with the <code>copilot</code> scope.
                   </p>
                   {hasGithubToken && (
                     <p>
-                      Current token:{' '}
-                      <code>
-                        {'•'.repeat(8)}…{(config?.githubToken ?? '').slice(-4)}
-                      </code>{' '}
+                      <code>&lt;Stored GitHub token&gt;</code>{' '}
                       <button
                         type="button"
                         onClick={clearGitHubToken}
@@ -2558,7 +2705,7 @@ export function SettingsView() {
                   <div className="new-row">
                     <input
                       type="password"
-                      placeholder={hasGithubToken ? 'Replace token…' : 'Paste GitHub token…'}
+                      placeholder={hasGithubToken ? 'Replace GitHub token…' : 'Paste GitHub token…'}
                       value={tokenDraft}
                       onChange={(e) => setTokenDraft(e.target.value)}
                       style={{ flex: 1 }}
@@ -2581,11 +2728,13 @@ export function SettingsView() {
                 on each gezel&rsquo;s Settings tab.
               </p>
               <label
+                className="muted"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: '0.5rem',
                   marginTop: '0.5rem',
+                  fontSize: '0.9rem',
                 }}
               >
                 <input
@@ -2824,9 +2973,10 @@ export function SettingsView() {
               <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
                 Reasoning effort
               </label>
-              <EffortPicker
+              <EffortTray
                 provider="codex-cli"
                 model={config?.defaultModel?.['codex-cli']}
+                defaultModel="gpt-5.5"
                 value={config?.codexCli?.defaultReasoningEffort ?? ''}
                 onChange={(value) =>
                   void saveCodexCli({
@@ -2835,10 +2985,6 @@ export function SettingsView() {
                 }
               />
             </div>
-            <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-              Forwarded as <code>-c model_reasoning_effort="…"</code>. Options follow the selected
-              model; gezels can override per turn via their effort picker.
-            </p>
 
             <details style={{ marginTop: '1rem' }}>
               <summary style={{ cursor: 'pointer' }}>
@@ -2869,7 +3015,7 @@ export function SettingsView() {
 
               <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
                 <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                  MCP wiring
+                  Gezel tools
                 </label>
                 <label className="muted" style={{ fontSize: '0.9rem' }}>
                   <input
@@ -2878,13 +3024,11 @@ export function SettingsView() {
                     onChange={(e) => void saveCodexCli({ manageRuntimeFiles: e.target.checked })}
                     style={{ marginRight: '0.5rem' }}
                   />
-                  Write a per-thread <code>CODEX_HOME</code> so Codex can call gezel-mcp tools
+                  Add Gezel tools like search, memories, tasks, and team coordination to Codex
                 </label>
               </div>
               <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                Files land under <code>~/.gezel/runtime/codex-cli/</code> and never touch your repo.
-                Disable to run Codex against your own <code>~/.codex/</code> with no gezel-mcp
-                wiring.
+                Disable to run Codex with only its built-in tools.
               </p>
             </details>
           </section>
@@ -3020,29 +3164,37 @@ export function SettingsView() {
               </ol>
             )}
 
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-              <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+            <div
+              className="new-row claude-permission-row"
+              style={{ alignItems: 'flex-start', marginTop: '0.75rem' }}
+            >
+              <span className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
                 Default permission
-              </label>
-              <select
-                value={config?.anthropicCli?.defaultPermissionMode ?? 'acceptEdits'}
-                onChange={(e) =>
-                  void saveAnthropicCli({
-                    defaultPermissionMode: e.target.value as
-                      | 'default'
-                      | 'acceptEdits'
-                      | 'plan'
-                      | 'bypassPermissions',
-                  })
-                }
+              </span>
+              <div
+                className="gz-tray claude-permission-tray"
+                role="radiogroup"
+                aria-label="Default permission"
               >
-                <option value="acceptEdits">acceptEdits — auto-approve file edits</option>
-                <option value="default">default — CLI's normal prompts</option>
-                <option value="plan">plan — read-only / review</option>
-                <option value="bypassPermissions">
-                  bypassPermissions — yolo (auto-approve Bash too)
-                </option>
-              </select>
+                {CLAUDE_PERMISSION_CHOICES.map((choice) => {
+                  const selected =
+                    (config?.anthropicCli?.defaultPermissionMode ?? 'acceptEdits') === choice.id;
+                  return (
+                    <button
+                      key={choice.id}
+                      type="button"
+                      // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons is the shared keys-in-trays pattern.
+                      role="radio"
+                      aria-checked={selected}
+                      className={`gz-key gz-key--stacked${selected ? ' gz-key-active' : ''}`}
+                      onClick={() => void saveAnthropicCli({ defaultPermissionMode: choice.id })}
+                    >
+                      <span className="claude-permission-label">{choice.label}</span>
+                      <span className="claude-permission-hint">{choice.description}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
@@ -3053,6 +3205,7 @@ export function SettingsView() {
                 provider="anthropic-cli"
                 value={config?.defaultModel?.['anthropic-cli']}
                 onChange={(v) => void saveDefaultModel('anthropic-cli', v)}
+                placeholder="Gezel default (Claude Sonnet)"
               />
             </div>
 
@@ -3097,7 +3250,7 @@ export function SettingsView() {
 
               <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
                 <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                  MCP wiring
+                  Gezel tools
                 </label>
                 <label className="muted" style={{ fontSize: '0.9rem' }}>
                   <input
@@ -3108,12 +3261,11 @@ export function SettingsView() {
                     }
                     style={{ marginRight: '0.5rem' }}
                   />
-                  Write a per-thread <code>.mcp.json</code> so Claude can call gezel-mcp tools
+                  Add Gezel tools like search, memories, tasks, and team coordination to Claude
                 </label>
               </div>
               <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                Files land under <code>~/.gezel/runtime/anthropic-cli/</code> and never touch the
-                user's repo. Disable to run Claude with only its built-in tools.
+                Disable to run Claude with only its built-in tools.
               </p>
 
               <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
@@ -3131,7 +3283,7 @@ export function SettingsView() {
                       void saveAnthropicCli({ poolSize: n });
                     }
                   }}
-                  style={{ width: '5rem' }}
+                  style={{ width: '2.5rem' }}
                 />
                 <span className="muted" style={{ fontSize: '0.85rem' }}>
                   warm <code>claude</code> subprocesses to keep around
@@ -3163,7 +3315,7 @@ export function SettingsView() {
                       void saveAnthropicCliConcurrency(n);
                     }
                   }}
-                  style={{ width: '5rem' }}
+                  style={{ width: '2.5rem' }}
                 />
                 <span className="muted" style={{ fontSize: '0.85rem' }}>
                   turns running in parallel
@@ -3193,7 +3345,7 @@ export function SettingsView() {
                       void saveAnthropicCli({ workerIdleSec: n });
                     }
                   }}
-                  style={{ width: '5rem' }}
+                  style={{ width: '2.5rem' }}
                 />
                 <span className="muted" style={{ fontSize: '0.85rem' }}>
                   seconds
@@ -3220,7 +3372,7 @@ export function SettingsView() {
 
         {section === 'ds4' && (
           <section className="provider-card">
-            <Ds4Settings config={config} onConfigChanged={setConfig} />
+            <Ds4Settings config={config} onConfigChanged={setConfig} health={health} />
           </section>
         )}
 
@@ -3344,7 +3496,9 @@ export function SettingsView() {
           </section>
         )}
 
-        {section === 'channels' && <ChannelsSettings config={config} onConfigChanged={setConfig} />}
+        {section === 'channels' && config?.showWorkInProgressFeatures === true && (
+          <ChannelsSettings config={config} onConfigChanged={setConfig} />
+        )}
 
         {section === 'connectedApps' && <ConnectedAppsPanel />}
         {section === 'remoteServers' && <RemoteServersPanel />}
@@ -3406,6 +3560,7 @@ export function SettingsView() {
               <UpdateStatus />
             </section>
             <GildeUpdatesCard />
+            <StorageUsageCard />
             <section style={{ marginBottom: '2rem' }}>
               <h3>Advanced</h3>
               <p className="muted" style={{ marginTop: 0 }}>
@@ -4080,7 +4235,7 @@ function CopilotConnectionStatus({
   mode: 'cli' | 'pat';
   onRetest: () => void;
 }) {
-  const label = mode === 'pat' ? 'via Personal Access Token' : 'via Copilot CLI';
+  const label = mode === 'pat' ? 'via GitHub token' : 'via Copilot CLI';
   return (
     <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center', gap: '0.5rem' }}>
       {probe.kind === 'probing' && <span className="muted small">checking connection…</span>}

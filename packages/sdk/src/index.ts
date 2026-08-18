@@ -350,10 +350,14 @@ export interface GezelSDK<TInput = Record<string, unknown>> {
     /** Write (or overwrite) an artifact. */
     write(path: string, content: string): Promise<void>;
     /**
-     * List artifacts, optionally filtered by path prefix.
-     * @param prefix - Only return artifacts whose path starts with this.
+     * List artifacts in one directory of the drawer, or a whole subtree.
+     * @param prefix - Directory to list (default: the drawer root).
+     * @param opts.recursive - Walk the subtree under `prefix` instead of one
+     *   level. Returned paths stay relative to the drawer root, so they can
+     *   be passed straight back to {@link read}. Large subtrees are capped by
+     *   the walker's entry budget; scope `prefix` to stay inside it.
      */
-    list(prefix?: string): Promise<ArtifactEntry[]>;
+    list(prefix?: string, opts?: { recursive?: boolean }): Promise<ArtifactEntry[]>;
     /** Delete an artifact. */
     delete(path: string): Promise<void>;
   };
@@ -638,7 +642,11 @@ export const gezel: GezelSDK = {
   artifacts: {
     read: (path) => rpc.call<string>('artifact.read', { path }),
     write: (path, content) => rpc.call<void>('artifact.write', { path, content }),
-    list: (prefix) => rpc.call<ArtifactEntry[]>('artifact.list', { prefix }),
+    list: (prefix, opts) =>
+      rpc.call<ArtifactEntry[]>('artifact.list', {
+        prefix,
+        ...(opts?.recursive ? { recursive: true } : {}),
+      }),
     delete: (path) => rpc.call<void>('artifact.delete', { path }),
   },
   documents: {

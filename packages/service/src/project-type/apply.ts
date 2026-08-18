@@ -13,6 +13,7 @@ import {
   type ScheduleMaterialization,
   createLogger,
   pickRandomNameWithGender,
+  projectTypeIcon,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
@@ -432,6 +433,7 @@ export async function applyProjectType(
     id: typeId,
     version: manifest.version,
     source,
+    icon: projectTypeIcon(manifest),
     ...(params && Object.keys(params).length > 0 ? { params } : {}),
     appliedAt: new Date().toISOString(),
   };

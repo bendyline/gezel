@@ -187,6 +187,34 @@ describe('QueueMeter — preparing window', () => {
     expect(stop).toHaveTextContent('Stopping…');
   });
 
+  it('names the connected app that owns an in-flight request without a Gezel stop target', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      ...ACTIVE_STATUS,
+      providers: {
+        'llama-cpp': {
+          ...ACTIVE_STATUS.providers['llama-cpp']!,
+          active: [
+            {
+              gezelId: 'gez-1',
+              actorLabel: 'pi (Gezel local models)',
+              job: 'pi (Gezel local models)',
+              runningForMs: 12_000,
+            },
+          ],
+        },
+      },
+    });
+
+    render(<QueueMeter />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
+
+    const status = await screen.findByText('In flight via pi');
+    expect(status).toHaveAttribute('title', 'pi controls this request. Stop it from pi.');
+    expect(screen.queryByRole('button', { name: /Stop active chat/ })).not.toBeInTheDocument();
+  });
+
   it('keeps provider labels and plain status markers in boring mode', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'llama-cpp',
@@ -454,6 +482,72 @@ describe('QueueMeter — preparing window', () => {
     expect(screen.queryByText(/2 queued/)).not.toBeInTheDocument();
     expect(screen.getAllByText(/deferred until idle/)).toHaveLength(3);
   });
+
+  it('uses the live interactive width when a stale broker batch fallback says 1', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      providers: {
+        'llama-cpp': {
+          running: 1,
+          runningInteractive: 1,
+          queuedInteractive: 0,
+          queuedBackground: 1,
+          concurrency: 5,
+          interactiveConcurrency: 4,
+          backgroundConcurrency: 3,
+          maxConcurrency: 1,
+          active: [{ gezelId: 'gez-1', runningForMs: 5000 }],
+          pending: [{ id: 2, lane: 'background', waitedMs: 1000 }],
+        },
+      },
+      taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+      sessions: [],
+      cache: [],
+      at: '',
+    });
+
+    render(<QueueMeter />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
+
+    expect(await screen.findByText('1 / 4 in flight · 1 queued')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Chats can use all 4 slots. Background work takes at most 3, so a chat can always start.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows only the active count when every known item is in flight', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      providers: {
+        'llama-cpp': {
+          running: 2,
+          queuedInteractive: 0,
+          queuedBackground: 0,
+          concurrency: 1,
+          maxConcurrency: 1,
+          active: [
+            { gezelId: 'gez-1', runningForMs: 5000 },
+            { gezelId: 'gez-1', runningForMs: 3000 },
+          ],
+          pending: [],
+        },
+      },
+      taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+      sessions: [],
+      cache: [],
+      at: '',
+    });
+
+    render(<QueueMeter />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
+
+    expect(await screen.findByText('2 in flight')).toBeInTheDocument();
+    expect(screen.queryByText('2 / 1 in flight')).not.toBeInTheDocument();
+  });
 });
 
 describe('QueueMeter — cloud and CLI providers', () => {
@@ -497,6 +591,48 @@ describe('QueueMeter — cloud and CLI providers', () => {
       expect(api.cancelProviderQueueItem).toHaveBeenLastCalledWith(provider, 71);
     },
   );
+});
+
+describe('QueueMeter — running vs waiting rows', () => {
+  beforeEach(() => {
+    mockLiveTurns = new Map();
+    vi.mocked(api.listGezels).mockResolvedValue({ gezels: [ALEJANDRO] } as never);
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [{ id: 'project-7', name: 'Spanish lessons' }],
+    } as never);
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'openai' } as ConfigResponse);
+  });
+
+  it('names both groups and marks the waiting rows when work is running and queued', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue(busyProviderStatus('openai'));
+
+    const { container } = render(<QueueMeter />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
+
+    const panel = await screen.findByLabelText('AI chat queue');
+    expect(within(panel).getByText('Running')).toBeInTheDocument();
+    expect(within(panel).getByText('Waiting')).toBeInTheDocument();
+    expect(container.querySelectorAll('.queue-meter-panel-item-waiting')).toHaveLength(1);
+    expect(within(panel).getByTitle('Running for 12s')).toHaveTextContent('12s');
+    expect(within(panel).getByTitle('Waiting 4s for a free slot')).toHaveTextContent('4s');
+  });
+
+  it('leaves the headings off when nothing is waiting', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'llama-cpp' } as ConfigResponse);
+    vi.mocked(api.getQueueStatus).mockResolvedValue(ACTIVE_STATUS);
+
+    render(<QueueMeter />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
+
+    const panel = await screen.findByLabelText('AI chat queue');
+    expect(within(panel).getByText('1 in flight')).toBeInTheDocument();
+    expect(within(panel).queryByText('Running')).not.toBeInTheDocument();
+    expect(within(panel).queryByText('Waiting')).not.toBeInTheDocument();
+  });
 });
 
 describe('QueueMeter — night-shift handoffs', () => {
@@ -559,6 +695,29 @@ describe('QueueMeter — night-shift handoffs', () => {
     expect(within(panel).getByText('Waiting for a free slot.')).toBeInTheDocument();
     expect(within(panel).getByText('4 scheduled')).toBeInTheDocument();
     expect(within(panel).getByText(/Nothing to do\./)).toBeInTheDocument();
+  });
+
+  it('names the quota reserve instead of the window clock while it holds work', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      ...SCHEDULED_ONLY,
+      taskRunner: {
+        ...SCHEDULED_ONLY.taskRunner,
+        pendingCount: 5,
+        dispatchable: { count: 1, byGezel: { 'gez-1': 1 } },
+        nightShift: { active: true, opensAt: '2026-08-02T22:00:00.000Z', quotaHold: true },
+      },
+    });
+
+    render(<QueueMeter />);
+    const button = await screen.findByRole('button', {
+      name: 'AI chat queue — click for details',
+    });
+    await userEvent.click(button);
+    const panel = await screen.findByLabelText('AI chat queue');
+    expect(
+      within(panel).getByText('Holding to protect your subscription quota.'),
+    ).toBeInTheDocument();
+    expect(within(panel).queryByText(/Starts/)).not.toBeInTheDocument();
   });
 
   it('names the sticky reason when AI engagement is switched off', async () => {

@@ -18,21 +18,34 @@ function makeManager(engineRouter?: EngineRouter): ChatManager {
   });
 }
 
-function ownedRouter() {
+function ownedRouter(busyKeys: string[] = []) {
   return {
     shutdown: vi.fn(async () => {}),
+    releaseIdle: vi.fn(async () => busyKeys),
   } as unknown as EngineRouter;
+}
+
+function cacheRouter(manager: ChatManager, router: EngineRouter): void {
+  (
+    manager as unknown as {
+      engineRouterCache: EngineRouter | null;
+    }
+  ).engineRouterCache = router;
+}
+
+function cachedRouter(manager: ChatManager): EngineRouter | null {
+  return (
+    manager as unknown as {
+      engineRouterCache: EngineRouter | null;
+    }
+  ).engineRouterCache;
 }
 
 describe('ChatManager pooled-engine shutdown', () => {
   it('shuts down the production-owned lazy engine router', async () => {
     const manager = makeManager();
     const router = ownedRouter();
-    (
-      manager as unknown as {
-        engineRouterCache: EngineRouter | null;
-      }
-    ).engineRouterCache = router;
+    cacheRouter(manager, router);
 
     await manager.shutdown();
 
@@ -119,5 +132,53 @@ describe('ChatManager pooled-engine shutdown', () => {
     await manager.drainBackground();
     await new Promise<void>((resolve) => setImmediate(resolve));
     await manager.shutdown();
+  });
+});
+
+describe('ChatManager.resetClient — live (config-change) engine handling', () => {
+  it('releases idle engines instead of force-killing the pool', async () => {
+    const manager = makeManager();
+    const router = ownedRouter();
+    cacheRouter(manager, router);
+
+    await manager.resetClient();
+
+    expect(router.releaseIdle).toHaveBeenCalledOnce();
+    expect(router.shutdown).not.toHaveBeenCalled();
+  });
+
+  it('keeps the router so an engine still serving a turn is never orphaned', async () => {
+    const manager = makeManager();
+    const router = ownedRouter(['mlx:qwen3.8-27b-q4:0']);
+    cacheRouter(manager, router);
+
+    await manager.resetClient();
+
+    // Dropping the router while an engine is resident would leave that
+    // process outside the broker's accounting with nobody left to evict it.
+    expect(cachedRouter(manager)).toBe(router);
+  });
+
+  it('still force-evicts when the caller asks for it (emergency stop / shutdown)', async () => {
+    const manager = makeManager();
+    const router = ownedRouter();
+    cacheRouter(manager, router);
+
+    await manager.resetClient({ engines: 'force' });
+
+    expect(router.shutdown).toHaveBeenCalledOnce();
+    expect(router.releaseIdle).not.toHaveBeenCalled();
+    expect(cachedRouter(manager)).toBeNull();
+  });
+
+  it('leaves engines completely alone on a deferred model-preference reset', async () => {
+    const manager = makeManager();
+    const router = ownedRouter();
+    cacheRouter(manager, router);
+
+    await manager.resetClient({ deferBusy: true });
+
+    expect(router.shutdown).not.toHaveBeenCalled();
+    expect(router.releaseIdle).not.toHaveBeenCalled();
   });
 });

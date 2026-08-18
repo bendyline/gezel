@@ -175,9 +175,23 @@ describe('ensureGezel — bespoke fallback', () => {
       chat: manager,
     });
     expect(res.action).toBe('created-bespoke');
-    expect(res.role).toBe('marine biologist');
+    expect(res.role).toBe('Marine Biologist');
     const onDisk = await store.getGezel(res.gezelId);
     expect(onDisk?.about).toContain('marine biologist');
+  });
+
+  it('title-cases a lowercase job title for display without touching the about prose', async () => {
+    const res = await ensureGezel({
+      opts: { jobTitle: 'submarine acoustician' },
+      store,
+      catalog,
+      chat: manager,
+      bespokeMode: 'static',
+    });
+    expect(res.action).toBe('created-bespoke');
+    const onDisk = await store.getGezel(res.gezelId);
+    expect(onDisk?.role).toBe('Submarine Acoustician');
+    expect(onDisk?.about).toContain("crew's **submarine acoustician**");
   });
 
   it('uses a deterministic persona for task-safe bespoke recruitment', async () => {

@@ -33,6 +33,7 @@ import { LogRotator } from './log-rotator.js';
 import { machineServiceInstallFailed } from './machine-service-state.js';
 import { type Mode, resolveMode, resolvePerUserMode } from './mode.js';
 import { nativeBinDir, resolveNativeBinaryPath } from './native-bin.js';
+import { resolveSharedServiceTree } from './shared-service-tree.js';
 import {
   type SystemServiceRuntime,
   readSystemServiceRuntime,
@@ -710,7 +711,8 @@ export class SupervisedService extends EventEmitter {
     // Extraction is safe to prepare transactionally while the old process is
     // still serving. If it fails, restartOwnedWithFallback sees state=ready and
     // leaves the healthy old daemon untouched instead of causing an outage.
-    if (mode === 'local-spawn-packaged') await preparePackagedInstall(this.opts);
+    const preparedInstallDir =
+      mode === 'local-spawn-packaged' ? await preparePackagedInstall(this.opts) : undefined;
 
     this.beginDestructiveRestart();
     this.stopHealthWatch();
@@ -725,7 +727,7 @@ export class SupervisedService extends EventEmitter {
     this.detachResources();
     const result =
       mode === 'local-spawn-packaged'
-        ? await spawnChildFromInstall(this.opts, { bundlePrepared: true })
+        ? await spawnChildFromInstall(this.opts, preparedInstallDir ? { preparedInstallDir } : {})
         : mode === 'local-spawn-dev'
           ? await spawnChild(this.opts)
           : (() => {
@@ -1887,16 +1889,29 @@ async function probeRemote(baseUrl: string, token: string): Promise<void> {
   }
 }
 
+/**
+ * Resolve the tree the per-user daemon will run from, extracting only when we
+ * cannot safely run from the one the installer already unpacked.
+ *
+ * Returns the directory, which the caller must pass to `spawnChildFromInstall`
+ * rather than recomputing `gezelPaths(home).install` — the whole point is that
+ * the answer is sometimes not that path.
+ */
 async function preparePackagedInstall(opts: ConnectOptions): Promise<string> {
-  const installDir = gezelPaths(opts.home).install;
   const { tarballPath, metaPath } = defaultBundlePaths(import.meta.url);
+  const shared = await resolveSharedServiceTree({
+    metaPath,
+    ...(opts.logger ? { logger: opts.logger } : {}),
+  });
+  if (shared) return shared;
+  const installDir = gezelPaths(opts.home).install;
   await extractBundleIfNeeded({ installDir, tarballPath, metaPath, logger: opts.logger });
   return installDir;
 }
 
 async function spawnChildFromInstall(
   opts: ConnectOptions,
-  options: { bundlePrepared?: boolean } = {},
+  options: { preparedInstallDir?: string } = {},
 ): Promise<{
   child: ChildProcess;
   baseUrl: string;
@@ -1906,11 +1921,10 @@ async function spawnChildFromInstall(
 }> {
   // Bundle ships as a tarball + meta sidecar that electron-builder
   // asar-unpacks to `app.asar.unpacked/dist/service-bundle.tar.gz`.
-  // Extract to the user's install dir if the shipped version is newer
-  // (or missing). See extract-bundle.ts for the rationale on archiving.
-  const installDir = options.bundlePrepared
-    ? gezelPaths(opts.home).install
-    : await preparePackagedInstall(opts);
+  // Either the installer already unpacked it machine-wide (adopted as-is) or
+  // we extract to the user's install dir when the shipped version is newer or
+  // missing. See extract-bundle.ts and shared-service-tree.ts.
+  const installDir = options.preparedInstallDir ?? (await preparePackagedInstall(opts));
   const daemonEntry = join(installDir, 'dist', 'bin', 'gezeld.js');
   // The spawned daemon's own `findBundledUi` (in service/bin/gezeld.ts)
   // looks adjacent to itself for the UI, but at this point gezeld lives
@@ -2088,8 +2102,10 @@ async function startEmbeddedRaw(
   const { tarballPath, metaPath } = defaultBundlePaths(import.meta.url);
   let mod: ServiceModule;
   if (existsSync(tarballPath)) {
-    const installDir = gezelPaths(opts.home).install;
-    await extractBundleIfNeeded({ installDir, tarballPath, metaPath, logger: opts.logger });
+    // Same adopt-or-extract decision the spawn path makes: the embedded
+    // fallback imports the tree instead of executing it as a child, but the
+    // bytes and the trust question are identical.
+    const installDir = await preparePackagedInstall(opts);
     const indexUrl = pathToFileURL(join(installDir, 'dist', 'index.js')).href;
     mod = (await import(indexUrl)) as ServiceModule;
   } else {

@@ -39,14 +39,37 @@ import type { McpToolResult, McpToolWrapper, McpToolWrapperContext } from './typ
 const SNAPSHOT_LINK_RE = /^- \[Snapshot\]\(([^)]+)\)\s*$/gm;
 const MAX_INLINE_BYTES = 50_000;
 
+export const PLAYWRIGHT_TOOLSET_ID = '@playwright/mcp';
+
+/**
+ * The package name as it survives into a system-toolset install path.
+ * `installDirName` slugifies the scope separator (`@playwright/mcp` →
+ * `@playwright__mcp@0.0.78`), so the literal package name is absent from
+ * the spawn command for the copy Gezel manages itself.
+ */
+const PLAYWRIGHT_INSTALL_SLUG = PLAYWRIGHT_TOOLSET_ID.replace('/', '__');
+
 export function isPlaywrightMcp(spec: McpServerSpec): boolean {
-  // @playwright/mcp is a system-bootstrapped stdio subprocess; an
-  // http-mcp registry entry can't be it. Short-circuit before the
-  // haystack check so we don't dereference the stdio-specific
-  // `command`/`args` fields on an http spec.
+  // Identity beats sniffing: ChatManager knows exactly which toolset it is
+  // spawning and stamps `toolsetId` on the spec. This is the path that
+  // matters for the managed browser — the command line it is spawned with
+  // contains the slugified install dir, not the package name, so the
+  // haystack check below never saw it and silently disabled the
+  // `file:`-URL rewrite plus the local-preview tool pruning.
+  if (spec.toolsetId === PLAYWRIGHT_TOOLSET_ID) return true;
+  // @playwright/mcp is a stdio subprocess; an http-mcp registry entry
+  // can't be it. Short-circuit before the haystack check so we don't
+  // dereference the stdio-specific `command`/`args` fields on an http spec.
   if (spec.kind === 'http') return false;
+  // Fallback for specs with no stamped identity: a user-configured
+  // custom-mcp entry (`npx @playwright/mcp@latest`), and the slug form so
+  // an unstamped managed install still matches.
   const haystack = [spec.command, ...spec.args].join(' ');
-  return haystack.includes('@playwright/mcp') || haystack.includes('playwright-mcp');
+  return (
+    haystack.includes(PLAYWRIGHT_TOOLSET_ID) ||
+    haystack.includes('playwright-mcp') ||
+    haystack.includes(PLAYWRIGHT_INSTALL_SLUG)
+  );
 }
 
 async function readCapped(absolute: string): Promise<{ content: string; truncated: number }> {

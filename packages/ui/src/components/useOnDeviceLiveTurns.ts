@@ -39,6 +39,14 @@ export interface LiveTurnState {
   projectId?: string;
   /** When we first saw this turn start (used for elapsed-time). */
   startedAt: number;
+  /**
+   * When the engine entered its `generating` phase. Distinct from
+   * `startedAt` because prefill on a large local model can run tens of
+   * seconds; dividing output tokens by the whole turn would report a
+   * decode speed a fraction of the real one. Absent until the engine
+   * actually starts decoding.
+   */
+  generatingSince?: number;
   /** 0-1 progress, when the phase event carried one (prompt-processing batches). */
   progress?: number;
   /**
@@ -49,6 +57,16 @@ export interface LiveTurnState {
    * streamed text fragments are not tokenizer boundaries.
    */
   outputChars?: number;
+  /**
+   * Exact completion tokens decoded so far, straight from the engine's own
+   * counter (llama-server `timings.predicted_n`, MLX streamed usage). When
+   * this is present consumers must show it as fact; `outputChars` is only
+   * the fallback for engines that publish nothing until the turn ends, and
+   * anything derived from it has to be marked approximate.
+   */
+  outputTokens?: number;
+  /** Exact engine-measured decode rate right now, tokens/sec. */
+  tokensPerSec?: number;
   /**
    * Wall-clock millis of the most recent event that touched this
    * entry (user_message seed, engine_phase update). Used by the idle
@@ -115,6 +133,11 @@ export function useOnDeviceLiveTurns(
             startedAt: prior?.startedAt ?? now,
             lastEventAt: now,
             ...(prior?.progress !== undefined ? { progress: prior.progress } : {}),
+            ...(prior?.generatingSince !== undefined
+              ? { generatingSince: prior.generatingSince }
+              : {}),
+            ...(prior?.outputTokens !== undefined ? { outputTokens: prior.outputTokens } : {}),
+            ...(prior?.tokensPerSec !== undefined ? { tokensPerSec: prior.tokensPerSec } : {}),
             outputChars: (prior?.outputChars ?? 0) + addition.chars,
           });
         }
@@ -144,6 +167,8 @@ export function useOnDeviceLiveTurns(
             const phase = event.phase;
             const detail = event.detail;
             const progress = event.progress;
+            const outputTokens = event.outputTokens;
+            const tokensPerSec = event.tokensPerSec;
             setLiveTurns((prev) => {
               const next = new Map(prev);
               const prior = next.get(sessionId);
@@ -151,6 +176,12 @@ export function useOnDeviceLiveTurns(
                 next.delete(sessionId);
                 return next;
               }
+              // Latch the first `generating` event of the turn. Engines
+              // re-emit the phase on a ticker, so re-stamping it here
+              // would reset the live-rate clock every second and pin the
+              // reading to whatever arrived in the last tick.
+              const generatingSince =
+                phase === 'generating' ? (prior?.generatingSince ?? Date.now()) : undefined;
               next.set(sessionId, {
                 phase,
                 provider: event.provider,
@@ -160,7 +191,21 @@ export function useOnDeviceLiveTurns(
                 startedAt: prior?.startedAt ?? Date.now(),
                 lastEventAt: Date.now(),
                 outputChars: prior?.outputChars ?? 0,
+                ...(generatingSince !== undefined ? { generatingSince } : {}),
                 ...(typeof progress === 'number' ? { progress } : {}),
+                // Engines emit these on a ticker; a phase event that carries
+                // no counter (a TTFT or prefill emit landing mid-decode)
+                // must not blank the last real reading.
+                ...(typeof outputTokens === 'number'
+                  ? { outputTokens }
+                  : prior?.outputTokens !== undefined
+                    ? { outputTokens: prior.outputTokens }
+                    : {}),
+                ...(typeof tokensPerSec === 'number'
+                  ? { tokensPerSec }
+                  : prior?.tokensPerSec !== undefined
+                    ? { tokensPerSec: prior.tokensPerSec }
+                    : {}),
               });
               return next;
             });

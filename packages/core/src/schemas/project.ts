@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ProjectIconIdSchema } from '../project-icons.js';
 import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeSchema } from './codex.js';
 import { EntityIdSchema } from './entity-id.js';
@@ -163,13 +164,26 @@ export const ProjectTypeProvenanceSchema = z.object({
   params: z.record(z.string(), z.unknown()).optional(),
   /** ISO timestamp of adoption. */
   appliedAt: z.string(),
+  /** Maker's mark inherited from the type at adoption. */
+  icon: ProjectIconIdSchema.optional(),
 });
 export type ProjectTypeProvenance = z.infer<typeof ProjectTypeProvenanceSchema>;
+
+/**
+ * Project shape. `crew` (the default) is the original behavior — the voorman
+ * recruits and coordinates a team of specialists. `solo` is a "job": a single
+ * Builder handles the whole project themselves and team-management MCP tools
+ * are stripped from every session scoped here.
+ */
+export const ProjectModeSchema = z.enum(['crew', 'solo']);
+export type ProjectMode = z.infer<typeof ProjectModeSchema>;
 
 export const ProjectSchema = z.object({
   id: EntityIdSchema,
   name: z.string(),
   description: z.string().optional(),
+  /** Explicit maker's-mark override. Missing inherits from the project type. */
+  icon: ProjectIconIdSchema.optional(),
   workingDir: z.string().optional(),
   /** Optional gezel that acts as the project's voorman (foreman). Surfaces in
    *  the project detail pane, flows into the system prompt when a session is
@@ -231,7 +245,7 @@ export const ProjectSchema = z.object({
    * for back-compat with every project on disk before this field
    * existed.
    */
-  mode: z.enum(['crew', 'solo']).optional(),
+  mode: ProjectModeSchema.optional(),
   /**
    * Optional custom label for this project's lead gezel, overriding the
    * mode-based default ("Voorman" / "Builder") everywhere the UI

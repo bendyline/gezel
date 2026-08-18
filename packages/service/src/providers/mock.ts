@@ -12,7 +12,11 @@
 import { randomUUID } from 'node:crypto';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { ProviderQueue } from './queue.js';
-import { StreamingSessionBase } from './streaming-session.js';
+import {
+  type EnginePhaseEvent,
+  StreamingSessionBase,
+  type TurnStatsEvent,
+} from './streaming-session.js';
 import {
   type ExternalToolCall,
   type LLMProvider,
@@ -75,6 +79,10 @@ export class MockProvider implements LLMProvider {
   private readonly responseQueue: string[] = [];
   /** Private-reasoning chunks to emit before the next scripted reply. */
   private readonly reasoningQueue: string[][] = [];
+  private readonly engineTelemetryQueue: Array<{
+    phases: EnginePhaseEvent[];
+    turnStats?: TurnStatsEvent;
+  }> = [];
   private readonly toolCallQueue: ScriptedToolCall[][] = [];
   private resumeFailureQueued = false;
   /** Error message to throw from the next `sendAndWait`, if any. */
@@ -101,6 +109,8 @@ export class MockProvider implements LLMProvider {
    * through to the normal scripted response when empty.
    */
   private readonly externalToolCallQueue: ExternalToolCall[][] = [];
+  /** Live argument fragments paired with the next scripted external call. */
+  private readonly externalToolCallDeltaQueue: Array<Array<{ name: string; chunk: string }>> = [];
   /**
    * When set, the next {@link createSession} blocks — after recording its
    * call — until the promise resolves. Lets a test park a turn inside
@@ -145,6 +155,24 @@ export class MockProvider implements LLMProvider {
    */
   scriptReasoning(...chunks: string[]): void {
     this.reasoningQueue.push(chunks);
+  }
+
+  /** Queue local-engine telemetry for the next ordinary scripted response. */
+  scriptEngineTelemetry(telemetry: {
+    phases?: EnginePhaseEvent[];
+    turnStats?: TurnStatsEvent;
+  }): void {
+    this.engineTelemetryQueue.push({
+      phases: telemetry.phases ?? [],
+      ...(telemetry.turnStats ? { turnStats: telemetry.turnStats } : {}),
+    });
+  }
+
+  /** @internal */
+  nextScriptedEngineTelemetry():
+    | { phases: EnginePhaseEvent[]; turnStats?: TurnStatsEvent }
+    | undefined {
+    return this.engineTelemetryQueue.shift();
   }
 
   /** @internal */
@@ -261,9 +289,23 @@ export class MockProvider implements LLMProvider {
     this.externalToolCallQueue.push(calls);
   }
 
+  /**
+   * Script the live argument fragments emitted before the next external tool
+   * call completes. This mirrors llama-cpp/MLX `delta.tool_calls` streaming
+   * and lets HTTP compatibility tests cover their progressive tool UI.
+   */
+  scriptExternalToolCallDeltas(chunks: Array<{ name: string; chunk: string }>): void {
+    this.externalToolCallDeltaQueue.push(chunks);
+  }
+
   /** @internal */
   nextScriptedExternalToolCalls(): ExternalToolCall[] | undefined {
     return this.externalToolCallQueue.shift();
+  }
+
+  /** @internal */
+  nextScriptedExternalToolCallDeltas(): Array<{ name: string; chunk: string }> {
+    return this.externalToolCallDeltaQueue.shift() ?? [];
   }
 
   /** @internal */
@@ -449,6 +491,9 @@ class MockSession extends StreamingSessionBase implements LLMSession {
     if (this.opts.externalTools && this.opts.externalTools.length > 0) {
       const scriptedExternal = this.provider.nextScriptedExternalToolCalls();
       if (scriptedExternal && scriptedExternal.length > 0) {
+        for (const { name, chunk } of this.provider.nextScriptedExternalToolCallDeltas()) {
+          this.emitToolArgsDelta(name, chunk);
+        }
         this._capturedExternalCalls = scriptedExternal;
         // Emit a single empty "delta" so streaming consumers see at
         // least one event, then return empty content — the route
@@ -479,6 +524,8 @@ class MockSession extends StreamingSessionBase implements LLMSession {
     }
 
     const text = this.provider.nextScriptedResponse(prompt);
+    const engineTelemetry = this.provider.nextScriptedEngineTelemetry();
+    for (const phase of engineTelemetry?.phases ?? []) this.emitEnginePhase(phase);
     // Emit 2-3 deltas so streaming tests see activity.
     const mid = Math.floor(text.length / 2);
     const parts = text.length > 1 ? [text.slice(0, mid), text.slice(mid)] : [text];
@@ -493,6 +540,7 @@ class MockSession extends StreamingSessionBase implements LLMSession {
         durationMs: 1,
       }),
     );
+    if (engineTelemetry?.turnStats) this.emitTurnStats(engineTelemetry.turnStats);
     return text;
   }
 

@@ -3,6 +3,7 @@ import { parseTaskRef } from '@bendyline/gezel';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
+import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 import { providerLabel as resolveProviderLabel } from './provider-label.js';
 import {
   MENTION_RE,
@@ -24,6 +25,8 @@ interface Props {
    */
   gezelName?: string;
   onSessionIdChange: (next: string | undefined) => void;
+  /** Reports the selected record so parents can enforce external read-only UI. */
+  onActiveSessionChange?: (session: ChatSessionSummary | null) => void;
   /** Runs after "+ New" has created and selected a fresh session. */
   onNewSessionCreated?: (sessionId: string) => void;
   /** Bumped by the parent after a write it wants the switcher to re-read
@@ -44,6 +47,13 @@ interface Props {
 }
 
 /**
+ * Coalesce the user-message + done pair (and bursts of concurrent external
+ * turns) into one session-list read. This is deliberately much shorter than
+ * a polling interval: the event itself is the invalidation signal.
+ */
+const LIVE_SESSION_REFRESH_DEBOUNCE_MS = 150;
+
+/**
  * Inline session picker + "+ New" / "Archive" controls, scoped to a
  * (gezel, project) pair. Rendered above the timeline so the user can pick
  * which session the composer posts into and which session reads as
@@ -60,6 +70,7 @@ export function SessionSwitcher({
   sessionId,
   gezelName,
   onSessionIdChange,
+  onActiveSessionChange,
   onNewSessionCreated,
   refreshKey,
   taskRef,
@@ -69,6 +80,7 @@ export function SessionSwitcher({
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
   const [busy, setBusy] = useState(false);
   const autoPickedFor = useRef<string | null>(null);
+  const refreshedUnknownSession = useRef<string | null>(null);
 
   // The (gezel, project, task) triple the list is scoped to. Stamped onto
   // the loaded list so the auto-pick below can tell "this list is for the
@@ -150,6 +162,82 @@ export function SessionSwitcher({
     autoPickedFor.current = key;
     onSessionIdChange(sessions[0]!.id);
   }, [sessions, sessionsScope, sessionId, scopeKey, onSessionIdChange]);
+
+  useEffect(() => {
+    if (sessionsScope !== scopeKey) return;
+    const active = sessions.find((session) => session.id === sessionId);
+    // A live external session can appear after this list loaded. Keep the
+    // parent's current safety state until the one-shot refresh below has had
+    // a chance to fetch its provenance.
+    if (sessionId && !active) return;
+    onActiveSessionChange?.(active ?? null);
+  }, [sessions, sessionsScope, sessionId, scopeKey, onActiveSessionChange]);
+
+  useEffect(() => {
+    if (sessionsScope !== scopeKey || !sessionId) return;
+    if (sessions.some((session) => session.id === sessionId)) return;
+    const key = `${scopeKey}:${sessionId}`;
+    if (refreshedUnknownSession.current === key) return;
+    refreshedUnknownSession.current = key;
+    void refresh();
+  }, [sessions, sessionsScope, sessionId, scopeKey, refresh]);
+
+  // Sessions can be created or resumed outside this renderer (OpenCode, Pi,
+  // another external client, scheduled work). The interleaved timeline sees
+  // those turns immediately through the shared project stream, but this
+  // switcher used to retain the list it fetched on mount until a local action
+  // bumped `refreshKey`. Subscribe to the same shared stream and treat durable
+  // turn boundaries as list invalidations. We intentionally do not select the
+  // arriving session: background work should appear in the menu without
+  // stealing the conversation the user is currently addressing.
+  useEffect(() => {
+    const ctrl = new AbortController();
+    let refreshTimer: number | null = null;
+    let stopped = false;
+
+    const scheduleRefresh = () => {
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        void refresh();
+      }, LIVE_SESSION_REFRESH_DEBOUNCE_MS);
+    };
+
+    void (async () => {
+      let backoffMs = 250;
+      while (!stopped) {
+        try {
+          for await (const envelope of streamSharedProjectChatEvents({
+            url: api.projectEventsUrl(projectId),
+            headers: api.authHeader(),
+            signal: ctrl.signal,
+            fetch: api.getFetch(),
+          })) {
+            if (stopped) return;
+            if (envelope.projectId !== projectId || envelope.gezelId !== gezelId) continue;
+            const { event } = envelope;
+            if (event.type === 'user_message' || event.type === 'done') scheduleRefresh();
+            backoffMs = 250;
+          }
+        } catch (err) {
+          if (stopped || (err as Error).name === 'AbortError') return;
+          console.warn(
+            `[SessionSwitcher] chat event stream error (reconnecting in ${backoffMs}ms):`,
+            err,
+          );
+        }
+        if (stopped) return;
+        await new Promise<void>((resolve) => window.setTimeout(resolve, backoffMs));
+        backoffMs = Math.min(backoffMs * 2, 5_000);
+      }
+    })();
+
+    return () => {
+      stopped = true;
+      ctrl.abort();
+      if (refreshTimer !== null) window.clearTimeout(refreshTimer);
+    };
+  }, [gezelId, projectId, refresh]);
 
   const createNew = useCallback(async () => {
     setBusy(true);
@@ -264,6 +352,7 @@ function renderTitleWithMentions(title: string): ReactNode {
 // The engine/model suffix shown after the relative time. `engineLabel`
 // (fixed-function generators) wins; otherwise it's the chat provider + model.
 function engineSuffix(s: ChatSessionSummary, engineLabel?: string | null): string {
+  if (s.source?.kind === 'external') return `From ${s.source.appName} · read-only`;
   if (engineLabel) return engineLabel;
   const provider = resolveProviderLabel(s.providerName, window.__GEZEL__?.platform);
   return `${provider}${s.model ? ` (${s.model})` : ''}`;

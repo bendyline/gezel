@@ -7,6 +7,7 @@ import {
   importDiscoveredSkill,
   rejectPendingImport,
 } from '../../workspace/import-sync.js';
+import { findDiscoveredSkill, invokeWorkspaceSkill } from '../../workspace/skill-invocation.js';
 import type { ServiceContext } from '../context.js';
 
 /**
@@ -27,6 +28,7 @@ import type { ServiceContext } from '../context.js';
  *   POST   /api/projects/:id/imports/approve        approve one (writes craftbook + scripts + persona)
  *   POST   /api/projects/:id/imports/reject         reject one (prose-only craftbook)
  *   POST   /api/projects/:id/imports/convert        convert one discovered skill on demand
+ *   POST   /api/projects/:id/skills/invoke          run one discovered skill (triage → run → verify)
  *
  * Mounted under `/api/projects` alongside the other project sub-routers.
  */
@@ -178,6 +180,37 @@ export function projectGezelRoutes(ctx: ServiceContext): Hono {
     } catch (err) {
       return writeError(c, err);
     }
+  });
+
+  // Running a skill is a crew decision, not a file read: the voorman
+  // triages it, names the craftsman, and verifies the result. The task is
+  // dispatched here (not left "active" for someone to notice) — see
+  // workspace/skill-invocation.ts for why that kickoff is the whole point.
+  app.post('/:projectId/skills/invoke', async (c) => {
+    const projectId = c.req.param('projectId');
+    const { skillSource } = ImportActionSchema.parse(await c.req.json());
+    const { skills } = await ctx.workspaceIndex.readSkills(projectId);
+    const skill = findDiscoveredSkill(skills, skillSource);
+    if (!skill) return c.json({ error: 'no discovered skill at that source' }, 404);
+    const { task, dispatch } = await invokeWorkspaceSkill(
+      {
+        store: ctx.store,
+        tasks: ctx.tasks,
+        taskRunner: ctx.taskRunner,
+        history: ctx.history,
+      },
+      projectId,
+      skill,
+    );
+    return c.json(
+      {
+        task,
+        started: dispatch.enqueued,
+        ...(dispatch.assigneeName ? { assigneeName: dispatch.assigneeName } : {}),
+        ...(dispatch.reason ? { reason: dispatch.reason } : {}),
+      },
+      201,
+    );
   });
 
   return app;

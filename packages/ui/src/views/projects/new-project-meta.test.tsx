@@ -1,6 +1,11 @@
 import type { CatalogItemSummary } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { PROJECT_CATEGORIES, PROJECT_KINDS, categorizeCatalogType } from './new-project-meta.js';
+import {
+  PROJECT_CATEGORIES,
+  PROJECT_KINDS,
+  catalogProjectTypeGlyph,
+  categorizeCatalogType,
+} from './new-project-meta.js';
 
 function summaryFor(manifest: Record<string, unknown>): CatalogItemSummary {
   return {
@@ -36,5 +41,15 @@ describe('project kind registry', () => {
     for (const kind of PROJECT_KINDS) {
       expect(known.has(kind.category)).toBe(true);
     }
+  });
+
+  it('uses explicit and inferred maker marks for custom types', () => {
+    expect(catalogProjectTypeGlyph(summaryFor({ id: 'custom', icon: 'heart' }))).toBe('heart');
+    expect(catalogProjectTypeGlyph(summaryFor({ id: 'community-api', tags: ['backend'] }))).toBe(
+      'server',
+    );
+    expect(catalogProjectTypeGlyph(summaryFor({ id: 'unknown', category: 'writing' }))).toBe(
+      'quill',
+    );
   });
 });

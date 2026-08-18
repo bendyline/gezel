@@ -1203,3 +1203,227 @@ describe('LlamaCppModelManager.listInstalled / delete / resolveDefaultModelPath'
     await expect(mgr.delete('../etc')).rejects.toThrow(/unsafe/);
   });
 });
+
+describe('catalog drift is measured against the payload, not the version string', () => {
+  const weights = buildGguf({ arch: 'qwen2', contextLength: 32768, chatTemplate: '{{ x }}' });
+  const weightsSha = sha256Hex(weights);
+
+  function driftManifest(version: string, sha = weightsSha): ChatModelManifest {
+    return {
+      schemaVersion: 1,
+      kind: 'chat-model',
+      id: 'qwen-test',
+      name: 'Qwen Test',
+      description: 'fixture',
+      tags: [],
+      maintainer: { name: 'Test' },
+      version,
+      releasedAt: '2026-04-22T00:00:00Z',
+      availableVersions: [version],
+      parameterSize: '2B',
+      approxSizeBytes: weights.byteLength,
+      supportsTools: true,
+      llamaCpp: {
+        huggingfaceRepo: 'test-org/test-repo',
+        filename: 'test.gguf',
+        sha256: sha,
+        approxSizeBytes: weights.byteLength,
+        quantization: 'Q4_K_M',
+      },
+    } as ChatModelManifest;
+  }
+
+  async function installAt(version: string): Promise<void> {
+    const mgr = new LlamaCppModelManager({
+      home,
+      catalog: fakeCatalog(new Map([['qwen-test', driftManifest(version)]])),
+      fetchImpl: streamingFetch(weights),
+    });
+    const events = await drain(mgr.install('qwen-test'));
+    expect(
+      events.find((e) => e.type === 'done'),
+      JSON.stringify(events),
+    ).toBeDefined();
+  }
+
+  const manifestPath = (): string =>
+    join(home, 'engines', 'llama-cpp', 'models', 'qwen-test', 'manifest.json');
+
+  it('offers no update when a newer catalog version pins the same files', async () => {
+    await installAt('1.0.0');
+    const mgr = new LlamaCppModelManager({
+      home,
+      catalog: fakeCatalog(new Map([['qwen-test', driftManifest('1.1.3')]])),
+      fetchImpl: streamingFetch(weights),
+    });
+    const [model] = await mgr.listInstalled();
+    expect(model?.updateAvailable).toBeFalsy();
+    expect(await mgr.getUpdateStatus('qwen-test')).toEqual({ updateAvailable: false });
+  });
+
+  it('offers the update when a newer catalog version rotates the weights', async () => {
+    await installAt('1.0.0');
+    const mgr = new LlamaCppModelManager({
+      home,
+      catalog: fakeCatalog(new Map([['qwen-test', driftManifest('1.1.0', 'f'.repeat(64))]])),
+      fetchImpl: streamingFetch(weights),
+    });
+    const [model] = await mgr.listInstalled();
+    expect(model?.updateAvailable).toBe(true);
+    expect(model?.availableVersion).toBe('1.1.0');
+    expect(model?.updateReason).toContain('test.gguf');
+  });
+
+  it('snapshots the catalog payload at install so the first check is a string compare', async () => {
+    await installAt('1.0.0');
+    const installed = JSON.parse(readFileSync(manifestPath(), 'utf8'));
+    expect(installed.payloadFingerprint).toMatch(/^[a-f0-9]{64}$/);
+
+    // Same fingerprint, so the verdict holds even if the file hashes are
+    // unreadable — which is what makes a poll of a 200 GiB model cheap.
+    const mgr = new LlamaCppModelManager({
+      home,
+      catalog: fakeCatalog(new Map([['qwen-test', driftManifest('2.0.0')]])),
+      fetchImpl: streamingFetch(weights),
+    });
+    const [model] = await mgr.listInstalled();
+    expect(model?.updateAvailable).toBeFalsy();
+  });
+
+  it('getUpdateStatus returns null for a model this engine does not have', async () => {
+    const mgr = new LlamaCppModelManager({
+      home,
+      catalog: fakeCatalog(new Map([['qwen-test', driftManifest('1.0.0')]])),
+      fetchImpl: streamingFetch(weights),
+    });
+    expect(await mgr.getUpdateStatus('qwen-test')).toBeNull();
+  });
+});
+
+describe('LlamaCppModelManager.install reuses files the update did not change', () => {
+  const firstShard = buildGguf({ arch: 'gpt-oss', contextLength: 131072, chatTemplate: '{{ x }}' });
+  const secondShard = Buffer.from('TENSOR-DATA-FOR-SHARD-2', 'utf8');
+  const rebuiltSecondShard = Buffer.from('REBUILT-TENSOR-DATA-FOR-SHARD-2!', 'utf8');
+
+  function shardedManifest(version: string, second: Buffer): ChatModelManifest {
+    return {
+      schemaVersion: 1,
+      kind: 'chat-model',
+      id: 'big-moe',
+      name: 'Big MoE',
+      description: 'fixture',
+      tags: [],
+      maintainer: { name: 'Test' },
+      version,
+      releasedAt: '2026-04-22T00:00:00Z',
+      availableVersions: [version],
+      parameterSize: '117B',
+      approxSizeBytes: firstShard.byteLength + second.byteLength,
+      supportsTools: true,
+      llamaCpp: {
+        huggingfaceRepo: 'test-org/big-moe-GGUF',
+        shards: [
+          {
+            name: 'Q4_K_M/big-moe-00001-of-00002.gguf',
+            sha256: sha256Hex(firstShard),
+            sizeBytes: firstShard.byteLength,
+          },
+          {
+            name: 'Q4_K_M/big-moe-00002-of-00002.gguf',
+            sha256: sha256Hex(second),
+            sizeBytes: second.byteLength,
+          },
+        ],
+        approxSizeBytes: firstShard.byteLength + second.byteLength,
+        quantization: 'Q4_K_M',
+      },
+    } as ChatModelManifest;
+  }
+
+  /** Serves the shards and records every URL it was asked for. */
+  function countingFetch(second: Buffer, requested: string[]): typeof fetch {
+    return (async (input: string | URL) => {
+      const href = typeof input === 'string' ? input : input.toString();
+      requested.push(href);
+      const blob = href.includes('00001-of-00002')
+        ? firstShard
+        : href.includes('00002-of-00002')
+          ? second
+          : null;
+      if (!blob) return new Response('not found', { status: 404 });
+      return new Response(blob, {
+        status: 200,
+        headers: { 'content-length': String(blob.byteLength) },
+      });
+    }) as typeof fetch;
+  }
+
+  it('downloads only the shard whose hash moved', async () => {
+    const dir = join(home, 'engines', 'llama-cpp', 'models', 'big-moe');
+    const firstRun: string[] = [];
+    const initial = new LlamaCppModelManager({
+      home,
+      catalog: fakeCatalog(new Map([['big-moe', shardedManifest('1.0.0', secondShard)]])),
+      fetchImpl: countingFetch(secondShard, firstRun),
+    });
+    expect((await drain(initial.install('big-moe'))).find((e) => e.type === 'done')).toBeDefined();
+    expect(firstRun).toHaveLength(2);
+    const untouchedShard = readFileSync(join(dir, 'big-moe-00001-of-00002.gguf'));
+
+    const secondRun: string[] = [];
+    const updated = new LlamaCppModelManager({
+      home,
+      catalog: fakeCatalog(new Map([['big-moe', shardedManifest('1.1.0', rebuiltSecondShard)]])),
+      fetchImpl: countingFetch(rebuiltSecondShard, secondRun),
+    });
+    const events = await drain(updated.install('big-moe'));
+    expect(
+      events.find((e) => e.type === 'done'),
+      JSON.stringify(events),
+    ).toBeDefined();
+
+    // The unchanged shard was never asked for a second time.
+    expect(secondRun).toHaveLength(1);
+    expect(secondRun[0]).toContain('00002-of-00002');
+    // …and it is still on disk, byte for byte, rather than re-fetched.
+    expect(readFileSync(join(dir, 'big-moe-00001-of-00002.gguf')).equals(untouchedShard)).toBe(
+      true,
+    );
+    expect(readFileSync(join(dir, 'big-moe-00002-of-00002.gguf')).equals(rebuiltSecondShard)).toBe(
+      true,
+    );
+
+    // The manifest describes the new payload: both digests, and the
+    // fingerprint of the version that produced it.
+    const onDisk = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+    expect(onDisk.catalogVersion).toBe('1.1.0');
+    expect(onDisk.fileSha256['big-moe-00001-of-00002.gguf']).toBe(sha256Hex(firstShard));
+    expect(onDisk.fileSha256['big-moe-00002-of-00002.gguf']).toBe(sha256Hex(rebuiltSecondShard));
+    expect(await updated.getUpdateStatus('big-moe')).toEqual({ updateAvailable: false });
+  });
+
+  it('re-fetches everything when the recorded digests are missing', async () => {
+    const dir = join(home, 'engines', 'llama-cpp', 'models', 'big-moe');
+    const firstRun: string[] = [];
+    const initial = new LlamaCppModelManager({
+      home,
+      catalog: fakeCatalog(new Map([['big-moe', shardedManifest('1.0.0', secondShard)]])),
+      fetchImpl: countingFetch(secondShard, firstRun),
+    });
+    await drain(initial.install('big-moe'));
+
+    // An install predating the per-file hash map has nothing to trust.
+    const stripped = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+    stripped.fileSha256 = undefined;
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify(stripped));
+
+    const secondRun: string[] = [];
+    const again = new LlamaCppModelManager({
+      home,
+      catalog: fakeCatalog(new Map([['big-moe', shardedManifest('1.1.0', rebuiltSecondShard)]])),
+      fetchImpl: countingFetch(rebuiltSecondShard, secondRun),
+    });
+    expect((await drain(again.install('big-moe'))).find((e) => e.type === 'done')).toBeDefined();
+    expect(secondRun).toHaveLength(2);
+  });
+});

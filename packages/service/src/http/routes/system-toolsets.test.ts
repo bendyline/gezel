@@ -107,8 +107,9 @@ describe('GET /api/system/home', () => {
   // The supervisor's home-preference decision reads this before committing
   // to a machine-service adoption. A fresh home MUST report everUsed=false
   // even though boot auto-creates the whole system crew (Meester, Klerk,
-  // Boekwachter) and the default project — none of that is evidence a
-  // person worked here. Only sessions and extra projects are.
+  // Boekwachter) and the built-in projects (`default`, the shared library) —
+  // none of that is evidence a person worked here. Only sessions and
+  // user-created projects are.
   it('reports a fresh home as never used', async () => {
     const res = await httpFetch(`${baseUrl}/api/system/home`, { headers: auth() });
     expect(res.status).toBe(200);
@@ -121,13 +122,30 @@ describe('GET /api/system/home', () => {
     };
     expect(info.home).toBe(home);
     expect(info.scope).toBe('user');
-    // Bootstrap crew — present on every fresh boot, deliberately not part
-    // of the everUsed signal.
+    // Bootstrap crew and the built-in projects (`default` + the shared
+    // library) — present on every fresh boot, deliberately not part of the
+    // everUsed signal. Counting projects instead of identifying the
+    // built-ins would report a pristine home as used.
     expect(info.usage.gezelCount).toBeGreaterThanOrEqual(1);
-    expect(info.usage.projectCount).toBeLessThanOrEqual(1);
+    expect(info.usage.projectCount).toBeLessThanOrEqual(2);
     expect(info.usage.everUsed).toBe(false);
     expect(info.memory.totalBytes).toBeGreaterThan(0);
     expect(Array.isArray(info.engines)).toBe(true);
+  });
+
+  it('reports everUsed once a real project exists', async () => {
+    await httpFetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: { ...auth(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Someone Worked Here',
+        about: 'A project a person deliberately created in this home.',
+        missionObjectives: 'Prove the everUsed signal still fires.',
+      }),
+    });
+    const res = await httpFetch(`${baseUrl}/api/system/home`, { headers: auth() });
+    const info = (await res.json()) as { usage: { everUsed: boolean } };
+    expect(info.usage.everUsed).toBe(true);
   });
 
   it('requires auth like the rest of the internal API', async () => {

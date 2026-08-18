@@ -17,6 +17,11 @@ import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { MachineEngineBridge } from '../machine-engine/bridge.js';
 import { LlamaCppModelManager } from '../providers/llama-cpp/models.js';
 import { MlxModelManager } from '../providers/mlx/models.js';
+import {
+  type InstalledPayloadRecord,
+  comparePayloadIdentity,
+  describeCatalogPayload,
+} from './catalog-payload-identity.js';
 import { GezmodelManager } from './gezmodel.js';
 
 interface ModelSummary {
@@ -143,7 +148,14 @@ export class SharedModelMigrationManager {
       if (!current || current.manifest.kind !== 'chat-model') {
         throw new Error('the current catalog manifest is no longer available');
       }
-      if (current.manifest.version !== candidate.catalogVersion) {
+      if (
+        !(await this.holdsCurrentCatalogPayload(
+          join(source.home, 'engines', request.engine, 'models', request.id),
+          request.engine,
+          candidate.catalogVersion,
+          current.manifest,
+        ))
+      ) {
         throw new Error('the model is no longer up to date with the current catalog');
       }
       const bundle = await managers.bundles.export(request.engine, request.id);
@@ -234,7 +246,16 @@ export class SharedModelMigrationManager {
     if (!info?.isDirectory() || info.isSymbolicLink()) return null;
     const detail = await this.options.catalog.get('chat-model', model.id).catch(() => null);
     if (!detail || detail.manifest.kind !== 'chat-model') return null;
-    if (detail.manifest.version !== model.catalogVersion) return null;
+    if (
+      !(await this.holdsCurrentCatalogPayload(
+        localDir,
+        engine,
+        model.catalogVersion,
+        detail.manifest,
+      ))
+    ) {
+      return null;
+    }
     return SharedModelMigrationCandidateSchema.parse({
       source: source.source,
       sourceLabel: source.label,
@@ -245,6 +266,45 @@ export class SharedModelMigrationManager {
       catalogVersion: model.catalogVersion,
       moving: this.inFlight.has(migrationKey(source.home, engine, model.id)),
     });
+  }
+
+  /**
+   * May this copy be offered to the machine store? The catalog has to still
+   * describe the bytes it holds — which is a payload question, not a version
+   * question. Gating on version equality alone stranded every install after
+   * any catalog edit, including the metadata-only ones that leave the weights
+   * untouched, with "no longer up to date" as the only explanation.
+   *
+   * This is a pre-filter, not the security boundary:
+   * {@link assertCatalogPayloadIntegrity} re-hashes the exported bundle
+   * against the current catalog before the broker admits a byte of it.
+   */
+  private async holdsCurrentCatalogPayload(
+    localDir: string,
+    engine: GezmodelEngine,
+    installedVersion: string | undefined,
+    manifest: ChatModelManifest,
+  ): Promise<boolean> {
+    if (!installedVersion) return false;
+    if (manifest.version === installedVersion) return true;
+    const catalog = describeCatalogPayload(manifest, engine);
+    if (!catalog) return false;
+    const installed = await readFile(join(localDir, 'manifest.json'), 'utf8')
+      .then((raw) => JSON.parse(raw) as InstalledPayloadRecord)
+      .catch(() => null);
+    if (!installed) return false;
+    const result = await comparePayloadIdentity({
+      catalog,
+      installed: {
+        ...(installed.huggingfaceRepo ? { huggingfaceRepo: installed.huggingfaceRepo } : {}),
+        ...(installed.payloadFingerprint
+          ? { payloadFingerprint: installed.payloadFingerprint }
+          : {}),
+        ...(installed.fileSha256 ? { fileSha256: installed.fileSha256 } : {}),
+      },
+      modelDir: localDir,
+    });
+    return result.identity === 'same';
   }
 
   private managersFor(home: string): MigrationManagers {

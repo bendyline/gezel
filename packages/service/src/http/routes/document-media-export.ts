@@ -5,7 +5,6 @@ import {
   type DocumentMediaExportRequest,
   DocumentMediaExportRequestSchema,
 } from '@bendyline/gezel';
-import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
 import { markdownToDoc, resolveAudioMapping } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import type { Doc } from '@bendyline/squisq/schemas';
@@ -13,7 +12,10 @@ import type { ContentContainer, ContentEntry } from '@bendyline/squisq/storage';
 import { Hono } from 'hono';
 import { mimeTypeForFilename } from '../../fs/media-types.js';
 import type { Store } from '../../fs/store.js';
-import { resolveManagedChromiumBinary } from '../../rendering/managed-chromium.js';
+import {
+  type ManagedBrowserRunner,
+  runWithManagedBrowser,
+} from '../../rendering/managed-browser.js';
 import type { ServiceContext } from '../context.js';
 
 interface NativeDocumentMediaRenderer {
@@ -32,52 +34,6 @@ interface NativeDocumentMediaRenderer {
 async function loadNativeRenderer(): Promise<NativeDocumentMediaRenderer> {
   return import('@bendyline/squisq-cli/api');
 }
-
-type ManagedBrowserRunner = <T>(home: string, task: () => Promise<T>) => Promise<T>;
-
-let managedBrowserQueue: Promise<unknown> = Promise.resolve();
-
-/**
- * Squisq's renderer uses its exact-pinned `playwright-core`, while Gezel's
- * system toolset may have downloaded Chromium with another Playwright
- * revision. Serialize the small launch override so Squisq reuses Gezel's
- * managed executable instead of looking for a second revision-specific copy.
- */
-const runWithManagedBrowser: ManagedBrowserRunner = async (home, task) => {
-  const run = async () => {
-    const browsersDir = playwrightBrowsersDir(home);
-    const executablePath = await resolveManagedChromiumBinary(browsersDir);
-    if (!executablePath) {
-      throw new Error(
-        `Playwright Chromium is not installed under ${browsersDir}. Wait for browser setup to finish and try again.`,
-      );
-    }
-
-    process.env.PLAYWRIGHT_BROWSERS_PATH ||= browsersDir;
-    const { chromium } = await import('playwright-core');
-    const ownLaunch = Object.getOwnPropertyDescriptor(chromium, 'launch');
-    const originalLaunch = chromium.launch;
-    chromium.launch = ((options = {}) =>
-      originalLaunch.call(chromium, {
-        ...options,
-        executablePath,
-        args: Array.from(
-          new Set([...(options.args ?? []), '--disable-dev-shm-usage', '--no-sandbox']),
-        ),
-      })) as typeof chromium.launch;
-
-    try {
-      return await task();
-    } finally {
-      if (ownLaunch) Object.defineProperty(chromium, 'launch', ownLaunch);
-      else delete (chromium as unknown as { launch?: unknown }).launch;
-    }
-  };
-
-  const result = managedBrowserQueue.then(run, run);
-  managedBrowserQueue = result.catch(() => undefined);
-  return result;
-};
 
 /**
  * Native rendered-media export for Squisq documents.

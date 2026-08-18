@@ -75,12 +75,16 @@ describe('macOS machine-service filesystem security', () => {
   it('migrates private state while exposing runtime and read-only assets', () => {
     expect(macPostinstall).toContain('umask 077');
     expect(macPostinstall).toContain(
-      'find -x "$DATA_DIR" -exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} +',
+      'find -x "$DATA_DIR" -path "$SERVICE_TREE" -prune -o \\\n  -exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} +',
     );
-    expect(macPostinstall).toContain('find -x "$DATA_DIR" ! -type l -exec chmod -N {} +');
+    expect(macPostinstall).toContain(
+      'find -x "$DATA_DIR" -path "$SERVICE_TREE" -prune -o ! -type l -exec chmod -N {} +',
+    );
     expect(macPostinstall).not.toContain('chmod -RN "$DATA_DIR"');
     expect(macPostinstall).not.toContain('chown -R');
-    expect(macPostinstall).toContain('find -x "$DATA_DIR" ! -type l -exec chmod go-rwx {} +');
+    expect(macPostinstall).toContain(
+      'find -x "$DATA_DIR" -path "$SERVICE_TREE" -prune -o ! -type l -exec chmod go-rwx {} +',
+    );
     expect(macPostinstall).toContain('chmod 711 "$DATA_DIR"');
     expect(macPostinstall).toContain('chmod 755 "$DATA_DIR/runtime"');
     expect(macPostinstall).toContain('chmod 700 "$DATA_DIR/logs"');
@@ -423,13 +427,17 @@ describe('Linux machine-service filesystem security', () => {
   it('migrates private state while exposing runtime and read-only assets', () => {
     expect(linuxPostinstall).toContain('umask 077');
     expect(linuxPostinstall).toContain(
-      'find "$DATA_DIR" -xdev -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} +',
+      'find "$DATA_DIR" -xdev -path "$SERVICE_TREE" -prune -o \\\n  -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} +',
     );
     expect(linuxPostinstall).not.toContain('chown -R');
-    expect(linuxPostinstall).toContain('find "$DATA_DIR" -xdev ! -type l -exec setfacl -b -- {} +');
-    expect(linuxPostinstall).toContain('find "$DATA_DIR" -xdev -type d -exec setfacl -k -- {} +');
     expect(linuxPostinstall).toContain(
-      'find "$DATA_DIR" -xdev -path "$SHARED_DIR" -prune -o ! -type l -exec chmod go-rwx {} +',
+      'find "$DATA_DIR" -xdev -path "$SERVICE_TREE" -prune -o ! -type l -exec setfacl -b -- {} +',
+    );
+    expect(linuxPostinstall).toContain(
+      'find "$DATA_DIR" -xdev -path "$SERVICE_TREE" -prune -o -type d -exec setfacl -k -- {} +',
+    );
+    expect(linuxPostinstall).toContain(
+      'find "$DATA_DIR" -xdev \\( -path "$SHARED_DIR" -o -path "$SERVICE_TREE" \\) -prune -o \\\n  ! -type l -exec chmod go-rwx {} +',
     );
     expect(linuxPostinstall).toContain('chmod 711 "$DATA_DIR"');
     expect(linuxPostinstall).toContain('chmod 755 "$DATA_DIR/runtime"');
@@ -463,6 +471,52 @@ describe('Linux machine-service filesystem security', () => {
     expect(inactiveGate).toBeLessThan(sharedMigration);
     expect(sharedMigration).toBeLessThan(migration);
     expect(migration).toBeLessThan(extraction);
+  });
+
+  it('publishes the service tree read-only so user daemons can run it without rewriting it', () => {
+    // The tree is product code — the same bytes as the world-readable tarball
+    // in /opt and inside Gezel.app — so making it readable exposes nothing new,
+    // and it is what lets each account's user daemon execute this copy instead
+    // of unpacking a byte-identical second one into its own home.
+    //
+    // Writability is the property that must not move. A tree an interactive
+    // account could rewrite, executed by a service daemon, is an escalation;
+    // `go=u-w` grants group and other exactly the owner's access minus write,
+    // so exec bits survive and only the service account can modify anything.
+    // supervisor/shared-service-tree.ts independently refuses to adopt a tree
+    // that fails this at runtime, but the installer must not produce one.
+    for (const script of [linuxPostinstall, macPostinstall]) {
+      expect(script).toContain('chmod go=u-w {} +');
+      expect(script).not.toContain('chmod go+w');
+      expect(script).not.toContain('chmod a+w');
+    }
+    expect(linuxPostinstall).toContain(
+      'find "$SERVICE_TREE" -xdev \\\n  -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} + \\\n  ! -type l -exec chmod go=u-w {} +',
+    );
+    expect(macPostinstall).toContain(
+      'find -x "$SERVICE_TREE" -exec chown -h "${DAEMON_USER}:${DAEMON_USER}" {} +',
+    );
+    // macOS inherited ACLs survive a mode change, so they must be stripped
+    // before the tree is published rather than after.
+    expect(macPostinstall).toContain('find -x "$SERVICE_TREE" ! -type l -exec chmod -N {} +');
+    expect(
+      position(macPostinstall, 'find -x "$SERVICE_TREE" ! -type l -exec chmod -N {} +'),
+    ).toBeLessThan(
+      position(macPostinstall, 'find -x "$SERVICE_TREE" ! -type l -exec chmod go=u-w {} +'),
+    );
+    // The private-state sweeps must not run over it: they would both undo the
+    // publication and traverse ~33k files that step 2b is about to replace.
+    for (const script of [linuxPostinstall, macPostinstall]) {
+      expect(script).toContain('-path "$SERVICE_TREE" -prune');
+    }
+    // Publication happens after extraction, never before — otherwise the modes
+    // would apply to the tree being thrown away.
+    expect(position(linuxPostinstall, '--dest="$SERVICE_TREE"')).toBeLessThan(
+      position(linuxPostinstall, 'chmod go=u-w {} +'),
+    );
+    expect(position(macPostinstall, '--dest="$SERVICE_TREE"')).toBeLessThan(
+      position(macPostinstall, 'chmod go=u-w {} +'),
+    );
   });
 
   it('rejects installer-owned symlinks and gives systemd the same private umask', () => {

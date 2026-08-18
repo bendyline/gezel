@@ -21,6 +21,30 @@ describe('splashStage', () => {
     );
   });
 
+  it('surfaces extraction progress once the supervisor starts reporting it', () => {
+    // Twenty minutes behind a caption that never changes is indistinguishable
+    // from a hung process, whatever the caption says. The opening line has no
+    // percentage and must still fall through to the generic stage — its
+    // version number must not be mistaken for progress.
+    expect(
+      splashStage('[supervisor] extracting service bundle v1.26226.50 to /home/x/.gezel/service'),
+    ).toBe('Setting up Gezel — first run takes a few minutes');
+    expect(splashStage('[supervisor] extracting service bundle — 5% (1650/33000 files)')).toBe(
+      'Setting up Gezel — 5% unpacked',
+    );
+    expect(splashStage('[supervisor] extracting service bundle — 65% (21450/33000 files)')).toBe(
+      'Setting up Gezel — 65% unpacked',
+    );
+  });
+
+  it('names the adopted-tree launch, which does no extraction at all', () => {
+    expect(
+      splashStage(
+        '[supervisor] reusing the installer-extracted service tree at /var/lib/gezel/service (sha abc123abc123) — skipping a duplicate unpack into the user home',
+      ),
+    ).toBe('Setting up Gezel');
+  });
+
   it('holds the current stage rather than surfacing internals', () => {
     // Unmatched → null → the splash keeps whatever it was showing. These are
     // real lines that would otherwise leak paths and mode flags to the user.
@@ -39,6 +63,13 @@ describe('splashStage', () => {
     // reads as a crash dump. Guards the copy, not just the matching.
     for (const { text } of [
       { text: splashStage('[supervisor] extracting service bundle v1 to C:\\x') ?? '' },
+      { text: splashStage('[supervisor] extracting service bundle — 100% (33000/33000)') ?? '' },
+      {
+        text:
+          splashStage(
+            '[supervisor] reusing the installer-extracted service tree at /var/lib/gezel/service (sha abc) — skipping a duplicate unpack into the user home',
+          ) ?? '',
+      },
       { text: splashStage('[supervisor] installing bundled node v24.18.1') ?? '' },
       { text: splashStage('[supervisor] embedded service bound on https://127.0.0.1:6228') ?? '' },
     ]) {

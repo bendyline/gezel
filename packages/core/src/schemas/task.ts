@@ -131,6 +131,24 @@ export const TaskCraftbookStepSchema = CraftbookStepSchema.extend({
    */
   gateAttempts: z.number().int().nonnegative().optional(),
   /**
+   * Rejections that MEASURABLY CONVERGED — the same checks failed on
+   * strictly fewer outstanding items than the attempt before (see
+   * `gateAttemptHistory[].remaining`). These are what a bounded batch
+   * loop produces on every pass but the last, so they are budgeted
+   * separately from `gateAttempts`: charging them to the same budget made
+   * `maxAttempts` a ceiling on CORPUS SIZE rather than on stalling, and a
+   * PR one batch larger than the budget could never finish however well
+   * the reviewer worked.
+   *
+   * Bounded by `GATE_MAX_PROGRESS_ATTEMPTS`. Strict convergence already
+   * guarantees termination (the count is a non-negative integer that must
+   * fall each pass), but "converging one item per pass across 200 items"
+   * is a runaway to whoever is paying for the sessions, so it still ends
+   * in a pause-for-help. Reset by `bumpStepActivation` alongside
+   * `gateAttempts`, and preserved by the same self-loop carve-out.
+   */
+  gateProgressAttempts: z.number().int().nonnegative().optional(),
+  /**
    * Repeat-reject damper. When the gated deliverable is byte-identical
    * to what the gate last rejected, the runtime returns this cached
    * rejection instead of re-running gate scripts, and the chat nudge
@@ -161,9 +179,10 @@ export const TaskCraftbookStepSchema = CraftbookStepSchema.extend({
    * Rolling reject trail (capped at 8 entries, oldest dropped). One entry
    * per real completion-gate rejection PLUS one per damped byte-identical
    * resubmit (`frozen: true`). `signatureHash` hashes the failing-check
-   * IDENTITY set (GateCheckOutcome labels), not prose or bytes — byte
-   * churn with an unmoved failure set IS a plateau; a cleared check
-   * changes the signature and resets the ladder.
+   * IDENTITY set (GateCheckOutcome labels) plus any outstanding-item
+   * count those checks report, not prose or bytes — byte churn with an
+   * unmoved failure set IS a plateau; a cleared check, or a falling
+   * item count, changes the signature and resets the ladder.
    *
    * Deliberately NOT stripped by `bumpStepActivation`: `onReject: <self>`
    * loop gates reset `gateAttempts`/`lastGateReject` on every pass, so
@@ -180,6 +199,15 @@ export const TaskCraftbookStepSchema = CraftbookStepSchema.extend({
         messageFingerprint: z.string(),
         /** Failing GateCheckOutcome labels (or `script:<name>`). */
         failedChecks: z.array(z.string()).optional(),
+        /**
+         * Outstanding-item count summed over the failing checks that
+         * report one (`GateCheckOutcome.remaining`); absent when no
+         * failing check counts in items. Read against the next
+         * rejection's count so a bounded batch loop can say "25 cleared,
+         * 18 to go" instead of repeating the same bullets under a
+         * "your last edits did not move the gate" opener.
+         */
+        remaining: z.number().int().nonnegative().optional(),
         /** True when this entry records a damped byte-identical resubmit. */
         frozen: z.boolean().optional(),
       }),

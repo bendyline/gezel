@@ -223,14 +223,24 @@ assert_not_symlink "$SERVICE_TREE" "Gezel service tree"
 
 # Upgrade migration: strip all group/other access and replace legacy owners.
 # Do not dereference symlinks or cross into mounted filesystems.
-find "$DATA_DIR" -xdev -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} +
+#
+# $SERVICE_TREE is pruned from all four sweeps below. It holds the previous
+# install's ~33k-file service bundle, which step 2b replaces wholesale and then
+# sets ownership and modes on directly — so walking it here is four extra
+# traversals of the largest directory on the machine to fix up files that are
+# about to be deleted. It is also the one subtree whose final modes differ
+# (it is readable, not private; see step 2b), so leaving it in the `go-rwx`
+# sweep would fight that on every upgrade.
+find "$DATA_DIR" -xdev -path "$SERVICE_TREE" -prune -o \
+  -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} +
 # Remove named/default POSIX ACLs when the platform provides setfacl. chmod
 # alone can leave dormant named entries that regain access after a later mode
 # change. On minimal systems without ACL tooling, the mode mask still denies
 # all group/other access.
-find "$DATA_DIR" -xdev ! -type l -exec setfacl -b -- {} +
-find "$DATA_DIR" -xdev -type d -exec setfacl -k -- {} +
-find "$DATA_DIR" -xdev -path "$SHARED_DIR" -prune -o ! -type l -exec chmod go-rwx {} +
+find "$DATA_DIR" -xdev -path "$SERVICE_TREE" -prune -o ! -type l -exec setfacl -b -- {} +
+find "$DATA_DIR" -xdev -path "$SERVICE_TREE" -prune -o -type d -exec setfacl -k -- {} +
+find "$DATA_DIR" -xdev \( -path "$SHARED_DIR" -o -path "$SERVICE_TREE" \) -prune -o \
+  ! -type l -exec chmod go-rwx {} +
 chmod 711 "$DATA_DIR"
 chmod 755 "$DATA_DIR/runtime"
 chmod 700 "$DATA_DIR/logs"
@@ -269,8 +279,10 @@ rm -f \
 
 # 2b. Extract the shipped service bundle into $SERVICE_TREE. Runs through
 # the bundled Electron exe in Node mode (ELECTRON_RUN_AS_NODE=1) so we
-# don't need a system Node at install time. --force populates the tree
-# even if a previous partial install left files behind.
+# don't need a system Node at install time. --force keeps this hook
+# authoritative: a partial previous install, a content-drifted tree, or a
+# deliberate downgrade all get replaced. It no longer re-unpacks a tree that
+# already carries this bundle's sha.
 echo "[gezel after-install] extracting service bundle"
 if [ ! -f "$BUNDLE_TARBALL" ] || [ ! -f "$EXTRACT_CLI" ]; then
   echo "[gezel after-install] ERROR: shipped bundle missing (tarball=$BUNDLE_TARBALL cli=$EXTRACT_CLI)" >&2
@@ -281,8 +293,24 @@ ELECTRON_RUN_AS_NODE=1 "$ELECTRON_EXE" "$EXTRACT_CLI" \
   --meta="$BUNDLE_META" \
   --dest="$SERVICE_TREE" \
   --force
-find "$SERVICE_TREE" -xdev -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} +
-find "$SERVICE_TREE" -xdev ! -type l -exec chmod go-rwx {} +
+# Readable, not private — one traversal, both fixups.
+#
+# This tree is the only thing under $DATA_DIR that is not the daemon's private
+# state: it is product code, the exact bytes of the world-readable tarball in
+# /opt that produced it. Publishing it lets each account's user daemon execute
+# this copy instead of unpacking a byte-identical second one into its own home,
+# which is the difference between one ~33k-file extraction per machine and one
+# per account (see supervisor/shared-service-tree.ts). $DATA_DIR stays 0711, so
+# reaching it still requires knowing the path — the directory is not listable.
+#
+# `go=u-w` grants group/other exactly what the owner has, minus write: 0755
+# stays 0755, 0644 stays 0644, executables keep their exec bits. Write access
+# remains the service account's alone, which is the property that matters —
+# a user-writable tree executed by a root-adjacent daemon would be an
+# escalation, and the supervisor refuses to adopt one for that reason.
+find "$SERVICE_TREE" -xdev \
+  -exec chown --no-dereference "$GEZEL_USER:$GEZEL_USER" -- {} + \
+  ! -type l -exec chmod go=u-w {} +
 
 # 3. Preserve electron-builder's standard Linux desktop integration. Supplying
 # our own afterInstall hook replaces electron-builder's default hook entirely,

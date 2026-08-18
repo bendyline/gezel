@@ -1,11 +1,13 @@
 import type {
   ChatEventEnvelope,
+  ChatSessionSource,
   ChatTurnErrorDetail,
   GezelSummary,
   ListTimelineResponse,
   Project,
   ProviderName,
   Question,
+  ReferencedFile,
   SessionGpuTask,
   TerminalTimelineEntry,
   TimelineMessage,
@@ -284,6 +286,8 @@ interface LiveSlot {
    */
   sessionProviderName?: ProviderName;
   sessionModel?: string;
+  /** External owner for a live read-only thread. */
+  sessionSource?: ChatSessionSource;
   taskRef?: string;
   /**
    * Set when the turn ended in error (context overflow, provider crash,
@@ -428,9 +432,13 @@ export interface ChatTimelineViewProps {
   onArtifactReference?: (path: string, projectId?: string) => void;
   /** Passively remembers parsed artifact mentions for `/open` MRU suggestions. */
   onArtifactSeen?: (path: string, projectId?: string) => void;
-  /** Opens a verified terminal workspace-file reference in the right rail. */
+  /**
+   * Opens a verified workspace-file reference in the right rail — from a
+   * terminal `openFile` event, or from a `#workspace:` chip/link the
+   * reference parser recognized in a reply body.
+   */
   onWorkspaceReference?: (path: string, projectId?: string) => void;
-  /** Passively remembers persisted workspace tool paths for `/open` MRU suggestions. */
+  /** Passively remembers parsed + tool-touched workspace paths for `/open` MRU suggestions. */
   onWorkspaceSeen?: (path: string, projectId?: string) => void;
   /**
    * Forwarded from {@link ChatReferences} so the right rail's "Task" tab
@@ -663,8 +671,9 @@ export function ChatTimelineView({
   useEffect(() => {
     if (!onArtifactSeen && !onWorkspaceSeen) return;
     for (const message of messages) {
-      for (const path of message.referencedArtifacts ?? []) {
-        onArtifactSeen?.(path, message.projectId);
+      for (const file of referencedFilesOf(message)) {
+        if (file.kind === 'workspace') onWorkspaceSeen?.(file.path, message.projectId);
+        else onArtifactSeen?.(file.path, message.projectId);
       }
       for (const tool of message.toolCalls ?? []) {
         if (!tool.success) continue;
@@ -1638,6 +1647,11 @@ export function ChatTimelineView({
           // with at this moment. The canonical row from the post-
           // `complete` refresh overwrites this.
           sessionProviderName: lastForSession?.sessionProviderName ?? defaultProvider,
+          ...(lastForSession?.sessionSource
+            ? { sessionSource: lastForSession.sessionSource }
+            : env.sessionSource
+              ? { sessionSource: env.sessionSource }
+              : {}),
           ...(lastForSession?.sessionModel ? { sessionModel: lastForSession.sessionModel } : {}),
           ...(lastForSession?.taskRef ? { taskRef: lastForSession.taskRef } : {}),
           ...(lastForSession?.stepId ? { stepId: lastForSession.stepId } : {}),
@@ -1648,6 +1662,9 @@ export function ChatTimelineView({
           // renders as a "Yusuf → Leo" handoff instead of "You".
           ...(event.message.from ? { from: event.message.from } : {}),
           ...(event.message.nudge ? { nudge: true } : {}),
+          // Keep a live dispatch seed labelled System — without this the
+          // bubble reads as "You" until the next canonical refresh.
+          ...(event.message.origin === 'system' ? { origin: 'system' as const } : {}),
         };
         const dedupKey = `${sessionId}:${event.message.at}:${event.message.role}`;
         setMessages((prev) => {
@@ -1718,6 +1735,11 @@ export function ChatTimelineView({
                     : {}),
                 }
               : {}),
+            ...(lastForSession?.sessionSource
+              ? { sessionSource: lastForSession.sessionSource }
+              : env.sessionSource
+                ? { sessionSource: env.sessionSource }
+                : {}),
             ...(lastForSession?.taskRef ? { taskRef: lastForSession.taskRef } : {}),
           });
           setLiveBump((n) => n + 1);
@@ -2225,6 +2247,11 @@ export function ChatTimelineView({
           ...(lastForSession ? { sessionTitle: lastForSession.sessionTitle } : {}),
           ...(lastForSession ? { sessionCreatedAt: lastForSession.sessionCreatedAt } : {}),
           ...(lastForSession?.taskRef ? { taskRef: lastForSession.taskRef } : {}),
+          ...(lastForSession?.sessionSource
+            ? { sessionSource: lastForSession.sessionSource }
+            : env.sessionSource
+              ? { sessionSource: env.sessionSource }
+              : {}),
         };
       }
     },
@@ -3004,6 +3031,9 @@ export function ChatTimelineView({
     const fontSourceFont = gezels.get(fontSourceId)?.font;
     const fontFamily = resolveGezelFontFamily(fontSourceFont);
     const fontScale = resolveGezelFontScale(fontSourceFont);
+    // Resolved once: the legacy widening allocates, and a fresh array per
+    // render would defeat the bubble's linkify memo.
+    const files = referencedFilesOf(m);
     return (
       <MessageBubble
         key={`msg:${m.sessionId}:${m.at}:${m.role}`}
@@ -3033,6 +3063,7 @@ export function ChatTimelineView({
         {...(!roleBasedNameOnlyMode && gezel?.role ? { authorRole: gezel.role } : {})}
         {...(m.from ? { from: m.from } : {})}
         {...(m.nudge ? { nudge: true } : {})}
+        {...(m.origin === 'system' ? { origin: 'system' as const } : {})}
         receiverLabel={
           gezel
             ? displayName(
@@ -3046,7 +3077,7 @@ export function ChatTimelineView({
         {...(project ? { projectLabel: project.name } : {})}
         extraClass={fade ? 'timeline-msg-faded' : undefined}
         mediaProvider={getReadonlyGezelMediaProvider(m.projectId, m.sessionId)}
-        {...(m.referencedArtifacts ? { referencedArtifacts: m.referencedArtifacts } : {})}
+        {...(files.length > 0 ? { referencedFiles: files } : {})}
         {...(m.referencedTasks ? { referencedTasks: m.referencedTasks } : {})}
         {...(m.toolCalls && m.toolCalls.length > 0
           ? { toolCalls: m.toolCalls, projectId: m.projectId }
@@ -3074,8 +3105,13 @@ export function ChatTimelineView({
                 }),
             }
           : {})}
-        {...(onArtifactReference
-          ? { onArtifactReference: (path: string) => onArtifactReference(path, m.projectId) }
+        {...(onArtifactReference || onWorkspaceReference
+          ? {
+              onFileReference: (file: ReferencedFile) => {
+                if (file.kind === 'workspace') onWorkspaceReference?.(file.path, m.projectId);
+                else onArtifactReference?.(file.path, m.projectId);
+              },
+            }
           : {})}
         onTaskReference={(ref) =>
           window.dispatchEvent(new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }))
@@ -3130,29 +3166,33 @@ export function ChatTimelineView({
             : providerForGezel(slot.gezelId) === 'ds4'
               ? { localEngine: 'ds4' as const }
               : {})}
-        onCancel={async () => {
-          try {
-            await api.cancelChatSessionTurn(sessionId);
-          } catch (err) {
-            console.warn('[timeline] failed to cancel turn:', err);
-          }
-        }}
-        onReEngage={async () => {
-          // Cancel first: a wedged turn holds the session lock, so a
-          // nudge sent while it runs would queue behind it forever.
-          try {
-            await api.cancelChatSessionTurn(sessionId);
-          } catch (err) {
-            console.warn('[timeline] re-engage: cancel failed:', err);
-          }
-          try {
-            await api.sendToChatSession(sessionId, {
-              message: 'Please continue where you left off and finish the work you started.',
-            });
-          } catch (err) {
-            console.warn('[timeline] re-engage: send failed:', err);
-          }
-        }}
+        {...(slot.sessionSource
+          ? {}
+          : {
+              onCancel: async () => {
+                try {
+                  await api.cancelChatSessionTurn(sessionId);
+                } catch (err) {
+                  console.warn('[timeline] failed to cancel turn:', err);
+                }
+              },
+              onReEngage: async () => {
+                // Cancel first: a wedged turn holds the session lock, so a
+                // nudge sent while it runs would queue behind it forever.
+                try {
+                  await api.cancelChatSessionTurn(sessionId);
+                } catch (err) {
+                  console.warn('[timeline] re-engage: cancel failed:', err);
+                }
+                try {
+                  await api.sendToChatSession(sessionId, {
+                    message: 'Please continue where you left off and finish the work you started.',
+                  });
+                } catch (err) {
+                  console.warn('[timeline] re-engage: send failed:', err);
+                }
+              },
+            })}
         {...(fontFamily ? { fontFamily } : {})}
         {...(fontScale !== 1 ? { fontScale } : {})}
         {...(slot.error ? { error: slot.error } : {})}
@@ -3613,6 +3653,7 @@ function renderDivider(args: {
       ? row.msg.sessionCreatedAt
       : (row.slot.sessionCreatedAt ?? new Date(row.slot.startedAt).toISOString());
   const taskRef = row.kind === 'message' ? row.msg.taskRef : row.slot.taskRef;
+  const source = row.kind === 'message' ? row.msg.sessionSource : row.slot.sessionSource;
   const handoff = row.kind === 'message' ? row.msg.handoffFrom : undefined;
   const handoffName = handoff
     ? (() => {
@@ -3634,7 +3675,11 @@ function renderDivider(args: {
         continuing ? ' timeline-session-divider-continuing' : ''
       }`}
       onClick={() => onFocusSession?.(sessionId, gezelId, projectId)}
-      title="Focus this thread — composer will post here"
+      title={
+        source
+          ? `View this read-only thread from ${source.appName}`
+          : 'Focus this thread — composer will post here'
+      }
     >
       <GezelIcon
         svg={gezel?.icon ?? null}
@@ -3648,6 +3693,13 @@ function renderDivider(args: {
           <>
             ↩ continuing with {gezelName}
             {project && <> · in {project.name}</>}
+            {source && <> · from {source.appName} · read-only</>}
+          </>
+        ) : source ? (
+          <>
+            external thread with {gezelName} · from {source.appName} · read-only
+            {project && <> · in {project.name}</>}
+            {' · '}started {formatRelativeTime(createdAt)}
           </>
         ) : (
           <>
@@ -3752,6 +3804,20 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+const NO_FILES: readonly ReferencedFile[] = [];
+
+/**
+ * The message's referenced files, widening the legacy artifact-only field
+ * for any surface still sending it. `listTimeline` backfills the current
+ * shape on read, so this fallback is for live SSE rows written by an older
+ * daemon — a stable empty array otherwise, to keep the bubble's memos warm.
+ */
+function referencedFilesOf(message: TimelineMessage): readonly ReferencedFile[] {
+  if (message.referencedFiles?.length) return message.referencedFiles;
+  if (!message.referencedArtifacts?.length) return NO_FILES;
+  return message.referencedArtifacts.map((path) => ({ kind: 'artifact' as const, path }));
+}
+
 function withinHours(iso: string | undefined, ms: number): boolean {
   if (!iso) return false;
   try {
@@ -3767,8 +3833,12 @@ function withinHours(iso: string | undefined, ms: number): boolean {
  * user prompt + the assistant bubble header for whatever's
  * currently being scrolled past. Keeps the conversation context
  * visible while the user reads through a long response.
+ *
+ * Exported for its unit test (same reason as `staleLiveSessionIds`): it is
+ * the second place that decides an author label, so it can drift from the
+ * bubble's without a test holding the two together.
  */
-function ChatStickyHeader({
+export function ChatStickyHeader({
   payload,
   gezels,
 }: {
@@ -3803,7 +3873,12 @@ function ChatStickyHeader({
   return (
     <div className="chat-sticky-header" aria-live="polite">
       <div className="chat-sticky-header-user" title={userMsg.content}>
-        <span className="chat-sticky-header-author">YOU</span>
+        {/* A task dispatch seed rides the user role but is the machinery
+            talking — the bubble labels it System, and the sticky header
+            has to agree or the attribution flips as the user scrolls. */}
+        <span className="chat-sticky-header-author">
+          {userMsg.origin === 'system' ? 'SYSTEM' : 'YOU'}
+        </span>
         <span className="chat-sticky-header-preview">{userPreview}</span>
       </div>
       <div className="chat-sticky-header-assistant" key={assistantGezelId}>

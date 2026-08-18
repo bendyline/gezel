@@ -1,11 +1,11 @@
 # Gezel — Design Guidelines
 
-A distillation of the design language used in the Gezel desktop app, written
-so it can be applied to the marketing site, decks, social cards, and any
-other surface carrying the brand.
+A distillation of the design language used in the Gezel desktop app, written so
+it can be applied to the marketing site, decks, social cards, and any other
+surface carrying the brand.
 
-This is the shareable summary. The authoritative, implementation-level source
-is `docs/ux.md` in the product repo; the tokens live in
+This is the shareable summary. The authoritative, implementation-level source is
+`docs/ux.md` in the product repo; the tokens live in
 `packages/ui/src/styles.css`. Where this document and those disagree, they win.
 
 ---
@@ -21,24 +21,23 @@ Three words should describe any surface we make:
 
 1. **Organic** — human, warm, a little imperfect. Not factory-flat. Gentle
    curves, generous whitespace, colors pulled from wood, parchment, and ink
-   rather than from a corporate palette. Transitions fade and settle rather
-   than pop.
+   rather than from a corporate palette. Transitions fade and settle rather than
+   pop.
 
-2. **Classic** — it should read like a well-made tool you'd keep for years,
-   not a product surfacing the month's design trend. Typography, proportion,
-   and materials over novelty and chrome. Nothing that would look dated in
-   2031.
+2. **Classic** — it should read like a well-made tool you'd keep for years, not
+   a product surfacing the month's design trend. Typography, proportion, and
+   materials over novelty and chrome. Nothing that would look dated in 2031.
 
 3. **Historic** — Gezel is a guild. The vocabulary (*gezel*, *meester*,
-   *voorman*) is Dutch apprenticeship terminology, and the visuals should
-   echo the world those words come from. A guild hall, an apprentice's bench,
-   a master's ledger.
+   *voorman*) is Dutch apprenticeship terminology, and the visuals should echo
+   the world those words come from. A guild hall, an apprentice's bench, a
+   master's ledger.
 
 **What this does not mean:** kitsch, pastiche, sepia washes, or literal
 skeuomorphism. If a first-time visitor can't quite put a finger on *why* the
-brand feels different from every other AI product, we've done it right. The
-cues stay subtle — color temperature, border weight, corner radius, the
-pacing of a transition.
+brand feels different from every other AI product, we've done it right. The cues
+stay subtle — color temperature, border weight, corner radius, the pacing of a
+transition.
 
 The one sanctioned physical cue is **things you press**. Gezels are workers at
 craft tables, so controls may read as tools set into a bench: keys resting in
@@ -49,16 +48,16 @@ never through textures or ornament.
 
 Alongside the craft framing, Gezel exists to make AI accessible to people who
 aren't technical. The word "gezel" is itself the thesis: users work with
-*craftspeople*, not with the cold and technical "agents." Design and copy
-should both carry that. Warm nouns over jargon. A named character over an
-abstract capability. Plain sentences over feature bullets.
+*craftspeople*, not with the cold and technical "agents." Design and copy should
+both carry that. Warm nouns over jargon. A named character over an abstract
+capability. Plain sentences over feature bullets.
 
 ---
 
 ## 2. Color
 
-The palette is parchment, ink, sage, and terracotta. Warm throughout — there
-is essentially no blue in the brand except where blue carries data.
+The palette is parchment, ink, sage, and terracotta. Warm throughout — there is
+essentially no blue in the brand except where blue carries data.
 
 ### Foundation palette (light)
 
@@ -88,10 +87,10 @@ These are the authored primitives. Everything else derives from them.
 
 ### The two brand colors
 
-- **Sage green `#667f62`** is the *identity* color: the masthead, the
-  logotype, the thing you see first. It is a place, not a control.
-- **Terracotta `#b0724c`** is the *action* color: links, selected state,
-  focus rings, the pressed key. It is never used as a large field.
+- **Sage green **`#667f62` is the *identity* color: the masthead, the logotype,
+  the thing you see first. It is a place, not a control.
+- **Terracotta **`#b0724c` is the *action* color: links, selected state, focus
+  rings, the pressed key. It is never used as a large field.
 
 Never invert those roles. A sage button or a terracotta header both read as a
 different product.
@@ -114,7 +113,7 @@ Component styling should consume these, not the raw primitives:
 | `--warning` | `#e67e22` | `#f0a04b` |
 | `--danger` | `#c0392b` | `#e74c3c` |
 
-Note the light-mode inversion that most systems get wrong: **`--surface` is
+Note the light-mode inversion that most systems get wrong: `--surface`** is
 darker than the canvas, not lighter.** Inputs and wells read as *pressed into*
 the parchment. Dark mode uses ordinary additive elevation.
 
@@ -124,15 +123,15 @@ cream.
 
 ### Rules
 
-- **Everything derives from the foundation.** A nearby tone via `color-mix()`
-  is fine; starting a parallel palette is not.
+- **Everything derives from the foundation.** A nearby tone via `color-mix()` is
+  fine; starting a parallel palette is not.
 - **Hardcoded color is reserved for content that carries data** — diffs,
   terminal output, illustration, the character figures. Never for chrome.
-- **Dark mode is a real mode, not an afterthought.** The dark canvas is a
-  cool near-black (`#141517`) and the accent lightens to `#c0875d` to hold
-  contrast. Design both.
-- **Focus is visible and terracotta:** a 2px page-colored ring plus a 2px
-  accent ring, so it reads on any surface.
+- **Dark mode is a real mode, not an afterthought.** The dark canvas is a cool
+  near-black (`#141517`) and the accent lightens to `#c0875d` to hold contrast.
+  Design both.
+- **Focus is visible and terracotta:** a 2px page-colored ring plus a 2px accent
+  ring, so it reads on any surface.
 
 ---
 
@@ -147,22 +146,22 @@ A **two-font system**, both self-hosted WOFF2 — no CDN, no runtime fetch.
 
 **The one rule that keeps a surface consistent:**
 
-> Headings carry the serif. All other text — body, labels, helper text,
-> buttons, inputs, and links — is sans.
+> Headings carry the serif. All other text — body, labels, helper text, buttons,
+> inputs, and links — is sans.
 
 Two things to actively watch:
 
 - **Links stay sans even inside a heading.** A link that inherits its font
   inside an `<h3>` will pick up the serif. That's a bug — force it back.
 - **PT Serif ships only 400 and 700.** Asking for 500/600 on a serif heading
-  synthesizes a weight and looks wrong. Leave headings at their natural bold,
-  or set 400 for a lighter editorial look. Hanken Grotesk has 400/500/600/700,
-  so sans text can use the full range.
+  synthesizes a weight and looks wrong. Leave headings at their natural bold, or
+  set 400 for a lighter editorial look. Hanken Grotesk has 400/500/600/700, so
+  sans text can use the full range.
 
 ### Size scale
 
-A small, deliberate set — use it instead of ad-hoc values. Ad-hoc sizing is
-most of what makes a panel look "off."
+A small, deliberate set — use it instead of ad-hoc values. Ad-hoc sizing is most
+of what makes a panel look "off."
 
 | Token | Size | Use |
 | --- | --- | --- |
@@ -175,15 +174,14 @@ most of what makes a panel look "off."
 
 Long-form editorial surfaces are the deliberate exception: marketing prose,
 article bodies, and hero copy set their own comfortable reading size (1rem and
-up) and don't draw from this scale. **A marketing site is mostly editorial**,
-so expect to live above this scale more often than the app does — but keep the
+up) and don't draw from this scale. **A marketing site is mostly editorial**, so
+expect to live above this scale more often than the app does — but keep the
 ratios and the serif/sans split intact.
 
 ### Density
 
 Moderate. Not Linear-tight, not Notion-loose. Comfortable line-height; ~0.5rem
-between related controls. The spacing scale is
-`0.25 / 0.5 / 1 / 1.5 / 2 rem`.
+between related controls. The spacing scale is `0.25 / 0.5 / 1 / 1.5 / 2 rem`.
 
 ---
 
@@ -199,19 +197,18 @@ between related controls. The spacing scale is
 
 Panels and dialogs may go a step larger. **Never perfectly square, and never
 capsule-shaped for anything interactive.** Fully-rounded (`999px` / `50%`) is
-reserved for true circles — dots, avatars, scrollbar thumbs, switch knobs —
-plus one exception: non-interactive **status badges** are true capsules,
-precisely because the capsule silhouette is what stops them being mistaken for
-buttons.
+reserved for true circles — dots, avatars, scrollbar thumbs, switch knobs — plus
+one exception: non-interactive **status badges** are true capsules, precisely
+because the capsule silhouette is what stops them being mistaken for buttons.
 
-**There are no pill buttons.** A capsule-shaped control is a bug, not a
-variant. If you're reaching for `border-radius: 999px` on something with a
-text label, it should be a small-radius key or chip.
+**There are no pill buttons.** A capsule-shaped control is a bug, not a variant.
+If you're reaching for `border-radius: 999px` on something with a text label, it
+should be a small-radius key or chip.
 
 ### Keys in trays
 
-The signature control treatment, and the most transferable idea for a
-marketing site's interactive bits (plan toggles, tab switchers, filters).
+The signature control treatment, and the most transferable idea for a marketing
+site's interactive bits (plan toggles, tab switchers, filters).
 
 A group of mutually exclusive options is a shallow **tray** routed into the
 bench; each option is a raised, mostly-square **key**; the chosen key sits
@@ -219,8 +216,8 @@ bench; each option is a raised, mostly-square **key**; the chosen key sits
 `--radius-lg`, so their corners stay parallel.
 
 The 3D is expressed through **light and depth only** — gradients a few percent
-apart, a 1px top highlight, an inset recess. Never textures, never ornament.
-One soft light source, from above.
+apart, a 1px top highlight, an inset recess. Never textures, never ornament. One
+soft light source, from above.
 
 - Selected = pressed *in*, not popped out: translate down 1px, take the accent
   fill, carry an inset shadow.
@@ -232,18 +229,18 @@ One soft light source, from above.
 ### Surfaces and shadow
 
 Shadows are soft and low-contrast, modeling a single overhead light:
-`0 1px 2px rgba(0,0,0,0.05), 0 6px 18px rgba(0,0,0,0.06)` in light,
-roughly 6× the alpha in dark.
+`0 1px 2px rgba(0,0,0,0.05), 0 6px 18px rgba(0,0,0,0.06)` in light, roughly 6×
+the alpha in dark.
 
 ### Texture
 
 Exactly one texture ships in the product: a **faint wood grain** screened over
-the sage masthead and then knocked back to a whisper by a near-opaque veil.
-It should be felt, not noticed. If a visitor can identify it as "a wood
-texture," it is too strong.
+the sage masthead and then knocked back to a whisper by a near-opaque veil. It
+should be felt, not noticed. If a visitor can identify it as "a wood texture,"
+it is too strong.
 
-Do not add paper grain, noise overlays, or scanlines elsewhere. The warmth
-comes from color and proportion.
+Do not add paper grain, noise overlays, or scanlines elsewhere. The warmth comes
+from color and proportion.
 
 ---
 
@@ -252,8 +249,8 @@ comes from color and proportion.
 Slow-ish and soft. **Nothing snaps or bounces.**
 
 - Overlays and dialogs: **160ms ease-out** in, **120ms ease-in** out.
-- Dialogs fade and scale from `0.98` with a 2% vertical drift — a settle, not
-  a pop.
+- Dialogs fade and scale from `0.98` with a 2% vertical drift — a settle, not a
+  pop.
 - Color/border/background transitions: **120ms**.
 - "Working" is a slow pulse (1.2–1.8s ease-in-out), never a spinner where a
   pulse would do.
@@ -272,10 +269,10 @@ marketing site rather than commissioning a fourth.
 
 ### Poppetjes — the crew
 
-Every gezel is a **poppetje**: a small hand-painted, lathe-turned wooden
-figure. These are the brand's characters and the primary way we show a "team."
-They are parametric SVG, generated deterministically, so a given gezel always
-looks the same.
+Every gezel is a **poppetje**: a small hand-painted, lathe-turned wooden figure.
+These are the brand's characters and the primary way we show a "team." They are
+parametric SVG, generated deterministically, so a given gezel always looks the
+same.
 
 The visual target is painted wood in soft window light:
 
@@ -300,23 +297,22 @@ are **never** bound to gender or craft.
 Thumbnails and category art are quiet square still-lifes drawn from a circa
 **1905–1915 bindery and small-letterpress** material language: laid rag paper,
 woven bookcloth, lightly printed charcoal ink, dull oxidized brass. Parchment
-and charcoal base, one muted category accent, one dominant artifact, at most
-one or two supporting tools.
+and charcoal base, one muted category accent, one dominant artifact, at most one
+or two supporting tools.
 
 The historical cue stays in **material and construction, not decoration**. No
-sepia wash, no distressing, no wax seals, no ornate flourishes, no steampunk,
-no medieval props, no nostalgic clutter.
+sepia wash, no distressing, no wax seals, no ornate flourishes, no steampunk, no
+medieval props, no nostalgic clutter.
 
 ### The Village — a codebase as a settlement
 
-The product draws a codebase as a settlement from roughly **1890–1915** —
-gabled cottages, shopfronts and inns, civic halls with cupolas, brick
-workshops, rail depots, sawtooth-roofed foundries, rendered in 2:1 dimetric
-isometric. Never a modern skyline: no glass towers, no rooftop HVAC, no neon,
-no office campuses.
+The product draws a codebase as a settlement from roughly **1890–1915** — gabled
+cottages, shopfronts and inns, civic halls with cupolas, brick workshops, rail
+depots, sawtooth-roofed foundries, rendered in 2:1 dimetric isometric. Never a
+modern skyline: no glass towers, no rooftop HVAC, no neon, no office campuses.
 
-It's the most screenshot-able surface in the app and the strongest single
-visual asset for a marketing site.
+It's the most screenshot-able surface in the app and the strongest single visual
+asset for a marketing site.
 
 ---
 
@@ -328,14 +324,14 @@ The visual rules have a verbal counterpart.
   and always glossed on first use: *gezel* (journeyman/companion), *meester*
   (the guildmaster who helps you hire the rest), *voorman* (the crew lead on a
   project), *handboek* (the manual), *gilde* (the catalog).
-- **Warm nouns over technical ones.** A crew, a bench, a workshop — not
-  "agent orchestration."
-- **Plain and concrete.** Say what a thing is and what the person would do
-  about it. The product's own copy rule: never claim something is
-  "temporarily paused" unless it genuinely resumes on its own.
-- **No emoji.** The product bans them in shipped UI (one sanctioned
-  exception, a ⭐ on the meester). Marketing should hold the same line — the
-  glyph vocabulary is drawn and typographic, not emoji.
+- **Warm nouns over technical ones.** A crew, a bench, a workshop — not "agent
+  orchestration."
+- **Plain and concrete.** Say what a thing is and what the person would do about
+  it. The product's own copy rule: never claim something is "temporarily paused"
+  unless it genuinely resumes on its own.
+- **No emoji.** The product bans them in shipped UI (one sanctioned exception, a
+  ⭐ on the meester). Marketing should hold the same line — the glyph vocabulary
+  is drawn and typographic, not emoji.
 - **Local-first is a promise, not a feature bullet.** Everything a user makes
   lives on their own disk as ordinary files they can open. Lead with that.
 
@@ -355,16 +351,16 @@ The visual rules have a verbal counterpart.
 
 **Don't**
 
-- Pill buttons, capsule-shaped controls, or fully-rounded anything that isn't
-  a circle.
+- Pill buttons, capsule-shaped controls, or fully-rounded anything that isn't a
+  circle.
 - Stark white cards on cream.
 - Blue — anywhere it isn't carrying data.
 - Sepia, distressing, wax seals, gears, or any "vintage" costume.
 - Bouncy, springy, or snappy motion.
 - Emoji, stock photography of people at laptops, or generic AI iconography
   (glowing orbs, neural meshes, circuit traces).
-- Gradients as decoration. Gradients exist here only to describe a light
-  source on a physical surface.
+- Gradients as decoration. Gradients exist here only to describe a light source
+  on a physical surface.
 
 ---
 

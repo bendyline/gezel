@@ -58,6 +58,19 @@ describe('Local providers advertise supportsPriorMessages = true', () => {
 });
 
 describe('MlxProvider engine request lock', () => {
+  const sseResponse = (content: string): Response =>
+    new Response(
+      [
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content } }] })}`,
+        '',
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}`,
+        '',
+        'data: [DONE]',
+        '',
+      ].join('\n'),
+      { status: 200, headers: { 'content-type': 'text/event-stream' } },
+    );
+
   it('serializes backend requests even when callers enter concurrently', async () => {
     const provider = new MlxProvider({ baseUrl: 'http://127.0.0.1:0' });
     const events: string[] = [];
@@ -92,6 +105,99 @@ describe('MlxProvider engine request lock', () => {
 
     expect(maxActive).toBe(1);
     expect(events).toEqual(['first:start', 'first:end', 'second:start', 'second:end']);
+  });
+
+  it('removes an aborted physical-slot waiter before handing off the lease', async () => {
+    const provider = new MlxProvider({ baseUrl: 'http://127.0.0.1:0' });
+    const releaseHeldSlot = await provider.acquireExclusiveEngineRequest('held');
+    const ctrl = new AbortController();
+    const waiting = provider.acquireExclusiveEngineRequest('cancelled-waiter', ctrl.signal);
+
+    ctrl.abort();
+    await expect(waiting).rejects.toMatchObject({ name: 'AbortError' });
+    releaseHeldSlot();
+
+    const releaseFreshSlot = await provider.acquireExclusiveEngineRequest('fresh');
+    releaseFreshSlot();
+    expect(provider.isEngineBusy()).toBe(false);
+  });
+
+  it('releases the physical slot when an in-flight fetch is aborted', async () => {
+    let signalFirstFetchEntered!: () => void;
+    const firstFetchEntered = new Promise<void>((resolve) => {
+      signalFirstFetchEntered = resolve;
+    });
+    let fetchCalls = 0;
+    const fetchImpl = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      fetchCalls++;
+      if (fetchCalls === 1) {
+        signalFirstFetchEntered();
+        return await new Promise<Response>((_resolve, reject) => {
+          const abort = () => reject(new DOMException('aborted', 'AbortError'));
+          if (init?.signal?.aborted) abort();
+          else init?.signal?.addEventListener('abort', abort, { once: true });
+        });
+      }
+      return sseResponse('recovered');
+    }) as typeof fetch;
+    const provider = new MlxProvider({ baseUrl: 'http://mlx.test', fetchImpl });
+    const firstSession = await provider.createSession({ systemMessage: 'first' });
+    const secondSession = await provider.createSession({ systemMessage: 'second' });
+    const ctrl = new AbortController();
+    const first = firstSession.sendAndWait('hang', {
+      queue: { lane: 'interactive', sessionId: 'abort-first', signal: ctrl.signal },
+    });
+    await firstFetchEntered;
+    const second = secondSession.sendAndWait('follow-up', {
+      queue: { lane: 'background', sessionId: 'after-abort' },
+    });
+
+    ctrl.abort();
+    await expect(first).rejects.toThrow('turn cancelled by caller');
+    await expect(second).resolves.toBe('recovered');
+    expect(fetchCalls).toBe(2);
+    expect(provider.isEngineBusy()).toBe(false);
+  });
+
+  it('releases the physical slot after fetch and HTTP response failures', async () => {
+    for (const failure of ['transport', 'http'] as const) {
+      const fetchImpl = (async () => {
+        if (failure === 'transport') throw new Error('socket broke');
+        return new Response('engine unavailable', { status: 503, statusText: 'Unavailable' });
+      }) as typeof fetch;
+      const provider = new MlxProvider({ baseUrl: 'http://mlx.test', fetchImpl });
+      const session = await provider.createSession({ systemMessage: failure });
+
+      await expect(
+        session.sendAndWait('fail', {
+          queue: { lane: 'interactive', sessionId: `${failure}-failure` },
+        }),
+      ).rejects.toThrow();
+      expect(provider.isEngineBusy()).toBe(false);
+    }
+  });
+
+  it('bounds physical-slot waiting by the turn deadline', async () => {
+    const provider = new MlxProvider({
+      baseUrl: 'http://mlx.test',
+      fetchImpl: (async () => {
+        throw new Error('a timed-out waiter must not reach fetch');
+      }) as typeof fetch,
+    });
+    const releaseHeldSlot = await provider.acquireExclusiveEngineRequest('held');
+    const waitingSession = await provider.createSession({ systemMessage: 'waiting' });
+
+    await expect(
+      waitingSession.sendAndWait('wait', {
+        timeoutMs: 25,
+        queue: { lane: 'background', sessionId: 'deadline-waiter' },
+      }),
+    ).rejects.toThrow('timed out');
+
+    releaseHeldSlot();
+    const releaseFreshSlot = await provider.acquireExclusiveEngineRequest('fresh');
+    releaseFreshSlot();
+    expect(provider.isEngineBusy()).toBe(false);
   });
 });
 

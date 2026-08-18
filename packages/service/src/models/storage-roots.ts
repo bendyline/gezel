@@ -239,10 +239,26 @@ export async function modelExistsOnlyReadOnly(
   return root !== null && resolve(root) !== resolve(roots.writableRoot);
 }
 
+export const READ_ONLY_MODEL_CODE = 'read-only-model';
+
+/**
+ * Refusal to mutate a model that only exists in a read-only overlay root.
+ * Typed so HTTP routes can map it to a 4xx with the actionable message
+ * instead of letting it escape as an opaque 500.
+ */
+export class ReadOnlyModelError extends Error {
+  readonly code = READ_ONLY_MODEL_CODE;
+
+  constructor(id: string) {
+    super(
+      `model "${id}" is supplied by the read-only machine asset store; install a user-owned copy to replace it`,
+    );
+    this.name = 'ReadOnlyModelError';
+  }
+}
+
 export function readOnlyModelError(id: string): Error {
-  return new Error(
-    `model "${id}" is supplied by the read-only machine asset store; install a user-owned copy to replace it`,
-  );
+  return new ReadOnlyModelError(id);
 }
 
 /**

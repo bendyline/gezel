@@ -16,7 +16,10 @@ vi.mock('./FoldersSettings.js', () => ({ FoldersSettings: stub('folders-settings
 vi.mock('./ImageEngineSettings.js', () => ({ ImageEngineSettings: stub('image-settings') }));
 vi.mock('./LlamaCppSettings.js', () => ({ LlamaCppSettings: stub('llamacpp-settings') }));
 vi.mock('./MlxSettings.js', () => ({ MlxSettings: stub('mlx-settings') }));
-vi.mock('./OllamaSettings.js', () => ({ OllamaSettings: stub('ollama-settings') }));
+vi.mock('./OllamaSettings.js', () => ({
+  OllamaSettings: stub('ollama-settings'),
+  TimeoutRow: stub('timeout-row'),
+}));
 
 vi.mock('../components/CacheControlsPanel.js', () => ({ CacheControlsPanel: () => null }));
 vi.mock('../components/CatalogBrowser.js', () => ({ CatalogBrowser: () => null }));
@@ -171,6 +174,27 @@ describe('SettingsView', () => {
     await waitFor(() =>
       expect(api.updateConfig).toHaveBeenCalledWith({ showWorkInProgressFeatures: true }),
     );
+  });
+
+  it('hides the Channels section until work-in-progress features are on', async () => {
+    render(<SettingsView />);
+    await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
+    await screen.findByTestId('settings-nav-about');
+    expect(screen.queryByTestId('settings-nav-channels')).toBeNull();
+  });
+
+  it('shows the Channels section when work-in-progress features are on', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+      showWorkInProgressFeatures: true,
+    } as never);
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-channels'));
+
+    expect(await screen.findByTestId('channels-settings')).toBeInTheDocument();
   });
 
   it('offers the installed macOS uninstaller from About settings', async () => {
@@ -452,6 +476,64 @@ describe('SettingsView', () => {
     ).toBeInTheDocument();
   });
 
+  it('defaults the quota reserve to overall-on at 20% with per-day opt-in', async () => {
+    render(<SettingsView />);
+    const overallToggle = await screen.findByRole('checkbox', {
+      name: 'Stop night work near my overall quota',
+    });
+    // Absent config = the protective default is already on.
+    expect(overallToggle).toBeChecked();
+    const overallPercent = screen.getByRole('spinbutton', { name: 'Overall quota floor percent' });
+    expect(overallPercent).toHaveValue(20);
+    expect(overallPercent).toBeEnabled();
+
+    const perDayToggle = screen.getByRole('checkbox', {
+      name: 'Reserve a share of my quota per day until reset',
+    });
+    expect(perDayToggle).not.toBeChecked();
+    expect(screen.getByRole('spinbutton', { name: 'Daily quota reserve percent' })).toBeDisabled();
+  });
+
+  it('saves quota-reserve edits with the sibling rule intact', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+      nightShift: {
+        quotaReserve: { perDay: { enabled: true, percent: 15 } },
+      },
+    } as never);
+    render(<SettingsView />);
+
+    const overallToggle = await screen.findByRole('checkbox', {
+      name: 'Stop night work near my overall quota',
+    });
+    fireEvent.click(overallToggle); // on-by-default → unchecking writes enabled: false
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        nightShift: {
+          quotaReserve: {
+            perDay: { enabled: true, percent: 15 },
+            overall: { enabled: false },
+          },
+        },
+      }),
+    );
+  });
+
+  it('clamps a quota percent typed past 100', async () => {
+    render(<SettingsView />);
+    const overallPercent = await screen.findByRole('spinbutton', {
+      name: 'Overall quota floor percent',
+    });
+    fireEvent.change(overallPercent, { target: { value: '150' } });
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        nightShift: { quotaReserve: { overall: { percent: 100 } } },
+      }),
+    );
+  });
+
   it('inherits the default AI model until the Night Shift override is enabled', async () => {
     const inheritedConfig = {
       provider: 'openai',
@@ -575,6 +657,41 @@ describe('SettingsView', () => {
     expect(await pills.findByRole('button', { name: 'GitHub Copilot' })).toBeInTheDocument();
   });
 
+  it('uses the compact settings text size for the Copilot sandbox checkbox', async () => {
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-copilot'));
+
+    const checkbox = await screen.findByRole('checkbox', {
+      name: 'Sandbox Copilot to gezel tools only',
+    });
+    expect(checkbox.closest('label')).toHaveClass('muted');
+    expect(checkbox.closest('label')).toHaveStyle({ fontSize: '0.9rem' });
+  });
+
+  it('describes Copilot PAT authentication as a GitHub token with Copilot scope', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+      githubToken: '********KzTe',
+    } as never);
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-copilot'));
+
+    const heading = await screen.findByRole('heading', {
+      name: /Alternative sign-in: GitHub token/,
+    });
+    const card = heading.closest('section');
+    expect(card).not.toBeNull();
+    expect(card).toHaveTextContent(
+      'Use a classic GitHub personal access token with the copilot scope.',
+    );
+    expect(card).toHaveTextContent('<Stored GitHub token>');
+    expect(card).not.toHaveTextContent('KzTe');
+    expect(within(card as HTMLElement).getByPlaceholderText('Replace GitHub token…')).toBeVisible();
+  });
+
   it('offers the expanded Codex CLI reasoning levels', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'codex-cli',
@@ -593,6 +710,13 @@ describe('SettingsView', () => {
           reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
           defaultReasoningEffort: 'low',
         },
+        {
+          id: 'gpt-5.5',
+          name: 'gpt-5.5 — GPT-5.5',
+          supportsReasoning: true,
+          reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+          defaultReasoningEffort: 'medium',
+        },
       ],
     } as never);
 
@@ -600,12 +724,52 @@ describe('SettingsView', () => {
     fireEvent.click(await screen.findByTestId('settings-nav-codexCli'));
 
     expect(await screen.findByTestId('model-picker-codex-cli')).toBeInTheDocument();
-    const effortSelect = await screen.findByDisplayValue('max');
-    expect(within(effortSelect).getByRole('option', { name: 'Default (low)' })).toBeInTheDocument();
-    expect(within(effortSelect).queryByRole('option', { name: 'minimal' })).toBeNull();
-    expect(within(effortSelect).getByRole('option', { name: 'xhigh' })).toBeInTheDocument();
-    expect(within(effortSelect).getByRole('option', { name: 'max' })).toBeInTheDocument();
-    expect(within(effortSelect).getByRole('option', { name: 'ultra' })).toBeInTheDocument();
+    const effortTray = await screen.findByRole('radiogroup', { name: 'Reasoning effort' });
+    expect(
+      within(effortTray).getByRole('radio', { name: 'Model default (Low)' }),
+    ).toBeInTheDocument();
+    expect(within(effortTray).queryByRole('radio', { name: 'Minimal' })).toBeNull();
+    expect(within(effortTray).getByRole('radio', { name: 'Extra high' })).toBeInTheDocument();
+    expect(within(effortTray).getByRole('radio', { name: 'Maximum' })).toBeChecked();
+    expect(within(effortTray).getByRole('radio', { name: 'Ultra' })).toBeInTheDocument();
+    expect(screen.queryByText(/model_reasoning_effort/)).toBeNull();
+    expect(screen.getByText('Gezel tools')).toBeInTheDocument();
+    expect(
+      screen.getByRole('checkbox', {
+        name: 'Add Gezel tools like search, memories, tasks, and team coordination to Codex',
+      }),
+    ).toBeChecked();
+    expect(
+      screen.getByText('Disable to run Codex with only its built-in tools.'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the Codex effort tray when the model uses Gezel’s default', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'codex-cli',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+      codexCliStatus: { installed: true, path: '/usr/local/bin/codex', version: '0.145.0' },
+    } as never);
+    vi.mocked(api.listProviderModels).mockResolvedValue({
+      models: [
+        {
+          id: 'gpt-5.5',
+          name: 'gpt-5.5 — GPT-5.5',
+          supportsReasoning: true,
+          reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+          defaultReasoningEffort: 'medium',
+        },
+      ],
+    } as never);
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-codexCli'));
+
+    const effortTray = await screen.findByRole('radiogroup', { name: 'Reasoning effort' });
+    expect(within(effortTray).getByRole('radio', { name: 'Model default (Medium)' })).toBeChecked();
+    expect(within(effortTray).getByRole('radio', { name: 'Low' })).toBeInTheDocument();
+    expect(within(effortTray).getByRole('radio', { name: 'Extra high' })).toBeInTheDocument();
   });
 
   it('offers model-specific Claude CLI reasoning levels', async () => {
@@ -640,6 +804,45 @@ describe('SettingsView', () => {
     expect(within(effortSelect).getByRole('option', { name: 'low' })).toBeInTheDocument();
     expect(within(effortSelect).getByRole('option', { name: 'max' })).toBeInTheDocument();
     expect(within(effortSelect).queryByRole('option', { name: 'ultra' })).toBeNull();
+  });
+
+  it('offers human-readable Claude permission choices in a tray', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'anthropic-cli',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+      anthropicCli: { defaultPermissionMode: 'acceptEdits' },
+    } as never);
+    vi.mocked(api.updateConfig).mockResolvedValue({
+      provider: 'anthropic-cli',
+      meesterGezelId: 'gz-meester',
+      anthropicCli: { defaultPermissionMode: 'bypassPermissions' },
+    } as never);
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByTestId('settings-nav-anthropicCli'));
+
+    const tray = await screen.findByRole('radiogroup', { name: 'Default permission' });
+    expect(within(tray).getByRole('radio', { name: /Accept edits/i })).toBeChecked();
+    expect(within(tray).getByText('Read and review without making changes.')).toBeInTheDocument();
+    expect(within(tray).queryByText('bypassPermissions')).toBeNull();
+    expect(screen.getByText('Gezel tools')).toBeInTheDocument();
+    expect(
+      screen.getByRole('checkbox', {
+        name: 'Add Gezel tools like search, memories, tasks, and team coordination to Claude',
+      }),
+    ).toBeChecked();
+    expect(
+      screen.getByText('Disable to run Claude with only its built-in tools.'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(within(tray).getByRole('radio', { name: /Full access/i }));
+
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        anthropicCli: { defaultPermissionMode: 'bypassPermissions' },
+      }),
+    );
   });
 
   it('lists gezellen for the Meester picker', async () => {

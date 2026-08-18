@@ -12,60 +12,68 @@ const DEFAULT_MODEL = 'sonnet';
 const log = createLogger('anthropic-cli');
 
 /**
- * Claude Code's stable `--model` aliases. They keep working across CLI/model
- * upgrades, while users who need a provider-specific or pinned id can add it
- * through `config.anthropicCli.extraModels`.
+ * Claude Code's stable `--model` aliases. Aliases keep working across
+ * CLI/model upgrades, while users who need another provider-specific or
+ * pinned id can add it through `config.anthropicCli.extraModels`.
  *
  * `opusplan` is the CLI-specific hybrid: Opus for `/plan` mode, Sonnet for
  * execution. Useful for review-style gezels that we don't expose as a
  * separate provider but is worth surfacing here.
  *
- * Display names intentionally describe the alias rather than today's
+ * Alias display names intentionally describe the family rather than today's
  * version. Alias resolution depends on the user's account/provider and moves
- * independently of Gezel, so embedding version numbers here creates cosmetic
+ * independently of Gezel, so embedding version numbers there creates cosmetic
  * drift even though the actual model selection remains current.
  */
 const HARDCODED_MODELS: ModelInfo[] = [
-  { id: 'default', name: 'default — Recommended for your account' },
+  { id: 'default', name: 'Recommended for your account' },
   {
     id: 'best',
-    name: 'best — Latest Claude Opus',
+    name: 'Best available — Most capable model your account can use',
     supportsReasoning: true,
     reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     defaultReasoningEffort: 'xhigh',
   },
   {
+    id: 'fable',
+    name: 'Claude Fable 5 — Highest capability for demanding, long-running work',
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+    defaultReasoningEffort: 'high',
+    contextWindow: 1_000_000,
+  },
+  {
     id: 'sonnet',
-    name: 'sonnet — Latest Claude Sonnet',
+    name: 'Claude Sonnet — Balanced speed and capability for daily work',
     supportsReasoning: true,
     reasoningEfforts: ['low', 'medium', 'high', 'max'],
     defaultReasoningEffort: 'high',
   },
   {
     id: 'sonnet[1m]',
-    name: 'sonnet[1m] — Latest Claude Sonnet · 1M context',
+    name: 'Claude Sonnet with 1M context — For long sessions and large codebases',
     supportsReasoning: true,
     reasoningEfforts: ['low', 'medium', 'high', 'max'],
     defaultReasoningEffort: 'high',
   },
   {
     id: 'opus',
-    name: 'opus — Latest Claude Opus',
+    name: 'Claude Opus — Deep reasoning for complex work',
     supportsReasoning: true,
     reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     defaultReasoningEffort: 'xhigh',
   },
   {
     id: 'opus[1m]',
-    name: 'opus[1m] — Latest Claude Opus · 1M context',
+    name: 'Claude Opus with 1M context — Deep reasoning for long sessions',
     supportsReasoning: true,
     reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     defaultReasoningEffort: 'xhigh',
   },
-  { id: 'haiku', name: 'haiku — Latest Claude Haiku' },
+  { id: 'haiku', name: 'Claude Haiku — Fastest for simple tasks' },
   {
     id: 'opusplan',
-    name: 'opusplan — Opus planning + Sonnet execution',
+    name: 'Plan with Opus, build with Sonnet — For complex implementation work',
     supportsReasoning: true,
     reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     defaultReasoningEffort: 'xhigh',

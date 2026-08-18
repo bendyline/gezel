@@ -574,7 +574,8 @@ export class IndexStore {
     return this.db
       .prepare(
         `SELECT file_path, name, kind, line_start, line_end, signature
-         FROM fts_symbols WHERE fts_symbols MATCH ? AND collection_id = ? LIMIT ?`,
+         FROM fts_symbols WHERE fts_symbols MATCH ? AND collection_id = ?
+         ORDER BY bm25(fts_symbols) LIMIT ?`,
       )
       .all<{
         file_path: string;
@@ -823,7 +824,8 @@ export class IndexStore {
       .prepare(
         `SELECT f.path AS file_path, s.snip FROM (
            SELECT content_hash, collection_id, snippet(fts_summaries, 0, '', '', '…', 12) AS snip
-           FROM fts_summaries WHERE fts_summaries MATCH ? AND collection_id = ? LIMIT ?
+           FROM fts_summaries WHERE fts_summaries MATCH ? AND collection_id = ?
+           ORDER BY bm25(fts_summaries) LIMIT ?
          ) s
          JOIN files f ON f.hash = s.content_hash AND f.collection_id = s.collection_id
          LIMIT ?`,
@@ -994,8 +996,12 @@ export class IndexStore {
     if (!this.caps.fts) return [];
     return this.db
       .prepare(
+        // FTS5 bm25() is lower-is-better, so plain ascending order is the
+        // best-first order. Without it FTS5 yields rowid (insertion) order and
+        // a LIMIT returns the oldest-indexed matches, not the closest ones.
         `SELECT file_path, line_start, chunk_id, snippet(fts_docs, 0, '', '', '…', 12) AS snip
-         FROM fts_docs WHERE fts_docs MATCH ? AND collection_id = ? LIMIT ?`,
+         FROM fts_docs WHERE fts_docs MATCH ? AND collection_id = ?
+         ORDER BY bm25(fts_docs) LIMIT ?`,
       )
       .all<{ file_path: string; line_start: number; chunk_id: number; snip: string }>(
         ftsPhrase(query),
@@ -1329,6 +1335,47 @@ export class IndexStore {
       )
       .get<{ n: number }>(this.collectionId, kind, rubricHash, rubricHash, maxAttempts);
     return row?.n ?? 0;
+  }
+
+  /**
+   * How much indexing work landed in `[since, until)`, read off the tiers'
+   * own success stamps rather than any separate bookkeeping — which is what
+   * makes a Night Shift tally survive a daemon restart mid-window. Bounds
+   * are ISO-UTC strings, compared lexicographically (`nowIso()` is the only
+   * writer of these columns, so the format is uniform).
+   *
+   * Counted per content hash, so a file re-summarized after an edit counts
+   * again — that is real work done in the period, not double-counting.
+   */
+  workCountsSince(
+    since: string,
+    until: string,
+  ): { summarized: number; reviewed: number; described: number } {
+    const count = (sql: string, ...params: SqlValue[]) =>
+      Number(this.db.prepare(sql).get<{ n: number }>(...params)?.n ?? 0);
+    return {
+      summarized: count(
+        `SELECT COUNT(*) AS n FROM summaries
+         WHERE collection_id = ? AND created_at >= ? AND created_at < ?`,
+        this.collectionId,
+        since,
+        until,
+      ),
+      reviewed: count(
+        `SELECT COUNT(*) AS n FROM file_reviews
+         WHERE collection_id = ? AND reviewed_at >= ? AND reviewed_at < ?`,
+        this.collectionId,
+        since,
+        until,
+      ),
+      described: count(
+        `SELECT COUNT(*) AS n FROM shadow_state
+         WHERE collection_id = ? AND state = 'ok' AND updated_at >= ? AND updated_at < ?`,
+        this.collectionId,
+        since,
+        until,
+      ),
+    };
   }
 
   /**

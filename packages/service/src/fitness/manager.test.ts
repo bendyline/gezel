@@ -120,8 +120,9 @@ describe('ModelFitnessManager', () => {
   });
 
   describe('install-trigger headroom deferral', () => {
-    // 92 committed + ceil(5 × 1.2) = 98 GB > the 96 GB budget — spawning
-    // the probe target would force-evict the resident 27B.
+    // 92 committed + the 5 GB target's resident estimate (~5.75 GB) exceeds
+    // the 96 GB budget — spawning the probe target would force-evict the
+    // resident 27B.
     const fullPool: PoolSnapshot = {
       enforced: true,
       committedBytes: 92 * GB,

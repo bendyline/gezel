@@ -229,17 +229,22 @@ export function lintChatModelManifest(manifest: LooseManifest): ManifestLintRepo
     }
   }
 
-  if (
-    typeof manifest.llamaCpp?.residentBytes !== 'number' &&
-    typeof manifest.mlx?.residentBytes !== 'number' &&
-    typeof manifest.ds4?.residentBytes !== 'number'
-  ) {
+  // Only ds4 has to pin. llama.cpp and MLX both derive their footprint from
+  // the on-disk size through measured fixed-plus-proportional estimators
+  // (`estimateLlamaCppResidentBytes` / `estimateMlxResidentBytes`), so a pin
+  // there only restates the formula — and the pins this rule used to demand
+  // were authored to an older reading of the field ("weights + KV at default
+  // context"), double-counting KV by 1.2–1.3× because the broker prices KV
+  // separately. ds4 differs in kind: it streams MoE experts from SSD, so its
+  // resident set is the expert-cache budget rather than anything the file size
+  // implies, and the fallback can only clamp to a crude 48 GiB.
+  if (manifest.ds4 && typeof manifest.ds4.residentBytes !== 'number') {
     errors.push({
       modelId,
       rule: 'missing-resident-bytes',
       detail:
-        'no `llamaCpp.residentBytes`, `mlx.residentBytes`, or `ds4.residentBytes` — the capacity broker cannot ' +
-        'reserve for this model and either over-admits (OOM) or mis-denies',
+        'ds4 block without `ds4.residentBytes` — ds4 streams experts from SSD, so its resident set cannot be ' +
+        'derived from the on-disk size and the broker falls back to a crude 48 GiB clamp',
     });
   }
 

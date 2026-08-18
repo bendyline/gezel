@@ -16,6 +16,7 @@ export function GlobalTimeline({
   onToolActivity,
   onArtifactReference,
   onArtifactSeen,
+  onWorkspaceReference,
   onWorkspaceSeen,
   onTaskReference,
   emptyPlaceholder,
@@ -25,6 +26,7 @@ export function GlobalTimeline({
   onToolActivity?: (tool: ToolActivity) => void;
   onArtifactReference?: (path: string, projectId?: string) => void;
   onArtifactSeen?: (path: string, projectId?: string) => void;
+  onWorkspaceReference?: (path: string, projectId?: string) => void;
   onWorkspaceSeen?: (path: string, projectId?: string) => void;
   onTaskReference?: (ref: string, opts?: { scoped?: boolean }) => void;
   emptyPlaceholder?: string;
@@ -43,6 +45,7 @@ export function GlobalTimeline({
       onToolActivity={onToolActivity}
       onArtifactReference={onArtifactReference}
       onArtifactSeen={onArtifactSeen}
+      onWorkspaceReference={onWorkspaceReference}
       onWorkspaceSeen={onWorkspaceSeen}
       {...(onTaskReference ? { onTaskReference } : {})}
       emptyPlaceholder={emptyPlaceholder}

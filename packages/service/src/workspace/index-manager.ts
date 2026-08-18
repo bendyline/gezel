@@ -1,4 +1,4 @@
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type CommandShape,
@@ -11,6 +11,7 @@ import {
   type WorkspaceInstructionIndex,
   type WorkspaceSkillIndex,
   createLogger,
+  isSharedLibraryProject,
   nowIso,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -21,7 +22,7 @@ import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
 import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
 import type { ContentIndex } from '../index-store/content-index.js';
-import { PROJECT_TYPE_MIN_SCORE, detectProjectType } from '../project-type/detect.js';
+import { detectAndPersistProjectType } from '../project-type/detect.js';
 import {
   type EnsureProjectLeadResult,
   type ImportSyncDeps,
@@ -118,6 +119,17 @@ export class WorkspaceIndexManager {
   /** Per-project promise chain so two concurrent scans on the same
    *  project serialize rather than racing on the disk. */
   private readonly locks = new Map<string, Promise<unknown>>();
+  /**
+   * Parsed `files.json` per project, revalidated against the file's own
+   * mtime + size so it can never go stale. `files.json` runs to megabytes
+   * on a real checkout and its readers are all hot — terminal path
+   * autocomplete on every keystroke, the chat reference parser on every
+   * turn, the timeline backfill on every page.
+   */
+  private readonly filesCache = new Map<
+    string,
+    { mtimeMs: number; size: number; files: WorkspaceFile[] }
+  >();
 
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -252,12 +264,17 @@ export class WorkspaceIndexManager {
    */
   async readFiles(projectId: string): Promise<WorkspaceFile[]> {
     if (!(await this.isIndexingEnabled(projectId))) return [];
-    const dir = projectIndexDir(this.home, projectId);
+    const file = join(projectIndexDir(this.home, projectId), FILES_FILE);
     try {
-      const raw = await readFile(join(dir, FILES_FILE), 'utf8');
-      const parsed = JSON.parse(raw) as WorkspaceFile[];
-      return Array.isArray(parsed) ? parsed : [];
+      const { mtimeMs, size } = await stat(file);
+      const cached = this.filesCache.get(projectId);
+      if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return cached.files;
+      const parsed = JSON.parse(await readFile(file, 'utf8')) as WorkspaceFile[];
+      const files = Array.isArray(parsed) ? parsed : [];
+      this.filesCache.set(projectId, { mtimeMs, size, files });
+      return files;
     } catch {
+      this.filesCache.delete(projectId);
       return [];
     }
   }
@@ -267,7 +284,7 @@ export class WorkspaceIndexManager {
    * autocomplete. The index stores files only, so directories are derived:
    * each match collapses to its next path segment after the prefix — a
    * directory (trailing `/`, so the user can descend) or the full file path.
-   * Reads the cached file list (capped at ~500 by the indexer).
+   * Reads the cached file list (capped at 20,000 files by the indexer).
    * Case-insensitive prefix; deduped; capped.
    */
   async searchWorkspaceFiles(projectId: string, prefix: string, limit = 50): Promise<string[]> {
@@ -486,26 +503,18 @@ export class WorkspaceIndexManager {
       } catch (err) {
         log.warn(`[index] content-index refresh failed for ${projectId}: ${describe(err)}`);
       }
-
-      // Classify the project's output type from the freshly-indexed file mix
-      // + about/mission text, and persist the top result. Drives the curated
-      // craftbook shortlist in the rail. Never overwrites the user's explicit
-      // `projectTypeId` override; best-effort, never breaks the scan.
-      try {
-        const ranked = await detectProjectType(
-          { store: this.store, contentIndex: this.contentIndex },
-          projectId,
-        );
-        const top = ranked[0];
-        if (top && top.score >= PROJECT_TYPE_MIN_SCORE) {
-          await this.store.updateProject(projectId, {
-            detectedProjectType: { id: top.id, score: top.score, scannedAt: nowIso() },
-          });
-        }
-      } catch (err) {
-        log.warn(`[index] project-type detect failed for ${projectId}: ${describe(err)}`);
-      }
     }
+
+    // Classify the project's output type from its file mix + about/mission
+    // text, and persist the top result. Drives the curated craftbook shortlist
+    // in the rail and the gezel-role affinity lists. Never overwrites the
+    // user's explicit `projectTypeId` override; best-effort, never breaks the
+    // scan. Runs outside the `contentIndex` gate above because detection falls
+    // back to a bounded folder scan when no index profile exists.
+    await detectAndPersistProjectType(
+      { store: this.store, contentIndex: this.contentIndex },
+      projectId,
+    );
 
     // Make sure the project has a voorman — promote a project-member gezel,
     // reuse an existing voorman, or recruit a real one from the `voorman`
@@ -617,7 +626,20 @@ export class WorkspaceIndexManager {
     if (!cfg?.recentTabs) return Number.POSITIVE_INFINITY;
     const projectTabs = cfg.recentTabs.filter((t) => t.kind === 'project');
     const i = projectTabs.findIndex((t) => t.id === projectId);
-    return i < 0 ? Number.POSITIVE_INFINITY : i;
+    if (i >= 0) return i;
+    // The shared library is opened through the Documents area, which records
+    // no project tab, so recency alone would file it as cold (30 min). Yet it
+    // is the workspace most likely to change while nobody is looking — a sync
+    // client landing another device's edits, often while the app was closed,
+    // where the watcher never sees the event at all. Treat it as recent so
+    // the poll is the backstop the watcher needs.
+    return (await this.isSharedLibrary(projectId)) ? 1 : Number.POSITIVE_INFINITY;
+  }
+
+  private async isSharedLibrary(projectId: string): Promise<boolean> {
+    if (typeof this.store.getProject !== 'function') return false;
+    const meta = await this.store.getProject(projectId).catch(() => null);
+    return meta ? isSharedLibraryProject(meta) : false;
   }
 
   /**

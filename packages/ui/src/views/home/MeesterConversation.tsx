@@ -58,6 +58,11 @@ export function MeesterConversation({
     : activeGezelId === meesterGezelId
       ? meesterName
       : activeGezelId;
+  const activeGezelRole = selectedGezel
+    ? selectedGezel.role
+    : activeGezelId === meesterGezelId
+      ? 'Meester'
+      : undefined;
   const activeGezelIcon = selectedGezel
     ? (selectedGezel.icon ?? null)
     : activeGezelId === meesterGezelId
@@ -102,6 +107,7 @@ export function MeesterConversation({
           onToolActivity,
           onArtifactReference,
           onArtifactSeen,
+          onWorkspaceReference,
           onWorkspaceSeen,
           recentReferences,
           onOpenReference,
@@ -118,6 +124,7 @@ export function MeesterConversation({
               onToolActivity={onToolActivity}
               onArtifactReference={onArtifactReference}
               onArtifactSeen={onArtifactSeen}
+              onWorkspaceReference={onWorkspaceReference}
               onWorkspaceSeen={onWorkspaceSeen}
               onTaskReference={onTaskReference}
               emptyPlaceholder={emptyPlaceholder}
@@ -125,6 +132,7 @@ export function MeesterConversation({
             <ChatComposer
               gezelId={activeGezelId}
               gezelName={activeGezelName}
+              gezelRole={activeGezelRole}
               gezelIcon={activeGezelIcon}
               gezelPoppetje={activeGezelPoppetje}
               gezelIconOverride={activeGezelIconOverride}

@@ -1,9 +1,22 @@
-import { type NightShiftTaskBrief, createLogger } from '@bendyline/gezel';
+import {
+  type NightShiftTallyResponse,
+  type NightShiftTaskBrief,
+  createLogger,
+} from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { buildNightShiftReview } from '../../tasks/night-review.js';
+import { buildNightShiftTally, nightShiftTallyPeriod } from '../../tasks/night-tally.js';
 import type { ServiceContext } from '../context.js';
 
 const log = createLogger('http');
+
+/**
+ * Each tally build rescans the audit log and opens every project's content
+ * index, and the moon menu polls on a 5s cadence. A short memo keeps an
+ * open menu from sweeping the disk twelve times a minute — over a window
+ * this brief the counts barely move.
+ */
+const TALLY_TTL_MS = 15_000;
 
 /**
  * Night Shift control surface.
@@ -21,6 +34,20 @@ const log = createLogger('http');
 export function nightShiftRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
+  // One shape for /status and the /manual response: on/off, when the period
+  // started and when the scheduled one ends, plus the quota-reserve hold
+  // summary while pending night work is parked by it.
+  const statusJson = () => {
+    const quotaHold = ctx.nightShift.quotaHoldStatus();
+    return {
+      active: ctx.nightShift.isActive(),
+      source: ctx.nightShift.source(),
+      window: ctx.nightShift.windowBounds(),
+      startedAt: ctx.nightShift.startedAtIso(),
+      ...(quotaHold ? { quotaHold } : {}),
+    };
+  };
+
   app.post('/manual', async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { action?: string };
     if (body.action === 'start') {
@@ -31,12 +58,10 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
       return c.json({ error: "action must be 'start' or 'stop'" }, 400);
     }
     log.info(`[night-shift] manual ${body.action} → active=${ctx.nightShift.isActive()}`);
-    return c.json({ active: ctx.nightShift.isActive(), source: ctx.nightShift.source() });
+    return c.json(statusJson());
   });
 
-  app.get('/status', (c) =>
-    c.json({ active: ctx.nightShift.isActive(), source: ctx.nightShift.source() }),
-  );
+  app.get('/status', (c) => c.json(statusJson()));
 
   // What the shift is working on: pending night-shift tasks split into
   // those with a turn in flight (`active`) and the rest (`upcoming`).
@@ -50,6 +75,7 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
     const running = ctx.chat.activeTaskRefs();
     const runner = ctx.taskRunner.workSnapshot();
     const queued = new Set([...runner.queuedTaskRefs, ...runner.dispatchedTaskRefs]);
+    const quotaHeld = ctx.nightShift.quotaHeldTaskRefs();
     const tasks = await ctx.nightShift.listPendingTasks();
     const projectNames = new Map<string, string>();
     const active: NightShiftTaskBrief[] = [];
@@ -67,6 +93,7 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
         title: t.title,
         projectName,
         ...(stepName ? { stepName } : {}),
+        ...(quotaHeld.has(t.ref) ? { quotaHeld: true } : {}),
       };
       if (running.has(t.ref)) active.push(brief);
       else if (queued.has(t.ref)) upcoming.push(brief);
@@ -88,6 +115,30 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
   });
 
   app.get('/power-intent', (c) => c.json(ctx.nightShift.getPowerIntent()));
+
+  // How much the shift has got through: the running period's counts, or the
+  // last window's once it's over. Deliberately the same period the review
+  // below reports on, so the numbers and the list can't describe two
+  // different nights.
+  let cached: { since: string; live: boolean; at: number; tally: NightShiftTallyResponse } | null =
+    null;
+  app.get('/tally', async (c) => {
+    const period = nightShiftTallyPeriod(new Date(), ctx.nightShift.currentWindow(), {
+      active: ctx.nightShift.isActive(),
+      startedAt: ctx.nightShift.startedAtIso(),
+    });
+    const since = period.since.toISOString();
+    const now = Date.now();
+    if (cached && cached.since === since && cached.live === period.live) {
+      if (now - cached.at < TALLY_TTL_MS) return c.json(cached.tally);
+    }
+    const tally = await buildNightShiftTally(
+      { history: ctx.history, store: ctx.store, contentIndex: ctx.contentIndex },
+      period,
+    );
+    cached = { since, live: period.live, at: now, tally };
+    return c.json(tally);
+  });
 
   // The morning review: what the most recent night window accomplished —
   // completed tasks + the reports they left, with embedded-action tallies.

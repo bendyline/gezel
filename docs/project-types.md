@@ -29,7 +29,7 @@ format. Implementation lands in phases (see the end of this doc).
   its detection profile, `craftbookTags`, and gezel-role affinity.
 - `project.json` today carries `projectTypeId` (user override) and `detectedProjectType`
   (auto-detected). This grows into full provenance: `projectType: {id, version, source,
-  params}`. `resolveProjectTypeId` keeps working for existing consumers.
+  params, icon}`. `resolveProjectTypeId` keeps working for existing consumers.
 - The **email pipeline** ([packages/service/src/mail/](../packages/service/src/mail/))
   stays native service code. It gets *wrapped* by a bundled type manifest so the New
   Project gallery presents one mental model — it is not retrofitted into the manifest
@@ -43,7 +43,7 @@ New catalog kind `project-type`, using the standard gilde item layout — identi
 ```
 data/project-types/{shard}/{id}/
 ├── manifest.json              identity: schemaVersion, id, name, description, tags,
-│                              category?, maintainer, logo?, yankedVersions,
+│                              category?, icon?, maintainer, logo?, yankedVersions,
 │                              minSupportedVersion?, kind: 'project-type'
 └── versions/{semver}/
     ├── manifest.json          composition payload (below)
@@ -68,6 +68,39 @@ gallery card explains itself to someone who has never met the role. The Dutch
 name carries the character; the gloss carries the meaning. Gezel-template
 descriptions don't repeat their own card's name, so they need no gloss — they
 lead with plain English instead.
+
+### Maker's marks
+
+Every project type has a small monochrome **maker's mark**. It is the type's
+durable iconographic identity and is deliberately separate from `logo`: a logo
+may be richer catalog artwork, while a mark must remain legible at 16–24px,
+follow `currentColor`, and sit naturally in Gezel's paper/wood palette. Marks
+come from the finite `ProjectIconIdSchema` vocabulary in
+`packages/core/src/project-icons.ts`; examples include `code` (curly braces),
+`quill`, `palette`, `server`, `book`, `meal`, and `plane`.
+
+An identity manifest may declare one directly:
+
+```jsonc
+{
+  "kind": "project-type",
+  "id": "api-workshop",
+  "category": "code",
+  "icon": "server"
+}
+```
+
+If it does not, Gezel deterministically infers a mark from the type id, tags,
+taxonomy base, and category. On adoption the resolved mark is stamped into the
+project-type provenance, so project lists do not need a catalog lookup. Project
+instances follow one inheritance rule:
+
+`project.icon` override → applied type mark → explicit/detected taxonomy mark →
+connected-folder affordance → general `sheet`.
+
+The optional project override is a maker's-mark id today. Future generated
+instance artwork can layer over this fallback without changing type manifests
+or making old projects lose their recognizable mark.
 
 Version manifest (composition payload):
 
@@ -221,6 +254,39 @@ any preview; raw project paths are not public routes. The manifest pin overrides
 read-only cross-source paths in `pages.reads`; the service folds only those trusted
 manifest scopes into the capability. The preview surface stays read-only; all writes
 go through scripts/tools.
+
+### Pages follow the app's theme through `prefers-color-scheme`
+
+A page renders in the preview iframe, which is a **null-origin sandboxed
+document**: gezel's CSS variables never reach it, a `color-scheme` on the frame
+element does not cross the sandbox boundary (measured), and the `window.gezel`
+theme message only reaches pages that opted into the page API. What does cross
+is the browser's own colour-scheme preference, so the desktop shell pushes the
+user's Light/Dark/System choice into `nativeTheme.themeSource`
+([main.ts](../packages/app/src/main.ts), fed from `applyThemePref` in
+[theme.ts](../packages/ui/src/theme.ts)).
+
+That makes the ordinary media query the contract, and every page must honour
+it — a page that ships only light colours becomes a glaring white slab down the
+side of a dark workshop:
+
+```css
+:root { color-scheme: light dark; --bg: #faf7f2; --card: #fff; --ink: #2b2620; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #1c1a17; --card: #262320; --ink: #efe9e0; }
+}
+```
+
+Two rules keep it working: declare `color-scheme: light dark` so form controls
+and scrollbars follow too, and drive every colour through the variables rather
+than hardcoding `#fff` in a component rule — a literal in a card background
+survives the media query and stays light. Pages on the v1 API may additionally
+read the pushed theme for finer control, but the media query stays the floor.
+Note where the push does not reach: opened in a real browser ("Open in
+browser"), or served to the web UI, there is no Electron process to move the
+preference, so the page follows the operating system rather than the gezel
+setting. That is the honest ceiling of this mechanism, and the reason pages are
+asked to honour the ordinary media query rather than a gezel-specific hook.
 
 ### The Output Pane API (`window.gezel`) — v1
 

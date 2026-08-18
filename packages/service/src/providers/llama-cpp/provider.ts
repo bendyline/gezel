@@ -58,6 +58,7 @@ import {
   findXmlTagToolCallSpans,
   foldPostActionRumination,
   foldPreToolPreamble,
+  isPayloadMutationToolName,
   isWriteShapedToolName,
   parseJsonEnvelopeToolCalls,
   salvageWriteShapedTruncation,
@@ -78,8 +79,9 @@ import type {
   NativeEngineSupervisor,
 } from '../native/supervisor.js';
 import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
-import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from '../queue.js';
+import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs, runInQueue } from '../queue.js';
 import { RambleDetector } from '../ramble-detector.js';
+import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
 import { type EnginePhaseEvent, StreamingSessionBase } from '../streaming-session.js';
 import { terminalToolClosingText } from '../terminal-tool-policy.js';
 import { coerceToolCallArgs } from '../tool-arg-schema-coercion.js';
@@ -181,6 +183,13 @@ const MAX_TOOL_LOOP_TURNS = 96;
  * (ChatManager, TaskRunner) typically pass their own via `opts.timeoutMs`.
  */
 const DEFAULT_TIMEOUT_MS = 120_000;
+/**
+ * Cadence for the live `generating` phase carrying llama-server's running
+ * token/rate counters. Fast enough that the status readout ticks visibly,
+ * slow enough that a 200 tok/s decode doesn't push an event per token onto
+ * the chat bus. Matches the MLX provider's phase throttle.
+ */
+const GENERATING_PHASE_MIN_INTERVAL_MS = 300;
 // This is a floor, not a preferred cap. A model with a larger catalog
 // `sampling.maxTokens` keeps that larger value; models with no tuning land
 // on this fallback. Keep the fallback bounded for small local models, and
@@ -701,6 +710,9 @@ export function isGateSurgicalEditTurn(
   // (the drawer has no patch tool) — clamping that turn to the workspace
   // patch tools would strand it.
   if (prompt.includes('write_artifact')) return false;
+  // Same escape for the note surface: a fileless gate is repaired with
+  // `write_task_note`, which a patch-only clamp strips outright.
+  if (prompt.includes('write_task_note')) return false;
   const names = (tools ?? [])
     .map((tool) => chatCompletionToolName(tool))
     .filter((name): name is string => !!name);
@@ -1502,11 +1514,8 @@ function setChatTemplateKwarg(body: Record<string, unknown>, key: string, value:
 type DisableThinkingRequestShape = 'chat-template' | 'deepseek';
 
 /**
- * Chat-template variables that name a model's reasoning DEPTH rather than an
- * on/off switch. `applyTuning` has already written the manifest's declared
- * `reasoning.templateKwargs` onto the body by the time the constrained-turn
- * paths run, so we downgrade whichever dial this model actually reads instead
- * of keeping a per-model branch here.
+ * Reasoning-depth handling now lives in `../reasoning-depth.ts` so both local
+ * engines share one definition.
  *
  * Load-bearing for templates that have no `enable_thinking` at all: Muse
  * Glimmer reads only `reasoning_strength`, so the disable below is a silent
@@ -1515,7 +1524,45 @@ type DisableThinkingRequestShape = 'chat-template' | 'deepseek';
  * eval — 1027 reasoning chars against the 1024 limit, two aborted turns and a
  * poisoned-session recovery on a run that otherwise passed.
  */
-const REASONING_DEPTH_TEMPLATE_KWARGS = new Set(['reasoning_effort', 'reasoning_strength']);
+
+export interface LlamaCppReasoningRequestDiagnostic {
+  enableThinking?: boolean;
+  reasoningEffort?: string | number | boolean;
+  reasoningStrength?: string | number | boolean;
+}
+
+/**
+ * Extract only the non-sensitive reasoning controls that will reach the chat
+ * template. Keeping this at the final request-body boundary lets evals prove
+ * an effort arm did not collapse after profile resolution or constrained-turn
+ * rewriting, without logging prompts, messages, or tool arguments.
+ */
+export function llamaCppReasoningRequestDiagnostic(
+  body: Record<string, unknown>,
+): LlamaCppReasoningRequestDiagnostic | null {
+  const raw = body.chat_template_kwargs;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const kwargs = raw as Record<string, unknown>;
+  const diagnostic: LlamaCppReasoningRequestDiagnostic = {};
+  if (typeof kwargs.enable_thinking === 'boolean') {
+    diagnostic.enableThinking = kwargs.enable_thinking;
+  }
+  if (
+    typeof kwargs.reasoning_effort === 'string' ||
+    typeof kwargs.reasoning_effort === 'number' ||
+    typeof kwargs.reasoning_effort === 'boolean'
+  ) {
+    diagnostic.reasoningEffort = kwargs.reasoning_effort;
+  }
+  if (
+    typeof kwargs.reasoning_strength === 'string' ||
+    typeof kwargs.reasoning_strength === 'number' ||
+    typeof kwargs.reasoning_strength === 'boolean'
+  ) {
+    diagnostic.reasoningStrength = kwargs.reasoning_strength;
+  }
+  return Object.keys(diagnostic).length > 0 ? diagnostic : null;
+}
 
 function disableThinkingForConstrainedTurn(
   body: Record<string, unknown>,
@@ -1523,14 +1570,7 @@ function disableThinkingForConstrainedTurn(
   model: string | undefined,
 ): void {
   setChatTemplateKwarg(body, 'enable_thinking', false);
-  const declared = body.chat_template_kwargs;
-  if (declared && typeof declared === 'object' && !Array.isArray(declared)) {
-    for (const key of Object.keys(declared as Record<string, unknown>)) {
-      if (REASONING_DEPTH_TEMPLATE_KWARGS.has(key)) {
-        setChatTemplateKwarg(body, key, 'low');
-      }
-    }
-  }
+  downgradeReasoningDepthKwargs(body);
   // llama.cpp's bundled GPT-OSS template ignores enable_thinking and defaults
   // reasoning_effort to "medium". Set the template's actual control for terse,
   // tool-constrained turns so the model can reach the required call promptly.
@@ -1917,13 +1957,13 @@ export class LlamaCppProvider implements LLMProvider {
      */
     reserveBackgroundSlot?: boolean;
     /**
-     * Engine batch width. When set > 1 (the manager passes the llama-server
-     * `--parallel` slot count once `batchedInference` is enabled and
-     * `--cont-batching` is on), the queue switches to the adaptive
-     * interactive policy: concurrent interactive turns may co-occupy all
-     * slots, with one reserved so a live turn never waits behind a
-     * background cohort. Default 1 — today's behavior (interactive
-     * single-file, background fills spare slots). See {@link LLMProvider.batch}.
+     * Engine batch width — how many sequences the server can generate at
+     * once. The supervised path passes its `--parallel` slot count, so this
+     * equals {@link concurrency} there; chats may fill all of it, with one
+     * slot withheld from background work so a live turn never waits behind a
+     * background cohort. Default 1, which is what the external-baseUrl path
+     * takes: we don't control that server's `--parallel` and it may be
+     * single-slot. See {@link LLMProvider.batch}.
      */
     batchMaxConcurrency?: number;
     affinity?: boolean;
@@ -2056,21 +2096,21 @@ export class LlamaCppProvider implements LLMProvider {
     const slots = opts.concurrency ?? 2;
     this.launchedSlots = slots;
     this.engineRequestWidth = slots;
-    const batchMax = Math.max(1, opts.batchMaxConcurrency ?? 1);
+    // A supervised engine's `concurrency` is the exact `--parallel` launch
+    // width, so it is also the safe interactive batch width. Keep external
+    // base-URL mode conservative: we may be configured with several client
+    // queue sockets without knowing how many native slots that server owns.
+    const batchMax = Math.max(1, opts.batchMaxConcurrency ?? (opts.supervisor ? slots : 1));
     this.batchMaxConcurrency = batchMax;
-    const batching = batchMax > 1;
-    // Interactive lane capped at 1 (serial) or the batch width; foreground chat
-    // behaves like the old serial queue while background chores fill spare
-    // slots. Reserve at least ONE slot above the interactive cap for the
-    // background lane so a mid-turn one-shot pinned to this provider (compaction
-    // / memory extraction / summarization) can't deadlock behind a full
-    // interactive lane. The default (slots=2, interactive=1) already had a spare
-    // slot; the guard matters when the memory ceiling clamps a big model to a
-    // single slot (`providerConcurrency['llama-cpp']=1` or a tight-RAM auto-size)
-    // — without it, a lone slot + a synchronous mid-turn compaction wedges the
-    // turn, the same failure the MLX single-slot path hit. See the matching note
-    // in the MLX provider.
-    const interactiveConcurrency = batching ? Math.min(slots, batchMax) : 1;
+    // Slots are one fungible pool: chats may fill all of them. Background work
+    // is the only capped lane (`backgroundLaneCap` = width - 1), so a live turn
+    // can always start. Reserve at least ONE queue slot above the interactive
+    // cap for the background lane so a mid-turn one-shot pinned to this provider
+    // (compaction / memory extraction / summarization) can't deadlock behind a
+    // full interactive lane — without it, a lone slot plus a synchronous
+    // mid-turn compaction wedges the turn, the same failure the MLX
+    // single-slot path hit. See the matching note in the MLX provider.
+    const interactiveConcurrency = batchMax;
     const queueConcurrency =
       opts.reserveBackgroundSlot === false ? slots : Math.max(slots, interactiveConcurrency + 1);
     this.queue = new ProviderQueue({
@@ -2083,7 +2123,12 @@ export class LlamaCppProvider implements LLMProvider {
       // without two sessions ever pinning the same native slot concurrently.
       concurrency: queueConcurrency,
       interactiveConcurrency,
-      backgroundConcurrency: Math.max(1, queueConcurrency - interactiveConcurrency),
+      // Keyed to `slots` — the width `acquireExclusiveEngineRequest`
+      // enforces — not to the queue's deadlock reserve. This is a no-op
+      // for the serial and ds4 paths, where the old expression already
+      // came out to `slots - 1`; it only widens the batched path, which
+      // was pinned at 1. See `backgroundLaneCap`.
+      backgroundConcurrency: backgroundLaneCap(slots),
       ...(opts.affinity !== undefined ? { affinity: opts.affinity } : {}),
       // A single local GPU: hold ambient housekeeping (nudges,
       // extraction, icon/about) while the user is actively engaged, so
@@ -3219,6 +3264,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
     // subsequent iterations means we've already seen the first token
     // so the "prefill" phase doesn't re-fire on each tool loop.
     let firstTokenAt: number | null = null;
+    // Throttle for the live `generating` phase carrying llama-server's
+    // running `timings` counters. Turn-scoped so a tool loop's second
+    // iteration doesn't restart the cadence.
+    let lastGeneratingPhaseAt = 0;
     // Register with the provider so supervisor-side phase events
     // (model load progress) fan out to this session while it's in-
     // flight. Deregister in the finally block below.
@@ -4480,6 +4529,16 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         let res: Response;
         const requestStartedAt = Date.now();
         try {
+          const reasoningDiagnostic = llamaCppReasoningRequestDiagnostic(body);
+          if (reasoningDiagnostic) {
+            log.debug(
+              `[llama-cpp] request-reasoning ${JSON.stringify({
+                model: this.deps.model,
+                iteration: turn,
+                ...reasoningDiagnostic,
+              })}`,
+            );
+          }
           res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4967,7 +5026,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 if (tc.function?.name) liveToolArgsName = tc.function.name;
                 const argChunk = tc.function?.arguments ?? '';
                 if (tc.function?.name || argChunk.length > 0) {
-                  this.emitToolArgsDelta(liveToolArgsName, argChunk);
+                  this.emitToolArgsDelta(liveToolArgsName, argChunk, {
+                    index: tc.index,
+                    ...(tc.id ? { id: tc.id } : {}),
+                  });
                 }
               }
               if (
@@ -4982,6 +5044,38 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                   `[llama-cpp] ABORT-FIRED reason=immediate-write-structured (${toolCallAccumulator.rawArgumentsForTool('write_file')?.length ?? 0} arg chars) afterMs=${Date.now() - start}`,
                 );
                 ctrl.abort();
+              }
+            }
+            // `timings_per_token` puts llama-server's running counters on
+            // EVERY chunk, not just the final usage one — an exact decoded
+            // token count and an exact decode rate, live. Publish them so the
+            // status readouts stop estimating both from streamed characters
+            // (chars/4) and marking the result approximate.
+            if (firstTokenAt !== null) {
+              const live = (chunk as { timings?: Record<string, unknown> }).timings;
+              const decodedTokens =
+                typeof live?.predicted_n === 'number' ? live.predicted_n : undefined;
+              const decodeRate =
+                typeof live?.predicted_per_second === 'number'
+                  ? live.predicted_per_second
+                  : undefined;
+              const nowMs = Date.now();
+              if (
+                decodedTokens !== undefined &&
+                decodedTokens > 0 &&
+                nowMs - lastGeneratingPhaseAt >= GENERATING_PHASE_MIN_INTERVAL_MS
+              ) {
+                lastGeneratingPhaseAt = nowMs;
+                this.emitEnginePhase({
+                  provider: 'llama-cpp',
+                  phase: 'generating',
+                  // No `detail`: the counters are the payload, and the
+                  // phase's own copy belongs to the UI.
+                  outputTokens: decodedTokens,
+                  ...(decodeRate !== undefined && decodeRate > 0
+                    ? { tokensPerSec: decodeRate }
+                    : {}),
+                });
               }
             }
             if (chunk.usage) {
@@ -5318,6 +5412,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           }
         }
         let malformedStructuredCallIds = new Set<string>();
+        let malformedStructuredCallPaths = new Map<string, string>();
         if (toolCalls.length > 0) {
           const normalized = normalizeMalformedStructuredToolCalls(
             toolCalls,
@@ -5330,6 +5425,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           );
           toolCalls = normalized.toolCalls;
           malformedStructuredCallIds = new Set(normalized.sanitizedIds);
+          malformedStructuredCallPaths = normalized.sanitizedPaths;
           for (const r of normalized.repaired) {
             log.info(
               `[llama-cpp] repaired malformed structured ${r.name} args (path=${r.path}, content=${r.bytes} bytes)`,
@@ -6077,15 +6173,20 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               `[llama-cpp] surgical edit targeted a missing file; forcing create path=${missingEditPath}`,
             );
           }
-          const writeShapedCall =
-            call.function.name === 'write_file' || call.function.name === 'append_to_file';
+          const writeShapedCall = isWriteShapedToolName(call.function.name);
+          // Cap detection covers every payload-carrying mutation, not just
+          // whole-file writes: `insert_at_marker` / `replace_in_file` /
+          // `replace_lines` / `apply_patch` carry bodies just as large and
+          // fail the same way. Whole-file-only bookkeeping above keeps
+          // `writeShapedCall`.
+          const payloadMutationCall = isPayloadMutationToolName(call.function.name);
           const requestMaxTokens = typeof body.max_tokens === 'number' ? body.max_tokens : null;
           // ds4-server can recover a tool envelope that was cut at the
           // generation limit and then report finish_reason=tool_calls. The
           // explicit `length` signal is therefore not sufficient: usage at
           // the request cap plus a failed write is the reliable fallback.
           const failedWriteHitOutputLimit =
-            writeShapedCall &&
+            payloadMutationCall &&
             output.startsWith('ERROR:') &&
             (finishReason === 'length' ||
               (requestMaxTokens !== null &&
@@ -6317,19 +6418,41 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           // the MCP layer already saved the draft for append-based recovery.
           if (failedWriteHitOutputLimit && !recoverableImmediateWriteError) {
             const before = output.length;
+            // When the cap cut the ARGUMENTS json (not just the file body)
+            // the call arrives sanitized to `{}`, so `args.content` is gone
+            // and the helper's usual truncation proof with it. That is the
+            // most common shape of this failure, not an exotic one — vouch
+            // for it explicitly and hand over the recovered path.
+            const argsLostToCap = malformedStructuredCallIds.has(call.id);
+            const recoveredPath = malformedStructuredCallPaths.get(call.id) ?? null;
+            // The remedy has to be checkable against what this turn actually
+            // wired, not against the union of every write tool that exists.
+            const liveToolNames = new Set(
+              (Array.isArray(body.tools) ? (body.tools as ChatCompletionTool[]) : [])
+                .map((tool) => chatCompletionToolName(tool))
+                .filter((name): name is string => typeof name === 'string'),
+            );
             output = appendCapTruncationHintToRejectedWrite(
               output,
               call.function.name,
               args,
               requestMaxTokens,
+              { argsLostToCap, pathHint: recoveredPath, availableToolNames: liveToolNames },
             );
             if (output.length !== before) {
-              const path = typeof args.path === 'string' ? args.path : '(unknown)';
+              const path =
+                recoveredPath ?? (typeof args.path === 'string' ? args.path : '(unknown)');
+              // Two very different outcomes share this branch, and a
+              // postmortem needs to tell them apart: a steer the model can
+              // act on, versus a hard ceiling with no incremental path.
+              const noRemedy = output.includes('No incremental edit tool is wired this turn');
               log.info(
-                `[llama-cpp] cap-truncated rejected write — incremental-edit hint appended tool=${call.function.name} id=${call.id} path=${path} max_tokens=${requestMaxTokens ?? 'unset'}`,
+                `[llama-cpp] cap-truncated rejected write — ${noRemedy ? 'no incremental tool wired; escalation hint' : 'incremental-edit hint'} appended tool=${call.function.name} id=${call.id} path=${path} args-lost=${argsLostToCap} max_tokens=${requestMaxTokens ?? 'unset'}`,
               );
               this.emitWarning(
-                `The model hit its output-token cap mid-write_file (${path}); the write was rejected and it was steered to incremental edits instead of a full rewrite.`,
+                noRemedy
+                  ? `The model hit its output-token cap mid-\`${call.function.name}\` (${path}) and this session has no incremental edit tool for that target, so the deliverable cannot be written in one call at the current cap.`
+                  : `The model hit its output-token cap mid-\`${call.function.name}\` (${path}); the edit was rejected and it was steered to incremental edits instead of a full rewrite.`,
               );
             }
           }
@@ -6714,10 +6837,18 @@ export function normalizeMalformedStructuredToolCalls(
   repaired: Array<{ name: string; path: string; bytes: number }>;
   sanitized: string[];
   sanitizedIds: string[];
+  /**
+   * Call id → path recovered from the unparseable argument prefix, when
+   * the truncation left one readable. Sanitizing to `{}` erases the only
+   * evidence of which file the model was mid-way through, and the
+   * cap-truncation steer needs to name it.
+   */
+  sanitizedPaths: Map<string, string>;
 } {
   const repaired: Array<{ name: string; path: string; bytes: number }> = [];
   const sanitized: string[] = [];
   const sanitizedIds: string[] = [];
+  const sanitizedPaths = new Map<string, string>();
   const normalized = toolCalls.map((call): StructuredToolCall => {
     const raw = call.function.arguments;
     try {
@@ -6742,9 +6873,13 @@ export function normalizeMalformedStructuredToolCalls(
     }
     sanitized.push(call.function.name || '<unknown>');
     sanitizedIds.push(call.id);
+    if (isPayloadMutationToolName(call.function.name)) {
+      const recoveredPath = findLoosePathArg(looseUnescapeToolArgumentText(raw))?.value;
+      if (recoveredPath) sanitizedPaths.set(call.id, recoveredPath);
+    }
     return { ...call, function: { ...call.function, arguments: '{}' } };
   });
-  return { toolCalls: normalized, repaired, sanitized, sanitizedIds };
+  return { toolCalls: normalized, repaired, sanitized, sanitizedIds, sanitizedPaths };
 }
 
 export function tryRepairMalformedWriteToolArguments(

@@ -124,8 +124,13 @@ export function formatScriptRunResult(res: RunScriptResponse): CallToolResult {
     : '';
   const outputBlock =
     res.output === undefined ? '' : `\noutput:\n${JSON.stringify(res.output, null, 2)}`;
+  // A failed tool row already carries a red ✗ and error styling. Lead with
+  // the actionable script message instead of repeating a run UUID, status,
+  // and "error" label that are useful to machinery but noisy in the chat.
+  if (res.status === 'error') {
+    return errorResult(`${res.error ?? 'Script failed.'}${outputBlock}${callsSummary}`);
+  }
   const text = `${header}${outputBlock}${callsSummary}`;
-  if (res.status === 'error') return errorResult(text);
   return okResult(
     ExecutionToolOutputSchema,
     {

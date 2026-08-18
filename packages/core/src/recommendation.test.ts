@@ -17,8 +17,9 @@ const GB = 1024 ** 3;
 
 /**
  * Candidate set mirroring the seeded catalog (Gemma 4 = recoScore 15, Qwen
- * 3.6 = 20). `residentBytes` is the llama.cpp working set (≈ on-disk × 1.2)
- * unless the manifest pins one. Only the fields the picker reads are set.
+ * 3.6 = 20). `residentBytes` is the llama.cpp working set (see
+ * `estimateLlamaCppResidentBytes`) unless the manifest pins one. Only the
+ * fields the picker reads are set.
  */
 const CANDIDATES: RecoModelInput[] = [
   {

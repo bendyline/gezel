@@ -107,6 +107,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     vi.mocked(api.listLlamaCppModels).mockResolvedValue({
       models: [{ id: 'talkie-1930-13b-q4', name: 'Talkie 1930 13B' } as never],
     });
+    vi.mocked(api.getUsage).mockResolvedValue({ providers: {}, lastUpdated: null });
   });
 
   it('keeps the idle DwarfStar pill and adds a busy llama.cpp/Talkie pill', async () => {
@@ -125,6 +126,43 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(talkie).toHaveClass('engine-pill-busy');
     expect(talkie).toHaveTextContent(providerLabel('llama-cpp', window.__GEZEL__?.platform));
     expect(talkie.querySelector('.engine-pill-progress')).toBeInTheDocument();
+  });
+
+  it('restores the last completed turn from daemon usage after a page load', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getUsage).mockResolvedValue({
+      providers: {
+        'llama-cpp': {
+          quotaBuckets: [],
+          todayTurns: 1,
+          todayTokensIn: 1_234,
+          todayTokensOut: 56,
+          todayCost: 0,
+          totalTurns: 1,
+          totalTokensIn: 1_234,
+          totalTokensOut: 56,
+          totalCost: 0,
+          modelSpeeds: [],
+          lastTurn: {
+            model: 'talkie-1930-13b-q4',
+            inputTokens: 1_234,
+            outputTokens: 56,
+            cost: 0,
+            durationMs: 2_000,
+            outputTokensPerSec: 28,
+            at: '2026-08-18T12:00:00.000Z',
+          },
+          lastUpdated: '2026-08-18T12:00:00.000Z',
+        },
+      },
+      lastUpdated: '2026-08-18T12:00:00.000Z',
+    });
+
+    render(<EngineStatusPill />);
+    await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
+
+    expect(await screen.findByText('Last turn')).toBeInTheDocument();
+    expect(screen.getByText(/1,234 in/)).toHaveTextContent('1,234 in · 56 out · 28 tok/s');
   });
 
   it('distinguishes chat caches from shared prefixes in engine telemetry', async () => {
@@ -200,7 +238,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     }
   });
 
-  it('shows the active gezel and live output estimate using the boring-mode name', async () => {
+  it('keeps the live output estimate out of the pill, in the tooltip and popover', async () => {
     mockLiveTurns = new Map([
       [
         'talkie-session',
@@ -232,12 +270,64 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       ],
     });
 
+    const user = userEvent.setup();
     render(<EngineStatusPill />);
 
     const pill = await screen.findByRole('button', { name: /technical-writer.*Generating/i });
-    expect(pill).toHaveTextContent('technical-writer · Generating · ≈100 tok');
+    expect(pill).toHaveTextContent('technical-writer · Generating');
+    expect(pill).not.toHaveTextContent('tok');
     expect(pill).not.toHaveTextContent('Liesel');
     expect(pill.getAttribute('title')).toContain('about 100 output tokens');
+
+    await user.click(pill);
+    expect(await screen.findByText('This turn')).toBeInTheDocument();
+    expect(screen.getByText('≈100 tok')).toBeInTheDocument();
+  });
+
+  /**
+   * llama-server (`timings_per_token`) and MLX both publish a running
+   * `predicted_n` / `output_tokens` counter. When the engine tells us the
+   * number there is nothing to approximate, and hedging a figure we were
+   * handed reads as a bug.
+   */
+  it('drops the approximation mark when the engine reports exact counters', async () => {
+    mockLiveTurns = new Map([
+      [
+        'talkie-session',
+        {
+          provider: 'llama-cpp',
+          phase: 'generating',
+          label: 'Generating',
+          gezelId: 'liesel',
+          // Deliberately inconsistent with the exact counter: whatever the
+          // character estimate would say, the engine's number wins.
+          outputChars: 400,
+          outputTokens: 59,
+          tokensPerSec: 24.4,
+          startedAt: Date.now(),
+          lastEventAt: Date.now(),
+        },
+      ],
+    ]);
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'talkie-1930-13b-q4' },
+      deviceSafety: { mode: 'observe' },
+    } as ConfigResponse);
+
+    const user = userEvent.setup();
+    render(<EngineStatusPill />);
+
+    await waitFor(() => expect(document.querySelectorAll('button').length).toBeGreaterThan(0));
+    const pill = [...document.querySelectorAll('button')].find((el) =>
+      (el.getAttribute('title') ?? '').includes('Generating'),
+    )!;
+    expect(pill.getAttribute('title')).toContain('59 output tokens');
+    expect(pill.getAttribute('title')).not.toContain('about');
+
+    await user.click(pill);
+    expect(await screen.findByText('This turn')).toBeInTheDocument();
+    expect(screen.getByText(/^59 tok · 24 tok\/s$/)).toBeInTheDocument();
   });
 
   it('persists the Observe/Manage choice from the engine pill', async () => {
@@ -542,11 +632,11 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(screen.queryByText(/Capacity planning only/)).not.toBeInTheDocument();
     // Capacity holders are visible as well as accessible. Known ids take
     // their catalog name; the rest fall back to the id.
-    expect(screen.getByText('Talkie 1930 13B ×2 · 4 concurrent')).toBeInTheDocument();
+    expect(screen.getByText('Talkie 1930 13B ×2 · 4 slots')).toBeInTheDocument();
     expect(screen.getByText('~30.9 GB')).toBeInTheDocument();
     expect(screen.getByText('qwen3.6-27b-q4')).toBeInTheDocument();
     expect(screen.getByText('~19.1 GB')).toBeInTheDocument();
-    expect(capacityMeter).toHaveAccessibleName(/Talkie 1930 13B ×2 · 4 concurrent/i);
+    expect(capacityMeter).toHaveAccessibleName(/Talkie 1930 13B ×2 · 4 slots/i);
     expect(capacityMeter).toHaveAccessibleName(/qwen3\.6-27b-q4/i);
   });
 
@@ -595,11 +685,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       name: /Model capacity: about 98\.0 GB of 112\.0 GB reserved/i,
     });
     expect(capacityMeter).toHaveAccessibleName(/System reserve about 16\.0 GB/i);
-    expect(
-      screen.getByText(
-        'Scale: ~112.0 GB model capacity + ~16.0 GB system reserve = 128.0 GB unified memory',
-      ),
-    ).toBeVisible();
+    expect(screen.queryByText(/^Scale:/)).not.toBeInTheDocument();
     expect(capacityMeter.querySelector('.machine-memory-reservation-pool-ram')).toHaveStyle({
       width: '87.5%',
     });

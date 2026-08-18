@@ -4,6 +4,9 @@ import { Select } from '../primitives/index.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { CodexSetupCard } from './CodexSetupCard.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { OpenCodeSetupCard } from './OpenCodeSetupCard.js';
+import { PiSetupCard } from './PiSetupCard.js';
+import { VSCodeSetupCard } from './VSCodeSetupCard.js';
 import {
   approvalErrorMessage,
   formatVerificationCode,
@@ -71,6 +74,8 @@ interface GezelOption {
 
 const AUTOMATIC_FALLBACK_GEZEL = '__AUTOMATIC__';
 
+type EndpointsStatusScope = 'endpoints' | 'ollama';
+
 /**
  * Backends that run their own tool loop (agent runtimes, not raw model
  * APIs) can't advertise-and-halt caller-supplied tools — `/v1` returns
@@ -93,8 +98,11 @@ export function ConnectedAppsPanel() {
     emulateOllama?: boolean;
   }>({});
   const [gezels, setGezels] = useState<GezelOption[]>([]);
-  const [endpointsStatus, setEndpointsStatus] = useState<string | null>(null);
-  const [codexSetupRefreshKey, setCodexSetupRefreshKey] = useState(0);
+  const [endpointsStatus, setEndpointsStatus] = useState<{
+    scope: EndpointsStatusScope;
+    text: string;
+  } | null>(null);
+  const [harnessSetupRefreshKey, setHarnessSetupRefreshKey] = useState(0);
   const [defaultProvider, setDefaultProvider] = useState<string>('copilot');
   const [meesterGezelId, setMeesterGezelId] = useState<string | undefined>();
 
@@ -149,12 +157,16 @@ export function ConnectedAppsPanel() {
       emulateOllama?: boolean;
     }) => {
       const previous = endpoints;
+      // The Ollama toggle now lives in its own subsection, below the harness
+      // cards. Report its save beside the control the user just used.
+      const scope: EndpointsStatusScope =
+        next.emulateOllama !== previous.emulateOllama ? 'ollama' : 'endpoints';
       setEndpoints(next);
-      setEndpointsStatus('saving…');
+      setEndpointsStatus({ scope, text: 'saving…' });
       try {
         const res = await api.updateConfig({ openaiEndpoints: next });
         setEndpoints(res.openaiEndpoints ?? {});
-        setCodexSetupRefreshKey((current) => current + 1);
+        setHarnessSetupRefreshKey((current) => current + 1);
         setEndpointsStatus(null);
       } catch (err) {
         setEndpoints(previous);
@@ -166,9 +178,10 @@ export function ConnectedAppsPanel() {
           err && typeof err === 'object' && 'details' in err
             ? (err as { details?: { message?: string } }).details?.message
             : undefined;
-        setEndpointsStatus(
-          `save failed: ${detail ?? (err instanceof Error ? err.message : String(err))}`,
-        );
+        setEndpointsStatus({
+          scope,
+          text: `save failed: ${detail ?? (err instanceof Error ? err.message : String(err))}`,
+        });
       }
     },
     [endpoints],
@@ -237,7 +250,7 @@ export function ConnectedAppsPanel() {
       }
       setRevokeTarget(null);
       await refresh();
-      setCodexSetupRefreshKey((current) => current + 1);
+      setHarnessSetupRefreshKey((current) => current + 1);
     } finally {
       setBusy(null);
     }
@@ -348,6 +361,37 @@ export function ConnectedAppsPanel() {
           still get the gezel's character and each model's tuned settings (sampling, thinking mode),
           but no runtime interventions.
         </p>
+        {endpointsStatus?.scope === 'endpoints' && (
+          <output className="muted small">{endpointsStatus.text}</output>
+        )}
+      </div>
+
+      <CodexSetupCard
+        key={`codex-${harnessSetupRefreshKey}`}
+        endpointsEnabled={endpointsEnabled}
+        onChanged={refresh}
+      />
+
+      <VSCodeSetupCard
+        key={`vscode-${harnessSetupRefreshKey}`}
+        endpointsEnabled={endpointsEnabled}
+        onChanged={refresh}
+      />
+
+      <OpenCodeSetupCard
+        key={`opencode-${harnessSetupRefreshKey}`}
+        endpointsEnabled={endpointsEnabled}
+        onChanged={refresh}
+      />
+
+      <PiSetupCard
+        key={`pi-${harnessSetupRefreshKey}`}
+        endpointsEnabled={endpointsEnabled}
+        onChanged={refresh}
+      />
+
+      <div className="settings-subsection">
+        <h3>Ollama emulation</h3>
         <label className="debug-toggle">
           <input
             type="checkbox"
@@ -368,14 +412,10 @@ export function ConnectedAppsPanel() {
           this computer can use your models without asking first. Gezel refuses to take the port if
           Ollama itself is already running.
         </p>
-        {endpointsStatus && <output className="muted small">{endpointsStatus}</output>}
+        {endpointsStatus?.scope === 'ollama' && (
+          <output className="muted small">{endpointsStatus.text}</output>
+        )}
       </div>
-
-      <CodexSetupCard
-        key={codexSetupRefreshKey}
-        endpointsEnabled={endpointsEnabled}
-        onChanged={refresh}
-      />
 
       {pending.length > 0 && (
         <div className="settings-subsection">

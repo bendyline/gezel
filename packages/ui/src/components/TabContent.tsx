@@ -15,17 +15,27 @@ import { ScriptsView } from '../views/ScriptsView.js';
 import { SettingsView } from '../views/SettingsView.js';
 import { TaskTabContent } from '../views/TaskTabContent.js';
 import { TasksView } from '../views/TasksView.js';
+import { useDebugMode } from './useDebugMode.js';
 
 interface TabContentProps {
   tab: RecentTab;
+  activeProjectsByGezel?: ReadonlyMap<string, ReadonlySet<string>>;
+  activeTurnsReady?: boolean;
 }
 
-export function TabContent({ tab }: TabContentProps) {
+export function TabContent({ tab, activeProjectsByGezel, activeTurnsReady }: TabContentProps) {
+  const debugMode = useDebugMode();
   switch (tab.kind) {
     case 'project':
       return <ProjectDetailView projectId={tab.id} />;
     case 'gezel':
-      return <GezelDetail gezelId={tab.id} />;
+      return (
+        <GezelDetail
+          gezelId={tab.id}
+          workingProjectIds={activeProjectsByGezel?.get(tab.id)}
+          activeTurnsReady={activeTurnsReady}
+        />
+      );
     case 'document':
       return <DocumentDetail path={tab.path} />;
     case 'task':
@@ -41,7 +51,12 @@ export function TabContent({ tab }: TabContentProps) {
         case 'projects':
           return <ProjectsView />;
         case 'gezels':
-          return <GezellenView />;
+          return (
+            <GezellenView
+              activeProjectsByGezel={activeProjectsByGezel}
+              activeTurnsReady={activeTurnsReady}
+            />
+          );
         case 'documents':
           return <DocumentsView />;
         case 'tasks':
@@ -55,7 +70,12 @@ export function TabContent({ tab }: TabContentProps) {
         case 'handboek':
           return <HandboekView />;
         case 'benchmarks':
-          return <BenchmarksView />;
+          // Developer surface, not a shipped one: unstyled selects, inline
+          // hex colours, and a runner that cannot execute in a packaged
+          // install. Settings hides its tab behind debugMode, but this route
+          // had no gate, so a restored selection from before it moved could
+          // drop an ordinary user straight onto the raw panel.
+          return debugMode ? <BenchmarksView /> : <SettingsView />;
         case 'settings':
           return <SettingsView />;
       }

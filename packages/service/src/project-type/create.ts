@@ -393,7 +393,12 @@ export async function createTypedProject(
     try {
       const stageStore = new Store({ home: stageHome });
       await stageStore.createProject(
-        { name: input.name, description: input.description, mode: input.mode },
+        {
+          name: input.name,
+          description: input.description,
+          mode: input.mode,
+          icon: input.icon,
+        },
         { id: projectId },
       );
       const applied = await applyProjectType(

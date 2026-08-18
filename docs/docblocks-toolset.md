@@ -3,8 +3,8 @@
 Gezel ships the [DocBlocks](https://github.com/bendyline/docblocks) MCP server as a
 **bundled catalog toolset** (`docblocks`), so gezels can turn markdown into real
 Office documents and rendered media — editable `.pptx` and `.docx`, `.pdf`, XLSX,
-CSV, HTML, EPUB, DBK, MP4, and animated GIF — instead of hand-assembling HTML,
-raw OOXML, or base64.
+CSV, HTML, EPUB, DBK, MP4, animated GIF, and (from 2.4.0) single-image dashboard
+PNGs — instead of hand-assembling HTML, raw OOXML, or base64.
 
 Three pieces make it native rather than "just another MCP server":
 
@@ -20,12 +20,26 @@ pre-authorized tool set from `tools[].name`
 the server when bumping versions (`docblocks mcp` publishes exactly 19 tools, no
 aliases; verify with a `tools/list` against the new tarball).
 
-The current bundled release is **`@bendyline/docblocks-cli@2.3.2`**, pinned to
+The current authored release is **`@bendyline/docblocks-cli@2.4.0`**, pinned to
 tarball SHA-256
-`642f3f054b2ac76487ab869a5cf3dd1c7bec55853b3093f4e09e4b98232229ca`.
-Compared with the old 2.0.0 inventory, `validate_document` is gone and
-`get_authoring_context` is present. Plain Markdown needs no validation preflight;
-conversion reports and previews carry the useful diagnostics.
+`93ce7e3bbfe323911ef9398327259b8f41d28c030e9bd3ae1db8f4c398fc388e`.
+(The gezel install serves whatever the pinned `@bendyline/gilde` release
+carries — check `docblocks-catalog-contract.test.ts` for the version the
+current pin actually ships.) Compared with the old 2.0.0 inventory,
+`validate_document` is gone and `get_authoring_context` is present. Plain
+Markdown needs no validation preflight; conversion reports and previews carry
+the useful diagnostics.
+
+**2.4.0 adds squisq dashboards as a conversion target** — no new tool names
+(the 19-tool inventory is unchanged, so craftbook `autoAllow` derivations are
+unaffected): `convert_document` accepts a `{ format: 'png', resolution?,
+width?/height?, layout?, style?, title? }` target that renders the markdown's
+top-level blocks as one PNG mosaic (resolution presets `hd`, `fhd` (default),
+`4k`, `square`, `square-2k`, `portrait`, `portrait-4k`, `standard`; styles
+`basic | card | panel | accent`), plus a `create-dashboard` MCP prompt.
+Gezel's own ambient dashboard (see [ADR 0007](decisions/0007-ambient-display-applier.md))
+renders through `@bendyline/squisq-cli` directly and does not depend on this
+toolset — the `png` target is the agentic, on-demand surface.
 
 To bump: add a new `versions/<ver>/manifest.json` with the new tarball's SHA-256
 (`Get-FileHash` the `.tgz` from the npm registry) and re-run

@@ -1,5 +1,5 @@
 import { type FileHandle, mkdir, open, rename, unlink, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { Writable } from 'node:stream';
 import {
   type DiscoverOrSpawnResult,
@@ -293,6 +293,26 @@ export async function spawnTrialDaemon(opts: SpawnTrialDaemonOptions): Promise<T
     // silence, harness killed the trial, zero assistant messages
     // committed, no usable artifact.
     GEZEL_LLAMA_CPP_STREAMING_IDLE_MS: process.env.GEZEL_LLAMA_CPP_STREAMING_IDLE_MS ?? '120000',
+    // A fresh GEZEL_HOME is NOT sufficient isolation on a machine with a
+    // packaged Gezel installed. That install registers a machine-engine
+    // system service, and a user daemon is built to find it: it hands
+    // native inference to the machine engine and mounts its
+    // machine-shared gezels. Both behaviours are correct in production
+    // and ruinous here — the trial's model is loaded in the trial's
+    // engine, not the service's, so every turn dies on
+    // `/v1/remote/admit -> 404 model_not_loaded`, and the "fresh" home
+    // arrives carrying another install's gezels and tasks.
+    //
+    // Wild-caught on an arcade-deluxe run that failed at 4% GPU
+    // utilisation with zero model turns, having adopted 4 machine-shared
+    // gezels and 44 tasks it never created. Silent: nothing in the trial
+    // log says "your results came from somewhere else".
+    //
+    // Pointing the shared-home override at a path with no marker file is
+    // what disables discovery (see `machineSharedHome` in core/paths).
+    GEZEL_DISABLE_MACHINE_ENGINE: process.env.GEZEL_DISABLE_MACHINE_ENGINE ?? '1',
+    GEZEL_MACHINE_SHARED_HOME:
+      process.env.GEZEL_MACHINE_SHARED_HOME ?? join(opts.home, '.no-machine-shared'),
     ...opts.extraEnv,
   };
 

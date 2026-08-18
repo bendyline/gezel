@@ -47,7 +47,7 @@ const STATUS = {
     projects: '/home/u/.gezel/projects',
   },
   externalized: { documents: null, gezels: null, projects: null },
-  backups: { count: 0, totalBytes: 0, path: '/home/u/.gezel/backups' },
+  backups: { count: 0, totalBytes: 0, path: '/home/u/.gezel/backup', snapshots: [] },
   activeJob: false,
 };
 
@@ -73,8 +73,13 @@ describe('FoldersSettings', () => {
   });
 
   afterEach(() => {
-    delete (window as unknown as { __GEZEL__: { selectDirectory?: unknown } }).__GEZEL__
-      ?.selectDirectory;
+    const bridge = (
+      window as unknown as {
+        __GEZEL__: { selectDirectory?: unknown; openPath?: unknown };
+      }
+    ).__GEZEL__;
+    delete bridge?.selectDirectory;
+    delete bridge?.openPath;
   });
 
   it('renders a Loading… placeholder before the status arrives', async () => {
@@ -189,6 +194,73 @@ describe('FoldersSettings', () => {
         screen.getByText(/Folder picker is only available in the desktop app/),
       ).toBeInTheDocument();
     });
+  });
+
+  it('says nothing about snapshots when no move has ever run', async () => {
+    render(<FoldersSettings />);
+    await waitFor(() => {
+      expect(screen.getByText(/Documents library/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Move snapshots/)).not.toBeInTheDocument();
+  });
+
+  it('lists each snapshot with its scope and size, and opens it', async () => {
+    const openPath = vi.fn().mockResolvedValue(undefined);
+    (window as unknown as { __GEZEL__: Record<string, unknown> }).__GEZEL__.openPath = openPath;
+    vi.mocked(api.getFolders).mockResolvedValue({
+      ...STATUS,
+      backups: {
+        count: 1,
+        totalBytes: 2048,
+        path: '/home/u/.gezel/backup',
+        snapshots: [
+          {
+            id: '2026-08-14T09-15-00-000Z',
+            path: '/home/u/.gezel/backup/2026-08-14T09-15-00-000Z',
+            scopes: ['gezels'],
+            bytes: 2048,
+            createdAt: '2026-08-14T09:15:00.000Z',
+          },
+        ],
+      },
+    } as never);
+
+    render(<FoldersSettings />);
+    await waitFor(() => {
+      expect(screen.getByText(/Move snapshots/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Gezellen · 2.0 KB/)).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(within(screen.getByRole('list')).getByRole('button', { name: 'Open' }));
+
+    expect(openPath).toHaveBeenCalledWith('/home/u/.gezel/backup/2026-08-14T09-15-00-000Z');
+  });
+
+  it('falls back to the folder name when a snapshot timestamp does not parse', async () => {
+    vi.mocked(api.getFolders).mockResolvedValue({
+      ...STATUS,
+      backups: {
+        count: 1,
+        totalBytes: 10,
+        path: '/home/u/.gezel/backup',
+        snapshots: [
+          {
+            id: 'manual-copy',
+            path: '/home/u/.gezel/backup/manual-copy',
+            scopes: [],
+            bytes: 10,
+            createdAt: null,
+          },
+        ],
+      },
+    } as never);
+
+    render(<FoldersSettings />);
+    await waitFor(() => {
+      expect(screen.getByText('manual-copy')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/empty · 10 B/)).toBeInTheDocument();
   });
 
   it('renders a Reset button for an externalized scope and dispatches resetFolder', async () => {

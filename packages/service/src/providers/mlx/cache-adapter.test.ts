@@ -108,6 +108,38 @@ describe('MlxCacheAdapter — prepareForSend', () => {
     expect(warmCalls).toHaveLength(1);
   });
 
+  it('joins concurrent warmers for the same prefix instead of submitting duplicate work', async () => {
+    let releaseFetch = (): void => {};
+    let markStarted = (): void => {};
+    const fetchGate = new Promise<void>((resolve) => {
+      releaseFetch = resolve;
+    });
+    const fetchStarted = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let fetchCalls = 0;
+    const fetchImpl = (async () => {
+      fetchCalls++;
+      markStarted();
+      await fetchGate;
+      return new Response(JSON.stringify({ warmed: true }), { status: 200 });
+    }) as typeof fetch;
+    const a = new MlxCacheAdapter({
+      resolveBaseUrl: async () => 'http://127.0.0.1:0',
+      fetchImpl,
+    });
+
+    const first = a.prepareForSend('sess-1', 'shared prompt');
+    await fetchStarted;
+    const second = a.prepareForSend('sess-2', 'shared prompt');
+    await Promise.resolve();
+    expect(fetchCalls).toBe(1);
+
+    releaseFetch();
+    await Promise.all([first, second]);
+    expect(fetchCalls).toBe(1);
+  });
+
   it('routes prefix warming through the exclusive engine gate', async () => {
     const { fetchImpl } = makeFetchSpy();
     const labels: string[] = [];

@@ -5,6 +5,8 @@ import {
   assertLockfileVersion,
   hasLocalGildeOverride,
   hasPackageWideAgeExemption,
+  lockfileMatchesVersion,
+  missingTypeEntries,
   parseLatestVersion,
   readPinnedDependency,
   updatePinnedDependency,
@@ -84,4 +86,30 @@ snapshots:
 `;
   assert.doesNotThrow(() => assertLockfileVersion(lockfile, '1.2.3'));
   assert.throws(() => assertLockfileVersion(lockfile, '1.2.4'), /not pinned/);
+
+  // The state question behind resumability: a pin that already reads 1.2.4
+  // over a lockfile still on 1.2.3 is an interrupted update, not a finished
+  // one, and must not report "already current".
+  assert.equal(lockfileMatchesVersion(lockfile, '1.2.3'), true);
+  assert.equal(lockfileMatchesVersion(lockfile, '1.2.4'), false);
+  assert.equal(lockfileMatchesVersion('', '1.2.3'), false);
+});
+
+test('reports unbuilt core type declarations before anything is mutated', () => {
+  const entries = [
+    '/repo/packages/core/dist/index.d.ts',
+    '/repo/packages/core/dist/svg/index.d.ts',
+  ];
+  assert.deepEqual(
+    missingTypeEntries(entries, () => true),
+    [],
+  );
+  assert.deepEqual(
+    missingTypeEntries(entries, () => false),
+    entries,
+  );
+  assert.deepEqual(
+    missingTypeEntries(entries, (entry) => entry.endsWith('index.d.ts') && !entry.includes('svg')),
+    ['/repo/packages/core/dist/svg/index.d.ts'],
+  );
 });

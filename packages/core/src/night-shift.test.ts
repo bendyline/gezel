@@ -5,6 +5,7 @@ import {
   lastNightShiftWindow,
   nextNightShiftStart,
   nightShiftDayKey,
+  nightShiftWindowBounds,
   nightShiftWindowKey,
 } from './night-shift.js';
 import { type Task, isPendingNightShiftTask } from './schemas/task.js';
@@ -81,6 +82,36 @@ describe('night-shift window math', () => {
     expect(nextNightShiftStart(at(2026, 6, 20, 12, 0), OVERNIGHT)).toEqual(at(2026, 6, 20, 22, 0));
     // After tonight's open → tomorrow at startHour.
     expect(nextNightShiftStart(at(2026, 6, 20, 23, 0), OVERNIGHT)).toEqual(at(2026, 6, 21, 22, 0));
+  });
+
+  it('bounds the open window, else the next one', () => {
+    // Inside the wrapping window's tail: tonight's window, still open.
+    const inside = nightShiftWindowBounds(at(2026, 6, 21, 2, 0), OVERNIGHT);
+    expect(inside.open).toBe(true);
+    expect(inside.start).toEqual(at(2026, 6, 20, 22, 0));
+    expect(inside.end).toEqual(at(2026, 6, 21, 6, 0));
+
+    // Daytime: the window due tonight, crossing midnight.
+    const before = nightShiftWindowBounds(at(2026, 6, 20, 12, 0), OVERNIGHT);
+    expect(before.open).toBe(false);
+    expect(before.start).toEqual(at(2026, 6, 20, 22, 0));
+    expect(before.end).toEqual(at(2026, 6, 21, 6, 0));
+
+    // Same-day window before it opens: today, no midnight crossing.
+    const day = nightShiftWindowBounds(at(2026, 6, 20, 8, 0), DAYTIME);
+    expect(day.open).toBe(false);
+    expect(day.start).toEqual(at(2026, 6, 20, 9, 0));
+    expect(day.end).toEqual(at(2026, 6, 20, 17, 0));
+
+    // Same-day window after it closed: tomorrow's.
+    const evening = nightShiftWindowBounds(at(2026, 6, 20, 18, 0), DAYTIME);
+    expect(evening.start).toEqual(at(2026, 6, 21, 9, 0));
+    expect(evening.end).toEqual(at(2026, 6, 21, 17, 0));
+
+    // Always-on: permanently open, rolling 24h.
+    const always = nightShiftWindowBounds(at(2026, 6, 21, 12, 0), { startHour: 0, endHour: 0 });
+    expect(always.open).toBe(true);
+    expect(always.end.getTime() - always.start.getTime()).toBe(24 * 60 * 60 * 1000);
   });
 });
 

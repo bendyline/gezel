@@ -155,9 +155,14 @@ export async function bootstrapOnDeviceFirstRun(opts: {
   //   - no install is currently in flight (don't race a live download)
   //   - the pinned model isn't actually installed (deleting from
   //     Settings counts; abandoned downloads count)
-  // and only ACT when the resolver picks a different tier — same tier
-  // means the existing pin is fine, the limbo recovery in the banner
-  // will re-fire that install on its own.
+  // Then: a lone installed model wins the pin, because there is no ambiguity
+  // about which one the user meant and nothing else on the machine can serve a
+  // turn. With SEVERAL installed we keep re-resolving the tier instead —
+  // guessing which unrelated user/shared model to adopt is worse than
+  // recommending the hardware-ranked one, and the pickers still offer the
+  // rest. Either way we only ACT when the resolver picks a different model;
+  // same tier means the existing pin is fine and the limbo recovery in the
+  // banner will re-fire that install on its own.
   if (config.firstRunCompleted && (config.provider === 'llama-cpp' || config.provider === 'mlx')) {
     const provider = config.provider;
     const installer = provider === 'mlx' ? mlxModels : llamaCppModels;
@@ -166,6 +171,26 @@ export async function bootstrapOnDeviceFirstRun(opts: {
       const installed = await installer.listInstalled();
       const pinnedIsOnDisk = pinned ? installed.some((m) => m.id === pinned) : false;
       if (!pinnedIsOnDisk) {
+        // One installed model, and it isn't the pinned one: adopt it. The tier
+        // re-resolution below cannot rescue this case — on hardware whose
+        // verdict is stable the resolver re-picks the same never-downloaded id,
+        // so the pin keeps naming a phantom model while the machine's only
+        // usable one sits on disk, and every session dies on
+        // `model_not_loaded`. Wild-caught on a 122 GB host that pinned
+        // `qwen3.6-27b-q8`, abandoned the download at 257 MB, and then had
+        // `gemma4-e4b-q4` installed by hand.
+        const soleInstalled = installed.length === 1 ? installed[0]?.id : undefined;
+        if (soleInstalled) {
+          log.info(
+            `[first-run] pinned ${provider}/${pinned ?? '<none>'} is not installed; repinning ` +
+              `to ${soleInstalled} — the only model on this machine — so chat works without a download.`,
+          );
+          await store.writeConfig({
+            defaultModel: { ...config.defaultModel, [provider]: soleInstalled },
+            firstRunInstallError: null as unknown as undefined,
+          });
+          return;
+        }
         const decision = await detectModelTier(await listChatModelManifests(opts.catalog));
         const target = resolveFirstRunTarget(decision.tier, effPlatform, effArch);
         if (target.provider === provider && target.modelId !== pinned) {

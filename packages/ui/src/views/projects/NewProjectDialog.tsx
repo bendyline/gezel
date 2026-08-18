@@ -26,6 +26,7 @@ import {
   ProjectGlyph,
   type ProjectGlyphId,
   type ProjectKindId,
+  catalogProjectTypeGlyph,
   categorizeCatalogType,
 } from './new-project-meta.js';
 
@@ -801,11 +802,17 @@ export function NewProjectDialog({
                           key={item.manifest.id}
                           label={item.manifest.name}
                           description={item.manifest.description}
-                          glyph={section.cat.glyph}
+                          glyph={catalogProjectTypeGlyph(item)}
                           index={section.builtins.length + index}
                           active={item.manifest.id === selectedTypeId}
-                          {...(item.iconSvg ? { iconSvg: item.iconSvg } : {})}
-                          {...(item.logoUrl ? { logoUrl: item.logoUrl } : {})}
+                          {...(!(item.manifest.kind === 'project-type' && item.manifest.icon) &&
+                          item.iconSvg
+                            ? { iconSvg: item.iconSvg }
+                            : {})}
+                          {...(!(item.manifest.kind === 'project-type' && item.manifest.icon) &&
+                          item.logoUrl
+                            ? { logoUrl: item.logoUrl }
+                            : {})}
                           onSelect={() => {
                             if (kind === 'github') cancelRepoPreview();
                             setSelectedTypeId(item.manifest.id);

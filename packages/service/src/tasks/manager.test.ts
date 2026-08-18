@@ -185,6 +185,228 @@ describe('TaskManager', () => {
     expect(created.craftbook.steps[0]?.advanceWhen?.file).toBe('marne-battle.pptx');
   });
 
+  it('interpolates launch params everywhere inside a gate, not just check.file', async () => {
+    // A gate buries its params below its own top level. The old
+    // field-by-field walk touched `checks[].file` only, so Pull Request
+    // Review's scope gate shipped the literal `#{{number}}` to the regex
+    // engine: the reviewer wrote the note the step asked for, the gate
+    // could never match it, and the only way past was to put the raw
+    // template token into the task's permanent audit trail.
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            id,
+            name: 'Pull Request Review',
+            steps: [
+              {
+                id: 'scope',
+                name: 'Map PR #{{number}}',
+                prompt: 'Read the corpus at {{corpusScope}}.',
+                gate: {
+                  at: 'completion',
+                  scripts: [
+                    {
+                      name: 'checkTaskNoteContains',
+                      scope: 'standard',
+                      inputs: { pattern: '##\\s*Scope\\s*[—-]\\s*PR\\s*#{{number}}' },
+                    },
+                  ],
+                  checks: [
+                    {
+                      kind: 'contains',
+                      file: 'review-{{number}}.md',
+                      pattern: 'Pull Request Review — PR #{{number}}',
+                      artifact: true,
+                    },
+                    {
+                      kind: 'corpusCoverage',
+                      file: 'coverage.json',
+                      corpusDir: '{{corpusScope}}',
+                      artifact: true,
+                    },
+                  ],
+                },
+                terminal: true,
+              },
+            ],
+            entryStepId: 'scope',
+            createdAt: '2026-08-16T00:00:00Z',
+            updatedAt: '2026-08-16T00:00:00Z',
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+    const created = await tasks.create('website', {
+      title: 'Review PR 46',
+      assignee: { kind: 'user' },
+      craftbookId: 'pull-request-review',
+      craftbookParams: {
+        number: '46',
+        corpusScope: 'artifacts/data/github-pull-requests/pr-46',
+      },
+    });
+    const gate = created.craftbook.steps[0]?.gate as {
+      scripts?: Array<{ inputs?: Record<string, string> }>;
+      checks?: Array<Record<string, unknown>>;
+    };
+    expect(created.craftbook.steps[0]?.name).toBe('Map PR #46');
+    // The gate SCRIPT input — the one that actually rejected Ayza.
+    expect(gate.scripts?.[0]?.inputs?.pattern).toBe('##\\s*Scope\\s*[—-]\\s*PR\\s*#46');
+    // A check's non-`file` strings interpolate too.
+    expect(gate.checks?.[0]?.file).toBe('review-46.md');
+    expect(gate.checks?.[0]?.pattern).toBe('Pull Request Review — PR #46');
+    expect(gate.checks?.[1]?.corpusDir).toBe('artifacts/data/github-pull-requests/pr-46');
+    // Non-string fields survive the walk intact — including the drawer
+    // flag the schema used to strip.
+    expect(gate.checks?.[1]?.artifact).toBe(true);
+    expect(JSON.stringify(gate)).not.toContain('{{');
+  });
+
+  it('interpolates launch params into onEnter/onExit script inputs', async () => {
+    // Same class as the gate miss above, on the hook that does a step's
+    // deterministic work with no model turn. Pull Request Review's scope step
+    // publishes its fanout batches through an `onEnter` stdlib script; left
+    // out of the walk, that script receives the literal `{{corpusScope}}`,
+    // finds no corpus, and fails as if the connector had never synced.
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            id,
+            name: 'Pull Request Review',
+            steps: [
+              {
+                id: 'scope',
+                name: 'Map the corpus',
+                prompt: 'Read {{corpusScope}}.',
+                onEnter: [
+                  {
+                    name: 'publishCorpusBatches',
+                    scope: 'standard',
+                    inputs: { corpusDir: '{{corpusScope}}', outFile: 'pr-review/batches.json' },
+                  },
+                ],
+                onExit: {
+                  name: 'noteSomething',
+                  scope: 'standard',
+                  inputs: { label: 'PR #{{number}}' },
+                },
+                terminal: true,
+              },
+            ],
+            entryStepId: 'scope',
+            createdAt: '2026-08-17T00:00:00Z',
+            updatedAt: '2026-08-17T00:00:00Z',
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+    const created = await tasks.create('website', {
+      title: 'Review PR 33',
+      assignee: { kind: 'user' },
+      craftbookId: 'pull-request-review',
+      craftbookParams: {
+        number: '33',
+        corpusScope: 'artifacts/data/github-pull-requests/pr-33',
+      },
+    });
+    const step = created.craftbook.steps[0] as {
+      onEnter?: Array<{ inputs?: Record<string, string> }>;
+      onExit?: { inputs?: Record<string, string> };
+    };
+    expect(step.onEnter?.[0]?.inputs?.corpusDir).toBe('artifacts/data/github-pull-requests/pr-33');
+    // Untemplated inputs pass through unchanged.
+    expect(step.onEnter?.[0]?.inputs?.outFile).toBe('pr-review/batches.json');
+    // The legacy single-ref shape interpolates too.
+    expect(step.onExit?.inputs?.label).toBe('PR #33');
+    expect(JSON.stringify(step)).not.toContain('{{');
+  });
+
+  it('interpolates the fanout half of the recipe too, and hands children the host’s needs', async () => {
+    // Same miss as the gate walk above, one level out: `interpolateStepsContext`
+    // walks the HOST's steps, so `spawn.overFile` and every child-template
+    // step kept their raw `{{…}}`. A batch fanout whose corpus lives at
+    // `…/pr-{{number}}/…` reads a path that cannot exist, finds no items,
+    // and logs "skipping fanout" while the host sails on to a collect
+    // barrier with no children to wait for — a silent no-op review.
+    await installProjectToolset('usb-camera');
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            id,
+            name: 'Pull Request Review',
+            toolsets: [{ toolsetId: 'usb-camera', autoAllow: true, reason: 'read the PR' }],
+            steps: [
+              { id: 'scan', name: 'Scan', spawnFanout: true },
+              { id: 'collect', name: 'Collect', terminal: true },
+            ],
+            entryStepId: 'scan',
+            spawn: {
+              overFile:
+                'data/github-pull-requests/pr-{{number}}/attachments/001/pr-{{number}}-files.json',
+              overArtifact: true,
+              itemsPath: 'batches',
+              entryStepId: 'review-batch',
+              steps: [
+                {
+                  id: 'review-batch',
+                  name: 'Review batch {{number}}',
+                  prompt: 'Review PR #{{number}} batch {{batchNumber}}.',
+                  gate: {
+                    at: 'completion',
+                    checks: [
+                      {
+                        kind: 'corpusCoverage',
+                        file: 'pr-review/coverage-{{batchNumber}}.json',
+                        corpusDir: 'artifacts/data/github-pull-requests/pr-{{number}}',
+                        expectPaths: '{{paths}}',
+                        artifact: true,
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+            createdAt: '2026-08-16T00:00:00Z',
+            updatedAt: '2026-08-16T00:00:00Z',
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+    const created = await tasks.create('website', {
+      title: 'Review PR 46',
+      assignee: { kind: 'user' },
+      craftbookId: 'pull-request-review',
+      craftbookParams: { number: '46' },
+    });
+
+    // The file the fanout actually reads.
+    expect(created.craftbook.spawn?.overFile).toBe(
+      'data/github-pull-requests/pr-46/attachments/001/pr-46-files.json',
+    );
+    // Child-template steps carry the launch params as well; the per-item
+    // `{{batchNumber}}`/`{{paths}}` stay for spawnChild to fill in.
+    const child = created.spawnsCraftbook?.steps[0];
+    expect(child?.prompt).toBe('Review PR #46 batch {{batchNumber}}.');
+    const childCheck = (child?.gate as { checks?: Array<Record<string, unknown>> })?.checks?.[0];
+    expect(childCheck?.corpusDir).toBe('artifacts/data/github-pull-requests/pr-46');
+    expect(childCheck?.file).toBe('pr-review/coverage-{{batchNumber}}.json');
+
+    // Children do the host's work on a slice of it, so they inherit its
+    // toolset needs — the chat session's auto-allow reads them off the task.
+    expect(created.spawnsCraftbook?.toolsets).toEqual([
+      { toolsetId: 'usb-camera', autoAllow: true, reason: 'read the PR' },
+    ]);
+  });
+
   it('emits task.created history', async () => {
     await tasks.create('website', {
       title: 'Ship',
@@ -1225,6 +1447,89 @@ describe('TaskManager craftbookParams interpolation', () => {
       'reviews/release-candidate/report.md',
     );
     expect(overridden.craftbookParams).toEqual({ reviewId: 'release-candidate' });
+  });
+
+  it('provides per-task runtime placeholders and expands only declared defaults', async () => {
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            ...bookWithPlaceholders,
+            id,
+            paramSchema: {
+              type: 'object',
+              properties: {
+                workPath: { type: 'string', default: 'powerpoint/task-{{task.num}}' },
+                outputPath: { type: 'string', default: '{{workPath}}/deck.pptx' },
+                content: { type: 'string', default: '' },
+              },
+            },
+            steps: [
+              {
+                id: 'report',
+                name: 'Write {{task.ref}} for {{task.projectId}}',
+                prompt: 'Write {{workPath}}/outline.md, then preserve this source: {{content}}.',
+                advanceWhen: {
+                  file: '{{workPath}}/outline.md',
+                  artifact: true,
+                  minBytes: 400,
+                },
+                gate: {
+                  at: 'completion' as const,
+                  checks: [
+                    {
+                      kind: 'minBytes' as const,
+                      file: '{{workPath}}/outline.md',
+                      bytes: 400,
+                      artifact: true,
+                    },
+                  ],
+                  onReject: 'report',
+                  maxAttempts: 3,
+                },
+                next: 'done',
+              },
+              { id: 'done', name: 'Done', terminal: true },
+            ],
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+    const task = await tasks.create('website', {
+      title: 'Named deck',
+      craftbookId: 'powerpoint-deck',
+      assignee: { kind: 'user' },
+      craftbookParams: { content: 'Keep {{topic}} literal.' },
+    });
+
+    const step = task.craftbook.steps[0]!;
+    expect(step.name).toBe(`Write website/${task.num} for website`);
+    expect(step.prompt).toContain(`powerpoint/task-${task.num}/outline.md`);
+    expect(step.prompt).toContain('Keep {{topic}} literal.');
+    expect(step.advanceWhen?.file).toBe(`powerpoint/task-${task.num}/outline.md`);
+    expect((step.gate?.checks?.[0] as { file?: string }).file).toBe(
+      `powerpoint/task-${task.num}/outline.md`,
+    );
+    expect(task.craftbookParams).toEqual({
+      workPath: `powerpoint/task-${task.num}`,
+      outputPath: `powerpoint/task-${task.num}/deck.pptx`,
+      content: 'Keep {{topic}} literal.',
+    });
+    expect(task.craftbookParams).not.toHaveProperty('task.num');
+
+    const nextTask = await tasks.create('website', {
+      title: 'Another deck',
+      craftbookId: 'powerpoint-deck',
+      assignee: { kind: 'user' },
+    });
+    expect(nextTask.num).not.toBe(task.num);
+    expect(nextTask.craftbook.steps[0]?.advanceWhen?.file).toBe(
+      `powerpoint/task-${nextTask.num}/outline.md`,
+    );
+    expect(nextTask.craftbookParams?.outputPath).toBe(`powerpoint/task-${nextTask.num}/deck.pptx`);
+    expect(nextTask.craftbookParams?.workPath).not.toBe(task.craftbookParams?.workPath);
   });
 
   it('leaves the snapshot byte-identical when no params are given', async () => {

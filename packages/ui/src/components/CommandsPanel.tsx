@@ -320,24 +320,19 @@ export function CommandsPanel({
     [projectId],
   );
 
+  // A SKILL.md says what to do, never who does it. The service builds the
+  // triage → run → verify task and hands step 1 to the voorman, who picks
+  // the craftsman for step 2 — so this stays a one-line call rather than
+  // fabricating a task here that nobody owns.
   const invokeSkill = useCallback(
     async (skill: DiscoveredSkill) => {
       try {
-        const task = await api.createTask(projectId, {
-          title: `${skill.name} (workspace skill) — ${new Date().toLocaleString()}`,
-          description:
-            skill.description ||
-            `Run the workspace skill ${skill.name} (${skill.source}) against this project.`,
-          steps: [
-            {
-              name: skill.name,
-              ...(skill.description ? { description: skill.description } : {}),
-              prompt: skill.body,
-            },
-          ],
-          assignee: { kind: 'user' },
-        });
-        setToast(`Invoked skill ${skill.name} — task ${task.ref}`);
+        const res = await api.invokeProjectSkill(projectId, skill.source);
+        setToast(
+          res.started
+            ? `${res.assigneeName ?? 'The voorman'} is looking at ${skill.name} — task ${res.task.ref}`
+            : `Queued ${skill.name} as task ${res.task.ref} — nobody has picked it up yet`,
+        );
       } catch (err) {
         setToast(
           `Couldn’t invoke ${skill.name}: ${err instanceof Error ? err.message : String(err)}`,

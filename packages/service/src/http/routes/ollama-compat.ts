@@ -1,3 +1,4 @@
+import { externalGezelModelId } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { stream as honoStream } from 'hono/streaming';
 import { ZodError, z } from 'zod';
@@ -10,6 +11,8 @@ import type {
   TurnUsage,
 } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
+import { appendCallerOwnedActionLedger } from '../openai-compat/action-ledger.js';
+import { profileForCallerOwnedInference } from '../openai-compat/caller-owned-profile.js';
 import type { ChatTarget } from '../openai-compat/chat-target.js';
 import { resolveChatTarget } from '../openai-compat/chat-target.js';
 import {
@@ -358,6 +361,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
     model: string,
     provider: ProviderName,
     usage: TurnUsage | null,
+    actionReceiptCount = 0,
   ): void => {
     void ctx.history
       .log({
@@ -368,6 +372,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
           surface: 'ollama',
           model,
           provider,
+          actionReceiptCount,
           ...(usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : {}),
         },
       })
@@ -421,8 +426,8 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
         const gezel = await ctx.store.getGezel(servingGezelId).catch(() => null);
         if (gezel) {
           servingEntry.push({
-            name: `gezel:${gezel.name}`,
-            model: `gezel:${gezel.name}`,
+            name: externalGezelModelId(gezel),
+            model: externalGezelModelId(gezel),
             modified_at: now,
             size: 0,
             digest: '',
@@ -597,7 +602,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       ...(target.model ? { model: target.model } : {}),
       ...(tuning ? { tuning } : {}),
       ...(defaults && endpointsConfig.supportingBehaviors !== false
-        ? { profile: defaults.profile }
+        ? { profile: profileForCallerOwnedInference(defaults.profile) }
         : {}),
     });
     const usageRef: { value: TurnUsage | null } = { value: null };
@@ -701,11 +706,15 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
     if (!target) return c.json({ error: `model "${parsed.model}" not found` }, 404);
 
     let translated: ReturnType<typeof translateMessagesWithPrefix>;
+    let actionReceiptCount = 0;
     try {
       translated = translateMessagesWithPrefix(
         toOpenAiMessages(parsed.messages),
         target.systemPrefix,
       );
+      const actionLedger = appendCallerOwnedActionLedger(translated);
+      translated = actionLedger.input;
+      actionReceiptCount = actionLedger.receiptCount;
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
@@ -748,7 +757,8 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
 
     // Same session defaults as /v1/chat/completions: tuning always
     // (with the request's options/format overlaid on top), behavior
-    // profile gated by the Connected Apps switch.
+    // profile gated by the Connected Apps switch. Caller-owned inference
+    // keeps compatibility behaviors without Gezel action-loop enforcement.
     const defaults = await ctx.chat
       .resolveModelSessionDefaults(target.provider, target.model, target.tuningOverrides ?? {})
       .catch(() => null);
@@ -764,7 +774,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       ...(externalTools && externalTools.length > 0 ? { externalTools } : {}),
       ...(tuning ? { tuning } : {}),
       ...(defaults && endpointsConfig.supportingBehaviors !== false
-        ? { profile: defaults.profile }
+        ? { profile: profileForCallerOwnedInference(defaults.profile) }
         : {}),
     });
 
@@ -781,7 +791,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       try {
         const content = await session.sendAndWait(prompt, sendOpts);
         const captured = session.capturedToolCalls?.() ?? [];
-        logCompletion(appId, parsed.model, target.provider, usageRef.value);
+        logCompletion(appId, parsed.model, target.provider, usageRef.value, actionReceiptCount);
         return c.json({
           model: parsed.model,
           created_at: new Date().toISOString(),
@@ -820,7 +830,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       try {
         await session.sendAndWait(prompt, sendOpts);
         const captured = session.capturedToolCalls?.() ?? [];
-        logCompletion(appId, parsed.model, target.provider, usageRef.value);
+        logCompletion(appId, parsed.model, target.provider, usageRef.value, actionReceiptCount);
         if (captured.length > 0) {
           const toolLine: OllamaChatStreamChunk = {
             model: parsed.model,

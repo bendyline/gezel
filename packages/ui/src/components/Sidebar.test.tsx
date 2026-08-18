@@ -100,6 +100,33 @@ describe('Sidebar', () => {
     expect(await screen.findByRole('button', { name: 'Actions for Maya' })).toBeInTheDocument();
   });
 
+  it('shows a working indicator on an active gezel and opens that gezel from it', async () => {
+    window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ gezels: true }));
+    const onSelect = vi.fn();
+    const preferWorking = vi.fn();
+    window.addEventListener('gezel:prefer-working-project', preferWorking);
+    render(
+      <Sidebar
+        selection={null}
+        onSelect={onSelect}
+        onOpenArea={vi.fn()}
+        activeGezelIds={new Set(['g1'])}
+      />,
+    );
+
+    const working = await screen.findByRole('button', {
+      name: 'Maya is working. Open gezel.',
+    });
+    expect(working.querySelectorAll('.project-row-thinking-dot')).toHaveLength(3);
+
+    fireEvent.click(working);
+    expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ kind: 'gezel', id: 'g1' }));
+    expect(preferWorking).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: { gezelId: 'g1' } }),
+    );
+    window.removeEventListener('gezel:prefer-working-project', preferWorking);
+  });
+
   it('labels Home with the configured Meester name', async () => {
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'mock',
@@ -205,6 +232,32 @@ describe('Sidebar', () => {
     expect(screen.queryByText('No projects yet.')).not.toBeInTheDocument();
   });
 
+  /**
+   * Scripts is hidden unless "show advanced features" is on, but the Home
+   * "Save a routine" tip navigates there regardless. The rail derives its
+   * active row by matching the selection against the rendered roster, so a
+   * hidden destination matched nothing and the rail showed no active row at
+   * all — silently disagreeing with the canvas.
+   */
+  it('surfaces a hidden area as a transient row while it is the destination', async () => {
+    const selection: RecentTab = { kind: 'area', area: 'scripts', at: 0, order: 0 };
+    render(<Sidebar selection={selection} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    const row = await screen.findByRole('button', { name: 'Scripts' });
+    expect(row).toHaveClass('active');
+  });
+
+  it('does not add a transient row for an area that already has a group header', async () => {
+    const selection: RecentTab = { kind: 'area', area: 'documents', at: 0, order: 0 };
+    render(<Sidebar selection={selection} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    // The group header is the destination indicator; a transient plain link
+    // would render a second control with the same name.
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: /^Documents$/i })).toHaveLength(1);
+    });
+  });
+
   it('hides archived projects from the primary navigation list', async () => {
     vi.mocked(api.listProjects).mockResolvedValue({
       projects: [
@@ -213,6 +266,20 @@ describe('Sidebar', () => {
       ],
     } as never);
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+    expect(await screen.findByText('Alpha')).toBeInTheDocument();
+    expect(screen.queryByText('Buried')).not.toBeInTheDocument();
+  });
+
+  it('hides the current project from primary navigation once it is archived', async () => {
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [
+        { id: 'p1', name: 'Alpha' } as Project,
+        { id: 'p2', name: 'Buried', archived: true, status: 'inactive' } as Project,
+      ],
+    } as never);
+    const selection: RecentTab = { kind: 'project', id: 'p2', at: 0, order: 0 };
+    render(<Sidebar selection={selection} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
 
     expect(await screen.findByText('Alpha')).toBeInTheDocument();
     expect(screen.queryByText('Buried')).not.toBeInTheDocument();

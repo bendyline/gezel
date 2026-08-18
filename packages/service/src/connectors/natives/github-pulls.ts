@@ -17,9 +17,8 @@
  */
 
 import type { GitHubPullComment, GitHubPullDetail, GitHubPullFile } from '@bendyline/gezel';
-import { createLogger } from '@bendyline/gezel';
+import { createLogger, prioritizePullsForCurrentBranch } from '@bendyline/gezel';
 import type { ProjectDetail } from '@bendyline/gezel';
-import { prioritizePullsForCurrentBranch } from '@bendyline/gezel-mcp';
 import { type GitHubPrs, filterUnifiedDiffByPath } from '../../github/prs.js';
 import { registerNativeAdapter } from '../registry.js';
 import { assertConnectorTaskSync, registerConnectorTaskPrep } from '../task-prep.js';
@@ -71,6 +70,14 @@ export interface GitHubPullsRuntime {
     ): Promise<string>;
   };
   project(projectId: string): Promise<ProjectDetail>;
+  /**
+   * The branch HEAD actually points at in the checkout. Required rather
+   * than optional: `project.github.branch` is the *configured* tracking
+   * branch and is unset on most links, so a runtime that forgot to supply
+   * this silently reduced "the PR for the branch I'm on" to "no branch at
+   * all" — the launch failed on every project that had never pinned one.
+   */
+  currentBranch(project: ProjectDetail): Promise<string | undefined>;
 }
 
 /** What one `pr-<n>` scope resolves to; assembled once per scope per pass. */
@@ -223,6 +230,14 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
       const slice = files.slice(start, start + 25);
       return {
         number: index + 1,
+        // Fanout name-collision guard. A declarative fanout lands each
+        // item's fields as `{{key}}` in the child recipe, and launch
+        // params interpolate FIRST — so a craftbook launched with
+        // `number` = the PR number can never address the batch's
+        // `number`, and `{{number}}` silently resolves to the PR
+        // everywhere the child meant its own batch. `number` stays for
+        // existing readers; `batchNumber` is what a fanout addresses.
+        batchNumber: index + 1,
         start: start + 1,
         end: start + slice.length,
         paths: slice.map((file) => file.filename),
@@ -368,7 +383,7 @@ function parseConfig(raw: unknown): GitHubPullsConfig {
  * when it is wrong.
  */
 export async function resolveLaunchPullNumber(
-  runtime: Pick<GitHubPullsRuntime, 'prs'>,
+  runtime: Pick<GitHubPullsRuntime, 'prs' | 'currentBranch'>,
   project: ProjectDetail,
   params: Record<string, string>,
 ): Promise<number> {
@@ -376,7 +391,10 @@ export async function resolveLaunchPullNumber(
   if (Number.isSafeInteger(explicit) && explicit > 0) return explicit;
 
   const open = await runtime.prs.listPullRequests(project);
-  const branch = project.github?.branch;
+  // Live HEAD first, the link's pinned branch only as a fallback: the
+  // craftbook promises "the PR for the branch you are on", and that is the
+  // checkout's answer, not project.json's.
+  const branch = (await runtime.currentBranch(project)) ?? project.github?.branch;
   const { pulls, matchingCount } = prioritizePullsForCurrentBranch(open, branch);
   if (matchingCount > 0 && pulls[0]) return pulls[0].number;
   throw new Error(

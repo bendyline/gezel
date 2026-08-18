@@ -178,6 +178,29 @@ describe('project-local craftbooks', () => {
     expect(got?.requirements).toEqual([{ kind: 'github' }]);
   });
 
+  it('round-trips declared connectors so launch prep still runs for a local book', async () => {
+    // A dropped `connectors` list is silent: the task launches with no
+    // corpus and `{{corpusScope}}` survives interpolation into the step
+    // prompts and gates, so the gezel reviews a path that never filled.
+    const project = await store.createProject({ name: 'CB Connectors' });
+    const now = nowIso();
+    await store.writeProjectCraftbook(project.id, {
+      id: 'proj-corpus-review',
+      name: 'Corpus Review',
+      version: '1.0.0',
+      steps: [{ id: 'run', name: 'Run', prompt: 'Read `{{corpusScope}}/`.', terminal: true }],
+      entryStepId: 'run',
+      connectors: [{ typeId: 'github-pulls', reason: 'mirror the pull request corpus' }],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const got = await store.getProjectCraftbook(project.id, 'proj-corpus-review');
+    expect(got?.connectors).toEqual([
+      { typeId: 'github-pulls', reason: 'mirror the pull request corpus' },
+    ]);
+  });
+
   it('round-trips the project-type provenance sidecar', async () => {
     const project = await store.createProject({ name: 'CB Provenance' });
     expect(await store.readProjectCraftbookProvenance(project.id, 'nope')).toBeNull();

@@ -1,3 +1,4 @@
+import { estimateLlamaCppResidentBytes, estimateMlxResidentBytes } from '@bendyline/gezel';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   estimateKvReserveBytes,
@@ -374,13 +375,32 @@ describe('CapacityBroker', () => {
   });
 
   it('estimateResidentBytes uses the right multiplier per engine', () => {
+    // llama.cpp is measured too now, and its shape is proportional + fixed:
+    // weight buffers scale with the file (0.98-1.09x across a 3.9-21 GB
+    // span), while compute/output buffers are a flat ~100-160 MiB that the
+    // old single 1.2x multiplier smeared into the proportional term.
     expect(CapacityBroker.estimateResidentBytes('llama-cpp', 10 * GB)).toBe(
-      Math.round(10 * GB * 1.2),
+      estimateLlamaCppResidentBytes(10 * GB),
     );
-    // Measured: `mx.get_active_memory()` after load(), before inference, on a
-    // 27.50 GiB model reads 27.47 GiB. The old 1.3 folded KV into the weights
-    // term; callers price KV explicitly, so it was a double-count.
-    expect(CapacityBroker.estimateResidentBytes('mlx', 10 * GB)).toBe(Math.round(10 * GB * 1.05));
+    expect(estimateLlamaCppResidentBytes(10 * GB)).toBe(
+      Math.round(10 * GB * 1.1) + 256 * 1024 ** 2,
+    );
+    // The fixed term is what stops a small model from being under-described:
+    // doubling the file must NOT double the engine overhead.
+    expect(estimateLlamaCppResidentBytes(2 * GB) - Math.round(2 * GB * 1.1)).toBe(
+      estimateLlamaCppResidentBytes(20 * GB) - Math.round(20 * GB * 1.1),
+    );
+    // MLX is the same shape for the same reason. `mx.get_active_memory()`
+    // after load(), before inference, tracks the weights at 0.988-0.9999x
+    // across a 1.4-86 GiB span; what it does NOT scale with is the sidecar's
+    // Python/MLX/tokenizer cost, a flat 376-875 MiB. The old bare 1.05x
+    // under-reserved a 1.4 GiB model by 633 MiB and wasted 1.1 GiB on a 35.
+    expect(CapacityBroker.estimateResidentBytes('mlx', 10 * GB)).toBe(
+      estimateMlxResidentBytes(10 * GB),
+    );
+    expect(estimateMlxResidentBytes(2 * GB) - Math.round(2 * GB * 1.02)).toBe(
+      estimateMlxResidentBytes(20 * GB) - Math.round(20 * GB * 1.02),
+    );
   });
 
   it('estimateResidentBytes caps ds4 at the streaming working set, not the weight size', () => {
@@ -467,9 +487,15 @@ describe('estimatePerSlotKvBytes', () => {
 describe('llamaCppSlotCeiling', () => {
   it('fits one 65K q4_0-KV slot for a 120B-class model inside 110 GB', () => {
     // Nemotron Super is the tighter of the downloaded 120B+ cases by the
-    // conservative fallback: 86,051,079,584 bytes of weights × 1.2 resident
-    // multiplier. The remaining budget still covers a 65K q4_0 KV slot plus
-    // the broker's 20% compute-headroom reserve.
+    // conservative fallback: 86,051,079,584 bytes of weights through
+    // `estimateLlamaCppResidentBytes`. The remaining budget still covers a
+    // 65K q4_0 KV slot plus the broker's 20% compute-headroom reserve.
+    //
+    // This is a FLOOR — the invariant is that a 120B-class model is not
+    // refused outright. It asserted exactly 1 while the estimate was a flat
+    // 1.2x; measuring that down to 1.1x + a fixed term frees ~8 GB here,
+    // which is enough for a second slot. The exact count was pinning the
+    // over-reservation, not the property under test.
     const weightsBytes = 86_051_079_584;
     const budgetBytes = 110 * GB;
     const kvBytes = estimatePerSlotKvBytes({
@@ -491,7 +517,7 @@ describe('llamaCppSlotCeiling', () => {
         perTurnCtxTokens: 65_536,
         kvCacheType: 'q4_0',
       }),
-    ).toBe(1);
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it('collapses to a small count when a big model nearly fills the budget', () => {
@@ -539,13 +565,13 @@ describe('localEngineKvBudgetBytes', () => {
     // This used to read "leaves less headroom for MLX than llama-cpp" and
     // assert it through a 1.3x weights multiplier. That inverted the meaning
     // of the number: MLX's weights are the LIGHTER of the two (0.999x
-    // measured, vs llama's unmeasured 1.2), and what is heavier is its
+    // measured, vs llama's measured 0.98-1.09x), and what is heavier is its
     // per-wave compute working set. Both halves are now stated where they
     // belong — weights here, working set in the slot ceiling's headroom — so
     // the invariant that matters is still MLX <= llama in SLOTS.
     const base = { budgetBytes: 96 * GB, weightsBytes: 28 * GB };
     expect(localEngineKvBudgetBytes({ engine: 'mlx', ...base })).toBe(
-      96 * GB - Math.round(28 * GB * 1.05),
+      96 * GB - estimateMlxResidentBytes(28 * GB),
     );
     const slotInput = { ...base, perTurnCtxTokens: 32_768, kvCacheType: 'f16' as const };
     expect(localEngineSlotCeiling({ engine: 'mlx', ...slotInput })).toBeLessThanOrEqual(

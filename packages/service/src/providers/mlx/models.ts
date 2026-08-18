@@ -35,7 +35,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { join, resolve as resolvePath } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
@@ -43,6 +43,11 @@ import {
   listBundleModelFiles,
   publishStagedModel,
 } from '../../models/bundle-storage.js';
+import { type ModelUpdateStatus, evaluateCatalogDrift } from '../../models/catalog-drift.js';
+import {
+  catalogPayloadFingerprint,
+  describeCatalogPayload,
+} from '../../models/catalog-payload-identity.js';
 import {
   type IncompleteModelDownloadInfo,
   MODEL_HASH_READ_BUFFER_BYTES,
@@ -96,6 +101,19 @@ export interface InstalledMlxModel {
    * Delete that can only fail.
    */
   readOnly?: boolean;
+  /**
+   * True when the catalog now describes a different PAYLOAD than the one on
+   * disk — different repo, file list, or hashes. A version bump that only
+   * edits metadata (tuning, sizing hints, wording) deliberately does not set
+   * this: the runtime resolves that live from the catalog, so there is nothing
+   * for the user to download. Computed server-side in
+   * {@link MlxModelManager.listInstalled} so every surface agrees.
+   */
+  updateAvailable?: boolean;
+  /** The catalog's current version, when it differs from the installed one. */
+  availableVersion?: string;
+  /** What changed, in one sentence, for the model manager's tooltip. */
+  updateReason?: string;
 }
 
 /**
@@ -177,6 +195,15 @@ interface InstalledManifest {
   /** File names that were written into the model dir, in install order. */
   files: string[];
   fileSha256?: Record<string, string>;
+  /**
+   * Hash of the catalog payload description this copy was installed from —
+   * repo + every pinned filename and sha256 + any chat-template fallback.
+   * Lets a later catalog version be classified as a metadata-only edit or a
+   * genuine new build without re-reading a byte of the weights. Absent on
+   * installs predating it; the drift check backfills it the first time it
+   * proves identity by hash.
+   */
+  payloadFingerprint?: string;
 }
 
 export interface MlxModelManagerOptions {
@@ -304,11 +331,66 @@ export class MlxModelManager {
     const out: InstalledMlxModel[] = [];
     for (const id of entries) {
       const summary = await this.loadInstalled(id);
-      if (summary) out.push(summary);
-      else this.warnSkip(id, 'no readable manifest.json (incomplete or interrupted download?)');
+      if (!summary) {
+        this.warnSkip(id, 'no readable manifest.json (incomplete or interrupted download?)');
+        continue;
+      }
+      // Does the catalog now describe different weights than the ones on
+      // disk? Best-effort — a catalog miss (third-party / removed entry)
+      // leaves it un-flagged.
+      const status = await this.evaluateDrift(id, summary).catch(() => null);
+      if (status?.updateAvailable) {
+        summary.updateAvailable = true;
+        if (status.availableVersion) summary.availableVersion = status.availableVersion;
+        if (status.reason) summary.updateReason = status.reason;
+      }
+      out.push(summary);
     }
     out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
+  }
+
+  /**
+   * Whether a genuinely newer build of one installed model exists. Null when
+   * the id isn't installed for MLX. Shared with the chat manager's
+   * per-session staleness notice so a user is never told to re-download for a
+   * change that only touched metadata.
+   */
+  async getUpdateStatus(id: string): Promise<ModelUpdateStatus | null> {
+    const summary = await this.loadInstalled(id);
+    if (!summary) return null;
+    return this.evaluateDrift(id, summary).catch(() => ({ updateAvailable: false }));
+  }
+
+  /**
+   * Compare one installed copy against the live catalog. The catalog lookup
+   * runs for every model on every inventory poll; the manifest re-read only
+   * happens for the few whose version actually moved.
+   */
+  private async evaluateDrift(id: string, summary: InstalledMlxModel): Promise<ModelUpdateStatus> {
+    if (!summary.catalogVersion) return { updateAvailable: false };
+    const detail = await this.catalog.get('chat-model', id).catch(() => null);
+    if (!detail || detail.manifest.kind !== 'chat-model') return { updateAvailable: false };
+    if (detail.manifest.version === summary.catalogVersion) return { updateAvailable: false };
+
+    const parsed = await readFile(join(summary.modelDir, 'manifest.json'), 'utf8')
+      .then((raw) => JSON.parse(raw) as Partial<InstalledManifest>)
+      .catch(() => null);
+    if (!parsed) return { updateAvailable: false };
+
+    return evaluateCatalogDrift({
+      engine: 'mlx',
+      id,
+      modelDir: summary.modelDir,
+      manifest: detail.manifest,
+      installedVersion: summary.catalogVersion,
+      installed: {
+        ...(parsed.huggingfaceRepo ? { huggingfaceRepo: parsed.huggingfaceRepo } : {}),
+        ...(parsed.payloadFingerprint ? { payloadFingerprint: parsed.payloadFingerprint } : {}),
+        ...(parsed.fileSha256 ? { fileSha256: parsed.fileSha256 } : {}),
+      },
+      healable: !summary.readOnly && !this.activeInstalls.has(id),
+    });
   }
 
   /**
@@ -560,11 +642,30 @@ export class MlxModelManager {
       tracked.totalBytes = totalBytesAll;
       tracked.phase = 'downloading';
 
+      // Files this update doesn't have to fetch because the copy on disk is
+      // already the copy the catalog pins. MLX repos are many files and a
+      // rebuild usually rotates the weight shards while config.json,
+      // tokenizer.json and friends stay byte-identical.
+      const reusable = await this.planReusableFiles(itemDir, files);
+      const verifiedDigests: Record<string, string> = {};
+      for (const [name, sha] of reusable) verifiedDigests[name] = sha;
+      const toFetch = files.filter((file) => !reusable.has(file.name));
+      if (reusable.size > 0) {
+        log.info(
+          `[models] [mlx] "${catalogId}": ${reusable.size} of ${files.length} file(s) already match the catalog and will not be downloaded`,
+        );
+      }
+
       // Preflight free space before writing anything — see the matching check
       // in `LlamaCppModelManager`. MLX installs write every shard into one
-      // directory, so a late ENOSPC strands the whole set.
-      const alreadyOnDisk = await mlxBytesAlreadyOnDisk(itemDir, files);
-      const space = await checkDiskSpace(itemDir, Math.max(0, totalBytesAll - alreadyOnDisk));
+      // directory, so a late ENOSPC strands the whole set. Only what we
+      // actually have to fetch is charged, less any `.partial` resume credit;
+      // a file being replaced is charged in full because its `.partial` lives
+      // beside the old copy until publish.
+      const needBytes =
+        toFetch.reduce((sum, f) => sum + (f.sizeBytes ?? 0), 0) -
+        (await mlxPartialBytesOnDisk(itemDir, toFetch));
+      const space = await checkDiskSpace(itemDir, Math.max(0, needBytes));
       if (!space.ok) {
         yield { type: 'error', error: describeDiskShortfall(space, manifest.name) };
         return;
@@ -579,6 +680,13 @@ export class MlxModelManager {
       // model-level progress bar even though files finish out of order).
       // Workers push events into the queue; this generator drains it.
       const perFileBytes = new Array<number>(files.length).fill(0);
+      // Reused files are complete before the pool starts, so the one
+      // model-level bar opens at the bytes already present instead of
+      // pretending to re-download them.
+      files.forEach((file, index) => {
+        if (reusable.has(file.name)) perFileBytes[index] = file.sizeBytes ?? 0;
+      });
+      tracked.bytesWritten = perFileBytes.reduce((sum, bytes) => sum + bytes, 0);
       const queue = new AsyncEventQueue<MlxInstallEvent>();
       const ac = new AbortController();
       const push = (ev: MlxInstallEvent): void => queue.push(ev);
@@ -592,10 +700,12 @@ export class MlxModelManager {
           if (index >= files.length) break;
           const file = files[index];
           if (!file) break;
+          if (reusable.has(file.name)) continue;
           const fileResult = await this.downloadFileConcurrent(
             itemDir,
             src.huggingfaceRepo,
             src.revision,
+            src.subdir,
             file,
             index,
             fileCount,
@@ -605,6 +715,7 @@ export class MlxModelManager {
             skipSha,
             push,
             ac,
+            verifiedDigests,
           );
           if (fileResult === 'error') {
             // Cancel the in-flight siblings; the error event is already
@@ -653,6 +764,7 @@ export class MlxModelManager {
       // (readMlxSummary reads `tokenizer_config.json`, not `.partial`).
       // If any rename fails we bail — half-renamed state is a mess.
       for (const file of files) {
+        if (reusable.has(file.name)) continue;
         const finalPath = join(itemDir, file.name);
         const partialPath = `${finalPath}.partial`;
         try {
@@ -729,6 +841,9 @@ export class MlxModelManager {
       if (!chatTemplatePresent && src.chatTemplate) {
         try {
           await injectChatTemplate(tokenizerConfigPath, src.chatTemplate);
+          // The file no longer hashes to what the download verified, so its
+          // digest has to be re-read from disk rather than carried forward.
+          delete verifiedDigests['tokenizer_config.json'];
           chatTemplatePresent = true;
           templateSource = 'catalog';
         } catch (err) {
@@ -738,6 +853,7 @@ export class MlxModelManager {
         }
       }
 
+      const catalogPayload = describeCatalogPayload(manifest, 'mlx');
       const installed: InstalledManifest = {
         id: catalogId,
         name: manifest.name,
@@ -755,8 +871,18 @@ export class MlxModelManager {
         ...(summary.architecture ? { architecture: summary.architecture } : {}),
         chatTemplatePresent,
         files: files.map((f) => f.name),
+        // Snapshot what the catalog said this payload IS, so a later version
+        // bump that only edits metadata can be recognized as such without
+        // re-reading a byte. Skipped for a skipSha install: those bytes are
+        // knowingly not the ones the catalog describes.
+        ...(!skipSha && catalogPayload
+          ? { payloadFingerprint: catalogPayloadFingerprint(catalogPayload) }
+          : {}),
       };
-      installed.fileSha256 = await hashModelPayloadFiles(itemDir);
+      // Every file that was downloaded (or reused) has a verified digest
+      // already; hashing the whole payload back off disk would re-read tens of
+      // gigabytes to learn what we just measured.
+      installed.fileSha256 = await hashModelPayloadFiles(itemDir, verifiedDigests);
       await writeFile(join(itemDir, 'manifest.json'), JSON.stringify(installed, null, 2), 'utf8');
       await makeSharedModelReadable(itemDir);
 
@@ -800,6 +926,7 @@ export class MlxModelManager {
     itemDir: string,
     repo: string,
     revision: string | undefined,
+    subdir: string | undefined,
     file: { name: string; sha256: string; sizeBytes: number },
     index: number,
     total: number,
@@ -809,14 +936,23 @@ export class MlxModelManager {
     skipSha: boolean,
     push: (ev: MlxInstallEvent) => void,
     ac: AbortController,
+    /** Digest sink, so the post-install manifest doesn't re-hash from disk. */
+    verifiedDigests: Record<string, string>,
   ): Promise<'ok' | 'error' | 'aborted'> {
     const finalPath = join(itemDir, file.name);
+    // File names are relative to the selected model root and may preserve
+    // nested layout. The catalog schema guarantees they are contained paths;
+    // create their parent directories before the resumable downloader opens
+    // the `.partial` sibling.
+    await mkdir(dirname(finalPath), { recursive: true });
     const tmpPath = `${finalPath}.partial`;
     // Pin to the catalog's revision (commit SHA) when present so we get
     // the exact bytes the sha256 was computed against; fall back to
     // `main` for legacy manifests that predate revision pinning.
     const ref = revision ?? 'main';
-    const url = `https://huggingface.co/${repo}/resolve/${encodeURIComponent(ref)}/${encodeURIComponent(file.name)}?download=true`;
+    const repoPath = subdir ? `${subdir}/${file.name}` : file.name;
+    const encodedRepoPath = repoPath.split('/').map(encodeURIComponent).join('/');
+    const url = `https://huggingface.co/${repo}/resolve/${encodeURIComponent(ref)}/${encodedRepoPath}?download=true`;
 
     // Live sum across every file's bytes-so-far. Files complete out of
     // order under concurrency, so we can't use a "bytes of prior files"
@@ -895,6 +1031,7 @@ export class MlxModelManager {
       stream.on('error', reject);
     });
     const actual = hasher.digest('hex');
+    verifiedDigests[file.name] = actual;
     if (actual !== file.sha256.toLowerCase()) {
       if (skipSha) {
         // User explicitly asked to bypass after seeing a prior mismatch.
@@ -911,6 +1048,36 @@ export class MlxModelManager {
       return 'error';
     }
     return 'ok';
+  }
+
+  /**
+   * Files the plan asks for that are already on disk as exactly the bytes the
+   * catalog pins, keyed by filename with the digest to carry forward. See
+   * {@link LlamaCppModelManager.planReusableFiles} — same trust model: a
+   * digest this install recorded after verifying it, plus a file still at its
+   * pinned length, is identity.
+   */
+  private async planReusableFiles(
+    itemDir: string,
+    files: Array<{ name: string; sha256: string; sizeBytes?: number }>,
+  ): Promise<Map<string, string>> {
+    const reusable = new Map<string, string>();
+    const parsed = await readFile(join(itemDir, 'manifest.json'), 'utf8')
+      .then((raw) => JSON.parse(raw) as Partial<InstalledManifest>)
+      .catch(() => null);
+    const recorded = parsed?.fileSha256;
+    if (!recorded) return reusable;
+    for (const file of files) {
+      if (file.sizeBytes === undefined) continue;
+      const sha = recorded[file.name]?.toLowerCase();
+      if (!sha || sha !== file.sha256.toLowerCase()) continue;
+      const size = await stat(join(itemDir, file.name))
+        .then((info) => (info.isFile() ? info.size : -1))
+        .catch(() => -1);
+      if (size !== file.sizeBytes) continue;
+      reusable.set(file.name, sha);
+    }
+    return reusable;
   }
 
   /** Warn once per model directory per process, then stay quiet. */
@@ -975,26 +1142,22 @@ function describeError(err: unknown): string {
 }
 
 /**
- * Bytes of a planned MLX install already on disk (finished files plus
- * resumable `.partial` siblings), so the space preflight charges only what
- * still has to be fetched.
+ * Resume credit: bytes of a still-to-fetch file that a `.partial` already
+ * holds. Deliberately blind to finished files — a previous install's copy of
+ * the same name is not credit, because the new bytes stream into a `.partial`
+ * beside it and the old copy only goes away at publish. See the llama.cpp
+ * sibling for the ENOSPC this used to hide.
  */
-async function mlxBytesAlreadyOnDisk(
+async function mlxPartialBytesOnDisk(
   itemDir: string,
   files: Array<{ name: string; sizeBytes?: number }>,
 ): Promise<number> {
   let total = 0;
   for (const file of files) {
-    const finalPath = join(itemDir, file.name);
-    for (const candidate of [finalPath, `${finalPath}.partial`]) {
-      const size = await stat(candidate)
-        .then((st) => st.size)
-        .catch(() => 0);
-      if (size > 0) {
-        total += file.sizeBytes ? Math.min(size, file.sizeBytes) : size;
-        break;
-      }
-    }
+    const size = await stat(`${join(itemDir, file.name)}.partial`)
+      .then((st) => st.size)
+      .catch(() => 0);
+    if (size > 0) total += file.sizeBytes ? Math.min(size, file.sizeBytes) : size;
   }
   return total;
 }

@@ -580,7 +580,10 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           this.emitReasoningDelta(frame.text);
           break;
         case 'tool_args_delta':
-          this.emitToolArgsDelta(frame.name, frame.text);
+          this.emitToolArgsDelta(frame.name, frame.text, {
+            ...(frame.index !== undefined ? { index: frame.index } : {}),
+            ...(frame.id ? { id: frame.id } : {}),
+          });
           break;
         case 'wire_pulse':
           this.emitWirePulse();
@@ -638,6 +641,12 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
               ...(frame.detail ? { detail: frame.detail } : {}),
               ...(typeof frame.progress === 'number' ? { progress: frame.progress } : {}),
               ...(typeof frame.ttftMs === 'number' ? { ttftMs: frame.ttftMs } : {}),
+              ...(typeof frame.outputTokens === 'number'
+                ? { outputTokens: frame.outputTokens }
+                : {}),
+              ...(typeof frame.tokensPerSec === 'number'
+                ? { tokensPerSec: frame.tokensPerSec }
+                : {}),
             });
           }
           break;

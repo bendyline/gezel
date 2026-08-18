@@ -43,6 +43,10 @@ export async function buildTimeline(
     ...(opts.taskRef ? { taskRef: opts.taskRef } : {}),
     limit,
     ...(opts.before ? { before: opts.before } : {}),
+    // Lets the reference backfill recognize workspace paths, not just
+    // artifacts. Reads the indexer's persisted listing — never a walk.
+    workspaceFiles: async (projectId) =>
+      (await ctx.workspaceIndex.readFiles(projectId)).map((f) => f.path),
   });
   return {
     messages: result.messages,

@@ -1,14 +1,17 @@
+import { externalGezelModelId } from '@bendyline/gezel';
 import type { ProviderName } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
 
 /**
  * Uniform target the `/v1/chat/completions` route uses to drive a
  * session. Whether the caller supplied a raw `<provider>:<model>` id
- * or a `gezel:<id-or-name>` reference, the route only deals with
+ * or a `gezel:<role>-<name>` reference, the route only deals with
  * this shape after the resolve step.
  */
 export interface ChatTarget {
   provider: ProviderName;
+  /** Resolved persisted gezel identity, present only for persona-backed routes. */
+  gezelId?: string;
   /** Provider-native model id; undefined for caller of `<provider>` bare default. */
   model: string | undefined;
   /**
@@ -71,8 +74,8 @@ export async function resolveFallbackGezelId(
  * Resolve a {@link ChatTargetInput} into a concrete {@link ChatTarget}.
  *
  * Gezel routing:
- *   - The `ref` may be the gezel's id (UUID-like) or its name (case-
- *     insensitive). Id wins on collision.
+ *   - The `ref` may be the advertised `<role>-<name>` alias, the gezel's
+ *     persisted id, or its name (case-insensitive). Id wins on collision.
  *   - The gezel's frontmatter `provider` + `model` are honored when
  *     present; otherwise we delegate to {@link ChatManager.providerForGezel}
  *     so the install-level default applies (same path
@@ -109,6 +112,7 @@ export async function resolveChatTarget(
   const fm = gezel.parsed.frontmatter;
   return {
     provider,
+    gezelId: gezel.id,
     model,
     systemPrefix: persona,
     tuningOverrides: {
@@ -121,15 +125,27 @@ export async function resolveChatTarget(
 }
 
 async function loadGezelByRef(ref: string, ctx: ServiceContext) {
-  // Try as-an-id first — that's the fast path.
-  const byId = await ctx.store.getGezel(ref).catch(() => null);
-  if (byId) return byId;
-
-  // Fall back to a case-insensitive name match. Cheap because
-  // `listGezels` returns summaries; we then load the matching detail.
+  // Resolve against the canonical roster before touching the filesystem.
+  // On a case-insensitive volume, getGezel("Bram") can otherwise open the
+  // directory whose real id is "bram" and hydrate the caller's spelling as
+  // the id. That leaks a display name into queue/session identity.
   const list = await ctx.store.listGezels().catch(() => []);
+  const byId = list.find((g) => g.id === ref);
+  if (byId) return ctx.store.getGezel(byId.id).catch(() => null);
+
+  // Fall back to a case-insensitive name match. Id still wins on collision.
   const lower = ref.toLowerCase();
   const summary = list.find((g) => g.name.toLowerCase() === lower);
-  if (!summary) return null;
-  return ctx.store.getGezel(summary.id).catch(() => null);
+  if (summary) return ctx.store.getGezel(summary.id).catch(() => null);
+
+  // Match the human-readable alias advertised by /v1/models and local
+  // harness integrations (for example, `gezel:developer-sipho`).
+  const byExternalModelId = list.find(
+    (g) => externalGezelModelId(g).slice('gezel:'.length) === lower,
+  );
+  if (byExternalModelId) return ctx.store.getGezel(byExternalModelId.id).catch(() => null);
+
+  // Project-local gezels do not appear in the global roster. Preserve the
+  // existing explicit-id path for their encoded ids.
+  return ctx.store.getGezel(ref).catch(() => null);
 }

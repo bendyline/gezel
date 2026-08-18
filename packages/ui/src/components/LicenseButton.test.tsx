@@ -143,6 +143,35 @@ describe('LicenseButton', () => {
     expect(screen.getByText(/Free, open \(Apache 2\.0\)/)).toBeTruthy();
   });
 
+  it('falls back to the caller-supplied page when the manifest names none', () => {
+    render(
+      <LicenseButton
+        manifest={{ license: 'MIT', licenseClass: 'open', licenseShortName: 'MIT' }}
+        fallbackHref="https://huggingface.co/unsloth/model-GGUF"
+      />,
+    );
+    const link = screen.getByRole('link', { name: /Free, open \(MIT\)/ });
+    expect(link).toHaveAttribute('href', 'https://huggingface.co/unsloth/model-GGUF');
+  });
+
+  it('prefers the manifest license page over the fallback', () => {
+    render(
+      <LicenseButton
+        manifest={{
+          license: 'Apache 2.0',
+          licenseClass: 'open',
+          licenseShortName: 'Apache 2.0',
+          upstream: 'https://huggingface.co/google/gemma-4-E2B-it',
+        }}
+        fallbackHref="https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF"
+      />,
+    );
+    const link = screen.getByRole('link', { name: /Free, open \(Apache 2\.0\)/ });
+    expect(link).toHaveAttribute('href', 'https://huggingface.co/google/gemma-4-E2B-it');
+    // The ↗ is easy to miss at chip size, so the tooltip names the destination.
+    expect(link.getAttribute('title')).toContain('huggingface.co');
+  });
+
   it('renders nothing when the model has no license metadata', () => {
     const { container } = render(<LicenseButton manifest={{ commercialUse: true }} />);
     expect(container).toBeEmptyDOMElement();

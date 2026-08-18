@@ -115,7 +115,7 @@ describe('ProjectGitStatusBar', () => {
       '57',
     );
     expect(panel).toHaveTextContent('15 of 20 files searchable · 5 waiting');
-    expect(panel).toHaveTextContent('24 files · 3 commands');
+    expect(panel).toHaveTextContent('24 files');
     expect(panel).toHaveTextContent('12 of 20 files');
     expect(panel).toHaveTextContent('7 of 20 · 11 waiting · 2 to refresh');
   });
@@ -177,7 +177,7 @@ describe('ProjectGitStatusBar', () => {
     expect(screen.getByRole('button', { name: 'Update index now' })).toBeEnabled();
   });
 
-  it("surfaces the server's refusal message when the full scan cannot start", async () => {
+  it('offers to add the Boekwachter when the full scan cannot start without one', async () => {
     const refusal = Object.assign(new Error('Gezel API error 409'), {
       details: {
         error: 'boekwachter-required',
@@ -186,15 +186,23 @@ describe('ProjectGitStatusBar', () => {
       },
     });
     vi.mocked(api.driveIndexEnrichment).mockRejectedValue(refusal);
+    const onAddBoekwachter = vi.fn().mockResolvedValue(undefined);
 
-    render(<ProjectGitStatusBar projectId="pj-1" />);
+    render(<ProjectGitStatusBar projectId="pj-1" onAddBoekwachter={onAddBoekwachter} />);
     const trigger = await screen.findByRole('button', { name: /Workspace index is ready/ });
     await userEvent.click(trigger);
 
     await userEvent.click(screen.getByRole('button', { name: 'Full AI scan now' }));
-    await screen.findByText(/Add a Boekwachter to this project crew/);
+    const addLink = await screen.findByRole('button', {
+      name: 'Add a Boekwachter to this project crew',
+    });
+    expect(addLink).toHaveClass('project-index-panel-error-link');
     // A refused start is not a running drive — the button re-arms.
     expect(screen.getByRole('button', { name: 'Full AI scan now' })).toBeEnabled();
+
+    await userEvent.click(addLink);
+    await waitFor(() => expect(onAddBoekwachter).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/to enable AI summaries/)).not.toBeInTheDocument();
   });
 
   it('reflects a server-side drive: scan row, media tier, disabled button', async () => {
@@ -304,7 +312,7 @@ describe('ProjectGitStatusBar', () => {
       screen.getByRole('combobox', {
         name: 'Built-in tool workspace access for this project',
       }),
-    ).toHaveTextContent('Tools:Read-only');
+    ).toHaveTextContent(/^Read-only$/);
   });
 
   it('keeps managed tools independently configurable alongside Codex access', async () => {
@@ -324,7 +332,7 @@ describe('ProjectGitStatusBar', () => {
       name: 'Built-in tool workspace access for this project',
     });
     expect(managedControl).toBeEnabled();
-    expect(managedControl).toHaveTextContent('Tools:Read-only');
+    expect(managedControl).toHaveTextContent(/^Read-only$/);
 
     const codexControl = screen.getByRole('combobox', {
       name: 'Codex execution mode for this project',
@@ -356,7 +364,7 @@ describe('ProjectGitStatusBar', () => {
       screen.getByRole('combobox', {
         name: 'Built-in tool workspace access for this project',
       }),
-    ).toHaveTextContent('Tools:Read-only');
+    ).toHaveTextContent(/^Read-only$/);
     const claudeControl = screen.getByRole('combobox', {
       name: 'Claude execution mode for this project',
     });

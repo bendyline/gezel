@@ -8,6 +8,8 @@ function completionResponse(
     input_tokens: number;
     output_tokens: number;
     cached_tokens?: number;
+    prompt_tps?: number;
+    generation_tps?: number;
   },
 ): Response {
   const sse = [
@@ -116,6 +118,73 @@ describe('MlxProvider cache request wiring', () => {
     expect(usages[0]).toEqual(
       expect.objectContaining({ inputTokens: 9_261, cachedInputTokens: 9_200 }),
     );
+    unsubscribe();
+    await session.disconnect();
+  });
+
+  it('emits one terminal token-and-speed snapshot from streamed MLX usage', async () => {
+    const fetchImpl = (async () =>
+      completionResponse('measured', {
+        input_tokens: 9_261,
+        output_tokens: 42,
+        cached_tokens: 9_200,
+        prompt_tps: 1_234.5,
+        generation_tps: 24.5,
+      })) as typeof fetch;
+    const provider = new MlxProvider({ baseUrl: 'http://mlx.test', fetchImpl });
+    const session = await provider.createSession({ systemMessage: 'system', model: 'qwen-27b' });
+    const usages: Array<{ outputTokens: number; outputTokensPerSec?: number }> = [];
+    const turnStats: Array<{
+      promptTokens: number;
+      completionTokens: number;
+      cachedPromptTokens?: number;
+      promptTokensPerSec?: number;
+      tokensPerSec?: number;
+    }> = [];
+    const unsubscribeUsage = session.onUsage((usage) => usages.push(usage));
+    const unsubscribeStats = (
+      session as typeof session & {
+        onTurnStats: (handler: (event: (typeof turnStats)[number]) => void) => () => void;
+      }
+    ).onTurnStats((event) => turnStats.push(event));
+
+    await session.sendAndWait('hello', { timeoutMs: 5_000 });
+
+    expect(usages).toEqual([
+      expect.objectContaining({ outputTokens: 42, outputTokensPerSec: 24.5 }),
+    ]);
+    expect(turnStats).toEqual([
+      expect.objectContaining({
+        promptTokens: 9_261,
+        completionTokens: 42,
+        cachedPromptTokens: 9_200,
+        promptTokensPerSec: 1_234.5,
+        tokensPerSec: 24.5,
+      }),
+    ]);
+    unsubscribeUsage();
+    unsubscribeStats();
+    await session.disconnect();
+  });
+
+  it('falls back to a positive wall-clock rate when an older batch frame reports zero', async () => {
+    const fetchImpl = (async () =>
+      completionResponse('fallback', {
+        input_tokens: 100,
+        output_tokens: 4,
+        generation_tps: 0,
+      })) as typeof fetch;
+    const provider = new MlxProvider({ baseUrl: 'http://mlx.test', fetchImpl });
+    const session = await provider.createSession({ systemMessage: 'system' });
+    const rates: number[] = [];
+    const unsubscribe = session.onUsage((usage) => {
+      if (usage.outputTokensPerSec !== undefined) rates.push(usage.outputTokensPerSec);
+    });
+
+    await session.sendAndWait('hello', { timeoutMs: 5_000 });
+
+    expect(rates).toHaveLength(1);
+    expect(rates[0]).toBeGreaterThan(0);
     unsubscribe();
     await session.disconnect();
   });

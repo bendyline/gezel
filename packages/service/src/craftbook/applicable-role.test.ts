@@ -23,6 +23,19 @@ function book(id: string, role: 'project-starter' | 'maintenance-review' | 'gene
   } as unknown as CatalogItemSummary;
 }
 
+function connectorBook(id: string, optional = false): CatalogItemSummary {
+  return {
+    sourceId: 'bundled',
+    kind: 'craftbook-template',
+    manifest: {
+      kind: 'craftbook-template',
+      id,
+      role: 'general',
+      connectors: [{ typeId: 'github-pulls', ...(optional ? { optional: true } : {}) }],
+    },
+  } as unknown as CatalogItemSummary;
+}
+
 describe('project-aware craftbook roles', () => {
   it('recognizes normal codebase roots without treating a document folder as code', () => {
     expect(workspaceEntriesLookLikeCodebase([entry('.git', true)])).toBe(true);
@@ -32,6 +45,35 @@ describe('project-aware craftbook roles', () => {
     expect(workspaceEntriesLookLikeCodebase([entry('README.md'), entry('research', true)])).toBe(
       false,
     );
+  });
+
+  it('hides connector-reading craftbooks only when the posture forbids corpus movement', async () => {
+    // Super-lockdown refuses connector prep, so the card would be a button
+    // that always fails. An `optional` corpus degrades instead, so a book
+    // that merely prefers one stays offered.
+    const items = [
+      book('research-report', 'general'),
+      connectorBook('pull-request-review'),
+      connectorBook('inbox-digest', true),
+    ];
+    const catalog = { list: async () => items };
+    const store = { getProject: async () => null } as unknown as Store;
+
+    const blocked = await listApplicableCraftbooks(catalog as never, store, 'project', {
+      establishedCodebase: false,
+      connectorDataAllowed: false,
+    });
+    expect(blocked.map((item) => item.manifest.id)).toEqual(['research-report', 'inbox-digest']);
+
+    const allowed = await listApplicableCraftbooks(catalog as never, store, 'project', {
+      establishedCodebase: false,
+      connectorDataAllowed: true,
+    });
+    expect(allowed.map((item) => item.manifest.id)).toEqual([
+      'research-report',
+      'pull-request-review',
+      'inbox-digest',
+    ]);
   });
 
   it('hides project starters only for established codebases', async () => {

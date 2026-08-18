@@ -357,6 +357,13 @@ export interface TrialOptions {
    */
   llamaCppReasoningBudgetTokens?: number;
   /**
+   * Controlled llama.cpp capability experiment: override the model-native
+   * `chat_template_kwargs.reasoning_effort` value without editing Gilde.
+   * This is a per-request tuning lever; unlike the budget above it does not
+   * restart or otherwise alter the engine launch configuration.
+   */
+  llamaCppReasoningEffort?: string;
+  /**
    * When set, the runner aborts the polling loop and runs cleanup as soon
    * as the signal fires. Bin entry points wire this to SIGINT/SIGTERM so
    * Ctrl+C still produces a fully captured postmortem instead of leaving

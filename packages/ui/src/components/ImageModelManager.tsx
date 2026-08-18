@@ -11,7 +11,6 @@ import { api } from '../api.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { LicenseButton } from './LicenseButton.js';
-import { RecommendedBadge } from './RecommendedBadge.js';
 
 /**
  * Install / pull / delete flow for `image-model` catalog entries.
@@ -348,7 +347,6 @@ export function ImageModelManager({ disabledReason, onModelsChanged }: Props) {
                   </div>
                   <div className="catalog-ollama-pills">
                     <LicenseButton manifest={m} />
-                    <RecommendedBadge manifest={m} />
                   </div>
                 </div>
                 <button

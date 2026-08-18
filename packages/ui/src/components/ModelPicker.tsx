@@ -420,3 +420,80 @@ export function EffortPicker({
     </Select.Root>
   );
 }
+
+const EFFORT_LABELS: Readonly<Record<string, string>> = {
+  minimal: 'Minimal',
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+  max: 'Maximum',
+  ultra: 'Ultra',
+};
+
+/**
+ * Radio-like tray variant for prominent provider settings. Like
+ * {@link EffortPicker}, its options come from the selected model; `defaultModel`
+ * keeps the control visible when the model picker is set to Provider default.
+ */
+export function EffortTray({
+  provider,
+  model,
+  defaultModel,
+  value,
+  onChange,
+}: {
+  provider: ProviderName;
+  model: string | undefined;
+  defaultModel?: string;
+  value: string | undefined;
+  onChange: (effort: string | undefined) => void;
+}) {
+  const [models, setModels] = useState<ModelInfo[] | null>(cached.get(provider) ?? null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadModels(provider)
+      .then((loaded) => {
+        if (!cancelled) setModels(loaded);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [provider]);
+
+  if (!models) return <span className="muted small">loading effort levels…</span>;
+  const info = models.find((candidate) => candidate.id === (model ?? defaultModel));
+  if (!info?.supportsReasoning) return null;
+
+  const options = info.reasoningEfforts ?? ['low', 'medium', 'high'];
+  const defaultLabel = info.defaultReasoningEffort
+    ? `Model default (${EFFORT_LABELS[info.defaultReasoningEffort] ?? info.defaultReasoningEffort})`
+    : 'Model default';
+  const choices: ReadonlyArray<readonly [string | undefined, string]> = [
+    [undefined, defaultLabel],
+    ...options.map((effort) => [effort, EFFORT_LABELS[effort] ?? effort] as const),
+  ];
+
+  return (
+    <div className="gz-tray reasoning-effort-tray" role="radiogroup" aria-label="Reasoning effort">
+      {choices.map(([effort, label]) => {
+        const selected = value === effort || (!value && effort === undefined);
+        return (
+          <button
+            key={effort ?? '__DEFAULT__'}
+            type="button"
+            // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
+            role="radio"
+            aria-checked={selected}
+            className={`gz-key${selected ? ' gz-key-active' : ''}`}
+            onClick={() => onChange(effort)}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}

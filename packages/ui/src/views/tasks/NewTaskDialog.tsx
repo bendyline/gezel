@@ -6,10 +6,12 @@ import {
   type Task,
   type TaskAssignee,
   type TaskCronOverlap,
+  prioritizePullsForCurrentBranch,
   visibleCatalogItems,
 } from '@bendyline/gezel';
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { apiErrorMessage } from '../../api-error.js';
 import { api } from '../../api.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
 import { CraftbookToolsetSetup } from '../../components/CraftbookToolsetSetup.js';
@@ -151,6 +153,11 @@ export function NewTaskDialog({
   const [cronOverlap, setCronOverlap] = useState<TaskCronOverlap>('skip');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  // Pre-flight for craftbooks that resolve a pull request at launch: the
+  // corpus is materialized server-side before the first step, so "no open
+  // PR for this branch" is knowable now rather than as a 409 later.
+  const [pullHint, setPullHint] = useState<string | null>(null);
+  const pullHintSequence = useRef(0);
 
   // Reset per open so the dialog never reopens half-filled.
   useEffect(() => {
@@ -171,6 +178,7 @@ export function NewTaskDialog({
     setCronOverlap('skip');
     setBusy(false);
     setError('');
+    setPullHint(null);
   }, [open, defaultProjectId]);
 
   const loadCraftbooks = useCallback(async () => {
@@ -239,6 +247,45 @@ export function NewTaskDialog({
     const entry = m.steps.find((s) => s.id === m.entryStepId) ?? m.steps[0];
     return entry?.suggestedRole ?? null;
   })();
+
+  // A scheduled host performs no work itself — its craftbook resolves per
+  // tick, so there is nothing to pre-flight here.
+  const resolvesPullAtLaunch =
+    creationMode !== 'scheduled' &&
+    (selectedBook?.manifest.connectors ?? []).some(
+      (need) => need.typeId === 'github-pulls' && !need.optional,
+    );
+  const explicitPullNumber = String((params as { number?: unknown }).number ?? '').trim();
+
+  useEffect(() => {
+    const sequence = ++pullHintSequence.current;
+    setPullHint(null);
+    if (!open || !resolvesPullAtLaunch || !projectId) return;
+    void (async () => {
+      try {
+        const [status, openPulls] = await Promise.all([
+          api.getProjectGitStatus(projectId),
+          api.listProjectGitHubPulls(projectId),
+        ]);
+        if (sequence !== pullHintSequence.current) return;
+        // Same ranking the daemon's launch prep uses, so the warning and
+        // the outcome cannot disagree.
+        const { matchingCount } = prioritizePullsForCurrentBranch(
+          openPulls.pulls ?? [],
+          status.branch,
+        );
+        if (matchingCount > 0) return;
+        setPullHint(
+          status.branch
+            ? `No open pull request for branch "${status.branch}" — enter a pull request number above, or switch branches first.`
+            : 'This checkout is not on a branch — enter a pull request number above.',
+        );
+      } catch {
+        // Best-effort: a failed probe just leaves the launch to report the
+        // real reason itself.
+      }
+    })();
+  }, [open, resolvesPullAtLaunch, projectId]);
 
   const selectGeneral = useCallback(() => {
     setSelectedBookId(null);
@@ -471,7 +518,7 @@ export function NewTaskDialog({
           await onCreated(created);
           onClose();
         } catch (err) {
-          setError((err as Error).message);
+          setError(apiErrorMessage(err));
         } finally {
           setBusy(false);
         }
@@ -526,7 +573,7 @@ export function NewTaskDialog({
         await onCreated(created);
         onClose();
       } catch (err) {
-        setError((err as Error).message);
+        setError(apiErrorMessage(err));
       } finally {
         setBusy(false);
       }
@@ -927,14 +974,25 @@ export function NewTaskDialog({
                       </div>
                     )}
                   </div>
-                  {error && <p className="error small">{error}</p>}
                 </div>
+                {/* Every submit failure renders HERE, in the fixed footer
+                    beside the button — never inside the scrolling pane above,
+                    where a message lands below the fold on a pane parked at
+                    the top and the launch reads as a dead button. */}
                 <div className="gz-npd-pane-footer">
-                  <p className="gz-ntd-footnote">
-                    {creationMode === 'one-time' && selectedBook
-                      ? 'Starts immediately — the first gezel gets to work as soon as you create it.'
-                      : modeCopy.footnote}
-                  </p>
+                  {error ? (
+                    <p className="error small gz-ntd-submit-error" role="alert">
+                      {error}
+                    </p>
+                  ) : pullHint && !explicitPullNumber ? (
+                    <p className="gz-ntd-footnote gz-ntd-launch-hint">{pullHint}</p>
+                  ) : (
+                    <p className="gz-ntd-footnote">
+                      {creationMode === 'one-time' && selectedBook
+                        ? 'Starts immediately — the first gezel gets to work as soon as you create it.'
+                        : modeCopy.footnote}
+                    </p>
+                  )}
                   <Dialog.Actions>
                     <button type="button" onClick={onClose} disabled={busy}>
                       Cancel

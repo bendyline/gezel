@@ -2,11 +2,13 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChatEvent } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatEventBus } from '../chat/events.js';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
+import type { ProviderName } from '../providers/types.js';
 import { TaskManager } from './manager.js';
+import type { QuotaReserveHold } from './night-quota-gate.js';
 import { NightShiftManager } from './night-shift-manager.js';
 
 let home: string;
@@ -187,6 +189,57 @@ describe('NightShiftManager', () => {
     expect(await m.listPendingTasks()).toEqual([]);
   });
 
+  it('stamps the period start at the ON edge and keeps it across a source change', async () => {
+    await addNightTask();
+    clock = localMs(2026, 6, 20, 21, 0); // manual, before the window opens
+    const m = makeManager();
+    await m.startManual();
+    const startedAt = m.startedAtIso();
+    expect(startedAt).toBe(new Date(clock).toISOString());
+
+    // The window opens and takes the running shift over — same period.
+    clock = localMs(2026, 6, 20, 23, 0);
+    await m.stopManual();
+    await m.startManual();
+    expect(m.source()).toBe('manual');
+    clock = localMs(2026, 6, 21, 0, 0);
+    await m.tick();
+    expect(m.startedAtIso()).not.toBeNull();
+
+    // Draining it ends the period.
+    const list = await tasks.list({ projectId: 'ns' });
+    await tasks.setStatus('ns', list[0]!.num, 'paused');
+    clock = localMs(2026, 6, 21, 12, 0);
+    await m.tick();
+    expect(m.isActive()).toBe(false);
+    expect(m.startedAtIso()).toBeNull();
+  });
+
+  it('names the open window, else the next one due', async () => {
+    clock = localMs(2026, 6, 20, 23, 0);
+    const m = makeManager();
+    await m.tick();
+    const open = m.windowBounds();
+    expect(open?.open).toBe(true);
+    expect(open?.start).toBe(new Date(localMs(2026, 6, 20, 22, 0)).toISOString());
+    expect(open?.end).toBe(new Date(localMs(2026, 6, 21, 6, 0)).toISOString());
+
+    clock = localMs(2026, 6, 21, 12, 0);
+    await m.tick();
+    const next = m.windowBounds();
+    expect(next?.open).toBe(false);
+    expect(next?.start).toBe(new Date(localMs(2026, 6, 21, 22, 0)).toISOString());
+    expect(next?.end).toBe(new Date(localMs(2026, 6, 22, 6, 0)).toISOString());
+  });
+
+  it('has no window to name while the feature is switched off', async () => {
+    await store.writeConfig({ nightShift: { enabled: false } });
+    clock = localMs(2026, 6, 20, 23, 0);
+    const m = makeManager();
+    await m.tick();
+    expect(m.windowBounds()).toBeNull();
+  });
+
   it('reports keep-awake intent only when active and the flag is set', async () => {
     await store.writeConfig({ nightShift: { keepAwakeWhileRunning: true } });
     await addNightTask();
@@ -223,5 +276,135 @@ describe('NightShiftManager', () => {
     clock = localMs(2026, 6, 22, 6, 30);
     await m.tick();
     expect(settled).toEqual(['2026-06-20', '2026-06-21']);
+  });
+});
+
+describe('NightShiftManager — quota reserve holds', () => {
+  const HOLD: QuotaReserveHold = {
+    provider: 'copilot',
+    bucket: 'premium_interactions',
+    remainingPercent: 12,
+    floorPercent: 20,
+    rule: 'overall',
+  };
+
+  function makeQuotaManager(opts: {
+    holdFor: (provider: ProviderName) => Promise<QuotaReserveHold | null>;
+    resolve?: (gezelId: string) => Promise<ProviderName>;
+  }): NightShiftManager {
+    return new NightShiftManager({
+      store,
+      manager: tasks,
+      events,
+      now: () => new Date(clock),
+      quotaGate: { holdFor: opts.holdFor },
+      resolveProviderName: opts.resolve ?? (async () => 'copilot'),
+    });
+  }
+
+  async function addGezelNightTask(gezelId: string): Promise<string> {
+    const task = await tasks.create('ns', {
+      title: `Night work for ${gezelId}`,
+      assignee: { kind: 'gezel', gezelId },
+      steps: [{ name: 'Scan' }],
+      nightShift: { enabled: true },
+    });
+    return task.ref;
+  }
+
+  it('parks a fully-held shift without latching, then resumes when quota frees', async () => {
+    await store.createGezel({ name: 'Bea' });
+    const ref = await addGezelNightTask('bea');
+    clock = localMs(2026, 6, 20, 23, 0); // inside the window
+
+    let holding = true;
+    const m = makeQuotaManager({ holdFor: async () => (holding ? HOLD : null) });
+    let activations = 0;
+    m.setOnActivated(async () => {
+      activations++;
+    });
+
+    await m.tick();
+    expect(m.isActive()).toBe(false);
+    expect(m.quotaHoldStatus()).toEqual({ heldTaskCount: 1, reasons: [HOLD] });
+    expect([...m.quotaHeldTaskRefs()]).toEqual([ref]);
+    expect(activations).toBe(0);
+
+    // Quota frees mid-window (e.g. a five_hour reset) — the load-bearing
+    // assertion: no latch was set, so the very next tick re-activates.
+    holding = false;
+    clock = localMs(2026, 6, 20, 23, 30); // same window
+    await m.tick();
+    expect(m.isActive()).toBe(true);
+    expect(m.source()).toBe('scheduled');
+    expect(m.quotaHoldStatus()).toBeNull();
+    expect(m.quotaHeldTaskRefs().size).toBe(0);
+    expect(activations).toBe(1);
+  });
+
+  it('stays active for dispatchable work while holding only the gated provider', async () => {
+    await store.createGezel({ name: 'Bea' });
+    await store.createGezel({ name: 'Cas' });
+    const heldRef = await addGezelNightTask('bea');
+    await addGezelNightTask('cas');
+    clock = localMs(2026, 6, 20, 23, 0);
+
+    const m = makeQuotaManager({
+      holdFor: async (provider) => (provider === 'copilot' ? HOLD : null),
+      resolve: async (gezelId) => (gezelId === 'bea' ? 'copilot' : 'llama-cpp'),
+    });
+    await m.tick();
+
+    expect(m.isActive()).toBe(true);
+    expect(m.quotaHoldStatus()).toEqual({ heldTaskCount: 1, reasons: [HOLD] });
+    expect([...m.quotaHeldTaskRefs()]).toEqual([heldRef]);
+  });
+
+  it('releases keep-awake while fully quota-held despite the config flag', async () => {
+    await store.writeConfig({ nightShift: { keepAwakeWhileRunning: true } });
+    await store.createGezel({ name: 'Bea' });
+    await addGezelNightTask('bea');
+    clock = localMs(2026, 6, 20, 23, 0);
+
+    const m = makeQuotaManager({ holdFor: async () => HOLD });
+    await m.tick();
+    expect(m.isActive()).toBe(false);
+    expect(m.getPowerIntent().keepAwake).toBe(false);
+  });
+
+  it('keeps a manual request alive through a full hold and resumes as manual', async () => {
+    await store.createGezel({ name: 'Bea' });
+    await addGezelNightTask('bea');
+    clock = localMs(2026, 6, 20, 12, 0); // midday — manual ignores the window
+
+    let holding = true;
+    const m = makeQuotaManager({ holdFor: async () => (holding ? HOLD : null) });
+    let activations = 0;
+    m.setOnActivated(async () => {
+      activations++;
+    });
+
+    await m.startManual();
+    expect(m.isActive()).toBe(false); // asked, but everything is held
+    expect(m.quotaHoldStatus()).not.toBeNull();
+
+    // No second startManual: the surviving request resumes by itself.
+    holding = false;
+    await m.tick();
+    expect(m.isActive()).toBe(true);
+    expect(m.source()).toBe('manual');
+    expect(activations).toBe(1);
+  });
+
+  it('never probes the gate outside a window that could activate', async () => {
+    await store.createGezel({ name: 'Bea' });
+    await addGezelNightTask('bea');
+    clock = localMs(2026, 6, 20, 12, 0); // midday, no manual request
+
+    const gate = vi.fn(async () => HOLD);
+    const m = makeQuotaManager({ holdFor: gate });
+    await m.tick();
+    expect(m.isActive()).toBe(false);
+    expect(gate).not.toHaveBeenCalled();
   });
 });

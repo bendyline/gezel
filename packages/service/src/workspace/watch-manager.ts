@@ -34,6 +34,13 @@ export interface WorkspaceWatchManagerOptions {
   maxWatched?: number;
   debounceMs?: number;
   reconcileIntervalMs?: number;
+  /**
+   * Projects watched regardless of recency, ahead of the MRU slots. The
+   * shared document library is pinned here: it is edited from outside the
+   * app more than any workspace — a sync client writing a file another
+   * device changed — and it has no tab activity to earn an MRU slot.
+   */
+  pinnedProjects?: () => string[];
 }
 
 export class WorkspaceWatchManager {
@@ -43,6 +50,7 @@ export class WorkspaceWatchManager {
   private readonly maxWatched: number;
   private readonly debounceMs: number;
   private readonly reconcileIntervalMs: number;
+  private readonly pinnedProjects: () => string[];
 
   private readonly watchers = new Map<string, { dir: string; watcher: FSWatcher }>();
   private readonly debounces = new Map<string, ReturnType<typeof setTimeout>>();
@@ -59,6 +67,7 @@ export class WorkspaceWatchManager {
     this.maxWatched = opts.maxWatched ?? MAX_WATCHED;
     this.debounceMs = opts.debounceMs ?? DEBOUNCE_MS;
     this.reconcileIntervalMs = opts.reconcileIntervalMs ?? RECONCILE_INTERVAL_MS;
+    this.pinnedProjects = opts.pinnedProjects ?? (() => []);
   }
 
   start(): void {
@@ -96,7 +105,10 @@ export class WorkspaceWatchManager {
     if (this.stopped || !this.supported) return;
     const cfg = await this.store.readConfig().catch(() => null);
     const mru = (cfg?.recentTabs ?? []).filter((t) => t.kind === 'project').map((t) => t.id);
-    const wanted = mru.slice(0, this.maxWatched);
+    // Pins take their slots first; the MRU fills what is left, so pinning
+    // never silently costs the user a watcher on the project they are in.
+    const pinned = this.pinnedProjects();
+    const wanted = [...new Set([...pinned, ...mru])].slice(0, this.maxWatched + pinned.length);
 
     for (const [projectId, entry] of [...this.watchers]) {
       const stillWanted = wanted.includes(projectId);

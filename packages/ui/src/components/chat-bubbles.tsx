@@ -3,6 +3,7 @@ import type {
   ChatMessageToolCall,
   ChatTurnErrorDetail,
   Question,
+  ReferencedFile,
   SessionGpuTask,
   ToolCallAudio,
   ToolCallImage,
@@ -23,12 +24,15 @@ import type { FontFamily, Theme } from '@bendyline/squisq/schemas';
 import {
   type CSSProperties,
   type MouseEvent,
+  type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../api.js';
 import { isUserCancelledTurnError } from '../error-report.js';
 import { Tooltip } from '../primitives/index.js';
@@ -41,9 +45,9 @@ import { ImagePreview } from './ImagePreview.js';
 import { PendingQuestionCard } from './PendingQuestionCard.js';
 import { ReportErrorLink } from './ReportErrorLink.js';
 import { ToolDiffBlock } from './ToolDiffBlock.js';
-import { artifactPathFromHref, linkifyArtifactRefs } from './artifact-linkify.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from './chat-theme.js';
 import { formatElapsedClock } from './elapsed-time.js';
+import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
 import { shouldDisplayIntent } from './intent-display.js';
 import {
   type PendingToolCall,
@@ -52,7 +56,7 @@ import {
   parsePendingToolCalls,
 } from './pending-tool-calls.js';
 import { stripVisibleToolCallMarkup } from './strip-tool-call-markup.js';
-import { formatDurationShort, toolDisplayName } from './tool-display.js';
+import { formatDurationShort, toolDisplayName, toolErrorSummary } from './tool-display.js';
 
 /**
  * Build the inline style for a rendered bubble body: the gezel's font
@@ -175,6 +179,14 @@ export interface MessageBubbleProps {
    */
   nudge?: boolean;
   /**
+   * The machinery authored this user-role message — a task dispatch seed,
+   * a step handoff, a page reaction. Labels the bubble **System** instead
+   * of "You" and mutes it, so internal instructions ("call
+   * `advance_task_step`…") never read as words the person typed. User
+   * bubbles only.
+   */
+  origin?: 'system';
+  /**
    * Name of the gezel whose session this bubble lives in — used as the
    * receiver label in the "sender → receiver" header. Required when
    * `from` is set.
@@ -203,18 +215,19 @@ export interface MessageBubbleProps {
    */
   mediaProvider?: MediaProvider | null;
   /**
-   * Project-artifact paths the assistant reply mentioned. Drives the
-   * chip row rendered under the bubble and — combined with the
-   * markdown pipeline — linkification of matching inline code spans.
-   * Populated by the server-side parser at message-persist time and
-   * backfilled on read for pre-existing messages.
+   * Real project files the assistant reply mentioned — artifacts drawer
+   * and workspace tree alike. Drives the chip row rendered under the
+   * bubble and — combined with the markdown pipeline — linkification of
+   * matching inline code spans. Populated by the server-side parser at
+   * message-persist time and backfilled on read for pre-existing
+   * messages.
    */
-  referencedArtifacts?: string[];
+  referencedFiles?: readonly ReferencedFile[];
   /**
    * Task refs (`projectId/num`) the assistant reply mentioned. Same
-   * shape as `referencedArtifacts` — populated by the server-side
+   * shape as `referencedFiles` — populated by the server-side
    * parser, gated on the task existing. Surfaced as click-through
-   * chips next to the artifact chips.
+   * chips next to the file chips.
    */
   referencedTasks?: string[];
   /**
@@ -223,7 +236,7 @@ export interface MessageBubbleProps {
    * `projectId`, so cross-project surfaces like the Meester's global
    * timeline can route the lookup to the correct project.
    */
-  onArtifactReference?: (path: string) => void;
+  onFileReference?: (file: ReferencedFile) => void;
   /**
    * Called when a referenced-task chip is activated. Receives the full
    * `projectId/num` ref. Surfaces like the Meester's timeline can wire
@@ -388,13 +401,14 @@ export function MessageBubble({
   driftLabel,
   from,
   nudge,
+  origin,
   receiverLabel,
   projectLabel,
   extraClass,
   mediaProvider,
-  referencedArtifacts,
+  referencedFiles,
   referencedTasks,
-  onArtifactReference,
+  onFileReference,
   onTaskReference,
   toolCalls,
   reasoning,
@@ -415,7 +429,7 @@ export function MessageBubble({
   suppressHeader,
   timestampLabel,
 }: MessageBubbleProps) {
-  // When the assistant reply referenced real artifacts, pre-process the
+  // When the assistant reply referenced real files, pre-process the
   // markdown so code spans matching those filenames become clickable
   // links. Rewriting happens once per bubble. Also runs the
   // display-only tool-call markup scrub here — when the salvage layer
@@ -432,9 +446,9 @@ export function MessageBubble({
   // no-op.
   const displayContent = useMemo(() => {
     const scrubbed = promoteBareChannelNames(stripVisibleToolCallMarkup(content));
-    if (!referencedArtifacts || referencedArtifacts.length === 0) return scrubbed;
-    return linkifyArtifactRefs(scrubbed, referencedArtifacts);
-  }, [content, referencedArtifacts]);
+    if (!referencedFiles || referencedFiles.length === 0) return scrubbed;
+    return linkifyFileRefs(scrubbed, referencedFiles);
+  }, [content, referencedFiles]);
 
   // Walk `displayContent` and splice intent dividers at their offsets.
   // Produces an ordered list of `text` slices + `intent` markers. A
@@ -468,24 +482,24 @@ export function MessageBubble({
     return segs;
   }, [displayContent, intents]);
 
-  // Click delegate for the rendered body — intercepts `#artifact:` links
-  // so they route to the References pane instead of navigating.
+  // Click delegate for the rendered body — intercepts `#artifact:` and
+  // `#workspace:` links so they route to the References pane instead of
+  // navigating.
   const handleBodyClick = useCallback(
     (e: MouseEvent<HTMLDivElement>) => {
-      if (!onArtifactReference) return;
+      if (!onFileReference) return;
       const target = e.target as HTMLElement | null;
       const anchor = target?.closest('a');
       if (!anchor) return;
-      const href = anchor.getAttribute('href') ?? '';
-      const path = artifactPathFromHref(href);
-      if (!path) return;
+      const file = fileRefFromHref(anchor.getAttribute('href') ?? '');
+      if (!file) return;
       e.preventDefault();
-      onArtifactReference(path);
+      onFileReference(file);
     },
-    [onArtifactReference],
+    [onFileReference],
   );
 
-  const hasFiles = referencedArtifacts && referencedArtifacts.length > 0;
+  const hasFiles = referencedFiles && referencedFiles.length > 0;
   const hasTasks = referencedTasks && referencedTasks.length > 0;
   const chips =
     hasFiles || hasTasks ? (
@@ -493,15 +507,15 @@ export function MessageBubble({
         {hasFiles && (
           <>
             <span className="msg-refs-label">Files:</span>
-            {referencedArtifacts!.map((p) => (
+            {referencedFiles!.map((file) => (
               <button
-                key={`file-${p}`}
+                key={`file-${file.kind}-${file.path}`}
                 type="button"
                 className="msg-ref-chip"
-                onClick={() => onArtifactReference?.(p)}
-                title={p}
+                onClick={() => onFileReference?.(file)}
+                title={file.kind === 'workspace' ? `${file.path} — workspace` : file.path}
               >
-                {p.split('/').pop() ?? p}
+                {file.path.split('/').pop() ?? file.path}
               </button>
             ))}
           </>
@@ -569,17 +583,29 @@ export function MessageBubble({
     );
   }
   const isUser = role === 'user';
+  // A machine-authored user turn (task dispatch, step handoff) keeps the
+  // user role the provider needs but is never presented as the person's
+  // own words — see `ChatMessage.origin`.
+  const isSystem = isUser && origin === 'system';
   // Header suppression only applies to assistant bubbles — a user
   // bubble's "You" is its alignment anchor and always renders.
   const headerless = suppressHeader && !isUser;
-  const cls = `msg msg-${role}${headerless ? ' msg-headerless' : ''}${extraClass ? ` ${extraClass}` : ''}`;
+  const cls = `msg msg-${role}${isSystem ? ' msg-system' : ''}${headerless ? ' msg-headerless' : ''}${extraClass ? ` ${extraClass}` : ''}`;
   return (
     <div className={cls} data-msg-id={dataMsgId} data-session-id={dataSessionId}>
       {!headerless && (
         <div className="msg-role" title={!isUser ? authorTooltip : undefined}>
           {isUser ? (
             <>
-              {'You'}
+              {isSystem ? 'System' : 'You'}
+              {isSystem && (
+                <span
+                  className="msg-system-chip"
+                  title="Sent by gezel itself to move the task along — you didn't write this"
+                >
+                  automatic
+                </span>
+              )}
               {nudge && (
                 <span className="msg-nudge-chip" title="Sent while the previous turn was running">
                   nudged
@@ -845,14 +871,44 @@ export function formatDebugBundle(opts: {
   if (s.numCtx) lines.push(`- num_ctx: \`${s.numCtx}\``);
   lines.push(`- Session: \`${s.sessionId}\``);
   lines.push(`- Turn status at export: \`${s.turnStatus}\``);
-  if (s.registeredTools.length > 0) {
+  if (s.externalConversation) {
     lines.push(
-      `- Registered tools (${s.registeredTools.length}): ${s.registeredTools.map((t) => `\`${t}\``).join(', ')}`,
+      `- Conversation owner: **${s.externalConversation.appName}** (caller-owned prompt and tool loop; Gezel is a read-only mirror)`,
     );
-  } else {
-    lines.push('- Registered tools: **none** (cold session, or MCP bridge not yet started)');
+    if (s.externalConversation.workingDirectory) {
+      lines.push(`- Caller working directory: \`${s.externalConversation.workingDirectory}\``);
+    }
+    if (s.externalConversation.request) {
+      lines.push(`- Caller request captured: \`${s.externalConversation.request.capturedAt}\``);
+    }
   }
-  if (s.customToolsMd) {
+  if (s.registeredTools.length > 0) {
+    const scope =
+      s.registeredToolsSource === 'persisted'
+        ? ', last known'
+        : s.registeredToolsSource === 'caller'
+          ? `, supplied by ${s.externalConversation?.appName ?? 'caller'}`
+          : '';
+    lines.push(
+      `- Registered tools (${s.registeredTools.length}${scope}): ${s.registeredTools.map((t) => `\`${t}\``).join(', ')}`,
+    );
+  } else if (s.registeredToolsSource === 'live') {
+    lines.push('- Registered tools: **none** (live session reported an empty bridge)');
+  } else if (s.registeredToolsSource === 'caller') {
+    lines.push('- Registered tools: **none** (captured caller request supplied no functions)');
+  } else {
+    // Never assert "none" without having asked a live bridge. An empty
+    // list from a cold session is missing evidence, not evidence of a
+    // missing roster — and reading it as the latter cost one whole
+    // investigation, on a bundle whose own prompt listed ~80 tools.
+    // Older snapshots carry no source at all; they land here too.
+    lines.push(
+      '- Registered tools: **not recorded** (no live session at export — unknown, NOT an empty roster; read the "Tools available this turn" block in the prompt below)',
+    );
+  }
+  if (s.registeredToolsSource === 'caller') {
+    lines.push('- Tools listing source: caller-supplied OpenAI-compatible `tools[]`');
+  } else if (s.customToolsMd) {
     lines.push(
       '- Tools listing source: **custom `tools.md`** (auto-injected listing fully replaced; gezel owner is responsible for accuracy)',
     );
@@ -871,7 +927,13 @@ export function formatDebugBundle(opts: {
   }
   pushFenced(lines, response);
   lines.push('');
-  lines.push('## System prompt (freshly computed)');
+  lines.push(
+    s.externalConversation
+      ? s.externalConversation.request
+        ? `## System prompt (captured from ${s.externalConversation.appName} request)`
+        : '## System prompt (not captured for this older external mirror)'
+      : '## System prompt (freshly computed)',
+  );
   lines.push('');
   pushFenced(lines, s.systemPrompt.trim());
   lines.push('');
@@ -880,6 +942,36 @@ export function formatDebugBundle(opts: {
     lines.push('');
     pushFenced(lines, s.volatileContext.trim());
     lines.push('');
+  }
+  const externalRequest = s.externalConversation?.request;
+  if (externalRequest) {
+    lines.push(
+      `## Caller-owned request transcript (${externalRequest.transcript.length} of ${externalRequest.messageCount} messages)`,
+    );
+    lines.push('');
+    if (externalRequest.transcriptTruncated) {
+      lines.push('> This diagnostic copy was bounded; the owning app remains authoritative.');
+      lines.push('');
+    }
+    for (const message of externalRequest.transcript) {
+      const id = message.toolCallId ? ` (tool_call_id: ${message.toolCallId})` : '';
+      lines.push(`### ${message.role}${id}`);
+      lines.push('');
+      pushFenced(lines, message.content.trim());
+      for (const call of message.toolCalls ?? []) {
+        lines.push('');
+        lines.push(`Tool call \`${call.name}\` (\`${call.id}\`) arguments:`);
+        lines.push('');
+        pushFenced(lines, call.arguments);
+      }
+      lines.push('');
+    }
+    if (externalRequest.actionLedger) {
+      lines.push('## Action ledger injected into the completion');
+      lines.push('');
+      pushFenced(lines, externalRequest.actionLedger);
+      lines.push('');
+    }
   }
   lines.push(`## Recent messages (${s.recentMessages.length})`);
   lines.push('');
@@ -946,7 +1038,9 @@ export function formatDebugBundle(opts: {
     );
     lines.push('');
     lines.push(
-      `- **Session transcript** (every turn, tool call, reasoning): \`${d.sessionRecordPath}\``,
+      s.externalConversation
+        ? `- **Gezel mirror record** (normalized completed turns; ${s.externalConversation.appName} owns the authoritative transcript and intermediate tool loop): \`${d.sessionRecordPath}\``
+        : `- **Session transcript** (every turn, tool call, reasoning): \`${d.sessionRecordPath}\``,
     );
     lines.push(`- **Logs directory** (daemon + engine): \`${d.logsDir}\``);
     if (d.engineLogGlob) {
@@ -2363,6 +2457,86 @@ export function isStalledSilence(silentFor: number | null, hasProgress: boolean)
   return silentFor !== null && silentFor >= STALLED_AFTER_S && hasProgress;
 }
 
+/** Gap between the "details" toggle and its floating hover preview. */
+const TOOL_PREVIEW_GAP_PX = 6;
+
+/**
+ * The hover peek for a tool call's "details" toggle.
+ *
+ * Portaled to `document.body` and positioned in VIEWPORT coordinates
+ * rather than rendered next to the toggle. An absolutely-positioned
+ * preview still counts toward the scroll container's overflow, so
+ * showing it grew the chat timeline's `scrollHeight` — which the
+ * stick-to-bottom effect in ChatTimelineView reads as "content grew"
+ * and answers by scrolling to the bottom. That yanked the toggle out
+ * from under the cursor, mouse-out hid the preview, the height shrank
+ * back, and the pointer landed on the toggle again: a hover/scroll
+ * feedback loop that flickered several times a second. Out of the
+ * scrolling subtree, the preview cannot move the content it describes.
+ */
+function ToolDetailPreview({
+  anchorRef,
+  text,
+}: {
+  anchorRef: RefObject<HTMLButtonElement | null>;
+  text: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  // Layout effect: measure and place before paint, so the first frame
+  // the user sees is already at the anchor (no top-left flash).
+  useLayoutEffect(() => {
+    const place = () => {
+      const anchor = anchorRef.current;
+      const el = ref.current;
+      if (!anchor || !el) return;
+      const a = anchor.getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      const below = window.innerHeight - a.bottom - TOOL_PREVIEW_GAP_PX;
+      const above = a.top - TOOL_PREVIEW_GAP_PX;
+      // Prefer below the toggle; flip above only when the panel doesn't
+      // fit below AND there is more room up there (the common case for
+      // a tool call sitting near the bottom of the timeline).
+      const top =
+        box.height <= below || below >= above
+          ? a.bottom + TOOL_PREVIEW_GAP_PX
+          : Math.max(4, a.top - TOOL_PREVIEW_GAP_PX - box.height);
+      const left = Math.max(4, Math.min(a.left, window.innerWidth - box.width - 4));
+      setPos((prev) => (prev && prev.top === top && prev.left === left ? prev : { top, left }));
+    };
+    place();
+    // Capture phase: the anchor moves when its own scroll container
+    // scrolls, which never bubbles to window.
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    // Re-place when the panel itself resizes (a streaming tool result
+    // can grow the preview under the cursor), which also covers the
+    // flip decision changing as the height crosses the space below.
+    const ro =
+      typeof ResizeObserver === 'undefined' || !ref.current ? null : new ResizeObserver(place);
+    ro?.observe(ref.current as Element);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+      ro?.disconnect();
+    };
+  }, [anchorRef]);
+
+  if (typeof document === 'undefined') return null;
+  return createPortal(
+    <div
+      ref={ref}
+      className="thinking-tool-detail-preview"
+      role="tooltip"
+      style={pos ? { top: pos.top, left: pos.left } : { top: 0, left: 0, visibility: 'hidden' }}
+    >
+      <pre>{text}</pre>
+    </div>,
+    document.body,
+  );
+}
+
 /**
  * Per-tool-call "details" disclosure: the full, untruncated arguments
  * (what `argsSummary` abbreviates) plus the returned response when the
@@ -2384,6 +2558,7 @@ function ToolDetailsBlock({
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [copied, setCopied] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement>(null);
   const copy = async () => {
     try {
       const sections = [
@@ -2410,6 +2585,7 @@ function ToolDetailsBlock({
   return (
     <div className="thinking-tool-detail">
       <button
+        ref={toggleRef}
         type="button"
         className="thinking-tool-detail-toggle"
         aria-expanded={open}
@@ -2421,10 +2597,8 @@ function ToolDetailsBlock({
       >
         {open ? 'hide details' : 'details'}
       </button>
-      {hovered && !open && (
-        <div className="thinking-tool-detail-preview" role="tooltip">
-          <pre>{preview}</pre>
-        </div>
+      {hovered && !open && preview.length > 0 && (
+        <ToolDetailPreview anchorRef={toggleRef} text={preview} />
       )}
       {open && (
         <div className="thinking-tool-detail-body">
@@ -2479,6 +2653,9 @@ function ToolActivityList({
               <span className="thinking-tool-duration">{formatDurationShort(t.durationMs)}</span>
             )}
           </span>
+          {!t.success && t.errorMessage && (
+            <div className="thinking-tool-error">{toolErrorSummary(t.errorMessage)}</div>
+          )}
           {!suppressMedia &&
             (t.videos && t.videos.length > 0 && t.projectId ? (
               // A generated video supersedes its poster: render only the
@@ -2827,11 +3004,43 @@ function ToolImagePreviewLoader({
   );
 }
 
+/** Most failures a reader needs to see at once. Beyond this the expando
+ *  is the right surface — the notice is a headline, not a log. */
+const VISIBLE_TOOL_FAILURES = 2;
+
+/**
+ * Failures the turn never recovered from, newest last.
+ *
+ * A failure superseded by a later success of the same tool is resolved —
+ * the model corrected its arguments and moved on, and surfacing it would
+ * make a self-healed turn read as broken. What survives is the case that
+ * actually cost the user something: a completion gate that rejected the
+ * work, a tool that never came back. Mirrors the service's
+ * `unresolvedFailedToolCalls`, which builds the model's recovery nudge
+ * from the same rule.
+ */
+export function unresolvedToolFailures(
+  tools: ReadonlyArray<Pick<ChatMessageToolCall, 'name' | 'success' | 'errorMessage'>>,
+): Array<{ name: string; reason: string }> {
+  return tools
+    .filter(
+      (t, i) =>
+        !t.success && !tools.slice(i + 1).some((later) => later.name === t.name && later.success),
+    )
+    .map((t) => ({ name: t.name, reason: t.errorMessage ? toolErrorSummary(t.errorMessage) : '' }))
+    .filter((f) => f.reason.length > 0);
+}
+
 /**
  * Collapsible "tools that ran during this turn" expando, rendered at the
  * top of a completed assistant bubble. Defaults to closed — most readers
  * don't want to see the tool breadcrumbs on every message, but the
  * header line still conveys a useful summary ("3 steps · 1.2s total").
+ *
+ * Unrecovered failures break that default: "· 1 failed" behind a closed
+ * disclosure is how a rejected completion gate became invisible, leaving
+ * the user watching a task loop with no idea what the gate wanted. Those
+ * reasons render above the summary, in the thread, unprompted.
  */
 export function ToolHistoryExpando({
   tools,
@@ -2857,6 +3066,7 @@ export function ToolHistoryExpando({
   const mediaActivities = activities.filter(
     (t) => t.projectId && ((t.images && t.images.length > 0) || (t.videos && t.videos.length > 0)),
   );
+  const failures = unresolvedToolFailures(tools).slice(-VISIBLE_TOOL_FAILURES);
   return (
     <>
       {mediaActivities.map((t, i) => (
@@ -2866,6 +3076,17 @@ export function ToolHistoryExpando({
           ) : t.images && t.images.length > 0 && t.projectId ? (
             <ToolImageRow projectId={t.projectId} images={t.images} />
           ) : null}
+        </div>
+      ))}
+      {failures.map((f, i) => (
+        <div className="msg-tool-failure" key={`fail-${f.name}-${i}`}>
+          <span className="msg-tool-failure-icon" aria-hidden="true">
+            ✗
+          </span>
+          <span className="msg-tool-failure-body">
+            <span className="msg-tool-failure-tool">{toolDisplayName(f.name)}</span>
+            {f.reason}
+          </span>
         </div>
       ))}
       <details className="msg-tool-history">

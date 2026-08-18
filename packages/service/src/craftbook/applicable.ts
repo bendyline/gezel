@@ -13,6 +13,7 @@ import type {
 import {
   CraftbookTemplateManifestSchema,
   craftbookRequirementsMet,
+  resolveSecurityPolicy,
   unmetToolsets,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -155,11 +156,42 @@ export async function craftbookContextForProject(
 }
 
 /**
+ * Whether a craftbook can run at all under the current connector posture.
+ *
+ * A book that *requires* a connector corpus cannot start under
+ * `super-lockdown` — connector prep refuses before its first step's prompt
+ * is built — so offering the card would be offering a button that always
+ * fails. An `optional` connector is a bonus the launch degrades without,
+ * so it never hides anything.
+ */
+function craftbookConnectorPostureMet(
+  connectors: ReadonlyArray<{ optional?: boolean }> | undefined,
+  connectorDataAllowed: boolean,
+): boolean {
+  if (connectorDataAllowed) return true;
+  return !(connectors ?? []).some((need) => !need.optional);
+}
+
+/** The posture predicate the launcher filters on, resolved once per listing. */
+async function connectorDataAllowed(store: Store): Promise<boolean> {
+  let config: Parameters<typeof resolveSecurityPolicy>[0] = {};
+  try {
+    config = await store.readConfig();
+  } catch {
+    // An unreadable config resolves to the fail-safe `lockdown` posture,
+    // which permits user-initiated corpus movement — the same answer the
+    // authoritative gate in connector prep would give.
+  }
+  return resolveSecurityPolicy(config).allowConnectorData;
+}
+
+/**
  * The catalog craftbooks applicable to a project — those whose
- * `requirements` the project's GitHub/branch state satisfies. Shared by
- * the rail (HTTP route) and the terminal command launcher so both offer
- * exactly the same set, and a non-applicable craftbook (e.g. Pull Request
- * Review on a non-GitHub project) is neither shown nor recognized.
+ * `requirements` the project's GitHub/branch state satisfies, and whose
+ * declared connectors the security posture permits. Shared by the rail
+ * (HTTP route) and the terminal command launcher so both offer exactly
+ * the same set, and a non-applicable craftbook (e.g. Pull Request Review
+ * on a non-GitHub project) is neither shown nor recognized.
  */
 export async function listApplicableCraftbooks(
   catalog: CatalogService,
@@ -169,6 +201,7 @@ export async function listApplicableCraftbooks(
     establishedCodebase?: boolean;
     git?: ProjectGitStatusReader;
     requirementContext?: CraftbookRequirementContext;
+    connectorDataAllowed?: boolean;
   } = {},
 ): Promise<CatalogItemSummary[]> {
   const items = await catalog.list('craftbook-template').catch(() => []);
@@ -176,10 +209,12 @@ export async function listApplicableCraftbooks(
     opts.requirementContext ?? (await craftbookContextForProject(store, projectId, opts.git));
   const establishedCodebase =
     opts.establishedCodebase ?? (await projectHasEstablishedCodebase(store, projectId));
+  const connectorsOk = opts.connectorDataAllowed ?? (await connectorDataAllowed(store));
   return items.filter(
     (it) =>
       it.manifest.kind === 'craftbook-template' &&
       craftbookRequirementsMet(it.manifest.requirements, ctx) &&
+      craftbookConnectorPostureMet(it.manifest.connectors, connectorsOk) &&
       !(establishedCodebase && it.manifest.role === 'project-starter'),
   );
 }
@@ -239,6 +274,7 @@ export function craftbookTemplateManifestFromRuntime(
     ...(book.requirements ? { requirements: book.requirements } : {}),
     ...(book.runModes ? { runModes: book.runModes } : {}),
     ...(book.toolsets ? { toolsets: book.toolsets } : {}),
+    ...(book.connectors ? { connectors: book.connectors } : {}),
   });
   return parsed.success ? parsed.data : null;
 }
@@ -255,12 +291,14 @@ export async function projectCraftbookSummaries(
   opts: {
     git?: ProjectGitStatusReader;
     requirementContext?: CraftbookRequirementContext;
+    connectorDataAllowed?: boolean;
   } = {},
 ): Promise<CatalogItemSummary[]> {
   const summaries = await store.listProjectCraftbooks(projectId).catch(() => []);
   if (summaries.length === 0) return [];
   const ctx =
     opts.requirementContext ?? (await craftbookContextForProject(store, projectId, opts.git));
+  const connectorsOk = opts.connectorDataAllowed ?? (await connectorDataAllowed(store));
   const out: CatalogItemSummary[] = [];
   for (const s of summaries) {
     const book = await store.getProjectCraftbook(projectId, s.id).catch(() => null);
@@ -268,6 +306,7 @@ export async function projectCraftbookSummaries(
     const manifest = craftbookTemplateManifestFromRuntime(book);
     if (!manifest) continue;
     if (!craftbookRequirementsMet(manifest.requirements, ctx)) continue;
+    if (!craftbookConnectorPostureMet(manifest.connectors, connectorsOk)) continue;
     out.push({ sourceId: 'project', kind: 'craftbook-template', manifest });
   }
   return out;

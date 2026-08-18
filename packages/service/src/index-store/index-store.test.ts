@@ -155,6 +155,28 @@ describe('IndexStore', () => {
     store.close();
   });
 
+  it('ranks doc hits by relevance, not insertion order', async () => {
+    const store = await openStore();
+    if (!store.ftsAvailable) return store.close();
+    // Indexed first, mentions the term once among many words.
+    store.putChunks('docs/passing-mention.md', 'h1', [
+      {
+        kind: 'paragraph',
+        lineStart: 1,
+        lineEnd: 3,
+        text: 'travel and expenses and equipment and onboarding and refunds and payroll',
+      },
+    ]);
+    // Indexed second, densely about the term — must outrank the first.
+    store.putChunks('docs/refunds.md', 'h2', [
+      { kind: 'paragraph', lineStart: 1, lineEnd: 3, text: 'refunds: how refunds work' },
+    ]);
+    const hits = store.searchDocs('refunds', 1);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.filePath).toBe('docs/refunds.md');
+    store.close();
+  });
+
   it('roundtrips a vector and finds the nearest neighbour', async () => {
     const store = await openStore();
     if (!store.vecAvailable) return store.close();

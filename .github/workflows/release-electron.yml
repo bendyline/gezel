@@ -1083,6 +1083,23 @@ jobs:
       - name: Package Linux installer
         run: pnpm --filter @bendyline/gezel-app exec electron-builder --linux deb:${{ matrix.arch }} rpm:${{ matrix.arch }} --publish never
 
+      # Asserted rather than assumed, because every way of getting deb
+      # compression wrong looks correct in electron-builder.yml. fpm passes
+      # zstd its level through ZSTD_CLEVEL with a leading dash, which zstd
+      # reads as a NEGATIVE level, so a config that plainly says `compression:
+      # zst` can still ship ~200 MiB of fast-mode padding with no warning
+      # anywhere. The artifact is the only witness.
+      - name: Verify deb compression contract
+        run: |
+          set -euo pipefail
+          found=0
+          for installer in packages/app/dist/installers/*.deb; do
+            [[ -f "$installer" ]] || continue
+            found=1
+            node scripts/verify-deb-compression.mjs "$installer"
+          done
+          [[ "$found" == "1" ]]
+
       - name: Verify RPM dependency contract
         run: |
           set -euo pipefail

@@ -17,11 +17,17 @@
  *   stage 3 — stop: pause with the full attempt trail as diagnosis.
  *
  * The plateau signature hashes failing-check IDENTITY (GateCheckOutcome
- * labels), not prose and not content bytes: byte churn with an unmoved
- * failure set IS the plateau (the eval harness's retryLoopSniffKey
- * lesson), while clearing any single check changes the signature and
- * resets the ladder. Kill-switch: GEZEL_DISABLE_GATE_ESCALATION=1
- * restores the legacy quiet-damper behavior.
+ * labels) plus any outstanding-item count those checks report, not prose
+ * and not content bytes: byte churn with an unmoved failure set IS the
+ * plateau (the eval harness's retryLoopSniffKey lesson), while clearing a
+ * check — or covering more of what a counting check still wants — changes
+ * the signature and resets the ladder. The count matters because some
+ * craftbooks are DESIGNED to fail a gate repeatedly (bounded batch loops
+ * over a corpus too large for one context); identity alone cannot tell
+ * those from a stall, and calling them a stall pushes the assignee toward
+ * the smallest edit that clears the check rather than the work.
+ * Kill-switch: GEZEL_DISABLE_GATE_ESCALATION=1 restores the legacy
+ * quiet-damper behavior.
  */
 
 import { createHash } from 'node:crypto';
@@ -38,9 +44,40 @@ export function escalationDisabled(): boolean {
 }
 
 /**
- * Hash of the failing-check identity set. Sorted so check order never
+ * Outstanding items summed across the failing checks that count in items
+ * at all ({@link GateCheckOutcome.remaining}). `undefined` when no failing
+ * check reports one, which is every gate that isn't a coverage loop.
+ *
+ * A sum is lossy across several counting checks — A 10→5 while B 5→10
+ * holds the total at 15 and reads as no progress. That direction is the
+ * safe one: it under-reports progress and leaves the ladder as it is
+ * today, rather than resetting the plateau on a check that regressed.
+ */
+export function gateRemaining(
+  checkResults: readonly GateCheckOutcome[] | undefined,
+): number | undefined {
+  let total: number | undefined;
+  for (const check of checkResults ?? []) {
+    if (check.ok || check.remaining === undefined) continue;
+    total = (total ?? 0) + check.remaining;
+  }
+  return total;
+}
+
+/**
+ * Hash of the failing-check identity set, plus the outstanding-item count
+ * when the failing checks report one. Sorted so check order never
  * matters; `script:<name>` entries cover script-gate rejects (which
  * carry no failing declarative checks).
+ *
+ * The count is in the hash because identity alone cannot tell a stall
+ * from a bounded batch loop: a craftbook that reviews a 68-file PR 25 at
+ * a time fails the SAME coverage check every pass while genuinely
+ * converging, so the ladder read attempt 2 (25→50 files) as a plateau
+ * and fired the stage-1 targeted-edit directive at a reviewer that was
+ * working correctly. Falling count = the failure moved, ladder resets;
+ * a count frozen across attempts still climbs, which is the real stall.
+ * Checks that report no count behave exactly as before.
  */
 export function gateFailureSignature(
   checkResults: readonly GateCheckOutcome[] | undefined,
@@ -50,8 +87,10 @@ export function gateFailureSignature(
   for (const run of runs) {
     if (run.decision === 'reject' || run.error) labels.push(`script:${run.scriptName}`);
   }
+  const remaining = gateRemaining(checkResults);
   const canonical = [...labels].sort().join('\n');
-  return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
+  const withProgress = remaining === undefined ? canonical : `${canonical}\nremaining:${remaining}`;
+  return createHash('sha256').update(withProgress).digest('hex').slice(0, 16);
 }
 
 /**
@@ -95,8 +134,66 @@ export function appendGateAttempt(
  * at all) sends the model chasing a tool it does not have; the molen
  * dependency-audit night shift burned its whole gate budget exactly
  * that way. Default 'workspace' keeps legacy call sites byte-stable.
+ *
+ * `'note'` is the fileless case: the gate judges the TASK RECORD, so
+ * there is no deliverable on disk to claim exists or to patch. Pull
+ * Request Review's `scope` gate is one (`checkTaskNoteContains`), and it
+ * rendered as "The file the deliverable EXISTS … use replace_in_file" —
+ * broken grammar, an unprovable existence claim, and a tool that had
+ * been stripped from the roster because workspace writes were off.
  */
-export type DeliverableSurface = 'workspace' | 'artifact';
+export type DeliverableSurface = 'workspace' | 'artifact' | 'note';
+
+/**
+ * Classify a step's deliverable surface from what its gate actually
+ * reads. An explicit `advanceWhen` deliverable wins; otherwise the gate's
+ * own checks decide, and a gate that names no file anywhere while
+ * carrying scripts is judging the task record.
+ *
+ * The artifact verdict requires EVERY file-naming check to be drawer-
+ * flagged: a mixed gate still needs workspace wording, because the
+ * failure the model must repair may well be the workspace half.
+ */
+export function deliverableSurface(opts: {
+  advanceWhen?: { file?: string; artifact?: boolean } | undefined;
+  checks?: ReadonlyArray<Record<string, unknown>> | undefined;
+  scripts?: ReadonlyArray<unknown> | undefined;
+}): DeliverableSurface {
+  if (opts.advanceWhen?.file) return opts.advanceWhen.artifact ? 'artifact' : 'workspace';
+  const fileChecks = (opts.checks ?? []).filter(
+    (check) =>
+      typeof check.file === 'string' ||
+      Array.isArray(check.files) ||
+      typeof check.dir === 'string' ||
+      Array.isArray(check.ext),
+  );
+  if (fileChecks.length > 0) {
+    return fileChecks.every((check) => check.artifact === true) ? 'artifact' : 'workspace';
+  }
+  if ((opts.scripts?.length ?? 0) > 0) return 'note';
+  return 'workspace';
+}
+
+/**
+ * Stage 0, converging — the rejection a bounded batch loop is SUPPOSED to
+ * get. Prefixed to the gate's own verdict when the outstanding-item count
+ * fell against the same failing checks, so the assignee reads "keep going"
+ * rather than inferring a stall from bullets it saw last attempt too. The
+ * surrounding note still says "Gate — not yet met (attempt N/M)", which on
+ * its own reads as failure to a mid-tier local model.
+ *
+ * Deliberately carries no marker any provider turn-mode keys on: this turn
+ * wants the assignee to continue its normal procedure, not to be clamped
+ * to a write-only surface the way GATE_TARGETED_EDIT and GATE_FULL_REWRITE
+ * clamp theirs.
+ */
+export function buildProgressPreamble(opts: {
+  previousRemaining: number;
+  remaining: number;
+}): string {
+  const cleared = opts.previousRemaining - opts.remaining;
+  return `Progress: ${cleared} more item(s) covered since your last attempt — ${opts.remaining} still outstanding. This rejection is the expected loop, not a stall: keep working the same way and do NOT restart, re-plan, or redo what already passed. Continue with the next batch of outstanding items below.`;
+}
 
 /**
  * Stage 1 — smallest-targeted-edit directive. Ports the eval harness's
@@ -107,7 +204,8 @@ export type DeliverableSurface = 'workspace' | 'artifact';
  * or scenario-check header — this stage wants a surgical edit, not a
  * whole-file rewrite (both directions pinned by unit tests). The
  * artifact surface has no partial-edit tool, so its "targeted edit" is
- * a minimal rewrite through `write_artifact`.
+ * a minimal rewrite through `write_artifact`; the note surface has no
+ * file at all, so it neither claims existence nor names a file tool.
  */
 export function buildStageOneNudge(opts: {
   file?: string;
@@ -116,14 +214,26 @@ export function buildStageOneNudge(opts: {
   surface?: DeliverableSurface;
 }): string {
   const artifact = opts.surface === 'artifact';
+  const note = opts.surface === 'note';
   const fileRef = opts.file ? `\`${opts.file}\`` : 'the deliverable';
-  const opener = opts.frozen
-    ? 'Continue. You resubmitted the SAME deliverable and the gate rejected it again for the same reasons — resubmitting unchanged content cannot pass.'
-    : 'Continue. Your last edits did not move the gate — the same checks fail after each attempt.';
-  const fix = artifact
-    ? 'Fix the FIRST failure above with the smallest change — read the artifact with read_artifact, correct only the section the check names, and save it back with write_artifact. Do NOT switch to a different file, do NOT re-read everything, and do NOT reply that you already finished.'
-    : 'Fix the FIRST failure above with the smallest targeted edit — use replace_in_file on the exact section the check names. Do NOT recreate the file, do NOT re-read everything, and do NOT reply that you already finished.';
-  return `GATE_TARGETED_EDIT: ${opener} The ${artifact ? 'artifact' : 'file'} ${fileRef} EXISTS but fails exactly these checks:
+  const opener = note
+    ? opts.frozen
+      ? 'Continue. You wrote the SAME note again and the gate rejected it for the same reason — reposting unchanged content cannot pass.'
+      : 'Continue. Your last attempt did not move the gate — the same checks fail after each attempt.'
+    : opts.frozen
+      ? 'Continue. You resubmitted the SAME deliverable and the gate rejected it again for the same reasons — resubmitting unchanged content cannot pass.'
+      : 'Continue. Your last edits did not move the gate — the same checks fail after each attempt.';
+  const fix = note
+    ? 'Fix the FIRST failure above by recording it on the task itself — write_task_note for a required note, or whichever task tool the failure names. Do NOT edit workspace files, do NOT re-read everything, and do NOT reply that you already finished. If you are confident the note already satisfies the check, say so plainly and stop: escalate to the task owner rather than reshaping the note to match the checker.'
+    : artifact
+      ? 'Fix the FIRST failure above with the smallest change — read the artifact with read_artifact, correct only the section the check names, and save it back with write_artifact. Do NOT switch to a different file, do NOT re-read everything, and do NOT reply that you already finished.'
+      : 'Fix the FIRST failure above with the smallest targeted edit — use replace_in_file on the exact section the check names. Do NOT recreate the file, do NOT re-read everything, and do NOT reply that you already finished.';
+  // A note gate has no artifact on disk, so the existence claim the file
+  // and drawer surfaces open with would be a fabrication.
+  const subject = note
+    ? 'This gate reads the task record, not a file, and it still fails exactly these checks:'
+    : `The ${artifact ? 'artifact' : 'file'} ${fileRef} EXISTS but fails exactly these checks:`;
+  return `GATE_TARGETED_EDIT: ${opener} ${subject}
 
 ${opts.failingBullets}
 
@@ -152,6 +262,32 @@ export function buildStageTwoNudge(opts: {
 ${opts.failingBullets}
 
 Call ${tool}({ path: "${opts.file}", content: <the complete corrected file> }) as your next tool call. No planning prose, no reads first, no partial appends.`;
+}
+
+/**
+ * The converging-loop pause. Distinct from the plateau diagnosis because
+ * the failure is the opposite one: every pass DID move the gate, just not
+ * fast enough to be worth more sessions. Handing the resumer a "failed the
+ * same checks N times without progress" note here would send them hunting
+ * a defect in a deliverable that is steadily getting more correct, when
+ * the actual lever is the batch size (or finishing the tail by hand).
+ */
+export function buildProgressExhaustionNote(opts: {
+  stepName: string;
+  stepId: string;
+  passes: number;
+  remaining: number;
+  lastMessage: string;
+}): string {
+  return `# Gate progress budget spent — paused for help
+
+Step "${opts.stepName}" (${opts.stepId}) advanced on all ${opts.passes} of its passes — the gate was never stalled — but ${opts.remaining} item(s) are still outstanding, so it would need many more sessions to finish at this rate.
+
+Latest verdict:
+
+${opts.lastMessage}
+
+This is a throughput problem, not a stuck assignee. Raise the per-pass batch size in the step procedure, split the work across more steps, cover the remaining items by hand, or accept the partial coverage — then set the task active again.`;
 }
 
 /**

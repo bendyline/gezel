@@ -100,15 +100,19 @@ describe('formatScriptRunResult', () => {
     expect(resultText(formatted)).toContain('fs.write (4ms)');
   });
 
-  it('marks error runs as isError', () => {
+  it('leads error runs with the useful message instead of technical run metadata', () => {
     const formatted = formatScriptRunResult({
-      runId: 'r-2',
+      runId: 'b9e8723a-2dcf-4798-bd24-165b8705e4a1',
       status: 'error',
-      error: 'capability denied',
-      callsSummary: [],
+      error: 'Error: Illegal move e7-c5. Legal moves for black: b8-c7',
+      callsSummary: [{ kind: 'fs.read', durationMs: 1 }],
     });
     expect(formatted.isError).toBe(true);
-    expect(resultText(formatted)).toContain('error: capability denied');
+    expect(resultText(formatted)).toBe(
+      'Error: Illegal move e7-c5. Legal moves for black: b8-c7\ncalls:\n  - fs.read (1ms)',
+    );
+    expect(resultText(formatted)).not.toContain('b9e8723a-2dcf-4798-bd24-165b8705e4a1');
+    expect(resultText(formatted)).not.toContain('status: error');
   });
 });
 

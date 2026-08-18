@@ -38,7 +38,11 @@ describe('GET /api/queues', () => {
           holdReason: 'provider-busy',
         }),
       },
-      { isActive: () => false, nextStartIso: () => '2026-08-02T22:00:00.000Z' },
+      {
+        isActive: () => false,
+        nextStartIso: () => '2026-08-02T22:00:00.000Z',
+        quotaHoldStatus: () => null,
+      },
     );
 
     const response = await queueRoutes(ctx).request('/');
@@ -64,12 +68,39 @@ describe('GET /api/queues', () => {
           scheduled: { count: 0, byGezel: {} },
         }),
       },
-      { isActive: () => false, nextStartIso: () => null },
+      { isActive: () => false, nextStartIso: () => null, quotaHoldStatus: () => null },
     );
 
     const response = await queueRoutes(ctx).request('/');
     const body = (await response.json()) as { taskRunner: { nightShift: unknown } };
     expect(body.taskRunner.nightShift).toEqual({ active: false, opensAt: null });
+  });
+
+  it('flags the night-shift block while the quota reserve holds work', async () => {
+    const ctx = ctxWith(
+      {
+        snapshot: () => ({
+          pendingCount: 1,
+          pendingByGezel: { wren: 1 },
+          pendingByProject: { default: 1 },
+          dispatchable: { count: 0, byGezel: {} },
+          scheduled: { count: 1, byGezel: { wren: 1 } },
+        }),
+      },
+      {
+        isActive: () => false,
+        nextStartIso: () => '2026-08-02T22:00:00.000Z',
+        quotaHoldStatus: () => ({ heldTaskCount: 1, reasons: [] }),
+      },
+    );
+
+    const response = await queueRoutes(ctx).request('/');
+    const body = (await response.json()) as { taskRunner: { nightShift: unknown } };
+    expect(body.taskRunner.nightShift).toEqual({
+      active: false,
+      opensAt: '2026-08-02T22:00:00.000Z',
+      quotaHold: true,
+    });
   });
 
   it('keeps product queues local and merges only sanitized native broker telemetry', async () => {
@@ -96,7 +127,11 @@ describe('GET /api/queues', () => {
           pendingByProject: { project: 2 },
         }),
       },
-      { isActive: () => true, nextStartIso: () => '2026-08-05T22:00:00.000Z' },
+      {
+        isActive: () => true,
+        nextStartIso: () => '2026-08-05T22:00:00.000Z',
+        quotaHoldStatus: () => null,
+      },
     );
     Object.assign(ctx.chat, {
       getProviderIfReady: (name: string) => (name === 'openai' ? localProvider : null),
@@ -123,9 +158,12 @@ describe('GET /api/queues', () => {
                 queuedInteractive: 1,
                 queuedBackground: 0,
                 ambientHeld: 0,
-                concurrency: 2,
-                interactiveConcurrency: 1,
-                backgroundConcurrency: 1,
+                concurrency: 5,
+                interactiveConcurrency: 4,
+                backgroundConcurrency: 3,
+                // Simulate the stale denominator from the screenshot: the
+                // broker's queue already knows it can run four chats, but an
+                // older batch-capability path still says serial.
                 maxConcurrency: 1,
                 active: [
                   {
@@ -171,7 +209,11 @@ describe('GET /api/queues', () => {
     const body = (await response.json()) as {
       providers: Record<
         string,
-        { active: Array<Record<string, unknown>>; pending: Array<Record<string, unknown>> }
+        {
+          maxConcurrency: number;
+          active: Array<Record<string, unknown>>;
+          pending: Array<Record<string, unknown>>;
+        }
       >;
       sessions: unknown[];
       taskRunner: Record<string, unknown>;
@@ -186,6 +228,7 @@ describe('GET /api/queues', () => {
       projectId: 'project-a',
     });
     expect(body.providers['llama-cpp']!.pending[0]!.sessionId).toBe('queued-session');
+    expect(body.providers['llama-cpp']!.maxConcurrency).toBe(4);
     expect(body.sessions).toEqual([
       { sessionId: 'user-session', depth: 1, nextPreview: 'hello', entries: [] },
     ]);

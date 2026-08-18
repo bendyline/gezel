@@ -276,6 +276,10 @@ export function configRoutes(ctx: ServiceContext): Hono {
       // Live gilde content updates toggle (Settings → About). Same
       // whitelist rule as above.
       gildeUpdates: config.gildeUpdates,
+      // Ambient dashboard + wallpaper toggles (Settings → Ambient
+      // display). Same whitelist rule as above.
+      ambientDashboard: config.ambientDashboard,
+      ambientDisplay: config.ambientDisplay,
       remoteServing: {
         ...(config.remoteServing ?? {}),
         enabled: ctx.remoteServing.status().listening,
@@ -382,6 +386,21 @@ export function configRoutes(ctx: ServiceContext): Hono {
       await ctx.codexSetup.reconcile().catch((err) => {
         log.warn(
           `[codex-setup] bridge reconciliation failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+      await ctx.opencodeSetup.reconcile().catch((err) => {
+        log.warn(
+          `[opencode-setup] bridge reconciliation failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+      await ctx.piSetup.reconcile().catch((err) => {
+        log.warn(
+          `[pi-setup] bridge reconciliation failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+      await ctx.vscodeSetup.reconcile().catch((err) => {
+        log.warn(
+          `[vscode-setup] bridge reconciliation failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       });
     }

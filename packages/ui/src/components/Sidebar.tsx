@@ -5,7 +5,7 @@ import type {
   RecentTab,
   RecentTabArea,
 } from '@bendyline/gezel';
-import { displayName, isOutsideInInternalPath } from '@bendyline/gezel';
+import { SHARED_PROJECT_ID, displayName, isOutsideInInternalPath } from '@bendyline/gezel';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -29,6 +29,7 @@ import { GezelActionsMenu } from './GezelActionsMenu.js';
 import { GezelIcon } from './GezelIcon.js';
 import { NewPathDialog } from './NewPathDialog.js';
 import { ProjectActionsMenu } from './ProjectActionsMenu.js';
+import { ProjectIcon } from './ProjectIcon.js';
 import { ProjectQuestionsDialog } from './ProjectQuestionsDialog.js';
 import type { OutsideInLayout } from './SquisqIntegration/outside-in.js';
 import { documentLabel } from './document-label.js';
@@ -103,6 +104,9 @@ interface SidebarProps {
   /** Project ids with a gezel currently mid-turn — drives the animated
    *  "thinking" indicator on the row (replaces the status dot). */
   activeProjectIds?: Set<string>;
+  /** Gezel ids currently mid-turn — drives the same animated "thinking"
+   *  indicator on gezel rows. */
+  activeGezelIds?: Set<string>;
   /** projectId → count of pending questions — drives the "needs input"
    *  affordance that opens the resolution dialog. */
   pendingByProject?: Map<string, number>;
@@ -134,6 +138,11 @@ const DEFAULT_GROUPS: Record<GroupId, boolean> = {
 // last). Scripts/History live here as plain links per the nav design rather
 // than under a "More" group. Benchmarks is intentionally absent — it now
 // lives behind the debug-gated "Benchmarks" tab in Settings.
+// Areas that render as an expandable Group rather than a plain link. They
+// already light their own header when selected, so the transient-row rule
+// below must skip them.
+const GROUP_BACKED_AREAS: ReadonlySet<RecentTabArea> = new Set(['projects', 'documents', 'gezels']);
+
 const AREA_LINKS: RecentTabArea[] = [
   'tasks',
   'craftbooks',
@@ -148,7 +157,11 @@ const AREA_LINKS: RecentTabArea[] = [
 // list only shows projects the user actually started — unless it is the
 // current destination. A restored workspace must always have a visible
 // selected row naming the project that occupies the canvas.
-const HIDDEN_PROJECT_IDS = new Set<string>(['default']);
+//
+// `shared` is hidden for a different reason: it backs the Documents area,
+// which is its own top-level destination. Listing it as a project too would
+// offer two doors into one room.
+const HIDDEN_PROJECT_IDS = new Set<string>(['default', SHARED_PROJECT_ID]);
 const AREA_LINK_LABELS: Record<RecentTabArea, string> = {
   projects: 'Projects',
   gezels: 'Gezellen',
@@ -197,21 +210,12 @@ function readStoredGroups(): Record<GroupId, boolean> {
   }
 }
 
-/** Stable color + initial for a project's icon badge (no avatar data). */
-function projectInitial(name: string): string {
-  return (name.trim()[0] ?? '?').toUpperCase();
-}
-function hueFromString(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h % 360;
-}
-
 export function Sidebar({
   selection,
   onSelect,
   onOpenArea,
   activeProjectIds,
+  activeGezelIds,
   pendingByProject,
   poisonedProjects,
 }: SidebarProps) {
@@ -222,7 +226,7 @@ export function Sidebar({
   const visibleProjects = useMemo(
     () =>
       projects.filter(
-        (p) => p.id === selectedProjectId || (!HIDDEN_PROJECT_IDS.has(p.id) && !p.archived),
+        (p) => !p.archived && (p.id === selectedProjectId || !HIDDEN_PROJECT_IDS.has(p.id)),
       ),
     [projects, selectedProjectId],
   );
@@ -254,10 +258,22 @@ export function Sidebar({
       : 'Home';
   // "Scripts" is a power-user surface — gated behind Settings → About →
   // Advanced → "Show advanced features".
-  const areaLinks = useMemo(
-    () => AREA_LINKS.filter((area) => area !== 'scripts' || showAdvancedFeatures),
-    [showAdvancedFeatures],
-  );
+  const currentArea = selection?.kind === 'area' ? selection.area : null;
+  const areaLinks = useMemo(() => {
+    const links = AREA_LINKS.filter((area) => area !== 'scripts' || showAdvancedFeatures);
+    // A hidden area that is nevertheless the current destination gets a
+    // transient row, the same way HIDDEN_PROJECT_IDS surfaces the Default
+    // project while it is selected. Without it the rail matches nothing and
+    // renders no active row at all, so it silently disagrees with the canvas —
+    // reachable by default through the Home "Save a routine" tip, which routes
+    // to Scripts while Scripts is gated off. Group-backed areas are excluded:
+    // they light their own Group header instead and would double-render.
+    if (currentArea && !links.includes(currentArea) && !GROUP_BACKED_AREAS.has(currentArea)) {
+      const settingsAt = links.indexOf('settings');
+      links.splice(settingsAt < 0 ? links.length : settingsAt, 0, currentArea);
+    }
+    return links;
+  }, [showAdvancedFeatures, currentArea]);
   // Installation and updater notices live beneath Settings, which is the
   // lower corner of the rail in the default right-sidebar layout. Routine
   // "up to date" feedback clears after a moment; download and ready states
@@ -720,13 +736,7 @@ export function Sidebar({
                     title={p.name}
                     aria-current={activeKey === key ? 'page' : undefined}
                   >
-                    <span
-                      className="app-sidebar-item-icon app-sidebar-proj-badge"
-                      style={{ background: `hsl(${hueFromString(p.id)}, 50%, 42%)` }}
-                      aria-hidden="true"
-                    >
-                      {projectInitial(p.name)}
-                    </span>
+                    <ProjectIcon project={p} size={18} className="app-sidebar-item-icon" />
                     <span className="app-sidebar-item-label">
                       {p.name}
                       {p.storageScope === 'machine-shared' && (
@@ -887,6 +897,7 @@ export function Sidebar({
           ) : (
             gezels.map((g) => {
               const key = tabKey({ kind: 'gezel', id: g.id });
+              const isWorking = activeGezelIds?.has(g.id) ?? false;
               const name = displayName(
                 { name: g.name, roleBasedName: g.roleBasedName },
                 roleBasedNameOnly,
@@ -901,6 +912,16 @@ export function Sidebar({
               // description — where regular-name users learn what a role does.
               let title = !roleBasedNameOnly && roleLabel ? `${name} — ${roleLabel}` : name;
               if (description) title += ` · ${description}`;
+              const select = () => {
+                onSelect(toRecentTab({ kind: 'gezel', id: g.id }));
+                if (isWorking) {
+                  window.dispatchEvent(
+                    new CustomEvent('gezel:prefer-working-project', {
+                      detail: { gezelId: g.id },
+                    }),
+                  );
+                }
+              };
               return (
                 <li
                   key={g.id}
@@ -909,7 +930,7 @@ export function Sidebar({
                   <button
                     type="button"
                     className={`app-sidebar-item app-sidebar-subitem app-sidebar-gezel${activeKey === key ? ' active' : ''}`}
-                    onClick={() => onSelect(toRecentTab({ kind: 'gezel', id: g.id }))}
+                    onClick={select}
                     title={title}
                   >
                     <span className="app-sidebar-item-icon">
@@ -939,7 +960,20 @@ export function Sidebar({
                       {subtitle && <span className="app-sidebar-item-role">{subtitle}</span>}
                     </span>
                   </button>
-                  <GezelActionsMenu gezel={g} compact />
+                  {isWorking && (
+                    <button
+                      type="button"
+                      className="project-row-thinking app-sidebar-gezel-thinking"
+                      onClick={select}
+                      title={`${name} is working — open`}
+                      aria-label={`${name} is working. Open gezel.`}
+                    >
+                      <span className="project-row-thinking-dot" aria-hidden="true" />
+                      <span className="project-row-thinking-dot" aria-hidden="true" />
+                      <span className="project-row-thinking-dot" aria-hidden="true" />
+                    </button>
+                  )}
+                  <GezelActionsMenu gezel={g} compact boringMode={roleBasedNameOnly} />
                 </li>
               );
             })
@@ -1175,7 +1209,22 @@ function Group({
             title={addTitle}
             aria-label={addTitle}
           >
-            +
+            {/* An SVG plus, not a "+" glyph: flex centering aligns the text
+                line box, and the font's ascender/descender asymmetry then
+                leaves the character sitting visibly low in the 22px key. */}
+            <svg
+              width={12}
+              height={12}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2.4}
+              strokeLinecap="round"
+              focusable="false"
+              aria-hidden="true"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
           </button>
         )}
       </div>

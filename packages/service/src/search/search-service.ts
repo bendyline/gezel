@@ -1,6 +1,7 @@
-import { createLogger } from '@bendyline/gezel';
+import { createLogger, isSharedLibraryProject } from '@bendyline/gezel';
 import type { UnifiedSearchResult } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
+import { isLibraryInternalPath } from '../fs/sync-junk.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import type { GlobalIndex } from '../index-store/global-index.js';
 import { embedQuery } from '../memory/embeddings.js';
@@ -40,6 +41,22 @@ const PER_SOURCE_RESULTS = 5;
 const ARTIFACT_CATALOG_CAP = 2000;
 /** Hits requested from each memory scope. */
 const PER_MEMORY_RESULTS = 3;
+/**
+ * Cosine-similarity floor for a memory hit to be worth showing.
+ *
+ * Vector search is nearest-neighbour, not match/no-match: it returns the top
+ * K rows for *any* query, so without a floor a nonsense string still produced
+ * three confident-looking results, and real queries carried two or three
+ * unrelated fragments alongside the genuine hit. It also meant "No results"
+ * was unreachable once an install had memories — the user got debris instead
+ * of an honest answer.
+ *
+ * Measured against the shipped embedder (Xenova/all-MiniLM-L6-v2, 384d) on
+ * representative rows: genuine paraphrase matches scored 0.83-0.86, while the
+ * worst unrelated pair reached only 0.33. 0.35 sits in that gap. Raising it
+ * costs recall on loosely-worded matches; lowering it lets noise back in.
+ */
+const MEMORY_MIN_SIMILARITY = 0.35;
 /** Default merged result cap returned to the caller. */
 const DEFAULT_MAX_RESULTS = 30;
 
@@ -56,6 +73,8 @@ export const CATALOG_RELEVANT_HISTORY_KINDS: ReadonlySet<string> = new Set([
   'project.created',
   'project.updated',
   'document.created',
+  'document.folder.created',
+  'document.renamed',
   'document.deleted',
 ]);
 
@@ -80,6 +99,14 @@ interface CatalogEntry {
   title: string;
   /** Optional secondary match target (full path) for files/documents. */
   path?: string;
+  /**
+   * Extra match targets that are not the display title — a gezel's role and
+   * role-based name. Searchable because the product's whole vocabulary is
+   * roles: a user reading the Handboek types "meester" or "boekwachter", not
+   * the random first name that gezel happens to carry. Matched at a discount
+   * so a real name match still wins.
+   */
+  keywords?: string[];
   subtitle?: string;
   projectId?: string;
   projectName?: string;
@@ -169,15 +196,22 @@ export class SearchService {
       entries.push({ kind: 'project', id: `project:${p.id}`, title: p.name, projectId: p.id });
     }
     for (const g of gezels) {
+      const keywords = [g.role, g.roleBasedName].filter(
+        (k): k is string => typeof k === 'string' && k.trim().length > 0,
+      );
       entries.push({
         kind: 'gezel',
         id: `gezel:${g.id}`,
         title: g.name,
         ...(g.role ? { subtitle: g.role } : {}),
+        ...(keywords.length > 0 ? { keywords } : {}),
       });
     }
     for (const d of documents) {
       if (d.isDirectory) continue;
+      // Companion twins of a binary document (`brief.docx_files/brief.md`)
+      // are a derived view of a document already listed here.
+      if (isLibraryInternalPath(d.path)) continue;
       entries.push({
         kind: 'document',
         id: `document:${d.path}`,
@@ -189,7 +223,11 @@ export class SearchService {
 
     // File paths from each project's persisted files.json (no re-walk), plus
     // indexed artifact-corpus records (connector data under artifacts/data/**).
-    const fileLists = await mapPool(projects, FANOUT_CONCURRENCY, async (p) => {
+    // The library's files are already in the catalog as `document` entries
+    // above; walking it again here would list every document twice, once as
+    // a document and once as a file in a project the user never opens.
+    const fileListProjects = projects.filter((p) => !isSharedLibraryProject(p));
+    const fileLists = await mapPool(fileListProjects, FANOUT_CONCURRENCY, async (p) => {
       const [files, artifactFiles] = await Promise.all([
         this.indexManager.readFiles(p.id).catch(() => []),
         this.contentIndex.listArtifactIndexFiles(p.id, ARTIFACT_CATALOG_CAP).catch(() => []),
@@ -237,11 +275,20 @@ export class SearchService {
     const scored: UnifiedSearchResult[] = [];
     for (const e of catalog) {
       // Match the title (name/basename) first; fall back to full path with a
-      // discount so a path-fragment match still finds the file.
+      // discount so a path-fragment match still finds the file, then to the
+      // entry's keywords so a gezel is reachable by role as well as by name.
       let rel = fuzzyScore(query, e.title);
       if (rel === null && e.path) {
         const pathScore = fuzzyScore(query, e.path);
         if (pathScore !== null) rel = pathScore * 0.7;
+      }
+      if (rel === null && e.keywords) {
+        let best: number | null = null;
+        for (const keyword of e.keywords) {
+          const score = fuzzyScore(query, keyword);
+          if (score !== null && (best === null || score > best)) best = score;
+        }
+        if (best !== null) rel = best * 0.7;
       }
       if (rel === null) continue;
       scored.push({
@@ -284,6 +331,10 @@ export class SearchService {
     // One pool unit per project: code + docs + symbols + project memory.
     const perProject = projects.map((p) => async () => {
       const out: UnifiedSearchResult[] = [];
+      // The shared library has its own arm below, emitting `document` rows.
+      // Running it here too would list every document a second time as
+      // project content.
+      if (isSharedLibraryProject(p)) return out;
       const workspaceIndexing = p.indexingEnabled !== false;
       const codeOpts = vector
         ? { queryVector: vector, maxResults: PER_SOURCE_RESULTS }
@@ -368,6 +419,7 @@ export class SearchService {
         });
       }
       for (const r of mem) {
+        if (r.score < MEMORY_MIN_SIMILARITY) continue;
         out.push({
           kind: 'memory',
           id: `memory:project:${p.id}:${r.day}:${hashText(r.text)}`,
@@ -388,14 +440,16 @@ export class SearchService {
           const mem = await this.memory
             .searchVector('gezel', g.id, vector as number[], PER_MEMORY_RESULTS)
             .catch(() => []);
-          return mem.map((r) => ({
-            kind: 'memory' as const,
-            id: `memory:gezel:${g.id}:${r.day}:${hashText(r.text)}`,
-            title: r.text.slice(0, 80),
-            subtitle: `Memory · ${g.name}`,
-            snippet: r.text,
-            score: clamp01(r.score) * WEIGHT.memory,
-          }));
+          return mem
+            .filter((r) => r.score >= MEMORY_MIN_SIMILARITY)
+            .map((r) => ({
+              kind: 'memory' as const,
+              id: `memory:gezel:${g.id}:${r.day}:${hashText(r.text)}`,
+              title: r.text.slice(0, 80),
+              subtitle: `Memory · ${g.name}`,
+              snippet: r.text,
+              score: clamp01(r.score) * WEIGHT.memory,
+            }));
         })
       : [];
 
@@ -428,10 +482,21 @@ export class SearchService {
         });
       });
       globalTasks.push(async () => {
-        const hits = await globalIndex.searchDocuments(query, PER_SOURCE_RESULTS).catch(() => []);
+        // The library is a project now, so its content search is the ranked
+        // hybrid one. It is emitted as `document` rather than `content` (and
+        // skipped in the per-project loop) so a library hit reads as "a
+        // document" wherever it surfaces, not as a file in some project.
+        const libraryId = await this.store.sharedProjectId().catch(() => null);
+        if (!libraryId) return [];
+        const found = await this.contentIndex
+          .searchLibrary(libraryId, query, {
+            maxResults: PER_SOURCE_RESULTS,
+            ...(vector ? { queryVector: vector } : {}),
+          })
+          .catch(() => null);
         // Same id scheme as the catalog's document entries, so a name hit and
         // a content hit on one document collapse to a single row in merge().
-        return hits.map((h) => ({
+        return (found?.results ?? []).map((h) => ({
           kind: 'document' as const,
           id: `document:${h.path}`,
           title: basename(h.path),
@@ -439,7 +504,7 @@ export class SearchService {
           snippet: h.snippet,
           path: h.path,
           line: h.lineStart,
-          score: 0.6 * WEIGHT.document,
+          score: clamp01(h.score ?? 0.6) * WEIGHT.document,
         }));
       });
     }
@@ -462,7 +527,24 @@ export class SearchService {
       const existing = byId.get(r.id);
       if (!existing || r.score > existing.score) byId.set(r.id, r);
     }
-    return [...byId.values()].sort((a, b) => b.score - a.score).slice(0, maxResults);
+    // A memory's id carries its scope and day, so the same remembered
+    // sentence recorded for two gezels — or on two days — survives the id
+    // pass and lists two, three, four times over. The text is what the reader
+    // sees, so that is what has to be unique; the best-scoring copy wins and
+    // keeps its own id, which is what navigation resolves against.
+    const bestByText = new Map<string, UnifiedSearchResult>();
+    const out: UnifiedSearchResult[] = [];
+    for (const r of byId.values()) {
+      if (r.kind !== 'memory') {
+        out.push(r);
+        continue;
+      }
+      const key = memoryTextKey(r.snippet ?? r.title);
+      const existing = bestByText.get(key);
+      if (!existing || r.score > existing.score) bestByText.set(key, r);
+    }
+    out.push(...bestByText.values());
+    return out.sort((a, b) => b.score - a.score).slice(0, maxResults);
   }
 }
 
@@ -476,6 +558,15 @@ function basename(path: string): string {
 function clamp01(n: number): number {
   if (!Number.isFinite(n)) return 0;
   return n < 0 ? 0 : n > 1 ? 1 : n;
+}
+
+/**
+ * Identity of a remembered sentence for de-duplication: case- and
+ * whitespace-insensitive, so the same fact written on two days collapses to
+ * one row rather than reading as two separate recollections.
+ */
+function memoryTextKey(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 /**

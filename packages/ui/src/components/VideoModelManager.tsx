@@ -14,7 +14,6 @@ import { api } from '../api.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { LicenseButton } from './LicenseButton.js';
-import { RecommendedBadge } from './RecommendedBadge.js';
 
 /**
  * Install / pull / delete flow for `video-model` catalog entries.
@@ -384,9 +383,22 @@ export function VideoModelManager({
                     <td>{formatSize(m.approxSizeBytes)}</td>
                     <td className="muted small">{new Date(m.installedAt).toLocaleDateString()}</td>
                     <td>
-                      <button type="button" className="home-link" onClick={() => setToDelete(m.id)}>
-                        Delete
-                      </button>
+                      {m.readOnly ? (
+                        <span
+                          className="muted small"
+                          title="Installed for every user of this machine by the Gezel service. It can only be removed by an administrator, not from here."
+                        >
+                          Machine-wide
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="home-link"
+                          onClick={() => setToDelete(m.id)}
+                        >
+                          Delete
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -438,7 +450,6 @@ export function VideoModelManager({
                   </div>
                   <div className="catalog-ollama-pills">
                     <LicenseButton manifest={m} />
-                    <RecommendedBadge manifest={m} />
                   </div>
                 </div>
                 <button

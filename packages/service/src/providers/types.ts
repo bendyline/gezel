@@ -751,9 +751,10 @@ export interface LLMSession {
   onDelta(handler: (chunk: string) => void): () => void;
   /**
    * Subscribe to live private-reasoning deltas, streamed separately from
-   * the visible reply so they never enter the committed body or the
-   * external API-compat forwarders. Optional — only providers with a
-   * distinct reasoning channel (llama-cpp/ds4) fire it.
+   * the visible reply so they never enter the committed body. API-compat
+   * forwarders omit this private channel unless their client contract opts
+   * in explicitly. Optional — only providers with a distinct reasoning
+   * channel (llama-cpp/ds4) fire it.
    */
   onReasoningDelta?(handler: (chunk: string) => void): () => void;
   onUsage(handler: (usage: TurnUsage) => void): () => void;
@@ -778,7 +779,9 @@ export interface LLMSession {
    * calls arrive whole (Ollama) or run server-side (Copilot, OpenAI)
    * leave it undefined.
    */
-  onToolArgsDelta?(handler: (name: string, chunk: string) => void): () => void;
+  onToolArgsDelta?(
+    handler: (name: string, chunk: string, meta?: ToolArgsDeltaMeta) => void,
+  ): () => void;
   /**
    * Optional: subscribe to phase-announcement events. Currently only
    * `CopilotSession` emits these (SDK `assistant.intent` events from
@@ -903,6 +906,14 @@ export interface ExternalToolCall {
   id: string;
   name: string;
   arguments: string;
+}
+
+/** Identity attached to a live structured tool-argument fragment. */
+export interface ToolArgsDeltaMeta {
+  /** OpenAI-compatible position within the assistant's tool_calls array. */
+  index?: number;
+  /** Provider-supplied call id, normally present on the first fragment. */
+  id?: string;
 }
 
 /**

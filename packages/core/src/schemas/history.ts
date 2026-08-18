@@ -67,6 +67,8 @@ export const HistoryEventKindSchema = z.enum([
   'project.connector.unbound',
   'project.connector.synced',
   'document.created',
+  'document.folder.created',
+  'document.updated',
   'document.renamed',
   'document.deleted',
   'workspace.write',
@@ -201,6 +203,7 @@ export const HistoryEventKindSchema = z.enum([
    */
   'project.index.reviewed',
   'meester.status.generated',
+  'meester.dashboard.generated',
   'gezel.level.up',
   'gezel.trait.adopted',
   'gezel.trait.removed',

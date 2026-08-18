@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
   type GezelConfig,
-  type HistoryEvent,
   MEESTER_STATUS_HEADLINE_MAX,
   type MeesterStatusAction,
   type MeesterStatusCta,
@@ -9,19 +8,22 @@ import {
   MeesterStatusModelOutputSchema,
   type MeesterStatusReport,
   type MeesterStatusState,
-  type Project,
-  type Task,
   createLogger,
   isEngagementAllowed,
   isProactiveAllowed,
   isSchedulingAllowed,
-  projectAllowsAmbientWork,
 } from '@bendyline/gezel';
 import type { ChatEventBus } from '../chat/events.js';
 import type { ActivityTracker } from '../fs/activity-tracker.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { TaskManager } from '../tasks/manager.js';
+import {
+  type ProjectContext,
+  collectProjectContexts,
+  hashProjectContexts,
+  renderProjectContextSections,
+} from './collect.js';
 
 /**
  * The meester's occasional status report — the dynamic Home greeting.
@@ -56,10 +58,6 @@ const ONE_SHOT_TIMEOUT_MS = 180_000;
 const PROMPT_INPUT_CAP = 12_000;
 const MAX_ACTIONS_PER_RUN = 3;
 const MAX_ACTION_KEYS = 50;
-const MAX_EVENTS_PER_PROJECT = 15;
-const MAX_TASKS_PER_PROJECT = 8;
-const MAX_SESSIONS_PER_PROJECT = 5;
-const EVENT_WINDOW_MS = 48 * 60 * 60_000;
 
 export type StatusOneShot = (
   prompt: string,
@@ -82,16 +80,6 @@ export interface MeesterStatusGeneratorOptions {
   intervalMs?: number;
   startupDelayMs?: number;
   now?: () => Date;
-}
-
-interface ProjectContext {
-  project: Project;
-  lastActivityAt: string | null;
-  voormanName: string | null;
-  openTasks: Task[];
-  pendingQuestions: number;
-  events: HistoryEvent[];
-  sessionTitles: string[];
 }
 
 export class MeesterStatusGenerator {
@@ -181,7 +169,7 @@ export class MeesterStatusGenerator {
       if (Number.isFinite(sinceLast) && sinceLast < MIN_RUN_GAP_MS) return false;
     }
 
-    const candidates = await this.collectCandidates(config);
+    const candidates = await this.collectCandidates();
     const windowMs =
       (config.meesterStatus?.changeWindowHours ?? DEFAULT_CHANGE_WINDOW_HOURS) * 60 * 60_000;
     const lastRunMs = state.lastRunAt ? Date.parse(state.lastRunAt) : 0;
@@ -192,7 +180,7 @@ export class MeesterStatusGenerator {
     });
     if (changed.length === 0) return false;
 
-    const inputHash = hashInput(candidates);
+    const inputHash = hashProjectContexts(candidates);
     if (inputHash === state.inputHash) return false;
 
     return this.generate(config, meesterId, candidates, {
@@ -214,11 +202,11 @@ export class MeesterStatusGenerator {
     if (!config || config.meesterStatus?.enabled === false || !meesterId) return false;
     if (!isEngagementAllowed(config)) return false;
     const state = await this.store.readMeesterStatusState();
-    const candidates = await this.collectCandidates(config);
+    const candidates = await this.collectCandidates();
     return this.generate(config, meesterId, candidates, {
       trigger: 'manual',
       state,
-      inputHash: hashInput(candidates),
+      inputHash: hashProjectContexts(candidates),
       countRun: false,
     });
   }
@@ -320,43 +308,11 @@ export class MeesterStatusGenerator {
     });
   }
 
-  private async collectCandidates(config: GezelConfig): Promise<ProjectContext[]> {
-    const projects = await this.store.listProjects().catch(() => [] as Project[]);
-    const ambient = projects.filter((p) => projectAllowsAmbientWork(p));
-    const from = new Date(this.now().getTime() - EVENT_WINDOW_MS).toISOString();
-    const out: ProjectContext[] = [];
-    for (const project of ambient) {
-      const [lastActivityAt, tasks, questions, rawEvents, sessions] = await Promise.all([
-        this.activity.lastActivityAt(project.id),
-        this.store.listProjectTasks(project.id).catch(() => [] as Task[]),
-        this.store.listProjectQuestions(project.id).catch(() => []),
-        this.history
-          .listEvents({ projectId: project.id, from, limit: MAX_EVENTS_PER_PROJECT * 2 })
-          .catch(() => [] as HistoryEvent[]),
-        this.store.listSessions({ projectId: project.id }).catch(() => []),
-      ]);
-      const voorman = project.voormanGezelId
-        ? await this.store.getGezel(project.voormanGezelId).catch(() => null)
-        : null;
-      out.push({
-        project,
-        lastActivityAt,
-        voormanName: voorman?.name ?? null,
-        openTasks: tasks
-          .filter((t) => t.status === 'active' || t.status === 'paused' || t.status === 'draft')
-          .slice(0, MAX_TASKS_PER_PROJECT),
-        pendingQuestions: questions.filter((q) => !q.answer).length,
-        events: rawEvents
-          .filter((e) => e.kind !== 'meester.status.generated')
-          .slice(0, MAX_EVENTS_PER_PROJECT),
-        sessionTitles: sessions
-          .slice()
-          .sort((a, b) => (a.lastActivityAt < b.lastActivityAt ? 1 : -1))
-          .slice(0, MAX_SESSIONS_PER_PROJECT)
-          .map((s) => s.title),
-      });
-    }
-    return out;
+  private async collectCandidates(): Promise<ProjectContext[]> {
+    return collectProjectContexts(
+      { store: this.store, history: this.history, activity: this.activity },
+      { now: this.now(), excludeEventKinds: ['meester.status.generated'] },
+    );
   }
 
   /** Drop CTAs pointing at things that don't exist — a dead click is worse than none. */
@@ -457,15 +413,6 @@ function normalizeTitle(title: string): string {
   return title.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function hashInput(candidates: ProjectContext[]): string {
-  const lines = candidates.flatMap((c) => [
-    `${c.project.id}:${c.lastActivityAt ?? ''}`,
-    ...c.openTasks.map((t) => `${t.ref}:${t.status}`),
-    ...c.events.map((e) => e.id),
-  ]);
-  return createHash('sha256').update(lines.join('\n')).digest('hex');
-}
-
 function parseModelOutput(raw: string): MeesterStatusModelOutput | null {
   const fence = raw.match(/```(?:json)?\s*\n([\s\S]*?)\n?```/);
   const body = fence?.[1] ?? (raw.trim().startsWith('{') ? raw.trim() : null);
@@ -479,25 +426,7 @@ function parseModelOutput(raw: string): MeesterStatusModelOutput | null {
 }
 
 function buildStatusPrompt(candidates: ProjectContext[]): string {
-  const sections = candidates.map((c) => {
-    const lines: string[] = [`## Project "${c.project.name}" (id: ${c.project.id})`];
-    if (c.project.description) lines.push(c.project.description);
-    if (c.voormanName) lines.push(`Voorman: ${c.voormanName}`);
-    if (c.lastActivityAt) lines.push(`Last activity: ${c.lastActivityAt}`);
-    if (c.pendingQuestions > 0) {
-      lines.push(`${c.pendingQuestions} question(s) waiting on the user.`);
-    }
-    if (c.openTasks.length > 0) {
-      lines.push('Open tasks:', ...c.openTasks.map((t) => `- [${t.status}] ${t.ref} ${t.title}`));
-    }
-    if (c.events.length > 0) {
-      lines.push('Recent activity:', ...c.events.map((e) => `- ${e.at.slice(0, 16)} ${e.summary}`));
-    }
-    if (c.sessionTitles.length > 0) {
-      lines.push('Recent chats:', ...c.sessionTitles.map((t) => `- ${t}`));
-    }
-    return lines.join('\n');
-  });
+  const sections = renderProjectContextSections(candidates);
   const input = sections.join('\n\n').slice(0, PROMPT_INPUT_CAP);
   const projectIds = candidates.map((c) => `"${c.project.id}"`).join(', ');
   const taskRefs = candidates

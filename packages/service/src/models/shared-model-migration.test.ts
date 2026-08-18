@@ -55,10 +55,10 @@ function sourceHomes(): SharedModelSourceHome[] {
   return [{ source: 'current', label: 'This account', home }];
 }
 
-async function localModel(version = catalogVersion) {
+async function localModel(version = catalogVersion, weights = WEIGHTS) {
   const modelDir = join(home, 'engines', 'llama-cpp', 'models', MODEL_ID);
   await mkdir(modelDir, { recursive: true });
-  await writeFile(join(modelDir, 'weights.gguf'), WEIGHTS);
+  await writeFile(join(modelDir, 'weights.gguf'), weights);
   const installedManifest = {
     id: MODEL_ID,
     name: 'Llama 3.2 3B',
@@ -130,7 +130,7 @@ describe('SharedModelMigrationManager', () => {
     );
   });
 
-  it('offers only exact-current local models while the machine broker is connected', async () => {
+  it('offers only local models holding the current payload while the broker is connected', async () => {
     const { owner } = await localModel();
     const connected = migrationManager(
       owner,
@@ -153,7 +153,20 @@ describe('SharedModelMigrationManager', () => {
     );
     await expect(disconnected.listCandidates('llama-cpp')).resolves.toEqual([]);
 
-    const stale = await localModel('0.0.1');
+    // A version difference alone is not staleness. The catalog bumps for
+    // metadata edits that never touch the weights, and refusing to share a
+    // model over one would strand every install after any catalog change.
+    const bumped = await localModel('0.0.1');
+    await expect(
+      migrationManager(
+        bumped.owner,
+        bridgeWith(async () => new Response(null, { status: 500 })),
+      ).listCandidates('llama-cpp'),
+    ).resolves.toEqual([expect.objectContaining({ id: MODEL_ID, catalogVersion: '0.0.1' })]);
+
+    // Different bytes on disk than the catalog now pins: genuinely stale, and
+    // the export would fail its integrity check anyway.
+    const stale = await localModel('0.0.1', Buffer.from('different weights entirely'));
     await expect(
       migrationManager(
         stale.owner,

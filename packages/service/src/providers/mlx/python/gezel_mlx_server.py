@@ -268,6 +268,45 @@ parser.add_argument(
         "limit alone."
     ),
 )
+parser.add_argument(
+    "--kv-bits",
+    type=int,
+    default=0,
+    help=(
+        "Quantize the KV cache to this many bits. 0 (default) = f16. Halves "
+        "(8-bit) or quarters (4-bit) the largest term in a long-context "
+        "session: a 256K window on a 16-full-attention-layer 27B is 16 GiB of "
+        "f16 KV. Applies to the SERIAL generation path only — mlx-lm's "
+        "BatchGenerator builds BatchKVCache layers, which have no "
+        "`to_quantized`, and `maybe_quantize_kv_cache` skips them silently. "
+        "The launcher therefore plans memory at f16 whenever batching is on, "
+        "so the broker never reserves a discount the engine did not take."
+    ),
+)
+parser.add_argument(
+    "--kv-group-size",
+    type=int,
+    default=64,
+    help="Group size for KV quantization. mlx-lm's default is 64.",
+)
+parser.add_argument(
+    "--kv-quant-scheme",
+    default="uniform",
+    help=(
+        "Quantization scheme passed to mlx-vlm. 'uniform' is right for integer "
+        "bit values; mlx-vlm selects TurboQuant for fractional ones."
+    ),
+)
+parser.add_argument(
+    "--quantized-kv-start",
+    type=int,
+    default=0,
+    help=(
+        "Only quantize a layer once its cache passes this many tokens. Leaves "
+        "short turns on the f16 path, where quantization costs more than the "
+        "memory it saves."
+    ),
+)
 ARGS = parser.parse_args()
 
 
@@ -695,6 +734,28 @@ def _get_generation_lock() -> asyncio.Lock:
     return _GENERATION_LOCK
 
 
+def _kv_quant_kwargs() -> Dict[str, Any]:
+    """KV-quantization options for the serial `stream_generate` path.
+
+    Forwarded through `stream_generate(**kwargs)` into mlx-vlm's
+    `generate_step`, which converts each layer via `to_quantized` once it
+    passes `quantized_kv_start`. Layer classes without that method
+    (BatchKVCache, ChunkedKVCache) are skipped by `maybe_quantize_kv_cache`
+    rather than raising — safe, but silent, which is why the launcher plans
+    f16 whenever the batched path is in use instead of trusting this flag.
+
+    Empty when disabled, so the default path is byte-identical to before.
+    """
+    if ARGS.kv_bits <= 0:
+        return {}
+    return {
+        "kv_bits": ARGS.kv_bits,
+        "kv_group_size": ARGS.kv_group_size,
+        "kv_quant_scheme": ARGS.kv_quant_scheme,
+        "quantized_kv_start": ARGS.quantized_kv_start,
+    }
+
+
 def _budget_bytes() -> int:
     return ARGS.cache_budget_mb * 1024 * 1024
 
@@ -997,7 +1058,8 @@ class _Sub:
         "http_request", "uid", "queue", "cancelled", "token_ids", "emitted",
         "pinned_cache_ids", "prefill_total", "first_token_seen",
         "reused_tokens", "seed_mode", "prompt_snapshot", "snapshot_target",
-        "saved_cache_state",
+        "saved_cache_state", "prefill_started_at", "generation_started_at",
+        "prompt_tps", "generation_tps",
     )
 
     def __init__(
@@ -1039,6 +1101,15 @@ class _Sub:
         # reference for immediate persistence even if the memory-budget pass
         # evicts the just-built entry from the global LRU.
         self.saved_cache_state = None
+        # BatchGenerator does not expose per-sequence timing. Track wall-clock
+        # timing per subscription so the OpenAI-compatible usage frames retain
+        # the same prompt/decode speed fields as the serial stream_generate
+        # path. Values are snapshotted into queue items because the worker can
+        # advance again before the SSE coroutine consumes them.
+        self.prefill_started_at = None
+        self.generation_started_at = None
+        self.prompt_tps = 0.0
+        self.generation_tps = 0.0
 
 
 class BatchEngine:
@@ -1151,7 +1222,11 @@ class BatchEngine:
         if grammar is not None:
             # Accepts a single processor or a list (grammar + think-budget).
             procs = list(procs) + (grammar if isinstance(grammar, list) else [grammar])
-        return procs or None
+        # BatchGenerator receives one processor list per sequence. A mixed
+        # wave (for example cache warm + pi tool call) must use [] for the
+        # unconstrained sequence: mlx_lm iterates every per-sequence entry and
+        # crashes on None with "'NoneType' object is not iterable".
+        return list(procs or [])
 
     def _seed_args(self, sub):
         """Plan cache reuse for this sub: longest-common-prefix with
@@ -1321,6 +1396,7 @@ class BatchEngine:
                     continue
                 for uid, sub in zip(uids, batch):
                     sub.uid = uid
+                    sub.prefill_started_at = time.perf_counter()
                     self._subs[uid] = sub
                 # Arm prefill-liveness for the wave: total new tokens to
                 # prefill across its subs (authoritative — from the seed
@@ -1346,6 +1422,7 @@ class BatchEngine:
                 self._emit_prefill_liveness()
                 try:
                     prompt_responses, responses = self._gen.next()
+                    step_ended_at = time.perf_counter()
                 except Exception as exc:  # noqa: BLE001
                     print(f"[batch] step failed: {exc}", flush=True)
                     traceback.print_exc()
@@ -1391,8 +1468,27 @@ class BatchEngine:
                     sub = self._subs.get(r.uid)
                     if sub is None:
                         continue
+                    if sub.generation_started_at is None:
+                        # The step that yields the first token is the closest
+                        # boundary BatchGenerator exposes between prefill and
+                        # decode. Count it with prefill/TTFT, then measure decode
+                        # from the inter-token intervals that follow; otherwise
+                        # a short prompt can produce a near-zero denominator and
+                        # a wildly inflated first-token rate.
+                        sub.generation_started_at = step_ended_at
+                        prefill_started_at = sub.prefill_started_at or step_ended_at
+                        prefill_seconds = max(
+                            step_ended_at - prefill_started_at,
+                            1e-9,
+                        )
+                        if sub.prefill_total > 0:
+                            sub.prompt_tps = sub.prefill_total / prefill_seconds
                     sub.first_token_seen = True
                     sub.token_ids.append(int(r.token))
+                    generated_intervals = len(sub.token_ids) - 1
+                    generation_seconds = step_ended_at - sub.generation_started_at
+                    if generated_intervals > 0 and generation_seconds > 0:
+                        sub.generation_tps = generated_intervals / generation_seconds
                     self._emit_delta(sub)
                     if r.finish_reason is not None:
                         self._finish(sub, r)
@@ -1459,12 +1555,28 @@ class BatchEngine:
         if not delta:
             return
         sub.emitted = len(full)
-        sub.queue.put_nowait(("tok", delta, len(sub.token_ids)))
+        sub.queue.put_nowait(
+            (
+                "tok",
+                delta,
+                len(sub.token_ids),
+                sub.prompt_tps,
+                sub.generation_tps,
+            )
+        )
 
     def _finish(self, sub, r):
         full = _scrub_leaked_markers(self._tok.decode(sub.token_ids))
         if len(full) > sub.emitted:
-            sub.queue.put_nowait(("tok", full[sub.emitted :], len(sub.token_ids)))
+            sub.queue.put_nowait(
+                (
+                    "tok",
+                    full[sub.emitted :],
+                    len(sub.token_ids),
+                    sub.prompt_tps,
+                    sub.generation_tps,
+                )
+            )
             sub.emitted = len(full)
         try:
             if sub.request.cache_id:
@@ -1535,7 +1647,9 @@ class BatchEngine:
                 )
         except Exception as exc:  # noqa: BLE001
             print(f"[batch] cache save failed: {exc}", flush=True)
-        sub.queue.put_nowait(("done", r.finish_reason))
+        sub.queue.put_nowait(
+            ("done", r.finish_reason, sub.prompt_tps, sub.generation_tps)
+        )
 
 
 async def _batched_stream_iter(sub: "_Sub"):
@@ -1549,7 +1663,7 @@ async def _batched_stream_iter(sub: "_Sub"):
             item = await sub.queue.get()
             kind = item[0]
             if kind == "tok":
-                _, delta, out_count = item
+                _, delta, out_count, prompt_tps, generation_tps = item
                 if await sub.http_request.is_disconnected():
                     sub.cancelled = True
                     return
@@ -1570,8 +1684,8 @@ async def _batched_stream_iter(sub: "_Sub"):
                             "input_tokens": in_toks,
                             "output_tokens": out_count,
                             "total_tokens": in_toks + out_count,
-                            "prompt_tps": 0.0,
-                            "generation_tps": 0.0,
+                            "prompt_tps": prompt_tps,
+                            "generation_tps": generation_tps,
                             # Cache tokens actually served per the seed
                             # plan — parity with the serial path so the
                             # TS session's cachedInputTokens works on
@@ -1581,7 +1695,7 @@ async def _batched_stream_iter(sub: "_Sub"):
                     }
                 ) + "\n\n"
             elif kind == "done":
-                reason = item[1]
+                _, reason, prompt_tps, generation_tps = item
                 yield "data: " + json.dumps(
                     {
                         "id": rid,
@@ -1599,8 +1713,8 @@ async def _batched_stream_iter(sub: "_Sub"):
                             "input_tokens": in_toks,
                             "output_tokens": len(sub.token_ids),
                             "total_tokens": in_toks + len(sub.token_ids),
-                            "prompt_tps": 0.0,
-                            "generation_tps": 0.0,
+                            "prompt_tps": prompt_tps,
+                            "generation_tps": generation_tps,
                             "cached_tokens": sub.reused_tokens,
                         },
                     }
@@ -2395,6 +2509,7 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             generation_kwargs: Dict[str, Any] = {
                 "prompt_cache_state": cache_state,
                 "prefill_step_size": ARGS.prefill_step_size,
+                **_kv_quant_kwargs(),
             }
             if request.max_tokens is not None:
                 generation_kwargs["max_tokens"] = request.max_tokens

@@ -8,6 +8,8 @@
 export interface TurnStatsEntry {
   /** Wall-clock at turn end, used for rolling-window filtering. */
   at: number;
+  /** Model that generated the turn, when the daemon reported one. */
+  model?: string;
   promptTokens: number;
   completionTokens: number;
   durationMs: number;
@@ -46,6 +48,40 @@ export function formatTokensPerSec(rate: number): string {
 }
 
 /**
+ * Per-model generation speed used to be tallied here, over the life of the
+ * page. It now comes from the daemon's own usage record (`rollUpModelSpeeds`
+ * in the service's chat/usage.ts, served on `/api/usage`): the question is
+ * "how fast is this model on my machine", and the honest answer spans every
+ * session the daemon has run, not the handful this browser tab witnessed.
+ */
+
+/**
+ * Minimum decoding time before a live rate is worth showing. Under this
+ * the sample is dominated by the first few chunks arriving in a burst
+ * and the number swings wildly enough to look broken.
+ */
+const LIVE_RATE_MIN_ELAPSED_MS = 3_000;
+
+/**
+ * Live generation rate for the turn in flight, measured from the moment
+ * the engine entered its generating phase — not from turn start, which
+ * would fold a 30s prefill into the decode speed and report a third of
+ * the real number.
+ *
+ * Returns null while the sample is too short to mean anything.
+ */
+export function computeLiveTokensPerSec(
+  outputTokens: number,
+  generatingSince: number,
+  now: number,
+): number | null {
+  if (outputTokens <= 0) return null;
+  const elapsedMs = now - generatingSince;
+  if (!Number.isFinite(elapsedMs) || elapsedMs < LIVE_RATE_MIN_ELAPSED_MS) return null;
+  return outputTokens / (elapsedMs / 1000);
+}
+
+/**
  * Best-effort live output-token count for providers that only publish their
  * exact usage in the terminal stream frame. The UI prefixes this value with
  * an approximation mark; the engine's exact counter still wins whenever its
@@ -78,8 +114,14 @@ export function formatBytes(bytes: number): string {
  * "Idle" while chats wait.
  */
 export interface QueueStatusInput {
-  /** In-flight slots in the provider request queue. */
+  /** In-flight slots in the provider request queue, all lanes. */
   running: number;
+  /**
+   * In-flight slots held by the interactive lane — i.e. live
+   * conversations. Omit on a queue that predates the lane split and the
+   * whole of `running` is treated as chat work, preserving the old copy.
+   */
+  runningInteractive?: number;
   /** Foreground turns waiting in the provider request queue. */
   interactive: number;
   /** Background work (memory extraction, auto-recall, fan-out) waiting. */
@@ -89,7 +131,7 @@ export interface QueueStatusInput {
 }
 
 export interface QueueStatusView {
-  /** Total items waiting across both layers — drives the "+N" badge. */
+  /** Chats waiting across both layers — drives the "+N" badge. */
   waiting: number;
   /** True when anything is in flight or waiting — drives busy styling. */
   active: boolean;
@@ -106,18 +148,32 @@ export interface QueueStatusView {
  * comes from the live SSE phase, not from queue counts).
  */
 export function composeQueueStatus(input: QueueStatusInput): QueueStatusView {
-  const pending = input.interactive + input.background;
-  const waiting = pending + input.backlog;
-  const active = input.running > 0 || waiting > 0;
-  const idleStatus =
-    input.running > 0 || waiting > 0
-      ? [
-          input.running > 0 ? `${input.running} running` : null,
-          waiting > 0 ? `${waiting} queued` : null,
-        ]
-          .filter(Boolean)
-          .join(' · ')
-      : 'Idle — waiting for a message';
+  // Chats are the headline noun. A queue slot is not a conversation:
+  // index enrichment, memory extraction and digests all occupy `running`
+  // while zero humans are being talked to, which is how the Status line
+  // came to read "1 running" against an empty inflight-turn registry.
+  const chatsRunning = input.runningInteractive ?? input.running;
+  const chatsQueued = input.interactive + input.backlog;
+  const chores = Math.max(0, input.running - chatsRunning) + input.background;
+  const waiting = chatsQueued;
+  // Chores still light the pill — going quiet while the GPU decodes a
+  // one-shot is the regression the background counts were folded in to
+  // fix; they just never get to call themselves chats.
+  const active = input.running > 0 || chatsQueued > 0 || input.background > 0;
+  const parts: string[] = [];
+  if (chatsRunning > 0) {
+    parts.push(`${chatsRunning} ${chatsRunning === 1 ? 'chat' : 'chats'} running`);
+  }
+  if (chatsQueued > 0) {
+    parts.push(
+      chatsRunning > 0
+        ? `${chatsQueued} queued`
+        : `${chatsQueued} ${chatsQueued === 1 ? 'chat' : 'chats'} queued`,
+    );
+  }
+  if (parts.length === 0 && chores > 0) parts.push('No chats');
+  if (chores > 0) parts.push(`${chores} background ${chores === 1 ? 'job' : 'jobs'}`);
+  const idleStatus = parts.length > 0 ? parts.join(' · ') : 'Idle — waiting for a message';
   const queueRow = [
     input.running > 0 ? `${input.running} running` : null,
     input.interactive > 0 ? `${input.interactive} interactive` : null,

@@ -13,8 +13,9 @@ import type { ImageAttachment, ProviderName } from '../../providers/types.js';
  * `tools` IS honored (forwarded to the provider as external tools).
  *
  * The `model` field carries a selectable gezel or provider+model id:
- *   - `"gezel:<id-or-name>"` — a named gezel; persona and configured
- *     provider/model settings apply.
+ *   - `"gezel:<role>-<name>"` — the advertised gezel alias; persona and
+ *     configured provider/model settings apply. Persisted ids and bare names
+ *     remain accepted for compatibility.
  *   - `"<provider>:<model>"` — fully qualified, e.g. `"llama-cpp:qwen3-4b"`.
  *   - `"<provider>"` — bare provider; that provider chooses its default.
  * Other strings are handled by the route's gezel fallback policy.
@@ -213,13 +214,13 @@ const KNOWN_PROVIDERS: readonly ProviderName[] = [
  * embeddings still returns `404 model_not_found`).
  */
 /**
- * Detect a `gezel:<id-or-name>` model reference. Returns the bare ref
+ * Detect a `gezel:<reference>` model reference. Returns the bare ref
  * (everything after the colon) when present, `null` otherwise. Callers
  * route via {@link loadGezelTarget} when this matches; everything else
  * falls through to {@link resolveModelTarget}.
  *
  * Why this exists: a gezel encapsulates a persona + tools + a preferred
- * underlying model. `model: 'gezel:<id>'` lets callers (most notably
+ * underlying model. `model: 'gezel:<role>-<name>'` lets callers (most notably
  * the VS Code Language Model Chat Provider) route through the gezel
  * without needing to know which raw provider it currently uses.
  */

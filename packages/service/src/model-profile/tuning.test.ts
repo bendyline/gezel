@@ -564,6 +564,33 @@ describe('applyTuning — llama-cpp', () => {
     expect(target.chat_template_kwargs).toEqual({ reasoning_strength: 'low' });
   });
 
+  it('resolves the canonical thinking-deep profile as an opt-in effort override', () => {
+    const target: Record<string, unknown> = {};
+    const resolved = resolveTuning({
+      catalog: {
+        reasoning: {
+          enableThinking: true,
+          templateKwargs: { reasoning_effort: 'medium' },
+        },
+        profiles: {
+          'thinking-general': {
+            reasoning: { templateKwargs: { reasoning_effort: 'medium' } },
+          },
+          'thinking-deep': {
+            reasoning: { templateKwargs: { reasoning_effort: 'xhigh' } },
+          },
+        },
+      },
+      tuningProfileId: 'thinking-deep',
+    });
+    applyTuning(target, resolved, LLAMA_CPP_TUNING_MAP);
+    expect(resolved.resolvedTuningProfile).toBe('thinking-deep');
+    expect(target.chat_template_kwargs).toEqual({
+      enable_thinking: true,
+      reasoning_effort: 'xhigh',
+    });
+  });
+
   it('drops templateKwargs on cloud providers, which have no chat template to parameterize', () => {
     const target: Record<string, unknown> = {};
     applyTuning(

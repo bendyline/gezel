@@ -7,6 +7,7 @@ import {
   type CraftbookToolsetNeed,
   type CreateTaskRequest,
   DEFAULT_NIGHT_SHIFT_WINDOW,
+  GATE_MAX_PROGRESS_ATTEMPTS,
   type GateAttemptRecord,
   type GateScriptRef,
   type GezelConfig,
@@ -61,13 +62,18 @@ import type { HistoryManager } from '../history/manager.js';
 import type { ScriptRunner } from '../scripts/runner.js';
 import { nextCronFire, parseCron } from './cron.js';
 import {
+  type DeliverableSurface,
   type EscalationStage,
   appendGateAttempt,
   buildPlateauDiagnosisNote,
+  buildProgressExhaustionNote,
+  buildProgressPreamble,
   buildStageOneNudge,
   buildStageTwoNudge,
+  deliverableSurface,
   escalationDisabled,
   gateFailureSignature,
+  gateRemaining,
   plateauScore,
   stageForPlateau,
 } from './gate-escalation.js';
@@ -234,6 +240,33 @@ function craftbookParamDefaults(paramSchema: Craftbook['paramSchema']): Record<s
 }
 
 /**
+ * Resolve placeholders inside declared string defaults against explicit launch
+ * params plus the task's reserved runtime context. Only defaults are expanded:
+ * user-supplied values can legitimately contain `{{…}}` (inline templates,
+ * examples, source text) and must remain byte-for-byte authoritative.
+ *
+ * Defaults may reference other defaults, so resolve in a small bounded loop.
+ * Unknown or cyclic placeholders remain visible and are rejected later if they
+ * land in a gate path; they are never silently blanked.
+ */
+function resolveCraftbookParamDefaults(
+  defaults: Record<string, string>,
+  overrides: Record<string, string>,
+  runtime: Record<string, string>,
+): Record<string, string> {
+  let resolved = { ...defaults };
+  for (let pass = 0; pass < 8; pass += 1) {
+    const context = { ...resolved, ...overrides, ...runtime };
+    const next = Object.fromEntries(
+      Object.entries(resolved).map(([key, value]) => [key, interpolateContext(value, context)]),
+    );
+    if (Object.entries(next).every(([key, value]) => resolved[key] === value)) return next;
+    resolved = next;
+  }
+  return resolved;
+}
+
+/**
  * Substitute `{{ key }}` placeholders with per-child context values.
  * Plain string substitution only — no templating engine (mirrors the
  * `TaskVariation.context` contract). Unknown placeholders are left intact
@@ -249,15 +282,55 @@ function interpolateContext(text: string, context: Record<string, string>): stri
 }
 
 /**
+ * Recursive {@link interpolateContext} over a nested plain-data value —
+ * strings, arrays, and object values alike, returning fresh containers so
+ * nothing aliased is mutated in place.
+ *
+ * A gate buries its launch parameters well below its own top level:
+ * `scripts[].inputs.pattern`, `checks[].corpusDir`, `checks[].pattern`,
+ * `checks[].outlineFile`, `checks[].files[]`. Interpolating a hand-written
+ * list of fields missed every one of them, and the miss is invisible —
+ * an uninterpolated `{{number}}` reaches the regex engine as a literal
+ * and simply never matches. Pull Request Review's `scope` gate shipped
+ * `##\s*Scope\s*[—-]\s*PR\s*#{{number}}` to a reviewer who had written
+ * the note correctly; the only way past was to put the raw template token
+ * into the task's permanent audit trail. Walk the whole gate instead of
+ * naming fields, so a new check kind can never reintroduce this.
+ */
+function interpolateContextDeep<T>(value: T, context: Record<string, string>): T {
+  if (typeof value === 'string') return interpolateContext(value, context) as T;
+  if (Array.isArray(value)) {
+    return value.map((entry) => interpolateContextDeep(entry, context)) as T;
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        interpolateContextDeep(entry, context),
+      ]),
+    ) as T;
+  }
+  return value;
+}
+
+/**
  * Apply {@link interpolateContext} across the text-bearing fields of a
  * child craftbook's steps: name/description/prompt plus the file paths in
- * `advanceWhen` and every gate check. The step objects themselves are
- * fresh snapshot copies, but their NESTED `advanceWhen`/`gate` are still
- * aliased to the source book (`snapshotCraftbookForTask` shallow-spreads
- * each step) — so those are replaced copy-on-write, never mutated in
- * place, or the substitution would write through into the resolver's
- * template and leak one task's params into the next. Non-fatal by
- * construction — only string fields are touched.
+ * `advanceWhen`, every string inside the gate, and every string inside the
+ * `onEnter`/`onExit` script inputs. The step objects themselves are fresh
+ * snapshot copies, but their NESTED `advanceWhen`/`gate`/`onEnter` are still
+ * aliased to the source book (`snapshotCraftbookForTask` shallow-spreads each
+ * step) — so those are replaced copy-on-write, never mutated in place, or the
+ * substitution would write through into the resolver's template and leak one
+ * task's params into the next. Non-fatal by construction — only string fields
+ * are touched.
+ *
+ * Step-hook inputs matter as much as gate inputs: an `onEnter` script is how a
+ * step does deterministic work with no model turn, and its inputs address the
+ * same launch-param paths the prompt and gate do (`{{corpusScope}}`). Left out,
+ * the script receives the literal `{{corpusScope}}` and fails on a path that
+ * does not exist — which reads as a broken script rather than a missing
+ * substitution.
  */
 function interpolateStepsContext(
   steps: TaskCraftbookStep[],
@@ -280,18 +353,28 @@ function interpolateStepsContext(
         file: interpolateContext(step.advanceWhen.file, context),
       };
     }
-    const gate = step.gate as { checks?: Array<Record<string, unknown>> } | undefined;
-    if (gate?.checks?.some((check) => typeof check.file === 'string')) {
-      step.gate = {
-        ...gate,
-        checks: gate.checks.map((check) =>
-          typeof check.file === 'string'
-            ? { ...check, file: interpolateContext(check.file, context) }
-            : check,
-        ),
-      } as typeof step.gate;
-    }
+    if (step.gate) step.gate = interpolateContextDeep(step.gate, context);
+    if (step.onEnter) step.onEnter = interpolateContextDeep(step.onEnter, context);
+    if (step.onExit) step.onExit = interpolateContextDeep(step.onExit, context);
   }
+}
+
+/**
+ * The surface a step's gate rejection should speak to. Consults the gate
+ * itself, not `advanceWhen` alone: a step can carry a gate without ever
+ * declaring an `advanceWhen` deliverable, and reading only `advanceWhen`
+ * classified every one of those as 'workspace' — which is how a task-note
+ * script gate came to demand `replace_in_file`.
+ */
+function stepDeliverableSurface(
+  step: Pick<TaskCraftbookStep, 'advanceWhen' | 'gate'>,
+): DeliverableSurface {
+  const gate = step.gate ? normalizeStepGate(step.gate) : undefined;
+  return deliverableSurface({
+    advanceWhen: step.advanceWhen,
+    checks: gate?.checks as ReadonlyArray<Record<string, unknown>> | undefined,
+    scripts: gate?.scripts,
+  });
 }
 
 /**
@@ -308,6 +391,9 @@ function inlineStepsToCraftbook(
     plan?: string;
     defaultAssignee?: TaskAssignee;
     entryStepId?: string;
+    /** Requirements the children inherit — see the `mainBook.spawn` call site. */
+    toolsets?: CraftbookToolsetNeed[];
+    connectors?: CraftbookConnectorNeed[];
   },
 ): Craftbook {
   const resolved: CraftbookStep[] = expandStepDeliverables(steps);
@@ -320,6 +406,8 @@ function inlineStepsToCraftbook(
     ...(opts.description ? { description: opts.description } : {}),
     ...(opts.plan ? { plan: opts.plan } : {}),
     ...(opts.defaultAssignee ? { defaultAssignee: opts.defaultAssignee } : {}),
+    ...(opts.toolsets ? { toolsets: opts.toolsets } : {}),
+    ...(opts.connectors ? { connectors: opts.connectors } : {}),
     steps: resolved,
     entryStepId: entry,
     createdAt: now,
@@ -884,6 +972,15 @@ export class TaskManager {
         name: `${mainBook.name} — spawn template`,
         defaultAssignee: input.assignee,
         ...(mainBook.spawn.entryStepId ? { entryStepId: mainBook.spawn.entryStepId } : {}),
+        // Children of a declarative fanout do the parent book's work on a
+        // slice of it, so they need the parent's tool + connector
+        // requirements. `inlineStepsToCraftbook` carries neither, and the
+        // chat session's auto-allow derivation reads `craftbook.toolsets`
+        // off the task — so children of a PR-review fanout would come up
+        // without the GitHub/code-intelligence toolset their steps name.
+        // The host already proved these are installed and bound at launch.
+        ...(mainBook.toolsets ? { toolsets: mainBook.toolsets } : {}),
+        ...(mainBook.connectors ? { connectors: mainBook.connectors } : {}),
       });
     }
 
@@ -921,9 +1018,11 @@ export class TaskManager {
     // the snapshot is written, so gates and observable-progress see the
     // resolved paths. Unknown placeholders survive untouched; books
     // without `{{}}` are unaffected.
-    const effectiveCraftbookParams = {
-      ...craftbookParamDefaults(mainBook.paramSchema),
-      ...(input.craftbookParams ?? {}),
+    const declaredCraftbookDefaults = craftbookParamDefaults(mainBook.paramSchema);
+    const craftbookParamOverrides = { ...(input.craftbookParams ?? {}) };
+    let effectiveCraftbookParams = {
+      ...declaredCraftbookDefaults,
+      ...craftbookParamOverrides,
     };
     // Connector prep runs BEFORE interpolation, which is the whole reason
     // it lives at launch rather than at step activation: the corpus paths
@@ -957,13 +1056,35 @@ export class TaskManager {
           connectors: mainBook.connectors,
           params: effectiveCraftbookParams,
         });
-        Object.assign(effectiveCraftbookParams, prep.params ?? {});
+        Object.assign(craftbookParamOverrides, prep.params ?? {});
+        effectiveCraftbookParams = {
+          ...declaredCraftbookDefaults,
+          ...craftbookParamOverrides,
+        };
         connectorPrepNote = prep.note;
       }
     }
-    if (Object.keys(effectiveCraftbookParams).length > 0) {
-      interpolateStepsContext(craftbook.steps, effectiveCraftbookParams);
-    }
+    const runtimeCraftbookContext = {
+      'task.num': String(num),
+      'task.ref': buildTaskRef(projectId, num),
+      'task.projectId': projectId,
+    };
+    effectiveCraftbookParams = {
+      ...resolveCraftbookParamDefaults(
+        declaredCraftbookDefaults,
+        craftbookParamOverrides,
+        runtimeCraftbookContext,
+      ),
+      ...craftbookParamOverrides,
+    };
+    const craftbookInterpolationContext = {
+      ...effectiveCraftbookParams,
+      // Reserved runtime values win if a caller tries to spoof one as a
+      // craftbook param. They are interpolation context, not invocation
+      // params, so they are not persisted in `craftbookParams` below.
+      ...runtimeCraftbookContext,
+    };
+    interpolateStepsContext(craftbook.steps, craftbookInterpolationContext);
     // A previous run may have left the same deliverable path behind. An
     // existence-only observable gate would then advance this brand-new task
     // before its assignee changed anything. Preserve explicit author intent
@@ -983,6 +1104,24 @@ export class TaskManager {
       }),
     );
     const spawnsCraftbook = spawnBook ? snapshotCraftbookForTask(spawnBook, now) : undefined;
+    // The launch params have to reach the fanout half of the recipe too.
+    // `interpolateStepsContext` above walks the HOST's steps and stops
+    // there, so `spawn.overFile` and every child-template step kept their
+    // raw `{{…}}` — a fanout whose corpus lives at `…/pr-{{number}}/…`
+    // read a path that does not exist, found no items, and logged
+    // "skipping fanout" while the host advanced to its collect barrier
+    // with no children to wait for. Same class as the gate-interpolation
+    // miss above: interpolate the whole recipe, not the fields someone
+    // remembered. Done on the SNAPSHOTS (shallow-spread copies), never on
+    // `spawnBook`/`mainBook`, which may still be the resolver's cached
+    // template — writing through would leak one task's params into the
+    // next launch of the same craftbook.
+    if (spawnsCraftbook) {
+      interpolateStepsContext(spawnsCraftbook.steps, craftbookInterpolationContext);
+    }
+    if (craftbook.spawn) {
+      craftbook.spawn = interpolateContextDeep(craftbook.spawn, craftbookInterpolationContext);
+    }
     const activeStepId = craftbook.entryStepId;
     if (!isDraft) {
       // First activation of the entry step → attemptCount 1.
@@ -2471,6 +2610,10 @@ export class TaskManager {
         signatureHash: signature,
         messageFingerprint: step.lastGateReject.messageFingerprint,
         ...(lastEntry?.failedChecks ? { failedChecks: lastEntry.failedChecks } : {}),
+        // Byte-identical content ⇒ the same outstanding count. Carrying it
+        // keeps the next real rejection able to measure progress against
+        // this entry instead of losing the baseline to a frozen resubmit.
+        ...(lastEntry?.remaining !== undefined ? { remaining: lastEntry.remaining } : {}),
         frozen: true,
       };
       const newTrail = appendGateAttempt(trail, frozenEntry);
@@ -2577,9 +2720,7 @@ export class TaskManager {
         };
       }
 
-      const frozenSurface = step.advanceWhen?.artifact
-        ? ('artifact' as const)
-        : ('workspace' as const);
+      const frozenSurface = stepDeliverableSurface(step);
       const nudge =
         stage === 2 && deliverableFile
           ? buildStageTwoNudge({
@@ -2806,7 +2947,7 @@ export class TaskManager {
     // naming the real cause and the real fixes — instead of charging the
     // budget and then demanding `write_file` from a roster it was
     // stripped from.
-    const unsatFiles = await this.unsatisfiableWorkspaceGateFiles(projectId, gate, outcome);
+    const unsatFiles = await this.unsatisfiableWorkspaceGateFiles(projectId, step, gate, outcome);
     if (unsatFiles) {
       const fileList =
         unsatFiles.length > 0 ? unsatFiles.map((f) => `\`${f}\``).join(', ') : 'files';
@@ -2852,7 +2993,6 @@ export class TaskManager {
       };
     }
 
-    const attempt = priorAttempts + 1;
     const rawMessage = outcome.message ?? 'Gate rejected the step.';
     // Plateau scoring: same failing-check identity set as the trailing
     // attempts = no progress. Stage directives replace the raw verdict so
@@ -2862,9 +3002,37 @@ export class TaskManager {
     let stage: EscalationStage = modelDriven ? stageForPlateau(score) : 0;
     const deliverableFile = step.advanceWhen?.file;
     if (stage === 2 && !deliverableFile) stage = 1;
-    const rejectSurface = step.advanceWhen?.artifact
-      ? ('artifact' as const)
-      : ('workspace' as const);
+    const rejectSurface = stepDeliverableSurface(step);
+    const failedLabels = (outcome.checkResults ?? [])
+      .filter((c) => !c.ok)
+      .map((c) => c.label)
+      .slice(0, 8);
+    const rejectingScript = outcome.runs.find((r) => r.decision === 'reject' || r.error);
+    // Converging-loop rejection: the same checks fail, but on fewer
+    // outstanding items than last attempt. `signature` already carries the
+    // count so the ladder is at stage 0 here; this only replaces the
+    // silence with an explicit "keep going" the assignee can act on.
+    const remaining = gateRemaining(outcome.checkResults);
+    const previousAttempt = step.gateAttemptHistory?.at(-1);
+    const previousRemaining = previousAttempt?.remaining;
+    const sameFailures =
+      previousAttempt?.failedChecks !== undefined &&
+      [...previousAttempt.failedChecks].sort().join('\n') === [...failedLabels].sort().join('\n');
+    const converging =
+      stage === 0 &&
+      remaining !== undefined &&
+      previousRemaining !== undefined &&
+      sameFailures &&
+      remaining < previousRemaining;
+    // A converging pass spends the progress budget, not the stall budget.
+    // Charging both to `maxAttempts` turned it into a ceiling on corpus
+    // size: Pull Request Review's scan step burns one per 25-file batch,
+    // so a PR needing more batches than the budget could never finish no
+    // matter how well the reviewer worked.
+    const priorProgress = step.gateProgressAttempts ?? 0;
+    const progressAttempts = converging ? priorProgress + 1 : priorProgress;
+    const attempt = converging ? Math.max(priorAttempts, 1) : priorAttempts + 1;
+    const progressExhausted = progressAttempts >= GATE_MAX_PROGRESS_ATTEMPTS;
     const message =
       stage === 1
         ? buildStageOneNudge({
@@ -2880,20 +3048,18 @@ export class TaskManager {
               repeats: score,
               surface: rejectSurface,
             })
-          : rawMessage;
+          : converging
+            ? `${buildProgressPreamble({ previousRemaining: previousRemaining!, remaining: remaining! })}\n\n${rawMessage}`
+            : rawMessage;
     const fingerprint = gateMessageFingerprint(message);
     const now = nowIso();
-    const failedLabels = (outcome.checkResults ?? [])
-      .filter((c) => !c.ok)
-      .map((c) => c.label)
-      .slice(0, 8);
-    const rejectingScript = outcome.runs.find((r) => r.decision === 'reject' || r.error);
     const trailEntry: GateAttemptRecord = {
       at: now,
       attempt,
       ...(contentHash !== undefined ? { contentHash } : {}),
       signatureHash: signature,
       messageFingerprint: fingerprint,
+      ...(remaining !== undefined ? { remaining } : {}),
       ...(failedLabels.length > 0
         ? { failedChecks: failedLabels }
         : rejectingScript
@@ -2906,6 +3072,7 @@ export class TaskManager {
         ? {
             ...s,
             gateAttempts: attempt,
+            ...(progressAttempts > 0 ? { gateProgressAttempts: progressAttempts } : {}),
             gateAttemptHistory: newTrail,
             lastGateReject: {
               ...(contentHash !== undefined ? { contentHash } : {}),
@@ -2922,8 +3089,15 @@ export class TaskManager {
       updatedAt: now,
     };
     await this.store.writeTask(updated);
+    // A converging pass is the loop working, not a failure — heading the
+    // note "not yet met (attempt 2/6)" reads as a warning and pushed
+    // reviewers toward clearing the check rather than doing the next
+    // batch. Name it for what it is and count the passes, not the budget.
+    const noteHeading = converging
+      ? `# Gate — batch accepted, corpus incomplete (pass ${progressAttempts}/${GATE_MAX_PROGRESS_ATTEMPTS})`
+      : `# Gate — not yet met (attempt ${attempt}/${gate.maxAttempts})`;
     await this.appendNote(projectId, task.num, {
-      text: `# Gate — not yet met (attempt ${attempt}/${gate.maxAttempts})\n\n${message}\n\nAddress these specifically, then advance again — the gate re-checks automatically.`,
+      text: `${noteHeading}\n\n${message}\n\nAddress these specifically, then advance again — the gate re-checks automatically.`,
       author: { kind: 'user' },
       stepId: step.id,
     }).catch(() => {});
@@ -2932,8 +3106,14 @@ export class TaskManager {
         `[gate] ${task.ref} step "${step.id}": ${score} identical-signature rejections — escalating to stage ${stage}`,
       );
     }
+    if (converging) {
+      log.info(
+        `[gate] ${task.ref} step "${step.id}": converging — ${previousRemaining} → ${remaining} outstanding ` +
+          `(progress pass ${progressAttempts}/${GATE_MAX_PROGRESS_ATTEMPTS}, attempt budget untouched at ${attempt}/${gate.maxAttempts})`,
+      );
+    }
 
-    if (attempt >= gate.maxAttempts || stage === 3) {
+    if ((attempt >= gate.maxAttempts && !converging) || progressExhausted || stage === 3) {
       // Keurmeester escalation point: the gate budget is spent and the
       // pause-for-help is imminent. Consult first — an applied verdict
       // (corrective message, step/craftbook rewrite, or takeover) keeps
@@ -2954,7 +3134,13 @@ export class TaskManager {
             trigger: plateaued ? 'deliverable_plateau' : 'gate_exhausted',
             triggerSummary: plateaued
               ? `gate plateau: ${score} rejections with the identical failing-check signature; the task is about to pause for help`
-              : `completion gate rejected the deliverable ${attempt}/${gate.maxAttempts} times; the task is about to pause for help`,
+              : progressExhausted
+                ? // Converging but far too slowly to be worth more sessions —
+                  // a batch-size problem, not a stuck assignee, and the
+                  // summary has to say so or the verdict repairs the wrong
+                  // thing.
+                  `gate progress budget spent: ${progressAttempts} converging passes with ${remaining} item(s) still outstanding — the loop advances but too slowly to finish; the task is about to pause for help`
+                : `completion gate rejected the deliverable ${attempt}/${gate.maxAttempts} times; the task is about to pause for help`,
             projectId,
             taskNum: task.num,
             taskRef: task.ref,
@@ -3027,12 +3213,29 @@ export class TaskManager {
       }
       await this.setStatus(projectId, task.num, 'paused').catch(() => {});
       log.warn(
-        `[gate] ${task.ref} step "${step.id}" rejected ${attempt}× — pausing the task for help`,
+        progressExhausted
+          ? `[gate] ${task.ref} step "${step.id}" converged ${progressAttempts}× with ${remaining} still outstanding — progress budget spent, pausing the task for help`
+          : `[gate] ${task.ref} step "${step.id}" rejected ${attempt}× — pausing the task for help`,
       );
       // Pause WITH the investigation done: the trail note tells whoever
       // resumes (user or a stronger model) what was tried and what the
       // gate said each time, instead of a bare "paused" status.
-      if (newTrail.length >= 2) {
+      if (progressExhausted) {
+        // The plateau note would be a lie here — every pass DID move the
+        // gate. Say what actually went wrong so the resumer changes the
+        // batch size instead of hunting a defect in the deliverable.
+        await this.appendNote(projectId, task.num, {
+          text: buildProgressExhaustionNote({
+            stepName: step.name,
+            stepId: step.id,
+            passes: progressAttempts,
+            remaining: remaining ?? 0,
+            lastMessage: rawMessage,
+          }),
+          author: { kind: 'user' },
+          stepId: step.id,
+        }).catch(() => {});
+      } else if (newTrail.length >= 2) {
         await this.appendNote(projectId, task.num, {
           text: buildPlateauDiagnosisNote({
             stepName: step.name,
@@ -3056,7 +3259,9 @@ export class TaskManager {
         task,
         stepId: step.id,
         reason: stage === 3 && attempt < gate.maxAttempts ? 'gate_plateau' : 'gate_exhausted',
-        detail: `Gate rejected ${attempt}/${gate.maxAttempts}: ${rawMessage.split('\n')[0] ?? ''}`,
+        detail: progressExhausted
+          ? `Gate advanced on all ${progressAttempts} passes but ${remaining} item(s) remain — too slow to finish: ${rawMessage.split('\n')[0] ?? ''}`
+          : `Gate rejected ${attempt}/${gate.maxAttempts}: ${rawMessage.split('\n')[0] ?? ''}`,
       });
       return {
         kind: 'held',
@@ -3102,14 +3307,29 @@ export class TaskManager {
   }
 
   /**
-   * A rejected gate is unsatisfiable when a FAILING check reads the
-   * workspace tree while gezel workspace writes are off for the project
-   * (gate scripts always read the workspace, so a script rejection
-   * qualifies too). Returns the workspace files the failing checks name
-   * (possibly empty), or null when the gate is repairable. Drawer-only
-   * failures stay repairable — the artifacts drawer is deliberately
-   * exempt from the writes-off policy.
+   * True when EVERY one of `tasks` is parked on a step that owes a
+   * workspace file managed writes can't produce. Lets the ambient nudger
+   * tell a genuinely stuck writes-off project from one doing artifact-only
+   * work — the drawer is exempt from the writes-off policy, so a nightly
+   * report or a review still completes there and its voorman still wants
+   * the check-in.
+   *
+   * Conservative by construction: an empty list, a task with no active
+   * step, or any step whose deliverable is satisfiable all answer `false`.
+   * We only claim "blocked" on positive evidence for every task.
    */
+  async allActiveStepsBlockedByWorkspaceWrites(projectId: string, tasks: Task[]): Promise<boolean> {
+    if (tasks.length === 0) return false;
+    for (const task of tasks) {
+      const step = task.activeStepId
+        ? task.craftbook.steps.find((s) => s.id === task.activeStepId)
+        : undefined;
+      if (!step) return false;
+      if (!(await this.unsatisfiableStepWorkspaceFiles(projectId, step))) return false;
+    }
+    return true;
+  }
+
   /**
    * The workspace files a step must produce that no assignee is able to
    * write. The proactive twin of {@link unsatisfiableWorkspaceGateFiles}:
@@ -3187,8 +3407,25 @@ export class TaskManager {
     return true;
   }
 
+  /**
+   * A rejected gate is unsatisfiable when a FAILING check reads the
+   * workspace tree while gezel workspace writes are off for the project.
+   * Returns the workspace files the failing checks name (possibly empty),
+   * or null when the gate is repairable. Drawer-only failures stay
+   * repairable — the artifacts drawer is deliberately exempt from the
+   * writes-off policy.
+   *
+   * A gate SCRIPT names no file, so it is judged by what the step itself
+   * owes: unwinnable only when the step's own deliverable is a workspace
+   * file nobody can write. Counting every script rejection as a
+   * workspace-write failure misread the note-only gate on Pull Request
+   * Review's scope step — the note was written correctly and the real
+   * fault was elsewhere, but the task paused telling the user to enable
+   * workspace writes, which would have changed nothing.
+   */
   private async unsatisfiableWorkspaceGateFiles(
     projectId: string,
+    step: Pick<TaskCraftbookStep, 'advanceWhen' | 'gate'>,
     gate: NormalizedStepGate,
     outcome: StepGateOutcome,
   ): Promise<string[] | null> {
@@ -3202,9 +3439,11 @@ export class TaskManager {
     const failingWorkspace = (outcome.checkResults ?? []).filter(
       (o) => !o.ok && workspaceChecks.has(o.label),
     );
-    const scriptRejected = outcome.runs.some((r) => r.decision === 'reject');
-    if (failingWorkspace.length === 0 && !scriptRejected) return null;
-    return [...new Set(failingWorkspace.map((o) => o.file).filter((f): f is string => !!f))];
+    if (failingWorkspace.length > 0) {
+      return [...new Set(failingWorkspace.map((o) => o.file).filter((f): f is string => !!f))];
+    }
+    if (!outcome.runs.some((r) => r.decision === 'reject')) return null;
+    return await this.unsatisfiableStepWorkspaceFiles(projectId, step);
   }
 
   /**
@@ -3213,6 +3452,11 @@ export class TaskManager {
    * hook even when the target IS the gated step itself — `onReject:
    * <self>` deliberately produces a fresh activation + handoff session
    * each rejection (the loop shape that carries small models).
+   *
+   * A fresh SESSION is not a fresh BUDGET, though: when the route points
+   * back at the gated step, the rejection count has to survive the
+   * re-activation or `maxAttempts` is unreachable and the loop never
+   * escalates. See the self-loop carve-out in {@link bumpStepActivation}.
    */
   private async reactivateStepForGate(
     projectId: string,
@@ -3231,7 +3475,9 @@ export class TaskManager {
       ...task,
       craftbook: {
         ...task.craftbook,
-        steps: bumpStepActivation(task.craftbook.steps, targetId, now),
+        steps: bumpStepActivation(task.craftbook.steps, targetId, now, {
+          preserveGateBudget: targetId === gatedStep.id,
+        }),
         updatedAt: now,
       },
       activeStepId: targetId,
@@ -3757,6 +4003,7 @@ function bumpStepActivation(
   steps: TaskCraftbookStep[],
   stepId: string,
   at: string,
+  opts?: { preserveGateBudget?: boolean },
 ): TaskCraftbookStep[] {
   return steps.map((s) => {
     if (s.id !== stepId) return s;
@@ -3776,6 +4023,7 @@ function bumpStepActivation(
     const {
       completedAt: _done,
       gateAttempts: _ga,
+      gateProgressAttempts: _gpa,
       lastGateReject: _lgr,
       redriveCount: _rc,
       lastRedriveAt: _lra,
@@ -3783,10 +4031,34 @@ function bumpStepActivation(
     } = s;
     void _done;
     void _ga;
+    void _gpa;
     void _lgr;
     void _rc;
     void _lra;
-    return { ...rest, attemptCount: (s.attemptCount ?? 0) + 1, lastActivatedAt: at };
+    const bumped = { ...rest, attemptCount: (s.attemptCount ?? 0) + 1, lastActivatedAt: at };
+    if (!opts?.preserveGateBudget) return bumped;
+    // Self-loop carve-out. A gate with `onReject: <self>` re-activates the
+    // step it just rejected, so the reset above handed it a brand-new
+    // budget on every rejection and `maxAttempts` became unreachable —
+    // the pause-for-help that budget exists to trigger could never fire.
+    // Wild-caught on Pull Request Review: the step logged attemptCount 3
+    // while every trail entry (and every message the model saw) read
+    // "attempt 1/3", so nothing ever escalated and the loop could have run
+    // forever. Only a gate rejection routing back to ITSELF takes this
+    // branch; a loop through another step is real upstream rework and
+    // still earns a clean budget, as do create/manual activation and the
+    // deliberate `resetStepRecoveryBudget` second chance.
+    return {
+      ...bumped,
+      ...(s.gateAttempts !== undefined ? { gateAttempts: s.gateAttempts } : {}),
+      // Same reasoning for the progress budget: a self-loop that re-earned
+      // it every pass would make GATE_MAX_PROGRESS_ATTEMPTS unreachable,
+      // which is the exact bug this carve-out exists to prevent.
+      ...(s.gateProgressAttempts !== undefined
+        ? { gateProgressAttempts: s.gateProgressAttempts }
+        : {}),
+      ...(s.lastGateReject !== undefined ? { lastGateReject: s.lastGateReject } : {}),
+    };
   });
 }
 

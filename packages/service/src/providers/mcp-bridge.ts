@@ -75,6 +75,18 @@ export type McpServerSpec = StdioMcpServerSpec | HttpMcpServerSpec;
 
 export interface StdioMcpServerSpec {
   kind?: 'stdio';
+  /**
+   * Catalog toolset id this bridge speaks to, when it was spawned for an
+   * installed toolset. Wrappers select on this rather than sniffing the
+   * command line, because a managed system install spawns
+   * `node <home>/system-toolsets/@playwright__mcp@0.0.78/package/cli.js` —
+   * `installDirName` has slugified the `/` away, so the package name never
+   * appears in `command`/`args`. Sniffing there left every Playwright
+   * wrapper inert against the exact copy Gezel manages: the `file:`-URL
+   * rewrite never fired, and the local-preview posture advertised a browser
+   * surface nothing had pruned.
+   */
+  toolsetId?: string;
   command: string;
   args: string[];
   env: Record<string, string>;
@@ -84,6 +96,8 @@ export interface StdioMcpServerSpec {
 
 export interface HttpMcpServerSpec {
   kind: 'http';
+  /** Catalog toolset id — see {@link StdioMcpServerSpec.toolsetId}. */
+  toolsetId?: string;
   /**
    * `streamable-http` is the current MCP HTTP transport (one URL,
    * POST for messages, optional GET for SSE stream + auto-reconnect).

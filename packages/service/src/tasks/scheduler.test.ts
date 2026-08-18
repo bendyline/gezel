@@ -366,6 +366,12 @@ describe('TaskScheduler — ambient project nudges', () => {
       workingDir?: string;
       managedWorkspaceWritePolicy?: 'auto' | 'allow' | 'deny';
       withActiveTask?: boolean;
+      /**
+       * `advanceWhen` for the seeded active step. Drives the writes-off
+       * nudge gate: a workspace-file deliverable is unwinnable there, an
+       * `artifact: true` one is not.
+       */
+      activeStepDeliverable?: { file: string; artifact?: boolean };
     } = {},
   ): Promise<void> {
     // Ambient-nudge tests exercise cadence for work that already exists.
@@ -383,7 +389,14 @@ describe('TaskScheduler — ambient project nudges', () => {
         craftbook: {
           id: 'ambient-fixture',
           name: 'Ambient fixture',
-          steps: [{ id: 'main', name: 'Main', createdAt: seededAt }],
+          steps: [
+            {
+              id: 'main',
+              name: 'Main',
+              createdAt: seededAt,
+              ...(opts.activeStepDeliverable ? { advanceWhen: opts.activeStepDeliverable } : {}),
+            },
+          ],
           entryStepId: 'main',
           createdAt: seededAt,
           updatedAt: seededAt,
@@ -623,13 +636,14 @@ describe('TaskScheduler — ambient project nudges', () => {
     expect(chat.delivered).toHaveLength(1);
   });
 
-  it('skips Meester check-ins when the project explicitly disables gezel writes', async () => {
+  it('skips Meester check-ins when every active task owes an unwritable workspace file', async () => {
     const now = new Date('2026-05-01T12:00:00Z');
     await setupProject({
       voormanGezelId: 'leo',
       meesterGezelId: 'meester-1',
       updatedAt: new Date(now.getTime() - 10 * 60_000).toISOString(),
       managedWorkspaceWritePolicy: 'deny',
+      activeStepDeliverable: { file: 'src/report.md' },
     });
     const chat = fakeChat();
     const scheduler = new TaskScheduler({
@@ -644,7 +658,7 @@ describe('TaskScheduler — ambient project nudges', () => {
     expect(chat.delivered).toHaveLength(0);
   });
 
-  it('skips Meester check-ins when edits are off for an external project workspace', async () => {
+  it('skips Meester check-ins for an unwritable deliverable on an external workspace', async () => {
     const now = new Date('2026-05-01T12:00:00Z');
     await setupProject({
       voormanGezelId: 'leo',
@@ -652,6 +666,7 @@ describe('TaskScheduler — ambient project nudges', () => {
       updatedAt: new Date(now.getTime() - 10 * 60_000).toISOString(),
       workingDir: join(home, 'external-workspace'),
       managedWorkspaceWritePolicy: 'deny',
+      activeStepDeliverable: { file: 'src/report.md' },
     });
     const chat = fakeChat();
     const scheduler = new TaskScheduler({
@@ -664,6 +679,59 @@ describe('TaskScheduler — ambient project nudges', () => {
     await scheduler.tick();
 
     expect(chat.delivered).toHaveLength(0);
+  });
+
+  it('keeps Meester check-ins on a writes-off project doing artifact-only work', async () => {
+    // "Gezel file edits off" is not "nothing to do" — the artifacts
+    // drawer is exempt from the policy, so a nightly-report task still
+    // completes and its voorman still wants the check-in.
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setupProject({
+      voormanGezelId: 'leo',
+      meesterGezelId: 'meester-1',
+      updatedAt: new Date(now.getTime() - 10 * 60_000).toISOString(),
+      managedWorkspaceWritePolicy: 'deny',
+      activeStepDeliverable: { file: 'reports/nightly.md', artifact: true },
+    });
+    const chat = fakeChat();
+    const scheduler = new TaskScheduler({
+      manager: tasks,
+      chat: chat as unknown as ConstructorParameters<typeof TaskScheduler>[0]['chat'],
+      store,
+      now: () => now,
+    });
+
+    await scheduler.tick();
+
+    expect(chat.delivered).toHaveLength(1);
+  });
+
+  it('brings a writes-off project with no active tasks to rest instead of skipping', async () => {
+    // Regression: the writability gate used to sit above the at-rest
+    // self-heal, so a writes-off project whose tasks had all closed could
+    // never be stabilized and stayed `active` forever.
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setupProject({
+      voormanGezelId: 'leo',
+      meesterGezelId: 'meester-1',
+      updatedAt: new Date(now.getTime() - 10 * 60_000).toISOString(),
+      managedWorkspaceWritePolicy: 'deny',
+    });
+    const seeded = await tasks.getByRef('cron/900');
+    if (!seeded) throw new Error('expected the seeded ambient fixture task');
+    await store.writeTask({ ...seeded, status: 'complete' });
+    const chat = fakeChat();
+    const scheduler = new TaskScheduler({
+      manager: tasks,
+      chat: chat as unknown as ConstructorParameters<typeof TaskScheduler>[0]['chat'],
+      store,
+      now: () => now,
+    });
+
+    await scheduler.tick();
+
+    expect(chat.delivered).toHaveLength(0);
+    expect((await store.getProject('cron'))?.status).toBe('stable');
   });
 
   it('keeps Meester check-ins enabled for an explicitly writable external workspace', async () => {
@@ -1105,7 +1173,7 @@ describe('TaskScheduler — ambient project nudges', () => {
       await scheduler.tick();
       expect(chat.delivered).toHaveLength(0);
       expect(stdout.mock.calls.flat().join('')).not.toContain(
-        'skip — nudges disabled for this project',
+        'skip meester nudge — nudges disabled for this project',
       );
     } finally {
       stdout.mockRestore();

@@ -11,7 +11,34 @@ import type { MemoryManager } from './manager.js';
 
 const log = createLogger('memory');
 
-const EXTRACT_PROMPT = `You are a memory extraction system. Look at the conversation below and extract anything worth remembering for future conversations.
+/**
+ * The prompt's opening sentence, kept separate so the same string can be used
+ * to recognise a reply that is simply the prompt handed back.
+ */
+const EXTRACT_PROMPT_OPENER =
+  'You are a memory extraction system. Look at the conversation below and extract anything worth remembering for future conversations.';
+
+/**
+ * Few-shot examples, held as data rather than buried in the prompt prose so
+ * the identical list can reject them on the way back in.
+ *
+ * They are correctly-tagged memory lines, which is the point — and the trap.
+ * A model that echoes its instructions instead of answering (a weak local
+ * model, or any mock provider) hands these four back, they parse perfectly,
+ * and gezel's own documentation examples land in the user's memory as things
+ * their crew remembered. They then ride into later prompts as recalled
+ * context, so a project that never mentioned sqlite-vec is told it chose it.
+ * Wild-caught in unified search, where "Sessions are stored as JSON files
+ * under the data directory." came back four times over for an unrelated query.
+ */
+const EXTRACT_EXAMPLES = [
+  'PROJECT/FACT: Sessions are stored as JSON files under the data directory.',
+  'PROJECT/DECISION: Chose sqlite-vec over Vectra for the memory index.',
+  'GEZEL/PREF: The user prefers terse replies without emojis.',
+  'PROJECT/STATUS: The OpenAI API key is currently missing from config.',
+] as const;
+
+const EXTRACT_PROMPT = `${EXTRACT_PROMPT_OPENER}
 
 Every line of your reply must start with a tag in the form SCOPE/KIND: followed by one concise sentence.
 
@@ -26,10 +53,7 @@ KIND is one of:
 - STATUS — a temporary condition that is true right now.
 
 Examples:
-PROJECT/FACT: Sessions are stored as JSON files under the data directory.
-PROJECT/DECISION: Chose sqlite-vec over Vectra for the memory index.
-GEZEL/PREF: The user prefers terse replies without emojis.
-PROJECT/STATUS: The OpenAI API key is currently missing from config.
+${EXTRACT_EXAMPLES.join('\n')}
 
 Rules:
 - Extract ONLY genuinely useful information; skip greetings, small talk, and trivial exchanges.
@@ -83,6 +107,26 @@ export function parseExtractedLine(raw: string): TaggedMemory | null {
   }
 
   return { scope: 'project', kind: 'fact', text: line };
+}
+
+/** Normalized text of every few-shot example, for rejecting echoes of them. */
+const EXAMPLE_TEXTS: ReadonlySet<string> = new Set(
+  EXTRACT_EXAMPLES.map((line) => parseExtractedLine(line)?.text.trim().toLowerCase()).filter(
+    (t): t is string => typeof t === 'string' && t.length > 0,
+  ),
+);
+
+/**
+ * True when the reply is the prompt coming back rather than an answer.
+ *
+ * The untagged-line fallback treats any prose as a project fact, so an echoed
+ * prompt does not merely contribute its four examples — every heading and
+ * rule ("Examples:", "Rules:", "SCOPE is one of:") is stored as something the
+ * crew remembered. Recognising the echo wholesale is the only cheap way to
+ * reject all of it, and no genuine memory quotes the extractor's own opener.
+ */
+function looksLikePromptEcho(reply: string): boolean {
+  return reply.includes(EXTRACT_PROMPT_OPENER);
 }
 
 /**
@@ -163,11 +207,18 @@ export async function extractMemories(args: ExtractMemoriesArgs): Promise<void> 
   try {
     const content = (await oneShot(`${EXTRACT_PROMPT}${conversationText}`, 30_000)).trim();
     if (!content || content === 'NONE') return;
+    if (looksLikePromptEcho(content)) {
+      log.warn('[memory] extraction reply echoed the prompt; storing nothing for this turn');
+      return;
+    }
 
     const parsed = content
       .split('\n')
       .map(parseExtractedLine)
-      .filter((m): m is TaggedMemory => m !== null);
+      .filter((m): m is TaggedMemory => m !== null)
+      // A partial echo still hands back the examples verbatim. They parse
+      // cleanly, so nothing downstream would catch them.
+      .filter((m) => !EXAMPLE_TEXTS.has(m.text.trim().toLowerCase()));
     let saved = 0;
     let deduped = 0;
     for (const m of parsed) {

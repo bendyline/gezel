@@ -19,6 +19,7 @@ import { openAiErrorEnvelope } from './openai-compat/error-envelope.js';
 import { requireOpenAiEndpointsEnabled } from './openai-endpoints-gate.js';
 import { PreviewCapabilityStore } from './preview-capability.js';
 import { aiRoutes } from './routes/ai.js';
+import { ambientDashboardRoutes } from './routes/ambient-dashboard.js';
 import { askRoutes } from './routes/asks.js';
 import { audioRoutes } from './routes/audio.js';
 import { cacheRoutes } from './routes/cache.js';
@@ -61,10 +62,12 @@ import { nightShiftRoutes } from './routes/night-shift.js';
 import { oauthClientRoutes } from './routes/oauth-clients.js';
 import { ollamaCompatRoutes } from './routes/ollama-compat.js';
 import { ollamaRoutes } from './routes/ollama.js';
+import { opencodeSetupRoutes } from './routes/opencode-setup.js';
 import { pageCheckRoutes } from './routes/page-check.js';
 import { pageInvokeRoutes } from './routes/page-invoke.js';
 import { pageReadRoutes } from './routes/page-read.js';
 import { permissionRoutes } from './routes/permissions.js';
+import { piSetupRoutes } from './routes/pi-setup.js';
 import { previewCapabilityRoutes } from './routes/preview-capabilities.js';
 import { previewLogRoutes } from './routes/preview-log.js';
 import { previewRoutes } from './routes/preview.js';
@@ -85,6 +88,7 @@ import { scriptRoutes } from './routes/scripts.js';
 import { sdkTypesRoutes } from './routes/sdk-types.js';
 import { searchRoutes } from './routes/search.js';
 import { sessionRoutes } from './routes/sessions.js';
+import { storageRoutes } from './routes/storage.js';
 import { suggestedWorkRoutes } from './routes/suggested-work.js';
 import { systemToolsetRoutes } from './routes/system-toolsets.js';
 import { systemMemoryRoutes, systemRoutes } from './routes/system.js';
@@ -104,6 +108,7 @@ import { v1OpenApiRoutes } from './routes/v1-openapi.js';
 import { v1RemoteRoutes } from './routes/v1-remote.js';
 import { v1ResponsesRoutes } from './routes/v1-responses.js';
 import { videoGenRoutes } from './routes/video-gen.js';
+import { vscodeSetupRoutes } from './routes/vscode-setup.js';
 import {
   gezelScopeGuard,
   projectScopeGuard,
@@ -467,6 +472,12 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
       ...(llamaCppDetectedBackend ? { llamaCppDetectedBackend } : {}),
       ...(llamaCppDetectedVendor ? { llamaCppDetectedVendor } : {}),
       ...(llamaCppQuarantinedBackends.length > 0 ? { llamaCppQuarantinedBackends } : {}),
+      // Sent unconditionally, unlike the fields above: `false` is a verdict
+      // ("no ds4 build for this platform") the ds4 panel needs to tell apart
+      // from a daemon too old to report it. `discoverNativeBinaries` stamps
+      // this env var only when the binary is on disk, so its presence is the
+      // same fact the provider itself launches from.
+      ds4ServerBundled: Boolean(process.env.GEZEL_DS4_SERVER_BIN),
       // Boot probe rather than an env var: this one is a property of the
       // running process's own token, not something a supervisor could have
       // told us. `null` (non-Windows) is omitted, not sent as a value —
@@ -588,6 +599,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/document-media-export', documentMediaExportRoutes(ctx));
   app.route('/api/search', searchRoutes(ctx));
   app.route('/api/folders', folderRoutes(ctx));
+  app.route('/api/storage', storageRoutes(ctx));
   app.route('/api/models', modelsRoutes(ctx));
   // Remote model execution: A's paired-server admin surface (list/pair/unpair).
   app.route('/api/remotes', remotesRoutes(ctx));
@@ -619,9 +631,13 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/system', systemRoutes(ctx));
   app.route('/api/night-shift', nightShiftRoutes(ctx));
   app.route('/api/meester-status', meesterStatusRoutes(ctx));
+  app.route('/api/ambient-dashboard', ambientDashboardRoutes(ctx));
   app.route('/api/system-toolsets', systemToolsetRoutes(ctx));
   app.route('/api/gilde-updates', gildeUpdateRoutes(ctx));
   app.route('/api/codex-setup', codexSetupRoutes(ctx));
+  app.route('/api/opencode-setup', opencodeSetupRoutes(ctx));
+  app.route('/api/pi-setup', piSetupRoutes(ctx));
+  app.route('/api/vscode-setup', vscodeSetupRoutes(ctx));
   app.route('/api/history', historyRoutes(ctx));
   app.route('/api/handboek', handboekRoutes(ctx));
   app.route('/api/channels', channelRoutes(ctx));
@@ -668,7 +684,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.use('/v1/chat/*', openaiEndpointsGate);
   app.use('/v1/chat/*', bearerAuth(ctx.tokenStore));
   app.use('/v1/chat/*', requireScope('openai'));
-  app.route('/v1/chat', v1ChatRoutes(ctx));
+  // A connected app that supplies Gezel's stable conversation header gets a
+  // read-only transcript mirror under the selected gezel. Requests without the
+  // header remain the ordinary stateless inference surface.
+  app.route('/v1/chat', v1ChatRoutes(ctx, { externalConversation: { sourceFromAuth: true } }));
 
   // Codex custom model providers use the Responses wire protocol. Keep this
   // on the authenticated per-user listener: the response facade is inference

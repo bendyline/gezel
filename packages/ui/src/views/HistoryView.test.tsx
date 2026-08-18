@@ -109,19 +109,82 @@ describe('HistoryView', () => {
     });
   });
 
-  it('selecting an entry renders its raw JSON in the detail pane', async () => {
-    const evt = makeEvent({ id: 'e-99', summary: 'Renamed Maya to Mai' });
+  it('renders event details as labeled, readable fields instead of JSON', async () => {
+    const evt = makeEvent({
+      id: 'e-99',
+      kind: 'gezel.renamed',
+      summary: 'Renamed Maya to Mai',
+      details: {
+        oldName: 'Maya',
+        newName: 'Mai',
+        changed: ['name', 'description'],
+        patch: { reasoningEffort: 'high', sandboxCopilot: true },
+      },
+    });
     vi.mocked(api.listHistory).mockResolvedValue({ entries: [evt] });
     render(<HistoryView />);
 
     const row = await screen.findByRole('button', { name: /Renamed Maya to Mai/ });
     fireEvent.click(row);
 
-    // The detail pane is a <pre> with the JSON-stringified entry.
-    const pre = await screen.findByText(
-      (content, node) => node?.tagName === 'PRE' && content.includes('Renamed Maya to Mai'),
-    );
-    expect(pre.textContent).toContain('"id": "e-99"');
+    const detail = screen.getByRole('article');
+    expect(within(detail).getByRole('heading', { name: 'Renamed Maya to Mai' })).toBeVisible();
+    expect(within(detail).getByText('Previous name')).toBeVisible();
+    expect(within(detail).getAllByText('Maya').length).toBeGreaterThan(0);
+    expect(within(detail).getByText('Reasoning effort')).toBeVisible();
+    expect(within(detail).getByText('Yes')).toBeVisible();
+    expect(within(detail).getByText('Record reference')).toBeVisible();
+    expect(within(detail).getByText('e-99')).toBeVisible();
+    expect(within(detail).queryByText('"entryType"')).not.toBeInTheDocument();
+    expect(detail.querySelector('pre')).toBeNull();
+  });
+
+  it('renders chat thread timing and model information in conversation sections', async () => {
+    vi.mocked(api.listHistory).mockResolvedValue({
+      entries: [
+        makeSession({
+          id: 'sess-readable',
+          title: 'Plan the autumn catalog',
+          createdAt: '2026-08-17T19:00:00.000Z',
+          lastActivityAt: '2026-08-17T19:05:32.000Z',
+          durationMs: 332_000,
+          messageCount: 4,
+          providerName: 'mlx',
+          model: 'qwen3.6-27b-q8',
+        }),
+      ],
+    });
+    render(<HistoryView />);
+
+    const detail = await screen.findByRole('article');
+    expect(within(detail).getByRole('heading', { name: 'Plan the autumn catalog' })).toBeVisible();
+    expect(within(detail).getByText('5 minutes 32 seconds')).toBeVisible();
+    expect(within(detail).getByText('MLX')).toBeVisible();
+    expect(within(detail).getByText('qwen3.6-27b-q8')).toBeVisible();
+    expect(detail.querySelector('pre')).toBeNull();
+  });
+
+  it('keeps recorded diffs in a dedicated changes section', async () => {
+    vi.mocked(api.listHistory).mockResolvedValue({
+      entries: [
+        makeEvent({
+          kind: 'tool.called',
+          summary: 'Tool apply_patch ran',
+          details: {
+            tool: 'apply_patch',
+            diff: '@@ -1 +1 @@\n-old\n+new',
+            addedLines: 1,
+            removedLines: 1,
+          },
+        }),
+      ],
+    });
+    render(<HistoryView />);
+
+    const detail = await screen.findByRole('article');
+    expect(within(detail).getByRole('heading', { name: 'Changes' })).toBeVisible();
+    expect(within(detail).getByRole('button', { name: /Show diff \(\+1 −1\)/ })).toBeVisible();
+    expect(within(detail).queryByText('Diff')).not.toBeInTheDocument();
   });
 
   it('typing in the search box and clicking Refresh re-queries with q', async () => {

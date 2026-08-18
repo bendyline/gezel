@@ -59,6 +59,34 @@ describe('Store.ensureDefaultMeester', () => {
     expect((await store.listGezels()).length).toBe(2);
   });
 
+  /**
+   * The roster is sorted by name, so taking the first entry crowned whoever
+   * sorted earliest regardless of what they do — wild-caught as a Klerk named
+   * Ilse wearing the badge while a real Meester named Ulrike sat below her.
+   * The badge is the lesser half: a Meester's abilities live in its curated
+   * about.md, which a Klerk does not have.
+   */
+  it('prefers a gezel whose role is Meester over an earlier-sorting one', async () => {
+    const ada = await store.createGezel({ name: 'Ada', role: 'Klerk' });
+    const zoe = await store.createGezel({ name: 'Zoe', role: 'Meester' });
+
+    await store.ensureDefaultMeester();
+
+    const config = await store.readConfig();
+    expect(config.meesterGezelId).toBe(zoe.id);
+    expect(config.meesterGezelId).not.toBe(ada.id);
+  });
+
+  it('re-designates a stale pointer to the real Meester, not the first name', async () => {
+    await store.createGezel({ name: 'Ada', role: 'Klerk' });
+    const zoe = await store.createGezel({ name: 'Zoe', role: 'Meester' });
+    await store.writeConfig({ meesterGezelId: 'ghost' });
+
+    await store.ensureDefaultMeester();
+
+    expect((await store.readConfig()).meesterGezelId).toBe(zoe.id);
+  });
+
   it('re-designates when meesterGezelId points at a deleted gezel', async () => {
     await store.createGezel({ name: 'Ada', role: 'Developer' });
     await store.createGezel({ name: 'Boz', role: 'Writer' });

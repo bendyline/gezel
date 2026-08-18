@@ -41,8 +41,11 @@ import {
 } from '../../craftbook/applicable.js';
 import { writeFileAtomic } from '../../fs/atomic.js';
 import {
+  ArtifactPathExistsError,
+  ArtifactPathNotFoundError,
   ConnectorCorpusWriteDeniedError,
   ShadowPathWriteDeniedError,
+  normalizeArtifactPath,
 } from '../../fs/project-artifacts-store.js';
 import {
   PathSafetyError,
@@ -62,6 +65,7 @@ import {
 } from '../../packages/toolset-import-hook.js';
 import { applyProjectType } from '../../project-type/apply.js';
 import { TypedProjectCreateError, createTypedProject } from '../../project-type/create.js';
+import { detectAndPersistProjectType } from '../../project-type/detect.js';
 import { importGzlBundle, packProjectTypeBundle } from '../../project-type/gzl.js';
 import { readCommandApprovals } from '../../workspace/command-approvals.js';
 import { deriveWorkspaceFile } from '../../workspace/derive.js';
@@ -150,8 +154,17 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         name: ensured.createdGezel.name,
       });
     }
-    // Re-read so the response carries the freshly-set voormanGezelId; the
-    // UI selects the project from this payload and opens Chat on the lead.
+    // Classify a folder-backed project up front, off a bounded static scan of
+    // the directory. The index tick would get here eventually, but not for the
+    // first session: opening a folder and immediately asking "what should I
+    // build?" is exactly when the craftbook shortlist and the gezel-role
+    // suggestions need to know whether this is code, prose, data, or assets.
+    if (body.workingDir) {
+      await detectAndPersistProjectType({ store: ctx.store }, created.id);
+    }
+    // Re-read so the response carries the freshly-set voormanGezelId and
+    // detected type; the UI selects the project from this payload and opens
+    // Chat on the lead.
     const project = (await ctx.store.getProject(created.id)) ?? created;
     // Announce the new project on the project + global SSE streams so
     // always-mounted surfaces (the left sidebar PROJECTS list) fold it
@@ -640,9 +653,17 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   });
 
   // Workspace file/dir paths matching a prefix — backs the terminal's
-  // file-path autocomplete.
+  // file-path autocomplete. With `detail=1`, returns the complete flat file
+  // list from the last static scan (`{path, size, mtimeMs}` per file) —
+  // backs the UI's flat "by last modified" workspace view. Empty for
+  // never-indexed/disabled projects; callers read `/index/status` to tell
+  // those states apart.
   app.get('/:id/index/files', async (c) => {
     const id = c.req.param('id');
+    if (c.req.query('detail') === '1') {
+      const files = await ctx.workspaceIndex.readFiles(id);
+      return c.json({ files, total: files.length });
+    }
     const prefix = c.req.query('prefix') ?? '';
     const paths = await ctx.workspaceIndex.searchWorkspaceFiles(id, prefix);
     return c.json({ paths });
@@ -858,7 +879,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         : request.kind === 'workspace'
           ? await ctx.store.projectWorkspaceDir(id)
           : ctx.store.documentsDir();
-    const joined = safeJoin(base, request.path);
+    const joined = safeJoin(base, referenceRelativePath(request));
     if (!joined || !(await realpathContained(base, joined))) {
       return c.json({ error: 'path traversal' }, 400);
     }
@@ -884,7 +905,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         : request.kind === 'workspace'
           ? await ctx.store.projectWorkspaceDir(id)
           : ctx.store.documentsDir();
-    const joined = safeJoin(base, request.path);
+    const joined = safeJoin(base, referenceRelativePath(request));
     if (!joined || !(await realpathContained(base, joined))) {
       return c.json({ error: 'path traversal' }, 400);
     }
@@ -917,11 +938,23 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     const subpath = c.req.query('path') ?? '';
     const recursive = c.req.query('recursive') === '1';
+    // `stats=1` opts into per-file mtimes; only meaningful with `recursive=1`
+    // (the shallow listing has no stats path).
+    const withStats = c.req.query('stats') === '1';
+    // `hidden=1` is the file panel's "show hidden files" toggle: dotfiles plus
+    // the reserved shadow/ cache.
+    const includeHidden = c.req.query('hidden') === '1';
     if (recursive) {
-      const detailed = await ctx.store.listProjectArtifactsRecursiveDetailed(id);
+      const detailed = await ctx.store.listProjectArtifactsRecursiveDetailed(id, {
+        ...(withStats ? { withStats: true } : {}),
+        ...(includeHidden ? { includeHidden: true } : {}),
+        ...(subpath ? { subpath } : {}),
+      });
       return c.json({ files: detailed.entries, truncated: detailed.truncated });
     }
-    return c.json({ files: await ctx.store.listProjectArtifacts(id, subpath) });
+    return c.json({
+      files: await ctx.store.listProjectArtifacts(id, subpath, { includeHidden }),
+    });
   });
 
   app.get('/:id/artifacts/read', async (c) => {
@@ -929,11 +962,15 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const filePath = c.req.query('path');
     if (!filePath) return c.json({ error: 'missing ?path=' }, 400);
     if (c.req.query('raw') === '1') {
-      return serveRawFile(c, ctx.store.projectArtifactsDir(id), filePath);
+      return serveRawFile(c, ctx.store.projectArtifactsDir(id), normalizeArtifactPath(filePath));
     }
     const content = await ctx.store.readProjectArtifact(id, filePath);
     if (content === null) return c.json({ error: 'not found' }, 404);
-    return c.json({ path: filePath, content });
+    // Byte size rides along so a viewer that cannot preview the content
+    // (binaries) can still say how big the file is. The decoded string's
+    // length does not answer that — UTF-8 replacement chars destroy it.
+    const size = await ctx.store.projectArtifactSize(id, filePath);
+    return c.json({ path: filePath, content, ...(size === null ? {} : { size }) });
   });
 
   app.get('/:id/artifacts/resolve', async (c) => {
@@ -1073,6 +1110,36 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (!filePath) return c.json({ error: 'missing ?path=' }, 400);
     await ctx.store.deleteProjectArtifact(id, filePath);
     return c.json({ ok: true });
+  });
+
+  app.post('/:id/artifacts/mkdir', async (c) => {
+    const id = c.req.param('id');
+    const body = (await c.req.json()) as { path?: string };
+    if (!body.path) return c.json({ error: 'missing path' }, 400);
+    try {
+      const path = await ctx.store.createProjectArtifactFolder(id, body.path);
+      return c.json({ ok: true, path });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  app.post('/:id/artifacts/rename', async (c) => {
+    const id = c.req.param('id');
+    const body = (await c.req.json()) as { fromPath?: string; toPath?: string };
+    if (!body.fromPath || !body.toPath) return c.json({ error: 'missing fromPath / toPath' }, 400);
+    try {
+      const moved = await ctx.store.renameProjectArtifactPath(id, body.fromPath, body.toPath);
+      return c.json({ ok: true, ...moved });
+    } catch (err) {
+      const status =
+        err instanceof ArtifactPathNotFoundError
+          ? 404
+          : err instanceof ArtifactPathExistsError
+            ? 409
+            : 400;
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, status);
+    }
   });
 
   // ── run a user-authored Playwright script against Chromium ──
@@ -1306,12 +1373,25 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     const subpath = c.req.query('path') ?? '';
     const recursive = c.req.query('recursive') === '1';
+    // `stats=1` opts into per-file mtimes; only meaningful with `recursive=1`
+    // (the shallow listing has no stats path).
+    const withStats = c.req.query('stats') === '1';
+    // `hidden=1` is the file panel's "show hidden files" toggle: dotfiles plus
+    // the vendor directories (node_modules and friends), which are listed but
+    // still never walked into.
+    const includeHidden = c.req.query('hidden') === '1';
     try {
       if (recursive) {
-        const detailed = await ctx.store.listProjectWorkspaceRecursiveDetailed(id);
+        const detailed = await ctx.store.listProjectWorkspaceRecursiveDetailed(id, {
+          ...(withStats ? { withStats: true } : {}),
+          ...(includeHidden ? { includeHidden: true } : {}),
+          ...(subpath ? { subpath } : {}),
+        });
         return c.json({ files: detailed.entries, truncated: detailed.truncated });
       }
-      return c.json({ files: await ctx.store.listProjectWorkspace(id, subpath) });
+      return c.json({
+        files: await ctx.store.listProjectWorkspace(id, subpath, { includeHidden }),
+      });
     } catch (err) {
       const mapped = mapWorkspaceError(err);
       return c.json(mapped.body, mapped.status as 400 | 403 | 500);
@@ -1329,7 +1409,15 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       }
       const content = await ctx.store.readProjectWorkspaceFile(id, filePath);
       if (content === null) return c.json({ error: 'not found' }, 404);
-      return c.json({ path: filePath, content });
+      // Byte size rides along so a viewer that cannot preview the content
+      // (binaries) can still say how big the file is. The decoded string's
+      // length does not answer that — UTF-8 replacement chars destroy it.
+      const info = await ctx.store.statProjectWorkspacePath(id, filePath);
+      return c.json({
+        path: filePath,
+        content,
+        ...(info.kind === 'file' && info.size !== undefined ? { size: info.size } : {}),
+      });
     } catch (err) {
       const mapped = mapWorkspaceError(err);
       return c.json(mapped.body, mapped.status as 400 | 403 | 500);
@@ -2299,6 +2387,18 @@ function playwrightTestConfigSource(scriptAbs: string): string {
     '};',
     '',
   ].join('\n');
+}
+
+/**
+ * Artifact references routinely arrive with the drawer prefix already on
+ * them (`artifacts/data/…`) — craftbook corpus scopes are authored that way
+ * and the model writes the path straight back. Store reads strip it; these
+ * reference routes join the path themselves, so without this a file plainly
+ * on disk resolves to `artifacts/artifacts/…` and 404s. Workspace and
+ * document paths are left alone: a workspace may own an `artifacts/` folder.
+ */
+function referenceRelativePath(request: { kind: string; path: string }): string {
+  return request.kind === 'artifact' ? normalizeArtifactPath(request.path) : request.path;
 }
 
 async function serveRawFile(c: import('hono').Context, base: string, filePath: string) {

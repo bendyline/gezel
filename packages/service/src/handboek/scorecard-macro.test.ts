@@ -1,6 +1,6 @@
 import { type ScorecardDataset, ScorecardDatasetSchema } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { renderScorecardMarkdown } from './macros.js';
+import { breakModelLabel, renderScorecardMarkdown } from './macros.js';
 
 function dataset(
   over: {
@@ -157,5 +157,64 @@ describe('::handboek-model-scorecard', () => {
     expect(renderScorecardMarkdown(dataset(), 'core', { includeTaskCount: false })).not.toContain(
       'Tasks in this set',
     );
+  });
+
+  it('leaves model ids whole when nothing will render the break', () => {
+    const md = renderScorecardMarkdown(
+      dataset({
+        results: [
+          {
+            modelId: 'qwen',
+            label: 'qwen3.6-35b-a3b-q4',
+            engine: 'llama-cpp',
+            tier: 'medium',
+            runId: 'r2',
+            suiteId: 'core',
+            cells: [{ scenarioId: 'tictactoe', trials: 3, successes: 3, nonModelFailures: 0 }],
+          },
+        ],
+      }),
+      'core',
+      { includeTaskCount: true },
+    );
+    expect(md).toContain('| qwen3.6-35b-a3b-q4 |');
+    expect(md).not.toContain('<br>');
+  });
+
+  it('breaks a model id before its size so the column stays narrow', () => {
+    const md = renderScorecardMarkdown(
+      dataset({
+        results: [
+          {
+            modelId: 'qwen',
+            label: 'qwen3.6-35b-a3b-q4',
+            engine: 'llama-cpp',
+            tier: 'medium',
+            runId: 'r2',
+            suiteId: 'core',
+            cells: [{ scenarioId: 'tictactoe', trials: 3, successes: 3, nonModelFailures: 0 }],
+          },
+        ],
+      }),
+      'core',
+      { includeTaskCount: true, breakLabels: true },
+    );
+    expect(md).toContain('| qwen3.6-<br>35b-a3b-q4 |');
+  });
+});
+
+describe('breakModelLabel', () => {
+  it('breaks before the size segment, not at the first hyphen', () => {
+    expect(breakModelLabel('nemotron3.5-lightning-30b-q4')).toBe(
+      'nemotron3.5-lightning-<br>30b-q4',
+    );
+    expect(breakModelLabel('muse-glimmer-30b-q4')).toBe('muse-glimmer-<br>30b-q4');
+    expect(breakModelLabel('talkie-1930-13b-q4')).toBe('talkie-1930-<br>13b-q4');
+  });
+
+  it('leaves a label with no size segment alone', () => {
+    expect(breakModelLabel('Big 27B')).toBe('Big 27B');
+    expect(breakModelLabel('gpt-5')).toBe('gpt-5');
+    expect(breakModelLabel('claude-sonnet')).toBe('claude-sonnet');
   });
 });

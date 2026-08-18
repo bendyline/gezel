@@ -16,16 +16,17 @@ import {
 } from '../model-inventory.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { HuggingFaceRepoLink, huggingFaceRepoUrl } from './HuggingFaceRepoLink.js';
 import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { LicenseButton } from './LicenseButton.js';
 import { ImportModelBundleButton } from './ModelBundleControls.js';
 import { ModelActionsMenu, ModelContextSliderPanel } from './ModelContextControls.js';
-import { RecommendedBadge } from './RecommendedBadge.js';
+import { ModelSizeCell } from './ModelSizeCell.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { UnrecognizedModels } from './UnrecognizedModels.js';
 import { mlxFitsMemoryBudget } from './mlx-model-fit.js';
 import { formatContextWindow } from './model-context.js';
-import { formatBytes, modelMemoryHeadline, modelSizeTitle } from './model-memory-copy.js';
+import { formatBytes } from './model-memory-copy.js';
 import { approximateQuantizationLabel, quantizationTitle } from './model-quantization.js';
 
 interface MemoryProfile {
@@ -477,20 +478,6 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
     [unrecognized],
   );
 
-  // Map catalog-item id → current catalog manifest version. Used below
-  // to flag installed models whose on-disk manifest was written
-  // against an older catalog entry (upstream repo was swapped, file
-  // list changed, sha256s rotated). Without this, a stale install
-  // silently points at weights the catalog no longer describes and
-  // the failure mode is confusing — usually `mlx_vlm.server` trying
-  // to fetch a file from Hugging Face that the new build has but
-  // the old install is missing.
-  const catalogVersionById = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const item of catalogItems) map.set(item.manifest.id, item.manifest.version);
-    return map;
-  }, [catalogItems]);
-
   const availableCategories = useMemo<CategoryTab[]>(() => {
     const present = new Set<ChatModelCategory>();
     for (const item of catalogItems) {
@@ -617,10 +604,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                 </thead>
                 <tbody>
                   {models.map((m) => {
-                    const latest = catalogVersionById.get(m.id);
-                    const outOfDate = Boolean(
-                      latest && m.catalogVersion && m.catalogVersion !== latest,
-                    );
+                    const outOfDate = m.updateAvailable === true;
                     const reinstalling = Boolean(installs.get(m.id));
                     const fitnessKey = `mlx:${m.id}`;
                     const entry = fitness.get(fitnessKey);
@@ -646,7 +630,10 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                                 {outOfDate && (
                                   <span
                                     className="home-status-pill home-status-warn"
-                                    title={`Downloaded from catalog v${m.catalogVersion}; current catalog is v${latest}. The upstream repo or file list has changed — download it again to pick up the new version.`}
+                                    title={
+                                      m.updateReason ??
+                                      'The catalog ships different model files than the copy on disk. Update to pick them up.'
+                                    }
                                   >
                                     out of date
                                   </span>
@@ -654,14 +641,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                               </div>
                             </div>
                           </td>
-                          <td title={modelSizeTitle(m)}>
-                            {formatBytes(m.approxSizeBytes)}
-                            {modelMemoryHeadline(m) ? (
-                              <span className="muted small model-memory-headline">
-                                {modelMemoryHeadline(m)}
-                              </span>
-                            ) : null}
-                          </td>
+                          <ModelSizeCell model={m} />
                           <td title={quantizationTitle(m.quantization)}>
                             {approximateQuantizationLabel(m.quantization)}
                           </td>
@@ -849,7 +829,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
               <div className="catalog-ollama-action">
                 <div className="catalog-ollama-meta">
                   <div className="catalog-ollama-specs muted small">
-                    <code>{m.mlx.huggingfaceRepo}</code>
+                    <HuggingFaceRepoLink repo={m.mlx.huggingfaceRepo} />
                     <span>·</span>
                     <span>{m.parameterSize}</span>
                     <span>·</span>
@@ -862,8 +842,10 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                     )}
                   </div>
                   <div className="catalog-ollama-pills">
-                    <LicenseButton manifest={m} />
-                    <RecommendedBadge manifest={m} />
+                    <LicenseButton
+                      manifest={m}
+                      fallbackHref={huggingFaceRepoUrl(m.mlx.huggingfaceRepo)}
+                    />
                     {tight && (
                       <span
                         className="home-status-pill home-status-warn"

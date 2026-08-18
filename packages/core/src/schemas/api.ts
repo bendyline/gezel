@@ -1,5 +1,12 @@
 import { z } from 'zod';
 import { PoppetjeSchema } from '../poppetje/schema.js';
+import { ProjectIconIdSchema } from '../project-icons.js';
+import {
+  AmbientDashboardDisplayTargetSchema,
+  AmbientDashboardResolutionSchema,
+  AmbientDashboardStyleSchema,
+  AmbientDashboardThemeSchema,
+} from './ambient-dashboard.js';
 import {
   type GitAbandonMergeResponse,
   GitAbandonMergeResponseSchema,
@@ -120,13 +127,14 @@ import {
   ProjectDetailSchema,
   ProjectGitHubSchema,
   ProjectManagedWorkspaceWritePolicySchema,
+  ProjectModeSchema,
   ProjectNudgeConfigSchema,
   ProjectSchema,
   ProjectTabVisibilitySchema,
 } from './project.js';
 import { NpmInstallApprovalDecisionSchema, QuestionSchema } from './question.js';
 import { RecognitionModeSchema } from './recognition.js';
-import { ExpectedDeliverableSchema } from './session.js';
+import { ExpectedDeliverableSchema, ExternalRequestDiagnosticsSchema } from './session.js';
 import { TaskRefSchema } from './task.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
 
@@ -203,6 +211,28 @@ export const HealthResponseSchema = z.object({
    * offending binary is replaced (see `llama-quarantine.ts`).
    */
   llamaCppQuarantinedBackends: z.array(z.enum(['cuda', 'vulkan', 'metal', 'cpu'])).optional(),
+  /**
+   * Whether a `ds4-server` binary resolved for this host — the honest answer
+   * to "can DwarfStar run here", since it ships exactly one build per
+   * supported platform (Metal on darwin-arm64, CUDA on linux-x64/arm64,
+   * nothing on darwin-x64 or win32) and `discoverNativeBinaries` only stamps
+   * `GEZEL_DS4_SERVER_BIN` when that build is actually on disk. An operator
+   * pointing the env var at their own build counts too, which is correct: it
+   * still means a ds4 engine exists on this machine.
+   *
+   * Reported because the client had no way to ask. The ds4 Settings panel
+   * classified the device from `navigator.platform` alone, so **every** Linux
+   * machine — DGX Spark included — read "requires NVIDIA / CUDA" while the
+   * llama.cpp tab beside it correctly reported `cuda` from a real probe.
+   *
+   * Deliberately sent as an explicit `false` rather than omitted when absent:
+   * the client must tell "no ds4 build for this host" (a verdict) apart from
+   * "this daemon predates the field" (unknown), and those collapse into one
+   * if falsy values are dropped. Pair it with `llamaCppDetectedBackend` /
+   * `llamaCppDetectedVendor` on Linux — the binary proves the build exists,
+   * the probe proves the NVIDIA driver does.
+   */
+  ds4ServerBundled: z.boolean().optional(),
   /**
    * Whether the daemon may create child processes, probed once at boot.
    *
@@ -1102,6 +1132,12 @@ export const GezelConfigSchema = z.object({
    */
   meesterGezelId: z.string().optional(),
   /**
+   * Id of the canonical shared-library project when it could not take the
+   * default `shared` id — i.e. a user project already owned it. Absent on
+   * every ordinary install; see core `shared-project.ts`.
+   */
+  sharedProjectId: z.string().optional(),
+  /**
    * The gezel currently designated as "klerk" — the workshop scribe.
    * Handles utility text generation (about.md drafts, rewrites, session
    * summaries, memory consolidation) so users can route grunt work to
@@ -1771,32 +1807,6 @@ export const GezelConfigSchema = z.object({
     })
     .optional(),
   /**
-   * Opportunistic batched inference (experimental; A/B-gated).
-   *
-   * When enabled for a batching-capable local engine, concurrent chat
-   * turns may share the engine's parallel KV slots instead of running
-   * strictly one at a time. The per-provider queue switches to the
-   * "adaptive" interactive policy: ≥2 genuinely-concurrent interactive
-   * turns (e.g. two panes) co-occupy slots, while one slot is reserved so
-   * an arriving live turn never waits behind a background cohort.
-   *
-   * Scope & defaults: a LOCAL-ENGINE optimization, default ON for both
-   * supervised engines, sized from usable fast memory (VRAM on a discrete
-   * GPU; never the adjacent system-RAM offload pool), from 1 on constrained
-   * devices up to 4 on workstation-class hardware. llama.cpp serves its
-   * `--parallel N` slots with continuous batching; MLX runs its
-   * wrapped server with `--max-concurrency N` (one mlx_lm BatchGenerator,
-   * static-wave batching). Set `enabled: false` to force the serial path on
-   * both, or use the `GEZEL_BATCHED_INFERENCE` env var (`1`/`true`/`0`/`false`)
-   * as the eval A/B toggle. `providerConcurrency[engine]` overrides the slot
-   * count verbatim.
-   */
-  batchedInference: z
-    .object({
-      enabled: z.boolean().optional(),
-    })
-    .optional(),
-  /**
    * Tuning knobs for the per-provider request queue.
    *   - `affinity`: when true (the default), the queue prefers
    *     dispatching items that share a session / gezel with recently
@@ -1996,6 +2006,46 @@ export const GezelConfigSchema = z.object({
       maxRunsPerDay: z.number().int().min(1).max(24).optional(),
       /** How recent project activity must be to count as "changed". Default 24. */
       changeWindowHours: z.number().positive().optional(),
+    })
+    .optional(),
+  /**
+   * The ambient dashboard — the meester periodically composes a squisq
+   * dashboard (6-9 markdown blocks) summarizing the whole workshop and
+   * renders it to a PNG under `~/.gezel/ambient/` for the OS
+   * ambient-display integration (wallpaper / lock-screen rotation).
+   * Default OFF: it burns an LLM call plus a Chromium render every
+   * interval, so showing it is an explicit choice.
+   */
+  ambientDashboard: z
+    .object({
+      enabled: z.boolean().optional(),
+      /** Minimum minutes between automatic runs. Default 60. */
+      intervalMinutes: z.number().int().min(15).optional(),
+      /** Squisq dashboard resolution preset id. Default 'fhd' (1920x1080). */
+      resolution: AmbientDashboardResolutionSchema.optional(),
+      /** Squisq visual theme. Default 'gezellig' (warm dark). */
+      themeId: AmbientDashboardThemeSchema.optional(),
+      /**
+       * Last physical-pixel primary-display target reported by the Electron
+       * shell. Exact canvas dimensions prevent Fill/Zoom wallpaper modes from
+       * cropping; the safe area keeps content clear of OS chrome.
+       */
+      displayTarget: AmbientDashboardDisplayTargetSchema.optional(),
+      /** Squisq dashboard cell style. Default 'panel'. */
+      style: AmbientDashboardStyleSchema.optional(),
+      /** Dated PNGs retained before pruning. Default 48 (~2 days hourly). */
+      keep: z.number().int().min(1).max(200).optional(),
+    })
+    .optional(),
+  /**
+   * OS ambient display — whether the Electron shell keeps the desktop
+   * wallpaper set to the latest ambient dashboard PNG. Applied from the
+   * app's user session (never the machine service). Default OFF; the
+   * enable flow captures the previous wallpaper for restore-on-disable.
+   */
+  ambientDisplay: z
+    .object({
+      applyWallpaper: z.boolean().optional(),
     })
     .optional(),
   /**
@@ -2211,6 +2261,17 @@ export const GezelConfigSchema = z.object({
    *     Disabled or absent inherits the ordinary install defaults. Per-gezel
    *     provider/model pins still win because this remains a default, not a
    *     forced routing rule.
+   *   - `quotaReserve` — cloud-subscription quota reserve. Night-shift
+   *     handoffs to a quota-reporting provider (Copilot, Claude CLI,
+   *     Codex CLI) are held while any of that provider's non-unlimited
+   *     buckets sits at or below the effective floor; running turns are
+   *     never interrupted, and providers without quota data are allowed.
+   *     `overall` holds while a bucket's remaining% <= percent — ON by
+   *     default (absent = enabled, percent 20). `perDay` reserves
+   *     percent x fractional-days-until-reset — opt-in (absent =
+   *     disabled, percent 10 when enabled); buckets without a future
+   *     resetDate skip it. The strictest applicable floor wins per
+   *     bucket, clamped to 0-100. Read by `NightShiftQuotaGate`.
    *
    * Read by `NightShiftManager` (window/enable), the task/chat and index
    * enrichment paths (model defaults), and the Electron main process
@@ -2232,6 +2293,22 @@ export const GezelConfigSchema = z.object({
           enabled: z.boolean().optional(),
           provider: ProviderNameSchema.optional(),
           model: z.string().optional(),
+        })
+        .optional(),
+      quotaReserve: z
+        .object({
+          overall: z
+            .object({
+              enabled: z.boolean().optional(),
+              percent: z.number().min(0).max(100).optional(),
+            })
+            .optional(),
+          perDay: z
+            .object({
+              enabled: z.boolean().optional(),
+              percent: z.number().min(0).max(100).optional(),
+            })
+            .optional(),
         })
         .optional(),
     })
@@ -2946,6 +3023,12 @@ export type TransformStreamEvent = z.infer<typeof TransformStreamEventSchema>;
 export const WriteDocumentRequestSchema = z.object({
   path: z.string().min(1),
   content: z.string(),
+  /**
+   * Who is writing. A gezel's MCP subprocess passes its own id so the audit
+   * trail can attribute the edit; the app omits it, which reads as the user.
+   */
+  gezelId: z.string().optional(),
+  sessionId: z.string().optional(),
 });
 export type WriteDocumentRequest = z.infer<typeof WriteDocumentRequestSchema>;
 
@@ -3668,6 +3751,8 @@ export const ListProjectsResponseSchema = z.object({
 export const CreateProjectRequestSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
+  /** Optional per-project maker's-mark override. Missing inherits from its type. */
+  icon: ProjectIconIdSchema.optional(),
   /**
    * Existing local folder to use as the project workspace. Folder-backed
    * projects are created with ambient Meester progress check-ins disabled;
@@ -3719,6 +3804,8 @@ export const CreateProjectRequestSchema = z.object({
 export const UpdateProjectRequestSchema = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
+  /** Set a maker's-mark override, or null to resume inheriting from the type. */
+  icon: ProjectIconIdSchema.nullable().optional(),
   /** null clears the external working directory (falls back to internal). */
   workingDir: z.string().nullable().optional(),
   /** null clears the voorman. */
@@ -3813,6 +3900,14 @@ export const UpdateProjectRequestSchema = z.object({
    * not mentioned are untouched.
    */
   properties: z.record(z.string(), z.string()).optional(),
+  /**
+   * Project shape — `solo` (one gezel handles the whole job) vs `crew`. The
+   * Store has always accepted this; it reaches the wire so a solo job can be
+   * promoted when the user brings a second role onto it. Without the
+   * promotion a recruited Voorman keeps the solo tool surface, which strips
+   * exactly the team-management tools they were recruited for.
+   */
+  mode: ProjectModeSchema.optional(),
 });
 export type UpdateProjectRequest = z.infer<typeof UpdateProjectRequestSchema>;
 
@@ -3911,6 +4006,7 @@ export const CreateTypedProjectRequestSchema = CreateProjectRequestSchema.pick({
   name: true,
   description: true,
   mode: true,
+  icon: true,
 }).extend({
   projectType: ApplyProjectTypeRequestSchema,
 });
@@ -4936,12 +5032,20 @@ export const DocumentSearchResultSchema = z.object({
   path: z.string(),
   lineStart: z.number().int().positive(),
   snippet: z.string(),
+  /** 0..1 relevance. Optional: older services returned unranked hits. */
+  score: z.number().optional(),
+  /**
+   * For an office document, the converted markdown the snippet came from.
+   * The source path stays the identity — that is the file the user filed.
+   */
+  markdownPath: z.string().optional(),
 });
 export type DocumentSearchResult = z.infer<typeof DocumentSearchResultSchema>;
 
 export const SearchDocumentsResponseSchema = z.object({
   results: z.array(DocumentSearchResultSchema),
-  engine: z.enum(['fts', 'unavailable']),
+  /** `hybrid`/`semantic` once the library carries embeddings. */
+  engine: z.enum(['hybrid', 'semantic', 'fts', 'unavailable']),
 });
 export type SearchDocumentsResponse = z.infer<typeof SearchDocumentsResponseSchema>;
 
@@ -5456,6 +5560,33 @@ export const WorkspaceIndexStatusSchema = z.object({
 export type WorkspaceIndexStatus = z.infer<typeof WorkspaceIndexStatusSchema>;
 
 /**
+ * One workspace file as recorded by the static index scan (`files.json`).
+ * Mirrors the service-internal `WorkspaceFile` shape — core deliberately
+ * re-declares the three fields rather than importing service types.
+ */
+export const WorkspaceIndexFileSchema = z.object({
+  path: z.string(),
+  size: z.number(),
+  mtimeMs: z.number(),
+});
+export type WorkspaceIndexFile = z.infer<typeof WorkspaceIndexFileSchema>;
+
+/**
+ * Response for `GET /api/projects/:id/index/files?detail=1` — the complete
+ * flat file list from the static index (up to the indexer's file cap), used
+ * by the UI's flat "by last modified" workspace view. Empty when the project
+ * has never been indexed or indexing is disabled; callers read
+ * `/index/status` to tell those states apart.
+ */
+export const WorkspaceIndexFilesDetailResponseSchema = z.object({
+  files: z.array(WorkspaceIndexFileSchema),
+  total: z.number().int().nonnegative(),
+});
+export type WorkspaceIndexFilesDetailResponse = z.infer<
+  typeof WorkspaceIndexFilesDetailResponseSchema
+>;
+
+/**
  * On-demand enrichment drive ("study now"). Two shapes:
  *   - legacy (no `intensity`): one bounded synchronous pass per request — the
  *     caller loops until `drained`.
@@ -5515,6 +5646,8 @@ export const NightShiftTaskBriefSchema = z.object({
   projectName: z.string(),
   /** Name of the task's current (active) step, when it has one. */
   stepName: z.string().optional(),
+  /** True when this task's next handoff is held by the cloud quota reserve. */
+  quotaHeld: z.boolean().optional(),
 });
 export type NightShiftTaskBrief = z.infer<typeof NightShiftTaskBriefSchema>;
 
@@ -5582,6 +5715,96 @@ export const NightShiftReviewResponseSchema = z.object({
   reports: z.array(NightShiftReportSchema),
 });
 export type NightShiftReviewResponse = z.infer<typeof NightShiftReviewResponseSchema>;
+
+/** One provider-level reason night work is being held by the quota reserve. */
+export const NightShiftQuotaHoldReasonSchema = z.object({
+  provider: ProviderNameSchema,
+  /** Provider bucket id that tripped the reserve (e.g. "premium_interactions"). */
+  bucket: z.string(),
+  /** Derived remaining, 0-100. */
+  remainingPercent: z.number(),
+  /** Effective floor that triggered the hold, 0-100. */
+  floorPercent: z.number(),
+  rule: z.enum(['overall', 'per-day']),
+  resetDate: z.string().optional(),
+});
+export type NightShiftQuotaHoldReason = z.infer<typeof NightShiftQuotaHoldReasonSchema>;
+
+/**
+ * The scheduled window a status surface names: the one open right now, or
+ * the next one due. `open` is what tells "started 22:00, ends 06:00" apart
+ * from "next window 22:00 → 06:00".
+ */
+export const NightShiftWindowBoundsSchema = z.object({
+  start: z.string(),
+  end: z.string(),
+  open: z.boolean(),
+});
+export type NightShiftWindowBounds = z.infer<typeof NightShiftWindowBoundsSchema>;
+
+export const NightShiftStatusResponseSchema = z.object({
+  active: z.boolean(),
+  source: z.enum(['scheduled', 'manual']).nullable(),
+  /** Present while >=1 pending night task is held by the quota reserve. */
+  quotaHold: z
+    .object({
+      heldTaskCount: z.number(),
+      reasons: z.array(NightShiftQuotaHoldReasonSchema),
+    })
+    .optional(),
+  /**
+   * The scheduled window this status is about — open now, else next due.
+   * Null while the feature is switched off entirely (nothing is scheduled).
+   */
+  window: NightShiftWindowBoundsSchema.nullable().optional(),
+  /**
+   * When the running shift actually began — a manual shift starts on the
+   * user's click, a scheduled one on the tick that turned it on (which can
+   * be later than the window opening: the machine may have been asleep, or
+   * the work may have arrived mid-window). Null when nothing is running.
+   */
+  startedAt: z.string().nullable().optional(),
+});
+export type NightShiftStatusResponse = z.infer<typeof NightShiftStatusResponseSchema>;
+
+/**
+ * What the shift has actually got done, counted over one period. Derived
+ * from durable traces on every read — the audit log for the event-shaped
+ * work, the per-project content index for the indexing tiers — so a daemon
+ * restart mid-shift doesn't reset the count.
+ *
+ * Every counter is "since `since`", and every one of them can legitimately
+ * be zero; surfaces render the non-zero ones rather than a wall of zeroes.
+ */
+export const NightShiftTallyResponseSchema = z.object({
+  /** Start of the counted period: the running shift's start, else the window's. */
+  since: z.string(),
+  /** End of the period — now while a shift runs, else the window's close. */
+  until: z.string(),
+  /** True while this is the running shift, i.e. the counts are still climbing. */
+  live: z.boolean(),
+  tasksCompleted: z.number(),
+  stepsCompleted: z.number(),
+  /** Workspace files summarized + embedded by the indexing tiers. */
+  filesIndexed: z.number(),
+  /** Workspace files the boekwachter reviewed against the rubrics. */
+  filesReviewed: z.number(),
+  /** Images described / audio transcribed into shadow markdown. */
+  mediaDescribed: z.number(),
+  /** Workspace files written by gezels (MCP `write_file` and friends). */
+  filesWritten: z.number(),
+  /**
+   * Shared-library documents created. Overwrites of an existing document
+   * go to the library's own audit trail rather than the history log, so
+   * this counts new documents only.
+   */
+  documentsCreated: z.number(),
+  imagesRendered: z.number(),
+  /** Questions raised for the user to answer in the morning. */
+  questionsRaised: z.number(),
+  toolCalls: z.number(),
+});
+export type NightShiftTallyResponse = z.infer<typeof NightShiftTallyResponseSchema>;
 
 export const WorkspaceCommandIndexSchema = z.object({
   meta: WorkspaceIndexMetaSchema,
@@ -5694,7 +5917,10 @@ export const SessionDebugSnapshotSchema = z.object({
   leaksUntaggedReasoning: z.boolean(),
   reasoningEffort: z.string().optional(),
   numCtx: z.number().optional(),
-  /** Freshly-computed system prompt — what `buildInstructions` would emit RIGHT NOW. */
+  /**
+   * Native sessions: freshly computed prompt. External mirrors: the effective
+   * system message captured from the caller's latest request.
+   */
   systemPrompt: z.string(),
   /**
    * The volatile context layer — task/step/gate + other per-turn blocks
@@ -5723,6 +5949,38 @@ export const SessionDebugSnapshotSchema = z.object({
    * MLX sessions whose MCP subprocess is up.
    */
   registeredTools: z.array(z.string()),
+  /**
+   * Where {@link registeredTools} came from, so an empty list can't be
+   * misread as proof no tools were wired.
+   *
+   * `caller` — captured from an external app's `tools[]`. `live` — asked the
+   * running session's bridge; an empty list here is
+   * real evidence. `persisted` — no live session, so this is the
+   * last-known project-type script tools off the record. `unavailable` —
+   * no live session and nothing persisted, i.e. the bridge state is
+   * simply unknown; the prompt's `## Tools available this turn` block is
+   * the roster to read instead.
+   *
+   * Wild-caught: a bundle exported right after an aborted turn reported
+   * "Registered tools: none" while the very same bundle's system prompt
+   * listed ~80 wired tools, sending an investigation after a phantom
+   * dropped bridge. Optional so older persisted snapshots still parse.
+   */
+  registeredToolsSource: z.enum(['live', 'persisted', 'unavailable', 'caller']).optional(),
+  /**
+   * Present for a conversation whose loop is owned by another application.
+   * This is captured request evidence, unlike the native prompt reconstruction
+   * used for ordinary Gezel sessions.
+   */
+  externalConversation: z
+    .object({
+      appId: z.string(),
+      appName: z.string(),
+      externalConversationId: z.string(),
+      workingDirectory: z.string().optional(),
+      request: ExternalRequestDiagnosticsSchema.optional(),
+    })
+    .optional(),
   /** Live session state at export time; prevents an unfinished turn looking like an empty reply. */
   turnStatus: z.enum(['idle', 'in-progress', 'queued']),
   /**

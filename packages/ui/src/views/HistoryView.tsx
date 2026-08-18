@@ -1,7 +1,8 @@
-import type { GezelSummary, HistoryEntry, HistoryEventKind, Project } from '@bendyline/gezel';
+import type { GezelSummary, HistoryEntry, Project } from '@bendyline/gezel';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -14,7 +15,7 @@ import { Select } from '../primitives/index.js';
 
 const KINDS: Array<{ value: string; label: string }> = [
   { value: '', label: 'All kinds' },
-  { value: 'session', label: '💬 Chat threads' },
+  { value: 'session', label: 'Chat threads' },
   { value: 'gezel.created', label: 'Gezel created' },
   { value: 'gezel.deleted', label: 'Gezel removed' },
   { value: 'gezel.renamed', label: 'Gezel renamed' },
@@ -27,6 +28,7 @@ const KINDS: Array<{ value: string; label: string }> = [
   { value: 'project.mission.updated', label: 'Project mission updated' },
   { value: 'project.voorman.changed', label: 'Project voorman changed' },
   { value: 'document.created', label: 'Document created' },
+  { value: 'document.updated', label: 'Document edited' },
   { value: 'document.renamed', label: 'Document renamed' },
   { value: 'document.deleted', label: 'Document deleted' },
   { value: 'tool.called', label: 'Tool called' },
@@ -342,39 +344,454 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
                 </p>
               );
             }
-            // Surface the Layer 4 diff inline when present (a
-            // `tool.called` event for replace_in_file / apply_patch /
-            // insert_at_marker carries the unified diff in its details).
-            // Falls back to the raw JSON dump for any event without
-            // structured edit metadata.
-            const details =
-              selected.entryType === 'event'
-                ? (selected.details as Record<string, unknown> | undefined)
-                : undefined;
-            const diff = details && typeof details.diff === 'string' ? details.diff : undefined;
-            const addedLines =
-              details && typeof details.addedLines === 'number' ? details.addedLines : undefined;
-            const removedLines =
-              details && typeof details.removedLines === 'number'
-                ? details.removedLines
-                : undefined;
             return (
-              <>
-                {diff && (
-                  <ToolDiffBlock
-                    diff={diff}
-                    {...(addedLines !== undefined ? { addedLines } : {})}
-                    {...(removedLines !== undefined ? { removedLines } : {})}
-                  />
-                )}
-                <pre className="history-details">{JSON.stringify(selected, null, 2)}</pre>
-              </>
+              <HistoryDetail
+                entry={selected}
+                gezelName={gezelLabel(selected.gezelId)}
+                projectName={projectLabel(selected.projectId)}
+                resolveGezel={gezelLabel}
+                resolveProject={projectLabel}
+              />
             );
           })()}
         </section>
       </div>
     </div>
   );
+}
+
+type HistoryEventEntry = Extract<HistoryEntry, { entryType: 'event' }>;
+type HistorySessionEntry = Extract<HistoryEntry, { entryType: 'session' }>;
+
+const DETAIL_FIELD_LABELS: Record<string, string> = {
+  actionId: 'Action',
+  appId: 'App',
+  archived: 'Status',
+  at: 'When',
+  bookCatalogId: 'Craftbook',
+  bytes: 'Size',
+  capabilityFloor: 'Capability floor',
+  caseId: 'Case',
+  changed: 'Changed fields',
+  craftbookId: 'Craftbook',
+  createdAt: 'Started',
+  credentialName: 'Credential',
+  durationMs: 'Duration',
+  fieldIds: 'Fields',
+  fromPath: 'From',
+  fromSteps: 'Steps before',
+  gezel: 'Gezel',
+  gezelId: 'Gezel',
+  id: 'Reference',
+  inputTokens: 'Input tokens',
+  lastActivityAt: 'Last activity',
+  messageCount: 'Messages',
+  newName: 'New name',
+  oldName: 'Previous name',
+  outputTokens: 'Output tokens',
+  previous: 'Before',
+  previousStatus: 'Previous status',
+  previousUrl: 'Previous URL',
+  previousVersion: 'Previous version',
+  project: 'Project',
+  projectId: 'Project',
+  questionId: 'Question',
+  ref: 'Task',
+  reportPath: 'Report',
+  runId: 'Run',
+  sessionId: 'Chat thread',
+  stepId: 'Step',
+  taskRef: 'Task',
+  toPath: 'To',
+  toSteps: 'Steps after',
+  trialId: 'Trial',
+};
+
+const PROVIDER_LABELS: Record<string, string> = {
+  anthropic: 'Anthropic',
+  'anthropic-cli': 'Claude CLI',
+  'codex-cli': 'Codex CLI',
+  copilot: 'GitHub Copilot',
+  ds4: 'DwarfStar',
+  'llama-cpp': 'llama.cpp',
+  mlx: 'MLX',
+  ollama: 'Ollama',
+  openai: 'OpenAI',
+  remote: 'Remote device',
+};
+
+const DETAIL_ENUM_FIELDS =
+  /(?:^|\.)(action|decision|failureClass|kind|outcome|phase|provider|runMode|source|state|status|storageScope|surface|tier|trigger|via)$/i;
+const DETAIL_CODE_FIELDS =
+  /(?:^|\.)(command|credentialName|id|key|model|path|ref|script|tool|url)$/i;
+const DETAIL_DATE_FIELDS = /(?:^at$|At$|Date$|timestamp$)/i;
+
+function HistoryDetail({
+  entry,
+  gezelName,
+  projectName,
+  resolveGezel,
+  resolveProject,
+}: {
+  entry: HistoryEntry;
+  gezelName: string;
+  projectName: string;
+  resolveGezel: (id?: string) => string;
+  resolveProject: (id?: string) => string;
+}) {
+  if (entry.entryType === 'session') {
+    return <HistorySessionDetail entry={entry} gezelName={gezelName} projectName={projectName} />;
+  }
+  return (
+    <HistoryEventDetail
+      entry={entry}
+      gezelName={gezelName}
+      projectName={projectName}
+      resolveGezel={resolveGezel}
+      resolveProject={resolveProject}
+    />
+  );
+}
+
+function HistoryEventDetail({
+  entry,
+  gezelName,
+  projectName,
+  resolveGezel,
+  resolveProject,
+}: {
+  entry: HistoryEventEntry;
+  gezelName: string;
+  projectName: string;
+  resolveGezel: (id?: string) => string;
+  resolveProject: (id?: string) => string;
+}) {
+  const details = entry.details as Record<string, unknown> | undefined;
+  const diff = typeof details?.diff === 'string' ? details.diff : undefined;
+  const addedLines = typeof details?.addedLines === 'number' ? details.addedLines : undefined;
+  const removedLines = typeof details?.removedLines === 'number' ? details.removedLines : undefined;
+  const displayDetails = details
+    ? Object.fromEntries(
+        Object.entries(details).filter(
+          ([key, value]) =>
+            value !== undefined && !['diff', 'addedLines', 'removedLines'].includes(key),
+        ),
+      )
+    : undefined;
+  const hasDetails = displayDetails && Object.keys(displayDetails).length > 0;
+  const valueContext: HistoryValueContext = { resolveGezel, resolveProject };
+
+  return (
+    <article className="history-detail-document">
+      <header className="history-detail-header">
+        <p className="history-detail-eyebrow" title={entry.kind}>
+          {kindLabel(entry.kind)}
+        </p>
+        <h3>{entry.summary}</h3>
+        <time dateTime={entry.at} className="history-detail-time">
+          {formatDateTime(entry.at)} <span>· {formatRelativeLong(entry.at)}</span>
+        </time>
+      </header>
+
+      {(projectName || gezelName) && (
+        <HistoryDetailSection heading="Context">
+          <HistoryFieldList
+            fields={{
+              ...(projectName ? { project: projectName } : {}),
+              ...(gezelName ? { gezel: gezelName } : {}),
+            }}
+            context={valueContext}
+          />
+        </HistoryDetailSection>
+      )}
+
+      {hasDetails && (
+        <HistoryDetailSection heading="Details">
+          <HistoryFieldList fields={displayDetails} context={valueContext} />
+        </HistoryDetailSection>
+      )}
+
+      {diff && (
+        <HistoryDetailSection heading="Changes">
+          <ToolDiffBlock
+            diff={diff}
+            {...(addedLines !== undefined ? { addedLines } : {})}
+            {...(removedLines !== undefined ? { removedLines } : {})}
+          />
+        </HistoryDetailSection>
+      )}
+
+      <HistoryRecordReference id={entry.id} />
+    </article>
+  );
+}
+
+function HistorySessionDetail({
+  entry,
+  gezelName,
+  projectName,
+}: {
+  entry: HistorySessionEntry;
+  gezelName: string;
+  projectName: string;
+}) {
+  return (
+    <article className="history-detail-document">
+      <header className="history-detail-header">
+        <p className="history-detail-eyebrow">Chat thread</p>
+        <h3>{entry.title}</h3>
+        <p className="history-detail-subtitle">
+          {gezelName || entry.gezelId}
+          {projectName ? ` in ${projectName}` : ''}
+        </p>
+      </header>
+
+      <HistoryDetailSection heading="Conversation">
+        <HistoryFieldList
+          fields={{
+            gezel: gezelName || entry.gezelId,
+            project: projectName || entry.projectId,
+            messageCount: entry.messageCount,
+            durationMs: entry.durationMs,
+            archived: entry.archived === true ? 'Archived' : 'Active',
+          }}
+        />
+      </HistoryDetailSection>
+
+      <HistoryDetailSection heading="Timing">
+        <HistoryFieldList
+          fields={{
+            createdAt: entry.createdAt,
+            lastActivityAt: entry.lastActivityAt,
+          }}
+        />
+      </HistoryDetailSection>
+
+      <HistoryDetailSection heading="Model">
+        <HistoryFieldList
+          fields={{ provider: entry.providerName, ...(entry.model ? { model: entry.model } : {}) }}
+        />
+      </HistoryDetailSection>
+
+      <HistoryRecordReference id={entry.id} />
+    </article>
+  );
+}
+
+function HistoryDetailSection({ heading, children }: { heading: string; children: ReactNode }) {
+  return (
+    <section className="history-detail-section">
+      <h4>{heading}</h4>
+      {children}
+    </section>
+  );
+}
+
+function HistoryRecordReference({ id }: { id: string }) {
+  return (
+    <footer className="history-detail-reference">
+      <span>Record reference</span>
+      <code>{id}</code>
+    </footer>
+  );
+}
+
+interface HistoryValueContext {
+  resolveGezel?: (id?: string) => string;
+  resolveProject?: (id?: string) => string;
+}
+
+function HistoryFieldList({
+  fields,
+  context = {},
+  path = '',
+}: {
+  fields: Record<string, unknown>;
+  context?: HistoryValueContext;
+  path?: string;
+}) {
+  const entries = Object.entries(fields).filter(([, value]) => value !== undefined);
+  if (entries.length === 0) return <p className="muted">No additional details were recorded.</p>;
+
+  return (
+    <dl className="history-detail-fields">
+      {entries.map(([key, value]) => {
+        const fieldPath = path ? `${path}.${key}` : key;
+        return (
+          <div className="history-detail-field" key={fieldPath}>
+            <dt>{detailFieldLabel(key)}</dt>
+            <dd>
+              <HistoryFieldValue
+                field={key}
+                fieldPath={fieldPath}
+                value={value}
+                context={context}
+              />
+            </dd>
+          </div>
+        );
+      })}
+    </dl>
+  );
+}
+
+function HistoryFieldValue({
+  field,
+  fieldPath,
+  value,
+  context,
+}: {
+  field: string;
+  fieldPath: string;
+  value: unknown;
+  context: HistoryValueContext;
+}) {
+  if (value === null) return <span className="history-detail-empty">Not set</span>;
+  if (typeof value === 'boolean') return <span>{value ? 'Yes' : 'No'}</span>;
+  if (typeof value === 'number') {
+    if (field.toLowerCase().endsWith('ms')) return <span>{formatDuration(value)}</span>;
+    if (field.toLowerCase().endsWith('bytes') || field === 'bytes') {
+      return <span>{formatBytes(value)}</span>;
+    }
+    return <span>{value.toLocaleString()}</span>;
+  }
+  if (typeof value === 'string') {
+    if (DETAIL_DATE_FIELDS.test(field) && isValidDate(value)) {
+      return <time dateTime={value}>{formatDateTime(value)}</time>;
+    }
+    const resolved = resolveHistoryReference(field, value, context);
+    const display = detailStringValue(fieldPath, resolved);
+    if (DETAIL_CODE_FIELDS.test(fieldPath)) {
+      return <code className="history-detail-code">{display}</code>;
+    }
+    return <span className="history-detail-text">{display}</span>;
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span className="history-detail-empty">None</span>;
+    return (
+      <ul className="history-detail-list">
+        {value.map((item, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: History arrays are immutable audit values with no stable item identity.
+          <li key={`${fieldPath}:${index}`}>
+            {isRecord(item) ? (
+              <HistoryFieldList fields={item} context={context} path={`${fieldPath}.${index}`} />
+            ) : (
+              <HistoryFieldValue
+                field={field}
+                fieldPath={fieldPath}
+                value={item}
+                context={context}
+              />
+            )}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  if (isRecord(value)) {
+    return (
+      <div className="history-detail-nested">
+        <HistoryFieldList fields={value} context={context} path={fieldPath} />
+      </div>
+    );
+  }
+  return <span className="history-detail-text">{String(value)}</span>;
+}
+
+function detailFieldLabel(field: string): string {
+  const known = DETAIL_FIELD_LABELS[field];
+  if (known) return known;
+  const words = field
+    .replace(/[._-]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .replace(/\bid\b/g, 'ID')
+    .replace(/\burl\b/g, 'URL')
+    .replace(/\bapi\b/g, 'API')
+    .trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function detailStringValue(fieldPath: string, value: string): string {
+  const field = fieldPath.split('.').at(-1) ?? fieldPath;
+  if (field.toLowerCase().includes('provider')) return PROVIDER_LABELS[value] ?? value;
+  if (DETAIL_ENUM_FIELDS.test(fieldPath)) return humanizeEnum(value);
+  return value;
+}
+
+function resolveHistoryReference(
+  field: string,
+  value: string,
+  context: HistoryValueContext,
+): string {
+  if (field === 'gezelId') return context.resolveGezel?.(value) || value;
+  if (field === 'projectId' || field === 'targetProjectId') {
+    return context.resolveProject?.(value) || value;
+  }
+  return value;
+}
+
+function humanizeEnum(value: string): string {
+  const words = value.replace(/[._-]+/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isValidDate(value: string): boolean {
+  return !Number.isNaN(new Date(value).getTime());
+}
+
+function formatDateTime(iso: string): string {
+  if (!isValidDate(iso)) return iso;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(iso));
+}
+
+function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return `${ms} ms`;
+  if (ms < 1_000) return `${Math.round(ms)} ms`;
+  const totalSeconds = Math.round(ms / 1_000);
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts: string[] = [];
+  if (days) parts.push(`${days} ${days === 1 ? 'day' : 'days'}`);
+  if (hours) parts.push(`${hours} ${hours === 1 ? 'hour' : 'hours'}`);
+  if (minutes) parts.push(`${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`);
+  if (seconds && parts.length < 2) parts.push(`${seconds} ${seconds === 1 ? 'second' : 'seconds'}`);
+  return parts.slice(0, 2).join(' ');
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return `${bytes} bytes`;
+  if (bytes < 1_024) return `${bytes.toLocaleString()} ${bytes === 1 ? 'byte' : 'bytes'}`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1_024;
+  let unit = units[0];
+  for (let i = 1; i < units.length && value >= 1_024; i += 1) {
+    value /= 1_024;
+    unit = units[i];
+  }
+  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)} ${unit}`;
+}
+
+function formatRelativeLong(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return '';
+  const diff = Math.max(0, Date.now() - then);
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} ${days === 1 ? 'day' : 'days'} ago`;
 }
 
 /**
@@ -398,6 +815,7 @@ const KIND_LABELS: Record<string, string> = {
   'icon.reverted': 'Icon reverted',
   'poppetje.generated': 'Portrait carved',
   'document.created': 'Document created',
+  'document.updated': 'Document edited',
   'document.renamed': 'Document renamed',
   'document.deleted': 'Document deleted',
   'craftbook.created': 'Craftbook created',

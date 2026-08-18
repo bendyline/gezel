@@ -12,6 +12,8 @@ import {
 } from '../../providers/types.js';
 import type { LLMSession } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
+import { appendCallerOwnedActionLedger } from '../openai-compat/action-ledger.js';
+import { profileForCallerOwnedInference } from '../openai-compat/caller-owned-profile.js';
 import { type ChatTarget, resolveChatTarget } from '../openai-compat/chat-target.js';
 import {
   runResponsesNonStreaming,
@@ -136,8 +138,11 @@ export function v1ResponsesRoutes(ctx: ServiceContext): Hono {
       }
 
       let session: LLMSession | undefined;
+      const requestStartedAt = Date.now();
       try {
         translated.sessionInput = prependSystemPrefix(translated.sessionInput, target.systemPrefix);
+        const actionLedger = appendCallerOwnedActionLedger(translated.sessionInput);
+        translated.sessionInput = actionLedger.input;
         const provider = await ctx.chat.getProviderForModel(target.provider, target.model);
 
         let externalTools = translated.externalTools;
@@ -187,7 +192,11 @@ export function v1ResponsesRoutes(ctx: ServiceContext): Hono {
             : target.tuningOverrides?.reasoningEffort
               ? { reasoningEffort: target.tuningOverrides.reasoningEffort }
               : {}),
-          ...(defaults && supportingBehaviors ? { profile: defaults.profile } : {}),
+          // Codex owns this action loop. Keep model compatibility behavior,
+          // but never apply Gezel's must-use-a-tool ramble intervention.
+          ...(defaults && supportingBehaviors
+            ? { profile: profileForCallerOwnedInference(defaults.profile) }
+            : {}),
         };
         session = await provider.createSession(sessionOpts);
 
@@ -208,6 +217,7 @@ export function v1ResponsesRoutes(ctx: ServiceContext): Hono {
                 outcome,
                 model: parsed.model,
                 provider: target.provider,
+                actionReceiptCount: actionLedger.receiptCount,
                 ...(usageRef.value
                   ? {
                       inputTokens: usageRef.value.inputTokens,
@@ -217,6 +227,17 @@ export function v1ResponsesRoutes(ctx: ServiceContext): Hono {
               },
             })
             .catch(() => {});
+          log.info(
+            `caller-owned Responses iteration ${outcome}: ${JSON.stringify({
+              appId,
+              model: parsed.model,
+              provider: target.provider,
+              inputItemCount: Array.isArray(parsed.input) ? parsed.input.length : 1,
+              toolCount: parsed.tools?.length ?? 0,
+              actionReceiptCount: actionLedger.receiptCount,
+              elapsedMs: Date.now() - requestStartedAt,
+            })}`,
+          );
         };
 
         const turnAbort = new AbortController();
@@ -357,7 +378,7 @@ async function resolveResponsesTarget(model: string, ctx: ServiceContext): Promi
   }
 
   throw new Error(
-    `Unknown model "${model}". Use an explicit <provider>:<model> id or gezel:<id-or-name>.`,
+    `Unknown model "${model}". Use an explicit <provider>:<model> id or advertised gezel:<role>-<name> alias.`,
   );
 }
 

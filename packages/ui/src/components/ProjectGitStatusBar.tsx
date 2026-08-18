@@ -30,7 +30,7 @@ interface Props {
   managedWorkspaceWritable?: boolean;
   /**
    * Flip the per-project write switch. When provided, the bar renders an
-   * explicitly scoped "Tools: Can edit/Read-only" dropdown next to the
+   * explicitly labelled "Can edit/Read-only" dropdown next to the
    * status select.
    * The caller owns the external-dir confirmation flow (enabling writes
    * on a user-supplied folder must confirm first).
@@ -44,6 +44,8 @@ interface Props {
   onClaudeModeChange?: (mode: ClaudePermissionMode) => void;
   /** Opens the GitHub tab — the workbench for saves, diffs, and conflicts. */
   onOpenGitHub?: () => void;
+  /** Adds the install's designated Boekwachter to this project's crew. */
+  onAddBoekwachter?: () => Promise<void>;
   /**
    * Project lifecycle status, surfaced as an always-visible dropdown in the
    * bar (next to the index chip) so it doesn't hide inside the Settings tab.
@@ -309,6 +311,7 @@ export function ProjectGitStatusBar({
   claudeMode,
   onClaudeModeChange,
   onOpenGitHub,
+  onAddBoekwachter,
   status: projectStatus,
   statusLocked = false,
   onStatusChange,
@@ -325,7 +328,11 @@ export function ProjectGitStatusBar({
   const [indexRefreshBusy, setIndexRefreshBusy] = useState(false);
   const [indexRefreshError, setIndexRefreshError] = useState<string | null>(null);
   const [fullScanState, setFullScanState] = useState<'idle' | 'starting' | 'running'>('idle');
-  const [fullScanError, setFullScanError] = useState<string | null>(null);
+  const [fullScanError, setFullScanError] = useState<{
+    code?: string;
+    message: string;
+  } | null>(null);
+  const [boekwachterAddBusy, setBoekwachterAddBusy] = useState(false);
   const branchMenuRef = useRef<HTMLDivElement | null>(null);
   const managedWritesOn = managedWorkspaceWritable;
 
@@ -432,12 +439,30 @@ export function ProjectGitStatusBar({
       // actionable, unlike the generic retry line.
       const detail =
         err && typeof err === 'object' && 'details' in err
-          ? (err as { details?: { message?: string } }).details?.message
+          ? (err as { details?: { error?: string; message?: string } }).details
           : undefined;
-      setFullScanError(detail ?? 'Couldn’t start the full scan. Try again.');
+      setFullScanError({
+        code: detail?.error,
+        message: detail?.message ?? 'Couldn’t start the full scan. Try again.',
+      });
       setFullScanState('idle');
     }
   }, [fullScanState, indexStatus, projectId, refreshIndex]);
+
+  const addBoekwachter = useCallback(async () => {
+    if (!onAddBoekwachter || boekwachterAddBusy) return;
+    setBoekwachterAddBusy(true);
+    try {
+      await onAddBoekwachter();
+      setFullScanError(null);
+    } catch (err) {
+      setFullScanError({
+        message: err instanceof Error ? err.message : 'Couldn’t add the Boekwachter. Try again.',
+      });
+    } finally {
+      setBoekwachterAddBusy(false);
+    }
+  }, [boekwachterAddBusy, onAddBoekwachter]);
 
   // Re-arm the full-scan button once the server reports the drive gone —
   // whether it drained, failed, or was paused. Only a status polled AFTER
@@ -825,9 +850,7 @@ export function ProjectGitStatusBar({
                       <dt>Indexed</dt>
                       <dd>
                         {indexStatus.meta.fileCount} file
-                        {indexStatus.meta.fileCount === 1 ? '' : 's'} ·{' '}
-                        {indexStatus.meta.commandCount} command
-                        {indexStatus.meta.commandCount === 1 ? '' : 's'}
+                        {indexStatus.meta.fileCount === 1 ? '' : 's'}
                       </dd>
                     </div>
                     <div>
@@ -934,7 +957,23 @@ export function ProjectGitStatusBar({
                 )}
                 {fullScanError && (
                   <span className="project-index-panel-error" role="alert">
-                    {fullScanError}
+                    {fullScanError.code === 'boekwachter-required' && onAddBoekwachter ? (
+                      <>
+                        <button
+                          type="button"
+                          className="project-index-panel-error-link"
+                          disabled={boekwachterAddBusy}
+                          onClick={() => void addBoekwachter()}
+                        >
+                          {boekwachterAddBusy
+                            ? 'Adding Boekwachter…'
+                            : 'Add a Boekwachter to this project crew'}
+                        </button>{' '}
+                        to enable AI summaries, reviews, and semantic enrichment.
+                      </>
+                    ) : (
+                      fullScanError.message
+                    )}
                   </span>
                 )}
               </div>
@@ -982,7 +1021,6 @@ export function ProjectGitStatusBar({
                 <span className="project-writes-select-icon" aria-hidden>
                   <EditsLockIcon unlocked={managedWritesOn} />
                 </span>
-                <span className="project-permission-scope">Tools:</span>
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>

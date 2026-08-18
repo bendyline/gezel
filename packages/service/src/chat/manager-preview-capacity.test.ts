@@ -158,4 +158,20 @@ describe('previewLocalEnginePlan — reservation ownership', () => {
     expect(plan.contextWindow).toBeGreaterThanOrEqual(65_536);
     expect(plan.plannedResidentBytes).toBeGreaterThan(0);
   });
+
+  it('forwards standalone through previewContextWindowForModel', async () => {
+    // The Codex setup source prices models through this wrapper and writes the
+    // result into a profile on disk. It swallowed the denial below into
+    // `undefined` and fell back to the 64K floor, so a host admitting 128K+
+    // published 65536 for every model and Codex compacted at 90% of that,
+    // repeatedly, mid-task. Live pricing stays the default for remote admit.
+    useRouter(routerWithReservation({ otherModel: true }));
+
+    await expect(manager.previewContextWindowForModel('mlx', 'local-mlx')).rejects.toThrow(
+      /Not enough memory/,
+    );
+    await expect(
+      manager.previewContextWindowForModel('mlx', 'local-mlx', { standalone: true }),
+    ).resolves.toBeGreaterThanOrEqual(65_536);
+  });
 });

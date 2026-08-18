@@ -84,7 +84,6 @@ export function HomeWorkshop({
     () => deriveActiveProjectId(config, projects),
     [config, projects],
   );
-  const activeProject = projects.find((p) => p.id === activeProjectId);
 
   const refreshQuestions = useCallback(() => {
     api
@@ -192,14 +191,7 @@ export function HomeWorkshop({
     pendingQuestions.length +
     visibleTasks.filter((t) => t.assignee.kind === 'user' && t.status !== 'complete').length;
 
-  const chips: HomeChip[] = [{ dot: 'var(--live)', label: 'Ready to work' }];
-  if (activeProject && activeProject.id !== 'default') {
-    chips.push({ dot: 'var(--terra)', label: `${activeProject.name} on the bench` });
-  }
-  chips.push({
-    dot: 'var(--sage)',
-    label: `${projects.length} project${projects.length === 1 ? '' : 's'} open`,
-  });
+  const chips: HomeChip[] = [];
   if (waitingOnYou > 0) {
     chips.push({
       dot: 'var(--ochre)',

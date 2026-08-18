@@ -64,6 +64,7 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     kind: z.literal('totalMinBytes'),
     files: z.array(z.string().min(1)).min(1),
     bytes: z.number().int().positive(),
+    artifact: z.boolean().optional(),
   }),
   /**
    * At least `min` workspace files with one of `ext` exist (e.g. ≥3 images).
@@ -81,12 +82,14 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     min: z.number().int().positive(),
     dir: z.string().optional(),
     verifyImageBytes: z.boolean().optional(),
+    artifact: z.boolean().optional(),
   }),
   /** Inline `<style>` + linked `.css` in `file` (default index.html) clears `bytes`. */
   z.object({
     kind: z.literal('cssMinBytes'),
     bytes: z.number().int().positive(),
     file: z.string().optional(),
+    artifact: z.boolean().optional(),
   }),
   /** A named content sniff passes on `file` (workspace, or the artifacts drawer when `artifact`). */
   z.object({
@@ -102,6 +105,7 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     path: z.string().min(1),
     value: GateJsonScalarSchema,
     label: z.string().min(1).optional(),
+    artifact: z.boolean().optional(),
   }),
   /** A CSV file has the expected header/row shape and optional picklist values. */
   z.object({
@@ -112,6 +116,7 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     minRows: z.number().int().nonnegative().optional(),
     consistentColumns: z.boolean().optional(),
     allowedValues: z.record(z.string(), z.array(z.string().min(1)).min(1)).optional(),
+    artifact: z.boolean().optional(),
   }),
   /** `file` matches `pattern` (regex), in the workspace or the artifacts drawer when `artifact`. */
   z.object({
@@ -149,6 +154,7 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
       )
       .min(1),
     flags: z.string().optional(),
+    artifact: z.boolean().optional(),
   }),
   /**
    * Every inline `<script>` body in `file` (default index.html) parses as
@@ -161,6 +167,7 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('jsParses'),
     file: z.string().optional(),
+    artifact: z.boolean().optional(),
   }),
   /**
    * An in-process, zero-spawn static gate for an HTML deliverable: the document
@@ -172,6 +179,7 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('htmlLint'),
     file: z.string().min(1),
+    artifact: z.boolean().optional(),
   }),
   /**
    * Named `node:` imports in `file` resolve to real builtin exports, and a
@@ -185,6 +193,7 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('esmImports'),
     file: z.string().min(1),
+    artifact: z.boolean().optional(),
   }),
   /**
    * `file` parses as source code. For `.ts/.tsx/.js/.mjs/.cjs/.jsx` the
@@ -197,6 +206,7 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('sourceParses'),
     file: z.string().min(1),
+    artifact: z.boolean().optional(),
   }),
   /**
    * The first Markdown table in `file` has the required header set and
@@ -240,6 +250,12 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
    * dependency-free files can run (node built-ins ok; the sandbox has no
    * npm tree): a `node:test`/`assert` file exits nonzero on failure,
    * which is exactly the contract.
+   *
+   * Alone among the file-reading checks this takes no `artifact` flag: it
+   * does not read through the swappable gate reader at all, it hands the
+   * path to the sandbox executor, which resolves against the workspace.
+   * Accepting the flag would parse fine and then silently execute the
+   * wrong tree — the exact failure mode the flag exists to prevent.
    */
   z.object({
     kind: z.literal('nodeRuns'),
@@ -278,8 +294,11 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
   }),
   /**
    * A PR-review coverage ledger must name every changed path materialized in
-   * a connector corpus. The ledger is workspace JSON (`reviewedFiles` by
-   * default); the source records live in the read-only artifacts drawer and
+   * a connector corpus. The ledger is JSON (`reviewedFiles` by default) in
+   * the workspace, or in the artifacts drawer when `artifact` — a review of
+   * a read-only checkout can only write the drawer, so omitting the flag
+   * here made the whole Pull Request Review book unsatisfiable on any
+   * writes-off project. The source records always live in the drawer and
    * carry their authoritative path in frontmatter. This prevents a polished
    * report from passing after only the first context-sized prefix was read.
    */
@@ -289,6 +308,48 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     corpusDir: z.string().min(1),
     reviewedField: z.string().min(1).optional(),
     recordField: z.string().min(1).optional(),
+    artifact: z.boolean().optional(),
+    /**
+     * JSON array of the exact changed paths THIS ledger must cover, as a
+     * string — narrows the check from the whole corpus to one slice of it.
+     * Written for declarative fanout: a child reviewing batch 2 of 3 gets
+     * `"{{paths}}"` from its per-item context and is gated on its own 25
+     * files, not on the 68 nobody handed it. Without this a batch child
+     * can never pass its own gate, and coverage can only be enforced
+     * after a merge — far downstream of the child that under-delivered.
+     *
+     * Fails closed on anything that is not a JSON array of strings,
+     * including an uninterpolated `{{…}}` token: a mis-scoped coverage
+     * check that silently widens back to the full corpus would reject
+     * every child forever with a verdict none of them can act on.
+     */
+    expectPaths: z.string().min(1).optional(),
+  }),
+  /**
+   * A fanout-input batch file must reproduce a connector corpus manifest's own
+   * batch array exactly — same count, same ordinals, same paths, in order.
+   *
+   * The upstream sibling of {@link corpusCoverage}: that check proves the work
+   * covered the corpus, this one proves the *plan* did. A batch file is the
+   * spawn host's `overFile`, so a batch dropped here is never reviewed by
+   * anyone and never appears in any coverage ledger. `json-valid` + `minBytes`
+   * cannot see it: a batch array truncated at the model's output cap is still
+   * syntactically perfect JSON. Wild-caught on a 509-file PR whose scope step
+   * published 10 of 21 batches — 259 files silently out of scope, and the run
+   * then deadlocked eight attempts deep in the downstream merge gate, which is
+   * the wrong place to learn it and the one place that cannot fix it.
+   */
+  z.object({
+    kind: z.literal('corpusBatches'),
+    file: z.string().min(1),
+    corpusDir: z.string().min(1),
+    /** Filename suffix identifying the manifest inside the corpus. */
+    manifestSuffix: z.string().min(1).optional(),
+    /** Manifest field holding the authoritative batch array. */
+    itemsField: z.string().min(1).optional(),
+    /** Manifest field holding the total item count the batches must cover. */
+    totalField: z.string().min(1).optional(),
+    artifact: z.boolean().optional(),
   }),
   /**
    * The H1 slide titles in `file` must match the numbered slide headings in
@@ -302,6 +363,7 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     outlineFile: z.string().min(1),
     /** Read outlineFile from artifacts while file uses the check's primary surface. */
     outlineArtifact: z.boolean().optional(),
+    artifact: z.boolean().optional(),
   }),
   /**
    * Named facts in `file` must come from authorized sources: each fact
@@ -531,6 +593,19 @@ export const StepGateUnionSchema = z.union([StepGateSchema, GateSpecSchema]);
 export type StepGateUnion = z.infer<typeof StepGateUnionSchema>;
 
 export const GATE_DEFAULT_MAX_ATTEMPTS = 4;
+
+/**
+ * Ceiling on CONVERGING gate rejections — passes where the same checks
+ * failed on strictly fewer outstanding items than the pass before. Those
+ * do not spend `maxAttempts` (a bounded batch loop produces one per batch
+ * by design, so charging them there caps corpus size instead of
+ * stalling), but they are not free either: at 25 records a batch this
+ * allows a 600-record corpus, while a loop creeping forward one item at a
+ * time still reaches a human within a day's sessions rather than after
+ * hundreds. Deliberately not author-configurable — a craftbook that needs
+ * more passes than this has a batch-size problem, not a budget problem.
+ */
+export const GATE_MAX_PROGRESS_ATTEMPTS = 24;
 
 /** Uniform runtime view over both gate generations. */
 export interface NormalizedStepGate {

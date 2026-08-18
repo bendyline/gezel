@@ -342,6 +342,16 @@ describe('projects', () => {
     expect(detail!.packages).toEqual([]);
   });
 
+  it('persists and clears an explicit project maker-mark override', async () => {
+    const created = await store.createProject({ name: 'Design', icon: 'palette' });
+    expect(created.icon).toBe('palette');
+    expect((await store.getProject(created.id))?.icon).toBe('palette');
+
+    const cleared = await store.updateProject(created.id, { icon: null });
+    expect(cleared.icon).toBeUndefined();
+    expect((await store.getProject(created.id))?.icon).toBeUndefined();
+  });
+
   it('stores a creation-time workingDir and disables Meester progress check-ins', async () => {
     await store.createProject({ name: 'External', workingDir: '/tmp/ext' });
     const detail = await store.getProject('external');
@@ -564,6 +574,17 @@ describe('project artifacts', () => {
     ).rejects.toThrow('traversal');
   });
 
+  it('reports byte size for a file, and null for directories, misses, and escapes', async () => {
+    await store.createProject({ name: 'SizeTest' });
+    // Multi-byte on purpose: the viewer needs on-disk bytes, not string length.
+    await store.writeProjectArtifact('sizetest', 'sub/report.md', 'héllo');
+
+    expect(await store.projectArtifactSize('sizetest', 'sub/report.md')).toBe(6);
+    expect(await store.projectArtifactSize('sizetest', 'sub')).toBeNull();
+    expect(await store.projectArtifactSize('sizetest', 'missing.md')).toBeNull();
+    expect(await store.projectArtifactSize('sizetest', '../../etc/passwd')).toBeNull();
+  });
+
   it('keeps connector corpora read-only to gezels without blocking user edits', async () => {
     await store.createProject({ name: 'ConnectorArtifacts' });
     await expect(
@@ -647,6 +668,52 @@ describe('project artifacts', () => {
       .map((f) => f.path)
       .sort();
     expect(paths).toEqual(['deep.md', 'report.md']);
+  });
+
+  it('scopes a recursive artifact walk to subpath and keeps paths root-relative', async () => {
+    await store.createProject({ name: 'ScopedWalk' });
+    await store.writeProjectArtifact('scopedwalk', 'data/pulls/pr-1/files/a.md', 'a');
+    await store.writeProjectArtifact('scopedwalk', 'data/pulls/pr-1/files/b.md', 'b');
+    await store.writeProjectArtifact('scopedwalk', 'data/pulls/pr-2/files/c.md', 'c');
+    await store.writeProjectArtifact('scopedwalk', 'notes/unrelated.md', 'n');
+
+    const scoped = await store.listProjectArtifactsRecursive('scopedwalk', {
+      subpath: 'data/pulls/pr-1',
+    });
+    const paths = scoped
+      .filter((entry) => !entry.isDirectory)
+      .map((entry) => entry.path)
+      .sort();
+    expect(paths).toEqual(['data/pulls/pr-1/files/a.md', 'data/pulls/pr-1/files/b.md']);
+    // Root-relative paths are directly readable — the whole point of scoping.
+    expect(await store.readProjectArtifact('scopedwalk', paths[0]!)).toBe('a');
+
+    // The redundant prefix is tolerated here exactly as it is on read/write.
+    const prefixed = await store.listProjectArtifactsRecursive('scopedwalk', {
+      subpath: 'artifacts/data/pulls/pr-1/',
+    });
+    expect(prefixed.filter((entry) => !entry.isDirectory)).toHaveLength(2);
+
+    // An escaping subpath yields nothing rather than climbing out of the drawer.
+    expect(
+      await store.listProjectArtifactsRecursive('scopedwalk', { subpath: '../../etc' }),
+    ).toEqual([]);
+  });
+
+  it('scopes a recursive workspace walk to subpath, matching the artifacts twin', async () => {
+    await store.createProject({ name: 'ScopedWs' });
+    await store.writeProjectWorkspaceFile('scopedws', 'src/deep/a.ts', 'a');
+    await store.writeProjectWorkspaceFile('scopedws', 'src/deep/b.ts', 'b');
+    await store.writeProjectWorkspaceFile('scopedws', 'docs/readme.md', 'r');
+
+    const scoped = await store.listProjectWorkspaceRecursive('scopedws', { subpath: 'src' });
+    const paths = scoped
+      .filter((entry) => !entry.isDirectory)
+      .map((entry) => entry.path)
+      .sort();
+    expect(paths).toEqual(['src/deep/a.ts', 'src/deep/b.ts']);
+    expect(await store.readProjectWorkspaceFile('scopedws', paths[0]!)).toBe('a');
+    expect(await store.listProjectWorkspaceRecursive('scopedws', { subpath: '../..' })).toEqual([]);
   });
 
   it('resolveProjectArtifact returns exact match when path hits', async () => {
@@ -748,6 +815,25 @@ describe('project workspace', () => {
     await store.createProject({ name: 'Ext', workingDir: '/tmp' });
     const dir = await store.projectWorkspaceDir('ext');
     expect(dir).toBe('/tmp');
+  });
+
+  it('listProjectWorkspaceRecursiveDetailed forwards withStats to the walker', async () => {
+    const { writeFile, mkdir } = await import('node:fs/promises');
+    await store.createProject({ name: 'Stats' });
+    const dir = await store.projectWorkspaceDir('stats');
+    await mkdir(join(dir, 'sub'), { recursive: true });
+    await writeFile(join(dir, 'sub', 'file.txt'), 'x');
+
+    const plain = await store.listProjectWorkspaceRecursiveDetailed('stats');
+    expect(plain.entries.every((e) => e.mtimeMs === undefined)).toBe(true);
+
+    const detailed = await store.listProjectWorkspaceRecursiveDetailed('stats', {
+      withStats: true,
+    });
+    const file = detailed.entries.find((e) => e.path === 'sub/file.txt');
+    const folder = detailed.entries.find((e) => e.path === 'sub');
+    expect(file?.mtimeMs).toBeTypeOf('number');
+    expect(folder?.mtimeMs).toBeUndefined();
   });
 
   it('points at github.checkoutDir when github-linked and clone has landed', async () => {

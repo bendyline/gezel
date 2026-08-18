@@ -21,6 +21,45 @@ describe('GateCheckSchema — connector coverage', () => {
       }),
     ).toMatchObject({ kind: 'corpusCoverage' });
   });
+
+  it('keeps the artifact flag on every check whose evaluator can honor it', () => {
+    // Zod strips undeclared keys, so a variant that forgets `artifact`
+    // does not reject the craftbook — it silently drops the flag and the
+    // gate then reads the wrong tree. That is how Pull Request Review's
+    // coverage ledger, authored `artifact: true`, was judged as a
+    // workspace deliverable and paused every writes-off project.
+    const flagged = [
+      { kind: 'corpusCoverage', file: 'c.json', corpusDir: 'artifacts/data/pr-46' },
+      { kind: 'totalMinBytes', files: ['a.md', 'b.md'], bytes: 10 },
+      { kind: 'fileCount', ext: ['png'], min: 1 },
+      { kind: 'cssMinBytes', bytes: 10 },
+      { kind: 'jsonPathEquals', file: 'a.json', path: 'a.b', value: 1 },
+      { kind: 'csvShape', file: 'a.csv', minRows: 1 },
+      {
+        kind: 'unsupportedClaims',
+        file: 'a.md',
+        sourceFiles: ['b.md'],
+        patterns: [{ pattern: 'best' }],
+      },
+      { kind: 'jsParses', file: 'a.html' },
+      { kind: 'htmlLint', file: 'a.html' },
+      { kind: 'esmImports', file: 'a.mjs' },
+      { kind: 'sourceParses', file: 'a.ts' },
+      { kind: 'markdownHeadingsMatch', file: 'a.md', outlineFile: 'o.md' },
+    ];
+    for (const check of flagged) {
+      expect(GateCheckSchema.parse({ ...check, artifact: true })).toMatchObject({ artifact: true });
+    }
+  });
+
+  it('does NOT accept artifact on nodeRuns — the sandbox only runs the workspace', () => {
+    // The one file-reading check that bypasses the swappable gate reader:
+    // it hands the path to the sandbox executor. Accepting the flag would
+    // parse cleanly and then execute the wrong tree.
+    expect(
+      GateCheckSchema.parse({ kind: 'nodeRuns', file: 'test.mjs', artifact: true }),
+    ).not.toHaveProperty('artifact');
+  });
 });
 
 describe('TaskCraftbookStepSchema — plateau-trail back-compat', () => {

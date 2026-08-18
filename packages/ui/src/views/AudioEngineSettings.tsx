@@ -91,9 +91,7 @@ export function AudioEngineSettings() {
 
       <p className="muted small">
         Speech-to-text via the bundled <code>whisper.cpp</code> engine and text-to-speech via the
-        bundled <code>Kokoro</code> engine — both run locally, with weights stored under{' '}
-        <code>~/.gezel/engines/</code>. Available to any gezel via the <code>transcribe_audio</code>{' '}
-        and <code>synthesize_speech</code> MCP tools.
+        bundled <code>Kokoro</code> engine — both run locally.
       </p>
 
       {statusError && <p className="error">Couldn't reach the Gezel service. {statusError}</p>}
@@ -136,7 +134,7 @@ export function AudioEngineSettings() {
 
         {status?.tts.status === 'ok' && (
           <div className="ollama-section" style={{ marginTop: '1rem' }}>
-            <label className="provider-row" style={{ alignItems: 'center', gap: '0.5rem' }}>
+            <label className="provider-row">
               <input
                 type="checkbox"
                 checked={narrate}

@@ -318,9 +318,10 @@ describe('McpBridge', () => {
   it('callTool(list_documents) returns text content', async () => {
     const out = await bridge.callTool('list_documents', {});
     expect(typeof out).toBe('string');
-    // With a fresh home there are no documents — server returns the
-    // friendly "No documents found." message.
-    expect(out).toMatch(/No documents found|📄|📁/);
+    // A fresh home is seeded with the one starter document, so the listing
+    // is never empty. Rows are `dir `/`file` prefixed — no emoji.
+    expect(out).toMatch(/No documents found|^\s*(dir|file) /m);
+    expect(out).not.toMatch(/📄|📁/);
   });
 
   it('callTool(write_document) + callTool(read_document) round-trips content', async () => {
@@ -1269,6 +1270,180 @@ describe('McpBridge', () => {
         raw: true,
       });
       expect(readBack).toBe(cleanHtml);
+    });
+
+    // A model building a large script across several inserts leaves the
+    // file unparseable between steps. Without an opt-out every step is
+    // rejected and rolled back, so the sequence can never converge.
+    describe('provisional edit sequences (partial: true)', () => {
+      const seed = 'const a = 1;\n/* MARK */\n';
+
+      it('accepts an edit that breaks the file and keeps the provisional content', async () => {
+        await bridge.callTool('write_file', { path: 'layer4/seq-a.js', content: seed });
+        const out = await bridge.callTool('replace_in_file', {
+          path: 'layer4/seq-a.js',
+          find: '/* MARK */',
+          replace: 'function part1() {\n/* MARK */',
+          partial: true,
+        });
+        expect(out).not.toMatch(/ERROR:/);
+        expect(out).toMatch(/Provisional edit 1 of at most/);
+        expect(out).toMatch(/NOT syntax-checked/);
+        const readBack = await bridge.callTool('read_file', {
+          path: 'layer4/seq-a.js',
+          raw: true,
+        });
+        expect(readBack).toContain('function part1() {');
+      });
+
+      it('rejects the same edit without the flag, proving the gate still stands', async () => {
+        await bridge.callTool('write_file', { path: 'layer4/seq-b.js', content: seed });
+        const out = await bridge.callTool('replace_in_file', {
+          path: 'layer4/seq-b.js',
+          find: '/* MARK */',
+          replace: 'function part1() {\n/* MARK */',
+        });
+        expect(out).toMatch(/ERROR:/);
+        const readBack = await bridge.callTool('read_file', {
+          path: 'layer4/seq-b.js',
+          raw: true,
+        });
+        expect(readBack).toBe(seed.trimEnd());
+      });
+
+      it('closes the sequence when a final non-partial edit makes it parse', async () => {
+        await bridge.callTool('write_file', { path: 'layer4/seq-c.js', content: seed });
+        await bridge.callTool('replace_in_file', {
+          path: 'layer4/seq-c.js',
+          find: '/* MARK */',
+          replace: 'function part1() {\n/* MARK */',
+          partial: true,
+        });
+        const closed = await bridge.callTool('replace_in_file', {
+          path: 'layer4/seq-c.js',
+          find: '/* MARK */',
+          replace: '  return 1;\n}',
+        });
+        expect(closed).not.toMatch(/ERROR:/);
+        expect(closed).not.toMatch(/Provisional edit/);
+        const readBack = await bridge.callTool('read_file', {
+          path: 'layer4/seq-c.js',
+          raw: true,
+        });
+        expect(readBack).toContain('return 1;');
+      });
+
+      it('leaves the file alone when a close attempt still does not parse', async () => {
+        await bridge.callTool('write_file', { path: 'layer4/seq-d.js', content: seed });
+        await bridge.callTool('replace_in_file', {
+          path: 'layer4/seq-d.js',
+          find: '/* MARK */',
+          replace: 'function part1() {\n/* MARK */',
+          partial: true,
+        });
+        const out = await bridge.callTool('replace_in_file', {
+          path: 'layer4/seq-d.js',
+          find: '/* MARK */',
+          replace: 'const b = ;',
+        });
+        expect(out).toMatch(/ERROR:/);
+        expect(out).toMatch(/still an open provisional edit sequence/);
+        // Rolling back mid-sequence would discard the model's progress to
+        // reach a state no better than the one it is in.
+        const readBack = await bridge.callTool('read_file', {
+          path: 'layer4/seq-d.js',
+          raw: true,
+        });
+        expect(readBack).toContain('function part1() {');
+        expect(readBack).toContain('const b = ;');
+      });
+
+      it('closes the sequence when validate passes', async () => {
+        await bridge.callTool('write_file', { path: 'layer4/seq-e.js', content: seed });
+        await bridge.callTool('replace_in_file', {
+          path: 'layer4/seq-e.js',
+          find: '/* MARK */',
+          replace: 'function part1() { return 1; }\n/* MARK */',
+          partial: true,
+        });
+        const out = await bridge.callTool('validate', { path: 'layer4/seq-e.js' });
+        expect(out).toMatch(/PASS/);
+        expect(out).toMatch(/now closed/);
+      });
+
+      // The literal shape that broke: an HTML shell whose game engine is
+      // landed via insert_at_marker before `</body>`, in parts, with a
+      // section marker left open between them. Every intermediate state
+      // is unparseable by construction.
+      it('lets insert_at_marker build a script across two calls (the incident shape)', async () => {
+        const shell = [
+          '<!DOCTYPE html>',
+          '<html><body>',
+          '<canvas id="c"></canvas>',
+          '</body>',
+          '</html>',
+        ].join('\n');
+        await bridge.callTool('write_file', { path: 'layer4/game.html', content: shell });
+
+        const part1 = await bridge.callTool('insert_at_marker', {
+          path: 'layer4/game.html',
+          marker: '</body>',
+          where: 'before',
+          content: '<script>\nconst ctx = document.getElementById("c").getContext("2d");\n',
+          partial: true,
+        });
+        expect(part1).not.toMatch(/ERROR:/);
+        expect(part1).toMatch(/Provisional edit 1 of at most/);
+
+        const part2 = await bridge.callTool('insert_at_marker', {
+          path: 'layer4/game.html',
+          marker: '</body>',
+          where: 'before',
+          content: 'function draw() { ctx.fillRect(0, 0, 1, 1); }\ndraw();\n</script>\n',
+        });
+        expect(part2).not.toMatch(/ERROR:/);
+        expect(part2).not.toMatch(/Provisional edit/);
+
+        const readBack = await bridge.callTool('read_file', {
+          path: 'layer4/game.html',
+          raw: true,
+        });
+        expect(readBack).toContain('<script>');
+        expect(readBack).toContain('</script>');
+        expect(readBack).toContain('function draw()');
+        const validated = await bridge.callTool('validate', { path: 'layer4/game.html' });
+        expect(validated).toMatch(/PASS/);
+      });
+
+      it('names the opening line when a provisional sequence closes on a broken comment', async () => {
+        const shell = '<!DOCTYPE html>\n<html><body>\n<canvas id="c"></canvas>\n</body>\n</html>';
+        await bridge.callTool('write_file', { path: 'layer4/game2.html', content: shell });
+        const out = await bridge.callTool('insert_at_marker', {
+          path: 'layer4/game2.html',
+          marker: '</body>',
+          where: 'before',
+          content: '<script>\nconst a = 1;\n/* ===PART1-END===\n</script>\n',
+        });
+        expect(out).toMatch(/ERROR:/);
+        // `<script>` lands on 4, `const a = 1;` on 5, the unclosed
+        // comment on 6 — and 7 is the `</script>` the old message named.
+        expect(out).toMatch(/opens a block comment at line 6/);
+        expect(out).toMatch(/do not edit the last line of the script/i);
+        expect(out).toMatch(/pass `partial: true` on the intermediate edits/);
+      });
+
+      it('reports the sequence as still open when validate fails', async () => {
+        await bridge.callTool('write_file', { path: 'layer4/seq-f.js', content: seed });
+        await bridge.callTool('replace_in_file', {
+          path: 'layer4/seq-f.js',
+          find: '/* MARK */',
+          replace: 'function part1() {\n/* MARK */',
+          partial: true,
+        });
+        const out = await bridge.callTool('validate', { path: 'layer4/seq-f.js' });
+        expect(out).toMatch(/FAIL/);
+        expect(out).toMatch(/still an open provisional edit sequence/);
+      });
     });
 
     it('apply_patch applies a unified diff and returns the change envelope', async () => {

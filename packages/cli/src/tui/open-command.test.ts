@@ -73,6 +73,34 @@ describe('CLI /open recent references', () => {
     ]);
   });
 
+  it('seeds an MRU from referencedFiles, keeping each entry its own kind', () => {
+    const session = {
+      projectId: 'project-1',
+      messages: [
+        {
+          role: 'assistant',
+          content: 'See the review.',
+          at: '2026-08-14T00:00:00.000Z',
+          referencedFiles: [
+            { kind: 'artifact' as const, path: 'reports/pr-review.md' },
+            { kind: 'workspace' as const, path: 'docs/API.md' },
+          ],
+          // Present alongside the current field on anything this daemon
+          // wrote; the reader must not double-count it.
+          referencedArtifacts: ['reports/pr-review.md'],
+        },
+      ],
+    } as Pick<ChatSession, 'projectId' | 'messages'>;
+
+    // Newest-first, so the last path named in the body leads the MRU.
+    expect(
+      cliOpenReferencesFromSession(session).map((reference) => [reference.kind, reference.path]),
+    ).toEqual([
+      ['workspace', 'docs/API.md'],
+      ['artifact', 'reports/pr-review.md'],
+    ]);
+  });
+
   it('promotes repeated references and resolves exact paths or unique basenames', () => {
     const first = cliOpenReferencesFromEvent(toolEvent('docs/one/review.md'));
     const second = cliOpenReferencesFromEvent(toolEvent('docs/two/notes.md'));

@@ -14,6 +14,49 @@ import {
 
 const log = createLogger('tasks');
 
+/** Same shape `interpolateStepsContext` substitutes, so this sees exactly what it left behind. */
+const TEMPLATE_PLACEHOLDER = /\{\{\s*[a-zA-Z0-9_.-]+\s*\}\}/g;
+
+/**
+ * Gate fields still carrying a `{{param}}` token at evaluation time.
+ *
+ * Launch interpolation deliberately leaves UNKNOWN placeholders intact so
+ * a craftbook typo stays visible rather than silently blanking to an
+ * empty string. Visible to a human reading the recipe — but the model on
+ * the other end of the gate just sees a rejection it cannot satisfy,
+ * because the literal `{{…}}` is being handed to a regex engine or a
+ * path resolver. Pull Request Review shipped `PR\s*#{{number}}` that way:
+ * the reviewer had written the note correctly, spent three attempts
+ * re-deriving why a correct note kept failing, and finally "passed" the
+ * gate by writing the raw template token into the task's audit trail.
+ *
+ * No assignee can repair this, so it is an infrastructure fault — it
+ * pauses for a human instead of charging attempts and climbing the
+ * repair ladder.
+ */
+function unresolvedGatePlaceholders(gate: NormalizedStepGate): string[] {
+  const found: string[] = [];
+  const scan = (value: unknown, path: string): void => {
+    if (typeof value === 'string') {
+      const hits = value.match(TEMPLATE_PLACEHOLDER);
+      if (hits) found.push(`${path} (${[...new Set(hits)].join(' ')})`);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((entry, i) => scan(entry, `${path}[${i}]`));
+      return;
+    }
+    if (value && typeof value === 'object') {
+      for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+        scan(entry, `${path}.${key}`);
+      }
+    }
+  };
+  gate.checks.forEach((check, i) => scan(check, `checks[${i}] ${check.kind}`));
+  gate.scripts.forEach((ref, i) => scan(ref.inputs, `scripts[${i}] ${ref.name} inputs`));
+  return found;
+}
+
 /**
  * ─ Step-gate evaluation engine ───────────────────────────────────────
  *
@@ -87,6 +130,17 @@ export async function evaluateStepGate(opts: {
   const runs: StepGateOutcome['runs'] = [];
   const skipped: string[] = [];
   let checkResults: GateCheckOutcome[] | undefined;
+
+  const unresolved = unresolvedGatePlaceholders(gate);
+  if (unresolved.length > 0) {
+    return {
+      decision: 'reject',
+      message: `Gate configuration error: ${unresolved.join(', ')} still contains an unresolved template placeholder, so this gate can never pass. The craftbook references a launch parameter that was not supplied. Fix the craftbook or relaunch with that parameter — no deliverable can satisfy it.`,
+      infrastructureError: true,
+      skipped,
+      runs,
+    };
+  }
 
   if (gate.checks.length > 0) {
     const result = await evaluateGate(gate.checks, ws, deps);

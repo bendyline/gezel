@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { createReadStream, existsSync } from 'node:fs';
 import {
   lstat,
   mkdir,
@@ -35,6 +35,22 @@ const STAGING_SUFFIX =
   /^\.staging-([1-9][0-9]{0,9})-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
+ * Read size for the tarball stream. Matches node-tar's own `maxReadSize`
+ * default, which is what `tar.extract({ file })` would have used had we let
+ * it open the file itself. Node's 64 KiB default would put ~10k extra loop
+ * turns between us and a ~700 MB bundle for no benefit.
+ */
+const TARBALL_READ_SIZE = 16 * 1024 * 1024;
+
+/**
+ * Log a progress line once the completed share has advanced this far. Five
+ * points is ~20 lines for a full extraction: enough that a stalled install
+ * is visibly stalled, few enough that the deb/rpm hook's stdout stays
+ * readable in `apt` output.
+ */
+const PROGRESS_LOG_STEP = 5;
+
+/**
  * The service bundle ships as a single gzipped tarball plus a small JSON
  * sidecar with `{ version, sha256, sizeBytes, fileCount }`. Both are
  * asar-unpacked so the supervisor (and the install-time CLI in
@@ -51,6 +67,11 @@ const STAGING_SUFFIX =
  * service) or on first user launch (per-user spawn / embedded): about 20s in
  * a warm-cache Windows benchmark, but potentially several minutes under a
  * cold Defender scan. The startup splash makes that work explicit.
+ *
+ * On platforms with a machine service, the install-time extraction and the
+ * first-launch one used to be the *same* work done twice — see
+ * {@link ../shared-service-tree.js}, which lets the per-user daemon adopt the
+ * installer-owned tree when its sentinel matches this sidecar's sha.
  */
 export interface BundleMeta {
   version: string;
@@ -75,7 +96,16 @@ export interface ExtractOptions {
   /**
    * Force extraction regardless of version comparison. Used by install-time
    * hooks where the destination dir's existing contents (from a partial
-   * previous install) shouldn't gate replacement.
+   * previous install) shouldn't gate replacement, and where a *downgrade*
+   * must still take — an installer is authoritative about what belongs on
+   * disk in a way a launching app is not.
+   *
+   * It does not mean "always re-extract". An exact sha match still
+   * short-circuits, because a tree cannot carry a matching sentinel unless a
+   * complete extraction committed it: the sentinel is written inside the
+   * staging tree and only becomes visible through the final atomic rename.
+   * Re-running the same installer therefore no longer re-unpacks ~33k files
+   * for nothing.
    */
   force?: boolean;
 }
@@ -84,6 +114,16 @@ export interface ExtractResult {
   action: 'fresh-install' | 'upgraded' | 'up-to-date' | 'kept-newer' | 'forced';
   installedVersion: string;
   shippedVersion: string;
+  /**
+   * Wall-clock milliseconds this call spent. Reported for every action so a
+   * slow install can be attributed from a log alone — before this, the only
+   * evidence a caller had was one line at the start of an extraction and
+   * silence until the daemon came up, which is how a 15-minute unpack on a
+   * fresh Linux arm64 box read as a hang rather than as work.
+   */
+  elapsedMs: number;
+  /** Files + symlinks written, or null when no extraction ran. */
+  filesExtracted: number | null;
 }
 
 /**
@@ -163,6 +203,22 @@ export async function readBundleMeta(metaPath: string): Promise<BundleMeta | nul
  */
 export async function extractBundleIfNeeded(opts: ExtractOptions): Promise<ExtractResult> {
   const { installDir, tarballPath, metaPath, logger, force } = opts;
+  const startedAt = Date.now();
+  const done = (
+    action: ExtractResult['action'],
+    installedVersion: string,
+    shippedVersion: string,
+    filesExtracted: number | null,
+  ): ExtractResult => {
+    const elapsedMs = Date.now() - startedAt;
+    if (filesExtracted !== null) {
+      logger?.info?.(
+        `[supervisor] extracted service bundle v${shippedVersion} in ${describeDuration(elapsedMs)} ` +
+          `(${filesExtracted} files, ${describeRate(filesExtracted, elapsedMs)})`,
+      );
+    }
+    return { action, installedVersion, shippedVersion, elapsedMs, filesExtracted };
+  };
 
   await recoverInterruptedInstall(installDir);
   // Before the bundle checks below, so an orphan is reclaimed on the
@@ -185,27 +241,33 @@ export async function extractBundleIfNeeded(opts: ExtractOptions): Promise<Extra
   const shippedVersion = meta.version;
   const shippedSha = meta.sha256.toLowerCase();
 
-  if (force) {
-    logger?.info?.(
-      `[supervisor] force-extracting service bundle v${shippedVersion} to ${installDir}`,
-    );
-    await installTarball(tarballPath, installDir, meta);
-    return { action: 'forced', installedVersion: shippedVersion, shippedVersion };
-  }
-
   const installedVersion = existsSync(join(installDir, 'package.json'))
     ? await readPackageVersion(join(installDir, 'package.json'))
     : null;
 
+  if (force) {
+    if (installedVersion !== null && (await readShaSentinel(installDir)) === shippedSha) {
+      logger?.info?.(
+        `[supervisor] service bundle v${shippedVersion} is already extracted at ${installDir}`,
+      );
+      return done('up-to-date', installedVersion, shippedVersion, null);
+    }
+    logger?.info?.(
+      `[supervisor] force-extracting service bundle v${shippedVersion} to ${installDir}`,
+    );
+    const files = await installTarball(tarballPath, installDir, meta, logger);
+    return done('forced', shippedVersion, shippedVersion, files);
+  }
+
   if (installedVersion === null) {
     logger?.info?.(`[supervisor] extracting service bundle v${shippedVersion} to ${installDir}`);
-    await installTarball(tarballPath, installDir, meta);
-    return { action: 'fresh-install', installedVersion: shippedVersion, shippedVersion };
+    const files = await installTarball(tarballPath, installDir, meta, logger);
+    return done('fresh-install', shippedVersion, shippedVersion, files);
   }
 
   const installedSha = await readShaSentinel(installDir);
   if (installedSha !== null && installedSha === shippedSha) {
-    return { action: 'up-to-date', installedVersion, shippedVersion };
+    return done('up-to-date', installedVersion, shippedVersion, null);
   }
 
   // Sha differs (or sentinel missing — treat as "we don't know what's
@@ -215,7 +277,7 @@ export async function extractBundleIfNeeded(opts: ExtractOptions): Promise<Extra
     logger?.warn?.(
       `[supervisor] keeping installed service v${installedVersion} (newer than bundled v${shippedVersion})`,
     );
-    return { action: 'kept-newer', installedVersion, shippedVersion };
+    return done('kept-newer', installedVersion, shippedVersion, null);
   }
 
   // cmp >= 0 — either a true upgrade, or content drift at the same
@@ -233,47 +295,125 @@ export async function extractBundleIfNeeded(opts: ExtractOptions): Promise<Extra
       `[supervisor] re-extracting service bundle v${shippedVersion} (content drift: shipped sha=${shippedSha.slice(0, 12)} installed sha=${installedSha.slice(0, 12)})`,
     );
   }
-  await installTarball(tarballPath, installDir, meta);
-  return { action: 'upgraded', installedVersion: shippedVersion, shippedVersion };
+  const files = await installTarball(tarballPath, installDir, meta, logger);
+  return done('upgraded', shippedVersion, shippedVersion, files);
 }
 
-async function installTarball(tarballPath: string, dest: string, meta: BundleMeta): Promise<void> {
+/**
+ * Extract into a staging tree and return how many files + symlinks landed.
+ *
+ * The tarball is read exactly once. Its bytes are hashed as they stream
+ * through on the way into the untar, rather than by a separate `readFile` +
+ * `update()` pass beforehand — that pass doubled the I/O for a ~700 MB
+ * archive and allocated the whole thing as one Buffer, both of which are
+ * felt on a slow or cold-cache install.
+ *
+ * ORDERING, DELIBERATE: the integrity check therefore now gates the
+ * *commit* rather than the *read*. Nothing is executed, imported, or linked
+ * out of the staging tree — the only thing that ever happens to unverified
+ * bytes is that they get written to a private staging directory and, on any
+ * mismatch, recursively deleted below. The live install dir is only ever
+ * reached by a rename that a matching sha is a precondition for. The
+ * property this preserves is the one that matters: gezeld never runs from a
+ * tree whose bytes did not hash to the sidecar's sha.
+ *
+ * (The tarball + meta ship together inside the signed/notarized app, so this
+ * is integrity/corruption protection rather than authentication either way —
+ * see the class comment on BundleMeta.)
+ */
+async function installTarball(
+  tarballPath: string,
+  dest: string,
+  meta: BundleMeta,
+  logger?: ExtractOptions['logger'],
+): Promise<number> {
   const tarballStat = await stat(tarballPath);
   if (tarballStat.size !== meta.sizeBytes) {
     throw new Error(
       `[supervisor] service bundle size mismatch (tarball=${tarballStat.size} expected=${meta.sizeBytes}) — refusing to extract`,
     );
   }
-  // Verify the tarball hashes to the sha the meta sidecar declares before
-  // we extract + execute its contents. The tarball + meta ship together
-  // inside the signed/notarized app, so this is integrity/corruption
-  // protection rather than authentication — a deeper guarantee against
-  // post-extraction tampering of the user-writable install dir would
-  // require running the service from a non-user-writable location.
-  const actualSha = createHash('sha256')
-    .update(await readFile(tarballPath))
-    .digest('hex');
-  if (actualSha.toLowerCase() !== meta.sha256.toLowerCase()) {
-    throw new Error(
-      `[supervisor] service bundle sha mismatch (tarball=${actualSha.slice(0, 12)} expected=${meta.sha256.slice(0, 12)}) — refusing to extract`,
-    );
-  }
   const staging = `${dest}.staging-${process.pid}-${randomUUID()}`;
   const backup = `${dest}.previous`;
   await mkdir(dirname(dest), { recursive: true });
   await mkdir(staging, { recursive: true });
+
+  const hash = createHash('sha256');
+  let extractedFileCount = 0;
+  let bytesRead = 0;
+  let loggedPercent = 0;
   try {
-    await tar.extract({ file: tarballPath, cwd: staging, strict: true, preservePaths: false });
+    const extractor = tar.extract({
+      cwd: staging,
+      strict: true,
+      preservePaths: false,
+      onentry: (entry) => {
+        // Directories are the one entry kind that leaves nothing countable
+        // behind — the same rule `inventoryBundleArchivePaths` applies when
+        // the release build computes `meta.fileCount`, so the two agree by
+        // construction. Hardlinks (`Link`) and symlinks both materialize as
+        // filesystem entries and count, which is what the old readdir walk
+        // did too; pnpm deploy trees contain both.
+        if (entry.type === 'Directory') return;
+        extractedFileCount += 1;
+        if (meta.fileCount <= 0) return;
+        const percent = Math.floor((extractedFileCount / meta.fileCount) * 100);
+        if (percent >= loggedPercent + PROGRESS_LOG_STEP && percent < 100) {
+          loggedPercent = percent;
+          logger?.info?.(
+            `[supervisor] extracting service bundle — ${percent}% ` +
+              `(${extractedFileCount}/${meta.fileCount} files)`,
+          );
+        }
+      },
+    });
+    const source = createReadStream(tarballPath, { highWaterMark: TARBALL_READ_SIZE });
+    source.on('data', (chunk: string | Buffer) => {
+      hash.update(chunk);
+      bytesRead += chunk.length;
+    });
+    await new Promise<void>((resolveDone, reject) => {
+      let settled = false;
+      const fail = (err: unknown) => {
+        if (settled) return;
+        settled = true;
+        source.destroy();
+        reject(err instanceof Error ? err : new Error(String(err)));
+      };
+      // `close` is what node-tar's own file-mode extract resolves on: Unpack
+      // emits `end` only once every pending file write has landed, and the
+      // parser turns that into `close` on the next microtask.
+      extractor.on('close', () => {
+        if (settled) return;
+        settled = true;
+        resolveDone();
+      });
+      extractor.on('error', fail);
+      source.on('error', fail);
+      source.pipe(extractor);
+    });
   } catch (err) {
     await rm(staging, { recursive: true, force: true });
     throw err;
   }
+
   try {
+    if (bytesRead !== meta.sizeBytes) {
+      throw new Error(
+        `[supervisor] service bundle read ${bytesRead} bytes but the sidecar declares ${meta.sizeBytes} — refusing to install`,
+      );
+    }
+    const actualSha = hash.digest('hex').toLowerCase();
+    if (actualSha !== meta.sha256.toLowerCase()) {
+      throw new Error(
+        `[supervisor] service bundle sha mismatch (tarball=${actualSha.slice(0, 12)} expected=${meta.sha256.slice(0, 12)}) — refusing to install`,
+      );
+    }
     // `fileCount` used to be write-only metadata. A Windows release proved
     // that a tarball can pass size/SHA validation yet leave an incomplete
-    // extracted dependency tree. Count regular files + symlinks before the
-    // staging swap so a partial install never becomes the live service.
-    const extractedFileCount = await countExtractedBundleFiles(staging);
+    // extracted dependency tree. Counting the entries as they are unpacked
+    // replaced a second full walk of ~33k paths that existed only to produce
+    // this number.
     if (extractedFileCount !== meta.fileCount) {
       throw new Error(
         `[supervisor] post-extract file count mismatch (extracted=${extractedFileCount} expected=${meta.fileCount})`,
@@ -322,22 +462,19 @@ async function installTarball(tarballPath: string, dest: string, meta: BundleMet
     throw err;
   }
   if (existsSync(backup)) await rm(backup, { recursive: true, force: true });
+  return extractedFileCount;
 }
 
-async function countExtractedBundleFiles(root: string): Promise<number> {
-  let count = 0;
-  async function walk(dir: string): Promise<void> {
-    const entries = await readdir(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isSymbolicLink() || entry.isFile()) {
-        count += 1;
-      } else if (entry.isDirectory()) {
-        await walk(join(dir, entry.name));
-      }
-    }
-  }
-  await walk(root);
-  return count;
+function describeDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = ms / 1000;
+  if (seconds < 90) return `${seconds.toFixed(1)}s`;
+  return `${Math.floor(seconds / 60)}m${String(Math.round(seconds % 60)).padStart(2, '0')}s`;
+}
+
+function describeRate(files: number, ms: number): string {
+  if (ms <= 0) return 'instant';
+  return `${Math.round(files / (ms / 1000))} files/s`;
 }
 
 async function recoverInterruptedInstall(dest: string): Promise<void> {
@@ -420,6 +557,16 @@ async function sweepAbandonedStaging(
       );
     }
   }
+}
+
+/**
+ * The sha of the bundle an already-extracted tree was produced from, or null
+ * when the tree predates the sentinel / has a corrupt one. Exported so
+ * {@link ../shared-service-tree.js} can ask "is the installer-owned tree the
+ * same bytes this app ships?" without duplicating the sentinel's format.
+ */
+export async function readInstalledBundleSha(installDir: string): Promise<string | null> {
+  return readShaSentinel(installDir);
 }
 
 async function readShaSentinel(installDir: string): Promise<string | null> {

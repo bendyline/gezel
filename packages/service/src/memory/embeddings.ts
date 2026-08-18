@@ -282,3 +282,26 @@ export async function embedBatch(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
   return embedMany(texts);
 }
+
+/**
+ * Load the embedding pipeline ahead of the first real caller.
+ *
+ * The model loads lazily on first use, and that load was measured at ~41s on
+ * a fresh install. Whoever arrives first pays it — and the unified search sits
+ * in the titlebar, so it was routinely the user's first keystroke, with the
+ * search box appearing to ignore them. The first chat turn loads the same
+ * pipeline for memory extraction anyway, so warming moves the cost off an
+ * interactive path rather than adding one.
+ *
+ * Never throws: embeddings being disabled or unavailable is a supported
+ * configuration, and the callers already degrade to keyword-only search.
+ */
+export async function warmEmbeddings(): Promise<boolean> {
+  if (disabledByEnv() || disabledReason) return false;
+  try {
+    await embed('warm');
+    return true;
+  } catch {
+    return false;
+  }
+}

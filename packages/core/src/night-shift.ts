@@ -114,6 +114,30 @@ export function lastNightShiftWindow(
 }
 
 /**
+ * The scheduled window a status surface should name: the one open right
+ * now, else the next one due. `open` tells the caller which it got — the
+ * difference between "started 22:00, ends 06:00" and "next window 22:00 →
+ * 06:00". An always-on window (equal bounds) is permanently open and
+ * reported as the rolling last 24h, matching {@link lastNightShiftWindow}.
+ */
+export function nightShiftWindowBounds(
+  now: Date,
+  window: NightShiftWindow,
+): { start: Date; end: Date; open: boolean } {
+  if (isInNightShiftWindow(now, window)) {
+    const { start, end } = lastNightShiftWindow(now, window);
+    return { start, end, open: true };
+  }
+  const start = nextNightShiftStart(now, window);
+  const end = new Date(start);
+  // Wall-clock arithmetic, same as lastNightShiftWindow: a window that
+  // wraps midnight ends on the following local date at `endHour`.
+  if (window.endHour <= window.startHour) end.setDate(end.getDate() + 1);
+  end.setHours(window.endHour, 0, 0, 0);
+  return { start, end, open: false };
+}
+
+/**
  * The next local datetime the window opens, strictly after `now`. Used to
  * pre-schedule an OS wake (`wakeOnStart`) so a sleeping machine comes up
  * for the upcoming shift — the service can't detect the window if it's

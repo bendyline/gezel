@@ -13,8 +13,13 @@ you. Reviews get written, indexes get refreshed, translations catch up.
 In the morning there's a report waiting instead of a backlog.
 
 The moon in the title bar shows when a shift is running and what it's
-working on. You can also start one manually — stepping out for lunch is a
-perfectly good night.
+working on. It also says **when the period started and when it ends** —
+a scheduled shift closes with its window, a manual one runs until the
+work is done — and keeps a **running tally** of what the shift has got
+through: tasks finished, files indexed and reviewed, files written,
+questions raised for you. During the day the same line tells you when
+the next window opens. You can start a shift manually too — stepping out
+for lunch is a perfectly good night.
 
 ## Roles that bring their own night work
 
@@ -46,6 +51,21 @@ Some values are shared across night work: the Translator's target
 language, for instance, is a **project property** — set once in project
 Settings (or the first time you enable the translation run) and reused by
 every run after that.
+
+## Keeping your subscription quota safe
+
+Night work on a Claude, Codex, or Copilot subscription spends the same
+quota you use during the day, so the Night Shift keeps a **quota
+reserve**: by default it stops sending work to a subscription once you're
+within 20% of a quota, leaving the rest for you. You can adjust that
+floor in Settings → Night Shift, or add a daily reserve that scales with
+the time left — 10% a day with four days until your quota resets keeps
+the last 40% for you.
+
+Work that's already running always finishes; only new work is held. Held
+work resumes on its own when a quota window resets (if the machine is
+awake) or the next night, and the moon menu says what's being protected
+and why. Gezels on local models spend nothing and are never held.
 
 ## The morning review
 

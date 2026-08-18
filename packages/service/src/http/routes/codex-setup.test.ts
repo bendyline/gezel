@@ -16,6 +16,7 @@ const STATUS: CodexSetupStatusResponse = {
   bridge: { baseUrl: 'http://127.0.0.1:11435/v1', listening: false, port: 11_435 },
   canConfigure: false,
   canRemove: false,
+  canRepair: false,
 };
 
 function app() {

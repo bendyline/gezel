@@ -4,8 +4,10 @@ import { GateCheckSchema, GateScriptRefSchema } from './gate.js';
 import {
   ChatMessageSchema,
   ChatMessageToolCallSchema,
+  ChatSessionSourceSchema,
   ChatTurnErrorDetailSchema,
   ProviderNameSchema,
+  ReferencedFileSchema,
 } from './gezel.js';
 import { TerminalTimelineEntrySchema } from './terminal.js';
 
@@ -54,6 +56,41 @@ export const ExpectedDeliverableSchema = z.object({
 export type ExpectedDeliverable = z.infer<typeof ExpectedDeliverableSchema>;
 
 /**
+ * Bounded evidence captured from the most recent caller-owned OpenAI-shaped
+ * request. External apps own their transcript and tool loop, so rebuilding a
+ * native Gezel prompt later is not evidence of what that model actually saw.
+ */
+export const ExternalRequestDiagnosticsSchema = z.object({
+  capturedAt: z.string(),
+  /** Effective system message after an optional gezel persona was prepended. */
+  systemMessage: z.string(),
+  /** Function names supplied by the caller on this request. */
+  toolNames: z.array(z.string()),
+  /** Count before the bounded diagnostic transcript window was applied. */
+  messageCount: z.number().int().nonnegative(),
+  transcriptTruncated: z.boolean().optional(),
+  transcript: z.array(
+    z.object({
+      role: z.enum(['system', 'developer', 'user', 'assistant', 'tool']),
+      content: z.string(),
+      toolCalls: z
+        .array(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+            arguments: z.string(),
+          }),
+        )
+        .optional(),
+      toolCallId: z.string().optional(),
+    }),
+  ),
+  /** Exact receipt text appended to the final tool result sent to the model. */
+  actionLedger: z.string().optional(),
+});
+export type ExternalRequestDiagnostics = z.infer<typeof ExternalRequestDiagnosticsSchema>;
+
+/**
  * A chat session — one persistent thread of conversation between the user
  * and a gezel. Every session lives inside a (gezel, project) pair. The
  * `default` project fills in when the user hasn't picked one.
@@ -99,6 +136,10 @@ export const ChatSessionSchema = z.object({
   createdAt: z.string(),
   lastActivityAt: z.string(),
   archived: z.boolean().optional(),
+  /** Provenance for a read-only conversation mirrored from another app. */
+  source: ChatSessionSourceSchema.optional(),
+  /** Latest actual caller-owned request, retained solely for diagnostics. */
+  externalRequestDiagnostics: ExternalRequestDiagnosticsSchema.optional(),
   messages: z.array(ChatMessageSchema),
   providerState: z.object({
     copilotSessionId: z.string().optional(),
@@ -273,9 +314,10 @@ export const ChatSessionSchema = z.object({
       hits: z.array(
         z.object({
           text: z.string(),
-          /** 'workspace' = an index-derived code hit (path:line + snippet),
-           *  not a memory; `day` is empty for those. */
-          scope: z.enum(['gezel', 'project', 'workspace']),
+          /** 'workspace' = an index-derived code hit (path:line + snippet)
+           *  and 'library' = a shared-document hit — neither is a memory, so
+           *  `day` is empty for both. */
+          scope: z.enum(['gezel', 'project', 'workspace', 'library']),
           day: z.string(),
           score: z.number(),
           /** Memory kind; absent on hits recalled before kinds existed. */
@@ -332,6 +374,7 @@ export const ChatSessionSummarySchema = ChatSessionSchema.pick({
   createdAt: true,
   lastActivityAt: true,
   archived: true,
+  source: true,
   // Surfaced so callers that only have the summary (e.g. the ambient-nudge
   // scheduler) can tell whether a session's last turn aborted without
   // loading the full record. Set on abort, cleared on the next successful
@@ -496,6 +539,8 @@ export const TimelineMessageSchema = z.object({
   sessionCreatedAt: z.string(),
   sessionLastActivityAt: z.string(),
   sessionArchived: z.boolean().optional(),
+  /** Provenance for a read-only conversation mirrored from another app. */
+  sessionSource: ChatSessionSourceSchema.optional(),
   /**
    * Session-pinned provider (from `ChatSession.providerName`). Captured
    * at session creation from the gezel-override-then-config-default
@@ -536,9 +581,24 @@ export const TimelineMessageSchema = z.object({
    */
   nudge: z.boolean().optional(),
   /**
-   * Mirrors `ChatMessage.referencedArtifacts` — validated artifact paths
-   * the assistant reply mentioned. Populated on write and backfilled on
-   * read for older messages that predate the parser.
+   * Mirrors `ChatMessage.origin` — the machinery authored this user turn
+   * (task dispatch seed, step handoff, reaction seed), so the bubble is
+   * labelled **System** rather than "You". Also set at read time for
+   * sessions written before the field existed: the opening user message
+   * of a task-scoped session is always the dispatch seed.
+   */
+  origin: z.enum(['system']).optional(),
+  /**
+   * Mirrors `ChatMessage.referencedFiles` — validated artifact and
+   * workspace paths the assistant reply mentioned. Populated on write
+   * and backfilled on read for older messages that predate the parser.
+   */
+  referencedFiles: z.array(ReferencedFileSchema).optional(),
+  /**
+   * Mirrors `ChatMessage.referencedArtifacts` — the artifact-only
+   * projection of `referencedFiles`, kept for older clients.
+   *
+   * @deprecated superseded by `referencedFiles`
    */
   referencedArtifacts: z.array(z.string()).optional(),
   /**

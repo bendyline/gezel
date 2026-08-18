@@ -1,8 +1,6 @@
-import { createHash } from 'node:crypto';
-import { realpathSync } from 'node:fs';
-import { chmod, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type {
   CodexSetupModelOption,
   CodexSetupStatusResponse,
@@ -12,6 +10,7 @@ import type {
   ProviderName,
 } from '@bendyline/gezel';
 import { writeFileAtomic } from '../fs/atomic.js';
+import { createManagedMarker, setupOwnerId as managedFileOwnerId } from '../fs/managed-marker.js';
 import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
 import type { CodexBridgeController } from '../http/codex-bridge.js';
 import {
@@ -19,6 +18,22 @@ import {
   type TokenRecord,
   type TokenStore,
 } from '../http/token-store.js';
+import {
+  HarnessSetupError,
+  asError,
+  createMutationQueue,
+  ensurePrivateDir,
+  findHarnessModel,
+  harnessBridgeSnapshot,
+  harnessTokenRecord,
+  isExactHarnessToken,
+  listEligibleHarnessModels,
+  posixShellWord,
+  powershellLiteral,
+  preserveConflictingFile,
+  readOptionalFile,
+  recommendedHarnessModel,
+} from '../local-harness/base.js';
 import { type CodexBinaryDetection, detectCodexBinary } from '../providers/codex-cli/binary.js';
 import type { ModelInfo } from '../providers/types.js';
 
@@ -28,25 +43,19 @@ export const CODEX_SETUP_REVISION = 1;
 const CODEX_SETUP_APP_NAME = 'Codex (Gezel local models)';
 
 const PROFILE_FILE = `${CODEX_SETUP_PROFILE_NAME}.config.toml`;
-const MANAGED_HEADER =
-  '# Managed by Gezel. Use Settings > Connected Apps to change or remove this profile.';
-const OWNER_HEADER = '# Gezel setup owner: ';
-const DIGEST_HEADER = '# Gezel profile digest: ';
-const LOCAL_PROVIDERS = [
-  'llama-cpp',
-  'mlx',
-  'ds4',
-  'ollama',
-] as const satisfies readonly ProviderName[];
-const LOCAL_PROVIDER_SET = new Set<ProviderName>(LOCAL_PROVIDERS);
+const PROFILE_MARKER = createManagedMarker({ commentPrefix: '# ', noun: 'profile' });
 const MINIMUM_CODEX_VERSION = [0, 147, 0] as const;
 
 interface SetupState {
   version: 1;
   model: string;
+  /** Stable identity behind a human-readable gezel model id. */
+  gezelId?: string;
   createdAt: string;
   updatedAt: string;
 }
+
+type ConflictKind = 'profile' | 'credential' | 'state';
 
 export interface CodexCatalogModel {
   slug: string;
@@ -55,13 +64,9 @@ export interface CodexCatalogModel {
   [key: string]: unknown;
 }
 
-export class CodexSetupError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly status: 400 | 404 | 409 | 500 = 409,
-  ) {
-    super(message);
+export class CodexSetupError extends HarnessSetupError {
+  constructor(code: string, message: string, status: 400 | 404 | 409 | 500 = 409) {
+    super(code, message, status);
     this.name = 'CodexSetupError';
   }
 }
@@ -100,7 +105,7 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
   const tokenPath = join(integrationDir, 'token');
   const catalogPath = join(integrationDir, 'models.json');
   const profilePath = join(codexHome, PROFILE_FILE);
-  const setupOwnerId = sha256(canonicalPath(opts.home)).slice(0, 24);
+  const setupOwnerId = managedFileOwnerId(opts.home);
   const now = opts.now ?? (() => new Date());
 
   const detect =
@@ -110,100 +115,23 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
       return detectCodexBinary({ override: config.codexCli?.binaryPath, env });
     });
 
-  let mutation = Promise.resolve();
   let closing = false;
-  const serialize = <T>(fn: () => Promise<T>): Promise<T> => {
-    const result = mutation.then(fn, fn);
-    mutation = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
-  };
+  const serialize = createMutationQueue();
 
   const listEligibleModels = async (
     suppliedConfig?: GezelConfig,
-  ): Promise<CodexSetupModelOption[]> => {
-    const config = suppliedConfig ?? (await opts.readConfig());
-    const groups = await Promise.all(
-      LOCAL_PROVIDERS.map(async (provider) => {
-        try {
-          const models = await opts.listModels(provider);
-          return models
-            .filter((model) => model.supportsTools === true)
-            .map(
-              (model): CodexSetupModelOption => ({
-                id: `${provider}:${model.id}`,
-                label: model.name || model.id,
-                description: `Local ${provider} model`,
-                kind: 'model',
-                provider,
-                ...(model.contextWindow ? { contextWindow: model.contextWindow } : {}),
-                ...(model.supportsReasoning !== undefined
-                  ? { supportsReasoning: model.supportsReasoning }
-                  : {}),
-                supportsTools: true,
-              }),
-            );
-        } catch {
-          return [];
-        }
-      }),
-    );
-    const rawModels = groups.flat().sort((a, b) => a.label.localeCompare(b.label));
-    const rawModelsByTarget = new Map(rawModels.map((model) => [model.id, model]));
-    const gezels = await opts.listGezels().catch(() => []);
-    const gezelModels = (
-      await Promise.all(
-        gezels.map(async (gezel): Promise<CodexSetupModelOption | null> => {
-          if (gezel.fixedFunction) return null;
-          const provider = await opts.providerForGezel(gezel.id).catch(() => null);
-          if (!provider || !LOCAL_PROVIDER_SET.has(provider)) return null;
-
-          const modelId = gezel.model ?? config.defaultModel?.[provider];
-          if (!modelId) return null;
-          const backingModel = rawModelsByTarget.get(`${provider}:${modelId}`);
-          if (!backingModel) return null;
-
-          return {
-            id: `gezel:${gezel.id}`,
-            label: gezel.name,
-            description: [gezel.role, backingModel.label].filter(Boolean).join(' · '),
-            kind: 'gezel',
-            provider,
-            gezelId: gezel.id,
-            ...(gezel.role ? { role: gezel.role } : {}),
-            modelLabel: backingModel.label,
-            ...(backingModel.contextWindow ? { contextWindow: backingModel.contextWindow } : {}),
-            ...(backingModel.supportsReasoning !== undefined
-              ? { supportsReasoning: backingModel.supportsReasoning }
-              : {}),
-            supportsTools: true,
-          };
-        }),
-      )
-    )
-      .filter((model): model is CodexSetupModelOption => model !== null)
-      .sort((a, b) => a.label.localeCompare(b.label));
-
-    // Gezels are the first-class choice. Raw models remain available for
-    // callers that deliberately want Codex without a Gezel persona.
-    return [...gezelModels, ...rawModels];
-  };
+  ): Promise<CodexSetupModelOption[]> =>
+    listEligibleHarnessModels({
+      config: suppliedConfig ?? (await opts.readConfig()),
+      listModels: opts.listModels,
+      listGezels: opts.listGezels,
+      providerForGezel: opts.providerForGezel,
+    });
 
   const codexModelCatalog = async (): Promise<CodexCatalogModel[]> =>
     (await listEligibleModels()).map(catalogModelFor);
 
-  const bridgeSnapshot = () => {
-    const live = opts.bridge.status();
-    const port = live.port ?? opts.bridge.desiredPort();
-    const origin = opts.bridge.baseUrl() ?? `http://127.0.0.1:${port}`;
-    return {
-      baseUrl: `${origin}/v1`,
-      listening: live.listening,
-      port,
-    };
-  };
+  const bridgeSnapshot = () => harnessBridgeSnapshot(opts.bridge);
 
   const readState = async (): Promise<SetupState | null> =>
     readSecurityJson(statePath, 'Codex setup', decodeSetupState);
@@ -213,6 +141,7 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
     state: SetupState | null;
     models: CodexSetupModelOption[];
     detection: CodexBinaryDetection;
+    conflict: ConflictKind | null;
   }> => {
     const configPromise = opts.readConfig();
     const [config, models, detection, stateResult, profile, tokenFile, catalog] = await Promise.all(
@@ -224,20 +153,16 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
           (value) => ({ value, error: null as Error | null }),
           (error) => ({ value: null, error: asError(error) }),
         ),
-        readOptional(profilePath),
-        readOptional(tokenPath),
-        readOptional(catalogPath),
+        readOptionalFile(profilePath),
+        readOptionalFile(tokenPath),
+        readOptionalFile(catalogPath),
       ],
     );
     const state = stateResult.value;
     const endpointsEnabled = config.openaiEndpoints?.enabled !== false;
     const versionSupported = detection.installed && isSupportedCodexVersion(detection.version);
-    const recommendedModel =
-      models.find((model) => model.kind === 'gezel' && model.gezelId === config.meesterGezelId)
-        ?.id ??
-      models.find((model) => model.kind === 'gezel')?.id ??
-      models[0]?.id;
-    const tokenRecord = setupTokenRecord(opts.tokenStore);
+    const recommendedModel = recommendedHarnessModel(models, config.meesterGezelId);
+    const tokenRecord = harnessTokenRecord(opts.tokenStore, CODEX_SETUP_APP_ID);
     const tokenOwnedBySetup = tokenRecord?.appName === CODEX_SETUP_APP_NAME;
     const canRemove = Boolean(
       state ||
@@ -250,33 +175,37 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
     const reasons: string[] = [];
     let statusState: CodexSetupStatusResponse['state'] = 'not-configured';
     let message: string | undefined;
+    let conflict: ConflictKind | null = null;
 
     if (profile !== null && !isManagedProfile(profile, setupOwnerId)) {
       statusState = 'conflict';
-      message = profile.startsWith(MANAGED_HEADER)
+      conflict = 'profile';
+      message = PROFILE_MARKER.isClaimed(profile)
         ? `${profilePath} was changed outside this setup or belongs to another Gezel home. It was preserved.`
         : `${profilePath} already exists and is not managed by Gezel. It was not changed.`;
     } else if (tokenRecord && !tokenOwnedBySetup) {
       statusState = 'conflict';
+      conflict = 'credential';
       message =
         'Another connected app is using Gezel’s reserved Codex credential identity. Revoke that app before setting up Codex.';
     } else if (stateResult.error) {
       statusState = 'conflict';
+      conflict = 'state';
       message = 'Gezel found damaged Codex setup state and left the existing files untouched.';
     } else if (state) {
       if (!endpointsEnabled) reasons.push('Connected-app model serving is turned off.');
       if (!versionSupported) reasons.push(codexVersionReason(detection));
-      if (!models.some((model) => model.id === state.model)) {
+      if (!findHarnessModel(models, state.model, state.gezelId)) {
         reasons.push('The configured gezel or local model is no longer available.');
       }
       if (profile === null) reasons.push('The managed Codex profile is missing.');
-      if (!tokenRecord || !isExactSetupToken(tokenRecord)) {
+      if (!tokenRecord || !isExactHarnessToken(tokenRecord, CODEX_SETUP_APP_NAME)) {
         reasons.push('The Codex app credential was revoked or is invalid.');
       } else if (tokenFile?.trim() !== tokenRecord.token) {
         reasons.push('The managed Codex credential file needs repair.');
       }
       if (profile !== null) {
-        const selected = models.find((model) => model.id === state.model);
+        const selected = findHarnessModel(models, state.model, state.gezelId);
         if (selected) {
           const expected = buildProfile({
             model: selected,
@@ -303,16 +232,25 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         : 'Install a local chat model with tool support before setting up Codex.';
     }
 
-    const canConfigure =
-      endpointsEnabled && versionSupported && models.length > 0 && statusState !== 'conflict';
+    const publishable = endpointsEnabled && versionSupported && models.length > 0;
+    const canConfigure = publishable && statusState !== 'conflict';
+    // A credential conflict is another app's to release; the profile and our own
+    // damaged state are the only conflicts Gezel may resolve on the user's behalf.
+    const canRepair = publishable && (conflict === 'profile' || conflict === 'state');
     return {
       state,
       models,
       detection,
+      conflict,
       status: {
         state: statusState,
         models,
-        ...(state ? { configuredModel: state.model } : {}),
+        ...(state
+          ? {
+              configuredModel:
+                findHarnessModel(models, state.model, state.gezelId)?.id ?? state.model,
+            }
+          : {}),
         ...(recommendedModel ? { recommendedModel } : {}),
         reasons,
         ...(message ? { message } : {}),
@@ -331,11 +269,22 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         bridge: bridgeSnapshot(),
         canConfigure,
         canRemove,
+        canRepair,
       },
     };
   };
 
   const status = async (): Promise<CodexSetupStatusResponse> => (await inspect()).status;
+
+  // Exclusive create, never overwrite: the whole point of the backup is that a
+  // file Gezel does not own survives, and that includes an earlier backup.
+  const preserveConflictingProfile = (content: string): Promise<string> =>
+    preserveConflictingFile({
+      path: profilePath,
+      content,
+      mode: 0o600,
+      code: 'codex_profile_backup_failed',
+    });
 
   const configure = (input: ConfigureCodexRequest): Promise<CodexSetupStatusResponse> =>
     serialize(async () => {
@@ -356,13 +305,14 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
       if (!before.detection.installed || !isSupportedCodexVersion(before.detection.version)) {
         throw new CodexSetupError('codex_unavailable', codexVersionReason(before.detection));
       }
-      if (before.status.state === 'conflict') {
+      const repairing = input.backupConflictingProfile === true && before.status.canRepair;
+      if (before.status.state === 'conflict' && !repairing) {
         throw new CodexSetupError(
           'codex_profile_conflict',
           before.status.message ?? `${profilePath} is not managed by Gezel.`,
         );
       }
-      const selected = before.models.find((model) => model.id === input.model);
+      const selected = findHarnessModel(before.models, input.model);
       if (!selected) {
         throw new CodexSetupError(
           'model_not_available',
@@ -375,9 +325,14 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         throw new CodexSetupError('codex_bridge_unavailable', asError(error).message);
       });
       let issuedNewToken = false;
+      let backup: { path: string; content: string } | null = null;
       try {
-        const currentProfile = await readOptional(profilePath);
-        if (currentProfile !== null && !isManagedProfile(currentProfile, setupOwnerId)) {
+        const currentProfile = await readOptionalFile(profilePath);
+        const foreignProfile =
+          currentProfile !== null && !isManagedProfile(currentProfile, setupOwnerId)
+            ? currentProfile
+            : null;
+        if (foreignProfile !== null && !repairing) {
           throw new CodexSetupError(
             'codex_profile_conflict',
             `${profilePath} changed while setup was running and was not overwritten.`,
@@ -387,8 +342,12 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         await ensurePrivateDir(integrationDir);
         await mkdir(codexHome, { recursive: true });
 
-        let record = setupTokenRecord(opts.tokenStore);
-        if (record && record.appName === CODEX_SETUP_APP_NAME && !isExactSetupToken(record)) {
+        let record = harnessTokenRecord(opts.tokenStore, CODEX_SETUP_APP_ID);
+        if (
+          record &&
+          record.appName === CODEX_SETUP_APP_NAME &&
+          !isExactHarnessToken(record, CODEX_SETUP_APP_NAME)
+        ) {
           await opts.tokenStore.revoke(CODEX_SETUP_APP_ID);
           record = undefined;
         }
@@ -405,6 +364,7 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         const nextState: SetupState = {
           version: CODEX_SETUP_REVISION,
           model: selected.id,
+          ...(selected.kind === 'gezel' ? { gezelId: selected.gezelId } : {}),
           createdAt,
           updatedAt: now().toISOString(),
         };
@@ -426,19 +386,38 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
           mode: 0o600,
           durable: true,
         });
-        if ((await readOptional(profilePath)) !== currentProfile) {
+        if ((await readOptionalFile(profilePath)) !== currentProfile) {
           throw new CodexSetupError(
             'codex_profile_conflict',
             `${profilePath} changed while setup was running and was not overwritten.`,
           );
         }
+        if (foreignProfile !== null) {
+          backup = {
+            path: await preserveConflictingProfile(foreignProfile),
+            content: foreignProfile,
+          };
+        }
         await writeFileAtomic(profilePath, profile, { mode: 0o600, durable: true });
         await writeSecurityJson(statePath, `${JSON.stringify(nextState, null, 2)}\n`);
-        return status();
+        const published = await status();
+        return backup ? { ...published, profileBackupPath: backup.path } : published;
       } catch (error) {
+        if (backup) {
+          // Undo the move before any other cleanup: the file we displaced is the
+          // user's, and a failed repair must leave it where they left it.
+          const published = await readOptionalFile(profilePath).catch(() => null);
+          if (published === null || isManagedProfile(published, setupOwnerId)) {
+            await writeFileAtomic(profilePath, backup.content, {
+              mode: 0o600,
+              durable: true,
+            }).catch(() => undefined);
+          }
+          await rm(backup.path, { force: true }).catch(() => undefined);
+        }
         if (issuedNewToken) await opts.tokenStore.revoke(CODEX_SETUP_APP_ID).catch(() => false);
         if (!before.state) {
-          const publishedProfile = await readOptional(profilePath).catch(() => null);
+          const publishedProfile = await readOptionalFile(profilePath).catch(() => null);
           if (publishedProfile !== null && isManagedProfile(publishedProfile, setupOwnerId)) {
             await rm(profilePath, { force: true }).catch(() => undefined);
           }
@@ -454,14 +433,14 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
       const failures: unknown[] = [];
       await opts.bridge.stop().catch((error) => failures.push(error));
 
-      const profile = await readOptional(profilePath).catch((error) => {
+      const profile = await readOptionalFile(profilePath).catch((error) => {
         failures.push(error);
         return null;
       });
       if (profile !== null && isManagedProfile(profile, setupOwnerId)) {
         await rm(profilePath, { force: true }).catch((error) => failures.push(error));
       }
-      const record = setupTokenRecord(opts.tokenStore);
+      const record = harnessTokenRecord(opts.tokenStore, CODEX_SETUP_APP_ID);
       if (record?.appName === CODEX_SETUP_APP_NAME) {
         await opts.tokenStore.revoke(CODEX_SETUP_APP_ID).catch((error) => failures.push(error));
       }
@@ -486,11 +465,11 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         await opts.bridge.stop();
         return;
       }
-      const record = setupTokenRecord(opts.tokenStore);
-      const tokenFile = await readOptional(tokenPath);
-      const profile = await readOptional(profilePath);
+      const record = harnessTokenRecord(opts.tokenStore, CODEX_SETUP_APP_ID);
+      const tokenFile = await readOptionalFile(tokenPath);
+      const profile = await readOptionalFile(profilePath);
       if (
-        !isExactSetupToken(record) ||
+        !isExactHarnessToken(record, CODEX_SETUP_APP_NAME) ||
         tokenFile?.trim() !== record.token ||
         profile === null ||
         !isManagedProfile(profile, setupOwnerId)
@@ -499,12 +478,12 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         return;
       }
       const models = await listEligibleModels(config);
-      const selected = models.find((model) => model.id === state.model);
+      const selected = findHarnessModel(models, state.model, state.gezelId);
       if (!selected) {
         await opts.bridge.stop();
         return;
       }
-      if ((await readOptional(profilePath)) !== profile) {
+      if ((await readOptionalFile(profilePath)) !== profile) {
         await opts.bridge.stop();
         return;
       }
@@ -528,6 +507,22 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
         }),
         { mode: 0o600, durable: true },
       );
+      const selectedGezelId = selected.kind === 'gezel' ? selected.gezelId : undefined;
+      if (state.model !== selected.id || state.gezelId !== selectedGezelId) {
+        await writeSecurityJson(
+          statePath,
+          `${JSON.stringify(
+            {
+              ...state,
+              model: selected.id,
+              gezelId: selectedGezelId,
+              updatedAt: now().toISOString(),
+            },
+            null,
+            2,
+          )}\n`,
+        );
+      }
     });
 
   return {
@@ -543,24 +538,8 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
   };
 }
 
-function setupTokenRecord(store: TokenStore): TokenRecord | undefined {
-  return store.list().find((record) => record.appId === CODEX_SETUP_APP_ID);
-}
-
-function isExactSetupToken(record: TokenRecord | undefined): record is TokenRecord {
-  return (
-    record?.appName === CODEX_SETUP_APP_NAME &&
-    record.scopes.length === 1 &&
-    record.scopes[0] === 'openai'
-  );
-}
-
 function isManagedProfile(content: string, setupOwnerId: string): boolean {
-  const lines = content.split('\n');
-  if (lines[0] !== MANAGED_HEADER || lines[1] !== `${OWNER_HEADER}${setupOwnerId}`) return false;
-  const digest = lines[2]?.startsWith(DIGEST_HEADER) ? lines[2].slice(DIGEST_HEADER.length) : null;
-  if (!digest) return false;
-  return digest === sha256(lines.slice(3).join('\n'));
+  return PROFILE_MARKER.isManaged(content, setupOwnerId);
 }
 
 function buildProfile(input: {
@@ -591,7 +570,7 @@ args = ${tomlArray(auth.args)}
 timeout_ms = 5000
 refresh_interval_ms = 300000
 `;
-  return `${MANAGED_HEADER}\n${OWNER_HEADER}${input.setupOwnerId}\n${DIGEST_HEADER}${sha256(body)}\n${body}`;
+  return PROFILE_MARKER.build(body, input.setupOwnerId);
 }
 
 function authCommand(
@@ -629,27 +608,6 @@ function buildLaunchCommand(input: {
   return input.includeCodexHome
     ? `CODEX_HOME=${posixShellWord(input.codexHome)} ${invocation}`
     : invocation;
-}
-
-function posixShellWord(value: string): string {
-  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value;
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
-}
-
-function powershellLiteral(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
-function canonicalPath(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    return resolve(path);
-  }
-}
-
-function sha256(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
 }
 
 function catalogModelFor(model: CodexSetupModelOption): CodexCatalogModel {
@@ -736,28 +694,10 @@ function decodeSetupState(raw: string): SetupState {
   return parsed as SetupState;
 }
 
-async function readOptional(path: string): Promise<string | null> {
-  try {
-    return await readFile(path, 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw error;
-  }
-}
-
-async function ensurePrivateDir(path: string): Promise<void> {
-  await mkdir(path, { recursive: true, mode: 0o700 });
-  await chmod(path, 0o700).catch(() => {});
-}
-
 function tomlString(value: string): string {
   return JSON.stringify(value);
 }
 
 function tomlArray(values: string[]): string {
   return `[${values.map(tomlString).join(', ')}]`;
-}
-
-function asError(value: unknown): Error {
-  return value instanceof Error ? value : new Error(String(value));
 }

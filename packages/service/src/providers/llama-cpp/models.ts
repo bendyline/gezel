@@ -44,6 +44,11 @@ import {
   publishStagedModel,
   safeBundleModelPath,
 } from '../../models/bundle-storage.js';
+import { type ModelUpdateStatus, evaluateCatalogDrift } from '../../models/catalog-drift.js';
+import {
+  catalogPayloadFingerprint,
+  describeCatalogPayload,
+} from '../../models/catalog-payload-identity.js';
 import {
   type IncompleteModelDownloadInfo,
   MODEL_HASH_READ_BUFFER_BYTES,
@@ -83,6 +88,15 @@ export interface InstalledLlamaCppModel {
    */
   mmprojPath?: string;
   /**
+   * On-disk size of {@link mmprojPath}, read from the file rather than the
+   * manifest. `approxSizeBytes` does NOT include the projector — the value
+   * recorded at install time is the weights alone whenever the payload was
+   * adopted or resumed rather than freshly downloaded — so every memory
+   * estimate has to add this explicitly or it under-reserves a vision model
+   * by the projector plus its compute buffers (1.7 GB on muse-glimmer).
+   */
+  mmprojSizeBytes?: number;
+  /**
    * Absolute path to a speculative-decoding companion GGUF, when the
    * catalog ships one. The launcher forwards it as
    * `--spec-draft-model <path>` for the selected draft algorithm.
@@ -120,15 +134,20 @@ export interface InstalledLlamaCppModel {
    */
   readOnly?: boolean;
   /**
-   * True when the catalog now ships a different version than the one this
-   * model was downloaded against — a newer build is available. Lets the
-   * model manager offer "Update" (re-download + replace in place) instead
-   * of forcing the user to delete and re-fetch. Computed in
+   * True when the catalog now describes a different PAYLOAD than the one on
+   * disk — a newer build whose bytes this copy does not have. Lets the model
+   * manager offer "Update" (fetch what differs, replace in place) instead of
+   * forcing the user to delete and re-fetch. A catalog version bump that
+   * leaves the files alone (retuning, sizing hints, wording) deliberately
+   * does not set this: the runtime resolves that metadata live, so there is
+   * nothing for the user to download. Computed in
    * {@link LlamaCppModelManager.listInstalled} against the live catalog.
    */
   updateAvailable?: boolean;
   /** The catalog's current version, when it differs from the installed one. */
   availableVersion?: string;
+  /** What changed, in one sentence, for the model manager's tooltip. */
+  updateReason?: string;
 }
 
 export type InstallEvent =
@@ -247,6 +266,14 @@ interface InstalledManifest {
   chatTemplatePresent: boolean;
   /** Complete payload hashes used when adopting a read-only machine model. */
   fileSha256?: Record<string, string>;
+  /**
+   * Hash of the catalog payload description this copy was installed from —
+   * repo + every pinned filename and sha256. Lets a later catalog version be
+   * classified as a metadata-only edit or a genuine new build without
+   * re-reading a byte of the weights. Absent on installs predating it; the
+   * drift check backfills it the first time it proves identity by hash.
+   */
+  payloadFingerprint?: string;
 }
 
 interface DownloadPlanEntry {
@@ -373,18 +400,14 @@ export class LlamaCppModelManager {
         this.warnSkip(id, 'no readable manifest.json (incomplete or interrupted download?)');
         continue;
       }
-      // Drift flag: does the catalog now ship a different version than the
-      // one on disk? If so, mark `updateAvailable` so the model manager can
-      // offer "Update" instead of delete + re-fetch. Best-effort — a
-      // catalog miss (third-party / removed entry) leaves it un-flagged.
-      if (summary.catalogVersion) {
-        const detail = await this.catalog.get('chat-model', id).catch(() => null);
-        const current =
-          detail && detail.manifest.kind === 'chat-model' ? detail.manifest.version : undefined;
-        if (current && current !== summary.catalogVersion) {
-          summary.updateAvailable = true;
-          summary.availableVersion = current;
-        }
+      // Drift flag: does the catalog now describe different weights than the
+      // ones on disk? Best-effort — a catalog miss (third-party / removed
+      // entry) leaves it un-flagged.
+      const status = await this.evaluateDrift(id, summary).catch(() => null);
+      if (status?.updateAvailable) {
+        summary.updateAvailable = true;
+        if (status.availableVersion) summary.availableVersion = status.availableVersion;
+        if (status.reason) summary.updateReason = status.reason;
       }
       out.push(summary);
     }
@@ -511,6 +534,56 @@ export class LlamaCppModelManager {
    */
   async resolveModel(id: string): Promise<InstalledLlamaCppModel | null> {
     return this.loadInstalled(id);
+  }
+
+  /**
+   * Whether a genuinely newer build of one installed model exists. Null when
+   * the id isn't installed for this engine. Shared with the chat manager's
+   * per-session staleness notice so a user is never told to re-download for a
+   * change that only touched metadata.
+   */
+  async getUpdateStatus(id: string): Promise<ModelUpdateStatus | null> {
+    const summary = await this.loadInstalled(id);
+    if (!summary) return null;
+    return this.evaluateDrift(id, summary).catch(() => ({ updateAvailable: false }));
+  }
+
+  /**
+   * Compare one installed copy against the live catalog. The catalog lookup
+   * runs for every model on every inventory poll; the manifest re-read only
+   * happens for the few whose version actually moved.
+   */
+  private async evaluateDrift(
+    id: string,
+    summary: InstalledLlamaCppModel,
+  ): Promise<ModelUpdateStatus> {
+    const installedVersion = summary.catalogVersion;
+    if (!installedVersion) return { updateAvailable: false };
+    const detail = await this.catalog.get('chat-model', id).catch(() => null);
+    if (!detail || detail.manifest.kind !== 'chat-model') return { updateAvailable: false };
+    if (detail.manifest.version === installedVersion) return { updateAvailable: false };
+
+    const root = await findModelRoot(this.storageRoots, id);
+    if (!root) return { updateAvailable: false };
+    const modelDir = join(root, id);
+    const parsed = await readFile(join(modelDir, 'manifest.json'), 'utf8')
+      .then((raw) => JSON.parse(raw) as Partial<InstalledManifest>)
+      .catch(() => null);
+    if (!parsed) return { updateAvailable: false };
+
+    return evaluateCatalogDrift({
+      engine: this.engine,
+      id,
+      modelDir,
+      manifest: detail.manifest,
+      installedVersion,
+      installed: {
+        ...(parsed.huggingfaceRepo ? { huggingfaceRepo: parsed.huggingfaceRepo } : {}),
+        ...(parsed.payloadFingerprint ? { payloadFingerprint: parsed.payloadFingerprint } : {}),
+        ...(parsed.fileSha256 ? { fileSha256: parsed.fileSha256 } : {}),
+      },
+      healable: !summary.readOnly && !this.activeInstalls.has(id),
+    });
   }
 
   async delete(id: string): Promise<void> {
@@ -700,7 +773,6 @@ export class LlamaCppModelManager {
 
     const totalPlanned = plan.reduce((sum, e) => sum + e.sizeBytes, 0) || src.approxSizeBytes;
     tracked.totalBytes = totalPlanned;
-    let bytesCompleted = 0;
     // sha256 of each verified file, keyed by its final relative path (flat,
     // since planDownloads uses basename). Reused to build the fileSha256 map
     // after publish so we don't re-hash the whole payload from disk a second
@@ -708,11 +780,39 @@ export class LlamaCppModelManager {
     // still records the true on-disk identity.
     const verifiedDigests: Record<string, string> = {};
 
+    // Files this update doesn't have to fetch because the copy on disk is
+    // already the copy the catalog pins. They count as completed bytes from
+    // the start, keep their digests, and are left untouched by the publish
+    // rename below.
+    const reusable = await this.planReusableFiles(itemDir, plan);
+    let bytesCompleted = 0;
+    for (const entry of plan) {
+      const sha = reusable.get(entry.destFilename);
+      if (!sha) continue;
+      verifiedDigests[entry.destFilename] = sha;
+      bytesCompleted += entry.sizeBytes;
+    }
+    if (reusable.size > 0) {
+      log.info(
+        `[models] [${this.engine}] "${catalogId}": ${reusable.size} of ${plan.length} file(s) already match the catalog and will not be downloaded`,
+      );
+      tracked.bytesWritten = bytesCompleted;
+    }
+    const toFetch = plan.filter((entry) => !reusable.has(entry.destFilename));
+
     // Preflight the disk before writing a byte. ds4 GGUFs run to 200+ GiB, so
     // discovering ENOSPC at 95% costs hours and leaves a `.partial` occupying
-    // the disk it just filled. Only the bytes still missing are charged, so a
-    // resumed install isn't refused for space it already holds.
-    const remainingBytes = Math.max(0, totalPlanned - (await bytesAlreadyOnDisk(itemDir, plan)));
+    // the disk it just filled. Only what we actually have to fetch is charged,
+    // less any `.partial` already holding part of it, so a resumed install
+    // isn't refused for space it already holds. A file being REPLACED is
+    // charged in full: its `.partial` lives beside the old copy and the old
+    // copy is only deleted at publish, so the update transiently needs room
+    // for both.
+    const remainingBytes = Math.max(
+      0,
+      toFetch.reduce((sum, e) => sum + e.sizeBytes, 0) -
+        (await partialBytesOnDisk(itemDir, toFetch)),
+    );
     const space = await checkDiskSpace(itemDir, remainingBytes);
     if (!space.ok) {
       yield { type: 'error', error: describeDiskShortfall(space, manifest.name) };
@@ -722,6 +822,10 @@ export class LlamaCppModelManager {
     for (let i = 0; i < plan.length; i++) {
       const entry = plan[i];
       if (!entry) continue;
+      if (reusable.has(entry.destFilename)) {
+        yield { type: 'progress', bytesWritten: bytesCompleted, totalBytes: totalPlanned };
+        continue;
+      }
       const destPath = join(itemDir, entry.destFilename);
       const tmpPath = `${destPath}.partial`;
       // Pin to the catalog's revision (commit SHA) when present so we
@@ -846,7 +950,12 @@ export class LlamaCppModelManager {
       yield { type: 'error', error: 'internal: download plan has no weights entry' };
       return;
     }
-    const firstTmpPath = `${join(itemDir, firstWeights.destFilename)}.partial`;
+    // A reused file was never re-downloaded, so it has no `.partial` — read
+    // the published copy instead.
+    const firstWeightsPath = join(itemDir, firstWeights.destFilename);
+    const firstTmpPath = reusable.has(firstWeights.destFilename)
+      ? firstWeightsPath
+      : `${firstWeightsPath}.partial`;
     let summary: ReturnType<typeof readGgufSummary> | null = null;
     try {
       summary = readGgufSummary(firstTmpPath);
@@ -871,6 +980,7 @@ export class LlamaCppModelManager {
     // partial state is what we already accept on download failure.
     try {
       for (const entry of plan) {
+        if (reusable.has(entry.destFilename)) continue;
         const finalPath = join(itemDir, entry.destFilename);
         await rm(finalPath, { force: true });
         await rename(`${finalPath}.partial`, finalPath);
@@ -897,6 +1007,13 @@ export class LlamaCppModelManager {
     const weightsShards = plan.filter((e) => e.role === 'weights' || e.role === 'weights-shard');
     const mmprojEntry = plan.find((e) => e.role === 'mmproj');
     const draftModelEntry = plan.find((e) => e.role === 'draft-model');
+    // Snapshot what the catalog said this payload IS, so a later version bump
+    // that only edits metadata can be recognized as such without re-reading a
+    // byte. Skipped for a skipSha install: those bytes are knowingly not the
+    // ones the catalog describes.
+    const catalogPayload = describeCatalogPayload(manifest, this.engine);
+    const payloadFingerprint =
+      catalogPayload && !skipSha ? catalogPayloadFingerprint(catalogPayload) : undefined;
     const installed: InstalledManifest = {
       id: catalogId,
       name: manifest.name,
@@ -922,6 +1039,7 @@ export class LlamaCppModelManager {
       ...(summary.contextLength ? { contextWindow: Number(summary.contextLength) } : {}),
       ...(summary.architecture ? { architecture: summary.architecture } : {}),
       chatTemplatePresent: !summary.chatTemplateMissing,
+      ...(payloadFingerprint ? { payloadFingerprint } : {}),
     };
     installed.fileSha256 = await hashModelPayloadFiles(itemDir, verifiedDigests);
     await writeFile(join(itemDir, 'manifest.json'), JSON.stringify(installed, null, 2), 'utf8');
@@ -936,6 +1054,40 @@ export class LlamaCppModelManager {
       // Fire-and-forget: a hook failure must never fail a completed install.
     }
     yield { type: 'done', id: catalogId, ...(warning ? { warning } : {}) };
+  }
+
+  /**
+   * Files the plan asks for that are already on disk as exactly the bytes the
+   * catalog pins, keyed by filename with the digest to carry forward.
+   *
+   * An update usually rotates one thing — a quant, one shard, an added draft
+   * companion — and re-fetching the rest is pure waste. The install manifest
+   * records a sha256 for every file it published, each verified against the
+   * catalog when it landed; where that digest equals the pin we are about to
+   * download and the file is still its full length, the bytes on disk ARE the
+   * bytes we would fetch. Same trust model as the shared-store adoption cache:
+   * a recorded digest plus an unchanged stat is identity.
+   */
+  private async planReusableFiles(
+    itemDir: string,
+    plan: DownloadPlanEntry[],
+  ): Promise<Map<string, string>> {
+    const reusable = new Map<string, string>();
+    const parsed = await readFile(join(itemDir, 'manifest.json'), 'utf8')
+      .then((raw) => JSON.parse(raw) as Partial<InstalledManifest>)
+      .catch(() => null);
+    const recorded = parsed?.fileSha256;
+    if (!recorded) return reusable;
+    for (const entry of plan) {
+      const sha = recorded[entry.destFilename]?.toLowerCase();
+      if (!sha || sha !== entry.sha256.toLowerCase()) continue;
+      const size = await stat(join(itemDir, entry.destFilename))
+        .then((info) => (info.isFile() ? info.size : -1))
+        .catch(() => -1);
+      if (size !== entry.sizeBytes) continue;
+      reusable.set(entry.destFilename, sha);
+    }
+    return reusable;
   }
 
   /** Warn once per model directory per process, then stay quiet. */
@@ -977,13 +1129,26 @@ export class LlamaCppModelManager {
     ) {
       return null;
     }
+    // Read from disk, not the manifest: `approxSizeBytes` recorded at install
+    // is the weights alone whenever the payload was adopted or resumed rather
+    // than freshly downloaded, so it cannot be trusted to include the projector.
+    const mmprojSizeBytes = parsed.mmprojFilename
+      ? await stat(join(root, id, parsed.mmprojFilename))
+          .then((s) => s.size)
+          .catch(() => 0)
+      : 0;
     return {
       id: parsed.id,
       name: parsed.name,
       approxSizeBytes: parsed.approxSizeBytes ?? 0,
       installedAt: parsed.installedAt,
       weightsPath: join(root, id, parsed.weightsFilename),
-      ...(parsed.mmprojFilename ? { mmprojPath: join(root, id, parsed.mmprojFilename) } : {}),
+      ...(parsed.mmprojFilename
+        ? {
+            mmprojPath: join(root, id, parsed.mmprojFilename),
+            ...(mmprojSizeBytes > 0 ? { mmprojSizeBytes } : {}),
+          }
+        : {}),
       ...(parsed.draftModelFilename
         ? { draftModelPath: join(root, id, parsed.draftModelFilename) }
         : {}),
@@ -1079,26 +1244,25 @@ function planDownloads(
 }
 
 /**
- * Bytes of a planned install that are already on disk — completed files from
- * an earlier attempt plus any resumable `.partial`. The disk preflight charges
- * only the remainder, so retrying a 200 GiB download that's 90% done isn't
- * refused for space it is already holding.
+ * Bytes of a still-to-fetch download that a `.partial` already holds — resume
+ * credit, so retrying a 200 GiB download that's 90% done isn't refused for
+ * space it is already occupying.
+ *
+ * Deliberately blind to finished files. A previous install's copy of the same
+ * filename is NOT credit: the new bytes stream into a `.partial` beside it and
+ * the old copy is only removed at publish, so both are on disk at once. (This
+ * counted the finished file, which meant an in-place replacement was preflighted
+ * as needing nothing at all, and a half-full disk failed with ENOSPC deep into
+ * the transfer instead of being refused up front.) Files that don't need
+ * fetching at all are excluded by the caller, not credited here.
  */
-async function bytesAlreadyOnDisk(itemDir: string, plan: DownloadPlanEntry[]): Promise<number> {
+async function partialBytesOnDisk(itemDir: string, plan: DownloadPlanEntry[]): Promise<number> {
   let total = 0;
   for (const entry of plan) {
-    const destPath = join(itemDir, entry.destFilename);
-    for (const candidate of [destPath, `${destPath}.partial`]) {
-      const size = await stat(candidate)
-        .then((st) => st.size)
-        .catch(() => 0);
-      // A finished file and its leftover `.partial` can coexist; count the
-      // larger one only, never both.
-      if (size > 0) {
-        total += Math.min(size, entry.sizeBytes);
-        break;
-      }
-    }
+    const size = await stat(`${join(itemDir, entry.destFilename)}.partial`)
+      .then((st) => st.size)
+      .catch(() => 0);
+    if (size > 0) total += Math.min(size, entry.sizeBytes);
   }
   return total;
 }

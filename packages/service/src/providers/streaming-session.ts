@@ -1,4 +1,4 @@
-import type { TurnUsage } from './types.js';
+import type { ToolArgsDeltaMeta, TurnUsage } from './types.js';
 
 /**
  * Phase payload for {@link StreamingSessionBase.emitEnginePhase}.
@@ -14,10 +14,19 @@ export interface EnginePhaseEvent {
   progress?: number;
   /** Time from request dispatch to the first model-produced token/fragment. */
   ttftMs?: number;
+  /**
+   * Exact cumulative completion tokens decoded so far this turn, as the
+   * engine counts them. Only on `generating`, and only from engines that
+   * publish a running counter — its absence is what forces the UI onto an
+   * approximate character-derived estimate.
+   */
+  outputTokens?: number;
+  /** Exact engine-measured decode rate right now, tokens/sec. */
+  tokensPerSec?: number;
 }
 
 /**
- * Per-turn telemetry for local providers (llama-cpp + Ollama).
+ * Per-turn telemetry for local providers (llama-cpp, Ollama, MLX, DS4).
  * See `turn_stats` in `ChatEventSchema` for rationale. Session-level
  * emit; `ChatManager` forwards to the session's event scope.
  */
@@ -53,7 +62,9 @@ export abstract class StreamingSessionBase {
   private readonly reasoningDeltaHandlers = new Set<(chunk: string) => void>();
   private readonly usageHandlers = new Set<(usage: TurnUsage) => void>();
   private readonly wirePulseHandlers = new Set<() => void>();
-  private readonly toolArgsDeltaHandlers = new Set<(name: string, chunk: string) => void>();
+  private readonly toolArgsDeltaHandlers = new Set<
+    (name: string, chunk: string, meta?: ToolArgsDeltaMeta) => void
+  >();
   private readonly intentHandlers = new Set<(label: string) => void>();
   private readonly heartbeatHandlers = new Set<(label: string | undefined) => void>();
   private readonly warningHandlers = new Set<(message: string) => void>();
@@ -118,7 +129,9 @@ export abstract class StreamingSessionBase {
    * the authoritative accumulation still happens in the provider's
    * tool-call accumulator.
    */
-  onToolArgsDelta(handler: (name: string, chunk: string) => void): () => void {
+  onToolArgsDelta(
+    handler: (name: string, chunk: string, meta?: ToolArgsDeltaMeta) => void,
+  ): () => void {
     this.toolArgsDeltaHandlers.add(handler);
     return () => {
       this.toolArgsDeltaHandlers.delete(handler);
@@ -180,8 +193,8 @@ export abstract class StreamingSessionBase {
   }
 
   /**
-   * Subscribe to per-turn token+speed telemetry. llama-cpp + Ollama
-   * fire these once at turn end. Cloud providers don't.
+   * Subscribe to per-turn token+speed telemetry. Local engines fire these
+   * once at turn end. Cloud providers don't.
    */
   onTurnStats(handler: (ev: TurnStatsEvent) => void): () => void {
     this.turnStatsHandlers.add(handler);
@@ -218,8 +231,8 @@ export abstract class StreamingSessionBase {
     for (const h of this.wirePulseHandlers) h();
   }
 
-  protected emitToolArgsDelta(name: string, chunk: string): void {
-    for (const h of this.toolArgsDeltaHandlers) h(name, chunk);
+  protected emitToolArgsDelta(name: string, chunk: string, meta?: ToolArgsDeltaMeta): void {
+    for (const h of this.toolArgsDeltaHandlers) h(name, chunk, meta);
   }
 
   protected emitIntent(label: string): void {

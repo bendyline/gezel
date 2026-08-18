@@ -8,11 +8,11 @@
 // `createRequire` so we go through Electron's patched CJS loader.
 const require = createRequire(import.meta.url);
 // biome-ignore format: `typeof import(...)` cannot be broken across lines
-const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, powerMonitor, powerSaveBlocker, session, shell } = require('electron') as typeof import('electron');
+const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, nativeTheme, powerMonitor, powerSaveBlocker, screen, session, shell } = require('electron') as typeof import('electron');
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { realpath, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, realpath, rename, rm, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -32,6 +32,16 @@ import {
   createTrustingFetch,
   streamAllChatEvents,
 } from '@bendyline/gezel-client/node';
+import { ambientDir } from '@bendyline/gezel/paths';
+import { ambientDashboardDisplayTarget } from './ambient-display/display-target.js';
+import { ambientDisplay } from './ambient-display/index.js';
+import {
+  disable as ambientDisable,
+  enable as ambientEnable,
+  applyLatest,
+  newestDatedImage,
+  readDisplayState,
+} from './ambient-display/runtime.js';
 import { autostart } from './autostart/index.js';
 import { resolveAutostartNodePath, resolveAutostartPnpmPath } from './autostart/runtime.js';
 import {
@@ -44,6 +54,11 @@ import {
   isPreviewDocumentUrl,
 } from './electron-boundaries.js';
 import { mainProcessIssueUrl } from './main-process-errors.js';
+import {
+  modelBytesFromResponse,
+  verifyModelBundleArchive,
+  writeModelBundleResponse,
+} from './model-bundle-export.js';
 import { findGezmodelArguments, portableGezmodelFilename } from './model-bundle-files.js';
 import { QuitCoordinator } from './quit-coordinator.js';
 import { rendererConnectionSnapshot } from './renderer-connection.js';
@@ -100,6 +115,10 @@ let trayActivityAbort: AbortController | null = null;
 // Cert-aware client for talking to the service from the main process —
 // rebuilt whenever the supervisor rotates the token/cert on restart.
 let apiClient: GezelClient | null = null;
+const activeModelBundleExports = new Map<
+  string,
+  { controller: AbortController; webContentsId: number }
+>();
 let rendererNetworkPolicyEpoch = 0;
 let rendererNetworkPermissionRead: {
   epoch: number;
@@ -1230,6 +1249,40 @@ ipcMain.handle(
   },
 );
 
+/**
+ * Where should a content backup be written, or read from?
+ *
+ * These only resolve a path. The daemon streams the archive itself, because
+ * pushing tens of gigabytes through the renderer to save a file is the
+ * fragile way to do it — and the daemon already has the content open.
+ */
+ipcMain.handle(
+  'gezel:backup:choose-save-path',
+  async (event, defaultName: unknown): Promise<{ path?: string }> => {
+    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+    const suggested =
+      typeof defaultName === 'string' && defaultName.length > 0 ? defaultName : 'gezel-backup.zip';
+    const picked = await dialog.showSaveDialog(win as Electron.BrowserWindow, {
+      title: 'Save Gezel backup',
+      defaultPath: suggested,
+      filters: [{ name: 'Gezel backup', extensions: ['zip'] }],
+    });
+    if (picked.canceled || !picked.filePath) return {};
+    return { path: picked.filePath };
+  },
+);
+
+ipcMain.handle('gezel:backup:choose-open-path', async (event): Promise<{ path?: string }> => {
+  const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+  const picked = await dialog.showOpenDialog(win as Electron.BrowserWindow, {
+    title: 'Open Gezel backup',
+    properties: ['openFile'],
+    filters: [{ name: 'Gezel backup', extensions: ['zip'] }],
+  });
+  if (picked.canceled || picked.filePaths.length === 0) return {};
+  return { path: picked.filePaths[0] };
+});
+
 ipcMain.handle(
   'gezel:show-reference-in-folder',
   async (_event, value: unknown): Promise<{ ok: true } | { ok: false; error: string }> => {
@@ -1256,36 +1309,156 @@ ipcMain.handle(
   'gezel:export-model-bundle',
   async (
     event,
-    args?: { engine?: 'llama-cpp' | 'mlx' | 'ds4'; id?: string },
-  ): Promise<{ ok: true; path?: string } | { ok: false; error: string }> => {
+    args?: {
+      engine?: 'llama-cpp' | 'mlx' | 'ds4';
+      id?: string;
+      exportId?: string;
+    },
+  ): Promise<
+    | { ok: true; canceled: true }
+    | { ok: true; canceled?: false; path: string; bytesWritten: number; verified: true }
+    | { ok: false; error: string }
+  > => {
     const engines = new Set(['llama-cpp', 'mlx', 'ds4']);
-    if (!args?.engine || !engines.has(args.engine) || !args.id || args.id.length > 64) {
+    if (
+      !args?.engine ||
+      !engines.has(args.engine) ||
+      !args.id ||
+      args.id.length > 64 ||
+      !args.exportId ||
+      !/^[a-zA-Z0-9-]{1,80}$/.test(args.exportId)
+    ) {
       return { ok: false, error: 'invalid model export request' };
     }
-    if (!apiClient) return { ok: false, error: 'service is unavailable' };
-    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-    const picked = await dialog.showSaveDialog(win as Electron.BrowserWindow, {
-      title: 'Export model',
-      defaultPath: portableGezmodelFilename(args.id),
-      filters: [{ name: 'Gezel model bundle', extensions: ['gezmodel'] }],
-    });
-    if (picked.canceled || !picked.filePath) return { ok: true };
-    const partial = `${picked.filePath}.partial-${randomUUID()}`;
-    try {
-      const response = await apiClient.exportModelBundle(args.engine, args.id);
-      if (!response.body) throw new Error('service returned an empty export');
-      await pipeline(
-        Readable.fromWeb(response.body as import('node:stream/web').ReadableStream<Uint8Array>),
-        createWriteStream(partial, { flags: 'wx' }),
-      );
-      // Preserve an existing file until the complete replacement has landed.
-      await rm(picked.filePath, { force: true });
-      await rename(partial, picked.filePath);
-      return { ok: true, path: picked.filePath };
-    } catch (err) {
-      await rm(partial, { force: true }).catch(() => {});
-      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    const client = apiClient;
+    if (!client) return { ok: false, error: 'service is unavailable' };
+    if (activeModelBundleExports.has(args.exportId)) {
+      return { ok: false, error: 'model export request is already active' };
     }
+    const controller = new AbortController();
+    const activeExport = { controller, webContentsId: event.sender.id };
+    activeModelBundleExports.set(args.exportId, activeExport);
+    const abortOnRendererClose = () => controller.abort();
+    event.sender.once('destroyed', abortOnRendererClose);
+    let partial: string | undefined;
+    try {
+      const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+      const picked = await dialog.showSaveDialog(win as Electron.BrowserWindow, {
+        title: 'Export model',
+        defaultPath: portableGezmodelFilename(args.id),
+        filters: [{ name: 'Gezel model bundle', extensions: ['gezmodel'] }],
+      });
+      if (picked.canceled || !picked.filePath) return { ok: true, canceled: true };
+      controller.signal.throwIfAborted();
+      partial = `${picked.filePath}.partial-${randomUUID()}`;
+      let lastProgressAt = 0;
+      let lastProgressPhase = '';
+      const publishProgress = (
+        progress:
+          | { phase: 'preparing'; filename: string }
+          | {
+              phase: 'writing' | 'verifying';
+              filename: string;
+              bytesCompleted: number;
+              bytesTotal?: number;
+            },
+        force = false,
+      ) => {
+        const now = Date.now();
+        if (!force && progress.phase === lastProgressPhase && now - lastProgressAt < 200) return;
+        lastProgressAt = now;
+        lastProgressPhase = progress.phase;
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('gezel:model-bundle-export-progress', {
+            exportId: args.exportId,
+            ...progress,
+          });
+        }
+      };
+      const filename = basename(picked.filePath);
+      publishProgress({ phase: 'preparing', filename }, true);
+      const response = await client.exportModelBundle(args.engine, args.id, controller.signal);
+      const modelBytes = modelBytesFromResponse(response);
+      const bytesWritten = await writeModelBundleResponse(
+        response,
+        partial,
+        (progress) => {
+          publishProgress({ phase: 'writing', filename, ...progress });
+        },
+        controller.signal,
+      );
+      publishProgress(
+        {
+          phase: 'writing',
+          filename,
+          bytesCompleted: bytesWritten,
+          ...(modelBytes === undefined ? {} : { bytesTotal: modelBytes }),
+        },
+        true,
+      );
+
+      publishProgress(
+        {
+          phase: 'verifying',
+          filename,
+          bytesCompleted: 0,
+          ...(modelBytes === undefined ? {} : { bytesTotal: modelBytes }),
+        },
+        true,
+      );
+      let latestVerified = { bytesCompleted: 0, bytesTotal: modelBytes };
+      await verifyModelBundleArchive(
+        partial,
+        (progress) => {
+          latestVerified = progress;
+          publishProgress({ phase: 'verifying', filename, ...progress });
+        },
+        controller.signal,
+      );
+      publishProgress({ phase: 'verifying', filename, ...latestVerified }, true);
+
+      // Keep an existing export recoverable until the verified replacement is
+      // in place. Renaming the backup is cheap even for an 80 GB bundle.
+      controller.signal.throwIfAborted();
+      const backup = `${picked.filePath}.backup-${randomUUID()}`;
+      let backedUp = false;
+      try {
+        backedUp = (await stat(picked.filePath)).isFile();
+      } catch {
+        backedUp = false;
+      }
+      if (backedUp) await rename(picked.filePath, backup);
+      try {
+        controller.signal.throwIfAborted();
+        await rename(partial, picked.filePath);
+      } catch (error) {
+        if (backedUp) await rename(backup, picked.filePath).catch(() => {});
+        throw error;
+      }
+      if (backedUp) await rm(backup, { force: true }).catch(() => {});
+      return { ok: true, path: picked.filePath, bytesWritten, verified: true };
+    } catch (err) {
+      if (partial) await rm(partial, { force: true }).catch(() => {});
+      if (controller.signal.aborted) return { ok: true, canceled: true };
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      event.sender.removeListener('destroyed', abortOnRendererClose);
+      if (activeModelBundleExports.get(args.exportId) === activeExport) {
+        activeModelBundleExports.delete(args.exportId);
+      }
+    }
+  },
+);
+
+ipcMain.handle(
+  'gezel:cancel-model-bundle-export',
+  (event, exportId?: string): { ok: true } | { ok: false; error: string } => {
+    if (!exportId || !/^[a-zA-Z0-9-]{1,80}$/.test(exportId)) {
+      return { ok: false, error: 'invalid model export cancellation request' };
+    }
+    const active = activeModelBundleExports.get(exportId);
+    if (active?.webContentsId === event.sender.id) active.controller.abort();
+    return { ok: true };
   },
 );
 
@@ -1509,6 +1682,104 @@ ipcMain.handle('gezel:open-path', async (_event, target: string): Promise<string
   }
 });
 
+// ── Ambient display IPC ─────────────────────────────────────────────
+// Paths are computed main-side from GEZEL_HOME — the renderer never
+// supplies one (same posture as gezel:open-logs-folder).
+
+ipcMain.handle('gezel:ambient:status', async () => {
+  try {
+    const home = gezelHomeDir();
+    const [capability, state, newest] = await Promise.all([
+      ambientDisplay.capability(),
+      readDisplayState(home),
+      newestDatedImage(home),
+    ]);
+    let enabled = ambientApplyEnabled;
+    try {
+      const cfg = await apiClient?.getConfig();
+      if (cfg) enabled = cfg.ambientDisplay?.applyWallpaper === true;
+    } catch {
+      /* fall back to the mirrored flag */
+    }
+    return {
+      ok: true,
+      capability,
+      enabled,
+      folder: ambientDir(home),
+      lastApplied: state.lastApplied ?? null,
+      latestImageAt: newest ? new Date(newest.mtimeMs).toISOString() : null,
+    };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('gezel:ambient:enable', async () => {
+  if (!apiClient) return { ok: false, error: 'service is unavailable' };
+  try {
+    // OS action first: the macOS Automation (TCC) prompt then fires in
+    // the context of the user's click, not from a background timer.
+    const result = await ambientEnable(ambientRuntimeDeps());
+    await apiClient.updateConfig({ ambientDisplay: { applyWallpaper: true } });
+    setAmbientApplyEnabled(true);
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('gezel:ambient:disable', async () => {
+  if (!apiClient) return { ok: false, error: 'service is unavailable' };
+  try {
+    const result = await ambientDisable(ambientRuntimeDeps());
+    await apiClient.updateConfig({ ambientDisplay: { applyWallpaper: false } });
+    setAmbientApplyEnabled(false);
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('gezel:ambient:apply-now', async () => {
+  try {
+    const result = await applyLatest(ambientRuntimeDeps(), { force: true });
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+ipcMain.handle('gezel:ambient:open-folder', async (): Promise<string> => {
+  const dir = ambientDir(gezelHomeDir());
+  try {
+    await mkdir(dir, { recursive: true });
+    return await shell.openPath(dir);
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+});
+
+/**
+ * Theme sync: hand the user's Light/Dark/System choice to Chromium itself.
+ *
+ * The app's own surfaces are themed by our CSS variables, but a project-type
+ * page renders inside the preview iframe — a separate, null-origin document
+ * that our stylesheet can never reach. Neither a `color-scheme` on the frame
+ * element nor the page-API theme message helps: the first does not propagate
+ * across the sandbox boundary, and the second only reaches pages that opted
+ * into `window.gezel`. Setting `nativeTheme.themeSource` moves the browser's
+ * own preference, so `prefers-color-scheme` inside every frame answers with
+ * the user's gezel choice — which is what the shipped pages already key on.
+ * It also brings native menus and dialogs along.
+ *
+ * `system` is Electron's default and hands control back to the OS.
+ */
+ipcMain.on('gezel:set-native-theme', (_event, pref?: string) => {
+  if (pref === 'system' || pref === 'light' || pref === 'dark') {
+    nativeTheme.themeSource = pref;
+  }
+});
+
 // Tray sync: the renderer pushes the latest config after any change (it
 // already dispatches a `gezel:config-updated` window event; the preload
 // forwards it here). We mirror the engagement mode onto the tray's radio
@@ -1524,10 +1795,16 @@ ipcMain.on(
       showSystemTray?: boolean;
       quitOnClose?: boolean;
       securityPolicy?: unknown;
+      ambientDisplay?: { applyWallpaper?: boolean };
     },
   ) => {
     if (!cfg) return;
     if (Object.hasOwn(cfg, 'securityPolicy')) invalidateRendererNetworkPermission();
+    // Keep the wallpaper applier in sync when the toggle is flipped from
+    // another client (e.g. the web UI) without an IPC round-trip.
+    if (Object.hasOwn(cfg, 'ambientDisplay')) {
+      setAmbientApplyEnabled(cfg.ambientDisplay?.applyWallpaper === true);
+    }
     quitOnClose = cfg.quitOnClose === true;
     if (cfg.showSystemTray === false) {
       teardownTray();
@@ -1684,6 +1961,159 @@ function waitForTrayActivityRetry(signal: AbortSignal): Promise<void> {
 
 function syncTrayActivity(): void {
   tray?.setWorking(trayActiveSessions.size > 0);
+}
+
+// ── Ambient display (wallpaper) ──────────────────────────────────────
+//
+// The daemon's AmbientDashboardGenerator writes PNGs under
+// `~/.gezel/ambient/`; when the user opts in
+// (`config.ambientDisplay.applyWallpaper`), the main process keeps the
+// desktop wallpaper set to the newest one. Wallpaper APIs are
+// user-session-only, which is why this lives here and not in gezeld
+// (docs/service-boundaries.md).
+
+let ambientMonitorAbort: AbortController | null = null;
+let ambientApplyEnabled = false;
+let ambientDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let ambientResumeHooked = false;
+let ambientDisplayTargetTimer: ReturnType<typeof setTimeout> | null = null;
+let ambientDisplayTargetHooksInstalled = false;
+
+function gezelHomeDir(): string {
+  return process.env.GEZEL_HOME || join(homedir(), '.gezel');
+}
+
+function ambientRuntimeDeps(): { home: string; module: typeof ambientDisplay } {
+  return { home: gezelHomeDir(), module: ambientDisplay };
+}
+
+/**
+ * Debounced so the SSE `ended` event and any catch-up check that fire
+ * together produce one apply, not two.
+ */
+function scheduleAmbientApply(): void {
+  if (!ambientApplyEnabled) return;
+  if (ambientDebounceTimer) clearTimeout(ambientDebounceTimer);
+  ambientDebounceTimer = setTimeout(() => {
+    ambientDebounceTimer = null;
+    void applyLatest(ambientRuntimeDeps()).catch((err) => {
+      console.warn(`[ambient] wallpaper apply failed: ${err instanceof Error ? err.message : err}`);
+    });
+  }, 2_000);
+}
+
+function setAmbientApplyEnabled(next: boolean): void {
+  const was = ambientApplyEnabled;
+  ambientApplyEnabled = next;
+  if (!was && next) scheduleAmbientApply();
+  if (was && !next && ambientDebounceTimer) {
+    clearTimeout(ambientDebounceTimer);
+    ambientDebounceTimer = null;
+  }
+}
+
+async function syncPrimaryDisplayTarget(): Promise<void> {
+  const client = apiClient;
+  if (!client || process.env.GEZEL_E2E === '1') return;
+  try {
+    const displayTarget = ambientDashboardDisplayTarget(screen.getPrimaryDisplay());
+    await client.setAmbientDashboardDisplayTarget(displayTarget);
+  } catch (err) {
+    console.warn(
+      `[ambient] primary display sync failed: ${err instanceof Error ? err.message : err}`,
+    );
+  }
+}
+
+function schedulePrimaryDisplayTargetSync(delayMs = 300): void {
+  if (process.env.GEZEL_E2E === '1') return;
+  if (ambientDisplayTargetTimer) clearTimeout(ambientDisplayTargetTimer);
+  ambientDisplayTargetTimer = setTimeout(() => {
+    ambientDisplayTargetTimer = null;
+    void syncPrimaryDisplayTarget();
+  }, delayMs);
+}
+
+/**
+ * Persist the primary monitor's physical canvas + work-area-safe rectangle.
+ * Hooks live for the app lifetime; daemon reconnects merely replace the API
+ * client, and startAmbientMonitoring schedules a fresh sync for that client.
+ */
+function startPrimaryDisplayTargetSync(): void {
+  if (process.env.GEZEL_E2E === '1') return;
+  if (!ambientDisplayTargetHooksInstalled) {
+    ambientDisplayTargetHooksInstalled = true;
+    screen.on('display-added', () => schedulePrimaryDisplayTargetSync());
+    screen.on('display-removed', () => schedulePrimaryDisplayTargetSync());
+    screen.on('display-metrics-changed', () => schedulePrimaryDisplayTargetSync());
+  }
+  schedulePrimaryDisplayTargetSync(0);
+}
+
+function startAmbientMonitoring(): void {
+  stopAmbientMonitoring();
+  const client = apiClient;
+  if (!client || process.env.GEZEL_E2E === '1') return;
+  startPrimaryDisplayTargetSync();
+  const controller = new AbortController();
+  ambientMonitorAbort = controller;
+  if (!ambientResumeHooked) {
+    ambientResumeHooked = true;
+    try {
+      // A sleeping machine misses SSE events; check on wake.
+      powerMonitor.on('resume', () => scheduleAmbientApply());
+    } catch {
+      /* powerMonitor unavailable (headless/test) */
+    }
+  }
+  void (async () => {
+    try {
+      const cfg = await client.getConfig();
+      setAmbientApplyEnabled(cfg?.ambientDisplay?.applyWallpaper === true);
+    } catch {
+      /* config unreadable — keep the current toggle state */
+    }
+    // Catch-up: a render may have landed while the app was closed.
+    scheduleAmbientApply();
+    await monitorAmbientEvents(client, controller.signal);
+  })();
+}
+
+function stopAmbientMonitoring(): void {
+  ambientMonitorAbort?.abort();
+  ambientMonitorAbort = null;
+  if (ambientDebounceTimer) {
+    clearTimeout(ambientDebounceTimer);
+    ambientDebounceTimer = null;
+  }
+  if (ambientDisplayTargetTimer) {
+    clearTimeout(ambientDisplayTargetTimer);
+    ambientDisplayTargetTimer = null;
+  }
+}
+
+async function monitorAmbientEvents(client: GezelClient, signal: AbortSignal): Promise<void> {
+  while (!signal.aborted) {
+    try {
+      for await (const envelope of streamAllChatEvents({
+        url: client.allEventsUrl(),
+        headers: client.authHeader(),
+        fetch: client.getFetch(),
+        signal,
+      })) {
+        const event = envelope.event;
+        if (event.type === 'ambient_dashboard' && event.state === 'ended') {
+          scheduleAmbientApply();
+        }
+      }
+    } catch {
+      // SSE reader rejects on daemon/socket loss; retry against this
+      // connection until it rotates, at which point startAmbientMonitoring
+      // aborts us.
+    }
+    if (signal.aborted) return;
+    await waitForTrayActivityRetry(signal);
+  }
 }
 
 let idleReportTimer: ReturnType<typeof setInterval> | null = null;
@@ -2483,6 +2913,7 @@ app.whenReady().then(async () => {
   // engagement mode). Cert-aware, mirroring the supervisor's own client.
   apiClient = buildApiClient();
   invalidateRendererNetworkPermission();
+  startAmbientMonitoring();
 
   // Reload the BrowserWindow when the supervisor swaps the child or falls
   // back to embedded. The preload re-runs on reload, re-reads the token via
@@ -2496,6 +2927,7 @@ app.whenReady().then(async () => {
     apiClient = buildApiClient();
     invalidateRendererNetworkPermission();
     startTrayActivityMonitoring();
+    startAmbientMonitoring();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     console.log('[app] reloading window after service restart');
     // Load the (possibly rotated) baseUrl rather than `reload()`: an embedded
@@ -2515,6 +2947,7 @@ app.whenReady().then(async () => {
     apiClient = null;
     invalidateRendererNetworkPermission();
     stopTrayActivityMonitoring();
+    stopAmbientMonitoring();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     console.error(`[app] service restart became unrecoverable: ${failure.message}`);
     void showConnectionError(
@@ -2618,5 +3051,6 @@ app.on('before-quit', (event) => {
   // owned service has stopped; its second app.quit() is allowed through.
   isQuitting = true;
   stopTrayActivityMonitoring();
+  stopAmbientMonitoring();
   quitCoordinator.handleBeforeQuit(event);
 });

@@ -64,3 +64,19 @@ describe('VideoModelManager active-model selection', () => {
     expect(ltx).toBeChecked();
   });
 });
+
+describe('VideoModelManager machine-wide models', () => {
+  it('labels read-only models Machine-wide instead of offering Delete', async () => {
+    const [ltx, wan] = TWO_MODELS.models;
+    vi.mocked(api.listInstalledVideoModels).mockResolvedValue({
+      models: [ltx, { ...wan, readOnly: true }],
+    } as never);
+
+    render(<VideoModelManager />);
+
+    await screen.findByText('wan2.2-ti2v-5b');
+    expect(screen.getByText('Machine-wide')).toBeInTheDocument();
+    // Only the user-owned row keeps its Delete action.
+    expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(1);
+  });
+});

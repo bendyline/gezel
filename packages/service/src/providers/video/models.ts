@@ -21,7 +21,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import type { VideoModelLoad } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -56,6 +56,12 @@ export interface InstalledVideoModel {
   /** Default classifier-free guidance scale from the catalog manifest. */
   guidanceScale?: number;
   catalogVersion?: string;
+  /**
+   * True when the model resolves from a read-only overlay root (the machine
+   * asset store) rather than this process's writable root. `delete` refuses
+   * such models; the UI hides Delete and labels them machine-wide.
+   */
+  readOnly: boolean;
 }
 
 interface InstalledManifest {
@@ -456,6 +462,7 @@ export class VideoModelManager {
       installedAt: parsed.installedAt,
       modelDir: join(root, id),
       family: parsed.family ?? 'ltx',
+      readOnly: resolve(root) !== resolve(this.storageRoots.writableRoot),
       ...(parsed.load ? { load: parsed.load } : {}),
       ...(parsed.guidanceScale !== undefined ? { guidanceScale: parsed.guidanceScale } : {}),
       ...(parsed.catalogVersion ? { catalogVersion: parsed.catalogVersion } : {}),

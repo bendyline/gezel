@@ -138,7 +138,14 @@ export async function ensureDefaultBoekwachter(
   const config = await store.readConfig();
   if (config.boekwachterGezelId) {
     const existing = await store.getGezel(config.boekwachterGezelId).catch(() => null);
-    if (existing) return existing;
+    if (existing) {
+      // An install that already has the seat filled still needs the role
+      // added to a project created after the fact (the shared library on an
+      // upgrade). Only for explicitly named projects — the undefined case
+      // stays a pure no-op, so an existing roster is never re-broadened.
+      await recruitBoekwachterTo(store, existing.id, opts.recruitProjectIds);
+      return existing;
+    }
   }
 
   const roster = await store.listGezels().catch(() => []);
@@ -152,19 +159,32 @@ export async function ensureDefaultBoekwachter(
     : await createFreshBoekwachter(store, catalog);
   if (!ensured) throw new Error('Failed to ensure the Boekwachter gezel.');
   if (existingRole) await store.writeConfig({ boekwachterGezelId: ensured.id });
+  await recruitBoekwachterTo(store, ensured.id, opts.recruitProjectIds, { allProjects: true });
+  return ensured;
+}
+
+/**
+ * Add the Boekwachter to project rosters. `projectIds` undefined means "every
+ * project" only on a first ensure (`allProjects`); otherwise it means "none",
+ * so a later call cannot quietly re-add a role the user removed.
+ */
+async function recruitBoekwachterTo(
+  store: Store,
+  gezelId: string,
+  projectIds: string[] | undefined,
+  opts: { allProjects?: boolean } = {},
+): Promise<void> {
+  if (projectIds === undefined && !opts.allProjects) return;
   const projects = await store.listProjects().catch(() => []);
   const recruit =
-    opts.recruitProjectIds === undefined
-      ? projects
-      : projects.filter((project) => opts.recruitProjectIds?.includes(project.id));
+    projectIds === undefined ? projects : projects.filter((p) => projectIds.includes(p.id));
   await Promise.all(
     recruit.map((project) =>
-      store.addGezelToProject(project.id, ensured.id, { source: 'manual' }).catch(() => ({
+      store.addGezelToProject(project.id, gezelId, { source: 'manual' }).catch(() => ({
         added: false,
       })),
     ),
   );
-  return ensured;
 }
 
 /**

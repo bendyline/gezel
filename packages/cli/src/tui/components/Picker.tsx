@@ -5,6 +5,12 @@ export interface PickerItem {
   label: string;
   value: string;
   hint?: string;
+  /**
+   * Optional group this item belongs to. A dim header is drawn above the first
+   * visible item of each run. Headers are pure decoration — they are not list
+   * entries, so selection and the scroll window still index over items alone.
+   */
+  section?: string;
 }
 
 /**
@@ -64,12 +70,17 @@ export function Picker(props: {
           {start > 0 ? <Text dimColor> ↑ {start} more</Text> : null}
           {visibleItems.map((item, offset) => {
             const itemIndex = start + offset;
+            const previousSection = offset === 0 ? undefined : visibleItems[offset - 1]?.section;
+            const showSection = item.section !== undefined && item.section !== previousSection;
             return (
-              <Text key={item.value} color={itemIndex === index ? 'green' : undefined}>
-                {itemIndex === index ? '❯ ' : '  '}
-                {item.label}
-                {item.hint ? <Text dimColor> — {item.hint}</Text> : null}
-              </Text>
+              <Box key={item.value} flexDirection="column">
+                {showSection ? <Text dimColor>{item.section}</Text> : null}
+                <Text color={itemIndex === index ? 'green' : undefined}>
+                  {itemIndex === index ? '❯ ' : '  '}
+                  {item.label}
+                  {item.hint ? <Text dimColor> — {item.hint}</Text> : null}
+                </Text>
+              </Box>
             );
           })}
           {start + visibleItems.length < items.length ? (

@@ -40,6 +40,11 @@ import { familyToToolGrammarHint } from '../../model-profile/tool-grammar.js';
 import { MLX_TUNING_MAP, applyTuning } from '../../model-profile/tuning.js';
 import type { ResolvedModelProfile } from '../../model-profile/types.js';
 import { prepareSalvagedCodeBlocks } from '../code-block-salvage.js';
+import {
+  applyConstrainedTurnShape,
+  isImmediateFileWriteTurn,
+  writeFileOnlyTools,
+} from '../constrained-turn.js';
 import { DeliverableReadPaceTracker } from '../deliverable-read-pacing.js';
 import {
   appendTruncationHintToToolResult,
@@ -85,8 +90,9 @@ import {
   PROJECT_MACRO_INTERCEPT_CAP,
   deriveProjectMacroClosing,
 } from '../project-macro-loop-bail.js';
-import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from '../queue.js';
+import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs, runInQueue } from '../queue.js';
 import { RambleDetector } from '../ramble-detector.js';
+import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
 import {
   type EnginePhaseEvent,
   type EngineStatsEvent,
@@ -109,6 +115,7 @@ import type {
   SessionOpts,
   TurnUsage,
 } from '../types.js';
+import { StreamingReasoningSplit } from './reasoning-stream.js';
 import {
   type MlxFatalError,
   classifyMlxFatalErrorLine,
@@ -238,19 +245,6 @@ function chatCompletionToolName(tool: ChatCompletionTool): string | undefined {
   return tool.function.name;
 }
 
-function isImmediateFileWriteTurn(
-  prompt: string,
-  tools: ChatCompletionTool[] | undefined,
-): boolean {
-  if (!tools || tools.length !== 1) return false;
-  if (chatCompletionToolName(tools[0]!) !== 'write_file') return false;
-  return (
-    prompt.includes('There is still **no `index.html`** in the workspace') ||
-    prompt.includes('Do not end your turn until `write_file`') ||
-    prompt.includes('write_file({ path:')
-  );
-}
-
 function setChatTemplateKwarg(body: Record<string, unknown>, key: string, value: unknown): void {
   const existing = body.chat_template_kwargs;
   if (existing && typeof existing === 'object' && existing !== null) {
@@ -366,6 +360,8 @@ export class MlxProvider implements LLMProvider {
    * the catalog has resolved a default model.
    */
   private readonly catalogModelId?: string;
+  /** See the constructor option of the same name. */
+  private readonly templateOpensReasoning: boolean = false;
   private readonly activeSessions = new Set<MlxSession>();
   private lastStartupPhase: EnginePhaseEvent | null = null;
   // Replayed to sessions that register after the engine finishes
@@ -391,7 +387,12 @@ export class MlxProvider implements LLMProvider {
    * requests reach the sidecar for one static batched wave.
    */
   private engineGateActive = 0;
-  private readonly engineGateWaiters: Array<() => void> = [];
+  private readonly engineGateWaiters: Array<{
+    resolve: () => void;
+    reject: (reason?: unknown) => void;
+    signal?: AbortSignal;
+    onAbort?: () => void;
+  }> = [];
   private readonly batchMaxConcurrency: number;
 
   constructor(opts: {
@@ -419,6 +420,12 @@ export class MlxProvider implements LLMProvider {
     modelDisplayName?: string;
     /** See {@link MlxProvider.catalogModelId} for the contract. */
     catalogModelId?: string;
+    /**
+     * Whether this model's chat template opens a reasoning block as the last
+     * thing it emits. Detected once from the model directory at build time —
+     * see {@link templateOpensReasoning}.
+     */
+    templateOpensReasoning?: boolean;
   }) {
     if (!opts.supervisor && !opts.baseUrl) {
       throw new Error('[mlx] need either a supervisor or baseUrl');
@@ -435,9 +442,9 @@ export class MlxProvider implements LLMProvider {
     if (opts.modelManager) this.modelManager = opts.modelManager;
     if (opts.modelDisplayName) this.modelDisplayName = opts.modelDisplayName;
     if (opts.catalogModelId) this.catalogModelId = opts.catalogModelId;
+    if (opts.templateOpensReasoning) this.templateOpensReasoning = true;
     const batchMax = Math.max(1, opts.batchMaxConcurrency ?? 1);
     this.batchMaxConcurrency = batchMax;
-    const batching = batchMax > 1;
     // Interactive turns are capped at the memory-safe engine width (`batchMax`);
     // the engine gate below (`acquireExclusiveEngineRequest`) enforces the same
     // bound on real generation. The queue itself, though, must run at least ONE
@@ -451,12 +458,14 @@ export class MlxProvider implements LLMProvider {
     // sessions "mid-turn" once the memory ceiling clamped a big model to width 1.
     // The +1 admits the chore WITHOUT ever running a 2nd concurrent generation —
     // the engine gate, not queue width, is the OOM guard.
-    const interactiveConcurrency = batching ? batchMax : 1;
+    const interactiveConcurrency = batchMax;
     const queueConcurrency = Math.max(opts.concurrency ?? 1, interactiveConcurrency + 1);
     this.queue = new ProviderQueue({
       concurrency: queueConcurrency,
       interactiveConcurrency,
-      backgroundConcurrency: Math.max(1, queueConcurrency - interactiveConcurrency),
+      // Keyed to the engine gate's width (`batchMax`), not to the queue's
+      // deadlock reserve above — see `backgroundLaneCap`.
+      backgroundConcurrency: backgroundLaneCap(batchMax),
       ...(opts.affinity !== undefined ? { affinity: opts.affinity } : {}),
       // Single local GPU — same ambient admission control as llama-cpp:
       // housekeeping turns wait for a quiet window so they never wedge
@@ -508,7 +517,10 @@ export class MlxProvider implements LLMProvider {
     return this.supervisor?.lifecycleSnapshot();
   }
 
-  async acquireExclusiveEngineRequest(label: string): Promise<() => void> {
+  async acquireExclusiveEngineRequest(label: string, signal?: AbortSignal): Promise<() => void> {
+    if (signal?.aborted)
+      throw new DOMException(`MLX engine request ${label} aborted`, 'AbortError');
+
     const width = this.batchMaxConcurrency;
     const waitStartedAt = Date.now();
     if (this.engineGateActive < width) {
@@ -518,7 +530,24 @@ export class MlxProvider implements LLMProvider {
       // stays at `width` across the handoff, so we never exceed it — at
       // Width 1 is a strict provider-side FIFO; the sidecar still uses its
       // singleton BatchGenerator path for cache snapshots.
-      await new Promise<void>((resolve) => this.engineGateWaiters.push(resolve));
+      await new Promise<void>((resolve, reject) => {
+        const waiter: (typeof this.engineGateWaiters)[number] = {
+          resolve,
+          reject,
+          ...(signal ? { signal } : {}),
+        };
+        if (signal) {
+          waiter.onAbort = () => {
+            const idx = this.engineGateWaiters.indexOf(waiter);
+            if (idx === -1) return;
+            this.engineGateWaiters.splice(idx, 1);
+            signal.removeEventListener('abort', waiter.onAbort!);
+            reject(new DOMException(`MLX engine request ${label} aborted`, 'AbortError'));
+          };
+          signal.addEventListener('abort', waiter.onAbort, { once: true });
+        }
+        this.engineGateWaiters.push(waiter);
+      });
     }
     const waitedMs = Date.now() - waitStartedAt;
     if (waitedMs > 1_000) {
@@ -530,8 +559,11 @@ export class MlxProvider implements LLMProvider {
       released = true;
       const next = this.engineGateWaiters.shift();
       if (next) {
+        if (next.signal && next.onAbort) {
+          next.signal.removeEventListener('abort', next.onAbort);
+        }
         // Hand our slot straight to the next waiter — active count unchanged.
-        next();
+        next.resolve();
       } else {
         this.engineGateActive--;
       }
@@ -558,6 +590,16 @@ export class MlxProvider implements LLMProvider {
   /** See `LLMProvider.plannedReservationBytes`. */
   plannedReservationBytes(): number | undefined {
     return this.plannedReservation;
+  }
+
+  /**
+   * True once {@link shutdown} has been called. A session whose stream dies
+   * reads this to tell "Gezel stopped this engine" from "the engine died on
+   * its own" — the two need different messages, and the flag is set before
+   * the stop so the racing turn always sees it.
+   */
+  get isDisposed(): boolean {
+    return this.disposed;
   }
 
   async shutdown(): Promise<void> {
@@ -597,6 +639,7 @@ export class MlxProvider implements LLMProvider {
       ...(opts.debug ? { debug: opts.debug } : {}),
       ...(opts.requestCompaction ? { requestCompaction: opts.requestCompaction } : {}),
       ...(opts.profile ? { profile: opts.profile } : {}),
+      ...(this.templateOpensReasoning ? { templateOpensReasoning: true } : {}),
       ...(opts.activeCraftbookStep ? { activeCraftbookStep: opts.activeCraftbookStep } : {}),
       ...(opts.tuning ? { tuning: opts.tuning } : {}),
       ...(opts.forceDirectFileWork ? { forceDirectFileWork: true } : {}),
@@ -818,6 +861,13 @@ interface MlxSessionDeps {
    * the ramble detector + pre-tool preamble fold on profile opt-in.
    */
   profile?: ResolvedModelProfile;
+  /**
+   * Whether this model's chat template opens a reasoning block as the last
+   * thing it emits, so the stream starts mid-thought with only a closing tag
+   * to come. Read from the model directory at build time — guessing it from
+   * the token stream is exactly the ambiguity that made reasoning leak.
+   */
+  templateOpensReasoning?: boolean;
   /** Active craftbook step — passed to anti-spin abort messages. */
   activeCraftbookStep?: NonNullable<SessionOpts['activeCraftbookStep']>;
   /**
@@ -1017,15 +1067,17 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         Object.assign(body, adapter.buildRequestExtras(opts.sessionId));
       }
     }
+    const requestSignal = AbortSignal.timeout(opts?.timeoutMs ?? 10 * 60_000);
     const releaseEngineRequest = await this.deps.provider.acquireExclusiveEngineRequest(
       `cache-warm:${opts?.sessionId ?? 'anonymous'}`,
+      requestSignal,
     );
     try {
       const res = await this.deps.fetchImpl(`${baseUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(opts?.timeoutMs ?? 10 * 60_000),
+        signal: requestSignal,
       });
       if (!res.ok) {
         const detail = await res.text().catch(() => '');
@@ -1324,6 +1376,60 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
       cached_tokens?: number;
     } | null = null;
     let firstTokenAt: number | null = null;
+    let lastIterationStartedAt = start;
+    let lastIterationFirstTokenAt: number | null = null;
+    let lastIterationFinishedAt: number | null = null;
+    let turnFailed = false;
+
+    // Every successful terminal path must publish the same usage + turn
+    // snapshot. Keeping this in the outer finally covers ordinary replies,
+    // external tool capture, synthesized terminal closings, question cards,
+    // and one-shot sessions without duplicating subtly different accounting
+    // at each return site.
+    const emitTerminalTelemetry = (): void => {
+      if (!lastUsage || (lastUsage.prompt_tokens <= 0 && lastUsage.completion_tokens <= 0)) return;
+
+      const finishedAt = Date.now();
+      const durationMs = finishedAt - start;
+      const generationStartedAt = lastIterationFirstTokenAt ?? lastIterationStartedAt;
+      const generationFinishedAt = lastIterationFinishedAt ?? finishedAt;
+      const generationMs = Math.max(1, generationFinishedAt - generationStartedAt);
+      const wallTps =
+        lastUsage.completion_tokens > 0
+          ? lastUsage.completion_tokens / (generationMs / 1000)
+          : undefined;
+      const tokensPerSec =
+        lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
+          ? lastUsage.generation_tps
+          : wallTps;
+      const at = new Date(finishedAt).toISOString();
+      const usage: TurnUsage = {
+        model: this.deps.model,
+        inputTokens: lastUsage.prompt_tokens,
+        outputTokens: lastUsage.completion_tokens,
+        ...(lastUsage.cached_tokens !== undefined
+          ? { cachedInputTokens: lastUsage.cached_tokens }
+          : {}),
+        ...(tokensPerSec !== undefined ? { outputTokensPerSec: tokensPerSec } : {}),
+        durationMs,
+        at,
+      };
+      this.emitUsage(usage);
+      this.emitTurnStats({
+        provider: 'mlx',
+        promptTokens: lastUsage.prompt_tokens,
+        completionTokens: lastUsage.completion_tokens,
+        durationMs,
+        ...(firstTokenAt !== null ? { ttftMs: Math.max(0, firstTokenAt - start) } : {}),
+        ...(lastUsage.prompt_tps !== undefined && lastUsage.prompt_tps > 0
+          ? { promptTokensPerSec: lastUsage.prompt_tps }
+          : {}),
+        ...(lastUsage.cached_tokens !== undefined
+          ? { cachedPromptTokens: lastUsage.cached_tokens }
+          : {}),
+        ...(tokensPerSec !== undefined ? { tokensPerSec } : {}),
+      });
+    };
     this.deps.provider._registerActiveSession(this);
 
     // Status heartbeat. The pre-first-token window — cache warm (prepareForSend)
@@ -1349,6 +1455,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // post-move analysis wall reached the visible reply (wild-caught:
     // gemma4-12b checkers, ~1,000 tokens where one line belonged).
     let actionFiredEarlierThisTurn = false;
+    // The physical request lease must outlive all per-iteration setup, but it
+    // must never outlive this send. In particular, a fetch-level AbortError
+    // happens before the SSE-body `finally`; keeping the active release here
+    // lets the outer `finally` recover the slot from every exit path.
+    let releaseActiveEngineRequest: (() => void) | null = null;
 
     try {
       for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
@@ -1356,6 +1467,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // Skip the first iteration; from iteration 2 a freshly pushed
         // tool result can tip a healthy turn over the slot ctx.
         if (turn > 0) await this.maybeCompactMidLoop();
+
+        lastIterationStartedAt = Date.now();
+        lastIterationFirstTokenAt = null;
+        lastIterationFinishedAt = null;
 
         const remaining = deadline - Date.now();
         if (remaining <= 0) {
@@ -1419,6 +1534,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           'tools.mlx-template-fix',
         );
         if (templateFix?.template) body.chat_template_override = templateFix.template;
+        // Tool surface actually sent this turn. Defaults to the full roster;
+        // constrained turns narrow it below.
+        let requestTools = tools;
         const immediateFileWriteTurn = isImmediateFileWriteTurn(prompt, tools);
         if (immediateFileWriteTurn) {
           if (
@@ -1427,13 +1545,24 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           ) {
             userMsg.content += IMMEDIATE_FILE_WRITE_PROMPT_SUFFIX;
           }
-          const currentMax = typeof body.max_tokens === 'number' ? body.max_tokens : 0;
-          body.max_tokens = Math.max(currentMax, FILE_WRITE_MIN_TOKENS);
-          body.temperature = 0.2;
-          body.top_p = 0.8;
-          setChatTemplateKwarg(body, 'enable_thinking', false);
+          const shaped = applyConstrainedTurnShape(body);
+          // Narrow to write_file alone, matching llama-cpp. Without this the
+          // model keeps the full roster on a turn whose only acceptable move
+          // is the write, and wanders back into reads and delegation.
+          const narrowed = writeFileOnlyTools(tools);
+          if (narrowed.length > 0) requestTools = narrowed;
+          // The switch alone is not enough. Qwen 3.8's HF template resolves
+          // `reasoning_effort|default('xhigh')` inside its thinking branch, so
+          // a turn that isn't fully suppressed reasons at the model's most
+          // expensive setting and truncates the write_file body it was asked
+          // for. llama-cpp has downgraded depth here for a while; MLX did not,
+          // which is the whole of the measured engine divergence.
           log.debug(
-            `turn#${seq}.${turn} immediate-write mode: write_file-only surface, thinking disabled, max_tokens=${body.max_tokens}`,
+            `turn#${seq}.${turn} immediate-write mode: write_file-only surface (${narrowed.length} tool), thinking disabled${
+              shaped.reasoningDepthDowngraded.length > 0
+                ? `, reasoning depth -> low (${shaped.reasoningDepthDowngraded.join(', ')})`
+                : ''
+            }, max_tokens=${body.max_tokens}`,
           );
         }
         if (
@@ -1442,7 +1571,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         ) {
           body.max_tokens = FILE_WRITE_MIN_TOKENS;
         }
-        if (tools && tools.length > 0) body.tools = tools;
+        if (requestTools && requestTools.length > 0) body.tools = requestTools;
         // Tool-schema size breakdown (opt-in: GEZEL_PROMPT_BREAKDOWN=1). The
         // companion to buildInstructions' system-text breakdown — the tool JSON
         // schemas are prefilled alongside the system prompt, so this shows the
@@ -1518,15 +1647,45 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           );
         }
 
-        const releaseEngineRequest = await this.deps.provider.acquireExclusiveEngineRequest(
-          `turn#${seq}.${turn}`,
-        );
-        if (Date.now() >= deadline) {
+        const externalSignal = opts?.queue?.signal;
+        const engineWaitRemaining = deadline - Date.now();
+        if (engineWaitRemaining <= 0) {
+          throw new Error(`[Mac AI] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
+        }
+        const engineDeadlineSignal = AbortSignal.timeout(engineWaitRemaining);
+        const engineWaitSignal = externalSignal
+          ? AbortSignal.any([externalSignal, engineDeadlineSignal])
+          : engineDeadlineSignal;
+        let releaseEngineRequest: () => void;
+        try {
+          releaseEngineRequest = await this.deps.provider.acquireExclusiveEngineRequest(
+            `turn#${seq}.${turn}`,
+            engineWaitSignal,
+          );
+        } catch (err) {
+          if ((err as Error).name === 'AbortError') {
+            if (externalSignal?.aborted) {
+              throw new Error('[Mac AI] turn cancelled by caller');
+            }
+            if (engineDeadlineSignal.aborted) {
+              throw new Error(`[Mac AI] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
+            }
+          }
+          throw err;
+        }
+        let engineRequestReleased = false;
+        const releaseEngineRequestOnce = () => {
+          if (engineRequestReleased) return;
+          engineRequestReleased = true;
+          releaseActiveEngineRequest = null;
           releaseEngineRequest();
+        };
+        releaseActiveEngineRequest = releaseEngineRequestOnce;
+        if (Date.now() >= deadline) {
+          releaseEngineRequestOnce();
           throw new Error(`[Mac AI] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
         }
         const ctrl = new AbortController();
-        const externalSignal = opts?.queue?.signal;
         // Tag which trigger fired the abort — distinguishes the
         // hard-timer vs caller-cancel paths in the log so a hang
         // diagnosed via "turn#N FETCH-ABORT timer" reads unambiguously
@@ -1667,6 +1826,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           clearInterval(deadlineTicker);
           clearTimeout(idleTimer);
           this.currentTurnIdleReset = null;
+          releaseEngineRequestOnce();
           externalSignal?.removeEventListener('abort', onExternalAbort);
         };
 
@@ -1798,6 +1958,16 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // version is just noise). Streaming-safe: holds back fragments
         // that could be a partial marker prefix until disambiguated.
         const stripper = new LeakyToolCallStripper();
+        // MLX inlines chain-of-thought in the same content deltas as the
+        // reply; only the end-of-turn `extractReasoningWithProfile` pass below
+        // separates them. Everything reading live deltas — the chat bubble and
+        // every connected app through the OpenAI-compatible facade — would
+        // otherwise render thinking as the answer. This is the dedicated
+        // reasoning channel llama.cpp and ds4 get from their engines.
+        const reasoningSplit = new StreamingReasoningSplit({
+          opensInReasoning: this.deps.templateOpensReasoning === true,
+          enabled: this.deps.profile?.style.reasoningFormat !== 'none',
+        });
         // Throttle live phase emissions during generation so we don't
         // saturate the SSE fanout with one phase event per token —
         // ~3 Hz is fast enough that the tok/s readout feels live, slow
@@ -1851,8 +2021,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             // A structured-tool response may never emit visible `content`.
             // Count its first argument fragment as model activity so TTFT is
             // still observable and the engine phase advances to generating.
+            if ((hasContent || hasToolCalls) && lastIterationFirstTokenAt === null) {
+              lastIterationFirstTokenAt = Date.now();
+            }
             if ((hasContent || hasToolCalls) && firstTokenAt === null) {
-              firstTokenAt = Date.now();
+              firstTokenAt = lastIterationFirstTokenAt ?? Date.now();
               const ttft = firstTokenAt - start;
               log.info(`TTFT ${ttft}ms (session model=${this.deps.model})`);
               // First-token detail folds in the prefill speed when
@@ -1869,6 +2042,25 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               });
               lastPhaseAt = firstTokenAt;
             }
+            if ((hasContent || hasToolCalls) && firstTokenAt !== null) {
+              const now = Date.now();
+              if (now - lastPhaseAt >= PHASE_EMIT_MIN_INTERVAL_MS) {
+                this.emitEnginePhase({
+                  provider: 'mlx',
+                  phase: 'generating',
+                  detail: mlxGenerationPhaseDetail(generationTps, completionTokens),
+                  // Same numbers the detail string carries, as fields the
+                  // UI can render without scraping prose out of the label.
+                  ...(completionTokens !== undefined && completionTokens > 0
+                    ? { outputTokens: completionTokens }
+                    : {}),
+                  ...(generationTps !== undefined && generationTps > 0
+                    ? { tokensPerSec: generationTps }
+                    : {}),
+                });
+                lastPhaseAt = now;
+              }
+            }
             if (hasContent) {
               // Run the raw chunk through the marker stripper before
               // it lands anywhere user-visible. The TTFT / generating
@@ -1879,17 +2071,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               // visible output is empty.
               const safeContent = stripper.push(delta!.content!);
               if (safeContent.length > 0) turnContent += safeContent;
-              if (firstTokenAt !== null) {
-                const now = Date.now();
-                if (now - lastPhaseAt >= PHASE_EMIT_MIN_INTERVAL_MS) {
-                  this.emitEnginePhase({
-                    provider: 'mlx',
-                    phase: 'generating',
-                    detail: mlxGenerationPhaseDetail(generationTps, completionTokens),
-                  });
-                  lastPhaseAt = now;
-                }
-              }
               {
                 // Watchdog heartbeat to the daemon log (see decl above).
                 const now = Date.now();
@@ -1902,7 +2083,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                   lastStreamPulseAt = now;
                 }
               }
-              if (safeContent.length > 0) this.emitDelta(safeContent);
+              if (safeContent.length > 0) {
+                // `turnContent` keeps the raw text on purpose: ramble
+                // detection reads the reasoning phase, and the end-of-turn
+                // split still owns what gets committed. Only what goes out
+                // live is separated here.
+                const live = reasoningSplit.push(safeContent);
+                if (live.visible.length > 0) this.emitDelta(live.visible);
+                if (live.reasoning.length > 0) this.emitReasoningDelta(live.reasoning);
+              }
               if (!rambleAborted && ramble.observeContent(turnContent)) {
                 rambleAborted = true;
                 abortReason ??= 'idle';
@@ -1926,7 +2115,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 if (tc.function?.name) liveToolArgsName = tc.function.name;
                 const argChunk = tc.function?.arguments ?? '';
                 if (tc.function?.name || argChunk.length > 0) {
-                  this.emitToolArgsDelta(liveToolArgsName, argChunk);
+                  this.emitToolArgsDelta(liveToolArgsName, argChunk, {
+                    index: tc.index,
+                    ...(tc.id ? { id: tc.id } : {}),
+                  });
                 }
               }
             }
@@ -2074,17 +2266,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           // something actionable instead of the cryptic one-word message;
           // the original text still rides along in the persisted warning.
           if (!recoveredFromRamble && isMidStreamConnectionDrop(err)) {
-            const got =
-              turnContent.length > 0 ? `after ${turnContent.length} chars` : 'before any output';
             throw new Error(
-              `[Mac AI] the on-device engine dropped the connection mid-turn (${got}). This usually means the mlx server crashed, ran out of memory, or was restarted while the turn was streaming — this turn's work was lost. Retry the turn; if it keeps happening, restart the engine in Settings → On-device.`,
+              buildMidStreamDropMessage(turnContent.length, this.deps.provider.isDisposed),
             );
           }
           if (!recoveredFromRamble) throw err;
         } finally {
+          lastIterationFinishedAt = Date.now();
           cleanupTurn();
           this.deps.markUsed();
-          releaseEngineRequest();
         }
 
         // Drain any safely-buffered tail from the marker stripper. If
@@ -2094,7 +2284,17 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         const tail = stripper.flush();
         if (tail.length > 0) {
           turnContent += tail;
-          this.emitDelta(tail);
+          const live = reasoningSplit.push(tail);
+          if (live.visible.length > 0) this.emitDelta(live.visible);
+          if (live.reasoning.length > 0) this.emitReasoningDelta(live.reasoning);
+        }
+        {
+          // Whatever the split was still holding: a reasoning block the model
+          // never closed stays on the reasoning channel rather than becoming
+          // the reply.
+          const rest = reasoningSplit.flush();
+          if (rest.visible.length > 0) this.emitDelta(rest.visible);
+          if (rest.reasoning.length > 0) this.emitReasoningDelta(rest.reasoning);
         }
 
         // Always-on terminator log. `stream-end` here is the smoking gun
@@ -2688,21 +2888,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             content: turnContent || null,
             tool_calls: toolCalls,
           });
-          if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
-            this.emitUsage({
-              model: this.deps.model,
-              inputTokens: lastUsage.prompt_tokens,
-              outputTokens: lastUsage.completion_tokens,
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedInputTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
-                ? { outputTokensPerSec: lastUsage.generation_tps }
-                : {}),
-              durationMs: Date.now() - start,
-              at: new Date().toISOString(),
-            });
-          }
           return fullText;
         }
 
@@ -2920,53 +3105,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
 
         if (toolCalls.length === 0) {
           this.messages.push({ role: 'assistant', content: turnContent });
-          if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
-            const durationMs = Date.now() - start;
-            const usage: TurnUsage = {
-              model: this.deps.model,
-              inputTokens: lastUsage.prompt_tokens,
-              outputTokens: lastUsage.completion_tokens,
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedInputTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
-                ? { outputTokensPerSec: lastUsage.generation_tps }
-                : {}),
-              durationMs,
-              at: new Date().toISOString(),
-            };
-            this.emitUsage(usage);
-            // Prefer the engine's own `generation_tps` over a wall-
-            // clock estimate when it's available — it's measured
-            // inside the generate loop and excludes Node-side SSE
-            // overhead, queue dispatch, and tool-call back-and-forth.
-            // Fall back to wall-clock for older engines or any chunk
-            // shape that didn't carry the field.
-            const generationMs =
-              firstTokenAt !== null ? Math.max(1, Date.now() - firstTokenAt) : durationMs;
-            const wallTps =
-              lastUsage.completion_tokens > 0 && generationMs > 0
-                ? lastUsage.completion_tokens / (generationMs / 1000)
-                : undefined;
-            const tokensPerSec =
-              lastUsage.generation_tps && lastUsage.generation_tps > 0
-                ? lastUsage.generation_tps
-                : wallTps;
-            this.emitTurnStats({
-              provider: 'mlx',
-              promptTokens: lastUsage.prompt_tokens,
-              completionTokens: lastUsage.completion_tokens,
-              durationMs,
-              ...(firstTokenAt !== null ? { ttftMs: Math.max(0, firstTokenAt - start) } : {}),
-              ...(lastUsage.prompt_tps !== undefined && lastUsage.prompt_tps > 0
-                ? { promptTokensPerSec: lastUsage.prompt_tps }
-                : {}),
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedPromptTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(tokensPerSec !== undefined ? { tokensPerSec } : {}),
-            });
-          }
           if (finishReason === 'length') {
             this.emitWarning(
               'Model output was cut off at the length limit. The last turn may be incomplete.',
@@ -3205,21 +3343,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           // under it; persist one short line and release the turn.
           this.messages.push({ role: 'assistant', content: terminalActionClosing });
           fullText = terminalActionClosing;
-          if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
-            this.emitUsage({
-              model: this.deps.model,
-              inputTokens: lastUsage.prompt_tokens,
-              outputTokens: lastUsage.completion_tokens,
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedInputTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
-                ? { outputTokensPerSec: lastUsage.generation_tps }
-                : {}),
-              durationMs: Date.now() - start,
-              at: new Date().toISOString(),
-            });
-          }
           log.info(
             `turn#${seq} END terminal-tool-bail afterMs=${Date.now() - start} loopTurns=${turn + 1}`,
           );
@@ -3244,21 +3367,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           const closingText = immediateFileWriteClosing(immediateFileWritePaths);
           this.messages.push({ role: 'assistant', content: closingText });
           fullText = closingText;
-          if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
-            this.emitUsage({
-              model: this.deps.model,
-              inputTokens: lastUsage.prompt_tokens,
-              outputTokens: lastUsage.completion_tokens,
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedInputTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
-                ? { outputTokensPerSec: lastUsage.generation_tps }
-                : {}),
-              durationMs: Date.now() - start,
-              at: new Date().toISOString(),
-            });
-          }
           log.info(
             `turn#${seq} END immediate-write-bail afterMs=${Date.now() - start} ` +
               `paths=${immediateFileWritePaths.join(',') || '(unknown)'} loopTurns=${turn + 1}` +
@@ -3270,21 +3378,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           const closingText = asyncFileHandoffClosing(asyncFileHandoffCount);
           this.messages.push({ role: 'assistant', content: closingText });
           fullText = closingText;
-          if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
-            this.emitUsage({
-              model: this.deps.model,
-              inputTokens: lastUsage.prompt_tokens,
-              outputTokens: lastUsage.completion_tokens,
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedInputTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
-                ? { outputTokensPerSec: lastUsage.generation_tps }
-                : {}),
-              durationMs: Date.now() - start,
-              at: new Date().toISOString(),
-            });
-          }
           log.info(
             `turn#${seq} END async-file-handoff-bail afterMs=${Date.now() - start} ` +
               `handoffs=${asyncFileHandoffCount} loopTurns=${turn + 1}`,
@@ -3306,47 +3399,6 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           );
           this.messages.push({ role: 'assistant', content: forceProjectMacroBail.closingText });
           fullText = forceProjectMacroBail.closingText;
-          if (lastUsage && (lastUsage.prompt_tokens > 0 || lastUsage.completion_tokens > 0)) {
-            const durationMs = Date.now() - start;
-            const usage: TurnUsage = {
-              model: this.deps.model,
-              inputTokens: lastUsage.prompt_tokens,
-              outputTokens: lastUsage.completion_tokens,
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedInputTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(lastUsage.generation_tps !== undefined && lastUsage.generation_tps > 0
-                ? { outputTokensPerSec: lastUsage.generation_tps }
-                : {}),
-              durationMs,
-              at: new Date().toISOString(),
-            };
-            this.emitUsage(usage);
-            const generationMs =
-              firstTokenAt !== null ? Math.max(1, Date.now() - firstTokenAt) : durationMs;
-            const wallTps =
-              lastUsage.completion_tokens > 0 && generationMs > 0
-                ? lastUsage.completion_tokens / (generationMs / 1000)
-                : undefined;
-            const tokensPerSec =
-              lastUsage.generation_tps && lastUsage.generation_tps > 0
-                ? lastUsage.generation_tps
-                : wallTps;
-            this.emitTurnStats({
-              provider: 'mlx',
-              promptTokens: lastUsage.prompt_tokens,
-              completionTokens: lastUsage.completion_tokens,
-              durationMs,
-              ...(firstTokenAt !== null ? { ttftMs: Math.max(0, firstTokenAt - start) } : {}),
-              ...(lastUsage.prompt_tps !== undefined && lastUsage.prompt_tps > 0
-                ? { promptTokensPerSec: lastUsage.prompt_tps }
-                : {}),
-              ...(lastUsage.cached_tokens !== undefined
-                ? { cachedPromptTokens: lastUsage.cached_tokens }
-                : {}),
-              ...(tokensPerSec !== undefined ? { tokensPerSec } : {}),
-            });
-          }
           this.emitWarning(
             `On-device model emitted ${projectMacroInterceptCount + 1} \`${startedProjectOrJobThisTurn?.tool ?? 'start_project'}\` attempts in one turn after the first one succeeded. The runtime ended the turn for you — the project is real and the lead is on it. Consider switching the Meester to a cloud model if this recurs.`,
           );
@@ -3363,12 +3415,25 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         `[mlx] too many tool-call loops (>${MAX_TOOL_LOOP_TURNS}); aborting to prevent runaway`,
       );
     } catch (err) {
+      turnFailed = true;
       log.info(
         `turn#${seq} END throw afterMs=${Date.now() - start} ` +
           `${err instanceof Error ? err.message.slice(0, 200) : String(err)}`,
       );
       throw err;
     } finally {
+      if (!turnFailed) {
+        try {
+          emitTerminalTelemetry();
+        } catch (err) {
+          // Telemetry must never turn a completed model response into a
+          // failed user turn. Preserve the reply and leave a diagnostic.
+          log.warn(
+            `turn#${seq} terminal telemetry failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      releaseActiveEngineRequest?.();
       clearInterval(statusHeartbeat);
       this.deps.provider._deregisterActiveSession(this);
     }
@@ -3635,6 +3700,25 @@ function buildPreFirstByteAbortMessage(
     return `[Mac AI] aborting — still prefilling ${lastPrefill.detail} when the budget ran out. The prompt is large for this model's prefill speed; retry (the cache is warm now) or pick a faster/smaller model.`;
   }
   return '[Mac AI] no first byte from the engine; aborting (model is loading slowly or mlx_vlm.server is unhealthy). Retry the turn; if it keeps happening, restart the engine in Settings → On-device.';
+}
+
+/**
+ * Build the user-facing message for a stream that died mid-turn.
+ *
+ * A planned teardown and a crash are indistinguishable on the wire — both
+ * arrive as undici's bare `TypeError: terminated` — so the message has to
+ * come from our own knowledge of whether we stopped the engine
+ * (`plannedStop`, i.e. the provider was disposed by the pool). Getting this
+ * wrong is expensive in user time: the crash wording sends someone hunting
+ * for an out-of-memory event that never happened, when what actually
+ * occurred is that their own settings change restarted the session.
+ */
+export function buildMidStreamDropMessage(charsReceived: number, plannedStop: boolean): string {
+  const got = charsReceived > 0 ? `after ${charsReceived} chars` : 'before any output';
+  if (plannedStop) {
+    return `[Mac AI] this turn stopped ${got} because Gezel unloaded the on-device engine while it was answering. Changing your settings restarts chat sessions so the new settings apply, and unloading a model in Settings → On-device or quitting the app does the same. The model didn't crash — send the message again to redo this turn.`;
+  }
+  return `[Mac AI] the on-device engine dropped the connection mid-turn (${got}). This usually means the mlx server crashed, ran out of memory, or was restarted while the turn was streaming — this turn's work was lost. Retry the turn; if it keeps happening, restart the engine in Settings → On-device.`;
 }
 
 /**

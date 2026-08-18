@@ -16,6 +16,7 @@ const apiMocks = vi.hoisted(() => ({
   // The skills + imports actions. Without these, `invokeSkill` and
   // `reviewImport` throw "is not a function" the moment a test clicks one.
   createTask: vi.fn(),
+  invokeProjectSkill: vi.fn(),
   approveProjectImport: vi.fn(),
   rejectProjectImport: vi.fn(),
 }));
@@ -73,6 +74,11 @@ beforeEach(() => {
   apiMocks.listProjectCraftbooks.mockResolvedValue({ items: [] });
   apiMocks.getProjectImportsPending.mockResolvedValue({ items: [] });
   apiMocks.createTask.mockResolvedValue({ ref: 'p1/1', projectId: 'p1', num: 1 });
+  apiMocks.invokeProjectSkill.mockResolvedValue({
+    task: { ref: 'p1/1', projectId: 'p1', num: 1 },
+    started: true,
+    assigneeName: 'Lieke',
+  });
   apiMocks.approveProjectImport.mockResolvedValue({ ok: true });
   apiMocks.rejectProjectImport.mockResolvedValue({ ok: true });
 });
@@ -255,14 +261,28 @@ describe('CommandsPanel "skills" section', () => {
 
     await userEvent.click(await screen.findByText('summarize'));
 
-    await waitFor(() => expect(apiMocks.createTask).toHaveBeenCalled());
-    const [projectId, body] = apiMocks.createTask.mock.calls[0] as [
-      string,
-      { assignee: { kind: string }; steps: Array<{ prompt: string }> },
-    ];
-    expect(projectId).toBe('p1');
-    expect(body.assignee).toEqual({ kind: 'user' });
-    expect(body.steps[0]?.prompt).toBe(SKILL.body);
+    // Routed through the service so the skill lands on the voorman's desk —
+    // the panel must not hand-roll a task, which is how invocations used to
+    // end up owned by the user and never dispatched.
+    await waitFor(() =>
+      expect(apiMocks.invokeProjectSkill).toHaveBeenCalledWith('p1', SKILL.source),
+    );
+    expect(apiMocks.createTask).not.toHaveBeenCalled();
+    expect(await screen.findByText(/Lieke is looking at summarize — task p1\/1/)).toBeTruthy();
+  });
+
+  it('says so when the skill task was created but nobody picked it up', async () => {
+    apiMocks.getProjectSkills.mockResolvedValue({ skills: [SKILL] });
+    apiMocks.invokeProjectSkill.mockResolvedValue({
+      task: { ref: 'p1/4', projectId: 'p1', num: 4 },
+      started: false,
+      reason: 'project-inactive',
+    });
+    render(<CommandsPanel projectId="p1" section="skills" />);
+
+    await userEvent.click(await screen.findByText('summarize'));
+
+    expect(await screen.findByText(/nobody has picked it up yet/)).toBeTruthy();
   });
 
   it('approves a pending import', async () => {

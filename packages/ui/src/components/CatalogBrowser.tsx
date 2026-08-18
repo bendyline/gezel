@@ -1,6 +1,7 @@
 import {
   type CatalogItemSummary,
   type CatalogKind,
+  type LicenseClass,
   type ModelAttribution,
   type ToolsetCategory,
   modelAttribution,
@@ -9,6 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { Tooltip } from '../primitives/index.js';
 import { CatalogArtwork } from './CatalogArtwork.js';
+import { RecommendedBadge } from './RecommendedBadge.js';
 
 /**
  * Shared catalog browser. Given a `kind`, loads items via the catalog
@@ -70,6 +72,20 @@ function catalogModelAttribution(item: CatalogItemSummary): ModelAttribution | n
   if (item.manifest.kind === 'image-model' || item.manifest.kind === 'video-model') {
     return { maker: item.manifest.maintainer.name, customizers: [] };
   }
+  return null;
+}
+
+/**
+ * Narrow to the manifests that carry recommendation metadata. The ★ badge is
+ * part of the card's identity block (name, maker, tags) rather than of the
+ * kind-specific `action` footer, so every model catalog shows it in the same
+ * place instead of wherever its manager happened to render it.
+ */
+function catalogModelReco(
+  item: CatalogItemSummary,
+): { recoScore?: number; licenseClass?: LicenseClass; supportsTools?: boolean } | null {
+  const m = item.manifest;
+  if (m.kind === 'chat-model' || m.kind === 'image-model' || m.kind === 'video-model') return m;
   return null;
 }
 
@@ -237,6 +253,7 @@ export function CatalogBrowser({
       <ul className="catalog-grid">
         {visible.map((item) => {
           const attribution = catalogModelAttribution(item);
+          const reco = catalogModelReco(item);
           return (
             <li key={`${item.sourceId}:${item.manifest.id}`} className="catalog-item">
               <div className="catalog-item-header">
@@ -277,6 +294,7 @@ export function CatalogBrowser({
                       })}
                     </div>
                   )}
+                  {reco && <RecommendedBadge manifest={reco} />}
                 </div>
               </div>
               <p className="catalog-item-description">{item.manifest.description}</p>

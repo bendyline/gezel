@@ -72,6 +72,19 @@ export interface GateCheckOutcome {
   detail: string;
   /** Machine evidence preserved from the rich CheckResults (arrays sliced to ≤10). */
   evidence?: Record<string, unknown>;
+  /**
+   * Discrete items this check still wants, for checks that count in items
+   * at all (unread corpus records, uncovered paths). Folded into the
+   * plateau signature, which is what lets a gate a craftbook is DESIGNED
+   * to fail repeatedly — a bounded batch loop — read as progress instead
+   * of a stall while the count falls.
+   *
+   * Only set this where the count is deterministic for a given
+   * deliverable: a number that jitters on identical content would reset
+   * the ladder forever and hide a real plateau. Leaving it unset keeps
+   * the legacy identity-only behavior exactly.
+   */
+  remaining?: number;
 }
 
 export interface GateCheckResult {
@@ -241,6 +254,8 @@ export function gateCheckLabel(c: GateCheck): string {
       return `researchEvidence ${c.sourcePath?.trim() || c.tools.join(',')}`;
     case 'corpusCoverage':
       return `corpusCoverage ${c.file} ${c.corpusDir}`;
+    case 'corpusBatches':
+      return `corpusBatches ${c.file} ${c.corpusDir}`;
     case 'markdownHeadingsMatch':
       return `markdownHeadingsMatch ${c.file} ${c.outlineFile}`;
     case 'valueGrounding':
@@ -265,7 +280,7 @@ async function evalCheck(
   ws: GateWorkspaceReader,
   deps?: GateEvalDeps,
 ): Promise<GateCheckOutcome> {
-  const { ok, detail, evidence } = await evalCheckInner(c, ws, deps);
+  const { ok, detail, evidence, remaining } = await evalCheckInner(c, ws, deps);
   const file = checkFile(c);
   return {
     kind: c.kind,
@@ -274,6 +289,7 @@ async function evalCheck(
     ok,
     detail,
     ...(evidence !== undefined ? { evidence } : {}),
+    ...(remaining !== undefined ? { remaining } : {}),
   };
 }
 
@@ -281,6 +297,8 @@ interface InnerOutcome {
   ok: boolean;
   detail: string;
   evidence?: Record<string, unknown>;
+  /** See {@link GateCheckOutcome.remaining}. */
+  remaining?: number;
 }
 
 async function evalCheckInner(
@@ -388,7 +406,7 @@ async function evalCheckInner(
     }
     case 'unsupportedClaims': {
       const r = await unsupportedClaims(
-        ws,
+        reader,
         c.file,
         c.sourceFiles,
         c.patterns,
@@ -407,7 +425,7 @@ async function evalCheckInner(
     }
     case 'jsParses': {
       const file = c.file ?? 'index.html';
-      const content = await ws.read(file);
+      const content = await reader.read(file);
       if (content === null) {
         return { ok: false, detail: `${file} not found (needed for the inline-JS parse check)` };
       }
@@ -423,7 +441,7 @@ async function evalCheckInner(
           };
     }
     case 'htmlLint': {
-      const content = await ws.read(c.file);
+      const content = await reader.read(c.file);
       if (content === null) {
         return { ok: false, detail: `${c.file} not found (needed for the HTML lint check)` };
       }
@@ -444,7 +462,7 @@ async function evalCheckInner(
       };
     }
     case 'esmImports': {
-      const content = await ws.read(c.file);
+      const content = await reader.read(c.file);
       if (content === null) {
         return { ok: false, detail: `${c.file} not found (needed for the ESM-import check)` };
       }
@@ -452,7 +470,7 @@ async function evalCheckInner(
       return { ok: r.ok, detail: r.detail };
     }
     case 'sourceParses': {
-      const content = await ws.read(c.file);
+      const content = await reader.read(c.file);
       if (content === null) {
         return { ok: false, detail: `${c.file} not found (needed for the source-parse check)` };
       }
@@ -612,8 +630,177 @@ async function evalCheckInner(
         evidence,
       };
     }
+    case 'corpusBatches': {
+      const published = await reader.read(c.file);
+      if (published === null) {
+        return {
+          ok: false,
+          detail: `${c.file} not found — publish the fanout batch array before advancing.`,
+        };
+      }
+      if (!ws.listArtifacts || !ws.readArtifact) {
+        return {
+          ok: false,
+          detail: `${c.file}: batch completeness cannot be verified because artifact reads are unavailable (fail-closed).`,
+        };
+      }
+      const suffix = c.manifestSuffix ?? '-files.json';
+      const itemsField = c.itemsField ?? 'batches';
+      const totalField = c.totalField ?? 'totalFiles';
+      const corpusDir = c.corpusDir
+        .replace(/\\/g, '/')
+        .replace(/^\.?\/+/, '')
+        .replace(/^artifacts\/+/, '')
+        .replace(/\/+$/, '');
+      const manifests = (await ws.listArtifacts())
+        .map((path) => path.replace(/\\/g, '/'))
+        .filter((path) => path.startsWith(`${corpusDir}/`) && path.endsWith(suffix))
+        .sort();
+      if (manifests.length !== 1) {
+        return {
+          ok: false,
+          detail:
+            manifests.length === 0
+              ? `${c.file}: no '*${suffix}' manifest under artifacts/${corpusDir} — the corpus is missing, so the published batches cannot be verified (fail-closed).`
+              : `${c.file}: ${manifests.length} '*${suffix}' manifests under artifacts/${corpusDir} (${manifests.slice(0, 4).join(', ')}) — cannot tell which one the batches should match (fail-closed).`,
+        };
+      }
+      const manifestPath = manifests[0]!;
+      const manifestRaw = await ws.readArtifact(manifestPath);
+      if (manifestRaw === null) {
+        return {
+          ok: false,
+          detail: `${c.file}: could not read the corpus manifest artifacts/${manifestPath} (fail-closed).`,
+        };
+      }
+      let expectedBatches: unknown;
+      let expectedTotal: unknown;
+      try {
+        const manifest = JSON.parse(manifestRaw) as Record<string, unknown>;
+        expectedBatches = manifest?.[itemsField];
+        expectedTotal = manifest?.[totalField];
+      } catch (error) {
+        return {
+          ok: false,
+          detail: `${c.file}: corpus manifest artifacts/${manifestPath} is not valid JSON: ${error instanceof Error ? error.message : String(error)} (fail-closed).`,
+        };
+      }
+      if (!Array.isArray(expectedBatches) || expectedBatches.length === 0) {
+        return {
+          ok: false,
+          detail: `${c.file}: corpus manifest artifacts/${manifestPath} has no non-empty '${itemsField}' array to compare against (fail-closed).`,
+        };
+      }
+      let actual: unknown;
+      try {
+        actual = JSON.parse(published);
+      } catch (error) {
+        return {
+          ok: false,
+          detail: `${c.file} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+      if (!Array.isArray(actual)) {
+        return {
+          ok: false,
+          detail: `${c.file} must BE a JSON array of batch entries, with no wrapper object.`,
+        };
+      }
+      // Count first: this is the truncation signal a json-valid check misses,
+      // and naming it plainly is what tells the assignee the file is short
+      // rather than malformed.
+      if (actual.length !== expectedBatches.length) {
+        return {
+          ok: false,
+          detail: `${c.file} holds ${actual.length} batch(es) but artifacts/${manifestPath} defines ${expectedBatches.length}. Every batch must be published — a missing entry is work nobody is assigned. If the whole array will not fit in one call, say so instead of publishing a partial file.`,
+        };
+      }
+      const batchPaths = (value: unknown): string[] | null => {
+        if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+        const paths = (value as Record<string, unknown>).paths;
+        if (!Array.isArray(paths) || paths.some((path) => typeof path !== 'string')) return null;
+        return paths as string[];
+      };
+      const seen = new Set<string>();
+      for (let index = 0; index < expectedBatches.length; index += 1) {
+        const want = expectedBatches[index];
+        const got = actual[index];
+        const wantPaths = batchPaths(want);
+        const gotPaths = batchPaths(got);
+        const label = `batch at position ${index + 1}`;
+        if (wantPaths === null) {
+          return {
+            ok: false,
+            detail: `${c.file}: corpus manifest ${label} carries no path array (fail-closed).`,
+          };
+        }
+        if (gotPaths === null) {
+          return {
+            ok: false,
+            detail: `${c.file}: ${label} is not an object with a \`paths\` array of strings.`,
+          };
+        }
+        const wantFields = want as Record<string, unknown>;
+        const gotFields = got as Record<string, unknown>;
+        const wantNumber = wantFields.batchNumber ?? wantFields.number;
+        if (gotFields.batchNumber !== wantNumber) {
+          return {
+            ok: false,
+            detail: `${c.file}: ${label} has batchNumber ${JSON.stringify(gotFields.batchNumber ?? null)}, expected ${JSON.stringify(wantNumber ?? null)}. The fanout addresses children by this value.`,
+          };
+        }
+        for (const field of ['start', 'end'] as const) {
+          if (gotFields[field] !== wantFields[field]) {
+            return {
+              ok: false,
+              detail: `${c.file}: ${label} has ${field}=${JSON.stringify(gotFields[field] ?? null)}, expected ${JSON.stringify(wantFields[field] ?? null)}.`,
+            };
+          }
+        }
+        if (gotPaths.length !== wantPaths.length) {
+          return {
+            ok: false,
+            detail: `${c.file}: ${label} carries ${gotPaths.length} path(s), expected ${wantPaths.length}.`,
+          };
+        }
+        for (let p = 0; p < wantPaths.length; p += 1) {
+          if (gotPaths[p] !== wantPaths[p]) {
+            // Order matters as much as membership: a reordered batch still
+            // "contains" the path, but the per-batch coverage gates key off
+            // the published slice, so a retyped path becomes a gate no
+            // reviewer can pass.
+            return {
+              ok: false,
+              detail: `${c.file}: ${label} path ${p + 1} is ${JSON.stringify(gotPaths[p] ?? null)} but the manifest says ${JSON.stringify(wantPaths[p])}. Copy paths verbatim from the manifest — never retype, abbreviate, or reorder them.`,
+            };
+          }
+        }
+        for (const path of gotPaths) {
+          if (seen.has(path)) {
+            return {
+              ok: false,
+              detail: `${c.file}: '${path}' appears in more than one batch; every path must land in exactly one.`,
+            };
+          }
+          seen.add(path);
+        }
+      }
+      if (typeof expectedTotal === 'number' && seen.size !== expectedTotal) {
+        return {
+          ok: false,
+          detail: `${c.file}: batches cover ${seen.size} distinct path(s) but artifacts/${manifestPath} declares ${totalField}=${expectedTotal}.`,
+        };
+      }
+      return {
+        ok: true,
+        detail: `Fanout batches complete: ${actual.length} batch(es), ${seen.size} path(s), matching artifacts/${manifestPath}`,
+      };
+    }
     case 'corpusCoverage': {
-      const ledger = await ws.read(c.file);
+      // The ledger honors `artifact` like every other check; the corpus
+      // records it is compared against are always in the drawer, since
+      // that is the only place a connector mirror writes.
+      const ledger = await reader.read(c.file);
       if (ledger === null) {
         return {
           ok: false,
@@ -679,7 +866,35 @@ async function evalCheckInner(
           detail: `${c.file}: no changed-file records were found under artifacts/${filePrefix} — the PR corpus is missing or incomplete.`,
         };
       }
+      // Fanout slice, when the check carries one. Parsed before any record
+      // is read so a mis-scoped child fails on its own configuration
+      // rather than on a corpus it was never given.
+      let slice: Set<string> | undefined;
+      if (c.expectPaths !== undefined) {
+        let parsedSlice: unknown;
+        try {
+          parsedSlice = JSON.parse(c.expectPaths);
+        } catch {
+          return {
+            ok: false,
+            detail: `${c.file}: expectPaths is not valid JSON (${c.expectPaths.slice(0, 80)}) — the batch slice never reached this gate, so its coverage cannot be scoped (fail-closed).`,
+          };
+        }
+        if (
+          !Array.isArray(parsedSlice) ||
+          parsedSlice.length === 0 ||
+          parsedSlice.some((value) => typeof value !== 'string' || value.trim() === '')
+        ) {
+          return {
+            ok: false,
+            detail: `${c.file}: expectPaths must be a non-empty JSON array of exact changed-path strings (fail-closed).`,
+          };
+        }
+        slice = new Set((parsedSlice as string[]).map((path) => path.trim()));
+      }
+
       const expected = new Set<string>();
+      const scopedRecords: string[] = [];
       for (const record of records) {
         const content = await ws.readArtifact(record);
         if (content === null) {
@@ -695,8 +910,20 @@ async function evalCheckInner(
             detail: `${c.file}: connector record artifacts/${record} has no authoritative path frontmatter.`,
           };
         }
+        if (slice && !slice.has(path)) continue;
         expected.add(path);
+        scopedRecords.push(record);
       }
+      if (slice) {
+        const absent = [...slice].filter((path) => !expected.has(path)).sort();
+        if (absent.length > 0) {
+          return {
+            ok: false,
+            detail: `${c.file}: this batch names ${absent.length} path(s) with no corpus record under artifacts/${filePrefix}: ${absent.slice(0, 10).join(', ')}. The batch manifest and the mirrored corpus disagree — no assignee can reconcile that (fail-closed).`,
+          };
+        }
+      }
+      const records_ = slice ? scopedRecords : records;
 
       const reviewed = new Set(
         (reviewedRaw as string[]).map((path) => path.trim()).filter(Boolean),
@@ -706,7 +933,7 @@ async function evalCheckInner(
           .replace(/\\/g, '/')
           .replace(/^\.?\/+/, '')
           .replace(/^artifacts\/+/, '');
-      const expectedRecords = new Set(records.map(normalizeRecordPath));
+      const expectedRecords = new Set(records_.map(normalizeRecordPath));
       const reviewedRecords = new Set(
         (reviewedRecordsRaw as string[])
           .map((path) => normalizeRecordPath(path.trim()))
@@ -727,7 +954,9 @@ async function evalCheckInner(
         unknownRecords.length > 0
       ) {
         const parts = [
-          `${c.file}: reviewed ${reviewed.size} path(s), but the connector corpus contains ${expected.size}.`,
+          slice
+            ? `${c.file}: reviewed ${reviewed.size} path(s), but this batch covers ${expected.size}.`
+            : `${c.file}: reviewed ${reviewed.size} path(s), but the connector corpus contains ${expected.size}.`,
         ];
         if (missing.length > 0) {
           parts.push(
@@ -736,7 +965,9 @@ async function evalCheckInner(
         }
         if (unknown.length > 0) {
           parts.push(
-            `Not in PR: ${unknown.slice(0, 10).join(', ')}${unknown.length > 10 ? ` (+${unknown.length - 10} more)` : ''}.`,
+            slice
+              ? `Outside this batch: ${unknown.slice(0, 10).join(', ')}${unknown.length > 10 ? ` (+${unknown.length - 10} more)` : ''}.`
+              : `Not in PR: ${unknown.slice(0, 10).join(', ')}${unknown.length > 10 ? ` (+${unknown.length - 10} more)` : ''}.`,
           );
         }
         if (missingRecords.length > 0) {
@@ -760,16 +991,29 @@ async function evalCheckInner(
             missingRecords: capList(missingRecords),
             unknownRecords: capList(unknownRecords),
           },
+          // Bounded-batch craftbooks (Pull Request Review) fail this gate
+          // by design once per batch. Counting what is still outstanding
+          // is what separates "batch 2 of 3 landed" from a real stall —
+          // without it the ladder saw one unmoved failing label, called a
+          // 25→50 file jump a plateau, and told the reviewer to make "the
+          // smallest change" to the coverage JSON: a directive that reads
+          // as "just append the unread paths" and passes the gate with 18
+          // files unreviewed.
+          remaining:
+            missing.length + unknown.length + missingRecords.length + unknownRecords.length,
         };
       }
       return {
         ok: true,
-        detail: `${c.file}: coverage complete for all ${expected.size} changed path(s) and ${expectedRecords.size} per-file record(s) in artifacts/${filePrefix}.`,
+        detail: slice
+          ? `${c.file}: coverage complete for all ${expected.size} changed path(s) in this batch and its ${expectedRecords.size} record(s).`
+          : `${c.file}: coverage complete for all ${expected.size} changed path(s) and ${expectedRecords.size} per-file record(s) in artifacts/${filePrefix}.`,
         evidence: {
           expected: expected.size,
           reviewed: reviewed.size,
           expectedRecords: expectedRecords.size,
           reviewedRecords: reviewedRecords.size,
+          ...(slice ? { scopedToBatch: true } : {}),
         },
       };
     }

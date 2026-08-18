@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { MockProvider } from '../../providers/mock.js';
 import { type RunningService, startService } from '../../service.js';
 
 let svc: RunningService;
@@ -10,6 +11,7 @@ let baseUrl: string;
 let rootToken: string;
 let home: string;
 let httpFetch: typeof fetch;
+let mockCopilot: MockProvider;
 
 const priorMockFlag = process.env.GEZEL_MOCK_PROVIDER;
 
@@ -21,6 +23,9 @@ beforeAll(async () => {
   baseUrl = `${scheme}://127.0.0.1:${svc.port}`;
   rootToken = svc.context.token;
   httpFetch = svc.cert ? createTrustingFetch({ cert: svc.cert.certPem }) : fetch;
+  const provider = await svc.context.chat.getProvider('copilot');
+  if (!(provider instanceof MockProvider)) throw new Error('expected mock copilot provider');
+  mockCopilot = provider;
 }, 30_000);
 
 afterAll(async () => {
@@ -56,7 +61,7 @@ describe('GET /v1/gezels', () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       object: string;
-      data: Array<{ id: string; name: string }>;
+      data: Array<{ id: string; modelId: string; name: string }>;
     };
     expect(body.object).toBe('list');
     expect(body.data.length).toBeGreaterThanOrEqual(2);
@@ -64,6 +69,7 @@ describe('GET /v1/gezels', () => {
     for (const g of body.data) {
       expect(typeof g.id).toBe('string');
       expect(typeof g.name).toBe('string');
+      expect(g.modelId).toMatch(/^gezel:[a-z0-9-]+$/);
     }
   });
 
@@ -100,6 +106,7 @@ describe('POST /v1/chat/completions — gezel:<id-or-name> routing', () => {
     const list = await v1('GET', '/v1/gezels', { token: rootToken });
     const { data } = (await list.json()) as { data: Array<{ id: string; name: string }> };
     const target = data[0]!;
+    const callStart = mockCopilot.calls.length;
 
     const res = await v1('POST', '/v1/chat/completions', {
       body: {
@@ -118,6 +125,14 @@ describe('POST /v1/chat/completions — gezel:<id-or-name> routing', () => {
     // MockProvider echoes "Mock reply: <prompt>" — confirms we
     // actually reached the provider rather than short-circuiting.
     expect(body.choices[0]?.message.content).toContain('hello there');
+
+    const send = mockCopilot.calls.slice(callStart).find((call) => call.kind === 'send');
+    expect(send?.sendOpts?.queue).toMatchObject({
+      lane: 'interactive',
+      gezelId: target.id,
+      actorLabel: 'Gezel (root)',
+      job: 'Gezel (root)',
+    });
   });
 
   it('routes through a gezel by id (UUID-ish) the same way as by name', async () => {
@@ -133,6 +148,26 @@ describe('POST /v1/chat/completions — gezel:<id-or-name> routing', () => {
       token: rootToken,
     });
     expect(res.status).toBe(200);
+  });
+
+  it('routes through the role-name model id advertised by /v1/models', async () => {
+    const models = await v1('GET', '/v1/models', { token: rootToken });
+    const { data } = (await models.json()) as {
+      data: Array<{ id: string; owned_by: string; gezel_id?: string }>;
+    };
+    const advertised = data.find((model) => model.owned_by === 'gezel');
+    expect(advertised?.id).toMatch(/^gezel:[a-z0-9]+(?:-[a-z0-9]+)+$/);
+
+    const res = await v1('POST', '/v1/chat/completions', {
+      body: {
+        model: advertised!.id,
+        messages: [{ role: 'user', content: 'hello by alias' }],
+      },
+      token: rootToken,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { model: string };
+    expect(body.model).toBe(advertised!.id);
   });
 
   it('returns 404 gezel_not_found for an unknown ref', async () => {

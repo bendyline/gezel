@@ -567,7 +567,12 @@ async function installedModels(_attrs: Record<string, string>, ctx: MacroContext
 async function modelScorecard(attrs: Record<string, string>, ctx: MacroContext): Promise<string> {
   const suiteId = attrs.suite?.trim();
   if (!suiteId) return '';
-  return renderScorecardMarkdown(SCORECARD, suiteId, { includeTaskCount: ctx.mode !== 'site' });
+  return renderScorecardMarkdown(SCORECARD, suiteId, {
+    includeTaskCount: ctx.mode !== 'site',
+    // Agent mode hands this text to a model, where a `<br>` inside an id is
+    // noise the model can quote back as part of the model name.
+    breakLabels: ctx.mode !== 'agent',
+  });
 }
 
 /**
@@ -579,7 +584,7 @@ async function modelScorecard(attrs: Record<string, string>, ctx: MacroContext):
 export function renderScorecardMarkdown(
   dataset: ScorecardDataset,
   suiteId: string,
-  opts: { includeTaskCount: boolean },
+  opts: { includeTaskCount: boolean; breakLabels?: boolean },
 ): string {
   const board = buildSuiteScoreboard(dataset, suiteId);
   if (!board || board.scores.length === 0) {
@@ -605,7 +610,7 @@ export function renderScorecardMarkdown(
     )}**`,
   );
   lines.push('');
-  lines.push(...scoreTable(publishable));
+  lines.push(...scoreTable(publishable, opts.breakLabels ?? false));
 
   if (withheld.length > 0) {
     lines.push('');
@@ -640,7 +645,7 @@ export function renderScorecardMarkdown(
       )}**${why.length > 0 ? ` — ${why.join(', ')}` : ''}`,
     );
     lines.push('');
-    lines.push(...scoreTable(scores));
+    lines.push(...scoreTable(scores, opts.breakLabels ?? false));
   }
 
   if (opts.includeTaskCount) {
@@ -654,6 +659,28 @@ export function renderScorecardMarkdown(
 const PRIOR_ROUNDS_SHOWN = 2;
 
 /**
+ * A measurement and its unit are one token to a reader. Left as a plain
+ * space, a narrow column splits them and `1,104 tok/s` reads as two numbers
+ * stacked on top of each other.
+ */
+const NB = '\u00a0';
+
+/**
+ * Split a model label between its family and its size/quantization, so the
+ * Model column claims the width of `35b-a3b-q4` rather than the width of
+ * `qwen3.6-35b-a3b-q4`. This table is eight columns of numbers inside the
+ * site's 42rem reading measure — the widest column decides how much room is
+ * left for everything else.
+ *
+ * Labels without a size segment (`Big 27B`, `gpt-5`) are left alone: an
+ * arbitrary break inside a name would be worse than a wide column.
+ */
+export function breakModelLabel(label: string): string {
+  const match = /^(.*-)(\d+(?:\.\d+)?[bm]\b.*)$/i.exec(label);
+  return match ? `${match[1]}<br>${match[2]}` : label;
+}
+
+/**
  * One results table.
  *
  * Every optional column is omitted entirely when no model in the table
@@ -662,7 +689,7 @@ const PRIOR_ROUNDS_SHOWN = 2;
  * caused, which is why nothing here renders a placeholder dash for a whole
  * column.
  */
-function scoreTable(scores: ReturnType<typeof scoreModel>[]): string[] {
+function scoreTable(scores: ReturnType<typeof scoreModel>[], breakLabels: boolean): string[] {
   const anySpeed = scores.some((score) => !!score.result.performance);
   const anyRuntime = scores.some((score) => !!score.result.runtime);
   const anyJudge = scores.some((score) => !!score.result.judge);
@@ -674,7 +701,7 @@ function scoreTable(scores: ReturnType<typeof scoreModel>[]): string[] {
 
   const rows = scores.map((score) => {
     const cells = [
-      score.result.label,
+      breakLabels ? breakModelLabel(score.result.label) : score.result.label,
       score.result.parameterSize ?? score.result.tier,
       score.claim,
     ];
@@ -683,20 +710,20 @@ function scoreTable(scores: ReturnType<typeof scoreModel>[]): string[] {
       // The sample count travels WITH the mean, always: it is scored only
       // over work that got produced, so a model that fails early is graded
       // on its successes alone.
-      cells.push(judge ? `${judge.meanScore}/10 (${judge.artifacts} pieces)` : '—');
+      cells.push(judge ? `${judge.meanScore}/10 (${judge.artifacts}${NB}pieces)` : '—');
     }
     if (anySpeed) {
       const perf = score.result.performance;
       cells.push(
-        perf ? `${perf.prefillTokensPerSec.toLocaleString()} tok/s` : '—',
-        perf ? `${perf.decodeTokensPerSec} tok/s` : '—',
+        perf ? `${perf.prefillTokensPerSec.toLocaleString()}${NB}tok/s` : '—',
+        perf ? `${perf.decodeTokensPerSec}${NB}tok/s` : '—',
       );
     }
     if (anyRuntime) {
       const runtime = score.result.runtime;
       cells.push(
         runtime ? `${Math.round(runtime.contextTokens / 1024)}K` : '—',
-        runtime ? `${(runtime.peakMemoryMb / 1024).toFixed(1)} GB` : '—',
+        runtime ? `${(runtime.peakMemoryMb / 1024).toFixed(1)}${NB}GB` : '—',
       );
     }
     return `| ${cells.join(' | ')} |`;

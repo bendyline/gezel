@@ -493,6 +493,50 @@ export const ChatMessageToolCallSchema = z.object({
 export type ChatMessageToolCall = z.infer<typeof ChatMessageToolCallSchema>;
 
 /**
+ * Provenance for a chat thread whose interaction loop is owned by another
+ * application. Gezel mirrors these threads for visibility, history, and
+ * memory extraction, but must never accept composer sends into them.
+ */
+export const ChatSessionSourceSchema = z.object({
+  kind: z.literal('external'),
+  /** Stable integration id, e.g. `pi`. */
+  appId: z.string().min(1),
+  /** Human-facing application name, e.g. `Pi`. */
+  appName: z.string().min(1),
+  /** The external application's stable conversation/session identifier. */
+  externalConversationId: z.string().min(1),
+  /** External threads are ledger views; the owning app controls replies. */
+  readOnly: z.literal(true),
+  /** Working-directory hint supplied by the external app, when available. */
+  workingDirectory: z.string().optional(),
+  /** Project id/name hint supplied by the external app, when available. */
+  projectHint: z.string().optional(),
+});
+export type ChatSessionSource = z.infer<typeof ChatSessionSourceSchema>;
+
+/**
+ * Which store a referenced file lives in. Documents are deliberately not a
+ * third kind: the shared library is a project (ADR 0006), so its files
+ * arrive as that project's `workspace`.
+ */
+export const ReferencedFileKindSchema = z.enum(['artifact', 'workspace']);
+export type ReferencedFileKind = z.infer<typeof ReferencedFileKindSchema>;
+
+/**
+ * One real file an assistant reply named in its body text. `path` is
+ * relative to the store named by `kind` — the project's `artifacts/`
+ * drawer or its workspace root — and is always the canonical on-disk
+ * spelling, never the model's. Any `:line` / `#Lnn` locator the model
+ * wrote is stripped before matching; the inline link keeps it as label
+ * text, but nothing downstream resolves a path with one attached.
+ */
+export const ReferencedFileSchema = z.object({
+  kind: ReferencedFileKindSchema,
+  path: z.string(),
+});
+export type ReferencedFile = z.infer<typeof ReferencedFileSchema>;
+
+/**
  * A single turn in an agent chat. Stored in memory while a chat session is
  * active; dropped when the session ends or the daemon restarts.
  *
@@ -512,17 +556,27 @@ export const ChatMessageSchema = z.object({
     })
     .optional(),
   /**
-   * Artifact paths (relative to the project's `artifacts/` directory)
-   * the assistant reply referenced in its body text. Populated on save
-   * by the server-side reference parser, and used by the chat UI to
-   * render a chip row under the bubble and to linkify inline code spans
-   * that match a real artifact. Back-stops Copilot's tool-call
-   * blindspot and any "AI wrote a file outside the MCP tools" paths.
+   * Real files the assistant reply named in its body text — artifacts
+   * drawer and workspace tree alike. Populated on save by the
+   * server-side reference parser, and used by the chat UI to render a
+   * chip row under the bubble and to linkify inline code spans that
+   * match a real file. Back-stops Copilot's tool-call blindspot and any
+   * "AI wrote a file outside the MCP tools" path.
+   */
+  referencedFiles: z.array(ReferencedFileSchema).optional(),
+  /**
+   * The artifact-only projection of {@link referencedFiles}, still
+   * written so an older `@bendyline/gezel-cli` (or any out-of-tree
+   * reader) keeps working against a session file this daemon wrote.
+   * Read `referencedFiles` in new code — this field cannot represent a
+   * workspace path.
+   *
+   * @deprecated superseded by `referencedFiles`
    */
   referencedArtifacts: z.array(z.string()).optional(),
   /**
    * Task refs (`<projectId>/<num>`) the assistant reply mentioned. Same
-   * shape as `referencedArtifacts` — populated on save, gated on the
+   * shape as `referencedFiles` — populated on save, gated on the
    * ref actually existing in the task store, surfaced in the chat
    * bubble as click-through chips. Catches the common "I created task
    * gezel-ux-roadmap/2" mention so the user can jump to it without
@@ -619,6 +673,25 @@ export const ChatMessageSchema = z.object({
    * renders a small "nudged" chip on the bubble.
    */
   nudge: z.boolean().optional(),
+  /**
+   * The machinery — not the human — authored this `role: 'user'` message.
+   * Task dispatch seeds, step handoffs, and project-page reaction seeds
+   * all arrive as user turns because that is the only role a provider
+   * will accept mid-conversation, but the person never typed them.
+   *
+   * Display-only marker: the model still sees an ordinary user turn, and
+   * the UI labels the bubble **System** instead of "You". Without it the
+   * flagship Home thread opened with "YOU · call `advance_task_step` to
+   * hand off" — internal plumbing quoted back at the user in their own
+   * voice, which reads as a bug and undoes the warm-companion framing the
+   * whole product rests on.
+   *
+   * Set from the turn's `messageOrigin` (service-side `TurnMessageOrigin`);
+   * an enum rather than a boolean so a future dispatch/reaction split can
+   * widen it without a second field. Messages written before this field
+   * existed are inferred at read time — see `Store.listTimeline`.
+   */
+  origin: z.enum(['system']).optional(),
   /**
    * Persistent warnings attached to this assistant turn — fabricated
    * tool-use detection, degraded provider state, etc. The streaming
@@ -1077,10 +1150,26 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     detail: z.string().optional(),
     progress: z.number().min(0).max(1).optional(),
     ttftMs: z.number().int().nonnegative().optional(),
+    /**
+     * Exact cumulative completion tokens decoded so far this turn, as the
+     * engine counts them (llama-server `timings.predicted_n`, MLX's
+     * streamed `usage.output_tokens`). Present only on `generating`, and
+     * only for engines that publish a running counter — the UI falls back
+     * to an explicitly-approximate character estimate when it is absent,
+     * so this field is what lets a readout drop its "≈".
+     */
+    outputTokens: z.number().int().nonnegative().optional(),
+    /**
+     * Exact decode rate right now, engine-measured over the generation
+     * phase alone (llama-server `timings.predicted_per_second`, MLX's
+     * `generation_tps`). Same contract as `outputTokens`: absent means the
+     * UI must derive and mark its own estimate.
+     */
+    tokensPerSec: z.number().nonnegative().optional(),
   }),
   /**
-   * Per-turn telemetry for locally-hosted providers (llama-cpp +
-   * Ollama). Emitted once at turn end with the concrete token counts
+   * Per-turn telemetry for locally-hosted providers (llama-cpp, Ollama,
+   * MLX, and DS4). Emitted once at turn end with the concrete token counts
    * the UI needs for a speed readout — input tokens, output tokens,
    * wall-clock duration, and tokens-per-second on the generation
    * phase. UI accumulates these in a rolling window to show an
@@ -1094,6 +1183,13 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('turn_stats'),
     provider: z.enum(['llama-cpp', 'ollama', 'mlx', 'ds4']),
+    /**
+     * Model that generated the turn, as the session recorded it. Lets the
+     * UI bucket speed by model instead of averaging a 27B and a 4B into
+     * one meaningless number. Optional because older daemons (and remote
+     * peers on an older wire) don't send it.
+     */
+    model: z.string().optional(),
     promptTokens: z.number().int().nonnegative(),
     completionTokens: z.number().int().nonnegative(),
     durationMs: z.number().int().nonnegative(),
@@ -1255,6 +1351,19 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     generatedAt: z.string().optional(),
   }),
   /**
+   * Global signal from the ambient dashboard generator. `ended` means a
+   * fresh PNG landed on disk (filename is the dated file under
+   * `~/.gezel/ambient/`); the Electron shell reacts to it by re-applying
+   * the wallpaper when the user opted in, and the Settings card
+   * refreshes its preview.
+   */
+  z.object({
+    type: z.literal('ambient_dashboard'),
+    state: z.enum(['started', 'ended', 'failed']),
+    generatedAt: z.string().optional(),
+    filename: z.string().optional(),
+  }),
+  /**
    * Global (history-free) heartbeat from the boekwachter indexing loops —
    * workspace scans, AI enrichment batches, weekly digests. Drives the live
    * indicator pill; complements (doesn't replace) the polled per-project
@@ -1285,6 +1394,8 @@ export const ChatEventEnvelopeSchema = z.object({
   sessionId: z.string(),
   gezelId: z.string(),
   projectId: z.string(),
+  /** Present for externally-owned read-only threads, including live turns. */
+  sessionSource: ChatSessionSourceSchema.optional(),
   event: ChatEventSchema,
 });
 export type ChatEventEnvelope = z.infer<typeof ChatEventEnvelopeSchema>;

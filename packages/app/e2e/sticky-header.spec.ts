@@ -35,7 +35,24 @@ async function openMeesterChat() {
   await expect(page.getByTestId('chat-composer')).toBeVisible({ timeout: 20_000 });
 }
 
-async function sendAndWaitForReply(message: string, replyMarker: string) {
+/**
+ * A session's first user turn runs auto-recall (`ChatManager.tryAutoRecall`),
+ * which cold-loads the fp32 sentence-transformer on CPU while the shared
+ * library project is still doing its boot-time index — and auto-recall
+ * searches that library for every session regardless of project. Measured
+ * on an M-series laptop: turn 1 costs ~41s, turns 2-4 cost 44/91/35ms.
+ * Budget the two cases separately rather than raising every wait, so the
+ * warm turns keep a tight bound and a real streaming regression still
+ * fails fast instead of hiding inside a blanket timeout.
+ */
+const COLD_FIRST_REPLY_MS = 120_000;
+const WARM_REPLY_MS = 15_000;
+
+async function sendAndWaitForReply(
+  message: string,
+  replyMarker: string,
+  replyTimeout: number = WARM_REPLY_MS,
+) {
   const composer = page.getByTestId('chat-composer');
   const editor = composer.locator('.squisq-wysiwyg-editor');
   const timeline = page.getByTestId('chat-timeline');
@@ -43,8 +60,8 @@ async function sendAndWaitForReply(message: string, replyMarker: string) {
   await editor.click();
   await editor.fill(message);
   await editor.press('Enter');
-  await expect(timeline).toContainText(`Mock reply: ${replyMarker}`, { timeout: 15_000 });
-  await expect(composer.getByTestId('chat-send')).toBeVisible({ timeout: 15_000 });
+  await expect(timeline).toContainText(`Mock reply: ${replyMarker}`, { timeout: replyTimeout });
+  await expect(composer.getByTestId('chat-send')).toBeVisible({ timeout: WARM_REPLY_MS });
 }
 
 test.beforeAll(async () => {
@@ -79,6 +96,9 @@ test.afterAll(async () => {
 });
 
 test('sticky header does NOT show while the bubble header is visible', async () => {
+  // Absorbs the one-time cold auto-recall described above; the config
+  // default of 30s cannot cover a turn that legitimately costs ~41s.
+  test.setTimeout(180_000);
   // Send a few messages so there's enough content for the sticky to
   // potentially trigger. Then scroll to a position where an
   // assistant bubble is almost — but not quite — off the top. The
@@ -86,7 +106,11 @@ test('sticky header does NOT show while the bubble header is visible', async () 
   // still peeking into view.
   for (let i = 0; i < 4; i++) {
     const marker = `Setup msg ${i + 1}:`;
-    await sendAndWaitForReply(`${marker} lorem ipsum dolor sit amet, ${'x'.repeat(80)}`, marker);
+    await sendAndWaitForReply(
+      `${marker} lorem ipsum dolor sit amet, ${'x'.repeat(80)}`,
+      marker,
+      i === 0 ? COLD_FIRST_REPLY_MS : WARM_REPLY_MS,
+    );
   }
   // Position a middle assistant bubble so its top sits ~25 px BELOW
   // the timeline's visible top — header fully visible, bubble not
@@ -123,7 +147,7 @@ test('sticky header aligns with chat bubbles', async () => {
   // Keep this fixture below Chromium's per-origin connection limit: mock
   // replies finish so quickly that the prior finite SSE response may still be
   // retiring when the next turn starts, unlike a real model-paced chat.
-  test.setTimeout(60_000);
+  test.setTimeout(180_000);
   // Send enough messages to create vertical overflow so the sticky can
   // actually trigger on scroll. The mock echoes each padded user message,
   // producing a tall user/assistant pair per turn.
@@ -138,7 +162,11 @@ test('sticky header aligns with chat bubbles', async () => {
       'pariatur. Excepteur sint occaecat cupidatat non proident, sunt in',
       'culpa qui officia deserunt mollit anim id est laborum.',
     ].join(' ');
-    await sendAndWaitForReply(filler, `Turn ${i + 1}:`);
+    await sendAndWaitForReply(
+      filler,
+      `Turn ${i + 1}:`,
+      i === 0 ? COLD_FIRST_REPLY_MS : WARM_REPLY_MS,
+    );
   }
 
   await page.screenshot({

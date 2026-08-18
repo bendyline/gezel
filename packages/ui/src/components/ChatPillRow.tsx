@@ -67,9 +67,14 @@ export function ChatPillRow({
   refreshKey?: number | undefined;
   terminalRefreshKey?: number | undefined;
 }) {
-  const { tasks } = useProjectActiveTasks({ projectId, refreshKey });
+  const { tasks, loading: tasksLoading } = useProjectActiveTasks({ projectId, refreshKey });
   const taskRefs = useMemo(() => new Set(tasks.map((t) => t.ref)), [tasks]);
-  const { pills, overflow, taskPills } = useChatThreadPills({
+  const {
+    pills,
+    overflow,
+    taskPills,
+    loading: threadsLoading,
+  } = useChatThreadPills({
     projectId,
     gezelId,
     pinnedSessionId: activeSessionId,
@@ -131,7 +136,13 @@ export function ChatPillRow({
     .filter(Boolean)
     .join(', ');
 
-  const empty = pills.length === 0 && visibleTerminalThreads.length === 0 && tasks.length === 0;
+  // Both hooks start with empty arrays, so without their loading flags the
+  // strip asserted "No recent threads" for the whole first round trip — while
+  // the timeline directly below it still said "Loading…". Two adjacent
+  // elements claiming opposite things is worse than a beat of nothing.
+  const loading = tasksLoading || threadsLoading;
+  const empty =
+    !loading && pills.length === 0 && visibleTerminalThreads.length === 0 && tasks.length === 0;
   const cardCount =
     pills.length + overflow.length + visibleTerminalThreads.length + tasks.length + (empty ? 1 : 0);
   const { scrollRef, overflowBar } = useOverflowBar(cardCount);

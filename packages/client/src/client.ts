@@ -25,6 +25,9 @@ import type {
   VideoModelPullEvent,
 } from '@bendyline/gezel';
 import type {
+  AmbientDashboardDisplayTarget,
+  AmbientDashboardStatusResponse,
+  AmbientDashboardTheme,
   AnswerQuestionRequest,
   AppendTaskNoteRequest,
   AppendTaskNoteResponse,
@@ -37,6 +40,8 @@ import type {
   ArchiveListResponse,
   AskQuestionRequest,
   AskQuestionResponse,
+  BackupPlan,
+  BackupRequest,
   CancelCodeReviewResponse,
   CatalogItemDetail,
   CatalogItemSummary,
@@ -47,11 +52,15 @@ import type {
   ChatHistoryResponse,
   ChatSession,
   ChatSessionSummary,
+  CleanupRequest,
   CodeReviewResponse,
   CodexSetupStatusResponse,
   CompleteStepRequest,
   CompleteStepResponse,
   ConfigureCodexRequest,
+  ConfigureOpenCodeRequest,
+  ConfigurePiRequest,
+  ConfigureVSCodeRequest,
   CopilotAvailability,
   CopyArtifactToWorkspaceRequest,
   CopyArtifactToWorkspaceResponse,
@@ -165,8 +174,10 @@ import type {
   ImportCustomMcpConfigRequest,
   ImportCustomMcpConfigResponse,
   InsertAtMarkerInProjectWorkspaceFileRequest,
+  InstallOpenCodePluginRequest,
   InstallPackageRequest,
   InstallPackageResponse,
+  InstallPiExtensionRequest,
   InstalledToolset,
   InvokePageToolRequest,
   InvokePageToolResponse,
@@ -211,8 +222,12 @@ import type {
   NativeEngineResolveEvent,
   NativeEngineStatusResponse,
   NewCraftbookStep,
+  NightShiftQuotaHoldReason,
   NightShiftReviewResponse,
+  NightShiftStatusResponse,
+  NightShiftTallyResponse,
   NightShiftTasksResponse,
+  OpenCodeSetupStatusResponse,
   OutlineFileRequest,
   OutlineFileResponse,
   PageCheckRequest,
@@ -220,6 +235,7 @@ import type {
   PageReadRequest,
   PageReadResponse,
   PendingImports,
+  PiSetupStatusResponse,
   Poppetje,
   PreviewLogEntry,
   ProjectAboutPreviewRequest,
@@ -257,6 +273,9 @@ import type {
   ResolveArtifactResponse,
   ResolveSecurityFindingRequest,
   ResolveSecurityFindingResponse,
+  RestoreConfirm,
+  RestoreReview,
+  RestoreScanRequest,
   RevertGezelIconRequest,
   RewriteTextRequest,
   RewriteTextResponse,
@@ -300,6 +319,8 @@ import type {
   StartCodeReviewRequest,
   StartCodeReviewResponse,
   StepPosition,
+  StorageJob,
+  StorageSummary,
   SuggestCraftbooksResponse,
   SuggestedWorkItem,
   SuggestedWorkResponse,
@@ -336,11 +357,13 @@ import type {
   UpdateTaskRequest,
   UpdateTaskStepRequest,
   UpdateTaskStepResponse,
+  VSCodeSetupStatusResponse,
   WebSearchRequest,
   WebSearchResponse,
   WikipediaSearchRequest,
   WorkspaceCommandIndex,
   WorkspaceEditResponse,
+  WorkspaceIndexFilesDetailResponse,
   WorkspaceIndexStatus,
   WorkspaceSkillIndex,
 } from '@bendyline/gezel';
@@ -431,7 +454,36 @@ export interface ProviderUsage {
    * Optional so an older daemon that predates the field still typechecks.
    */
   medianOutputTokensPerSec?: number | null;
+  /**
+   * Per-model split of the same median decode rate, fastest first. Spans the
+   * daemon's whole life, so it stays populated across page reloads where a
+   * client-side rolling window starts empty. Optional so an older daemon that
+   * predates the field still typechecks.
+   */
+  modelSpeeds?: ModelSpeed[];
+  /** Most recently completed turn; optional for rolling upgrades from older daemons. */
+  lastTurn?: UsageTurnSummary | null;
   lastUpdated: string | null;
+}
+
+/** Durable last-turn snapshot returned by the daemon usage tracker. */
+export interface UsageTurnSummary {
+  model: string;
+  inputTokens: number;
+  cachedInputTokens?: number;
+  outputTokens: number;
+  cost: number;
+  durationMs: number;
+  outputTokensPerSec?: number;
+  at: string;
+}
+
+/** Per-model decode-rate rollup inside {@link ProviderUsage}. */
+export interface ModelSpeed {
+  model: string;
+  medianOutputTokensPerSec: number;
+  /** Turns that contributed a rate — not the model's total turn count. */
+  turns: number;
 }
 
 export interface UsageResponse {
@@ -451,12 +503,28 @@ export interface UsageResponse {
 }
 
 /**
+ * Night Shift status + its quota-hold reasons live in core's schema module
+ * with the rest of the night-shift wire types; re-exported here so the
+ * long-standing `@bendyline/gezel-client` import path keeps working.
+ */
+export type { NightShiftQuotaHoldReason, NightShiftStatusResponse };
+
+/**
  * Per-provider queue state — lets the UI render a "3 waiting on
  * Copilot" indicator and (on click) a breakdown of what's running
  * and pending.
  */
 export interface ProviderQueueState {
   running: number;
+  /**
+   * In-flight slots split by lane. Chat turns take the `interactive`
+   * lane; one-shot housekeeping (index enrichment, memory extraction,
+   * digests) takes `background`. Read `runningInteractive` — not
+   * `running` — for anything that calls the number a "chat". Absent
+   * from brokers older than the lane split.
+   */
+  runningInteractive?: number;
+  runningBackground?: number;
   queuedInteractive: number;
   queuedBackground: number;
   /** Ambient jobs currently held until the provider has been quiet long enough. */
@@ -465,8 +533,10 @@ export interface ProviderQueueState {
   /**
    * Cap on how many of the `concurrency` slots can be held by the
    * interactive lane at once. Equal to `concurrency` when no cap is
-   * configured (cloud providers); lower for local providers that
-   * reserve a slot for background work (llama-cpp ships at 2/1).
+   * configured (cloud providers). On a local engine it equals
+   * `maxConcurrency` — chats may fill every slot the engine owns; it is
+   * `backgroundConcurrency` that is held one below, so a live turn can
+   * always start.
    */
   interactiveConcurrency?: number;
   /**
@@ -477,11 +547,14 @@ export interface ProviderQueueState {
    */
   backgroundConcurrency?: number;
   /**
-   * The engine's true concurrent-generation width (its batch capability):
-   * 1 for a serial engine (MLX today), the `--parallel` slot count for
-   * llama-cpp with batched inference on. Surfaced by the EngineStatusPill
-   * as "N concurrent sessions". Distinct from `concurrency`, which can be
-   * raised for ask-overlap without parallel generation.
+   * The engine's slot count: `--parallel N` for llama-cpp,
+   * `--max-concurrency N` for MLX, 1 for a cloud or external server whose
+   * width we don't control. This is the same number the capacity broker
+   * reserved KV for — what we hold memory for is what can generate.
+   *
+   * The denominator for "in flight"; prefer it over `concurrency`, which
+   * carries an extra logical lane so a mid-turn one-shot can enter the
+   * queue without deadlocking behind the turn awaiting it.
    */
   maxConcurrency?: number;
   active: Array<{
@@ -555,6 +628,8 @@ export interface TaskRunnerState {
     active: boolean;
     /** ISO time the next window opens; null when Night Shift is off. */
     opensAt: string | null;
+    /** True while night work is held by the cloud quota reserve. */
+    quotaHold?: boolean;
   };
 }
 
@@ -742,6 +817,16 @@ export interface ProviderCacheStatsResponse {
 
 export type FolderScope = 'documents' | 'gezels' | 'projects';
 
+/** One pre-move snapshot under `~/.gezel/backup/<timestamp>/`. */
+export interface FolderBackupSnapshot {
+  id: string;
+  path: string;
+  scopes: FolderScope[];
+  bytes: number;
+  /** ISO timestamp, or null when the folder name doesn't parse. */
+  createdAt: string | null;
+}
+
 export interface FoldersStatusResponse {
   /** Default (un-externalized) location of each scope. */
   defaults: Record<FolderScope, string>;
@@ -752,8 +837,13 @@ export interface FoldersStatusResponse {
   /** True when a folder-move job is queued or running — the UI should
    *  disable the move buttons rather than queueing parallel ops. */
   activeJob: boolean;
-  /** Backup folder summary for the UI footer. */
-  backups: { count: number; totalBytes: number; path: string };
+  /** Pre-move snapshot summary, newest first. */
+  backups: {
+    count: number;
+    totalBytes: number;
+    path: string;
+    snapshots: FolderBackupSnapshot[];
+  };
 }
 
 export interface FolderMovePlanValidation {
@@ -1164,6 +1254,15 @@ export interface ConfigResponse {
       provider?: ProviderName;
       model?: string;
     };
+    /**
+     * Cloud-subscription quota reserve. See `GezelConfig.nightShift`
+     * in core schemas: `overall` is ON by default (absent = enabled,
+     * percent 20); `perDay` is opt-in (percent 10 when enabled).
+     */
+    quotaReserve?: {
+      overall?: { enabled?: boolean; percent?: number };
+      perDay?: { enabled?: boolean; percent?: number };
+    };
   };
   /**
    * Tool-filtering policy. See `GezelConfig.toolFilterMode` in core
@@ -1341,6 +1440,24 @@ export interface ConfigResponse {
    */
   gildeUpdates?: {
     enabled?: boolean;
+  };
+  /**
+   * Opt-in ambient dashboard (Settings → Ambient display). Default off.
+   * See `GezelConfig.ambientDashboard` in core schemas.
+   */
+  ambientDashboard?: {
+    enabled?: boolean;
+    intervalMinutes?: number;
+    resolution?: string;
+    themeId?: AmbientDashboardTheme;
+    displayTarget?: AmbientDashboardDisplayTarget;
+    style?: string;
+    keep?: number;
+  };
+  /** Whether the Electron shell keeps the wallpaper set to the latest
+   *  dashboard. See `GezelConfig.ambientDisplay` in core schemas. */
+  ambientDisplay?: {
+    applyWallpaper?: boolean;
   };
   /** Remote model execution: serving this device's models to paired clients. */
   remoteServing?: {
@@ -1582,6 +1699,13 @@ export interface LlamaCppInstalledModel {
   id: string;
   name: string;
   approxSizeBytes: number;
+  /**
+   * On-disk size of the multimodal projector, when this model has one.
+   * Deliberately NOT folded into `approxSizeBytes`, which stays the weights
+   * (and so the download size the UI shows); memory estimates add it
+   * explicitly via `estimateLlamaCppResidentBytes`'s `mmprojBytes`.
+   */
+  mmprojSizeBytes?: number;
   installedAt: string;
   weightsPath: string;
   /** Context capacity advertised by the GGUF metadata. */
@@ -1640,13 +1764,17 @@ export interface LlamaCppInstalledModel {
   chatTemplatePresent: boolean;
   architecture?: string;
   /**
-   * True when the catalog now ships a different version than the one this
-   * model was downloaded against. The model manager surfaces an "Update"
-   * action (re-download + replace in place) when set.
+   * True when the catalog now describes different model FILES than the ones
+   * on disk. The model manager surfaces an "Update" action (fetch what
+   * differs, replace in place) when set. A catalog version bump that only
+   * edits metadata does not set it — the runtime already resolves that live,
+   * so there is nothing to download.
    */
   updateAvailable?: boolean;
   /** The catalog's current version, when it differs from the installed one. */
   availableVersion?: string;
+  /** What changed, in one sentence, for the update tooltip. */
+  updateReason?: string;
   /**
    * True when the model lives in a read-only overlay (the machine/shared asset
    * store), not this daemon's writable root. The delete endpoint refuses these,
@@ -1823,11 +1951,7 @@ export interface MlxInstalledModel {
   quantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;
-  /**
-   * Catalog manifest `version` as of install — compare with the
-   * live catalog's version to detect "stale install" when a catalog
-   * bump changed the upstream repo or file set.
-   */
+  /** Catalog manifest `version` as of install. */
   catalogVersion?: string;
   /**
    * True when the model lives in a read-only overlay (the machine/shared asset
@@ -1835,6 +1959,16 @@ export interface MlxInstalledModel {
    * shows them as machine-provided instead of offering Delete.
    */
   readOnly?: boolean;
+  /**
+   * True when the catalog now describes different model FILES than the ones
+   * on disk — the daemon compares the payload, not the version string, so a
+   * metadata-only catalog edit never asks for a re-download.
+   */
+  updateAvailable?: boolean;
+  /** The catalog's current version, when it differs from the installed one. */
+  availableVersion?: string;
+  /** What changed, in one sentence, for the update tooltip. */
+  updateReason?: string;
 }
 
 /** Snapshot of the Python runtime powering MLX venvs. */
@@ -2176,6 +2310,68 @@ export class GezelClient {
     return this.request('DELETE', '/api/codex-setup');
   }
 
+  // ---------- OpenCode local-model setup ----------
+
+  getOpenCodeSetupStatus(): Promise<OpenCodeSetupStatusResponse> {
+    return this.request('GET', '/api/opencode-setup');
+  }
+
+  configureOpenCode(body: ConfigureOpenCodeRequest): Promise<OpenCodeSetupStatusResponse> {
+    return this.request('PUT', '/api/opencode-setup', body);
+  }
+
+  removeOpenCodeSetup(): Promise<OpenCodeSetupStatusResponse> {
+    return this.request('DELETE', '/api/opencode-setup');
+  }
+
+  /** Add the Gezel-owned plugin to OpenCode's own config directory. */
+  installOpenCodePlugin(
+    body: InstallOpenCodePluginRequest = {},
+  ): Promise<OpenCodeSetupStatusResponse> {
+    return this.request('PUT', '/api/opencode-setup/plugin', body);
+  }
+
+  removeOpenCodePlugin(): Promise<OpenCodeSetupStatusResponse> {
+    return this.request('DELETE', '/api/opencode-setup/plugin');
+  }
+
+  // ---------- pi local-model setup ----------
+
+  getPiSetupStatus(): Promise<PiSetupStatusResponse> {
+    return this.request('GET', '/api/pi-setup');
+  }
+
+  configurePi(body: ConfigurePiRequest): Promise<PiSetupStatusResponse> {
+    return this.request('PUT', '/api/pi-setup', body);
+  }
+
+  removePiSetup(): Promise<PiSetupStatusResponse> {
+    return this.request('DELETE', '/api/pi-setup');
+  }
+
+  /** Copy the Gezel-owned extension into pi's own agent directory. */
+  installPiExtension(body: InstallPiExtensionRequest = {}): Promise<PiSetupStatusResponse> {
+    return this.request('PUT', '/api/pi-setup/extension', body);
+  }
+
+  removePiExtension(): Promise<PiSetupStatusResponse> {
+    return this.request('DELETE', '/api/pi-setup/extension');
+  }
+
+  // ---------- VS Code built-in custom-endpoint setup ----------
+
+  getVSCodeSetupStatus(): Promise<VSCodeSetupStatusResponse> {
+    return this.request('GET', '/api/vscode-setup');
+  }
+
+  configureVSCode(body: ConfigureVSCodeRequest): Promise<VSCodeSetupStatusResponse> {
+    return this.request('PUT', '/api/vscode-setup', body);
+  }
+
+  removeVSCodeSetup(): Promise<VSCodeSetupStatusResponse> {
+    return this.request('DELETE', '/api/vscode-setup');
+  }
+
   // ---------- live gilde content updates ----------
 
   getGildeUpdateStatus(): Promise<GildeUpdateStatusResponse> {
@@ -2190,13 +2386,11 @@ export class GezelClient {
 
   // ---------- night shift ----------
 
-  getNightShiftStatus(): Promise<{ active: boolean; source: 'scheduled' | 'manual' | null }> {
+  getNightShiftStatus(): Promise<NightShiftStatusResponse> {
     return this.request('GET', '/api/night-shift/status');
   }
 
-  setNightShiftManual(
-    action: 'start' | 'stop',
-  ): Promise<{ active: boolean; source: 'scheduled' | 'manual' | null }> {
+  setNightShiftManual(action: 'start' | 'stop'): Promise<NightShiftStatusResponse> {
     return this.request('POST', '/api/night-shift/manual', { action });
   }
 
@@ -2209,6 +2403,11 @@ export class GezelClient {
   /** The morning review: what the most recent night window accomplished. */
   getNightShiftReview(): Promise<NightShiftReviewResponse> {
     return this.request('GET', '/api/night-shift/review');
+  }
+
+  /** Counted work for the running shift, else the last window that ran. */
+  getNightShiftTally(): Promise<NightShiftTallyResponse> {
+    return this.request('GET', '/api/night-shift/tally');
   }
 
   // ---------- suggested night work ----------
@@ -2296,6 +2495,99 @@ export class GezelClient {
    *  arrives on the global SSE stream as a `meester_status` event. */
   runMeesterStatus(): Promise<{ started: boolean }> {
     return this.request('POST', '/api/meester-status/run');
+  }
+
+  // ---------- ambient dashboard ----------
+
+  getAmbientDashboard(): Promise<AmbientDashboardStatusResponse> {
+    return this.request('GET', '/api/ambient-dashboard');
+  }
+
+  /** Authed URL of the newest dashboard PNG (404s before the first run). */
+  ambientDashboardLatestUrl(): string {
+    return `${this.baseUrl}/api/ambient-dashboard/latest.png`;
+  }
+
+  /** Kick a user-requested dashboard run. Returns immediately; completion
+   *  arrives on the global SSE stream as an `ambient_dashboard` event. */
+  runAmbientDashboard(): Promise<{ started: boolean }> {
+    return this.request('POST', '/api/ambient-dashboard/run');
+  }
+
+  /**
+   * Persist the Electron shell's primary-display canvas + safe content area.
+   * The daemon keeps this target for scheduled renders that run while the app
+   * is closed.
+   */
+  setAmbientDashboardDisplayTarget(
+    displayTarget: AmbientDashboardDisplayTarget,
+  ): Promise<{ displayTarget: AmbientDashboardDisplayTarget }> {
+    return this.request('PUT', '/api/ambient-dashboard/display-target', displayTarget);
+  }
+
+  // ── storage accounting, cleanup & backup ──
+
+  /**
+   * Per-category disk usage for the Gezel home directory, split into content
+   * that can be downloaded again and content that cannot. Sizes are memoized
+   * for a minute; pass `refresh` after anything that changes them.
+   */
+  storageSummary(opts?: { refresh?: boolean }): Promise<StorageSummary> {
+    return this.request('GET', `/api/storage/summary${opts?.refresh ? '?refresh=1' : ''}`);
+  }
+
+  /**
+   * Start a cleanup. Returns immediately with a job to poll — deleting tens
+   * of gigabytes outlives any sensible request timeout. Deleting user content
+   * additionally requires `confirmUserContent`.
+   */
+  startCleanup(body: CleanupRequest): Promise<{ jobId: string }> {
+    return this.request('POST', '/api/storage/cleanup', body);
+  }
+
+  getStorageJob(jobId: string): Promise<StorageJob> {
+    return this.request('GET', `/api/storage/cleanup/${encodeURIComponent(jobId)}`);
+  }
+
+  /** Stop at the next item. Already-deleted files are not restored. */
+  cancelStorageJob(jobId: string): Promise<{ cancelled: boolean }> {
+    return this.request('POST', `/api/storage/cleanup/${encodeURIComponent(jobId)}/cancel`);
+  }
+
+  /** What a content backup would contain, with sizes, before writing one. */
+  planBackup(opts?: { destPath?: string; excludeWorkspaces?: boolean }): Promise<BackupPlan> {
+    const params = new URLSearchParams();
+    if (opts?.destPath) params.set('dest', opts.destPath);
+    if (opts?.excludeWorkspaces) params.set('excludeWorkspaces', '1');
+    const query = params.toString();
+    return this.request('GET', `/api/storage/backup/plan${query ? `?${query}` : ''}`);
+  }
+
+  /**
+   * Write a content backup. The daemon writes the archive to `outPath`
+   * itself — a multi-gigabyte download through the renderer is the fragile
+   * way to do this, and the CLI and desktop app both have a real path.
+   */
+  startBackup(body: BackupRequest): Promise<{ jobId: string }> {
+    return this.request('POST', '/api/storage/backup', body);
+  }
+
+  /** Inspect a backup and report what restoring it would do. Read-only. */
+  scanRestore(body: RestoreScanRequest): Promise<RestoreReview> {
+    return this.request('POST', '/api/storage/restore/scan', body);
+  }
+
+  /** Apply a reviewed restore. Items that exist need an explicit `replace`. */
+  confirmRestore(restoreId: string, body: RestoreConfirm): Promise<{ jobId: string }> {
+    return this.request(
+      'POST',
+      `/api/storage/restore/${encodeURIComponent(restoreId)}/confirm`,
+      body,
+    );
+  }
+
+  cancelRestore(restoreId: string): Promise<{ cancelled: boolean }> {
+    return this.request('POST', `/api/storage/restore/${encodeURIComponent(restoreId)}/cancel`);
   }
 
   // ---------- folders externalization ----------
@@ -3006,10 +3298,15 @@ export class GezelClient {
   // ── portable `.gezmodel` bundles ──
 
   /** Fetch a streaming model export response. Callers must consume the body. */
-  async exportModelBundle(engine: GezmodelEngine, id: string): Promise<Response> {
+  async exportModelBundle(
+    engine: GezmodelEngine,
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<Response> {
     const url = `${this.baseUrl}/api/model-bundles/${encodeURIComponent(engine)}/${encodeURIComponent(id)}/export`;
     const res = await this.fetchImpl(url, {
       headers: { Authorization: `Bearer ${this.token}` },
+      signal,
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -4962,19 +5259,26 @@ export class GezelClient {
     id: string,
     subpath?: string,
     recursive?: boolean,
+    /** `hidden` also surfaces the reserved `shadow/` cache. */
+    opts?: { stats?: boolean; hidden?: boolean },
   ): Promise<{
-    files: Array<{ name: string; path: string; isDirectory: boolean }>;
+    files: Array<{ name: string; path: string; isDirectory: boolean; mtimeMs?: number }>;
     /** Present on recursive listings: true when the walker's entry cap dropped files. */
     truncated?: boolean;
   }> {
     const params = new URLSearchParams();
     if (subpath) params.set('path', subpath);
     if (recursive) params.set('recursive', '1');
+    if (opts?.stats) params.set('stats', '1');
+    if (opts?.hidden) params.set('hidden', '1');
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/artifacts${qs}`);
   }
 
-  readProjectArtifact(id: string, filePath: string): Promise<{ path: string; content: string }> {
+  readProjectArtifact(
+    id: string,
+    filePath: string,
+  ): Promise<{ path: string; content: string; size?: number }> {
     return this.request(
       'GET',
       `/api/projects/${encodeURIComponent(id)}/artifacts/read?path=${encodeURIComponent(filePath)}`,
@@ -5171,20 +5475,41 @@ export class GezelClient {
     );
   }
 
+  createProjectArtifactFolder(id: string, folderPath: string): Promise<{ ok: true; path: string }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/artifacts/mkdir`, {
+      path: folderPath,
+    });
+  }
+
+  renameProjectArtifactPath(
+    id: string,
+    fromPath: string,
+    toPath: string,
+  ): Promise<{ ok: true; fromPath: string; toPath: string }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/artifacts/rename`, {
+      fromPath,
+      toPath,
+    });
+  }
+
   // ── workspace (CRUD — writes gated by the managed workspace-write policy) ──
 
   listProjectWorkspace(
     id: string,
     subpath?: string,
     recursive?: boolean,
+    /** `hidden` also surfaces `node_modules` and friends — listed, not walked into. */
+    opts?: { stats?: boolean; hidden?: boolean },
   ): Promise<{
-    files: Array<{ name: string; path: string; isDirectory: boolean }>;
+    files: Array<{ name: string; path: string; isDirectory: boolean; mtimeMs?: number }>;
     /** Present on recursive listings: true when the walker's entry cap dropped files. */
     truncated?: boolean;
   }> {
     const params = new URLSearchParams();
     if (subpath) params.set('path', subpath);
     if (recursive) params.set('recursive', '1');
+    if (opts?.stats) params.set('stats', '1');
+    if (opts?.hidden) params.set('hidden', '1');
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/workspace${qs}`);
   }
@@ -5202,7 +5527,7 @@ export class GezelClient {
   readProjectWorkspaceFile(
     id: string,
     filePath: string,
-  ): Promise<{ path: string; content: string }> {
+  ): Promise<{ path: string; content: string; size?: number }> {
     return this.request(
       'GET',
       `/api/projects/${encodeURIComponent(id)}/workspace/read?path=${encodeURIComponent(filePath)}`,
@@ -5922,6 +6247,16 @@ export class GezelClient {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/index/status`);
   }
 
+  /**
+   * Complete flat workspace file list from the last static index scan
+   * (`{path, size, mtimeMs}` per file, up to the indexer's cap). Empty for
+   * never-indexed or indexing-disabled projects — read `/index/status` to
+   * tell those states apart.
+   */
+  listProjectIndexFilesDetail(id: string): Promise<WorkspaceIndexFilesDetailResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/index/files?detail=1`);
+  }
+
   /** Force a re-scan. Returns immediately; poll status for completion. */
   refreshProjectIndex(id: string): Promise<{ ok: true; status: WorkspaceIndexStatus }> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/index/refresh`);
@@ -6154,17 +6489,43 @@ export class GezelClient {
   listDocuments(
     subpath?: string,
     recursive?: boolean,
-  ): Promise<{ files: Array<{ name: string; path: string; isDirectory: boolean }> }> {
+    /** `hidden` also surfaces dotfiles and vendor dirs — listed, not walked into. */
+    opts?: { stats?: boolean; hidden?: boolean },
+  ): Promise<{
+    files: Array<{ name: string; path: string; isDirectory: boolean; mtimeMs?: number }>;
+    /** Present on recursive listings: true when the walker's entry cap dropped files. */
+    truncated?: boolean;
+  }> {
     const params = new URLSearchParams();
     if (subpath) params.set('path', subpath);
     if (recursive) params.set('recursive', '1');
+    if (opts?.stats) params.set('stats', '1');
+    if (opts?.hidden) params.set('hidden', '1');
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request('GET', `/api/documents${qs}`);
   }
 
-  readDocument(filePath: string): Promise<{
+  /** Open the shared documents library in the OS file manager. */
+  revealDocuments(): Promise<{ ok: true; path: string }> {
+    return this.request('POST', '/api/documents/reveal');
+  }
+
+  readDocument(
+    filePath: string,
+    opts?: {
+      /**
+       * Return office documents (.docx/.pdf/.pptx/.xlsx) converted to
+       * markdown, and refuse other binaries explicitly, instead of decoding
+       * their bytes as utf8. What model-facing callers want; the editor
+       * wants the bytes it can round-trip, so this is opt-in.
+       */
+      as?: 'markdown';
+    },
+  ): Promise<{
     path: string;
     content: string;
+    /** True when the content was converted from a binary source format. */
+    converted?: boolean;
     /**
      * What the server actually resolved the path to.
      *   - `document`: global shared library
@@ -6175,14 +6536,28 @@ export class GezelClient {
     kind?: 'document' | 'project-document' | 'artifact';
     /** Only present when a fuzzy fallback resolved the path. */
     resolvedFrom?: { projectId: string; relativePath: string };
+    /**
+     * On-disk byte size of the file. Only present for a verbatim read of a
+     * shared-library document — the converted and fuzzy-fallback branches
+     * return content that no single file's size describes.
+     */
+    size?: number;
   }> {
-    return this.request('GET', `/api/documents/read?path=${encodeURIComponent(filePath)}`);
+    const as = opts?.as ? `&as=${opts.as}` : '';
+    return this.request('GET', `/api/documents/read?path=${encodeURIComponent(filePath)}${as}`);
   }
 
-  writeDocument(filePath: string, content: string): Promise<{ ok: true; path: string }> {
+  writeDocument(
+    filePath: string,
+    content: string,
+    /** Attribution for the audit trail. Gezels pass their own id; the app omits it. */
+    actor?: { gezelId?: string; sessionId?: string },
+  ): Promise<{ ok: true; path: string }> {
     return this.request('PUT', '/api/documents/write', {
       path: filePath,
       content,
+      ...(actor?.gezelId ? { gezelId: actor.gezelId } : {}),
+      ...(actor?.sessionId ? { sessionId: actor.sessionId } : {}),
     });
   }
 
@@ -6266,8 +6641,11 @@ export class GezelClient {
     return res.blob();
   }
 
-  deleteDocument(filePath: string): Promise<{ ok: true }> {
-    return this.request('DELETE', `/api/documents/delete?path=${encodeURIComponent(filePath)}`);
+  deleteDocument(filePath: string, actor?: { gezelId?: string }): Promise<{ ok: true }> {
+    return this.request(
+      'DELETE',
+      `/api/documents/delete?path=${encodeURIComponent(filePath)}${actor?.gezelId ? `&gezelId=${encodeURIComponent(actor.gezelId)}` : ''}`,
+    );
   }
 
   createDocumentFolder(folderPath: string): Promise<{ ok: true; path: string }> {
@@ -6884,6 +7262,22 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/imports/convert`, {
       skillSource,
       ...(opts?.allowLlm !== undefined ? { allowLlm: opts.allowLlm } : {}),
+    });
+  }
+
+  /**
+   * Run a discovered workspace skill: creates the triage → run → verify
+   * task and hands the entry step to the project's voorman. `started`
+   * is false when the kickoff was withheld (an inactive project, no
+   * voorman to resolve) — the task exists either way, and `reason` says
+   * which guard tripped.
+   */
+  invokeProjectSkill(
+    projectId: string,
+    skillSource: string,
+  ): Promise<{ task: Task; started: boolean; assigneeName?: string; reason?: string }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/skills/invoke`, {
+      skillSource,
     });
   }
 

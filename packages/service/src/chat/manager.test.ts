@@ -536,6 +536,50 @@ describe('ChatManager — send + persistence', () => {
     expect(timelineAssistant?.reasoningDurationMs).toBe(assistant?.reasoningDurationMs);
   });
 
+  it('records referenced artifacts and workspace files, locators and all', async () => {
+    await store.writeProjectArtifact('default', 'pr-review.md', '# review');
+    manager.setWorkspaceIndex({
+      readFiles: async () => [
+        { path: 'packages/cli/src/commands/image.ts' },
+        { path: 'src/hooks/useFrameCapture.ts' },
+        { path: 'docs/API.md' },
+        { path: 'src/never-mentioned.ts' },
+      ],
+    });
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.script(
+      'Full review in `pr-review.md`. The default lives in ' +
+        '`packages/cli/src/commands/image.ts:84,230`, `useFrameCapture.ts:1633` drops the ' +
+        'style, and `docs/API.md` is missing two entries.',
+    );
+
+    await manager.send(session.id, 'review the PR');
+
+    const disk = await store.getSession('ada', session.id);
+    const assistant = disk?.messages.find((message) => message.role === 'assistant');
+    expect(assistant?.referencedFiles).toEqual([
+      { kind: 'artifact', path: 'pr-review.md' },
+      { kind: 'workspace', path: 'docs/API.md' },
+      { kind: 'workspace', path: 'packages/cli/src/commands/image.ts' },
+      { kind: 'workspace', path: 'src/hooks/useFrameCapture.ts' },
+    ]);
+    // The legacy projection stays artifact-only so an older CLI reading this
+    // session file still resolves every path it is handed.
+    expect(assistant?.referencedArtifacts).toEqual(['pr-review.md']);
+  });
+
+  it('falls back to artifacts alone when no workspace index is wired', async () => {
+    await store.writeProjectArtifact('default', 'pr-review.md', '# review');
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.script('Full review in `pr-review.md`; the bug is `useFrameCapture.ts:1633`.');
+
+    await manager.send(session.id, 'review the PR');
+
+    const disk = await store.getSession('ada', session.id);
+    const assistant = disk?.messages.find((message) => message.role === 'assistant');
+    expect(assistant?.referencedFiles).toEqual([{ kind: 'artifact', path: 'pr-review.md' }]);
+  });
+
   it('skips stale missing-deliverable messages once the workspace file exists', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
     await store.writeProjectWorkspaceFile(
@@ -1735,6 +1779,34 @@ describe('ChatManager — inflight visibility + cancel', () => {
     expect(snapshot!.elapsedMs).toBeGreaterThanOrEqual(0);
     expect(globalSnapshot?.providerName).toBe('copilot');
     expect(manager.inflightInfo(session.id)).toBeNull();
+  });
+
+  it('includes caller-owned external conversations in the in-flight snapshot', async () => {
+    const turn = await manager.beginExternalConversation({
+      sourceId: 'pi',
+      sourceName: 'Pi',
+      externalConversationId: 'pi-live-turn',
+      gezelId: 'ada',
+      providerName: 'copilot',
+      messages: [{ role: 'user', content: 'Build the rally game.' }],
+      effectiveSystemMessage: 'You are Ada.',
+      toolNames: [],
+    });
+
+    expect(manager.listInflight()).toEqual([
+      expect.objectContaining({
+        sessionId: turn.sessionId,
+        gezelId: 'ada',
+        projectId: 'default',
+        userText: 'Build the rally game.',
+      }),
+    ]);
+    expect(manager.isGezelActive('ada')).toBe(true);
+    expect(manager.isProjectActive('default')).toBe(true);
+
+    await turn.finish({ content: 'Partial answer.', finishReason: 'length' });
+    expect(manager.listInflight()).toHaveLength(0);
+    expect(manager.isGezelActive('ada')).toBe(false);
   });
 
   // The old "send() throws 'already in flight' when a turn is already
@@ -3877,9 +3949,52 @@ describe('ChatManager — one-shot attribution', () => {
 
     const send = mock.calls.find((call) => call.kind === 'send');
     expect(send?.sendOpts?.queue).toMatchObject({
+      lane: 'background',
       actorLabel: 'System',
       job: 'maintenance',
     });
+  });
+
+  it('forwards an explicit interactive lane to one-shot provider work', async () => {
+    mock.script('done');
+
+    await manager.oneShotCompletion('generate the requested wallpaper', 1_000, {
+      lane: 'interactive',
+    });
+
+    const send = mock.calls.find((call) => call.kind === 'send');
+    expect(send?.sendOpts?.queue?.lane).toBe('interactive');
+  });
+
+  it('fans ephemeral local-engine telemetry out to the global engine pill feed', async () => {
+    const received: Array<{ sessionId: string; event: { type: string } }> = [];
+    const unsubscribe = events.subscribeAll((envelope) => received.push(envelope));
+    mock.script('done');
+    mock.scriptEngineTelemetry({
+      phases: [
+        {
+          provider: 'mlx',
+          phase: 'generating',
+          detail: 'Generating · 4 tok · 20 tok/s',
+          outputTokens: 4,
+          tokensPerSec: 20,
+        },
+      ],
+      turnStats: {
+        provider: 'mlx',
+        promptTokens: 100,
+        completionTokens: 4,
+        durationMs: 250,
+        tokensPerSec: 20,
+      },
+    });
+
+    await manager.oneShotCompletion('background summary', 1_000);
+
+    expect(received.map(({ event }) => event.type)).toEqual(['engine_phase', 'turn_stats', 'done']);
+    expect(received[0]?.sessionId).toMatch(/^one-shot:/);
+    expect(received[1]?.sessionId).toBe(received[0]?.sessionId);
+    unsubscribe();
   });
 
   it('forwards a cancellation signal to one-shot provider work', async () => {
@@ -5020,6 +5135,70 @@ describe('ChatManager — askGezelAndWait (sync consultation)', () => {
   });
 });
 
+describe('ChatManager — per-turn shared-library recall', () => {
+  /** Minimal content-index stand-in: only the library search is exercised. */
+  function libraryIndex(
+    results: Array<{ path: string; snippet: string; score: number }>,
+    calls?: string[],
+  ) {
+    return {
+      searchLibrary: async (_projectId: string, query: string) => {
+        calls?.push(query);
+        return {
+          results: results.map((r) => ({ lineStart: 1, ...r })),
+          engine: 'hybrid' as const,
+        };
+      },
+    } as unknown as import('../index-store/content-index.js').ContentIndex;
+  }
+
+  async function sendAndReadPrompt(text: string): Promise<string> {
+    mock.script('ok');
+    const before = mock.calls.length;
+    const session = await manager.createSession({ gezelId: 'ada', projectId: 'default' });
+    await manager.send(session.id, text);
+    const sent = mock.calls.slice(before).find((c) => c.kind === 'send');
+    return (sent?.prompt as string) ?? '';
+  }
+
+  it('surfaces a document matching a topic the session did not open with', async () => {
+    // The gap this closes: turn-1 recall is frozen for the session, so a
+    // question that arrives later would otherwise reach the model with no
+    // retrieval at all.
+    await store.ensureSharedProject();
+    manager.setContentIndex(
+      libraryIndex([
+        { path: 'policies/refunds.md', snippet: 'Refunds are issued within 30 days.', score: 0.82 },
+      ]),
+    );
+
+    const prompt = await sendAndReadPrompt('what is our refund window for enterprise customers?');
+    expect(prompt).toContain('policies/refunds.md');
+    expect(prompt).toContain('shared document library');
+  });
+
+  it('stays silent when nothing matches strongly enough', async () => {
+    // A global corpus makes a loose match an intrusion into an unrelated
+    // conversation, so a weak hit is dropped rather than offered.
+    await store.ensureSharedProject();
+    manager.setContentIndex(
+      libraryIndex([{ path: 'notes/misc.md', snippet: 'Vaguely similar prose.', score: 0.2 }]),
+    );
+
+    const prompt = await sendAndReadPrompt('what is our refund window for enterprise customers?');
+    expect(prompt).not.toContain('notes/misc.md');
+  });
+
+  it('does not search on a message with no retrievable topic', async () => {
+    await store.ensureSharedProject();
+    const queries: string[] = [];
+    manager.setContentIndex(libraryIndex([], queries));
+
+    await sendAndReadPrompt('ok thanks');
+    expect(queries).toEqual([]);
+  });
+});
+
 describe('ChatManager — mission objectives are voorman-only context', () => {
   // Mission objectives describe the strategic direction the project is
   // moving toward — that's voorman-thinking, not specialist-thinking.
@@ -6056,6 +6235,20 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     expect(snap.diagnostics?.engineLogGlob).toBeUndefined();
   });
 
+  it('labels an empty tool list as unrecorded, not as an empty roster', async () => {
+    // A cold snapshot never asked a bridge anything. Reporting a bare
+    // "none" sent one investigation after a phantom dropped bridge on a
+    // bundle whose own system prompt listed ~80 wired tools, so the
+    // source has to travel with the list.
+    await store.createGezel({ name: 'Dev', role: 'developer' });
+    const project = await store.createProject({ name: 'Cold tools' });
+    const session = await manager.createSession({ gezelId: 'dev', projectId: project.id });
+
+    const snap = await manager.getSessionDebug(session.id);
+    expect(snap.registeredTools).toEqual([]);
+    expect(snap.registeredToolsSource).toBe('unavailable');
+  });
+
   it('marks debug snapshots exported during an active turn as in progress', async () => {
     await store.createGezel({ name: 'Dev', role: 'developer' });
     const project = await store.createProject({ name: 'Live debug' });
@@ -6069,6 +6262,49 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     } finally {
       internals.inflight.delete(session.id);
     }
+  });
+
+  it('uses captured caller evidence for external debug snapshots', async () => {
+    const turn = await manager.beginExternalConversation({
+      sourceId: 'opencode',
+      sourceName: 'OpenCode',
+      externalConversationId: 'opencode-debug-turn',
+      workingDirectory: '/tmp/external-project',
+      gezelId: 'ada',
+      providerName: 'mlx',
+      model: 'qwen-test',
+      messages: [
+        { role: 'system', content: 'Caller system prompt.' },
+        { role: 'user', content: 'Write the page.' },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call-write', name: 'write', arguments: '{"path":"index.html"}' }],
+        },
+        { role: 'tool', content: 'Wrote file successfully.', toolCallId: 'call-write' },
+      ],
+      effectiveSystemMessage: 'Gezel persona.\n\n---\n\nCaller system prompt.',
+      toolNames: ['write', 'read'],
+      actionLedger: '[Gezel caller-owned action ledger]\n- write -> `index.html`',
+    });
+
+    const snap = await manager.getSessionDebug(turn.sessionId);
+    expect(snap.systemPrompt).toBe('Gezel persona.\n\n---\n\nCaller system prompt.');
+    expect(snap.systemPrompt).not.toContain('About this project');
+    expect(snap.registeredTools).toEqual(['write', 'read']);
+    expect(snap.registeredToolsSource).toBe('caller');
+    expect(snap.turnStatus).toBe('in-progress');
+    expect(snap.externalConversation).toMatchObject({
+      appId: 'opencode',
+      appName: 'OpenCode',
+      workingDirectory: '/tmp/external-project',
+      request: {
+        messageCount: 4,
+        actionLedger: '[Gezel caller-owned action ledger]\n- write -> `index.html`',
+      },
+    });
+
+    await turn.finish({ content: 'Done.', finishReason: 'stop' });
   });
 
   it('uses persisted project script tools in a cold debug snapshot', async () => {
@@ -6246,16 +6482,62 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       // now also requires the role to actually hold GitHub tools, which a
       // pure delegation role does not, so it can no longer isolate the
       // role gate from the roster.
-      await store.writeDocument('guidelines.md', 'House style.');
+      await store.writeDocument('brand/guidelines.md', 'House style.');
       const sys = await sysFor({ role: 'voorman', force: true, github: true });
-      expect(sys).toContain('Shared documents library');
-      expect(sys).toContain('guidelines.md');
+      expect(sys).toContain('### Shared documents library');
+      // Foldered path proves the listing walks the tree; a top-level-only
+      // listing would render the folder and hide the document inside it.
+      expect(sys).toContain('brand/guidelines.md');
     });
 
-    it('trims the shared-documents listing for an executor under the behavior', async () => {
-      await store.writeDocument('guidelines.md', 'House style.');
-      const trimmed = await sysFor({ role: 'developer', force: true });
-      expect(trimmed).not.toContain('Shared documents library');
+    it('condenses the shared-documents listing to a pointer for a trimmed executor', async () => {
+      await store.writeDocument('brand/guidelines.md', 'House style.');
+      // Copywriter, not developer: the pointer names a document tool, so it
+      // only renders for an executor whose role actually holds one. The
+      // developer kit carries no `documents` group at all.
+      const trimmed = await sysFor({ role: 'copywriter', force: true });
+      // The inventory goes; knowing the library exists does not, or
+      // "consult team policy" has no trigger.
+      expect(trimmed).not.toContain('### Shared documents library');
+      expect(trimmed).not.toContain('brand/guidelines.md');
+      expect(trimmed).toContain('A shared documents library exists');
+    });
+
+    it('renders a description beside each document when the behavior is on', async () => {
+      // A bare path makes the model guess: `mission.md` and `notes-2024.md`
+      // are indistinguishable until something reads them.
+      await store.writeDocument('policies/refunds.md', '# Refunds\n');
+      await store.ensureSharedProject();
+      manager.setContentIndex({
+        libraryDescriptions: async () =>
+          new Map([['policies/refunds.md', 'How refunds are handled and when they apply.']]),
+      } as unknown as import('../index-store/content-index.js').ContentIndex);
+
+      // sysFor() owns the force env for the trim cases, so drive the send
+      // directly here with this behavior forced on instead.
+      process.env[FORCE] = 'prompt.documents-summaries';
+      try {
+        const project = await store.createProject({ name: 'Described Docs' });
+        const session = await manager.createSession({ gezelId: 'ada', projectId: project.id });
+        mock.script('ok');
+        await manager.send(session.id, 'go');
+        const create = mock.calls.find((c) => c.kind === 'create');
+        const sys = create!.opts!.systemMessage as string;
+        expect(sys).toContain('policies/refunds.md — How refunds are handled');
+      } finally {
+        delete process.env[FORCE];
+      }
+    });
+
+    it('steers to search_documents and hides outside-in companion twins', async () => {
+      await store.writeDocument('brand/guidelines.md', 'House style.');
+      // The editable markdown twin of a binary document. It is a derived
+      // view of a document already listed, so offering it as a second
+      // readable path invites the model to open the wrong one.
+      await store.writeDocument('brand/deck.pptx_files/deck.md', 'converted twin');
+      const sys = await sysFor({ role: 'voorman', force: false });
+      expect(sys).toContain('call `search_documents` with the topic');
+      expect(sys).not.toContain('deck.pptx_files');
     });
   });
 });

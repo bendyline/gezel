@@ -71,6 +71,15 @@ describe('GezellenView', () => {
     });
   });
 
+  it('shows which gezel is working in the full roster', async () => {
+    render(<GezellenView activeProjectsByGezel={new Map([['gz-2', new Set(['p2'])]])} />);
+
+    const working = await screen.findByRole('button', {
+      name: 'Bob is working. Open gezel.',
+    });
+    expect(working.querySelectorAll('.project-row-thinking-dot')).toHaveLength(3);
+  });
+
   it('labels a machine-shared gezel without implying their chats are shared', async () => {
     vi.mocked(api.listGezels).mockResolvedValue({
       gezels: [

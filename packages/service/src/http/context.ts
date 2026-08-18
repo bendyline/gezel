@@ -1,5 +1,6 @@
-import type { ServiceRole } from '@bendyline/gezel';
+import type { ProviderName, ServiceRole } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import type { AmbientDashboardGenerator } from '../ambient/dashboard-generator.js';
 import type { ChannelManager } from '../channels/manager.js';
 import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
@@ -27,6 +28,8 @@ import type { MeesterStatusGenerator } from '../meester/status-generator.js';
 import type { MemoryManager } from '../memory/manager.js';
 import type { EnsureModelOrchestrator } from '../models/ensure.js';
 import type { ChatModelInstallRegistries } from '../models/install-jobs.js';
+import type { OpenCodeSetupManager } from '../opencode-setup/manager.js';
+import type { PiSetupManager } from '../pi-setup/manager.js';
 import type { PreviewLogBuffer } from '../preview-log/buffer.js';
 import type { SpeechToTextProviderManager } from '../providers/audio/stt-manager.js';
 import type { TextToSpeechProviderManager } from '../providers/audio/tts-manager.js';
@@ -49,6 +52,7 @@ import type { ReportActionManager } from '../report-actions/report-action-manage
 import type { ScriptRunner } from '../scripts/runner.js';
 import type { SearchService } from '../search/search-service.js';
 import type { SecretStore } from '../secrets/types.js';
+import type { StorageJobManager } from '../storage/job-manager.js';
 import type { SystemToolsetInstallRegistry } from '../system-toolsets/install-registry.js';
 import type { SystemStatusBus } from '../system-toolsets/status-bus.js';
 import type { SystemIdleState } from '../system/idle-state.js';
@@ -59,6 +63,7 @@ import type { TaskRunner } from '../tasks/runner.js';
 import type { TaskScheduler } from '../tasks/scheduler.js';
 import type { TerminalEventBus } from '../terminal/events.js';
 import type { TerminalManager } from '../terminal/manager.js';
+import type { VSCodeSetupManager } from '../vscode-setup/manager.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
 import type { OllamaEmulationController } from './ollama-emulation.js';
 import type { TokenStore } from './token-store.js';
@@ -87,6 +92,12 @@ export interface ServiceContext {
    * manual run.
    */
   meesterStatus: MeesterStatusGenerator;
+  /**
+   * The meester's ambient dashboard (PNG workshop snapshots under
+   * `~/.gezel/ambient/`). In context so `/api/ambient-dashboard` can
+   * report status and kick manual runs.
+   */
+  ambientDashboard: AmbientDashboardGenerator;
   scriptRunner: ScriptRunner;
   catalog: CatalogService;
   /**
@@ -250,6 +261,12 @@ export interface ServiceContext {
   ollamaEmulation: OllamaEmulationController;
   /** Gezel-owned Codex profile, credential, and loopback bridge lifecycle. */
   codexSetup: CodexSetupManager;
+  /** Gezel-owned OpenCode config, credential, and loopback bridge lifecycle. */
+  opencodeSetup: OpenCodeSetupManager;
+  /** Gezel-owned pi extension, model list, credential, and loopback bridge lifecycle. */
+  piSetup: PiSetupManager;
+  /** VS Code custom endpoint, scoped credential, profile merge, and bridge lifecycle. */
+  vscodeSetup: VSCodeSetupManager;
   /**
    * Hex SHA-256 of the daemon's current TLS cert DER, when serving HTTPS.
    * `/v1/identity` signs this with the device identity key so a paired client
@@ -280,6 +297,13 @@ export interface ServiceContext {
    *  (the worker writes a sentinel file so the next boot can detect a
    *  crashed mid-move). */
   folderJobs: JobManager;
+  /** In-memory tracker for the one storage cleanup/backup/restore job that
+   *  may run at a time. Same lifetime as `folderJobs`, and mutually
+   *  exclusive with it — both rewrite the same directories. */
+  storageJobs: StorageJobManager;
+  /** Drop the cached model inventory after cleanup deletes model files, so
+   *  listings stop advertising models that are no longer on disk. */
+  invalidateModelsCache?: (provider?: ProviderName) => void;
   /** Background workspace indexer: commands + files + token index. */
   workspaceIndex: WorkspaceIndexManager;
   /** Content index (code/doc intelligence) backing the code-intel MCP tools. */

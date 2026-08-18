@@ -14,6 +14,7 @@ import { EditorShell } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { GezelIcon } from '../components/GezelIcon.js';
 import { PromptDialog } from '../components/PromptDialog.js';
 import { TaskChatPane } from '../components/TaskChatPane.js';
@@ -21,6 +22,7 @@ import { TaskStatusKeys } from '../components/TaskStatusKeys.js';
 import { TaskStepPanel } from '../components/TaskStepPanel.js';
 import { TaskStepTracker } from '../components/TaskStepTracker.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
+import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { Select } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 
@@ -190,41 +192,38 @@ export function TaskDetail({
     }
   }, [task.activeStepId]);
   const composerDraft = useRef<string>('');
-  // Description body is the long-form prose persisted as `about.md`
-  // sidecar to the task. The server hydrates it onto `task.description`
-  // for us; we mirror it into a draft ref so the editor edits don't
-  // re-render the whole detail view, and only flush on blur or via
-  // explicit save.
-  const descriptionDraft = useRef<string>(task.description ?? '');
-  const [descriptionDirty, setDescriptionDirty] = useState(false);
-  const [descriptionStatus, setDescriptionStatus] = useState<string>('');
+  // Description body is the long-form prose persisted as `about.md` sidecar
+  // to the task; the server hydrates it onto `task.description`. It autosaves
+  // like every other long-form editor in the app (gezel about.md, project
+  // about/mission, documents). It used to carry a Save button and a draft ref
+  // whose comment claimed a blur flush — there was no blur handler anywhere,
+  // so the panel unmounting on a tab switch or a step selection discarded the
+  // edit silently.
   const [descriptionKey, setDescriptionKey] = useState(0);
+
+  const saveDescription = useCallback(
+    (next: string) => api.updateTask(task.projectId, task.num, { description: next }),
+    [task.projectId, task.num],
+  );
+  const descriptionAutosave = useSerializedAutosave({
+    resourceKey: `task:${task.ref}:description`,
+    initialValue: task.description ?? '',
+    save: saveDescription,
+    onLatestSaved: (updated) => {
+      void onChanged(updated);
+    },
+  });
   // Reset the editor + draft whenever the underlying task body changes
   // (e.g. another tab/MCP tool updated it). EditorShell only reads
   // `initialMarkdown` once per mount, so we bump the key to force it.
   // biome-ignore lint/correctness/useExhaustiveDependencies: descriptionKey is the reset target, not a dep.
   useEffect(() => {
-    descriptionDraft.current = task.description ?? '';
-    setDescriptionDirty(false);
+    // hydrate() keeps an in-flight local edit from being clobbered by the
+    // server copy it is about to replace; it returns the value the editor
+    // should actually show.
+    descriptionAutosave.hydrate(task.description ?? '');
     setDescriptionKey((k) => k + 1);
-  }, [task.ref, task.description]);
-
-  const saveDescription = useCallback(async () => {
-    const next = descriptionDraft.current;
-    if ((task.description ?? '') === next) {
-      setDescriptionDirty(false);
-      return;
-    }
-    setDescriptionStatus('saving…');
-    try {
-      const updated = await api.updateTask(task.projectId, task.num, { description: next });
-      await onChanged(updated);
-      setDescriptionDirty(false);
-      setDescriptionStatus('saved');
-    } catch (err) {
-      setDescriptionStatus(`save failed: ${(err as Error).message}`);
-    }
-  }, [task.projectId, task.num, task.description, onChanged]);
+  }, [task.ref, task.description, descriptionAutosave.hydrate]);
 
   const loadNotes = useCallback(async () => {
     const r = await api.listTaskNotes(task.projectId, task.num);
@@ -630,25 +629,12 @@ export function TaskDetail({
           <section className="task-description-section">
             <div className="task-description-header">
               <h4>Description</h4>
-              <div className="task-description-actions">
-                {descriptionStatus && <span className="muted small">{descriptionStatus}</span>}
-                <button
-                  type="button"
-                  onClick={() => void saveDescription()}
-                  disabled={!descriptionDirty}
-                >
-                  Save
-                </button>
-              </div>
             </div>
             <div className="task-description-editor">
               <EditorShell
                 key={`description-${task.ref}-${descriptionKey}`}
                 initialMarkdown={task.description ?? ''}
-                onChange={(source) => {
-                  descriptionDraft.current = source;
-                  setDescriptionDirty((task.description ?? '') !== source);
-                }}
+                onChange={(source) => descriptionAutosave.update(source)}
                 colorScheme={editorTheme}
                 showPlayTab={false}
                 height="auto"
@@ -662,6 +648,7 @@ export function TaskDetail({
                     parentContext={`Project: ${projectName}`}
                   />
                 }
+                statusBarSlotRight={<AutosaveStatus autosave={descriptionAutosave} />}
               />
             </div>
           </section>

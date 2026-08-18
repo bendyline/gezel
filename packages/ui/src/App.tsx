@@ -1,17 +1,19 @@
 import type {
   ChatEventEnvelope,
   NightShiftReviewResponse,
+  NightShiftTallyResponse,
   NightShiftTasksResponse,
   RecentTab,
   RecentTabArea,
   SecurityPolicy,
 } from '@bendyline/gezel';
-import type { QuotaBucket, UsageResponse } from '@bendyline/gezel-client';
+import type { NightShiftStatusResponse, QuotaBucket, UsageResponse } from '@bendyline/gezel-client';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
 import logotypeUrl from './assets/gezellogotype.png';
 import woodtexUrl from './assets/woodtex.png';
+import { BackupRestoreDialog } from './components/BackupRestoreDialog.js';
 import { BoekwachterPill } from './components/BoekwachterPill.js';
 import { ClaudeCliPoolPill } from './components/ClaudeCliPoolPill.js';
 import { EngineStatusPill } from './components/EngineStatusPill.js';
@@ -21,6 +23,7 @@ import { ModelBundleImportController } from './components/ModelBundleControls.js
 import { NeedsInputPanel } from './components/NeedsInputPanel.js';
 import { QueueMeter } from './components/QueueMeter.js';
 import { Sidebar } from './components/Sidebar.js';
+import { StorageCleanupDialog } from './components/StorageCleanupDialog.js';
 import { TabContent } from './components/TabContent.js';
 import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
@@ -72,6 +75,11 @@ function readStoredSelection(): RecentTab | null {
 }
 
 type EngagementMode = 'proactive' | 'scheduled' | 'reactive' | 'off';
+
+type ActiveTurnAddress = {
+  projectId: string;
+  gezelId: string;
+};
 
 /**
  * Embedded-mode detector. Read once at module load; the URL doesn't
@@ -143,6 +151,10 @@ function FullApp() {
   // global SSE stream + the same listQuestions call the Home badge makes — no
   // extra endpoints or connections.
   const [activeProjectIds, setActiveProjectIds] = useState<Set<string>>(new Set());
+  const [activeProjectsByGezel, setActiveProjectsByGezel] = useState<Map<string, Set<string>>>(
+    new Map(),
+  );
+  const [activeTurnsReady, setActiveTurnsReady] = useState(false);
   const [pendingByProject, setPendingByProject] = useState<Map<string, number>>(new Map());
   // Projects with a "poisoned" session — last turn aborted, awaiting a user
   // turn to clear. Durable (survives reload) so it's seeded from a real fetch,
@@ -150,17 +162,41 @@ function FullApp() {
   const [poisonedProjects, setPoisonedProjects] = useState<
     Map<string, { sessionId: string; gezelId: string; error: string }>
   >(new Map());
-  // sessionId → projectId for every turn currently mid-flight. Recomputed into
-  // `activeProjectIds` only when project membership actually changes, so a
-  // burst of `delta` events doesn't thrash the sidebar.
-  const activeSessionsRef = useRef<Map<string, string>>(new Map());
-  const recomputeActiveProjects = useCallback(() => {
-    const next = new Set(activeSessionsRef.current.values());
+  // sessionId → gezel/project address for every turn currently mid-flight.
+  // Recomputed into navigation-friendly indexes only when turn membership
+  // changes, so a burst of `delta` events doesn't thrash the sidebar.
+  const activeSessionsRef = useRef<Map<string, ActiveTurnAddress>>(new Map());
+  const recomputeActiveTurns = useCallback(() => {
+    const next = new Set<string>();
+    const nextByGezel = new Map<string, Set<string>>();
+    for (const turn of activeSessionsRef.current.values()) {
+      next.add(turn.projectId);
+      const projects = nextByGezel.get(turn.gezelId) ?? new Set<string>();
+      projects.add(turn.projectId);
+      nextByGezel.set(turn.gezelId, projects);
+    }
     setActiveProjectIds((prev) => {
       if (prev.size === next.size && [...prev].every((id) => next.has(id))) return prev;
       return next;
     });
+    setActiveProjectsByGezel((prev) => {
+      const unchanged =
+        prev.size === nextByGezel.size &&
+        [...prev].every(([gezelId, projectIds]) => {
+          const nextProjectIds = nextByGezel.get(gezelId);
+          return (
+            nextProjectIds !== undefined &&
+            projectIds.size === nextProjectIds.size &&
+            [...projectIds].every((projectId) => nextProjectIds.has(projectId))
+          );
+        });
+      return unchanged ? prev : nextByGezel;
+    });
   }, []);
+  const activeGezelIds = useMemo(
+    () => new Set(activeProjectsByGezel.keys()),
+    [activeProjectsByGezel],
+  );
   const [engagementMode, setEngagementMode] = useState<EngagementMode>('proactive');
   const [nightShift, setNightShift] = useState<{
     active: boolean;
@@ -256,6 +292,7 @@ function FullApp() {
             showSystemTray?: boolean;
             quitOnClose?: boolean;
             securityPolicy?: SecurityPolicy;
+            ambientDisplay?: { applyWallpaper?: boolean };
           }
         | undefined;
       if (detail?.aiEngagementMode) {
@@ -274,6 +311,7 @@ function FullApp() {
           showSystemTray: detail.showSystemTray,
           quitOnClose: detail.quitOnClose,
           securityPolicy: detail.securityPolicy,
+          ambientDisplay: detail.ambientDisplay,
         });
       }
     };
@@ -440,13 +478,16 @@ function FullApp() {
     api
       .listInflightTurns()
       .then(({ inflight }) => {
-        const m = new Map<string, string>();
-        for (const t of inflight) m.set(t.sessionId, t.projectId);
+        const m = new Map<string, ActiveTurnAddress>();
+        for (const t of inflight) {
+          m.set(t.sessionId, { projectId: t.projectId, gezelId: t.gezelId });
+        }
         activeSessionsRef.current = m;
-        recomputeActiveProjects();
+        recomputeActiveTurns();
+        setActiveTurnsReady(true);
       })
-      .catch(() => {});
-  }, [recomputeActiveProjects]);
+      .catch(() => setActiveTurnsReady(true));
+  }, [recomputeActiveTurns]);
   const refreshPoisoned = useCallback(() => {
     api
       .listPoisonedProjects()
@@ -492,10 +533,13 @@ function FullApp() {
           // and closes on done/error/cancelled. Mount seed + 20s reconcile cover turns we
           // joined mid-flight.
           if (ev.type === 'user_message') {
-            activeSessionsRef.current.set(env.sessionId, env.projectId);
-            recomputeActiveProjects();
+            activeSessionsRef.current.set(env.sessionId, {
+              projectId: env.projectId,
+              gezelId: env.gezelId,
+            });
+            recomputeActiveTurns();
           } else if (ev.type === 'done' || ev.type === 'error' || ev.type === 'cancelled') {
-            if (activeSessionsRef.current.delete(env.sessionId)) recomputeActiveProjects();
+            if (activeSessionsRef.current.delete(env.sessionId)) recomputeActiveTurns();
           }
           // Poisoned tracking: a failed turn poisons the session (optimistic
           // paint now, since the persisted lastTurnError lands a beat later);
@@ -584,7 +628,7 @@ function FullApp() {
       }
     })();
     return () => ctrl.abort();
-  }, [refreshPendingCount, recomputeActiveProjects, refreshPoisoned]);
+  }, [refreshPendingCount, recomputeActiveTurns, refreshPoisoned]);
 
   useEffect(() => {
     const platform = window.__GEZEL__?.platform;
@@ -619,6 +663,8 @@ function FullApp() {
           to navigate to Settings → Connected Apps. */}
       <GrantConsentDialog />
       <MacUninstallDialog />
+      <StorageCleanupDialog />
+      <BackupRestoreDialog />
       <ModelBundleImportController onEngineIdentified={openModelBundleSettings} />
       {/* The top bar is now status-only — it remains the OS title bar (drag
           region + native window-control reservations via CSS padding). The
@@ -740,6 +786,7 @@ function FullApp() {
           onSelect={commitSelection}
           onOpenArea={openArea}
           activeProjectIds={activeProjectIds}
+          activeGezelIds={activeGezelIds}
           pendingByProject={pendingByProject}
           poisonedProjects={poisonedProjects}
         />
@@ -754,7 +801,11 @@ function FullApp() {
             />
           ) : (
             <TabErrorBoundary key={tabKey(selection)} resetKey={tabKey(selection)}>
-              <TabContent tab={selection} />
+              <TabContent
+                tab={selection}
+                activeProjectsByGezel={activeProjectsByGezel}
+                activeTurnsReady={activeTurnsReady}
+              />
             </TabErrorBoundary>
           )}
         </main>
@@ -954,6 +1005,8 @@ function NightShiftMenu({
   const [open, setOpen] = useState(false);
   const [tasks, setTasks] = useState<NightShiftTasksResponse | null>(null);
   const [review, setReview] = useState<NightShiftReviewResponse | null>(null);
+  const [status, setStatus] = useState<NightShiftStatusResponse | null>(null);
+  const [tally, setTally] = useState<NightShiftTallyResponse | null>(null);
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
@@ -995,6 +1048,8 @@ function NightShiftMenu({
   useEffect(() => {
     if (!open) {
       setTasks(null);
+      setStatus(null);
+      setTally(null);
       return;
     }
     let cancelled = false;
@@ -1006,6 +1061,26 @@ function NightShiftMenu({
         })
         .catch(() => {
           /* swallow — the menu still shows the status + action */
+        });
+      // The quota-hold detail and the window bounds ride the same poll: one
+      // explains why queued work isn't moving, the other counts down to the
+      // window's close, and both should track the same refresh cadence.
+      api
+        .getNightShiftStatus()
+        .then((s) => {
+          if (!cancelled) setStatus(s);
+        })
+        .catch(() => {
+          /* swallow — the pill's SSE state remains the on/off truth */
+        });
+      // Counted work for the period. Service-side memo absorbs this cadence.
+      api
+        .getNightShiftTally()
+        .then((t) => {
+          if (!cancelled) setTally(t);
+        })
+        .catch(() => {
+          /* swallow — an unavailable tally just hides its block */
         });
     };
     load();
@@ -1029,6 +1104,13 @@ function NightShiftMenu({
   const hasWork =
     tasks !== null &&
     (backgroundWork.length > 0 || tasks.active.length > 0 || tasks.upcoming.length > 0);
+  const periodLine = nightShiftPeriodLine(state, status);
+  const tallyItems = tally ? nightShiftTallyItems(tally) : [];
+  // The review reports on a window that may still be running — calling that
+  // "last night" at 2am, directly under a live tally, reads as a different
+  // night's work when it is in fact tonight's.
+  const reviewHeading =
+    review && Date.parse(review.windowEnd) > Date.now() ? 'Finished so far' : 'Done last night';
 
   return (
     <DropdownMenu.Root open={open} onOpenChange={handleOpenChange}>
@@ -1073,7 +1155,28 @@ function NightShiftMenu({
             {state.active
               ? `Running — ${state.source === 'manual' ? 'manual shift' : 'scheduled window'}`
               : 'Not running'}
+            {periodLine && <span className="app-nightshift-period">{periodLine}</span>}
+            {status?.quotaHold && (
+              <span className="app-nightshift-quota-hold">{quotaHoldLine(status.quotaHold)}</span>
+            )}
           </div>
+          {tallyItems.length > 0 && tally && (
+            <div className="app-nightshift-tally">
+              <div className="app-nightshift-task-heading">
+                {tally.live ? 'So far this shift' : 'Last night'}
+              </div>
+              <div className="app-nightshift-tally-items">
+                {tallyItems.map((item) => (
+                  <span className="app-nightshift-tally-item" key={item.key}>
+                    <span className="app-nightshift-tally-count">
+                      {item.count.toLocaleString()}
+                    </span>{' '}
+                    {item.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           {hasWork && tasks && (
             <div className="app-nightshift-tasks">
               {(backgroundWork.length > 0 || tasks.active.length > 0) && (
@@ -1110,7 +1213,7 @@ function NightShiftMenu({
           {review && (review.tasksCompleted.length > 0 || review.reports.length > 0) && (
             <div className="app-nightshift-tasks">
               <div className="app-nightshift-task-group">
-                <div className="app-nightshift-task-heading">Done last night</div>
+                <div className="app-nightshift-task-heading">{reviewHeading}</div>
                 {review.reports.map((r) => (
                   <button
                     key={`${r.projectId}:${r.path}`}
@@ -1198,8 +1301,113 @@ function NightShiftTaskRow({
   task: NightShiftTasksResponse['active'][number];
   active?: boolean;
 }) {
-  const meta = task.stepName ? `${task.projectName} · ${task.stepName}` : task.projectName;
+  const base = task.stepName ? `${task.projectName} · ${task.stepName}` : task.projectName;
+  const meta = task.quotaHeld ? `${base} · waiting for quota` : base;
   return <NightShiftWorkRow title={task.title} meta={meta} active={active} />;
+}
+
+/**
+ * The second status line: when this period started and when it ends.
+ *
+ * A scheduled shift is bounded by its window, so it can promise a close.
+ * A manual one can't — it runs until its work drains, whatever the clock
+ * says — so it states its start and says so. With nothing running, the
+ * line answers the daytime question instead: when does the next window open.
+ */
+function nightShiftPeriodLine(
+  state: NightShiftState,
+  status: NightShiftStatusResponse | null,
+): string | null {
+  const window = status?.window ?? null;
+  if (state.active) {
+    const started = status?.startedAt ? formatClock(status.startedAt) : null;
+    if (!started) return null;
+    // Only a scheduled shift ends with the window; a manual one outlives it.
+    if (state.source === 'manual' || !window?.open) {
+      return `Started ${started} · runs until the work is done`;
+    }
+    const ends = formatClock(window.end);
+    const left = formatTimeLeft(Date.parse(window.end) - Date.now());
+    if (!ends) return `Started ${started}`;
+    return left
+      ? `Started ${started} · ends ${ends} (${left} left)`
+      : `Started ${started} · ends ${ends}`;
+  }
+  if (!window) return null;
+  const start = formatClock(window.start);
+  const end = formatClock(window.end);
+  if (!start || !end) return null;
+  return window.open ? `Window ${start} – ${end}` : `Next window ${start} – ${end}`;
+}
+
+/** Local wall-clock time of an ISO instant, or null when unparseable. */
+function formatClock(iso: string): string | null {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  return at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+/** Coarse "3h 46m" / "24m" remaining; null once the moment has passed. */
+function formatTimeLeft(ms: number): string | null {
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${Math.max(minutes, 1)}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
+}
+
+/**
+ * The tally, as chips. Ordered by how much a person cares about the number
+ * — finished work first, effort last — and zeroes are dropped rather than
+ * rendered as a wall of noughts: a quiet night should read as a short list,
+ * not a full grid of nothing.
+ */
+const NIGHT_SHIFT_TALLY_ITEMS: Array<{
+  key: keyof NightShiftTallyResponse;
+  one: string;
+  many: string;
+}> = [
+  { key: 'tasksCompleted', one: 'task done', many: 'tasks done' },
+  { key: 'stepsCompleted', one: 'step finished', many: 'steps finished' },
+  { key: 'questionsRaised', one: 'question for you', many: 'questions for you' },
+  { key: 'filesIndexed', one: 'file indexed', many: 'files indexed' },
+  { key: 'filesReviewed', one: 'file reviewed', many: 'files reviewed' },
+  { key: 'mediaDescribed', one: 'media file described', many: 'media files described' },
+  { key: 'filesWritten', one: 'file written', many: 'files written' },
+  { key: 'documentsCreated', one: 'new document', many: 'new documents' },
+  { key: 'imagesRendered', one: 'image made', many: 'images made' },
+  { key: 'toolCalls', one: 'tool call', many: 'tool calls' },
+];
+
+function nightShiftTallyItems(
+  tally: NightShiftTallyResponse,
+): Array<{ key: string; count: number; label: string }> {
+  const out: Array<{ key: string; count: number; label: string }> = [];
+  for (const item of NIGHT_SHIFT_TALLY_ITEMS) {
+    const count = tally[item.key];
+    if (typeof count !== 'number' || count <= 0) continue;
+    out.push({ key: item.key, count, label: count === 1 ? item.one : item.many });
+  }
+  return out;
+}
+
+/**
+ * One sentence for the status strip while the quota reserve is holding
+ * night work. All percentages come from the server's verdict — the UI
+ * never recomputes quota math (the buckets' scales have bitten before).
+ */
+function quotaHoldLine(hold: NonNullable<NightShiftStatusResponse['quotaHold']>): string {
+  const n = hold.heldTaskCount;
+  const head = `Holding ${n} task${n === 1 ? '' : 's'} to protect your quota`;
+  const reason = hold.reasons[0];
+  if (!reason) return `${head}.`;
+  const label = QUOTA_PROVIDERS.find((p) => p.key === reason.provider)?.label ?? reason.provider;
+  const bucket = humanizeBucketName(reason.bucket).toLowerCase();
+  const detail = `${label} ${bucket} at ${reason.remainingPercent}% (reserve ${reason.floorPercent}%)`;
+  const more = hold.reasons.length > 1 ? ` and ${hold.reasons.length - 1} more` : '';
+  const resume = reason.resetDate ? ` · resumes after ${formatResetDate(reason.resetDate)}` : '';
+  return `${head} — ${detail}${more}${resume}`;
 }
 
 function NightShiftWorkRow({

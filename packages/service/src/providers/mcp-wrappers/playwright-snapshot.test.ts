@@ -44,12 +44,45 @@ describe('PlaywrightSnapshotInliner', () => {
     ).toBe(true);
   });
 
+  // Isolates the identity path: nothing in this command line hints at
+  // Playwright, so only the stamped `toolsetId` can carry the match. Guards
+  // the wrappers against any future change to the install-dir scheme.
+  it('matches on the stamped toolset id when the command line has no hint', () => {
+    expect(
+      PlaywrightSnapshotInliner.matches({
+        toolsetId: '@playwright/mcp',
+        command: 'node',
+        args: ['/opt/gezel/system-toolsets/browser/cli.js', '--headless'],
+        env: {},
+      }),
+    ).toBe(true);
+  });
+
+  it('matches the slugified install path on an unstamped spec', () => {
+    expect(
+      PlaywrightSnapshotInliner.matches({
+        command: 'node',
+        args: ['/home/u/.gezel/system-toolsets/@playwright__mcp@0.0.78/package/cli.js'],
+        env: {},
+      }),
+    ).toBe(true);
+  });
+
   it('does not match non-playwright servers', () => {
     expect(
       PlaywrightSnapshotInliner.matches({
         command: 'node',
         args: ['some-other-mcp.js'],
         env: {},
+      }),
+    ).toBe(false);
+    expect(
+      PlaywrightSnapshotInliner.matches({
+        toolsetId: 'docblocks',
+        kind: 'http',
+        transport: 'streamable-http',
+        url: 'https://example.com/mcp',
+        headers: {},
       }),
     ).toBe(false);
   });

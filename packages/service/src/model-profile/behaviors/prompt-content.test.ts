@@ -30,6 +30,7 @@ function promptCtx(overrides: Partial<PromptCtx>): PromptCtx {
     hasPlaywright: false,
     isMeester: false,
     about: 'Test about',
+    availableToolNames: new Set(['derive_file', 'run_nodejs_script', 'write_file']),
     ...overrides,
   };
 }
@@ -133,6 +134,35 @@ describe('PromptDeriveByExecution', () => {
     expect(out).toContain('run_nodejs_script');
     expect(out).toContain('Hand-typing rows loses data');
     expect(out).toContain('Reports and prose that merely cite data');
+  });
+
+  it('goes silent when no execution tool is wired', () => {
+    const out = PromptDeriveByExecution.promptAppend!(
+      promptCtx({ availableToolNames: new Set(['write_artifact', 'read_artifact']) }),
+      undefined,
+    );
+    expect(out).toBeNull();
+  });
+
+  it('names only the execution tool that is wired', () => {
+    const out = PromptDeriveByExecution.promptAppend!(
+      promptCtx({ availableToolNames: new Set(['run_nodejs_script', 'write_artifact']) }),
+      undefined,
+    );
+    expect(out).toContain('run_nodejs_script');
+    expect(out).not.toContain('derive_file');
+    // The carve-out points at the write tool this session actually has.
+    expect(out).toContain('`write_artifact` work');
+    expect(out).not.toContain('`write_file` work');
+  });
+
+  it('drops the prose carve-out when no write tool is wired', () => {
+    const out = PromptDeriveByExecution.promptAppend!(
+      promptCtx({ availableToolNames: new Set(['derive_file']) }),
+      undefined,
+    );
+    expect(out).toContain('derive_file');
+    expect(out).not.toContain('Reports and prose that merely cite data');
   });
 });
 

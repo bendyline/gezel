@@ -152,6 +152,9 @@ export interface PoolSnapshot {
  */
 export interface PooledQueueSummary {
   running: number;
+  /** See {@link ProviderQueue.describe}. Summed across replicas like `running`. */
+  runningInteractive: number;
+  runningBackground: number;
   queuedInteractive: number;
   queuedBackground: number;
   /** Pending ambient entries held by the admission gate across replicas. */
@@ -184,6 +187,8 @@ export interface PooledQueueSummary {
 function emptyPooledQueueSummary(): PooledQueueSummary {
   return {
     running: 0,
+    runningInteractive: 0,
+    runningBackground: 0,
     queuedInteractive: 0,
     queuedBackground: 0,
     ambientHeld: 0,
@@ -194,6 +199,32 @@ function emptyPooledQueueSummary(): PooledQueueSummary {
     active: [],
     pending: [],
   };
+}
+
+function positiveConcurrency(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 1) return undefined;
+  return Math.floor(value);
+}
+
+/**
+ * Concurrent generation width the provider can serve right now.
+ *
+ * A supervised native launch is the strongest source: its retained `slots`
+ * diagnostic is the exact `--parallel` / server-width value of the live
+ * process. Older or wrapper providers may expose only `batch` or the queue's
+ * interactive cap, so use the widest of those compatible signals as the
+ * fallback. Never use total queue concurrency here — local queues carry an
+ * extra logical background lease that is not a native generation slot.
+ */
+export function liveProviderConcurrency(provider: LLMProvider): number {
+  const launchedSlots = positiveConcurrency(provider.engineLaunchSnapshot?.()?.diagnostics?.slots);
+  if (launchedSlots !== undefined) return launchedSlots;
+
+  return Math.max(
+    1,
+    positiveConcurrency(provider.batch?.maxConcurrency) ?? 0,
+    positiveConcurrency(provider.queue?.interactiveConcurrency) ?? 0,
+  );
 }
 
 interface PoolEntry {
@@ -516,6 +547,35 @@ export class ProviderPool {
     }
     await this.evict(key);
     return true;
+  }
+
+  /**
+   * Unload every resident engine that is idle right now, leaving busy ones
+   * running. Returns the keys that stayed resident because they were serving
+   * a turn — the caller reports them; the ordinary LRU / idle-retention path
+   * collects them once they go quiet.
+   *
+   * This is what a live config reset uses. {@link shutdown} is the other
+   * shape — it force-evicts busy engines too — and is only correct when the
+   * process is going away (service shutdown, emergency stop), because a
+   * forced eviction kills whatever turn is streaming.
+   */
+  async releaseIdle(): Promise<string[]> {
+    const busy: string[] = [];
+    for (const key of [...this.entries.keys()]) {
+      try {
+        await this.unloadIdle(key);
+      } catch (err) {
+        if (err instanceof EngineBusyError) {
+          busy.push(key);
+          continue;
+        }
+        log.warn(
+          `releaseIdle: ${key} failed to unload: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    return busy;
   }
 
   /**
@@ -952,13 +1012,15 @@ export class ProviderPool {
       const name = entry.parsed.provider;
       const cur = out.get(name) ?? emptyPooledQueueSummary();
       cur.running += d.running;
+      cur.runningInteractive += d.runningInteractive;
+      cur.runningBackground += d.runningBackground;
       cur.queuedInteractive += d.queuedInteractive;
       cur.queuedBackground += d.queuedBackground;
       cur.ambientHeld += d.ambientHeld;
       cur.concurrency += d.concurrency;
       cur.interactiveConcurrency += d.interactiveConcurrency;
       cur.backgroundConcurrency += d.backgroundConcurrency;
-      cur.maxConcurrency += entry.provider.batch?.maxConcurrency ?? 1;
+      cur.maxConcurrency += liveProviderConcurrency(entry.provider);
       cur.active.push(...d.active);
       cur.pending.push(...d.pending);
       out.set(name, cur);

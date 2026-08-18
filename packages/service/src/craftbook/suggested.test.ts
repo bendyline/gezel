@@ -46,6 +46,7 @@ describe('suggestedCraftbookIdsForType', () => {
       id: 'x',
       label: 'X',
       description: '',
+      icon: 'sheet',
       detect: {},
       craftbookTags: ['SVG'],
       gezelRoles: { default: [], suggested: [] },

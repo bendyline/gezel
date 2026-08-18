@@ -15,11 +15,7 @@ import {
  */
 const KNOWN_GAPS: ReadonlyArray<`${string} ${string}`> = [
   'gpt-oss-120b-q4 missing-tuning-sampling',
-  'gpt-oss-120b-q4 missing-resident-bytes',
   'gpt-oss-20b-q4 missing-tuning-sampling',
-  'mistral-medium-3.5-128b-q4 missing-resident-bytes',
-  'nemotron3-nano-30b-q4 missing-resident-bytes',
-  'nemotron3-super-120b-q4 missing-resident-bytes',
 ];
 
 describe('chat-model manifest lint (ratchet over real catalog data)', () => {
@@ -132,12 +128,16 @@ describe('lintChatModelManifest rules', () => {
     expect(lintChatModelManifest(nonThinking).errors).toEqual([]);
   });
 
-  it('missing residentBytes on every backend is an error; any backend satisfies it', () => {
+  it('only ds4 must pin residentBytes — llama.cpp and MLX derive it', () => {
     const { llamaCpp: _drop, ...rest } = complete;
-    expect(lintChatModelManifest(rest).errors.map((f) => f.rule)).toContain(
+    // No pin anywhere is fine: both estimators are measured, and a pin that
+    // restates the formula is what produced the KV-double-counting 1.2-1.3x.
+    expect(lintChatModelManifest(rest).errors).toEqual([]);
+    expect(lintChatModelManifest({ ...rest, mlx: {} }).errors).toEqual([]);
+    // ds4 cannot be derived from the file size — it streams experts from SSD.
+    expect(lintChatModelManifest({ ...rest, ds4: {} }).errors.map((f) => f.rule)).toContain(
       'missing-resident-bytes',
     );
-    expect(lintChatModelManifest({ ...rest, mlx: { residentBytes: 1 } }).errors).toEqual([]);
     expect(lintChatModelManifest({ ...rest, ds4: { residentBytes: 1 } }).errors).toEqual([]);
   });
 

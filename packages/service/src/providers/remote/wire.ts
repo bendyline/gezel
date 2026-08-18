@@ -177,6 +177,8 @@ export const ToolArgsDeltaFrameSchema = z.object({
   type: z.literal('tool_args_delta'),
   name: z.string(),
   text: z.string(),
+  index: z.number().int().nonnegative().optional(),
+  id: z.string().optional(),
 });
 /** B received a non-content SSE frame from its native engine. */
 export const WirePulseFrameSchema = z.object({ type: z.literal('wire_pulse') });
@@ -213,6 +215,9 @@ export const PhaseFrameSchema = z.object({
   detail: z.string().optional(),
   progress: z.number().optional(),
   ttftMs: z.number().int().nonnegative().optional(),
+  /** Engine-exact running decode counters — see `engine_phase` in core. */
+  outputTokens: z.number().int().nonnegative().optional(),
+  tokensPerSec: z.number().nonnegative().optional(),
 });
 /** End-of-turn native-engine performance counters. */
 export const TurnStatsFrameSchema = z.object({

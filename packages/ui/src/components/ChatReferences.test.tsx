@@ -502,6 +502,48 @@ describe('ChatReferences reference picker', () => {
     );
   });
 
+  it('collapses the drawer-prefixed spelling of an artifact onto one entry', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onArtifactSeen, onWorkspaceSeen, recentReferences }) => (
+          <>
+            <button type="button" onClick={() => onArtifactSeen('data/pr-46/files/008--api.md')}>
+              See bare
+            </button>
+            <button
+              type="button"
+              onClick={() => onArtifactSeen('artifacts/data/pr-46/files/008--api.md')}
+            >
+              See prefixed
+            </button>
+            <button type="button" onClick={() => onWorkspaceSeen('artifacts/build.txt')}>
+              See workspace
+            </button>
+            <output data-testid="recent-reference-paths">
+              {recentReferences.map((reference) => reference.path).join('|')}
+            </output>
+          </>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'See bare' }));
+    await user.click(screen.getByRole('button', { name: 'See prefixed' }));
+    expect(screen.getByTestId('recent-reference-paths')).toHaveTextContent(
+      'data/pr-46/files/008--api.md',
+    );
+    expect(screen.getByTestId('recent-reference-paths').textContent).not.toContain('artifacts/');
+
+    // A workspace tree may own an `artifacts/` folder — that path stays whole.
+    await user.click(screen.getByRole('button', { name: 'See workspace' }));
+    expect(screen.getByTestId('recent-reference-paths')).toHaveTextContent(
+      'artifacts/build.txt|data/pr-46/files/008--api.md',
+    );
+  });
+
   it('renders global HTML documents as inert source rather than srcDoc', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     const user = userEvent.setup();

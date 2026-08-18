@@ -101,6 +101,236 @@ describe('evaluateGate', () => {
     expect(artScoped.failures).toEqual([]);
   });
 
+  it('the code/prose checks honor the artifact flag instead of always reading the workspace', async () => {
+    // These five read their content directly rather than through a helper,
+    // and each had grabbed `ws` instead of the artifact-swapped `reader` —
+    // so a drawer deliverable reported "not found" no matter what the
+    // craftbook declared. A review of a read-only checkout can only write
+    // the drawer, so this was the difference between a runnable gate and
+    // an unwinnable one.
+    const broken = 'function a() { return 1;';
+    const r = splitReader(
+      {},
+      {
+        'reports/build.mjs': broken,
+        'reports/page.html': `<html><body><script>${broken}</script></body></html>`,
+        'reports/imports.mjs': "import { nope } from 'node:url';\n",
+        'reports/claims.md': 'This is the fastest renderer ever built.',
+        'reports/source.md': 'It renders quickly.',
+      },
+    );
+    const flagged = await evaluateGate(
+      [
+        { kind: 'sourceParses', file: 'reports/build.mjs', artifact: true },
+        { kind: 'jsParses', file: 'reports/page.html', artifact: true },
+        { kind: 'htmlLint', file: 'reports/page.html', artifact: true },
+        { kind: 'esmImports', file: 'reports/imports.mjs', artifact: true },
+        {
+          kind: 'unsupportedClaims',
+          file: 'reports/claims.md',
+          sourceFiles: ['reports/source.md'],
+          patterns: [{ pattern: 'fastest[\\w\\s]*ever built', label: 'superlative' }],
+          artifact: true,
+        },
+      ],
+      r,
+    );
+    // Every one of these FAILS on content — which is the point: the checks
+    // reached the drawer and judged it. Before the fix they all failed as
+    // "not found", indistinguishable from a missing deliverable.
+    expect(flagged.pass).toBe(false);
+    expect(flagged.failures.some((f) => /not found/.test(f))).toBe(false);
+
+    const clean = splitReader(
+      {},
+      {
+        'reports/build.mjs': 'export function a() {\n  return 1;\n}\n',
+        'reports/imports.mjs': "import { fileURLToPath } from 'node:url';\n",
+      },
+    );
+    const passing = await evaluateGate(
+      [
+        { kind: 'sourceParses', file: 'reports/build.mjs', artifact: true },
+        { kind: 'esmImports', file: 'reports/imports.mjs', artifact: true },
+      ],
+      clean,
+    );
+    expect(passing.pass).toBe(true);
+  });
+
+  it('corpusCoverage accepts a drawer-side ledger (writes-off review projects)', async () => {
+    // The PR-review book declares `artifact: true` here because a review
+    // never writes the checkout. The flag used to be stripped by the
+    // schema, so the ledger was hunted for in the workspace and the whole
+    // craftbook was unsatisfiable on any writes-off project.
+    const record = (path: string) => `---\npath: ${path}\nstatus: modified\n---\n\n# ${path}\n`;
+    const r = splitReader(
+      {},
+      {
+        'data/github-pulls/pr-46/files/001--a--aaaa1111.md': record('src/a.ts'),
+        'pr-review-coverage.json': JSON.stringify({
+          reviewedFiles: ['src/a.ts'],
+          reviewedRecords: ['data/github-pulls/pr-46/files/001--a--aaaa1111.md'],
+        }),
+      },
+    );
+    const res = await evaluateGate(
+      [
+        {
+          kind: 'corpusCoverage',
+          file: 'pr-review-coverage.json',
+          corpusDir: 'artifacts/data/github-pulls/pr-46',
+          artifact: true,
+        },
+      ],
+      r,
+    );
+    expect(res.pass).toBe(true);
+  });
+
+  describe('corpusBatches (fanout-input completeness)', () => {
+    const CORPUS = 'data/github-pulls/pr-33';
+    const MANIFEST = `${CORPUS}/attachments/001/pr-33-files.json`;
+
+    const batch = (batchNumber: number, start: number, count: number) => ({
+      number: batchNumber,
+      batchNumber,
+      start,
+      end: start + count - 1,
+      paths: Array.from({ length: count }, (_, i) => `packages/p${start + i}/src/file.ts`),
+    });
+    const MANIFEST_JSON = JSON.stringify({
+      totalFiles: 30,
+      batchSize: 25,
+      batches: [batch(1, 1, 25), batch(2, 26, 5)],
+    });
+    /** What a correct publish looks like: the four fanout fields, verbatim. */
+    const entry = (b: ReturnType<typeof batch>) => ({
+      batchNumber: b.batchNumber,
+      start: b.start,
+      end: b.end,
+      paths: b.paths,
+    });
+    const check = {
+      kind: 'corpusBatches' as const,
+      file: 'pr-review/batches.json',
+      corpusDir: `artifacts/${CORPUS}`,
+      artifact: true,
+    };
+    const withPublished = (published: unknown) =>
+      splitReader(
+        {},
+        { [MANIFEST]: MANIFEST_JSON, 'pr-review/batches.json': JSON.stringify(published, null, 2) },
+      );
+
+    it('passes when every batch matches the manifest verbatim', async () => {
+      const res = await evaluateGate(
+        [check],
+        withPublished([entry(batch(1, 1, 25)), entry(batch(2, 26, 5))]),
+      );
+      expect(res.pass).toBe(true);
+    });
+
+    it('rejects a truncated batch array that is still valid JSON', async () => {
+      // The exact incident: the model's write hit its output cap, so it
+      // published a syntactically perfect array holding half the batches.
+      // json-valid + minBytes both pass on this file.
+      const res = await evaluateGate([check], withPublished([entry(batch(1, 1, 25))]));
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/holds 1 batch\(es\) but .* defines 2/);
+      expect(res.failures[0]).toMatch(/work nobody is assigned/);
+    });
+
+    it('rejects a retyped path even when the count is right', async () => {
+      const wrong = entry(batch(2, 26, 5));
+      wrong.paths = [...wrong.paths];
+      wrong.paths[2] = 'packages/p28/src/File.ts';
+      const res = await evaluateGate([check], withPublished([entry(batch(1, 1, 25)), wrong]));
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/path 3 is "packages\/p28\/src\/File\.ts"/);
+      expect(res.failures[0]).toMatch(/Copy paths verbatim/);
+    });
+
+    it('rejects reordered batches the fanout would misaddress', async () => {
+      const res = await evaluateGate(
+        [check],
+        withPublished([entry(batch(2, 26, 5)), entry(batch(1, 1, 25))]),
+      );
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/batchNumber 2, expected 1/);
+    });
+
+    it('rejects a wrapper object around the array', async () => {
+      const res = await evaluateGate(
+        [check],
+        withPublished({ batches: [entry(batch(1, 1, 25)), entry(batch(2, 26, 5))] }),
+      );
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/must BE a JSON array/);
+    });
+
+    it('rejects a duplicated path even when it matches the manifest', async () => {
+      // Verbatim comparison catches a retyped path first, so this branch only
+      // fires when the CORPUS itself double-claims a file. It must still fail:
+      // one path in two batches means two reviewers own it and the coverage
+      // arithmetic downstream still adds up.
+      const dup = batch(2, 26, 5);
+      dup.paths = [...dup.paths];
+      dup.paths[0] = 'packages/p1/src/file.ts';
+      const r = splitReader(
+        {},
+        {
+          [MANIFEST]: JSON.stringify({ totalFiles: 30, batches: [batch(1, 1, 25), dup] }),
+          'pr-review/batches.json': JSON.stringify([entry(batch(1, 1, 25)), entry(dup)]),
+        },
+      );
+      const res = await evaluateGate([check], r);
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/appears in more than one batch/);
+    });
+
+    it('fails closed when the corpus manifest is missing', async () => {
+      const r = splitReader(
+        {},
+        { 'pr-review/batches.json': JSON.stringify([entry(batch(1, 1, 25))]) },
+      );
+      const res = await evaluateGate([check], r);
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/no '\*-files\.json' manifest/);
+    });
+
+    it('fails closed when two manifests could be the source of truth', async () => {
+      const r = splitReader(
+        {},
+        {
+          [MANIFEST]: MANIFEST_JSON,
+          [`${CORPUS}/attachments/002/pr-34-files.json`]: MANIFEST_JSON,
+          'pr-review/batches.json': JSON.stringify([
+            entry(batch(1, 1, 25)),
+            entry(batch(2, 26, 5)),
+          ]),
+        },
+      );
+      const res = await evaluateGate([check], r);
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/2 '\*-files\.json' manifests/);
+    });
+
+    it('fails closed without an artifact accessor', async () => {
+      const res = await evaluateGate(
+        [check],
+        reader({ 'pr-review/batches.json': JSON.stringify([entry(batch(1, 1, 25))]) }),
+      );
+      expect(res.pass).toBe(false);
+    });
+
+    it('reports a missing batch file as missing, not malformed', async () => {
+      const res = await evaluateGate([check], splitReader({}, { [MANIFEST]: MANIFEST_JSON }));
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toMatch(/not found/);
+    });
+  });
+
   it('an artifact-flagged check fails closed when the reader has no artifact accessor', async () => {
     // A plain reader (no readArtifact) must not silently pass an artifact
     // check by reading the wrong tree — it fails "not found" instead.
@@ -178,6 +408,125 @@ describe('evaluateGate', () => {
     );
     expect(complete.pass).toBe(true);
     expect(complete.checks[0]?.detail).toContain('all 2 changed path');
+  });
+
+  // Declarative fanout: each batch child is gated on its own slice, so it
+  // can pass without covering files nobody handed it.
+  describe('corpusCoverage expectPaths (fanout batch scoping)', () => {
+    const record = (path: string) => `---\npath: ${path}\nstatus: modified\n---\n`;
+    const artifacts = {
+      'data/github-pulls/pr-52/files/001--a--aaaa1111.md': record('src/a.ts'),
+      'data/github-pulls/pr-52/files/002--b--bbbb2222.md': record('src/b.ts'),
+      'data/github-pulls/pr-52/files/003--c--cccc3333.md': record('src/c.ts'),
+    };
+    const batchCheck = (expectPaths: string) => ({
+      kind: 'corpusCoverage' as const,
+      file: 'coverage-2.json',
+      corpusDir: 'artifacts/data/github-pulls/pr-52',
+      expectPaths,
+    });
+    const ledger = (files: string[], records: string[]) =>
+      splitReader(
+        { 'coverage-2.json': JSON.stringify({ reviewedFiles: files, reviewedRecords: records }) },
+        artifacts,
+      );
+
+    it('passes on the batch slice while the wider corpus is untouched', async () => {
+      const res = await evaluateGate(
+        [batchCheck(JSON.stringify(['src/b.ts', 'src/c.ts']))],
+        ledger(
+          ['src/b.ts', 'src/c.ts'],
+          [
+            'data/github-pulls/pr-52/files/002--b--bbbb2222.md',
+            'data/github-pulls/pr-52/files/003--c--cccc3333.md',
+          ],
+        ),
+      );
+      expect(res.pass).toBe(true);
+      expect(res.checks[0]?.detail).toContain('all 2 changed path(s) in this batch');
+      expect(res.checks[0]?.evidence?.scopedToBatch).toBe(true);
+    });
+
+    it('still names what the batch itself is missing', async () => {
+      const res = await evaluateGate(
+        [batchCheck(JSON.stringify(['src/b.ts', 'src/c.ts']))],
+        ledger(['src/b.ts'], ['data/github-pulls/pr-52/files/002--b--bbbb2222.md']),
+      );
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toContain('this batch covers 2');
+      expect(res.failures[0]).toContain('src/c.ts');
+      // The converging-loop accounting still applies per child.
+      expect(res.checks[0]?.remaining).toBe(2);
+    });
+
+    it('rejects work claimed outside the batch', async () => {
+      const res = await evaluateGate(
+        [batchCheck(JSON.stringify(['src/b.ts']))],
+        ledger(['src/b.ts', 'src/a.ts'], ['data/github-pulls/pr-52/files/002--b--bbbb2222.md']),
+      );
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toContain('Outside this batch: src/a.ts');
+    });
+
+    it('fails closed on an uninterpolated or malformed slice', async () => {
+      const raw = await evaluateGate([batchCheck('{{paths}}')], ledger([], []));
+      expect(raw.pass).toBe(false);
+      expect(raw.failures[0]).toContain('never reached this gate');
+
+      const wrongShape = await evaluateGate([batchCheck('[1, 2]')], ledger([], []));
+      expect(wrongShape.pass).toBe(false);
+      expect(wrongShape.failures[0]).toContain('non-empty JSON array');
+    });
+
+    it('fails closed when the batch names a path the corpus never mirrored', async () => {
+      const res = await evaluateGate(
+        [batchCheck(JSON.stringify(['src/b.ts', 'src/ghost.ts']))],
+        ledger(['src/b.ts'], ['data/github-pulls/pr-52/files/002--b--bbbb2222.md']),
+      );
+      expect(res.pass).toBe(false);
+      expect(res.failures[0]).toContain('src/ghost.ts');
+      expect(res.failures[0]).toContain('no corpus record');
+    });
+  });
+
+  it('corpusCoverage reads an artifact-flagged ledger from the drawer', async () => {
+    // Review bookkeeping belongs in the drawer, which is also the only
+    // surface a writes-off project leaves writable. The ledger used to be
+    // read from the workspace whatever the flag said, so the drawer copy
+    // read as "ledger not found".
+    const artifactRecord = (path: string) => `---\npath: ${path}\nstatus: modified\n---\n`;
+    const ledger = JSON.stringify({
+      reviewedFiles: ['src/early.ts'],
+      reviewedRecords: ['data/github-pulls/pr-52/files/001--early--aaaa1111.md'],
+    });
+    const check = {
+      kind: 'corpusCoverage' as const,
+      file: 'pr-review-coverage.json',
+      corpusDir: 'artifacts/data/github-pulls/pr-52',
+      artifact: true,
+    };
+
+    const res = await evaluateGate(
+      [check],
+      splitReader(
+        {},
+        {
+          'pr-review-coverage.json': ledger,
+          'data/github-pulls/pr-52/files/001--early--aaaa1111.md': artifactRecord('src/early.ts'),
+        },
+      ),
+    );
+    expect(res.pass).toBe(true);
+
+    const workspaceOnly = await evaluateGate(
+      [check],
+      splitReader(
+        { 'pr-review-coverage.json': ledger },
+        { 'data/github-pulls/pr-52/files/001--early--aaaa1111.md': artifactRecord('src/early.ts') },
+      ),
+    );
+    expect(workspaceOnly.pass).toBe(false);
+    expect(workspaceOnly.failures[0]).toContain('not found');
   });
 
   it('notContains rejects forbidden content with a repairable gap', async () => {

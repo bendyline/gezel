@@ -84,7 +84,7 @@ suite('Gezel extension — activation', () => {
       },
     );
     assert.ok(models.length > 0, 'no Gezel models registered with vscode.lm');
-    // Every entry's id MUST be `gezel:<gezelId>` — that's how the
+    // Every entry's id MUST be `gezel:<role>-<name>` — that's how the
     // route routes the chat call back through the right gezel.
     for (const m of models) {
       assert.ok(

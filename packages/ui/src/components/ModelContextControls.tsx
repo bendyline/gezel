@@ -17,11 +17,12 @@
  * number.
  */
 
+import { estimateLlamaCppResidentBytes } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { announceModelInventoryChanged } from '../model-inventory.js';
 import { DropdownMenu } from '../primitives/index.js';
-import { useExportModelBundle } from './ModelBundleControls.js';
+import { ModelBundleExportProgressDialog, useExportModelBundle } from './ModelBundleControls.js';
 import { formatContextWindow } from './model-context.js';
 import { formatBytes } from './model-memory-copy.js';
 
@@ -31,6 +32,8 @@ export type ContextEngine = 'llama-cpp' | 'mlx' | 'ds4';
 export interface ContextControlModel {
   id: string;
   approxSizeBytes: number;
+  /** Projector size on a multimodal llama.cpp model — not part of `approxSizeBytes`. */
+  mmprojSizeBytes?: number;
   contextWindow?: number;
   effectiveContextWindow?: number;
   overrideContextTokens?: number;
@@ -47,7 +50,6 @@ export interface ContextControlModel {
 
 export const CONTEXT_SLIDER_MIN = 32_768;
 const CONTEXT_SLIDER_STEP = 8_192;
-const MEMORY_OVERHEAD_FACTOR = 1.2;
 
 /**
  * The slider's max: the advertised native window, except ds4 rows where the
@@ -134,12 +136,7 @@ export function ModelActionsMenu({
             <DropdownMenu.Item
               className="app-nav-menu-item"
               disabled={exporter.busy}
-              onSelect={(event) => {
-                // Keep the menu open-close default but let the async export
-                // run detached; the trigger row shows the error if any.
-                event.preventDefault();
-                void exporter.run();
-              }}
+              onSelect={() => void exporter.run()}
             >
               {exporter.busy ? 'Exporting…' : 'Export'}
             </DropdownMenu.Item>
@@ -166,6 +163,12 @@ export function ModelActionsMenu({
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
       {exporter.error && <span className="error small">{exporter.error}</span>}
+      <ModelBundleExportProgressDialog
+        state={exporter.progress}
+        canceling={exporter.canceling}
+        onCancel={exporter.cancel}
+        onDismiss={exporter.dismissProgress}
+      />
     </>
   );
 }
@@ -272,7 +275,9 @@ export function ModelContextSliderPanel({
   // one slot (matches the SIZE column's "in memory" headline), and the full
   // slot-fleet reservation for the over-fit check.
   const kvPerToken = model.kvBytesPerTokenPerSlot;
-  const weightsBytes = model.weightsResidentBytes ?? model.approxSizeBytes * MEMORY_OVERHEAD_FACTOR;
+  const weightsBytes =
+    model.weightsResidentBytes ??
+    estimateLlamaCppResidentBytes(model.approxSizeBytes, { mmprojBytes: model.mmprojSizeBytes });
   const kvFixed = model.kvFixedBytesPerSlot ?? 0;
   const singleBytes =
     kvPerToken !== undefined ? weightsBytes + kvFixed + kvPerToken * value : undefined;

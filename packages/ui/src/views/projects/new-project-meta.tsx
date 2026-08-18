@@ -1,4 +1,10 @@
-import type { CatalogItemSummary, ProjectTypeCategory } from '@bendyline/gezel';
+import {
+  type CatalogItemSummary,
+  PROJECT_CATEGORY_ICONS,
+  type ProjectIconId,
+  type ProjectTypeCategory,
+  projectTypeIcon,
+} from '@bendyline/gezel';
 import type { JSX } from 'react';
 
 /**
@@ -12,23 +18,8 @@ import type { JSX } from 'react';
  * 24×24 currentColor strokes, no external assets.
  */
 
-export type ProjectGlyphId =
-  | 'sheet'
-  | 'folder'
-  | 'envelope'
-  | 'branch'
-  | 'calendar'
-  | 'bubbles'
-  | 'chart'
-  | 'code'
-  | 'frame'
-  | 'quill'
-  | 'sprout'
-  | 'die'
-  | 'house'
-  | 'coin'
-  | 'banner'
-  | 'dots';
+/** UI alias retained for callers that think in rendering rather than schema terms. */
+export type ProjectGlyphId = ProjectIconId;
 
 const GLYPH_PATHS: Record<ProjectGlyphId, JSX.Element> = {
   sheet: (
@@ -81,8 +72,8 @@ const GLYPH_PATHS: Record<ProjectGlyphId, JSX.Element> = {
   ),
   code: (
     <>
-      <path d="M9 7 L4 12 L9 17" />
-      <path d="M15 7 L20 12 L15 17" />
+      <path d="M9.5 4.5 H8.5 C7 4.5 7 5.5 7 7 V9.5 C7 10.8 6.3 11.5 5 12 C6.3 12.5 7 13.2 7 14.5 V17 C7 18.5 7.5 19.5 9.5 19.5" />
+      <path d="M14.5 4.5 H15.5 C17 4.5 17 5.5 17 7 V9.5 C17 10.8 17.7 11.5 19 12 C17.7 12.5 17 13.2 17 14.5 V17 C17 18.5 16.5 19.5 14.5 19.5" />
     </>
   ),
   frame: (
@@ -135,6 +126,91 @@ const GLYPH_PATHS: Record<ProjectGlyphId, JSX.Element> = {
       <path d="M6 5 H18.5 L15.5 8.75 L18.5 12.5 H6" />
     </>
   ),
+  terminal: (
+    <>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="1.5" />
+      <path d="M7 9 L10 12 L7 15" />
+      <path d="M12.5 15 H17" />
+    </>
+  ),
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M4.5 9 H19.5 M4.5 15 H19.5" />
+      <path d="M12 4 C15.5 7.6 15.5 16.4 12 20 C8.5 16.4 8.5 7.6 12 4 Z" />
+    </>
+  ),
+  server: (
+    <>
+      <rect x="4" y="4.5" width="16" height="6" rx="1.3" />
+      <rect x="4" y="13.5" width="16" height="6" rx="1.3" />
+      <path d="M7 7.5 H7.1 M7 16.5 H7.1 M10 7.5 H16.5 M10 16.5 H16.5" />
+    </>
+  ),
+  package: (
+    <>
+      <path d="M4.5 8 L12 4 L19.5 8 V16 L12 20 L4.5 16 Z" />
+      <path d="M4.5 8 L12 12 L19.5 8 M12 12 V20" />
+      <path d="M8.5 6 L16 10" />
+    </>
+  ),
+  book: (
+    <>
+      <path d="M4 5.5 H9.5 C11 5.5 12 6.5 12 8 V19 C12 17.5 11 16.5 9.5 16.5 H4 Z" />
+      <path d="M20 5.5 H14.5 C13 5.5 12 6.5 12 8 V19 C12 17.5 13 16.5 14.5 16.5 H20 Z" />
+    </>
+  ),
+  palette: (
+    <>
+      <path d="M12 4 C7.3 4 4 7.2 4 11.5 C4 16 7.5 19.5 12 19.5 H13.2 C14.2 19.5 14.7 18.3 14 17.6 C13.2 16.8 13.7 15.5 14.8 15.5 H17 C19 15.5 20 14.1 20 12 C20 7.4 16.7 4 12 4 Z" />
+      <circle cx="8" cy="9" r="0.8" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="7.5" r="0.8" fill="currentColor" stroke="none" />
+      <circle cx="16" cy="9.5" r="0.8" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="13" r="0.8" fill="currentColor" stroke="none" />
+    </>
+  ),
+  camera: (
+    <>
+      <path d="M4 8 H7 L8.5 5.5 H15.5 L17 8 H20 V18.5 H4 Z" />
+      <circle cx="12" cy="13" r="3.3" />
+    </>
+  ),
+  briefcase: (
+    <>
+      <rect x="3.5" y="7.5" width="17" height="12" rx="1.5" />
+      <path d="M8.5 7.5 V5.5 H15.5 V7.5 M3.5 12.5 C8 15 16 15 20.5 12.5" />
+      <path d="M12 12.8 V15.2" />
+    </>
+  ),
+  heart: (
+    <path d="M12 20 C9 17.5 4.5 14.6 4.5 9.7 C4.5 6.8 6.3 5 8.8 5 C10.3 5 11.4 5.8 12 7 C12.6 5.8 13.7 5 15.2 5 C17.7 5 19.5 6.8 19.5 9.7 C19.5 14.6 15 17.5 12 20 Z" />
+  ),
+  cards: (
+    <>
+      <rect x="5" y="5.5" width="11" height="14" rx="1.5" />
+      <path d="M9 5.5 V4.5 A1.5 1.5 0 0 1 10.5 3 H17.5 A1.5 1.5 0 0 1 19 4.5 V15.5 A1.5 1.5 0 0 1 17.5 17 H16" />
+      <path d="M8 10 H13 M8 13 H12" />
+    </>
+  ),
+  meal: (
+    <>
+      <path d="M5 4.5 V10 M3.5 4.5 V8 C3.5 9.3 4.1 10 5 10 C5.9 10 6.5 9.3 6.5 8 V4.5 M5 10 V20" />
+      <path d="M15 4.5 C18 6.5 18.5 10.5 16 13.5 V20 M16 13.5 H13.5 V9 C13.5 6.7 14 5.3 15 4.5 Z" />
+    </>
+  ),
+  plane: (
+    <>
+      <path d="M3.5 13 L20.5 5.5 L15.5 19 L11.5 13.5 Z" />
+      <path d="M11.5 13.5 L20.5 5.5 M11.5 13.5 V18 L8.5 15" />
+    </>
+  ),
+  people: (
+    <>
+      <circle cx="9" cy="9" r="3" />
+      <path d="M3.5 19 C4 15.5 6 14 9 14 C12 14 14 15.5 14.5 19" />
+      <path d="M14.5 7 C17 7 18.5 8.5 18.5 10.5 C18.5 12 17.7 13 16.5 13.7 M16 15 C18.5 15.3 20 16.5 20.5 19" />
+    </>
+  ),
   dots: (
     <>
       <circle cx="6" cy="12" r="1.1" fill="currentColor" stroke="none" />
@@ -156,6 +232,7 @@ export function ProjectGlyph({ glyph, size = 18 }: { glyph: ProjectGlyphId; size
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
+      data-project-glyph={glyph}
     >
       {GLYPH_PATHS[glyph]}
     </svg>
@@ -172,52 +249,95 @@ export interface ProjectCategoryMeta {
 
 /** Ordered registry — rail and gallery sections render in this order. */
 export const PROJECT_CATEGORIES: ProjectCategoryMeta[] = [
-  { id: 'general', label: 'General', tagline: 'Start simple — a blank bench.', glyph: 'sheet' },
-  { id: 'code', label: 'Code', tagline: 'Build and ship software.', glyph: 'code' },
+  {
+    id: 'general',
+    label: 'General',
+    tagline: 'Start simple — a blank bench.',
+    glyph: PROJECT_CATEGORY_ICONS.general,
+  },
+  {
+    id: 'code',
+    label: 'Code',
+    tagline: 'Build and ship software.',
+    glyph: PROJECT_CATEGORY_ICONS.code,
+  },
   {
     id: 'communication',
     label: 'Communication',
     tagline: 'Mail, calendars, and conversations.',
-    glyph: 'envelope',
+    glyph: PROJECT_CATEGORY_ICONS.communication,
   },
   {
     id: 'creative',
     label: 'Photos & Media',
     tagline: 'Images, video, and design work.',
-    glyph: 'frame',
+    glyph: PROJECT_CATEGORY_ICONS.creative,
   },
-  { id: 'writing', label: 'Writing', tagline: 'Drafts, documents, and stories.', glyph: 'quill' },
+  {
+    id: 'writing',
+    label: 'Writing',
+    tagline: 'Drafts, documents, and stories.',
+    glyph: PROJECT_CATEGORY_ICONS.writing,
+  },
   {
     id: 'growth',
     label: 'Personal Growth',
     tagline: 'Learn, practice, and keep at it.',
-    glyph: 'sprout',
+    glyph: PROJECT_CATEGORY_ICONS.growth,
   },
-  { id: 'game', label: 'Games', tagline: 'Play, and build worlds.', glyph: 'die' },
-  { id: 'data', label: 'Data', tagline: 'Explore and report on datasets.', glyph: 'chart' },
+  {
+    id: 'game',
+    label: 'Games',
+    tagline: 'Play, and build worlds.',
+    glyph: PROJECT_CATEGORY_ICONS.game,
+  },
+  {
+    id: 'data',
+    label: 'Data',
+    tagline: 'Explore and report on datasets.',
+    glyph: PROJECT_CATEGORY_ICONS.data,
+  },
   {
     id: 'home',
     label: 'Home & Family',
     tagline: 'Run the household; care for the people in it.',
-    glyph: 'house',
+    glyph: PROJECT_CATEGORY_ICONS.home,
   },
   {
     id: 'money',
     label: 'Money & Small Business',
     tagline: 'Ledgers, invoices, and calm month-ends.',
-    glyph: 'coin',
+    glyph: PROJECT_CATEGORY_ICONS.money,
   },
   {
     id: 'events',
     label: 'Events & Journeys',
     tagline: 'Plan the day, make the trip, rally the crowd.',
-    glyph: 'banner',
+    glyph: PROJECT_CATEGORY_ICONS.events,
   },
-  { id: 'other', label: 'More', tagline: 'Purpose-built for something else.', glyph: 'dots' },
+  {
+    id: 'other',
+    label: 'More',
+    tagline: 'Purpose-built for something else.',
+    glyph: PROJECT_CATEGORY_ICONS.other,
+  },
 ];
 
 export function categoryMeta(id: ProjectTypeCategory): ProjectCategoryMeta {
   return PROJECT_CATEGORIES.find((c) => c.id === id) ?? PROJECT_CATEGORIES[0]!;
+}
+
+/** Maker's mark for a catalog project type, including community types. */
+export function catalogProjectTypeGlyph(item: CatalogItemSummary): ProjectGlyphId {
+  const manifest = item.manifest;
+  if (manifest.kind !== 'project-type') return 'dots';
+  return projectTypeIcon({
+    id: manifest.id,
+    icon: manifest.icon,
+    extends: manifest.extends,
+    category: manifest.category,
+    tags: manifest.tags,
+  });
 }
 
 /**

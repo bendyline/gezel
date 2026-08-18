@@ -165,48 +165,64 @@ describe('GlobalIndexManager sessions', () => {
   });
 });
 
-describe('GlobalIndexManager documents', () => {
+describe('GlobalIndexManager documents (retired collection)', () => {
   beforeEach(() => {
     store.onDocumentChange((ev) => manager.enqueueDocument(ev));
   });
 
-  it('indexes writes, sees content updates (which emit no history event), and prunes deletes', async () => {
+  it('no longer indexes documents — the library is a project', async () => {
     if (!ftsAvailable) return;
+    // Documents are indexed by the per-project pipeline now (ADR 0006).
+    // Mirroring them here too would answer searches from a second, unranked
+    // copy that no longer tracks the library's real content.
     await store.writeDocument('guides/style.md', '# Style\nAlways use the zwaluw pattern.');
     await manager.flush();
-    const first = await globalIndex.searchDocuments('zwaluw');
-    expect(first).toHaveLength(1);
-    expect(first[0]?.path).toBe('guides/style.md');
 
-    await store.writeDocument('guides/style.md', '# Style\nNow use the ooievaar pattern.');
-    await manager.flush();
-    expect(await globalIndex.searchDocuments('zwaluw')).toHaveLength(0);
-    expect(await globalIndex.searchDocuments('ooievaar')).toHaveLength(1);
-
-    await store.deleteDocument('guides/style.md');
-    await manager.flush();
-    expect(await globalIndex.searchDocuments('ooievaar')).toHaveLength(0);
+    const index = await openGlobalCollection(home, 'documents');
+    expect(index).not.toBeNull();
+    try {
+      expect(index!.allFiles()).toHaveLength(0);
+    } finally {
+      index!.close();
+    }
   });
 
-  it('records binaries without content chunks', async () => {
+  it('purges rows left behind by the old pipeline', async () => {
     if (!ftsAvailable) return;
-    await store.writeDocumentBinary('logo.png', new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
-    await manager.flush();
-    expect(await globalIndex.searchDocuments('PNG')).toHaveLength(0);
-    expect((await globalIndex.status()).documents).toBe(1);
-  });
+    // Simulate an upgrade: an install whose global db still carries the
+    // documents the retired writer indexed. Left in place they would keep
+    // surfacing in search, including documents since deleted.
+    const seed = await openGlobalCollection(home, 'documents');
+    expect(seed).not.toBeNull();
+    try {
+      seed!.putChunks('guides/legacy.md', 'hash-1', [
+        { kind: 'paragraph', lineStart: 1, lineEnd: 2, text: 'stale zwaluw content' },
+      ]);
+      seed!.upsertFile({
+        path: 'guides/legacy.md',
+        hash: 'hash-1',
+        size: 20,
+        mtimeMs: Date.now(),
+        lang: null,
+        kind: 'markdown',
+        modality: 'text',
+        trivial: false,
+        indexedAt: new Date().toISOString(),
+        loc: null,
+      });
+      expect(seed!.allFiles()).toHaveLength(1);
+    } finally {
+      seed!.close();
+    }
 
-  it('keeps outside-in companions out of search and document counts', async () => {
-    if (!ftsAvailable) return;
-    await store.writeDocument('brief.md', '# Visible\nGuild ledger.');
-    await store.writeDocument(
-      'report_files/report.md',
-      '# Managed companion\nHidden zwaluw duplicate.',
-    );
-    await manager.flush();
+    await manager.reconcile();
 
-    expect(await globalIndex.searchDocuments('zwaluw')).toHaveLength(0);
-    expect((await globalIndex.status()).documents).toBe(1);
+    const after = await openGlobalCollection(home, 'documents');
+    try {
+      expect(after!.allFiles()).toHaveLength(0);
+    } finally {
+      after!.close();
+    }
   });
 
   it('does not add managed companion operations to user-facing history', async () => {
@@ -217,18 +233,6 @@ describe('GlobalIndexManager documents', () => {
 
     const events = await history.listEvents();
     expect(events.map((event) => event.summary)).toEqual(['Created document brief.md']);
-  });
-
-  it('reconcile indexes pre-existing documents and prunes stale rows', async () => {
-    if (!ftsAvailable) return;
-    await mkdir(join(home, 'documents'), { recursive: true });
-    await writeFile(join(home, 'documents', 'mission.md'), '# Mission\nSimplify AI.', 'utf8');
-    await manager.reconcile();
-    expect(await globalIndex.searchDocuments('Simplify')).toHaveLength(1);
-
-    await rm(join(home, 'documents', 'mission.md'));
-    await manager.reconcile();
-    expect(await globalIndex.searchDocuments('Simplify')).toHaveLength(0);
   });
 });
 

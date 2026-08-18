@@ -80,6 +80,57 @@ describe('Store session CRUD', () => {
     expect(onDisk?.messages.find((m) => m.hidden)?.content).toContain('[Checkers page]');
   });
 
+  /**
+   * Threads written before `ChatMessage.origin` existed still open with a
+   * dispatch seed, and would keep rendering it as the user's own words. A
+   * task-scoped session is always created by the dispatcher *before* its
+   * seed is sent, so its first user message is machine-authored by
+   * construction — inferred structurally rather than by matching seed
+   * wording, which drifts with every copy edit.
+   */
+  it('listTimeline infers system origin for a legacy task seed', async () => {
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-legacy-task',
+        taskRef: 'default/1',
+        stepId: 'oversight',
+        messages: [
+          {
+            role: 'user',
+            content: 'The previous step has been completed and handed step `oversight` to you.',
+            at: '2026-04-14T10:00:00Z',
+          },
+          { role: 'assistant', content: 'On it.', at: '2026-04-14T10:00:02Z' },
+          // A real reply from the user, later in the same task thread.
+          { role: 'user', content: 'looks good, carry on', at: '2026-04-14T10:05:00Z' },
+        ],
+      }),
+    );
+
+    const timeline = await store.listTimeline({ gezelId: 'ada', limit: 50 });
+    const rows = timeline.messages.filter((m) => m.sessionId === 'sess-legacy-task');
+    expect(rows[0]?.origin).toBe('system');
+    expect(rows[1]?.origin).toBeUndefined();
+    // Only the opening seed is machinery — the user's own later turn stays theirs.
+    expect(rows[2]?.origin).toBeUndefined();
+  });
+
+  it('listTimeline leaves an ordinary session untouched by the legacy inference', async () => {
+    await store.writeSession(
+      sessionFixture({
+        id: 'sess-plain',
+        messages: [
+          { role: 'user', content: 'hello there', at: '2026-04-14T11:00:00Z' },
+          { role: 'assistant', content: 'hi', at: '2026-04-14T11:00:01Z' },
+        ],
+      }),
+    );
+
+    const timeline = await store.listTimeline({ gezelId: 'ada', limit: 50 });
+    const rows = timeline.messages.filter((m) => m.sessionId === 'sess-plain');
+    expect(rows.every((m) => m.origin === undefined)).toBe(true);
+  });
+
   it('listTimeline scoped to a taskRef drops unrelated sessions in the project', async () => {
     await store.writeSession(
       sessionFixture({
@@ -153,6 +204,88 @@ describe('Store session CRUD', () => {
     expect(scoped.messages.find((m) => m.gezelId === 'boz')?.handoffFrom).toEqual({
       gezelId: 'ada',
       sessionId: 'sess-ada',
+    });
+  });
+
+  describe('listTimeline reference backfill', () => {
+    const reviewReply = [
+      'Full review in `pr-review.md`.',
+      'The CLI `--title` default is in `packages/cli/src/commands/image.ts:84,230`,',
+      'and `useFrameCapture.ts:1633` drops the style. Minors are two `docs/API.md` omissions.',
+    ].join('\n');
+
+    const writeReply = () =>
+      store.writeSession(
+        sessionFixture({
+          id: 'sess-review',
+          messages: [{ role: 'assistant', content: reviewReply, at: '2026-04-14T10:00:00Z' }],
+        }),
+      );
+
+    it('resolves artifacts, and locator-suffixed workspace paths, from the reply body', async () => {
+      await store.writeProjectArtifact('default', 'pr-review.md', '# review');
+      await writeReply();
+
+      const timeline = await store.listTimeline({
+        gezelId: 'ada',
+        limit: 50,
+        workspaceFiles: async () => [
+          'packages/cli/src/commands/image.ts',
+          'src/hooks/useFrameCapture.ts',
+          'docs/API.md',
+          'src/unmentioned.ts',
+        ],
+      });
+
+      expect(timeline.messages[0]?.referencedFiles).toEqual([
+        { kind: 'artifact', path: 'pr-review.md' },
+        { kind: 'workspace', path: 'docs/API.md' },
+        { kind: 'workspace', path: 'packages/cli/src/commands/image.ts' },
+        { kind: 'workspace', path: 'src/hooks/useFrameCapture.ts' },
+      ]);
+    });
+
+    it('still emits the artifact-only projection for older clients', async () => {
+      await store.writeProjectArtifact('default', 'pr-review.md', '# review');
+      await writeReply();
+
+      const timeline = await store.listTimeline({
+        gezelId: 'ada',
+        limit: 50,
+        workspaceFiles: async () => ['docs/API.md'],
+      });
+      expect(timeline.messages[0]?.referencedArtifacts).toEqual(['pr-review.md']);
+    });
+
+    it('finds artifacts only when no workspace listing is supplied', async () => {
+      await store.writeProjectArtifact('default', 'pr-review.md', '# review');
+      await writeReply();
+
+      const timeline = await store.listTimeline({ gezelId: 'ada', limit: 50 });
+      expect(timeline.messages[0]?.referencedFiles).toEqual([
+        { kind: 'artifact', path: 'pr-review.md' },
+      ]);
+    });
+
+    it('widens a legacy artifact-only message when nothing re-resolves', async () => {
+      await store.writeSession(
+        sessionFixture({
+          id: 'sess-legacy',
+          messages: [
+            {
+              role: 'assistant',
+              content: 'wrote the report',
+              at: '2026-04-14T10:00:00Z',
+              referencedArtifacts: ['since-deleted.md'],
+            },
+          ],
+        }),
+      );
+
+      const timeline = await store.listTimeline({ gezelId: 'ada', limit: 50 });
+      expect(timeline.messages[0]?.referencedFiles).toEqual([
+        { kind: 'artifact', path: 'since-deleted.md' },
+      ]);
     });
   });
 

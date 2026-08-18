@@ -142,7 +142,11 @@ export async function detectCodexCapabilities(path: string): Promise<CodexBinary
   };
 }
 
-async function runTextProbe(path: string, args: string[], timeoutMs = 5000): Promise<string> {
+export async function runTextProbe(
+  path: string,
+  args: string[],
+  timeoutMs = 5000,
+): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     // Windows: `.cmd` / `.bat` shims (which is how OpenAI's CLI lands
     // when installed via `npm i -g @openai/codex`) can't be exec'd

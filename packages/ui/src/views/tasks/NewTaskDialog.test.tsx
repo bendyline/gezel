@@ -12,13 +12,18 @@ vi.mock('../../theme.js', () => ({ useEffectiveTheme: () => 'dark' }));
 // that emits one param change so we can drive values without Monaco.
 vi.mock('@bendyline/squisq-editor-react', () => ({
   JsonEditor: ({ onChange }: { onChange?: (v: unknown) => void }) => (
-    <button
-      type="button"
-      data-testid="json-editor"
-      onClick={() => onChange?.({ intensity: 'high' })}
-    >
-      params
-    </button>
+    <>
+      <button
+        type="button"
+        data-testid="json-editor"
+        onClick={() => onChange?.({ intensity: 'high' })}
+      >
+        params
+      </button>
+      <button type="button" data-testid="json-editor-pr" onClick={() => onChange?.({ number: 12 })}>
+        pr number
+      </button>
+    </>
   ),
 }));
 vi.mock('../../components/CraftbookToolsetSetup.js', () => ({
@@ -451,6 +456,97 @@ describe('NewTaskDialog', () => {
         expect.objectContaining({ assignee: { kind: 'gezel', gezelId: 'gz-maya' } }),
       );
     });
+  });
+
+  // The launch reported its reason into the bottom of the scrolling pane,
+  // which sits below the fold on a pane parked at the top — so a 409 from
+  // connector prep looked exactly like a button that does nothing.
+  it('renders a failed launch beside the button, not inside the scrolling pane', async () => {
+    vi.mocked(api.createTask).mockRejectedValue(
+      new Error('No open pull request for branch "qualityfixes". Pass an explicit PR number.'),
+    );
+    renderDialog();
+    await waitFor(() => {
+      expect(screen.getByText('Recommended for Web App')).toBeInTheDocument();
+    });
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: 'Code Review' }));
+    await user.click(screen.getByRole('button', { name: 'Create & start' }));
+
+    const message = await screen.findByRole('alert');
+    expect(message).toHaveTextContent(/No open pull request for branch "qualityfixes"/);
+    expect(message.closest('.gz-npd-pane-footer')).not.toBeNull();
+    expect(message.closest('.gz-npd-pane-scroll')).toBeNull();
+    // The reason replaces the footnote rather than stacking under it.
+    expect(screen.queryByText(/Starts immediately/)).not.toBeInTheDocument();
+  });
+
+  it('warns before submit when no open pull request matches the checked-out branch', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      showWorkInProgressFeatures: true,
+    } as never);
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('pull-request-review', 'Pull Request Review', {
+          connectors: [{ typeId: 'github-pulls' }],
+          paramSchema: { type: 'object', properties: { number: { type: 'number' } } },
+        }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    vi.mocked(api.getProjectGitStatus).mockResolvedValue({
+      branch: 'qualityfixes',
+    } as never);
+    vi.mocked(api.listProjectGitHubPulls).mockResolvedValue({
+      pulls: [{ number: 7, headRef: 'someone-else' }],
+    } as never);
+
+    renderDialog();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('radio', { name: 'Pull Request Review' }));
+
+    expect(
+      await screen.findByText(/No open pull request for branch "qualityfixes"/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create & start' })).toBeEnabled();
+
+    // Supplying the number answers the warning — the launch will resolve.
+    await user.click(screen.getByTestId('json-editor-pr'));
+    await waitFor(() => {
+      expect(screen.queryByText(/No open pull request for branch/)).not.toBeInTheDocument();
+    });
+  });
+
+  it('stays quiet when the checked-out branch does have an open pull request', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      showWorkInProgressFeatures: true,
+    } as never);
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [
+        bookItem('pull-request-review', 'Pull Request Review', {
+          connectors: [{ typeId: 'github-pulls' }],
+        }),
+      ],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+    } as never);
+    vi.mocked(api.getProjectGitStatus).mockResolvedValue({ branch: 'qualityfixes' } as never);
+    vi.mocked(api.listProjectGitHubPulls).mockResolvedValue({
+      pulls: [{ number: 7, headRef: 'qualityfixes' }],
+    } as never);
+
+    renderDialog();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('radio', { name: 'Pull Request Review' }));
+
+    expect(await screen.findByText(/Starts immediately/)).toBeInTheDocument();
+    expect(screen.queryByText(/No open pull request/)).not.toBeInTheDocument();
   });
 
   it('blocks creation while a craftbook still needs toolset setup', async () => {

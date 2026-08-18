@@ -19,6 +19,7 @@ interface StaticIndexWorkerRequest {
   workspaceDir: string;
   artifactsDir: string;
   collectionId: string;
+  scope?: 'workspace' | 'library';
 }
 
 let chain: Promise<void> = Promise.resolve();
@@ -37,6 +38,7 @@ port.on('message', (request: StaticIndexWorkerRequest) => {
           index,
           request.workspaceDir,
           request.artifactsDir,
+          { ...(request.scope ? { scope: request.scope } : {}) },
         );
         port.postMessage({ id: request.id, stats });
       } finally {

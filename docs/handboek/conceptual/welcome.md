@@ -9,6 +9,8 @@ summary: A crew of AI companions that works for you, from your own computer.
 
 ![gezel-mark](../assets/gezel-mark.png)
 
+[Watch the Gezel playlist on YouTube](https://www.youtube.com/watch?v=KCdgV5YFDzI&list=PLaD2JMwhPJ3w) for a quick introduction and guided tours.
+
 *Gezel* is Dutch for a companion journeyman. A **gezel** is an AI teammate who works for you: each one has a name, a face, a role, a set of tools, and its own story that shapes how it thinks. They remember what you've done together and get better over time as you work with them.
 
 ## A crew, not a chat

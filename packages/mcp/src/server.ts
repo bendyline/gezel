@@ -57,6 +57,7 @@ import {
   isReservedShadowArtifactPath,
   isTrustedConstrainedToolset,
   pickRandomNameWithGender,
+  prioritizePullsForCurrentBranch,
   removeStepAndCleanEdges,
   reorderStepsArray,
   resolveRoleId,
@@ -88,7 +89,6 @@ import {
   normalizeDocumentOutputPath,
 } from './document-routing.js';
 import { normalizeGenerateImageToolArgs } from './generate-image-normalization.js';
-import { prioritizePullsForCurrentBranch } from './github-pr-selection.js';
 import {
   buildKickoffStepDescription,
   buildKickoffTaskDescription,
@@ -97,6 +97,7 @@ import {
 } from './kickoff-text.js';
 import { closestFileNames } from './near-miss.js';
 import { normalizeMarkdown } from './normalize.js';
+import { CAP, PartialEditRegistry } from './partial-edits.js';
 import { unavailableToolsForPlatform } from './platform-tool-availability.js';
 import { composeQuestionPrompt, resolveQuestionTaskRef } from './question-prompt.js';
 import { reanchorAfterEdit, withLineNumbers } from './reanchor.js';
@@ -194,6 +195,15 @@ const fetchImpl: typeof fetch = certPath
   : createPatientFetch();
 
 const api = new GezelClient({ baseUrl, token, fetch: fetchImpl });
+// Process lifetime is session lifetime — this server is spawned per chat
+// session — so module scope is exactly session scope for draft state.
+const partialEdits = new PartialEditRegistry();
+const PartialEditArg = z
+  .boolean()
+  .optional()
+  .describe(
+    'Set true ONLY when this edit is one step of a planned multi-edit sequence that leaves the file temporarily unparseable — for example landing a large script in several pieces. It skips the whole-file syntax gate for this call and marks the file as a draft. You must close the sequence with a final edit that omits this flag (or a full `write_file`); until the file parses again, `advance_task_step` and `verify_outcome` are blocked. Leave it unset for an ordinary self-contained edit — an unset flag is what protects the last working version of the file.',
+  );
 // Keep the model-facing handoff hint deliberately small. The persisted/API
 // ExpectedDeliverableSchema also carries the full 24-variant gate contract
 // (`checks` + `scripts`). Advertising that internal completion machinery on
@@ -446,7 +456,7 @@ server.tool(
     scope: z
       .enum(['gezel', 'project'])
       .describe(
-        'Where to save: "agent" for personal memories, "project" for project-specific context',
+        'Where to save: "gezel" for your own personal memories, "project" for project-shared context',
       ),
     kind: z
       .enum(['fact', 'decision', 'pref', 'status'])
@@ -1292,8 +1302,22 @@ server.tool(
       }
     }
     const failed = result.checks.some((c) => c.ok === false);
+    // `validate` is deliberately not gated on an open provisional
+    // sequence — mid-draft it is the tool the model most needs. A clean
+    // pass is instead the natural close: the file parses again, so the
+    // sequence achieved what it set out to do.
+    let draftNote = '';
+    if (drawer === 'workspace' && partialEdits.isOpen(filePath)) {
+      if (failed) {
+        const draft = partialEdits.get(filePath)!;
+        draftNote = `\n\n\`${filePath}\` is still an open provisional edit sequence (${draft.edits} of at most ${CAP} edits). Fix the failures above, then close it with an edit that omits \`partial\`.`;
+      } else {
+        partialEdits.close(filePath);
+        draftNote = `\n\nProvisional edit sequence on \`${filePath}\` is now closed — the file parses again.`;
+      }
+    }
     return {
-      content: [{ type: 'text' as const, text: formatValidateResult(result) }],
+      content: [{ type: 'text' as const, text: formatValidateResult(result) + draftNote }],
       ...(failed ? { isError: true } : {}),
     };
   },
@@ -1947,6 +1971,9 @@ server.tool(
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
       });
+      // A complete, validated file supersedes any provisional sequence
+      // the model had open on this path.
+      partialEdits.close(path);
       return {
         content: [
           { type: 'text' as const, text: `Wrote ${path}${await htmlRuntimeCheckSuffix(path)}` },
@@ -2076,6 +2103,7 @@ server.tool(
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
       });
+      partialEdits.close(path);
       return {
         content: [
           {
@@ -2118,8 +2146,9 @@ server.tool(
       .describe(
         "Default: exactly one match required. Pass a 1-based index for the Nth match, or 'all' to replace every occurrence.",
       ),
+    partial: PartialEditArg,
   },
-  async ({ path, find, replace, occurrence }) => {
+  async ({ path, find, replace, occurrence, partial }) => {
     try {
       const before = await api.readProjectWorkspaceFile(projectId, path);
       const result = await api.replaceInProjectWorkspaceFile(projectId, {
@@ -2134,6 +2163,7 @@ server.tool(
         path,
         before.content,
         'replace_in_file',
+        partial,
       );
       if (validationError) {
         return {
@@ -2145,7 +2175,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `Edited ${path} (+${result.addedLines} −${result.removedLines}).${await htmlRuntimeCheckSuffix(path)}`,
+            text: `Edited ${path} (+${result.addedLines} −${result.removedLines}).${await editResultSuffix(path, partial)}`,
           },
         ],
         structuredContent: {
@@ -2184,8 +2214,9 @@ server.tool(
     content: z
       .string()
       .describe('Replacement text for the range. Empty deletes the lines. No `N→` gutter.'),
+    partial: PartialEditArg,
   },
-  async ({ path, startLine, endLine, content }) => {
+  async ({ path, startLine, endLine, content, partial }) => {
     try {
       const before = await api.readProjectWorkspaceFile(projectId, path);
       const result = await api.replaceLinesInProjectWorkspaceFile(projectId, {
@@ -2200,6 +2231,7 @@ server.tool(
         path,
         before.content,
         'replace_lines',
+        partial,
       );
       if (validationError) {
         return {
@@ -2218,7 +2250,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `Edited ${path} (+${result.addedLines} −${result.removedLines}).${await htmlRuntimeCheckSuffix(path)}${reanchor}`,
+            text: `Edited ${path} (+${result.addedLines} −${result.removedLines}).${await editResultSuffix(path, partial)}${reanchor}`,
           },
         ],
         structuredContent: {
@@ -2248,8 +2280,9 @@ server.tool(
       .describe(
         'Unified-diff body. Include at least one @@ -L,N +L,N @@ hunk. Do NOT include the file headers (--- a/, +++ b/) — they are inferred from `path`.',
       ),
+    partial: PartialEditArg,
   },
-  async ({ path, diff }) => {
+  async ({ path, diff, partial }) => {
     try {
       const before = await api.readProjectWorkspaceFile(projectId, path);
       const result = await api.applyPatchToProjectWorkspaceFile(projectId, {
@@ -2258,7 +2291,12 @@ server.tool(
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
       });
-      const validationError = await rejectInvalidWorkspaceEdit(path, before.content, 'apply_patch');
+      const validationError = await rejectInvalidWorkspaceEdit(
+        path,
+        before.content,
+        'apply_patch',
+        partial,
+      );
       if (validationError) {
         return {
           content: [{ type: 'text' as const, text: validationError }],
@@ -2269,7 +2307,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `Applied patch to ${path} (+${result.addedLines} −${result.removedLines}).${await htmlRuntimeCheckSuffix(path)}`,
+            text: `Applied patch to ${path} (+${result.addedLines} −${result.removedLines}).${await editResultSuffix(path, partial)}`,
           },
         ],
         structuredContent: {
@@ -2302,8 +2340,9 @@ server.tool(
       .enum(['before', 'after'])
       .optional()
       .describe("Where to land the content relative to the marker. Defaults to 'after'."),
+    partial: PartialEditArg,
   },
-  async ({ path, marker, content, where }) => {
+  async ({ path, marker, content, where, partial }) => {
     try {
       const before = await api.readProjectWorkspaceFile(projectId, path);
       const result = await api.insertAtMarkerInProjectWorkspaceFile(projectId, {
@@ -2318,6 +2357,7 @@ server.tool(
         path,
         before.content,
         'insert_at_marker',
+        partial,
       );
       if (validationError) {
         return {
@@ -2329,7 +2369,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `Inserted ${content.length} chars ${where ?? 'after'} marker in ${path} (+${result.addedLines} −${result.removedLines}).${await htmlRuntimeCheckSuffix(path)}`,
+            text: `Inserted ${content.length} chars ${where ?? 'after'} marker in ${path} (+${result.addedLines} −${result.removedLines}).${await editResultSuffix(path, partial)}`,
           },
         ],
         structuredContent: {
@@ -2866,11 +2906,56 @@ function explainWriteFailure(err: unknown): string {
   return detailsMessage ? message : `Write failed: ${message}`;
 }
 
+/**
+ * A provisional edit skips the headless page check — running a browser
+ * against a file the model has already declared unfinished burns time to
+ * report errors it expects. It gets the draft ledger instead.
+ */
+async function editResultSuffix(path: string, partial: boolean | undefined): Promise<string> {
+  if (!partial) return htmlRuntimeCheckSuffix(path);
+  const draft = partialEdits.get(path);
+  return draft ? partialEdits.noticeFor(draft) : '';
+}
+
+async function restoreWorkspaceFile(path: string, content: string): Promise<string> {
+  try {
+    await api.writeProjectWorkspaceFile(projectId, {
+      path,
+      content,
+      ...(gezelId ? { gezelId } : {}),
+      ...(sessionId ? { sessionId } : {}),
+    });
+    return 'The previous file content was restored.';
+  } catch (err) {
+    return `Automatic restore failed: ${unwrapApiError(err)}. Re-read the file before continuing.`;
+  }
+}
+
 async function rejectInvalidWorkspaceEdit(
   path: string,
   priorContent: string,
   toolName: 'replace_in_file' | 'apply_patch' | 'insert_at_marker' | 'replace_lines',
+  partial = false,
 ): Promise<string | null> {
+  // A declared provisional edit skips the gate, because the whole point
+  // of the sequence is that intermediate states do not parse. The cap
+  // is the circuit breaker: past it the sequence is abandoned and the
+  // pre-draft content comes back, so a model that sets the flag
+  // reflexively cannot grind a working file into rubble.
+  if (partial) {
+    const draft = partialEdits.record(path, priorContent);
+    if (draft.edits > CAP) {
+      partialEdits.close(path);
+      const restoreMessage = await restoreWorkspaceFile(path, draft.snapshot);
+      return [
+        `${toolName} ended the provisional edit sequence on \`${path}\`: it exceeded ${CAP} edits without the file ever parsing again.`,
+        restoreMessage,
+        'Stop editing in pieces. Call `write_file` once with the complete, correct file.',
+      ].join(' ');
+    }
+    return null;
+  }
+
   let after: { path: string; content: string };
   try {
     after = await api.readProjectWorkspaceFile(projectId, path);
@@ -2883,19 +2968,19 @@ async function rejectInvalidWorkspaceEdit(
   const htmlQualityRejection = sourceValidationMessage
     ? null
     : rejectHtmlWithScriptOutsideScriptTag(path, after.content);
-  if (!sourceValidationMessage && !htmlQualityRejection) return null;
-
-  let restoreMessage = 'The previous file content was restored.';
-  try {
-    await api.writeProjectWorkspaceFile(projectId, {
-      path,
-      content: priorContent,
-      ...(gezelId ? { gezelId } : {}),
-      ...(sessionId ? { sessionId } : {}),
-    });
-  } catch (err) {
-    restoreMessage = `Automatic restore failed: ${unwrapApiError(err)}. Re-read the file before continuing.`;
+  if (!sourceValidationMessage && !htmlQualityRejection) {
+    partialEdits.close(path);
+    return null;
   }
+
+  // Mid-sequence the previous content is another broken draft, so
+  // rolling back would discard the model's progress to reach a state
+  // that is no better. Report and let it keep repairing forward; the
+  // gate on finishing the work is what holds the line.
+  const draft = partialEdits.get(path);
+  const restoreMessage = draft
+    ? `\`${path}\` is still an open provisional edit sequence (${draft.edits} edit(s)); the file was left as-is so you can repair it rather than starting over.`
+    : await restoreWorkspaceFile(path, priorContent);
 
   if (htmlQualityRejection) {
     return [
@@ -2910,7 +2995,18 @@ async function rejectInvalidWorkspaceEdit(
     restoreMessage,
     'Use `write_file` to re-emit one clean complete file, or re-read the file and make a smaller edit that leaves the whole file parseable.',
     'Do not append or insert duplicate top-level declarations, classes, or functions while repairing parse errors.',
-  ].join(' ');
+    // Discovery point for the opt-out. The flag is nearly useless if a
+    // model only meets it in a schema it reads once: the moment it
+    // matters is the moment an intentional mid-build edit gets refused.
+    // Worded conditionally on purpose — this gate usually means a
+    // mistake, not a build in progress, and `partial` must not read as
+    // "retry to make the error go away".
+    draft
+      ? ''
+      : 'If you are deliberately building this file across several edits and it is NOT meant to parse yet, pass `partial: true` on the intermediate edits — but only if you will finish it, because nothing that declares work done runs until the file parses.',
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
 function extractApiErrorMessage(err: unknown): string | undefined {
@@ -3227,13 +3323,13 @@ async function listWorkspaceDeliverableFiles(projectId: string): Promise<string[
 
 server.tool(
   'list_artifacts',
-  'List every file in the project artifacts folder, recursively across all subdirectories. Use this when handing work off between gezels — anything a teammate produced will show up here regardless of how deeply they nested it. Pass `recursive: false` for a one-level listing of a specific subdirectory. Paths are scoped to the artifacts root — do NOT prefix with "artifacts/".',
+  'List files in the project artifacts folder, recursively across all subdirectories. Use this when handing work off between gezels — anything a teammate produced will show up here regardless of how deeply they nested it. Pass `path` to walk one subtree only (large drawers are capped, so scoping is how you see every file in a corpus); pass `recursive: false` for a one-level listing. Returned paths are relative to the artifacts root and can be read as-is — do NOT prefix with "artifacts/".',
   {
     path: z
       .string()
       .optional()
       .describe(
-        'Subdirectory path within the artifacts root (default: root). Do not include "artifacts/" — the call is already scoped there.',
+        'Subdirectory to walk (default: the whole artifacts root). Scopes recursive listings too. Do not include "artifacts/" — the call is already scoped there.',
       ),
     recursive: z
       .boolean()
@@ -3244,19 +3340,21 @@ server.tool(
   },
   async ({ path, recursive }) => {
     const subpath = normalizeArtifactPath(path ?? '');
-    // Recursive list always uses the project root — the underlying client
-    // method walks the whole tree. For a one-level listing, scope to the
-    // requested subpath (or the artifacts root if none was given).
+    // `path` scopes BOTH modes. It used to be dropped on the recursive branch,
+    // so a caller narrowing to one connector corpus silently got the whole
+    // drawer, hit the walker's entry cap, and was then advised to "narrow
+    // path" — the one thing that could not help. The walk now starts inside
+    // the subtree, so the cap applies to the subtree alone.
     const wantRecursive = recursive !== false;
-    const res = wantRecursive
-      ? await api.listProjectArtifacts(projectId, undefined, true)
-      : await api.listProjectArtifacts(projectId, subpath, false);
+    const res = await api.listProjectArtifacts(projectId, subpath || undefined, wantRecursive);
     const listing = res.files.map((f) => `${f.isDirectory ? '📁' : '📄'} ${f.path}`).join('\n');
     const summary = res.files.length
-      ? `Listed ${res.files.length} ${res.files.length === 1 ? 'artifact entry' : 'artifact entries'}.`
-      : 'No artifacts yet.';
+      ? `Listed ${res.files.length} ${res.files.length === 1 ? 'artifact entry' : 'artifact entries'}${subpath ? ` under ${subpath}/` : ''}.`
+      : subpath
+        ? `No artifacts under ${subpath}/.`
+        : 'No artifacts yet.';
     const truncation = res.truncated
-      ? '\nResults were truncated; narrow `path` or use `recursive: false`.'
+      ? `\nResults were truncated; ${subpath ? 'narrow `path` further' : 'pass `path` to scope the walk'} or use \`recursive: false\`.`
       : '';
     return okResult(
       ListToolOutputSchema,
@@ -3884,14 +3982,14 @@ server.tool(
 
 server.tool(
   'list_documents',
-  'List files in the shared documents library. This library holds cross-cutting guides like mission statements, coding guidelines, and style guides that apply across all projects.',
+  'List files in the shared documents library — cross-project guides every gezel can read (guidelines, mission statements, style guides, policies). Pass { recursive: true } to see inside folders. To find content rather than names, use search_documents.',
   {
     path: z.string().optional().describe('Subdirectory path to list (default: root)'),
     recursive: z.boolean().optional().describe('List all descendants (default: false)'),
   },
   async ({ path, recursive }) => {
     const res = await api.listDocuments(path ?? '', recursive ?? false);
-    const listing = res.files.map((f) => `${f.isDirectory ? '📁' : '📄'} ${f.path}`).join('\n');
+    const listing = res.files.map((f) => `${f.isDirectory ? 'dir ' : 'file'} ${f.path}`).join('\n');
     const summary = res.files.length
       ? `Listed ${res.files.length} ${res.files.length === 1 ? 'document entry' : 'document entries'}.`
       : 'No documents found.';
@@ -3905,21 +4003,21 @@ server.tool(
 
 server.tool(
   'read_document',
-  'Read a document from the shared documents library. Use this to consult mission statements, coding guidelines, style guides, etc.',
+  'Read one document from the shared library by path. Office documents (.docx, .pdf, .pptx, .xlsx) come back converted to markdown. Get paths from the library listing, list_documents, or a search_documents match.',
   {
     path: z
       .string()
       .describe('File path relative to the documents root (e.g. "guidelines/coding.md")'),
   },
   async ({ path }) => {
-    const res = await api.readDocument(path);
+    const res = await api.readDocument(path, { as: 'markdown' });
     return { content: [{ type: 'text' as const, text: res.content }] };
   },
 );
 
 server.tool(
   'write_document',
-  'Create or update a document in the shared documents library. Use this to capture durable, cross-project knowledge like guidelines or policies.',
+  'Create or update a document in the shared documents library (markdown preferred). Use for durable cross-project knowledge — guidelines, policies, style rules. For knowledge specific to one project, use a folder named after that project (e.g. "acme-site/decisions.md"). Deliverables for the current job belong in the workspace or artifacts, not here.',
   {
     path: z
       .string()
@@ -3933,26 +4031,26 @@ server.tool(
       'write_document',
     );
     if (redirected) return redirected;
-    await api.writeDocument(path, normalizeMarkdown(content));
+    await api.writeDocument(path, normalizeMarkdown(content), { gezelId });
     return { content: [{ type: 'text' as const, text: `Wrote document ${path}` }] };
   },
 );
 
 server.tool(
   'delete_document',
-  'Delete a document or folder from the shared documents library.',
+  'Delete a document — or a folder and its entire contents — from the shared documents library. Folder deletes are recursive and cannot be undone; prefer exact file paths.',
   {
     path: z.string().describe('File or folder path to delete'),
   },
   async ({ path }) => {
-    await api.deleteDocument(path);
+    await api.deleteDocument(path, { gezelId });
     return { content: [{ type: 'text' as const, text: `Deleted ${path}` }] };
   },
 );
 
 server.tool(
   'search_documents',
-  'Keyword-search the CONTENT of the shared documents library (not just names). Returns path + line + snippet; follow up with read_document to read a match.',
+  'Search the CONTENT of every document in the shared library, including converted office documents. Returns path + line + snippet; call this first for any question the library might answer — team policy, guidelines, conventions — then read_document the best match.',
   {
     q: z.string().min(1).describe('Full-text query against document content'),
     limit: z.number().optional().describe('Max results (default 10)'),
@@ -8315,6 +8413,8 @@ server.tool(
       .describe('Artifact path or note proving it — required when met is true.'),
   },
   async ({ ref, id, met, evidence }) => {
+    const draftBlock = partialEdits.blockReason('verify_outcome');
+    if (draftBlock) return errorResult(draftBlock);
     const parsed = parseRef(ref);
     const t = await api.getTask(parsed.projectId, parsed.num);
     const existing = t.outcomes ?? [];
@@ -8743,6 +8843,8 @@ server.tool(
       ),
   },
   async ({ ref, stepId, next }) => {
+    const draftBlock = partialEdits.blockReason('advance_task_step');
+    if (draftBlock) return errorResult(draftBlock);
     const parsed = parseRef(ref);
     const { task, gate } = await api.completeTaskStep(
       parsed.projectId,

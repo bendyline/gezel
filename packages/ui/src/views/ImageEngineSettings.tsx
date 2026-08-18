@@ -146,7 +146,6 @@ export function ImageEngineSettings({ onModelsChanged }: Props) {
         <select
           value={provider}
           onChange={(e) => void onProviderChange(e.target.value as ProviderChoice)}
-          style={{ marginLeft: 4 }}
         >
           <option value="sd-cpp">Local (Stable Diffusion)</option>
           <option value="google-ai">Google Nano Banana 2 (cloud)</option>

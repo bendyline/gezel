@@ -28,6 +28,7 @@ export function TitlebarSearch() {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [results, setResults] = useState<UnifiedSearchResult[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -38,29 +39,49 @@ export function TitlebarSearch() {
   const flat = useMemo(() => flattenGroups(groups), [groups]);
 
   // Debounced fetch; abort the previous in-flight request on each keystroke.
+  //
+  // Two phases, because they have wildly different costs. The name catalog
+  // answers in milliseconds, while the full search waits on the content
+  // fan-out — whose first call also pays the embedding model's cold load
+  // (measured at ~41s on a fresh install). Showing phase one immediately is
+  // what keeps the box from looking dead while phase two runs.
   useEffect(() => {
     const q = query.trim();
     if (!q) {
       setResults([]);
       setOpen(false);
       setLoading(false);
+      setFailed(false);
       return;
     }
     const ctrl = new AbortController();
     const timer = setTimeout(async () => {
+      // Mount the palette BEFORE the first request. The popover only exists
+      // while `open`, so opening it on the response made "Searching…"
+      // unreachable on the very first query — the box silently ignored the
+      // user for as long as the request took.
       setLoading(true);
+      setFailed(false);
+      setOpen(true);
+      let namesShown = false;
       try {
-        const res =
-          modeRef.current === 'quick-open'
-            ? await api.quickOpen(q, { signal: ctrl.signal })
-            : await api.search(q, { mode: 'full', signal: ctrl.signal });
-        setResults(res.results);
+        const quick = await api.quickOpen(q, { signal: ctrl.signal });
+        if (ctrl.signal.aborted) return;
+        setResults(quick.results);
         setActiveIndex(0);
-        setOpen(true);
+        namesShown = true;
+        if (modeRef.current === 'quick-open') return;
+        const full = await api.search(q, { mode: 'full', signal: ctrl.signal });
+        if (ctrl.signal.aborted) return;
+        setResults(full.results);
+        setActiveIndex(0);
       } catch {
-        /* aborted or failed — leave prior results in place */
+        // An abort is the ordinary keystroke path, not a failure. A genuine
+        // failure with nothing on screen has to say so — silently leaving an
+        // empty palette reads as "no matches", which is a different claim.
+        if (!ctrl.signal.aborted && !namesShown) setFailed(true);
       } finally {
-        setLoading(false);
+        if (!ctrl.signal.aborted) setLoading(false);
       }
     }, DEBOUNCE_MS);
     return () => {
@@ -174,6 +195,7 @@ export function TitlebarSearch() {
             groups={groups}
             activeIndex={activeIndex}
             loading={loading}
+            failed={failed}
             onPick={pick}
             onHover={setActiveIndex}
           />

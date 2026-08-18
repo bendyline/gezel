@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { GateAttemptRecord } from '@bendyline/gezel';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -9,10 +10,14 @@ import {
   GATE_ATTEMPT_TRAIL_CAP,
   appendGateAttempt,
   buildPlateauDiagnosisNote,
+  buildProgressExhaustionNote,
+  buildProgressPreamble,
   buildStageOneNudge,
   buildStageTwoNudge,
+  deliverableSurface,
   escalationDisabled,
   gateFailureSignature,
+  gateRemaining,
   plateauScore,
   stageForPlateau,
 } from './gate-escalation.js';
@@ -24,6 +29,13 @@ const outcome = (label: string, ok: boolean, detail = 'detail text'): GateCheckO
   ok,
   detail,
 });
+
+const coverage: GateCheckOutcome = {
+  kind: 'corpusCoverage',
+  label: 'corpusCoverage pr-review-coverage.json',
+  ok: false,
+  detail: 'reviewed 25 path(s), but the connector corpus contains 68.',
+};
 
 const trailEntry = (signatureHash: string, attempt = 1): GateAttemptRecord => ({
   at: '2026-07-06T12:00:00.000Z',
@@ -81,6 +93,91 @@ describe('gateFailureSignature', () => {
     );
     const withoutPass = gateFailureSignature([outcome('contains report.md /Total/', false)], []);
     expect(withPass).toBe(withoutPass);
+  });
+
+  // The Pull Request Review shape: one coverage check that a bounded batch
+  // loop fails once per batch while genuinely converging.
+  it('changes when the outstanding count falls under an unmoved failing check', () => {
+    const at = (remaining: number) => gateFailureSignature([{ ...coverage, remaining }], []);
+    expect(at(43)).not.toBe(at(18));
+    expect(at(18)).toBe(at(18));
+    // A count that regresses is not the same state as one that fell to it.
+    expect(at(43)).not.toBe(at(68));
+  });
+
+  it('leaves count-free checks byte-identical to the legacy signature', () => {
+    const legacy = gateFailureSignature([outcome('contains report.md /Total/', false)], []);
+    expect(legacy).toBe(
+      createHash('sha256').update('contains report.md /Total/').digest('hex').slice(0, 16),
+    );
+  });
+});
+
+describe('gateRemaining', () => {
+  it('sums only failing checks that report a count', () => {
+    expect(gateRemaining(undefined)).toBeUndefined();
+    expect(gateRemaining([outcome('contains report.md /Total/', false)])).toBeUndefined();
+    expect(gateRemaining([{ ...coverage, remaining: 18 }])).toBe(18);
+    expect(
+      gateRemaining([{ ...coverage, remaining: 18 }, outcome('minBytes report.md', false)]),
+    ).toBe(18);
+    // A cleared coverage check contributes nothing, even at remaining 0.
+    expect(gateRemaining([{ ...coverage, ok: true, remaining: 0 }])).toBeUndefined();
+  });
+});
+
+describe('buildProgressPreamble', () => {
+  it('reports what moved and tells the assignee to continue', () => {
+    const text = buildProgressPreamble({ previousRemaining: 43, remaining: 18 });
+    expect(text).toContain('25 more item(s) covered');
+    expect(text).toContain('18 still outstanding');
+    expect(text).toMatch(/do NOT restart/);
+  });
+
+  it('carries no marker that clamps a llama-cpp turn', () => {
+    const text = buildProgressPreamble({ previousRemaining: 43, remaining: 18 });
+    expect(text).not.toContain('GATE_TARGETED_EDIT:');
+    expect(text).not.toContain('GATE_FULL_REWRITE:');
+    expect(isImmediateFileWriteTurn(text, WRITE_FILE_TOOL)).toBe(false);
+    expect(isGateSurgicalEditTurn(text, WRITE_FILE_TOOL)).toBe(false);
+  });
+});
+
+describe('buildProgressExhaustionNote', () => {
+  const note = () =>
+    buildProgressExhaustionNote({
+      stepName: 'Review the next changed-file batch',
+      stepId: 'scan',
+      passes: 24,
+      remaining: 40,
+      lastMessage: 'coverage.json: reviewed 160 path(s), but the corpus contains 200.',
+    });
+
+  it('names throughput as the problem, not a stuck deliverable', () => {
+    const text = note();
+    expect(text).toContain('advanced on all 24 of its passes');
+    expect(text).toContain('40 item(s) are still outstanding');
+    expect(text).toContain('throughput problem');
+    expect(text).toContain('batch size');
+  });
+
+  it('never claims the plateau note’s "without progress"', () => {
+    expect(note()).not.toContain('without progress');
+    expect(
+      buildPlateauDiagnosisNote({
+        stepName: 'Build',
+        stepId: 'build',
+        trail: [
+          {
+            at: '2026-07-06T12:00:00.000Z',
+            attempt: 1,
+            signatureHash: 's',
+            messageFingerprint: 'f',
+          },
+        ],
+        lastMessage: 'nope',
+      }),
+    ).toContain('without progress');
   });
 });
 
@@ -199,6 +296,88 @@ describe('escalation nudges vs llama-cpp turn-mode matchers', () => {
     // scenario-repair — the structural exclusion, not chain order.
     const scenarioShaped = `[scenario check] I looked at \`index.html\` and the success criteria aren't met yet.\n${stage1Frozen}`;
     expect(isGateSurgicalEditTurn(scenarioShaped, patchTools)).toBe(false);
+  });
+});
+
+describe('note-surface escalation nudges', () => {
+  const bullets =
+    '- The task notes do not yet contain /##\\s*Scope\\s*[—-]\\s*PR\\s*#46/ — write the required note (use write_task_note) before advancing.';
+
+  it('classifies a fileless script gate as the note surface', () => {
+    expect(
+      deliverableSurface({
+        checks: [],
+        scripts: [{ name: 'checkTaskNoteContains', inputs: { pattern: '## Scope' } }],
+      }),
+    ).toBe('note');
+    // A gate that names a file is still judged by that file, script or not.
+    expect(
+      deliverableSurface({
+        checks: [{ kind: 'minBytes', file: 'report.md', bytes: 10 }],
+        scripts: [{ name: 'checkTaskNoteContains' }],
+      }),
+    ).toBe('workspace');
+    expect(
+      deliverableSurface({ checks: [{ kind: 'minBytes', file: 'r.md', artifact: true }] }),
+    ).toBe('artifact');
+    // Mixed gates keep workspace wording — the half the model must repair
+    // may well be the workspace half.
+    expect(
+      deliverableSurface({
+        checks: [
+          { kind: 'minBytes', file: 'r.md', artifact: true },
+          { kind: 'minBytes', file: 'index.html' },
+        ],
+      }),
+    ).toBe('workspace');
+    // An explicit deliverable still wins outright, and no gate at all is
+    // the byte-stable legacy default.
+    expect(
+      deliverableSurface({
+        advanceWhen: { file: 'r.md', artifact: true },
+        checks: [{ kind: 'minBytes', file: 'index.html' }],
+      }),
+    ).toBe('artifact');
+    expect(deliverableSurface({})).toBe('workspace');
+  });
+
+  it('stage 1 claims no file, names write_task_note, and never names a patch tool', () => {
+    const stage1 = buildStageOneNudge({ failingBullets: bullets, frozen: false, surface: 'note' });
+    expect(stage1).toContain('GATE_TARGETED_EDIT:');
+    expect(stage1).toContain('write_task_note');
+    expect(stage1).toContain(bullets);
+    // The workspace/artifact opener asserts the deliverable EXISTS. There
+    // is no file here, so that claim would be a fabrication — and the
+    // wild-caught rendering read "The file the deliverable EXISTS".
+    expect(stage1).not.toContain('EXISTS');
+    expect(stage1).not.toContain('the deliverable');
+    expect(stage1).not.toContain('replace_in_file');
+    expect(stage1).not.toContain('write_file');
+  });
+
+  it('steers a stuck reviewer to escalate rather than reshape the note to match the checker', () => {
+    // Ayza cleared this gate by writing the literal `{{number}}` template
+    // token into the task's permanent audit trail. Passing a broken gate
+    // is worse than pausing on it.
+    const frozen = buildStageOneNudge({ failingBullets: bullets, frozen: true, surface: 'note' });
+    expect(frozen).toContain('escalate to the task owner');
+    expect(frozen).toContain('reposting unchanged content cannot pass');
+  });
+
+  it('does not clamp the turn to patch-only tools', () => {
+    // The patch clamp strips write_task_note, so a note-surface stage 1
+    // that tripped it could never be repaired — the same trap the
+    // artifact surface already escapes.
+    const patchTools = [
+      {
+        type: 'function' as const,
+        function: { name: 'replace_in_file', description: 'Edit.', parameters: {} },
+      },
+      ...WRITE_FILE_TOOL,
+    ];
+    const stage1 = buildStageOneNudge({ failingBullets: bullets, frozen: false, surface: 'note' });
+    expect(isGateSurgicalEditTurn(stage1, patchTools)).toBe(false);
+    expect(isImmediateFileWriteTurn(stage1, WRITE_FILE_TOOL)).toBe(false);
   });
 });
 

@@ -82,6 +82,25 @@ describe('walkDirDetailed', () => {
     expect(entries.map((e) => e.path).sort()).toEqual(['one.txt', 'sub', 'sub/two.txt']);
   });
 
+  it('withStats puts mtimeMs on files and never on directories', async () => {
+    await Promise.all([seed('one.txt'), seed('sub/two.txt')]);
+
+    const { entries } = await walkDirDetailed(root, { withStats: true });
+    const byPath = new Map(entries.map((e) => [e.path, e]));
+
+    expect(byPath.get('one.txt')?.mtimeMs).toBeTypeOf('number');
+    expect(byPath.get('sub/two.txt')?.mtimeMs).toBeTypeOf('number');
+    expect(byPath.get('sub')?.mtimeMs).toBeUndefined();
+  });
+
+  it('omits mtimeMs entirely without withStats', async () => {
+    await seed('one.txt');
+
+    const { entries } = await walkDirDetailed(root);
+
+    expect(entries.every((e) => e.mtimeMs === undefined)).toBe(true);
+  });
+
   it('skipRootDirs prunes a root subtree during the walk, only at depth 0', async () => {
     await Promise.all([
       seed('report.md'),
@@ -100,6 +119,48 @@ describe('walkDirDetailed', () => {
     expect(paths).toContain('report.md');
     expect(paths).toContain('nested/shadow/keep.md');
     expect(paths.some((p) => p === 'shadow' || p.startsWith('shadow/'))).toBe(false);
+  });
+
+  it('includeHidden surfaces dotfiles, skipRootDirs, and vendor dirs', async () => {
+    await Promise.all([
+      seed('README.md'),
+      seed('.env'),
+      seed('.github/workflows/ci.yml'),
+      seed('shadow/report_files/report.md'),
+    ]);
+    await mkdir(join(root, 'node_modules'), { recursive: true });
+
+    const { entries } = await walkDirDetailed(root, {
+      includeHidden: true,
+      skipRootDirs: new Set(['shadow']),
+    });
+    const paths = entries.map((e) => e.path);
+
+    expect(paths).toContain('README.md');
+    expect(paths).toContain('.env');
+    expect(paths).toContain('.github/workflows/ci.yml');
+    expect(paths).toContain('node_modules');
+    expect(paths).toContain('shadow/report_files/report.md');
+  });
+
+  it('includeHidden lists vendor dirs without walking into them', async () => {
+    // One node_modules would otherwise consume the whole entry budget and
+    // truncate the real tree away.
+    await Promise.all([
+      seed('index.html'),
+      ...Array.from({ length: 20 }, (_, i) => seed(`node_modules/pkg-${i}/index.js`)),
+      seed('.git/objects/ab/cdef'),
+    ]);
+
+    const { entries, truncated } = await walkDirDetailed(root, { includeHidden: true });
+    const paths = entries.map((e) => e.path);
+
+    expect(truncated).toBe(false);
+    expect(paths).toContain('index.html');
+    expect(paths).toContain('node_modules');
+    expect(paths).toContain('.git');
+    expect(paths.some((p) => p.startsWith('node_modules/'))).toBe(false);
+    expect(paths.some((p) => p.startsWith('.git/'))).toBe(false);
   });
 });
 

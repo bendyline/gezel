@@ -1,7 +1,7 @@
 import type { ProjectDetail } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import type { BindingSyncResult } from './manager.js';
-import { runConnectorTaskPrep } from './task-prep.js';
+import { ConnectorPrepError, runConnectorTaskPrep } from './task-prep.js';
 
 function project(): ProjectDetail {
   return {
@@ -14,7 +14,7 @@ function project(): ProjectDetail {
 function deps(result: BindingSyncResult) {
   return {
     getProject: async () => project(),
-    allowExternalServices: async () => true,
+    allowConnectorData: async () => true,
     sync: async () => result,
   };
 }
@@ -39,7 +39,7 @@ describe('runConnectorTaskPrep', () => {
             github: { url: 'https://github.com/acme/widget' },
             connectors: [],
           }) as unknown as ProjectDetail,
-        allowExternalServices: async () => true,
+        allowConnectorData: async () => true,
         ensureBinding: async (_project, need) => {
           provisioned = need.typeId === 'github-pulls';
           return {
@@ -89,6 +89,57 @@ describe('runConnectorTaskPrep', () => {
         input,
       ),
     ).rejects.toThrow(/Could not pull down github-issues connector data: 1 record failed to sync/);
+  });
+
+  it('types a posture refusal so the launcher can render the fix instead of a 500', async () => {
+    const err = await runConnectorTaskPrep(
+      {
+        getProject: async () => project(),
+        allowConnectorData: async () => false,
+        sync: async () => {
+          throw new Error('sync must not run under a blocking posture');
+        },
+      },
+      input,
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConnectorPrepError);
+    const prepErr = err as ConnectorPrepError;
+    expect(prepErr.code).toBe('CONNECTOR_PREP_FAILED');
+    expect(prepErr.reason).toBe('policy');
+    expect(prepErr.typeId).toBe('github-issues');
+    expect(prepErr.message).toMatch(/Settings → Security/);
+  });
+
+  it('degrades an optional connector under a blocking posture instead of failing the launch', async () => {
+    const result = await runConnectorTaskPrep(
+      {
+        getProject: async () => project(),
+        allowConnectorData: async () => false,
+        sync: async () => {
+          throw new Error('sync must not run under a blocking posture');
+        },
+      },
+      { ...input, connectors: [{ typeId: 'github-issues', optional: true }] },
+    );
+    expect(result.params).toEqual({});
+    expect(result.note).toBeUndefined();
+  });
+
+  it('types a failure thrown by a registered prep so its message survives the transport', async () => {
+    const err = await runConnectorTaskPrep(
+      deps({
+        written: 0,
+        quarantined: 0,
+        skipped: 0,
+        pruned: 0,
+        errors: 2,
+        cursor: undefined,
+      }),
+      input,
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConnectorPrepError);
+    expect((err as ConnectorPrepError).reason).toBe('prep');
+    expect((err as ConnectorPrepError).message).toMatch(/2 records failed to sync/);
   });
 
   it('does not launch a generic connector task after a rate-limited partial sync', async () => {

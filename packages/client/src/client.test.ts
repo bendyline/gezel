@@ -141,6 +141,22 @@ describe('GezelClient model inventory', () => {
   });
 });
 
+describe('GezelClient model bundle export', () => {
+  it('forwards cancellation to the streaming export request', async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe('http://test/api/model-bundles/llama-cpp/demo/export');
+      expect(init?.signal).toBe(controller.signal);
+      return new Response('bundle');
+    }) as unknown as typeof fetch;
+    const client = new GezelClient({ baseUrl: 'http://test', token: 't', fetch: fetchImpl });
+
+    await expect(
+      client.exportModelBundle('llama-cpp', 'demo', controller.signal),
+    ).resolves.toBeInstanceOf(Response);
+  });
+});
+
 describe('GezelClient shared model migration', () => {
   it('uses the typed candidate and move endpoints', async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {

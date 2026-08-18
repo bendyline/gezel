@@ -28,21 +28,6 @@ export function toBookItems(items: CatalogItemSummary[]): BookItem[] {
   return out.sort((a, b) => a.manifest.name.localeCompare(b.manifest.name));
 }
 
-/** Glyph per project type, used as a card fallback. */
-const PROJECT_TYPE_GLYPHS: Record<string, ProjectGlyphId> = {
-  'browser-game': 'die',
-  'web-app': 'frame',
-  'static-site': 'frame',
-  'data-analysis': 'chart',
-  'api-service': 'code',
-  'cli-tool': 'code',
-  library: 'code',
-  'content-writing': 'quill',
-  'media-production': 'frame',
-  'design-prototype': 'frame',
-  email: 'envelope',
-};
-
 export interface TaskLens {
   id: string;
   label: string;
@@ -94,7 +79,7 @@ export function taskLensesFor(books: BookItem[]): TaskLens[] {
 export function craftbookGlyph(manifest: CraftbookTemplateManifest): ProjectGlyphId {
   for (const type of listProjectTypes()) {
     if (bookMatchesTags(manifest, lensTagSet(type))) {
-      return PROJECT_TYPE_GLYPHS[type.id] ?? 'sheet';
+      return type.icon;
     }
   }
   return 'sheet';

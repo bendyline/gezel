@@ -634,6 +634,30 @@ export function meesterStatusStateFile(root: string): string {
   return join(meesterStatusDir(root), 'state.json');
 }
 
+/**
+ * Home for the ambient dashboard — meester-generated PNG snapshots of the
+ * whole workshop, written for the OS ambient-display integration (wallpaper
+ * rotation points here). Holds dated `dashboard-*.png` files, a stable
+ * `latest.png` copy, the generator's `state.json`, and the Electron
+ * applier's `display-state.json` + `applied-a/b.png` slots. Per-user only —
+ * never under machineSharedHome: wallpaper is user-session state.
+ */
+export function ambientDir(root: string): string {
+  return join(root, 'ambient');
+}
+
+export function ambientDashboardStateFile(root: string): string {
+  return join(ambientDir(root), 'state.json');
+}
+
+export function ambientDashboardLatestFile(root: string): string {
+  return join(ambientDir(root), 'latest.png');
+}
+
+export function ambientDisplayStateFile(root: string): string {
+  return join(ambientDir(root), 'display-state.json');
+}
+
 export function projectTasksDir(
   root: string,
   projectId: string,
@@ -922,8 +946,18 @@ export function projectContentIndexDbFile(
   root: string,
   projectId: string,
   workspaceDir: string,
+  opts: {
+    /**
+     * Keep the database out of the workspace even though it is writable.
+     * The shared document library's workspace is the user's own documents
+     * folder, which may be a cloud-synced directory (OneDrive/Dropbox):
+     * mutable SQLite must not ride a sync client, and the user must not find
+     * a `.gezel/` directory in a folder they browse in Finder.
+     */
+    forceHomeSide?: boolean;
+  } = {},
 ): string {
-  return projectStorageScope(root, projectId) === 'machine-shared'
+  return opts.forceHomeSide || projectStorageScope(root, projectId) === 'machine-shared'
     ? join(fallbackProjectIndexDir(root, projectId), 'index.db')
     : projectLocalIndexDbFile(workspaceDir);
 }
@@ -1194,6 +1228,27 @@ export function keurmeesterDigestsDir(root: string): string {
 /** Digest idempotency state (last generated date, last case offset). */
 export function keurmeesterDigestStatePath(root: string): string {
   return join(keurmeesterDir(root), 'digest-state.json');
+}
+
+/**
+ * Root of every downloaded engine payload: per-engine model stores, the
+ * verified native binary releases, the HuggingFace cache, uv virtualenvs,
+ * and per-engine scratch. This is the bulk of a heavy install's disk use —
+ * on a working machine it dwarfs everything else in the home directory
+ * combined. Owned by the engine/model managers, not the Store.
+ */
+export function enginesRoot(root: string): string {
+  return join(root, 'engines');
+}
+
+/**
+ * Pinned node + pnpm runtimes the supervisor extracts so packaged installs
+ * need no system toolchain. The daemon executes through these, so nothing
+ * daemon-side may delete them; the platform uninstaller owns removal and the
+ * supervisor re-extracts on a sentinel mismatch.
+ */
+export function binRuntimeRoot(root: string): string {
+  return join(root, 'bin');
 }
 
 /**

@@ -36,7 +36,8 @@ export const TIER_DEFAULT_BEHAVIORS: Record<ModelTier, ReadonlyArray<BehaviorEnt
     // Manifest-less local imports otherwise pay the full ~23K-token raw
     // MCP tool-schema prose on every first turn — the single largest
     // first-prompt cost, and it starves the tier that can least afford
-    // attention. The behavior self-gates to skip large/cloud.
+    // attention. The behavior self-gates to skip `cloud` only; every
+    // local tier that selects it is compacted.
     'mcp.compact-tool-schemas',
     'fabrication.detect-past-tense-no-tools',
     { id: 'turn.continuation-budget', config: { count: 4 } },
@@ -51,15 +52,22 @@ export const TIER_DEFAULT_BEHAVIORS: Record<ModelTier, ReadonlyArray<BehaviorEnt
   // The gestalt block pays where attention budget allows and repo
   // orientation is the bottleneck; retrieval-first steers the tiers most
   // prone to read_file-walking. compact-tool-schemas keeps the schema
-  // tax off medium locals too (it self-gates off at large/cloud). Cloud
-  // stays empty as ever.
+  // tax off medium locals too. Note it does NOT stop at `large` — only
+  // `cloud` is exempt — so a fast large local still trades tool prose
+  // for prefill; A/B that per model with GEZEL_REMOVE_BEHAVIORS rather
+  // than assuming the trade holds at every size. Cloud stays empty.
   medium: [
     'mcp.compact-tool-schemas',
     'fabrication.detect-past-tense-no-tools',
     'prompt.retrieval-first',
     'prompt.workspace-gestalt',
+    'prompt.documents-summaries',
   ],
-  large: ['fabrication.detect-past-tense-no-tools', 'prompt.workspace-gestalt'],
+  large: [
+    'fabrication.detect-past-tense-no-tools',
+    'prompt.workspace-gestalt',
+    'prompt.documents-summaries',
+  ],
   cloud: [],
 };
 

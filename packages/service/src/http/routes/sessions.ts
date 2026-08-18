@@ -1,4 +1,5 @@
 import {
+  type ChatSessionSource,
   CreateChatSessionRequestSchema,
   InterruptSessionRequestSchema,
   SearchSessionsRequestSchema,
@@ -12,6 +13,21 @@ import { Hono } from 'hono';
 import type { ServiceContext } from '../context.js';
 
 const log = createLogger('http');
+
+async function externalReadOnlySource(
+  ctx: ServiceContext,
+  sessionId: string,
+): Promise<ChatSessionSource | null> {
+  const record = await ctx.chat.getSessionRecord(sessionId);
+  return record?.source?.kind === 'external' && record.source.readOnly ? record.source : null;
+}
+
+function externalReadOnlyError(source: ChatSessionSource) {
+  return {
+    error: `This conversation is controlled by ${source.appName} and is read-only in Gezel.`,
+    code: 'external_session_read_only',
+  };
+}
 
 export function sessionRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
@@ -169,6 +185,11 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
   app.post('/:id/send', async (c) => {
     const id = c.req.param('id');
     const body = SendToSessionRequestSchema.parse(await c.req.json());
+    const target = await ctx.chat.getSessionRecord(id);
+    if (!target) return c.json({ error: 'not found' }, 404);
+    if (target.source?.kind === 'external' && target.source.readOnly) {
+      return c.json(externalReadOnlyError(target.source), 409);
+    }
     const cfg = await ctx.store.readConfig();
     if (!isEngagementAllowed(cfg)) {
       return c.json({ error: `engagement mode is ${getEngagementMode(cfg)}; AI is disabled` }, 403);
@@ -235,7 +256,10 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
   });
 
   app.post('/:id/reset', async (c) => {
-    await ctx.chat.reset(c.req.param('id'));
+    const id = c.req.param('id');
+    const source = await externalReadOnlySource(ctx, id);
+    if (source) return c.json(externalReadOnlyError(source), 409);
+    await ctx.chat.reset(id);
     return c.json({ ok: true });
   });
 
@@ -250,7 +274,10 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
   });
 
   app.post('/:id/cancel', async (c) => {
-    const res = await ctx.chat.cancelInflight(c.req.param('id'));
+    const id = c.req.param('id');
+    const source = await externalReadOnlySource(ctx, id);
+    if (source) return c.json(externalReadOnlyError(source), 409);
+    const res = await ctx.chat.cancelInflight(id);
     return c.json(res);
   });
 
@@ -262,6 +289,8 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
   app.post('/:id/interrupt', async (c) => {
     const id = c.req.param('id');
     const body = InterruptSessionRequestSchema.parse(await c.req.json());
+    const source = await externalReadOnlySource(ctx, id);
+    if (source) return c.json(externalReadOnlyError(source), 409);
     const cfg = await ctx.store.readConfig();
     if (!isEngagementAllowed(cfg)) {
       return c.json({ error: `engagement mode is ${getEngagementMode(cfg)}; AI is disabled` }, 403);

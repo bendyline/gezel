@@ -85,6 +85,12 @@ const UNIVERSAL_DEFAULT_BEHAVIORS: readonly BehaviorId[] = [
   // entries, so a manifest's build prelude keeps claiming generic
   // "build me X" turns first.
   'prompt.meester-craftbook-prelude',
+  // Self-gating on resolved library matches, which the manager only supplies
+  // for user-origin turns above a high similarity floor — so this is silent
+  // on the overwhelming majority of turns and costs nothing when quiet.
+  // Listed LAST so the meester's build/craftbook preludes keep claiming the
+  // turns they route (first non-null wins).
+  'prompt.library-recall-prelude',
 ];
 
 /** Every behavior known to this engine. Useful for tooling, registry overviews, tests. */

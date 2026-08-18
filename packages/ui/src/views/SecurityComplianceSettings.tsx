@@ -79,7 +79,7 @@ export function SecurityComplianceSettings({
         const res = await api.updateConfig({ securityPolicy: next });
         onConfigChanged(res);
         window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
-        setStatus('');
+        setStatus('saved — open chats restart on their next message.');
       } catch (err) {
         setStatus(`save failed: ${(err as Error).message}`);
       }
@@ -110,6 +110,10 @@ export function SecurityComplianceSettings({
         script execution. Slide toward lockdown to make Gezel safe to try; loosen it as you build
         trust. Locked-down work still flows into the artifacts sandbox, so reviews, prototypes, and
         documents keep working.
+      </p>
+      <p className="muted small" style={{ marginTop: '-0.35rem' }}>
+        Changing the posture restarts open chat sessions so gezellen pick up the new rules on their
+        next message. A gezel that is answering right now finishes that answer first.
       </p>
 
       <div

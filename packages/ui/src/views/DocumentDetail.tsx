@@ -10,6 +10,7 @@ import {
   deriveContainerScope,
   resolveOutsideInLayout,
 } from '../components/SquisqIntegration/index.js';
+import { BINARY_FILE, NonTextFilePreview, looksBinary } from '../components/file-browser/index.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
@@ -50,9 +51,12 @@ export function DocumentDetail({ path }: DocumentDetailProps) {
   return <TextDocumentDetail path={path} />;
 }
 
+const fetchDocumentBlob = (filePath: string) => api.fetchDocumentBlob(filePath);
+
 function TextDocumentDetail({ path }: DocumentDetailProps) {
   const editorTheme = useEffectiveTheme();
   const [content, setContent] = useState<string | null>(null);
+  const [sizeBytes, setSizeBytes] = useState<number | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const saveDocument = useCallback((source: string) => api.writeDocument(path, source), [path]);
@@ -78,11 +82,13 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
   useEffect(() => {
     let cancelled = false;
     setContent(null);
+    setSizeBytes(undefined);
     setLoadError(null);
     void (async () => {
       try {
         const res = await api.readDocument(path);
         if (cancelled) return;
+        setSizeBytes(res.size);
         // Markdown goes through the Squisq editor, which re-emits its own
         // canonical serialization at mount — baseline on that form so mere
         // open never reads as an edit (or rewrites the file). Non-markdown
@@ -116,6 +122,19 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
   }
   if (content === null) {
     return <p className="placeholder">Loading {path}…</p>;
+  }
+  // Backstop for binary types the extension didn't reveal — the same one the
+  // project file panels use. Raw bytes in the editor render as garbage and an
+  // autosave would write that garbage back.
+  if (looksBinary(content)) {
+    return (
+      <NonTextFilePreview
+        content={BINARY_FILE}
+        path={path}
+        fetchBlob={fetchDocumentBlob}
+        {...(sizeBytes === undefined ? {} : { sizeBytes })}
+      />
+    );
   }
 
   const markdown = isMarkdown(path);

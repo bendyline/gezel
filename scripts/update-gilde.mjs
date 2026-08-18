@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { resolveNpmCli } from './pnpm-cli.mjs';
 import { runLockfileRefreshAndInstall, withPnpmInstallLock } from './pnpm-install.mjs';
 
 const GILDE_PACKAGE = '@bendyline/gilde';
@@ -18,6 +20,23 @@ const catalogPackagePath = join(catalogDir, 'package.json');
 const workspacePath = join(repoRoot, 'pnpm-workspace.yaml');
 const lockfilePath = join(repoRoot, 'pnpm-lock.yaml');
 const installedPackagePath = join(catalogDir, 'node_modules', GILDE_PACKAGE, 'package.json');
+
+/**
+ * Declaration files the catalog typecheck resolves `@bendyline/gezel`
+ * through. They are workspace build output, not dependency state, so a tree
+ * that has never been built fails verification for reasons that have nothing
+ * to do with Gilde — checked BEFORE the pin moves so the run is a no-op
+ * instead of a half-applied update explained by twenty TS7016 errors.
+ */
+const CORE_TYPE_ENTRIES = [
+  join(repoRoot, 'packages', 'core', 'dist', 'index.d.ts'),
+  join(repoRoot, 'packages', 'core', 'dist', 'native', 'index.d.ts'),
+  join(repoRoot, 'packages', 'core', 'dist', 'svg', 'index.d.ts'),
+];
+
+export function missingTypeEntries(entries, exists = existsSync) {
+  return entries.filter((entry) => !exists(entry));
+}
 
 export function parseLatestVersion(output) {
   let parsed;
@@ -108,9 +127,53 @@ export function assertLockfileVersion(source, version) {
   }
 }
 
+/** Non-throwing {@link assertLockfileVersion}, for state questions. */
+export function lockfileMatchesVersion(source, version) {
+  try {
+    assertLockfileVersion(source, version);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Is the checkout actually AT `version` — lockfile and installed package,
+ * not just the manifest pin? The pin is written before the install runs, so
+ * a run interrupted in between leaves a manifest that claims the new version
+ * over a tree that still holds the old one. Comparing only the pin against
+ * npm reported that state as "already current" and exited 0, turning one
+ * failed run into a stale lockfile nobody was told about.
+ */
+async function treeMatchesVersion(version) {
+  const [lockfileSource, installedSource] = await Promise.all([
+    readFile(lockfilePath, 'utf8').catch(() => null),
+    readFile(installedPackagePath, 'utf8').catch(() => null),
+  ]);
+  if (lockfileSource === null || installedSource === null) return false;
+  let installedVersion;
+  try {
+    installedVersion = JSON.parse(installedSource).version;
+  } catch {
+    return false;
+  }
+  return installedVersion === version && lockfileMatchesVersion(lockfileSource, version);
+}
+
 async function main() {
   if (process.argv.length > 2) {
     throw new Error('usage: pnpm gilde:update');
+  }
+
+  const unbuilt = missingTypeEntries(CORE_TYPE_ENTRIES);
+  if (unbuilt.length > 0) {
+    throw new Error(
+      `the workspace has no core type declarations (${unbuilt
+        .map((entry) => entry.slice(repoRoot.length + 1))
+        .join(
+          ', ',
+        )}). Run "pnpm build" first — the post-update catalog typecheck cannot resolve @bendyline/gezel without them.`,
+    );
   }
 
   const [catalogSource, workspaceSource] = await Promise.all([
@@ -130,9 +193,14 @@ async function main() {
 
   console.log(`[gilde:update] checking npm (current: ${current})`);
   const latest = queryLatestVersion();
-  if (current === latest) {
+  if (current === latest && (await treeMatchesVersion(latest))) {
     console.log(`[gilde:update] ${GILDE_PACKAGE}@${latest} is already current`);
     return;
+  }
+  if (current === latest) {
+    console.log(
+      `[gilde:update] the pin is ${latest} but the lockfile or installed package is not — finishing an interrupted update`,
+    );
   }
 
   const updated = await withPnpmInstallLock(
@@ -153,17 +221,21 @@ async function main() {
       if (hasLocalGildeOverride(lockedWorkspaceSource)) {
         throw new Error('local Gilde linking is active; run "pnpm unlink:gilde" before updating');
       }
-      if (lockedCurrent === latest) {
+      if (lockedCurrent === latest && (await treeMatchesVersion(latest))) {
         console.log(`[gilde:update] ${GILDE_PACKAGE}@${latest} was updated by another task`);
         return false;
       }
 
-      await writeFile(
-        catalogPackagePath,
-        updatePinnedDependency(lockedCatalogSource, latest),
-        'utf8',
-      );
-      console.log(`[gilde:update] updating ${lockedCurrent} -> ${latest}`);
+      if (lockedCurrent === latest) {
+        console.log(`[gilde:update] re-resolving ${GILDE_PACKAGE}@${latest} against the pin`);
+      } else {
+        await writeFile(
+          catalogPackagePath,
+          updatePinnedDependency(lockedCatalogSource, latest),
+          'utf8',
+        );
+        console.log(`[gilde:update] updating ${lockedCurrent} -> ${latest}`);
+      }
 
       const installStatus = await runLockfileRefreshAndInstall({
         repoRoot,
@@ -226,11 +298,13 @@ async function main() {
 }
 
 function queryLatestVersion() {
-  const result = spawnSync('npm', ['view', `${GILDE_PACKAGE}@latest`, 'version', '--json'], {
+  const env = npmEnvironment();
+  const npm = resolveNpmCli(['view', `${GILDE_PACKAGE}@latest`, 'version', '--json'], { env });
+  const result = spawnSync(npm.command, npm.args, {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: npmEnvironment(),
-    shell: process.platform === 'win32',
+    env,
+    shell: npm.shell,
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   if (result.error) throw result.error;

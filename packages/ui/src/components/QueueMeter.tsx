@@ -130,6 +130,9 @@ function formatClock(iso: string): string | undefined {
  */
 function scheduledHandoffNote(nightShift: TaskRunnerState['nightShift']): string {
   if (!nightShift) return 'Held for the next Night Shift.';
+  // The reserve outranks the clock: "starts 22:00" would be a lie while
+  // the hold is what's actually parking the work.
+  if (nightShift.quotaHold) return 'Holding to protect your subscription quota.';
   if (!nightShift.opensAt) return 'Night Shift is off — turn it on to run these.';
   if (nightShift.active) return 'Held for the next window.';
   const opensAt = formatClock(nightShift.opensAt);
@@ -225,6 +228,15 @@ function queueJobContext(
     if (label.startsWith(`${prefix} · `)) return label.slice(prefix.length + 3);
   }
   return label;
+}
+
+/** Connected apps identify themselves this way on the OpenAI-compatible
+ * surface. Their requests have no Gezel-owned session to cancel, so the
+ * queue row names the app that owns the request instead of leaving the
+ * action column mysteriously blank. */
+function connectedAppName(actorLabel: string | undefined): string | undefined {
+  const match = /^(.+?)\s+\(Gezel local models\)$/.exec(actorLabel?.trim() ?? '');
+  return match?.[1]?.trim() || undefined;
 }
 
 function formatMs(ms: number): string {
@@ -854,20 +866,61 @@ function QueueMeterPanel({
         const queued = state.queuedInteractive + state.queuedBackground;
         const deferred = Math.min(queued, state.ambientHeld ?? 0);
         const readyQueued = queued - deferred;
+        // The engine's real width, not `concurrency` — that carries an extra
+        // logical lane so a mid-turn one-shot can enter the queue, and using
+        // it as a denominator advertises a slot no turn can occupy.
+        // `interactiveConcurrency` is the queue's live foreground width and
+        // provides a rolling-upgrade fallback when an older broker reports a
+        // stale serial `maxConcurrency`. Never use total queue concurrency as
+        // the first fallback: local queues include one logical background
+        // lease that is not a physical engine slot.
+        const slots = Math.max(
+          1,
+          state.maxConcurrency ?? 0,
+          state.interactiveConcurrency ?? 0,
+          state.maxConcurrency === undefined && state.interactiveConcurrency === undefined
+            ? state.concurrency
+            : 0,
+        );
+        // Capacity only answers a useful question while something is waiting.
+        // When every known item is already running, prefer the plain count —
+        // besides reading more naturally, it avoids an impossible-looking
+        // `2 / 1` during a rolling-upgrade snapshot with stale capacity data.
+        const inFlightLabel =
+          queued > 0 && running <= slots
+            ? `${running} / ${slots} in flight`
+            : `${running} in flight`;
+        const backgroundCap = state.backgroundConcurrency;
+        const laneNote =
+          backgroundCap !== undefined && slots > 1 && backgroundCap < slots
+            ? `Chats can use all ${slots} slots. Background work takes at most ${backgroundCap}, so a chat can always start.`
+            : undefined;
+        // Two rows for the same gezel doing the same job read identically
+        // whether one is running and the other is waiting for a slot. Name
+        // the two groups whenever both exist; a list that is all one thing
+        // is already answered by the counts in the section header.
+        const showLaneHeadings = state.active.length > 0 && state.pending.length > 0;
         return (
           <section key={name} className="queue-meter-panel-section">
             <header className="queue-meter-panel-provider">
               <span className="queue-meter-panel-provider-name">{getPlatformPillLabel(name)}</span>
               <span className="muted small">
-                {running} / {state.concurrency} in flight
+                {inFlightLabel}
                 {readyQueued > 0 ? ` · ${readyQueued} queued` : ''}
                 {deferred > 0 ? ` · ${deferred} deferred until idle` : ''}
               </span>
             </header>
+            {/* The only place the lane split is named. The engine pill states
+                one number — the slot count — and stops there; this is where a
+                user comes to ask who is holding them. Shown only when the cap
+                actually bites (a background lane narrower than the pool), so
+                the common single-slot engine stays quiet. */}
+            {laneNote && <p className="queue-meter-panel-note muted small">{laneNote}</p>}
             {state.active.length === 0 && queued === 0 ? (
               <p className="muted small queue-meter-panel-empty">Idle.</p>
             ) : (
               <ul className="queue-meter-panel-list">
+                {showLaneHeadings && <li className="queue-meter-panel-group">Running</li>}
                 {state.active.map((a, i) => {
                   // For on-device turns, look up the current phase
                   // label so the user can see what the engine is
@@ -888,6 +941,7 @@ function QueueMeterPanel({
                   const actor = describeActor(a.gezelId, a.actorLabel, gezels, boringMode);
                   const activeSessionId =
                     a.sessionId && !a.sessionId.startsWith('dev:') ? a.sessionId : undefined;
+                  const connectedApp = connectedAppName(a.actorLabel);
                   const stopping = activeSessionId
                     ? stoppingSessionIds.has(activeSessionId)
                     : false;
@@ -919,7 +973,10 @@ function QueueMeterPanel({
                         phase={phase?.label}
                         extra={cacheEntry ? 'cached' : undefined}
                       />
-                      <span className="queue-meter-panel-time muted">
+                      <span
+                        className="queue-meter-panel-time muted"
+                        title={`Running for ${formatMs(a.runningForMs)}`}
+                      >
                         {formatMs(a.runningForMs)}
                       </span>
                       {activeSessionId && (
@@ -936,9 +993,22 @@ function QueueMeterPanel({
                           </button>
                         </span>
                       )}
+                      {!activeSessionId && (
+                        <span
+                          className="queue-meter-panel-active-status muted"
+                          title={
+                            connectedApp
+                              ? `${connectedApp} controls this request. Stop it from ${connectedApp}.`
+                              : 'This work has no chat session to stop from this queue.'
+                          }
+                        >
+                          {connectedApp ? `In flight via ${connectedApp}` : 'In flight'}
+                        </span>
+                      )}
                     </li>
                   );
                 })}
+                {showLaneHeadings && <li className="queue-meter-panel-group">Waiting</li>}
                 {state.pending.map((p) => {
                   // Reorder is constrained to same-lane neighbours
                   // (the dispatcher's lane invariant trumps any
@@ -952,7 +1022,7 @@ function QueueMeterPanel({
                   return (
                     <li
                       key={`pending-${p.id}`}
-                      className={`queue-meter-panel-item queue-meter-panel-item-pending queue-meter-panel-item-${p.lane}`}
+                      className={`queue-meter-panel-item queue-meter-panel-item-pending queue-meter-panel-item-waiting queue-meter-panel-item-${p.lane}`}
                     >
                       <QueueItemOpenButton
                         sessionId={p.sessionId}
@@ -976,7 +1046,12 @@ function QueueMeterPanel({
                         job={p.job}
                         extra={p.ambient && deferred > 0 ? 'deferred until idle' : undefined}
                       />
-                      <span className="queue-meter-panel-time muted">{formatMs(p.waitedMs)}</span>
+                      <span
+                        className="queue-meter-panel-time muted"
+                        title={`Waiting ${formatMs(p.waitedMs)} for a free slot`}
+                      >
+                        {formatMs(p.waitedMs)}
+                      </span>
                       <span className="queue-meter-panel-actions">
                         <button
                           type="button"

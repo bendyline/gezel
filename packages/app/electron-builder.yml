@@ -90,11 +90,12 @@ files:
   # while a chat turn is live; each base PNG picks up its @2x sibling.
   - assets/trayWorking*Template*.png
   - assets/splash.html
-  # The splash document references `./gezel-mark.png` from the same
-  # folder. Without listing it here electron-builder leaves the image
-  # out of app.asar, the splash loads, and the <img> renders as a
-  # broken-image icon for the ~2-3s window before the real UI paints.
+  # The splash uses the opaque mark as its full-window texture source and a
+  # transparent cutout for the centered illustration. Without listing both
+  # here electron-builder leaves them out of app.asar and the splash renders
+  # a broken-image icon during the handoff to the real UI.
   - assets/gezel-mark.png
+  - assets/gezel-mark-transparent.png
   - '!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}'
   - '!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}'
   - '!**/node_modules/*.d.ts'
@@ -439,11 +440,46 @@ linux:
 deb:
   afterInstall: installer/linux/after-install.sh
   afterRemove: installer/linux/after-remove.sh
-  # Ubuntu App Center does not use the non-standard `License` field that fpm
-  # writes into the Debian control record. It reads AppStream metadata instead.
-  # Install the upstream metainfo file at its standard system location so the
-  # sideload screen can identify Gezel's project license as MIT.
+  # zstd instead of electron-builder's xz default. This follows the platform
+  # rather than departing from it: Ubuntu's own archive has shipped
+  # zstd-compressed debs since 21.10, and every distro that clears our
+  # GLIBC_2.38 floor (docs/native-runtime-requirements.md) ships a dpkg that
+  # reads them. Debian's archive still defaults to xz, but Debian 12 cannot
+  # run our binaries at all.
+  #
+  # Measured on the v1.26226.50 arm64 payload (1630 MiB uncompressed):
+  #   xz -3    797 MiB   9.6s to decode   (170 MB/s)
+  #   zstd 3   886 MiB   2.3s to decode   (719 MB/s)
+  # +89 MiB of download buys ~7s of `dpkg --unpack` on a workstation and
+  # ~20s on a slower arm64 machine. Deliberate trade: install time is the
+  # scarce resource, download size is not. Canonical published the same
+  # trade for the same reason (~+9% size, decode under 20% of the time).
+  compression: zst
   fpm:
+    # MUST accompany `compression: zst`. fpm builds the ZSTD_CLEVEL value the
+    # same way it builds GZIP and XZ_OPT — with a leading dash (deb.rb:
+    # `"-#{deb_compression_level || 3}"`). That is correct for those two,
+    # whose env vars take CLI flags, and wrong for ZSTD_CLEVEL, which takes a
+    # bare integer: zstd parses the dash as a sign and selects NEGATIVE level
+    # 3, its fast mode. Left alone this ships 1084 MiB instead of 886 MiB,
+    # silently — the config reads correctly and only the artifact disagrees.
+    #
+    # `0` is both the fix and the stable choice: zstd maps level 0 to "use the
+    # default" (3), and -0 == 0, so this yields real level 3 whether or not
+    # fpm ever repairs the dash. Do NOT raise it — `9` becomes level -9 and
+    # ships 1168 MiB, worse than changing nothing.
+    #
+    # scripts/verify-deb-compression.mjs fails the release if this regresses,
+    # because every failure mode here is invisible in the config.
+    #
+    # Flags must precede the positional file mappings: electron-builder
+    # splices this array in ahead of the paths it appends itself.
+    - --deb-compression-level
+    - '0'
+    # Ubuntu App Center does not use the non-standard `License` field that fpm
+    # writes into the Debian control record. It reads AppStream metadata instead.
+    # Install the upstream metainfo file at its standard system location so the
+    # sideload screen can identify Gezel's project license as MIT.
     - assets/com.bendyline.gezel.metainfo.xml=/usr/share/metainfo/com.bendyline.gezel.metainfo.xml
   # Depends on systemd being present — virtually all modern desktop
   # distros use it. List explicitly so package managers refuse to

@@ -51,6 +51,28 @@ describe('referencePreviewRoutes', () => {
     await expect(response.json()).resolves.toEqual({ mode: 'text', content: 'plain notes' });
   });
 
+  it('resolves an artifact path that already carries the drawer prefix', async () => {
+    const corpus = join(artifacts, 'data', 'github-pull-requests', 'pr-46', 'files');
+    await mkdir(corpus, { recursive: true });
+    await writeFile(join(corpus, '008--api.md'), '# PR file');
+
+    const response = await preview(
+      'artifact',
+      'artifacts/data/github-pull-requests/pr-46/files/008--api.md',
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ mode: 'text', content: '# PR file' });
+  });
+
+  it('keeps a workspace artifacts/ folder addressable', async () => {
+    await mkdir(join(workspace, 'artifacts'), { recursive: true });
+    await writeFile(join(workspace, 'artifacts', 'build.txt'), 'workspace-owned');
+
+    const response = await preview('workspace', 'artifacts/build.txt');
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ mode: 'text', content: 'workspace-owned' });
+  });
+
   it('classifies unknown binary data as a machine file', async () => {
     await writeFile(join(artifacts, 'payload.bin'), Buffer.from([0, 1, 2, 255, 254]));
     const response = await preview('artifact', 'payload.bin');

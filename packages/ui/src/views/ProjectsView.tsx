@@ -13,11 +13,13 @@ import type {
   ProjectApprovalsResponse,
   ProjectDetail,
   ProjectTabVisibility,
+  WorkspaceIndexFile,
   WorkspaceIndexStatus,
 } from '@bendyline/gezel';
 import {
   MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   getProjectType,
+  isSharedLibraryProject,
   listProjectTypes,
   normalizeCodexPermissionMode,
   projectManagedWorkspaceWritable,
@@ -34,7 +36,9 @@ import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { queueComposerPrefill } from '../components/ChatComposer.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
+import { FileFlatList } from '../components/FileFlatList.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
+import { FileHiddenKey, FileViewModeKeys } from '../components/FileViewModeKeys.js';
 import { GezelPicker } from '../components/GezelPicker.js';
 import { HtmlPreviewFrame, type HtmlPreviewLogEntry } from '../components/HtmlPreviewFrame.js';
 import { ProjectMemoriesEditor } from '../components/MemoriesTree.js';
@@ -44,6 +48,7 @@ import { ProjectChat } from '../components/ProjectChat.js';
 import { ProjectConnectionsTab } from '../components/ProjectConnectionsTab.js';
 import { ProjectCrewRoster } from '../components/ProjectCrewRoster.js';
 import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
+import { ProjectIcon } from '../components/ProjectIcon.js';
 import { ProjectMailTab } from '../components/ProjectMailTab.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
@@ -71,6 +76,31 @@ import {
   workspaceIndexLabel,
 } from '../components/WorkspaceIndexPane.js';
 import { WorkspaceIssueFixDialog } from '../components/WorkspaceIssueFixDialog.js';
+import {
+  BINARY_FILE,
+  type FileBrowserCustomList,
+  FileBrowserPane,
+  NON_TEXT_CONTENT,
+  NonTextFilePreview,
+  looksBinary,
+  mediaSentinel,
+  projectFileSource,
+  useFileMutations,
+} from '../components/file-browser/index.js';
+import {
+  ARTIFACT_VIEW_MODES,
+  type FileViewMode,
+  WORKSPACE_VIEW_MODES,
+  aggregateIssuesByFile,
+  coerceFileViewMode,
+  compareFilesByMtimeDesc,
+  describeSeverities,
+  fileEntryFromPath,
+  fileHiddenStorageKey,
+  fileViewStorageKey,
+  formatRelativeFileTime,
+  sortAggregates,
+} from '../components/file-view-modes.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
 import { navigateToTab } from '../components/nav-actions.js';
 import { consumeCreate } from '../components/nav-intents.js';
@@ -97,68 +127,7 @@ import { ProjectOverviewView } from './ProjectOverviewView.js';
 import { TasksView } from './TasksView.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
 
-function isImage(name: string): boolean {
-  return /\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(name);
-}
-
-function isVideo(name: string): boolean {
-  return /\.(mp4|webm|mov|m4v|avi|mkv|ogv)$/i.test(name);
-}
-
-function isAudio(name: string): boolean {
-  return /\.(mp3|wav|ogg|oga|m4a|aac|flac|opus)$/i.test(name);
-}
-
-/**
- * Sentinel `content` markers for files we render via a binary blob rather
- * than the text editor. `openFileEntry` sets one of these instead of reading
- * the file as text; the viewer panel switches on them.
- */
-const MEDIA_IMAGE = '__IMAGE__';
-const MEDIA_VIDEO = '__VIDEO__';
-const MEDIA_AUDIO = '__AUDIO__';
-const BINARY_FILE = '__BINARY__';
-
-/** Sentinels whose `content` is not editable text — they render a viewer. */
-const NON_TEXT_CONTENT = new Set([MEDIA_IMAGE, MEDIA_VIDEO, MEDIA_AUDIO, BINARY_FILE]);
-
-/** The media sentinel for a file name, or null when it isn't recognized media. */
-function mediaSentinel(name: string): string | null {
-  if (isImage(name)) return MEDIA_IMAGE;
-  if (isVideo(name)) return MEDIA_VIDEO;
-  if (isAudio(name)) return MEDIA_AUDIO;
-  return null;
-}
-
-/**
- * Heuristic: does this text (decoded UTF-8 from the read API) look like raw
- * binary rather than something a human edits? A NUL byte never appears in
- * real text, and decoding binary as UTF-8 yields a sea of U+FFFD replacement
- * characters and stray control bytes. We sample the head so a huge artifact
- * doesn't cost a full scan. This is the backstop that keeps an unrecognized
- * binary extension (anything not caught by isImage/isVideo/isAudio) out of
- * the text editor.
- */
-function looksBinary(content: string): boolean {
-  const sample = content.slice(0, 4096);
-  if (!sample) return false;
-  let suspicious = 0;
-  for (let i = 0; i < sample.length; i++) {
-    const code = sample.charCodeAt(i);
-    // U+FFFD (replacement char) or a control byte that isn't tab/LF/CR.
-    if (code === 0xfffd || code < 9 || (code > 13 && code < 32)) suspicious++;
-  }
-  return suspicious / sample.length > 0.1;
-}
-
 const SELECTED_PROJECT_STORAGE_KEY = 'gezel:projects:selectedId';
-
-function projectInitial(name: string): string {
-  const trimmed = name.trim();
-  if (!trimmed) return '?';
-  const ch = Array.from(trimmed)[0];
-  return ch ? ch.toUpperCase() : '?';
-}
 
 function isHtml(name: string): boolean {
   return /\.html?$/i.test(name);
@@ -513,7 +482,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // Consume a pending "+" intent from the sidebar synchronously on first
   // render (the event below covers the already-mounted case). Never in
   // detail-only mode — a single project tab has no create UI.
-  const [createMode, setCreateMode] = useState<'crew' | 'solo' | null>(() =>
+  const [createMode, setCreateMode] = useState<'crew' | null>(() =>
     !detailOnly && consumeCreate('project') ? 'crew' : null,
   );
   const [pkgName, setPkgName] = useState('');
@@ -551,10 +520,27 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const [artifactFiles, setArtifactFiles] = useState<FileEntry[]>([]);
   const [workspaceTruncated, setWorkspaceTruncated] = useState(false);
   const [artifactsTruncated, setArtifactsTruncated] = useState(false);
+  // Per-tab file-panel view mode (tree/flat, sort axis), persisted per
+  // project + tab in localStorage. See file-view-modes.ts.
+  const [fileViewModes, setFileViewModes] = useState<Record<FileTab, FileViewMode>>({
+    workspace: 'tree-alpha',
+    artifacts: 'tree-alpha',
+  });
+  // Per-tab "show hidden files", persisted alongside the view mode. Drives the
+  // listing request itself — the exclusions are the walker's, not the tree's.
+  const [showHiddenFiles, setShowHiddenFiles] = useState<Record<FileTab, boolean>>({
+    workspace: false,
+    artifacts: false,
+  });
+  // Flat index-backed workspace file list ({path, size, mtimeMs}); fetched
+  // lazily when the flat "by modified" view is active. Null = not loaded.
+  const [workspaceIndexFiles, setWorkspaceIndexFiles] = useState<WorkspaceIndexFile[] | null>(null);
   const [openFile, setOpenFile] = useState<{
     path: string;
     content: string;
     source: FileTab;
+    /** On-disk bytes, as reported by the read. Absent for media, which never reads. */
+    size?: number;
     outsideIn?: OutsideInOpenFile;
   } | null>(null);
   const [workspaceIndexStatus, setWorkspaceIndexStatus] = useState<WorkspaceIndexStatus | null>(
@@ -572,7 +558,6 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   } | null>(null);
   const [workspaceSourceReveal, setWorkspaceSourceReveal] =
     useState<WorkspaceSourceRevealRequest | null>(null);
-  const [newFileName, setNewFileName] = useState('');
   // Output-pane visibility override. `null` = follow the auto default
   // (visible when the workspace has a previewable index.html); an
   // explicit boolean is the user's toggle choice, persisted per project
@@ -822,16 +807,24 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     [selected],
   );
 
-  const refreshFiles = useCallback(async (id: string) => {
-    const [ws, art] = await Promise.all([
-      api.listProjectWorkspace(id, '', true),
-      api.listProjectArtifacts(id, '', true),
-    ]);
-    setWorkspaceFiles(ws.files);
-    setArtifactFiles(art.files);
-    setWorkspaceTruncated(ws.truncated === true);
-    setArtifactsTruncated(art.truncated === true);
-  }, []);
+  const showWorkspaceHidden = showHiddenFiles.workspace;
+  const showArtifactsHidden = showHiddenFiles.artifacts;
+  const refreshFiles = useCallback(
+    async (id: string) => {
+      // Always ask for stats: one fetch powers the alpha tree, the
+      // modified-sorted tree, and the artifacts flat view. Cost is bounded by
+      // the walker's 500-entry cap.
+      const [ws, art] = await Promise.all([
+        api.listProjectWorkspace(id, '', true, { stats: true, hidden: showWorkspaceHidden }),
+        api.listProjectArtifacts(id, '', true, { stats: true, hidden: showArtifactsHidden }),
+      ]);
+      setWorkspaceFiles(ws.files);
+      setArtifactFiles(art.files);
+      setWorkspaceTruncated(ws.truncated === true);
+      setArtifactsTruncated(art.truncated === true);
+    },
+    [showWorkspaceHidden, showArtifactsHidden],
+  );
 
   // Output discovery has deliberately tighter traversal rules than the full
   // Workspace file tree: no node_modules/dot-folders, and at most four
@@ -891,6 +884,88 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       window.clearInterval(timer);
     };
   }, [fileTab, selectedProjectId]);
+
+  // Restore each tab's persisted view mode when the project changes.
+  useEffect(() => {
+    setWorkspaceIndexFiles(null);
+    if (!selectedProjectId) {
+      setFileViewModes({ workspace: 'tree-alpha', artifacts: 'tree-alpha' });
+      setShowHiddenFiles({ workspace: false, artifacts: false });
+      return;
+    }
+    let workspaceMode: FileViewMode = 'tree-alpha';
+    let artifactsMode: FileViewMode = 'tree-alpha';
+    let workspaceHidden = false;
+    let artifactsHidden = false;
+    try {
+      workspaceMode = coerceFileViewMode(
+        window.localStorage.getItem(fileViewStorageKey(selectedProjectId, 'workspace')),
+        'workspace',
+      );
+      artifactsMode = coerceFileViewMode(
+        window.localStorage.getItem(fileViewStorageKey(selectedProjectId, 'artifacts')),
+        'artifacts',
+      );
+      workspaceHidden =
+        window.localStorage.getItem(fileHiddenStorageKey(selectedProjectId, 'workspace')) === '1';
+      artifactsHidden =
+        window.localStorage.getItem(fileHiddenStorageKey(selectedProjectId, 'artifacts')) === '1';
+    } catch {}
+    setFileViewModes({ workspace: workspaceMode, artifacts: artifactsMode });
+    setShowHiddenFiles({ workspace: workspaceHidden, artifacts: artifactsHidden });
+  }, [selectedProjectId]);
+
+  const setFileViewMode = useCallback(
+    (tabKey: FileTab, mode: FileViewMode) => {
+      setFileViewModes((current) => ({ ...current, [tabKey]: mode }));
+      if (selectedProjectId) {
+        try {
+          window.localStorage.setItem(fileViewStorageKey(selectedProjectId, tabKey), mode);
+        } catch {}
+      }
+    },
+    [selectedProjectId],
+  );
+
+  const setShowHidden = useCallback(
+    (tabKey: FileTab, next: boolean) => {
+      setShowHiddenFiles((current) => ({ ...current, [tabKey]: next }));
+      if (selectedProjectId) {
+        try {
+          window.localStorage.setItem(
+            fileHiddenStorageKey(selectedProjectId, tabKey),
+            next ? '1' : '0',
+          );
+        } catch {}
+      }
+    },
+    [selectedProjectId],
+  );
+
+  // Fetch the complete index-backed file list while the flat "by modified"
+  // workspace view is active. Keyed on `scannedAt` so a finished re-scan
+  // (e.g. after "Index now") refreshes the list through the existing 30s
+  // status poll — no extra polling loop.
+  const workspaceViewMode = fileViewModes.workspace;
+  const indexScannedAt = workspaceIndexStatus?.meta?.scannedAt;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `indexScannedAt` is a deliberate extra dependency — a finished re-scan must refresh the list.
+  useEffect(() => {
+    if (fileTab !== 'workspace' || workspaceViewMode !== 'flat-modified' || !selectedProjectId) {
+      return;
+    }
+    let cancelled = false;
+    api
+      .listProjectIndexFilesDetail(selectedProjectId)
+      .then((res) => {
+        if (!cancelled) setWorkspaceIndexFiles(res.files);
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceIndexFiles(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [fileTab, workspaceViewMode, selectedProjectId, indexScannedAt]);
 
   const workspaceReviewPath =
     fileTab === 'workspace' && openFile?.source === 'workspace' ? openFile.path : null;
@@ -1618,44 +1693,21 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         await refreshProjectFiles(selected.id);
         return;
       }
-      if (openFile.source !== 'artifacts') return;
-      await api.writeProjectArtifact(selected.id, openFile.path, openFile.content);
-      await refreshFiles(selected.id);
+      // Plain text file. Deliberately no listing refresh: this path is an
+      // autosave lane now, and re-walking the tree on every keystroke pause
+      // would cost a full directory walk for a change that alters no
+      // structure.
+      if (!canWriteProjectFiles(openFile.source)) return;
+      if (openFile.source === 'workspace') {
+        await api.writeProjectWorkspaceFile(selected.id, {
+          path: openFile.path,
+          content,
+        });
+      } else {
+        await api.writeProjectArtifact(selected.id, openFile.path, content);
+      }
     },
-    [
-      selected,
-      openFile,
-      canWriteProjectFiles,
-      workspaceFiles,
-      artifactFiles,
-      refreshProjectFiles,
-      refreshFiles,
-    ],
-  );
-
-  const createArtifact = useCallback(async () => {
-    if (!selected || !newFileName.trim()) return;
-    await api.writeProjectArtifact(selected.id, newFileName.trim(), '');
-    setNewFileName('');
-    await refreshFiles(selected.id);
-  }, [selected, newFileName, refreshFiles]);
-
-  const deleteArtifact = useCallback(
-    async (entry: FileEntry) => {
-      if (!selected) return;
-      await api.deleteProjectArtifact(selected.id, entry.path);
-      if (openFile?.path === entry.path) setOpenFile(null);
-      await refreshFiles(selected.id);
-    },
-    [selected, openFile, refreshFiles],
-  );
-
-  const reveal = useCallback(
-    async (which: 'workspace' | 'artifacts') => {
-      if (!selected) return;
-      await api.revealProject(selected.id, which);
-    },
-    [selected],
+    [selected, openFile, canWriteProjectFiles, workspaceFiles, artifactFiles, refreshProjectFiles],
   );
 
   const imageUrl = useCallback(
@@ -1667,12 +1719,150 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   );
 
   const activeEntries = fileTab === 'workspace' ? workspaceFiles : artifactFiles;
-  const visibleActiveEntries = activeEntries.filter(
-    (entry) => !isOutsideInInternalPath(entry.path),
+  const showActiveHidden = fileTab ? showHiddenFiles[fileTab] : false;
+  // The outside-in sidecar folders (`_squisq`, `*_files`) are hidden for the
+  // same reason the walker hides dot-folders — "show hidden files" reveals
+  // both, otherwise the artifacts shadow/ folder would open onto nothing.
+  const visibleActiveEntries = useMemo(
+    () =>
+      showActiveHidden
+        ? activeEntries
+        : activeEntries.filter((entry) => !isOutsideInInternalPath(entry.path)),
+    [activeEntries, showActiveHidden],
   );
+  const activeViewMode: FileViewMode = fileTab ? fileViewModes[fileTab] : 'tree-alpha';
+  // Flat "by modified": prefer the complete index-backed list for the
+  // workspace (not capped by the walker); artifacts — and workspaces with
+  // indexing disabled or not yet scanned — fall back to the walked entries,
+  // which now carry mtimes.
+  const flatModifiedEntries = useMemo(() => {
+    if (activeViewMode !== 'flat-modified') return [];
+    if (fileTab === 'workspace' && workspaceIndexFiles && workspaceIndexFiles.length > 0) {
+      return workspaceIndexFiles
+        .filter((file) => showActiveHidden || !isOutsideInInternalPath(file.path))
+        .map((file) => fileEntryFromPath(file.path, file.mtimeMs))
+        .sort(compareFilesByMtimeDesc);
+    }
+    return visibleActiveEntries
+      .filter((entry) => !entry.isDirectory)
+      .slice()
+      .sort(compareFilesByMtimeDesc);
+  }, [activeViewMode, fileTab, workspaceIndexFiles, visibleActiveEntries, showActiveHidden]);
+  // Triage views: aggregate the already-polled live issues by file.
+  const issueAggregates = useMemo(
+    () => aggregateIssuesByFile(workspaceIssues?.issues ?? []),
+    [workspaceIssues],
+  );
+  const issueAggByPath = useMemo(
+    () => new Map(issueAggregates.map((agg) => [agg.path, agg])),
+    [issueAggregates],
+  );
+  const flatIssueEntries = useMemo(() => {
+    if (activeViewMode !== 'flat-issues' && activeViewMode !== 'flat-criticality') return [];
+    return sortAggregates(
+      issueAggregates,
+      activeViewMode === 'flat-issues' ? 'count' : 'score',
+    ).map((agg) => fileEntryFromPath(agg.path));
+  }, [activeViewMode, issueAggregates]);
+  // The shared browser builds its own flat-by-modified list from the walked
+  // entries. The workspace prefers the index-backed list where it exists (not
+  // capped by the walker), and owns the two issue-triage lists outright.
+  const indexBackedFlatList =
+    activeViewMode === 'flat-modified' &&
+    fileTab === 'workspace' &&
+    workspaceIndexFiles !== null &&
+    workspaceIndexFiles.length > 0;
+  const fileCustomList: FileBrowserCustomList | null = useMemo(() => {
+    if (activeViewMode === 'flat-issues' || activeViewMode === 'flat-criticality') {
+      return {
+        entries: flatIssueEntries,
+        emptyMessage: 'No open review issues.',
+        onSelect: (entry) => {
+          if (!fileTab) return;
+          void openFileEntry(entry, fileTab);
+          setWorkspaceIndexPaneOpen(true);
+        },
+        trailingForEntry: (entry) => {
+          const agg = issueAggByPath.get(entry.path);
+          if (!agg) return null;
+          return (
+            <>
+              {activeViewMode === 'flat-criticality' ? (
+                <span className="file-flat-score" title={`Criticality score ${agg.score}`}>
+                  {agg.score}
+                </span>
+              ) : (
+                <span
+                  className="workspace-tree-issue-count"
+                  title={`${agg.total} Boekwachter issue${agg.total === 1 ? '' : 's'} in this file`}
+                >
+                  {agg.total}
+                </span>
+              )}
+              <span className="file-flat-severities">{describeSeverities(agg.bySeverity)}</span>
+            </>
+          );
+        },
+      };
+    }
+    if (!indexBackedFlatList) return null;
+    return {
+      entries: flatModifiedEntries,
+      emptyMessage: 'No files yet.',
+      trailingForEntry: (entry) =>
+        entry.mtimeMs !== undefined ? (
+          <span className="file-flat-time">
+            {formatRelativeFileTime(new Date(entry.mtimeMs).toISOString())}
+          </span>
+        ) : null,
+    };
+  }, [
+    activeViewMode,
+    fileTab,
+    flatIssueEntries,
+    flatModifiedEntries,
+    indexBackedFlatList,
+    issueAggByPath,
+    openFileEntry,
+  ]);
+  // One adapter per (project, tab). The file panel itself is the shared
+  // browser — everything project-specific reaches it through this source or
+  // through the slots below (index summary, review pane, issue lists).
+  const fileSource = useMemo(
+    () =>
+      projectFileSource(selected?.id ?? '', fileTab ?? 'artifacts', {
+        canWrite: selected !== null && fileTab !== null && canWriteProjectFiles(fileTab),
+      }),
+    [selected, fileTab, canWriteProjectFiles],
+  );
+  const selectFilePath = useCallback(
+    (path: string | null) => {
+      if (!path) {
+        setOpenFile(null);
+        return;
+      }
+      if (!fileTab) return;
+      void openFileEntry(fileEntryFromPath(path), fileTab);
+    },
+    [fileTab, openFileEntry],
+  );
+  const fileMutations = useFileMutations({
+    source: fileSource,
+    entries: activeEntries,
+    selectedPath: openFile?.path ?? null,
+    onSelectPath: selectFilePath,
+    refresh: useCallback(async () => {
+      if (selected) await refreshProjectFiles(selected.id);
+    }, [selected, refreshProjectFiles]),
+  });
+  // Workspace files are editable exactly when the managed-workspace write
+  // policy allows it; artifacts always are. A rendered document additionally
+  // needs its explicit Markdown-editing opt-in.
   const isReadOnly = openFile?.outsideIn
     ? !openFile.outsideIn.editingEnabled || !canWriteProjectFiles(openFile.source)
-    : fileTab === 'workspace';
+    : fileTab
+      ? !canWriteProjectFiles(fileTab)
+      : true;
   const selectedWorkspaceIssueCount = workspaceReviewPath
     ? indexedIssueCountForEntry(
         { name: basenameOf(workspaceReviewPath), path: workspaceReviewPath, isDirectory: false },
@@ -1877,7 +2067,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   );
 
   const toggleSelectedArchive = useCallback(async () => {
-    if (!selected || selected.id === 'default' || changingArchive) return;
+    if (!selected || selected.id === 'default' || isSharedLibraryProject(selected)) return;
+    if (changingArchive) return;
     setChangingArchive(true);
     try {
       const updated = await api.updateProject(selected.id, { archived: !selected.archived });
@@ -1907,12 +2098,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
             className={`project-rail-name${selected?.id === p.id ? ' active' : ''}`}
             onClick={() => handleProjectRowClick(p.id)}
             title={p.name}
+            aria-label={sidebarCollapsed ? p.name : undefined}
           >
-            {sidebarCollapsed ? (
-              projectInitial(p.name)
-            ) : (
+            <ProjectIcon project={p} size={18} className="project-rail-mark" />
+            {!sidebarCollapsed && (
               <>
-                {p.name}
+                <span className="project-rail-label">{p.name}</span>
                 {p.storageScope === 'machine-shared' && (
                   <span
                     className="machine-shared-badge"
@@ -1995,23 +2186,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         <aside className={`side${sidebarCollapsed ? ' collapsed' : ''}`}>
           <div className="area-toolbar">
             {!sidebarCollapsed && (
-              <>
-                <button
-                  type="button"
-                  className="area-toolbar-btn"
-                  onClick={() => setCreateMode('crew')}
-                >
-                  + New Project
-                </button>
-                <button
-                  type="button"
-                  className="area-toolbar-btn"
-                  onClick={() => setCreateMode('solo')}
-                  title="A solo project — one Builder handles everything"
-                >
-                  + New Job
-                </button>
-              </>
+              <button
+                type="button"
+                className="area-toolbar-btn"
+                onClick={() => setCreateMode('crew')}
+              >
+                + New Project
+              </button>
             )}
             <button
               type="button"
@@ -2036,18 +2217,6 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   +
                 </span>
                 <span className="collapsed-create-label">Project</span>
-              </button>
-              <button
-                type="button"
-                className="collapsed-create-btn"
-                onClick={() => setCreateMode('solo')}
-                title="New Job (solo project)"
-                aria-label="New Job"
-              >
-                <span className="collapsed-create-symbol" aria-hidden="true">
-                  +
-                </span>
-                <span className="collapsed-create-label">Job</span>
               </button>
             </div>
           )}
@@ -2521,7 +2690,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             </small>
                           </fieldset>
 
-                          {selected.id !== 'default' && (
+                          {selected.id !== 'default' && !isSharedLibraryProject(selected) && (
                             <div className="project-archive-setting">
                               <div className="project-archive-setting-copy">
                                 <span className="project-archive-setting-title">
@@ -2820,132 +2989,191 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   )}
 
                   {fileTab !== null && (
-                    <div
-                      className={`project-files-layout project-files-layout-${fileTab}${fileTab === 'workspace' && workspaceIndexPaneOpen ? ' has-index-pane' : ''}`}
-                    >
-                      <div className="file-tree-panel">
-                        <div className="file-tree-header">
-                          <span className="file-tree-title">
-                            {fileTab === 'workspace' ? 'Workspace' : 'Artifacts'}
-                          </span>
-                          <button
-                            type="button"
-                            className="tree-reveal-btn"
-                            onClick={() => void reveal(fileTab)}
-                            title="Open in file manager"
-                          >
-                            Open
-                          </button>
-                          {fileTab === 'workspace' && (
-                            <div
-                              className="workspace-tree-index-summary"
-                              aria-live="polite"
-                              title={
-                                workspaceIndexError ??
-                                (workspaceIssues
-                                  ? `${workspaceIssues.reviewedFiles} of ${workspaceIssues.eligibleFiles} eligible files reviewed`
-                                  : workspaceIndexLabel(workspaceIndexStatus))
-                              }
-                            >
-                              <span
-                                className={`workspace-index-state workspace-index-state-${indexTone(workspaceIndexStatus)}`}
-                              >
-                                <span aria-hidden="true" />
-                                {workspaceIndexError
-                                  ? 'Index unavailable'
-                                  : workspaceIndexLabel(workspaceIndexStatus)}
-                              </span>
-                              {workspaceIssues && workspaceIssues.counts.total > 0 && (
-                                <span className="workspace-tree-issue-total">
-                                  {workspaceIssues.counts.total} issue
-                                  {workspaceIssues.counts.total === 1 ? '' : 's'}
+                    <FileBrowserPane
+                      source={fileSource}
+                      layoutClassName={`project-files-layout-${fileTab}`}
+                      entries={visibleActiveEntries}
+                      truncated={
+                        (fileTab === 'workspace' ? workspaceTruncated : artifactsTruncated) &&
+                        !indexBackedFlatList
+                      }
+                      viewMode={activeViewMode}
+                      modes={fileTab === 'workspace' ? WORKSPACE_VIEW_MODES : ARTIFACT_VIEW_MODES}
+                      onViewModeChange={(mode) => setFileViewMode(fileTab, mode)}
+                      showHidden={showActiveHidden}
+                      onShowHiddenChange={(next) => setShowHidden(fileTab, next)}
+                      selectedPath={openFile?.path}
+                      onSelect={(entry) => void openFileEntry(entry, fileTab)}
+                      emptyMessage={
+                        fileTab === 'workspace'
+                          ? selected.workingDir
+                            ? 'Workspace directory is empty.'
+                            : 'No external working directory set. Use the internal workspace or set an external path under the Settings tab.'
+                          : 'No artifacts yet. Your gezellen will store reports and outputs here.'
+                      }
+                      mutations={fileMutations}
+                      customList={fileCustomList}
+                      trailingForEntry={
+                        fileTab === 'workspace'
+                          ? (entry) => {
+                              const count = indexedIssueCountForEntry(entry, workspaceIssues);
+                              return count > 0 ? (
+                                <span
+                                  className="workspace-tree-issue-count"
+                                  title={`${count} Boekwachter issue${count === 1 ? '' : 's'} ${entry.isDirectory ? 'in this folder' : 'in this file'}`}
+                                  aria-label={`${count} indexing issue${count === 1 ? '' : 's'}`}
+                                >
+                                  {count}
                                 </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        {fileTab === 'artifacts' && (
-                          <div style={{ padding: '0.35rem 0.5rem' }}>
-                            <div className="new-row">
-                              <input
-                                placeholder="new-file.md"
-                                value={newFileName}
-                                onChange={(e) => setNewFileName(e.target.value)}
-                                style={{ fontSize: '0.8rem' }}
-                              />
-                              <button
-                                type="button"
-                                onClick={createArtifact}
-                                disabled={!newFileName.trim()}
-                                style={{ fontSize: '0.8rem', padding: '0.25rem 0.5rem' }}
-                              >
-                                +
-                              </button>
-                            </div>
+                              ) : null;
+                            }
+                          : undefined
+                      }
+                      actionsForEntry={(entry) => {
+                        if (
+                          entry.isDirectory ||
+                          !resolveOutsideInLayout(entry.path) ||
+                          (openFile?.path === entry.path &&
+                            openFile.source === fileTab &&
+                            openFile.outsideIn?.editingEnabled)
+                        ) {
+                          return [];
+                        }
+                        return [
+                          {
+                            label: 'Allow editing via markdown',
+                            disabled: !canWriteProjectFiles(fileTab),
+                            onSelect: () => allowOutsideInMarkdownEditing(entry, fileTab),
+                          },
+                        ];
+                      }}
+                      headerExtra={
+                        fileTab === 'workspace' ? (
+                          <div
+                            className="workspace-tree-index-summary"
+                            aria-live="polite"
+                            title={
+                              workspaceIndexError ??
+                              (workspaceIssues
+                                ? `${workspaceIssues.reviewedFiles} of ${workspaceIssues.eligibleFiles} eligible files reviewed`
+                                : workspaceIndexLabel(workspaceIndexStatus))
+                            }
+                          >
+                            <span
+                              className={`workspace-index-state workspace-index-state-${indexTone(workspaceIndexStatus)}`}
+                            >
+                              <span aria-hidden="true" />
+                              {workspaceIndexError
+                                ? 'Index unavailable'
+                                : workspaceIndexLabel(workspaceIndexStatus)}
+                            </span>
+                            {workspaceIssues && workspaceIssues.counts.total > 0 && (
+                              <span className="workspace-tree-issue-total">
+                                {workspaceIssues.counts.total} issue
+                                {workspaceIssues.counts.total === 1 ? '' : 's'}
+                              </span>
+                            )}
                           </div>
-                        )}
-                        <div className="file-tree">
-                          {visibleActiveEntries.length === 0 && (
-                            <p className="muted" style={{ padding: '0.5rem', fontSize: '0.85rem' }}>
-                              {fileTab === 'workspace'
-                                ? selected.workingDir
-                                  ? 'Workspace directory is empty.'
-                                  : 'No external working directory set. Use the internal workspace or set an external path under the Settings tab.'
-                                : 'No artifacts yet. Your gezellen will store reports and outputs here.'}
-                            </p>
-                          )}
-                          <FileTree
-                            entries={visibleActiveEntries}
-                            selectedPath={openFile?.path}
-                            onSelect={(e) => void openFileEntry(e, fileTab)}
-                            onDelete={fileTab === 'artifacts' ? deleteArtifact : undefined}
-                            trailingForEntry={
-                              fileTab === 'workspace'
-                                ? (entry) => {
-                                    const count = indexedIssueCountForEntry(entry, workspaceIssues);
-                                    return count > 0 ? (
-                                      <span
-                                        className="workspace-tree-issue-count"
-                                        title={`${count} Boekwachter issue${count === 1 ? '' : 's'} ${entry.isDirectory ? 'in this folder' : 'in this file'}`}
-                                        aria-label={`${count} indexing issue${count === 1 ? '' : 's'}`}
-                                      >
-                                        {count}
-                                      </span>
-                                    ) : null;
+                        ) : undefined
+                      }
+                      notices={
+                        fileTab === 'workspace' ? (
+                          <>
+                            {activeViewMode === 'flat-modified' &&
+                              workspaceIndexStatus &&
+                              workspaceIndexStatus.state !== 'fresh' && (
+                                <div className="file-flat-notice">
+                                  <span>
+                                    {workspaceIndexStatus.state === 'indexing'
+                                      ? 'Indexing…'
+                                      : workspaceIndexStatus.state === 'stale'
+                                        ? 'Index is out of date.'
+                                        : workspaceIndexStatus.state === 'never'
+                                          ? 'Not indexed yet — showing files from the folder walk.'
+                                          : 'Indexing is disabled — showing files from the folder walk.'}
+                                  </span>
+                                  {(workspaceIndexStatus.state === 'stale' ||
+                                    workspaceIndexStatus.state === 'never') && (
+                                    <button
+                                      type="button"
+                                      className="file-flat-notice-action"
+                                      onClick={() =>
+                                        void api
+                                          .refreshProjectIndex(selected.id)
+                                          .then((res) => setWorkspaceIndexStatus(res.status))
+                                          .catch(() => {})
+                                      }
+                                    >
+                                      Index now
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            {(activeViewMode === 'flat-issues' ||
+                              activeViewMode === 'flat-criticality') && (
+                              <div className="file-flat-notice">
+                                <span>
+                                  {workspaceIssues
+                                    ? `${workspaceIssues.reviewedFiles} of ${workspaceIssues.eligibleFiles} eligible files reviewed${workspaceIssues.truncated ? ' — showing the first 1000 issues' : ''}`
+                                    : 'Loading review coverage…'}
+                                </span>
+                                {(workspaceIndexStatus?.state === 'stale' ||
+                                  workspaceIndexStatus?.state === 'never') && (
+                                  <button
+                                    type="button"
+                                    className="file-flat-notice-action"
+                                    onClick={() =>
+                                      void api
+                                        .refreshProjectIndex(selected.id)
+                                        .then((res) => setWorkspaceIndexStatus(res.status))
+                                        .catch(() => {})
+                                    }
+                                  >
+                                    Index now
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        ) : undefined
+                      }
+                      extraPane={
+                        fileTab === 'workspace' && workspaceIndexPaneOpen ? (
+                          <WorkspaceIndexPane
+                            path={workspaceReviewPath}
+                            status={workspaceIndexStatus}
+                            issues={workspaceIssues}
+                            review={workspaceReview}
+                            loading={workspaceReviewLoading}
+                            error={workspaceReviewError}
+                            onClose={() => setWorkspaceIndexPaneOpen(false)}
+                            onSelectLine={(line) => {
+                              if (!workspaceReviewPath) return;
+                              setWorkspaceSourceReveal((current) => ({
+                                path: workspaceReviewPath,
+                                line,
+                                requestId: (current?.requestId ?? 0) + 1,
+                              }));
+                            }}
+                            onFixIssue={
+                              workspaceAccess.effectiveWritable
+                                ? (issue) => {
+                                    if (workspaceReviewPath) {
+                                      setWorkspaceIssueFixRequest({
+                                        path: workspaceReviewPath,
+                                        issue,
+                                      });
+                                    }
                                   }
                                 : undefined
                             }
-                            actionsForEntry={(entry) => {
-                              if (
-                                entry.isDirectory ||
-                                !resolveOutsideInLayout(entry.path) ||
-                                (openFile?.path === entry.path &&
-                                  openFile.source === fileTab &&
-                                  openFile.outsideIn?.editingEnabled)
-                              ) {
-                                return [];
-                              }
-                              return [
-                                {
-                                  label: 'Allow editing via markdown',
-                                  disabled: !canWriteProjectFiles(fileTab),
-                                  onSelect: () => allowOutsideInMarkdownEditing(entry, fileTab),
-                                },
-                              ];
-                            }}
+                            onUpdateIssue={updateWorkspaceIssue}
+                            onOpenTask={(taskRef) => navigateToTab({ kind: 'task', ref: taskRef })}
                           />
-                          {(fileTab === 'workspace' ? workspaceTruncated : artifactsTruncated) && (
-                            <p className="muted" style={{ padding: '0.5rem', fontSize: '0.8rem' }}>
-                              This folder has more files than can be shown — the listing is
-                              incomplete. Use "Open" above to browse everything in your file
-                              manager.
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="file-viewer-panel">
-                        {openFile ? (
+                        ) : undefined
+                      }
+                      viewer={
+                        openFile ? (
                           openFile.outsideIn ? (
                             <ProjectOutsideInEditor
                               key={`${openFile.source}:${openFile.path}`}
@@ -2958,50 +3186,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               onSave={saveArtifact}
                               toolbarIndexToggle={workspaceIndexToggle}
                             />
-                          ) : openFile.content === MEDIA_IMAGE ? (
-                            <div className="image-preview">
-                              <AuthedImagePreview
-                                projectId={selected.id}
-                                path={openFile.path}
-                                source={openFile.source}
-                              />
-                              <p className="muted" style={{ textAlign: 'center' }}>
-                                {openFile.path}
-                              </p>
-                            </div>
-                          ) : openFile.content === MEDIA_VIDEO ? (
-                            <div className="image-preview">
-                              <AuthedMediaPreview
-                                kind="video"
-                                projectId={selected.id}
-                                path={openFile.path}
-                                source={openFile.source}
-                              />
-                              <p className="muted" style={{ textAlign: 'center' }}>
-                                {openFile.path}
-                              </p>
-                            </div>
-                          ) : openFile.content === MEDIA_AUDIO ? (
-                            <div className="image-preview">
-                              <AuthedMediaPreview
-                                kind="audio"
-                                projectId={selected.id}
-                                path={openFile.path}
-                                source={openFile.source}
-                              />
-                              <p className="muted" style={{ textAlign: 'center' }}>
-                                {openFile.path}
-                              </p>
-                            </div>
-                          ) : openFile.content === BINARY_FILE ? (
-                            <div className="image-preview">
-                              <p className="muted" style={{ textAlign: 'center' }}>
-                                Binary file — no text preview available.
-                              </p>
-                              <p className="muted" style={{ textAlign: 'center' }}>
-                                {openFile.path}
-                              </p>
-                            </div>
+                          ) : NON_TEXT_CONTENT.has(openFile.content) ? (
+                            <NonTextFilePreview
+                              content={openFile.content}
+                              path={openFile.path}
+                              fetchBlob={fileSource.fetchBlob}
+                              {...(openFile.size === undefined ? {} : { sizeBytes: openFile.size })}
+                            />
                           ) : isHtml(openFile.path) ? (
                             <HtmlFileViewer
                               projectId={selected.id}
@@ -3014,86 +3205,25 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               toolbarIndexToggle={workspaceIndexToggle}
                               sourceReveal={activeWorkspaceSourceReveal}
                             />
-                          ) : isMarkdown(openFile.path) && openFile.source === 'artifacts' ? (
-                            <ProjectMarkdownArtifactEditor
+                          ) : (
+                            <ProjectFileEditor
                               key={`${openFile.source}:${openFile.path}`}
                               projectId={selected.id}
-                              path={openFile.path}
-                              content={openFile.content}
+                              file={openFile}
                               isReadOnly={isReadOnly}
                               editorTheme={editorTheme}
                               onChange={handleEditorContentChange}
                               onSave={saveArtifact}
+                              toolbarIndexToggle={workspaceIndexToggle}
                             />
-                          ) : (
-                            <div className="editor-wrap" style={{ height: '100%' }}>
-                              <EditorShell
-                                key={`${openFile.source}:${openFile.path}`}
-                                initialMarkdown={openFile.content}
-                                fileName={openFile.path}
-                                onChange={isReadOnly ? undefined : handleEditorContentChange}
-                                height="100%"
-                                colorScheme={editorTheme}
-                                showPlayTab={false}
-                                fullWidth
-                                toolbarSlotRight={
-                                  <>
-                                    {workspaceIndexToggle}
-                                    {!isReadOnly && (
-                                      <button
-                                        type="button"
-                                        onClick={() => void saveArtifact()}
-                                        style={{ marginLeft: '0.5rem' }}
-                                      >
-                                        Save
-                                      </button>
-                                    )}
-                                  </>
-                                }
-                              />
-                            </div>
                           )
                         ) : (
                           <p className="placeholder" style={{ padding: '2rem' }}>
-                            Select a file from the tree to view{' '}
-                            {fileTab === 'artifacts' ? 'or edit ' : ''}it.
+                            Select a file from the tree to view or edit it.
                           </p>
-                        )}
-                      </div>
-                      {fileTab === 'workspace' && workspaceIndexPaneOpen && (
-                        <WorkspaceIndexPane
-                          path={workspaceReviewPath}
-                          status={workspaceIndexStatus}
-                          issues={workspaceIssues}
-                          review={workspaceReview}
-                          loading={workspaceReviewLoading}
-                          error={workspaceReviewError}
-                          onClose={() => setWorkspaceIndexPaneOpen(false)}
-                          onSelectLine={(line) => {
-                            if (!workspaceReviewPath) return;
-                            setWorkspaceSourceReveal((current) => ({
-                              path: workspaceReviewPath,
-                              line,
-                              requestId: (current?.requestId ?? 0) + 1,
-                            }));
-                          }}
-                          onFixIssue={
-                            workspaceAccess.effectiveWritable
-                              ? (issue) => {
-                                  if (workspaceReviewPath) {
-                                    setWorkspaceIssueFixRequest({
-                                      path: workspaceReviewPath,
-                                      issue,
-                                    });
-                                  }
-                                }
-                              : undefined
-                          }
-                          onUpdateIssue={updateWorkspaceIssue}
-                          onOpenTask={(taskRef) => navigateToTab({ kind: 'task', ref: taskRef })}
-                        />
-                      )}
-                    </div>
+                        )
+                      }
+                    />
                   )}
 
                   {tab === 'chat' && (
@@ -3143,6 +3273,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                 workspaceAccess.claudeInUse ? saveClaudePermissionMode : undefined
               }
               onOpenGitHub={selected.github?.url ? () => setTab('github') : undefined}
+              onAddBoekwachter={
+                boekwachterGezelId ? () => addProjectGezel(boekwachterGezelId) : undefined
+              }
               status={selected.status ?? 'active'}
               statusLocked={selected.archived === true}
               onStatusChange={async (v) => {
@@ -3296,194 +3429,123 @@ function ProjectOutsideInEditor({
 }
 
 /**
- * Markdown-artifact editor with the full squisq feature set — Play
- * tab, the Files panel for image uploads (writes land in the parent
- * directory next to the markdown), the DocBlocks-style Export menu,
- * version history, and a sibling-artifact link picker. The
- * editor talks to `projects/{id}/artifacts/<dir>/` through a
- * `ContentContainer` adapter so image references in the doc resolve
- * relative to the doc's directory.
+ * The text editor for any project file that isn't a rendered document or an
+ * HTML page. Markdown artifacts get the full squisq feature set — the Files
+ * panel for image uploads (writes land next to the markdown), the
+ * DocBlocks-style Export menu, version history, a sibling-artifact link
+ * picker, and the report-action fence renderers that mount recommendation
+ * blocks as live cards. Workspace files (code) and non-markdown artifacts
+ * keep the plain shell: the squisq concepts (themes, playback, exporting to
+ * PowerPoint) only make sense for prose.
  *
- * Workspace files (code) and non-markdown artifacts keep the plain
- * EditorShell — the squisq concepts (themes, playback, exporting to
- * PowerPoint) only make sense for prose / markdown.
+ * Both autosave. Edits land through the same serialized lane the documents
+ * library uses, so a rename or delete can flush an in-flight draft rather
+ * than race it, and the status bar carries the dirty indicator instead of a
+ * Save button.
  */
-function ProjectMarkdownArtifactEditor({
+function ProjectFileEditor({
   projectId,
-  path,
-  content,
+  file,
   isReadOnly,
   editorTheme,
   onChange,
   onSave,
+  toolbarIndexToggle,
 }: {
   projectId: string;
-  path: string;
-  content: string;
+  file: { path: string; content: string; source: FileTab };
   isReadOnly: boolean;
   editorTheme: 'light' | 'dark';
   onChange: (source: string) => void;
-  onSave: () => void | Promise<void>;
+  onSave: (content?: string) => void | Promise<void>;
+  toolbarIndexToggle?: ReactNode;
 }) {
-  const root = useMemo(() => parentDir(path), [path]);
-  const primaryDocumentFilename = useMemo(() => basenameOf(path), [path]);
+  const markdown = isMarkdown(file.path) && file.source === 'artifacts';
+  const root = useMemo(() => parentDir(file.path), [file.path]);
+  const primaryDocumentFilename = useMemo(() => basenameOf(file.path), [file.path]);
+  const autosave = useSerializedAutosave({
+    resourceKey: `file:${file.source}:${file.path}`,
+    initialValue: markdown ? normalizeMarkdownBaseline(file.content) : file.content,
+    save: async (content) => {
+      await onSave(content);
+    },
+  });
+  const handleChange = useCallback(
+    (content: string) => {
+      onChange(content);
+      autosave.update(content);
+    },
+    [autosave.update, onChange],
+  );
   const container = useMemo(
     () =>
-      createArtifactsContentContainer({
-        projectId,
-        root,
-        client: api,
-        primaryDocumentFilename,
-      }),
-    [projectId, root, primaryDocumentFilename],
+      markdown
+        ? createArtifactsContentContainer({
+            projectId,
+            root,
+            client: api,
+            primaryDocumentFilename,
+          })
+        : null,
+    [markdown, projectId, root, primaryDocumentFilename],
   );
   const documentLinkProvider = useMemo(
     () =>
-      createDocumentLinkProvider({
-        client: api,
-        currentDocumentPath: path,
-        source: 'project-artifacts',
-        projectId,
-      }),
-    [projectId, path],
+      markdown
+        ? createDocumentLinkProvider({
+            client: api,
+            currentDocumentPath: file.path,
+            source: 'project-artifacts',
+            projectId,
+          })
+        : null,
+    [markdown, projectId, file.path],
   );
   // Reports may embed gezel-action recommendation blocks — register the
   // fence renderer so they mount as live, fireable cards INSIDE the
   // editor (instead of Monaco code insets).
   const fenceRenderers = useMemo(
-    () => makeReportActionFenceRenderers({ projectId, reportPath: path }),
-    [projectId, path],
+    () =>
+      markdown ? makeReportActionFenceRenderers({ projectId, reportPath: file.path }) : undefined,
+    [markdown, projectId, file.path],
   );
   return (
     <div className="editor-wrap" style={{ height: '100%' }}>
       <EditorShell
-        initialMarkdown={content}
-        fileName={path}
-        onChange={isReadOnly ? undefined : onChange}
+        initialMarkdown={autosave.desiredValue()}
+        fileName={file.path}
+        readOnly={isReadOnly}
+        onChange={isReadOnly ? undefined : handleChange}
         height="100%"
         colorScheme={editorTheme}
         fullWidth
+        showPlayTab={markdown}
         workspaceContainer={container}
         documentLinkProvider={documentLinkProvider}
         fenceRenderers={fenceRenderers}
-        allowVersioning={!isReadOnly}
+        allowVersioning={markdown && !isReadOnly}
         versionBasename={primaryDocumentFilename}
-        outline
+        outline={markdown}
         toolbarSlotAfterActions={
-          !isReadOnly ? <TransformToolbarButton context="generic" /> : undefined
+          markdown && !isReadOnly ? <TransformToolbarButton context="generic" /> : undefined
         }
         toolbarSlotRight={
           <>
-            {!isReadOnly && (
-              <button type="button" onClick={() => void onSave()} style={{ marginLeft: '0.5rem' }}>
-                Save
-              </button>
+            {toolbarIndexToggle}
+            {markdown && container && (
+              <ExportToolbarControls
+                selectedFile={file.path}
+                mediaContainer={container}
+                mediaSource={{ kind: 'project-artifacts', projectId }}
+              />
             )}
-            <ExportToolbarControls
-              selectedFile={path}
-              mediaContainer={container}
-              mediaSource={{ kind: 'project-artifacts', projectId }}
-            />
           </>
         }
+        statusBarSlotRight={!isReadOnly ? <AutosaveStatus autosave={autosave} /> : undefined}
       />
     </div>
   );
 }
-
-/**
- * Image preview that fetches through the authenticated client + renders
- * via a blob URL. `<img src="/api/...?raw=1">` would 401 because the
- * `<img>` element can't send a bearer token; this mirrors the pattern
- * `fetchSessionImage` / `fetchProjectAttachment` use on the chat side.
- */
-function AuthedImagePreview({
-  projectId,
-  path,
-  source,
-}: {
-  projectId: string;
-  path: string;
-  source: FileTab;
-}) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    let currentUrl: string | null = null;
-    void (async () => {
-      try {
-        const blob =
-          source === 'workspace'
-            ? await api.fetchProjectWorkspaceBlob(projectId, path)
-            : await api.fetchProjectArtifactBlob(projectId, path);
-        if (cancelled) return;
-        currentUrl = URL.createObjectURL(blob);
-        setBlobUrl(currentUrl);
-      } catch (err) {
-        if (!cancelled) setError((err as Error).message);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (currentUrl) URL.revokeObjectURL(currentUrl);
-    };
-  }, [projectId, path, source]);
-  if (error) return <p className="muted small">Preview failed: {error}</p>;
-  if (!blobUrl) return <p className="muted small">Loading…</p>;
-  return <img src={blobUrl} alt={path} />;
-}
-
-/**
- * Authenticated `<video>`/`<audio>` preview. Same auth fence as
- * AuthedImagePreview — `<video src="/api/...">` would 401 because the element
- * can't carry a bearer token, so we fetch the blob and play it from an object
- * URL.
- */
-function AuthedMediaPreview({
-  kind,
-  projectId,
-  path,
-  source,
-}: {
-  kind: 'video' | 'audio';
-  projectId: string;
-  path: string;
-  source: FileTab;
-}) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    let currentUrl: string | null = null;
-    void (async () => {
-      try {
-        const blob =
-          source === 'workspace'
-            ? await api.fetchProjectWorkspaceBlob(projectId, path)
-            : await api.fetchProjectArtifactBlob(projectId, path);
-        if (cancelled) return;
-        currentUrl = URL.createObjectURL(blob);
-        setBlobUrl(currentUrl);
-      } catch (err) {
-        if (!cancelled) setError((err as Error).message);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (currentUrl) URL.revokeObjectURL(currentUrl);
-    };
-  }, [projectId, path, source]);
-  if (error) return <p className="muted small">Preview failed: {error}</p>;
-  if (!blobUrl) return <p className="muted small">Loading…</p>;
-  if (kind === 'audio') {
-    // biome-ignore lint/a11y/useMediaCaption: user-generated audio artifact; no caption track exists.
-    return <audio src={blobUrl} controls style={{ width: '100%' }} />;
-  }
-  // biome-ignore lint/a11y/useMediaCaption: user-generated video artifact; no caption track exists.
-  return <video src={blobUrl} controls style={{ maxWidth: '100%', maxHeight: '100%' }} />;
-}
-
 /**
  * Preview/source viewer for `.html` files. An indexed line selection moves
  * the viewer to Source before the shared editor bridge reveals the anchor.
@@ -3504,7 +3566,7 @@ function HtmlFileViewer({
   isReadOnly: boolean;
   editorTheme: 'light' | 'dark';
   onEditorChange: (source: string) => void;
-  onSave: () => void | Promise<void>;
+  onSave: (content?: string) => void | Promise<void>;
   toolbarIndexToggle?: ReactNode;
   sourceReveal?: WorkspaceSourceRevealRequest | null;
   /**
@@ -3528,6 +3590,24 @@ function HtmlFileViewer({
   useEffect(() => {
     if (sourceReveal?.path === file.path) setMode('source');
   }, [file.path, sourceReveal]);
+
+  // Same autosave lane as every other project file — the Source tab edits the
+  // page the Preview tab renders, so a Save button here would be the one place
+  // an edit could sit unsaved while the preview claims to show the file.
+  const sourceAutosave = useSerializedAutosave({
+    resourceKey: `file:${file.source}:${file.path}`,
+    initialValue: file.content,
+    save: async (content) => {
+      await onSave(content);
+    },
+  });
+  const handleSourceChange = useCallback(
+    (content: string) => {
+      onEditorChange(content);
+      sourceAutosave.update(content);
+    },
+    [onEditorChange, sourceAutosave.update],
+  );
 
   const complain = useCallback(
     async (entry: HtmlPreviewLogEntry) => {
@@ -3617,26 +3697,16 @@ function HtmlFileViewer({
         <div className="editor-wrap">
           <EditorShell
             key={`${file.source}:${file.path}`}
-            initialMarkdown={file.content}
+            initialMarkdown={sourceAutosave.desiredValue()}
             fileName={file.path}
-            onChange={isReadOnly ? undefined : onEditorChange}
+            onChange={isReadOnly ? undefined : handleSourceChange}
             height="100%"
             colorScheme={editorTheme}
             showPlayTab={false}
             fullWidth
-            toolbarSlotRight={
-              <>
-                {toolbarIndexToggle}
-                {!isReadOnly && (
-                  <button
-                    type="button"
-                    onClick={() => void onSave()}
-                    style={{ marginLeft: '0.5rem' }}
-                  >
-                    Save
-                  </button>
-                )}
-              </>
+            toolbarSlotRight={toolbarIndexToggle}
+            statusBarSlotRight={
+              !isReadOnly ? <AutosaveStatus autosave={sourceAutosave} /> : undefined
             }
           />
         </div>

@@ -296,83 +296,83 @@ export function WorkspaceIndexPane({
                           {issue.taskRef && issue.status === 'in_progress' && (
                             <button
                               type="button"
-                              className="link-button"
+                              className="link-button workspace-index-issue-task"
                               onClick={() => onOpenTask?.(issue.taskRef!)}
                             >
                               Working · {issue.taskRef}
                             </button>
                           )}
-                          {onUpdateIssue && (
-                            <button
-                              type="button"
-                              className="link-button"
-                              disabled={issueAction !== null}
-                              onClick={() =>
-                                void runIssueAction(issue, issue.seen ? 'unread' : 'read', {
-                                  seen: !issue.seen,
-                                })
-                              }
-                            >
-                              {issue.seen ? 'Mark unread' : 'Mark read'}
-                            </button>
-                          )}
-                          {onUpdateIssue && issue.status === 'open' && (
-                            <>
-                              <button
-                                type="button"
-                                className="link-button"
+                          {/* The toolbar carries the issue's ref so a screen reader can
+                              tell one row's icon keys from the next one's, which lets
+                              the keys themselves keep short action labels. */}
+                          <div
+                            className="gz-tray workspace-index-issue-tray"
+                            role="toolbar"
+                            aria-label={`Actions for ${issue.ref}`}
+                          >
+                            {onUpdateIssue && (
+                              <IssueActionKey
+                                icon={issue.seen ? 'fa-envelope' : 'fa-envelope-open'}
+                                label={issue.seen ? 'Mark unread' : 'Mark read'}
                                 disabled={issueAction !== null}
                                 onClick={() =>
-                                  void runIssueAction(issue, 'dismiss', {
-                                    status: 'dismissed',
-                                    seen: true,
-                                    dismissalReason: 'not_an_issue',
+                                  void runIssueAction(issue, issue.seen ? 'unread' : 'read', {
+                                    seen: !issue.seen,
                                   })
                                 }
-                              >
-                                Not an issue
-                              </button>
-                              <button
-                                type="button"
-                                className="link-button"
-                                disabled={issueAction !== null}
-                                onClick={() =>
-                                  void runIssueAction(issue, 'resolve', {
-                                    status: 'resolved',
-                                    seen: true,
-                                  })
-                                }
-                              >
-                                Mark resolved
-                              </button>
-                            </>
-                          )}
-                          {onUpdateIssue &&
-                            (issue.status === 'resolved' || issue.status === 'dismissed') && (
-                              <button
-                                type="button"
-                                className="link-button"
-                                disabled={issueAction !== null}
-                                onClick={() =>
-                                  void runIssueAction(issue, 'reopen', {
-                                    status: 'open',
-                                    seen: true,
-                                  })
-                                }
-                              >
-                                Reopen
-                              </button>
+                              />
                             )}
-                          {onFixIssue && issue.status === 'open' && (
-                            <button
-                              type="button"
-                              className="gz-key workspace-index-issue-fix"
-                              onClick={() => onFixIssue(issue)}
-                              title={`Create a tracked task for ${issue.ref}`}
-                            >
-                              Fix
-                            </button>
-                          )}
+                            {onUpdateIssue && issue.status === 'open' && (
+                              <>
+                                <IssueActionKey
+                                  icon="fa-ban"
+                                  label="Not an issue"
+                                  disabled={issueAction !== null}
+                                  onClick={() =>
+                                    void runIssueAction(issue, 'dismiss', {
+                                      status: 'dismissed',
+                                      seen: true,
+                                      dismissalReason: 'not_an_issue',
+                                    })
+                                  }
+                                />
+                                <IssueActionKey
+                                  icon="fa-check"
+                                  label="Mark resolved"
+                                  disabled={issueAction !== null}
+                                  onClick={() =>
+                                    void runIssueAction(issue, 'resolve', {
+                                      status: 'resolved',
+                                      seen: true,
+                                    })
+                                  }
+                                />
+                              </>
+                            )}
+                            {onUpdateIssue &&
+                              (issue.status === 'resolved' || issue.status === 'dismissed') && (
+                                <IssueActionKey
+                                  icon="fa-rotate-left"
+                                  label="Reopen"
+                                  disabled={issueAction !== null}
+                                  onClick={() =>
+                                    void runIssueAction(issue, 'reopen', {
+                                      status: 'open',
+                                      seen: true,
+                                    })
+                                  }
+                                />
+                              )}
+                            {onFixIssue && issue.status === 'open' && (
+                              <IssueActionKey
+                                icon="fa-wrench"
+                                label="Fix"
+                                title={`Create a tracked task for ${issue.ref}`}
+                                className="workspace-index-issue-fix"
+                                onClick={() => onFixIssue(issue)}
+                              />
+                            )}
+                          </div>
                         </div>
                       </li>
                     );
@@ -419,6 +419,41 @@ export function WorkspaceIndexPane({
         )}
       </div>
     </aside>
+  );
+}
+
+/**
+ * One key in an issue row's action toolbar. Icon-only, so the label is the
+ * accessible name and — unless the action needs a longer explanation — the
+ * tooltip too (docs/ux.md → "Controls: keys in trays").
+ */
+function IssueActionKey({
+  icon,
+  label,
+  title,
+  className,
+  disabled,
+  onClick,
+}: {
+  icon: string;
+  label: string;
+  title?: string;
+  className?: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`gz-key gz-key--icon workspace-index-issue-key${className ? ` ${className}` : ''}`}
+      aria-label={label}
+      title={title ?? label}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {/* biome-ignore lint/a11y/noAriaHiddenOnFocusable: decorative icon, not focusable */}
+      <i className={`fa-solid ${icon}`} aria-hidden="true" />
+    </button>
   );
 }
 

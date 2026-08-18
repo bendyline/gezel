@@ -56,6 +56,7 @@ import {
   type ProjectDetail,
   type ProjectFileEntry,
   type ProjectGitHub,
+  type ProjectIconId,
   type ProjectLocalConfig,
   ProjectLocalConfigSchema,
   type ProjectManagedWorkspaceWritePolicy,
@@ -64,6 +65,9 @@ import {
   type ProjectTabVisibility,
   type ProviderName,
   type Question,
+  SHARED_PROJECT_FALLBACK_ID,
+  SHARED_PROJECT_ID,
+  SHARED_PROJECT_MARKER,
   type Task,
   type TaskNote,
   TaskNoteSchema,
@@ -81,11 +85,13 @@ import {
   encodeProjectGezelId,
   inferGenderForName,
   isSafeEntityId,
+  isSharedLibraryProject,
   isValidKokoroVoice,
   nowIso,
   parseGezelMarkdown,
   pickKokoroVoiceForGender,
   projectManagedWorkspaceWritePolicy,
+  resolveSharedProjectId,
   serializeGezelMarkdown,
 } from '@bendyline/gezel';
 import {
@@ -144,7 +150,13 @@ import {
   userProjectDir,
 } from '@bendyline/gezel/paths';
 import { applyPatch, parsePatch } from 'diff';
-import { matchReferencedArtifactsInContent } from '../chat/artifact-references.js';
+import {
+  type FileInventoryIndex,
+  artifactPathsOf,
+  buildFileInventoryIndex,
+  matchReferencedFilesWithIndex,
+  referencedFilesFromArtifactPaths,
+} from '../chat/file-references.js';
 import { matchReferencedTasksInContent } from '../chat/task-references.js';
 import { createGitIgnoreResolver } from '../git/ignore.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
@@ -163,7 +175,14 @@ import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../workspace/erro
 import { type JournalContext, appendJournalEntry } from '../workspace/journal.js';
 import { bootstrapWorkspace } from '../workspace/template.js';
 import { writeFileAtomic } from './atomic.js';
-import { DEFAULT_PROJECT_ABOUT_MD, DEFAULT_PROJECT_MISSION_MD } from './default-project-docs.js';
+import {
+  DEFAULT_PROJECT_ABOUT_MD,
+  DEFAULT_PROJECT_MISSION_MD,
+  SHARED_LIBRARY_STARTER_DOC,
+  SHARED_LIBRARY_STARTER_MD,
+  SHARED_PROJECT_ABOUT_MD,
+  SHARED_PROJECT_MISSION_MD,
+} from './default-project-docs.js';
 import { DocumentsStore } from './documents-store.js';
 import { ensurePrivateUserHome } from './home-permissions.js';
 import { extForMimeType, mimeTypeForFilename, safeBasename } from './media-types.js';
@@ -261,6 +280,11 @@ export interface StoreOptions {
    */
   history?: import('../history/manager.js').HistoryManager;
   /**
+   * Test seam: shorten the document-edit audit's quiet window so a test can
+   * observe a sitting close without waiting minutes.
+   */
+  auditQuietWindowMs?: number;
+  /**
    * Per-scope external roots, captured at boot from
    * `config.json#externalFolders`. When set, the Store routes reads/
    * writes for the externalized scopes (documents, gezels, projects)
@@ -300,7 +324,8 @@ export interface SessionChangeEvent {
 }
 
 export interface DocumentChangeEvent {
-  type: 'write' | 'delete';
+  /** `mkdir` carries no content — listeners that index files skip it. */
+  type: 'write' | 'delete' | 'mkdir';
   path: string;
 }
 
@@ -327,7 +352,7 @@ export class ConfigCorruptionError extends Error {
 export class ProjectDeleteError extends Error {
   constructor(
     message: string,
-    readonly reason: 'default_project' | 'machine_shared' | 'not_found',
+    readonly reason: 'default_project' | 'shared_project' | 'machine_shared' | 'not_found',
   ) {
     super(message);
     this.name = 'ProjectDeleteError';
@@ -359,8 +384,8 @@ export class Store {
    */
   private readonly sessionListeners = new Set<(ev: SessionChangeEvent) => void>();
 
-  /** Notified on every document write/delete, including overwrites (which
-   *  emit no history event). Same enqueue-only contract as session listeners. */
+  /** Notified on every document write/delete, including overwrites. Same
+   *  enqueue-only contract as session listeners. */
   private readonly documentListeners = new Set<(ev: DocumentChangeEvent) => void>();
 
   /** Notified after a shared gezel has been fully created and is listable.
@@ -383,6 +408,9 @@ export class Store {
       home: this.home,
       external: this.external,
       history: this.history,
+      ...(opts.auditQuietWindowMs !== undefined
+        ? { auditQuietWindowMs: opts.auditQuietWindowMs }
+        : {}),
       onChange: (ev) => {
         for (const listener of this.documentListeners) {
           try {
@@ -971,6 +999,138 @@ export class Store {
   }
 
   /**
+   * Ensure the canonical `shared` project exists and points at the resolved
+   * documents root. Its workspace IS the shared document library, so every
+   * per-project service (content index, shadow conversion, enrichment,
+   * watcher, search) reaches the library without a parallel pipeline.
+   *
+   * The library folder is user-owned and possibly cloud-synced, so nothing
+   * here writes into it beyond the one starter document on a first run.
+   *
+   * Returns whether it created the project, so boot can do the one-shot
+   * roster wiring (Boekwachter) exactly once.
+   */
+  async ensureSharedProject(): Promise<{ id: string; created: boolean }> {
+    const config = await this.readConfig();
+    const preferredId = config.sharedProjectId ?? SHARED_PROJECT_ID;
+    const documentsRoot = this.documentsDir();
+    const existing = await this.tryGetProjectMeta(preferredId);
+
+    if (existing) {
+      if (isSharedLibraryProject(existing)) {
+        // The documents root is relocatable (Settings -> Folders), so the
+        // pointer is derived state that re-syncs on every boot rather than
+        // a value the user edits on the project.
+        if (existing.workingDir !== documentsRoot) {
+          await this.writeProjectMeta({
+            ...existing,
+            workingDir: documentsRoot,
+            updatedAt: nowIso(),
+          });
+        }
+        await this.backfillSharedProjectDocs(preferredId);
+        return { id: preferredId, created: false };
+      }
+      // A project the user created first owns this id. Never adopt or
+      // overwrite it, and never hand it back as the library either — the
+      // Documents area is a facade over whatever this returns, so a foreign
+      // project here would expose someone's workspace as the library.
+      // `uniqueProjectId` settles on a free id, so this converges in one
+      // boot rather than walking the id space forever.
+      const fallbackId = await this.uniqueProjectId(SHARED_PROJECT_FALLBACK_ID);
+      const created = await this.createSharedProject(fallbackId, documentsRoot);
+      await this.writeConfig({ ...config, sharedProjectId: created.id });
+      return { id: created.id, created: true };
+    }
+
+    const created = await this.createSharedProject(preferredId, documentsRoot);
+    if (config.sharedProjectId !== preferredId && preferredId !== SHARED_PROJECT_ID) {
+      await this.writeConfig({ ...config, sharedProjectId: created.id });
+    }
+    return { id: created.id, created: true };
+  }
+
+  /**
+   * Id of the shared library project, or null when it does not exist yet
+   * (machine-engine role, or a boot that has not reached the ensure).
+   * Callers that need the library's index — document search, recall — go
+   * through this rather than assuming the default id.
+   */
+  async sharedProjectId(): Promise<string | null> {
+    const config = await this.readConfig().catch(() => null);
+    const id = resolveSharedProjectId(config ?? undefined);
+    const meta = await this.tryGetProjectMeta(id);
+    return meta && isSharedLibraryProject(meta) ? id : null;
+  }
+
+  private async createSharedProject(id: string, documentsRoot: string): Promise<ProjectDetail> {
+    await mkdir(documentsRoot, { recursive: true });
+    const project = await this.createProject(
+      {
+        name: 'Shared Library',
+        description: 'Shared knowledge every gezel can reach, from any project.',
+        about: SHARED_PROJECT_ABOUT_MD,
+        missionObjectives: SHARED_PROJECT_MISSION_MD,
+        workingDir: documentsRoot,
+        indexingEnabled: true,
+      },
+      { id },
+    );
+    const meta = await this.tryGetProjectMeta(id);
+    if (meta) {
+      await this.writeProjectMeta({
+        ...meta,
+        properties: { ...(meta.properties ?? {}), [SHARED_PROJECT_MARKER]: '1' },
+        // The library is written through the document tools by design;
+        // without this the external-workingDir gate denies those writes.
+        managedWorkspaceWritePolicy: 'allow',
+        // A library is not a jobsite: no lead to recruit, no progress to
+        // chase. Pre-stamping the auto-assign marker keeps the first index
+        // pass from creating a voorman nobody asked for.
+        voormanAutoAssignedAt: nowIso(),
+        projectTypeId: 'content-writing',
+        updatedAt: nowIso(),
+      });
+    }
+    await this.seedSharedLibraryStarterDoc();
+    return project;
+  }
+
+  /**
+   * One starter document, and only when the library is empty — an explanation
+   * a first-run user can read and edit, not a file we re-create after they
+   * delete it.
+   */
+  private async seedSharedLibraryStarterDoc(): Promise<void> {
+    try {
+      const entries = await this.listDocuments('');
+      if (entries.length > 0) return;
+      await this.writeDocument(SHARED_LIBRARY_STARTER_DOC, SHARED_LIBRARY_STARTER_MD);
+    } catch (err) {
+      log.warn(
+        '[store] failed to seed shared library starter doc:',
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
+  private async backfillSharedProjectDocs(id: string): Promise<void> {
+    const seeds: Array<[string, string]> = [
+      ['about.md', SHARED_PROJECT_ABOUT_MD],
+      ['missionObjectives.md', SHARED_PROJECT_MISSION_MD],
+    ];
+    for (const [name, content] of seeds) {
+      if ((await this.readProjectDoc(id, name)) !== null) continue;
+      await this.writeProjectDoc(id, name, content).catch((err) => {
+        log.warn(
+          `[store] failed to seed shared project ${name}:`,
+          err instanceof Error ? err.message : err,
+        );
+      });
+    }
+  }
+
+  /**
    * Seed the curated catch-all docs on installs whose `default` project
    * predates them. Only writes a doc that is genuinely absent — an existing
    * file (even an empty one) is the user's, and a later edit here must never
@@ -995,9 +1155,18 @@ export class Store {
   /**
    * Ensure `config.meesterGezelId` points at a valid gezel. Order of preference:
    *   1. Existing pointer → a live gezel: no-op.
-   *   2. Any other gezels exist: auto-pick the first alphabetically.
-   *   3. No gezels at all: create a fresh Meester with a random name and the
+   *   2. A gezel whose role is already Meester: designate it.
+   *   3. Any other gezels exist: auto-pick the first alphabetically.
+   *   4. No gezels at all: create a fresh Meester with a random name and the
    *      curated about.md from packages/service/src/meester/prompt.ts.
+   *
+   * Step 2 exists because the roster is sorted by name, so taking the first
+   * entry crowned whoever sorted earliest — a Klerk named Ilse ahead of a real
+   * Meester named Ulrike. The badge is only half the job: a Meester's power is
+   * its curated about.md teaching the team-management tools, which a Klerk
+   * does not have, so the front door silently lost its abilities. Reachable
+   * whenever the pointer goes stale (a deleted gezel, a restored backup) and
+   * on any install that mounts a machine-shared roster.
    */
   async ensureDefaultMeester(): Promise<void> {
     const config = await this.readConfig();
@@ -1011,10 +1180,11 @@ export class Store {
 
     const existing = await this.listGezels();
     if (existing.length > 0) {
-      const first = existing[0]!;
-      await this.writeConfig({ meesterGezelId: first.id });
-      log.info(`[meester] auto-designated ${first.id} as meester`);
-      await this.refreshStaleMeesterAbout(first.id);
+      const chosen =
+        existing.find((g) => g.role?.trim().toLowerCase() === 'meester') ?? existing[0]!;
+      await this.writeConfig({ meesterGezelId: chosen.id });
+      log.info(`[meester] auto-designated ${chosen.id} as meester`);
+      await this.refreshStaleMeesterAbout(chosen.id);
       return;
     }
 
@@ -1292,6 +1462,19 @@ export class Store {
         } else {
           merged.externalFolders = mergedExternal;
         }
+      }
+    }
+    // ambientDashboard combines user-authored preferences with the Electron
+    // shell's last-known primary-display target. A settings toggle commonly
+    // patches only `{ enabled }`; merge this object so that action cannot erase
+    // the screen geometry needed by scheduled renders after the app closes.
+    if ('ambientDashboard' in config && config.ambientDashboard !== null) {
+      const incoming = config.ambientDashboard as Record<string, unknown> | undefined;
+      if (incoming) {
+        merged.ambientDashboard = {
+          ...((existing as { ambientDashboard?: Record<string, unknown> }).ambientDashboard ?? {}),
+          ...incoming,
+        };
       }
     }
     await writeFileAtomic(p.config, `${JSON.stringify(merged, null, 2)}\n`);
@@ -2465,6 +2648,8 @@ export class Store {
     input: {
       name: string;
       description?: string;
+      /** Explicit maker's-mark override; missing inherits from the project type. */
+      icon?: ProjectIconId;
       /** Written to documents/about.md at creation. */
       about?: string;
       /** Written to documents/missionObjectives.md at creation. */
@@ -2526,6 +2711,7 @@ export class Store {
         id,
         name: input.name,
         description: input.description,
+        ...(input.icon ? { icon: input.icon } : {}),
         ...(input.workingDir ? { workingDir: input.workingDir } : {}),
         // Opening an existing folder is an intake action, not a declaration
         // that its objectives are ready for active supervision. Keep the
@@ -2555,6 +2741,7 @@ export class Store {
         details: {
           name: project.name,
           description: project.description,
+          icon: project.icon,
           workingDir: project.workingDir,
           ...(project.indexingEnabled !== undefined
             ? { indexingEnabled: project.indexingEnabled }
@@ -3075,6 +3262,8 @@ export class Store {
     patch: {
       name?: string;
       description?: string;
+      /** Explicit maker's-mark override; null resumes type inheritance. */
+      icon?: ProjectIconId | null;
       workingDir?: string | null;
       voormanGezelId?: string | null;
       voormanAutoAssignedAt?: string;
@@ -3121,6 +3310,23 @@ export class Store {
   ): Promise<ProjectDetail> {
     const meta = await this.tryGetProjectMeta(id);
     if (!meta) throw new Error(`project ${id} not found`);
+    if (isSharedLibraryProject(meta)) {
+      // Its workingDir is derived from the documents root on every boot, so
+      // a direct edit here silently reverts; the library moves through
+      // Settings -> Folders. Archiving would strand the Documents area, and
+      // a git link makes no sense for a document library.
+      if (patch.workingDir !== undefined) {
+        throw new Error(
+          'the shared library location is managed in Settings → Folders, not on the project',
+        );
+      }
+      if (patch.archived === true) {
+        throw new Error('the shared library project cannot be archived');
+      }
+      if (patch.github) {
+        throw new Error('the shared library project cannot be linked to a git repository');
+      }
+    }
     if (typeof patch.workingDir === 'string') this.assertSafeWorkingDir(patch.workingDir);
     let nextGitHub = mergeGitHubPatch(meta.github, patch.github);
     // Auto-link: if the user is pointing workingDir at an existing
@@ -3149,6 +3355,11 @@ export class Store {
       updatedAt: nowIso(),
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
+      ...(patch.icon === null
+        ? { icon: undefined }
+        : patch.icon !== undefined
+          ? { icon: patch.icon }
+          : {}),
       ...(patch.workingDir === null
         ? { workingDir: undefined }
         : patch.workingDir !== undefined
@@ -3243,6 +3454,7 @@ export class Store {
     if (patch.name !== undefined && patch.name !== meta.name) metaChanged.push('name');
     if (patch.description !== undefined && patch.description !== meta.description)
       metaChanged.push('description');
+    if (patch.icon !== undefined && patch.icon !== meta.icon) metaChanged.push('icon');
     if (patch.workingDir !== undefined) metaChanged.push('workingDir');
     if (
       patch.nudgeConfig !== undefined &&
@@ -3439,6 +3651,14 @@ export class Store {
     const meta = await this.tryGetProjectMeta(id);
     if (!meta) {
       throw new ProjectDeleteError(`project ${id} not found`, 'not_found');
+    }
+    // Deleting this project would take the Documents area's backing store
+    // with it. The library is managed from Settings -> Folders instead.
+    if (isSharedLibraryProject(meta)) {
+      throw new ProjectDeleteError(
+        'The shared library project cannot be deleted — it is the Documents library.',
+        'shared_project',
+      );
     }
     if (meta.storageScope === 'machine-shared') {
       throw new ProjectDeleteError(
@@ -3756,26 +3976,34 @@ export class Store {
     return this.artifacts.projectArtifactsDir(id);
   }
 
-  async listProjectArtifacts(id: string, subpath = ''): Promise<ProjectFileEntry[]> {
-    return this.artifacts.listProjectArtifacts(id, subpath);
+  async listProjectArtifacts(
+    id: string,
+    subpath = '',
+    opts?: { includeHidden?: boolean },
+  ): Promise<ProjectFileEntry[]> {
+    return this.artifacts.listProjectArtifacts(id, subpath, opts);
   }
 
   async listProjectArtifactsRecursive(
     id: string,
-    opts?: { withStats?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean; subpath?: string },
   ): Promise<ProjectFileEntry[]> {
     return this.artifacts.listProjectArtifactsRecursive(id, opts);
   }
 
   async listProjectArtifactsRecursiveDetailed(
     id: string,
-    opts?: { withStats?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean; subpath?: string },
   ): Promise<WalkDirResult> {
     return this.artifacts.listProjectArtifactsRecursiveDetailed(id, opts);
   }
 
   async readProjectArtifact(id: string, filePath: string): Promise<string | null> {
     return this.artifacts.readProjectArtifact(id, filePath);
+  }
+
+  async projectArtifactSize(id: string, filePath: string): Promise<number | null> {
+    return this.artifacts.projectArtifactSize(id, filePath);
   }
 
   /**
@@ -3898,6 +4126,18 @@ export class Store {
 
   async deleteProjectArtifact(id: string, filePath: string): Promise<void> {
     await this.artifacts.deleteProjectArtifact(id, filePath);
+  }
+
+  async createProjectArtifactFolder(id: string, folderPath: string): Promise<string> {
+    return this.artifacts.createProjectArtifactFolder(id, folderPath);
+  }
+
+  async renameProjectArtifactPath(
+    id: string,
+    fromPath: string,
+    toPath: string,
+  ): Promise<{ fromPath: string; toPath: string }> {
+    return this.artifacts.renameProjectArtifactPath(id, fromPath, toPath);
   }
 
   // ---------- session images (pasted / uploaded in a chat) ----------
@@ -4100,20 +4340,50 @@ export class Store {
     return this.resolveWorkspaceDir(id, meta).dir;
   }
 
-  async listProjectWorkspace(id: string, subpath = ''): Promise<ProjectFileEntry[]> {
+  async listProjectWorkspace(
+    id: string,
+    subpath = '',
+    opts?: { includeHidden?: boolean },
+  ): Promise<ProjectFileEntry[]> {
     const base = await this.projectWorkspaceDir(id);
-    return listDirEntries(base, intoWorkspaceRelative(base, subpath));
+    return listDirEntries(base, intoWorkspaceRelative(base, subpath), {
+      includeHidden: opts?.includeHidden === true,
+    });
   }
 
-  async listProjectWorkspaceRecursive(id: string): Promise<ProjectFileEntry[]> {
-    return (await this.listProjectWorkspaceRecursiveDetailed(id)).entries;
+  async listProjectWorkspaceRecursive(
+    id: string,
+    opts?: { withStats?: boolean; includeHidden?: boolean; subpath?: string },
+  ): Promise<ProjectFileEntry[]> {
+    return (await this.listProjectWorkspaceRecursiveDetailed(id, opts)).entries;
   }
 
-  /** Recursive listing plus the truncation flag, for surfaces that must
-   *  tell the user/model when the walker's entry cap dropped files. */
-  async listProjectWorkspaceRecursiveDetailed(id: string): Promise<WalkDirResult> {
-    const base = await this.projectWorkspaceDir(id);
-    return walkDirDetailed(base);
+  /**
+   * Recursive listing plus the truncation flag, for surfaces that must tell
+   * the user/model when the walker's entry cap dropped files.
+   *
+   * `subpath` roots the walk instead of post-filtering it, so a caller asking
+   * for one folder is not competing with the whole workspace for the entry
+   * budget — the same contract as the artifacts twin. Entry paths stay
+   * workspace-root-relative, so results remain directly readable.
+   */
+  async listProjectWorkspaceRecursiveDetailed(
+    id: string,
+    opts?: { withStats?: boolean; includeHidden?: boolean; subpath?: string },
+  ): Promise<WalkDirResult> {
+    const root = await this.projectWorkspaceDir(id);
+    const subpath = (opts?.subpath ?? '')
+      .replace(/\\/g, '/')
+      .replace(/^\.?\/+/, '')
+      .replace(/\/+$/, '');
+    const base = subpath === '' ? root : safeJoin(root, subpath);
+    if (base === null) return { entries: [], truncated: false };
+    const walked = await walkDirDetailed(base, opts);
+    if (subpath === '') return walked;
+    return {
+      ...walked,
+      entries: walked.entries.map((entry) => ({ ...entry, path: `${subpath}/${entry.path}` })),
+    };
   }
 
   async listProjectWorkspaceHtmlPages(id: string): Promise<ProjectFileEntry[]> {
@@ -4771,8 +5041,29 @@ export class Store {
     return this.documents.listDocumentsRecursive();
   }
 
+  /** Close any in-flight document-edit audit windows (service shutdown). */
+  async flushDocumentAudit(): Promise<void> {
+    await this.documents.flushAudit();
+  }
+
+  async readDocumentAsMarkdown(
+    filePath: string,
+  ): Promise<{ content: string; converted: boolean } | null> {
+    return this.documents.readDocumentAsMarkdown(filePath);
+  }
+
+  async listDocumentsRecursiveDetailed(
+    opts: { withStats?: boolean; includeHidden?: boolean } = {},
+  ): Promise<WalkDirResult> {
+    return this.documents.listDocumentsRecursiveDetailed(opts);
+  }
+
   async readDocument(filePath: string): Promise<string | null> {
     return this.documents.readDocument(filePath);
+  }
+
+  async documentSize(filePath: string): Promise<number | null> {
+    return this.documents.documentSize(filePath);
   }
 
   /**
@@ -4784,8 +5075,12 @@ export class Store {
     return this.documents.readDocumentBinary(filePath);
   }
 
-  async writeDocument(filePath: string, content: string): Promise<void> {
-    await this.documents.writeDocument(filePath, content);
+  async writeDocument(
+    filePath: string,
+    content: string,
+    actor?: import('./documents-store.js').DocumentWriteActor,
+  ): Promise<void> {
+    await this.documents.writeDocument(filePath, content, actor);
   }
 
   /**
@@ -4798,8 +5093,11 @@ export class Store {
     await this.documents.writeDocumentBinary(filePath, data);
   }
 
-  async deleteDocument(filePath: string): Promise<void> {
-    await this.documents.deleteDocument(filePath);
+  async deleteDocument(
+    filePath: string,
+    actor?: import('./documents-store.js').DocumentWriteActor,
+  ): Promise<void> {
+    await this.documents.deleteDocument(filePath, actor);
   }
 
   async createDocumentFolder(folderPath: string): Promise<void> {
@@ -4983,6 +5281,7 @@ export class Store {
           createdAt: session.createdAt,
           lastActivityAt: session.lastActivityAt,
           archived: session.archived,
+          ...(session.source ? { source: session.source } : {}),
           ...(session.lastTurnError ? { lastTurnError: session.lastTurnError } : {}),
           ...(session.taskRef ? { taskRef: session.taskRef } : {}),
           ...(session.stepId ? { stepId: session.stepId } : {}),
@@ -5026,6 +5325,13 @@ export class Store {
     limit: number;
     before?: string;
     includeArchived?: boolean;
+    /**
+     * Indexed workspace paths for a project, used to recognize workspace
+     * files an assistant reply named in prose. Supplied by the caller
+     * because the listing's owner (`WorkspaceIndexManager`) is built on top
+     * of this Store. Omit it and the backfill sees artifacts only.
+     */
+    workspaceFiles?: (projectId: string) => Promise<readonly string[]>;
   }): Promise<{
     messages: TimelineMessage[];
     hasMore: boolean;
@@ -5078,28 +5384,29 @@ export class Store {
       if (best) handoffOf.set(s.id, { gezelId: best.gezelId, sessionId: best.id });
     }
 
-    // Gather one artifact listing per in-scope project so we can
-    // backfill `referencedArtifacts` on assistant messages that predate
-    // the server-side parser. Cheap: one recursive walk per project,
-    // reused across every message in that project's sessions.
-    const projectArtifacts = new Map<string, string[]>();
+    // Gather one file inventory per in-scope project so we can backfill
+    // `referencedFiles` on assistant messages that predate the server-side
+    // parser. One recursive artifact walk plus one read of the indexer's
+    // persisted workspace listing per project, reused across every message
+    // in that project's sessions — the lookup tables are built once here
+    // rather than per message, which is what keeps a 20k-file workspace
+    // affordable on a timeline page.
+    const projectFileIndex = new Map<string, FileInventoryIndex>();
     const uniqueProjects = new Set(sessions.map((s) => s.projectId));
     for (const pid of uniqueProjects) {
-      const hasLegacyAssistant = sessions.some(
+      const hasUnparsedAssistant = sessions.some(
         (s) =>
           s.projectId === pid &&
-          s.messages.some((m) => m.role === 'assistant' && !m.referencedArtifacts),
+          s.messages.some((m) => m.role === 'assistant' && !m.referencedFiles),
       );
-      if (!hasLegacyAssistant) continue;
-      try {
-        const files = await this.listProjectArtifactsRecursive(pid);
-        projectArtifacts.set(
-          pid,
-          files.filter((f) => !f.isDirectory).map((f) => f.path),
-        );
-      } catch {
-        projectArtifacts.set(pid, []);
-      }
+      if (!hasUnparsedAssistant) continue;
+      const [artifacts, workspace] = await Promise.all([
+        this.listProjectArtifactsRecursive(pid)
+          .then((files) => files.filter((f) => !f.isDirectory).map((f) => f.path))
+          .catch(() => [] as string[]),
+        opts.workspaceFiles?.(pid).catch(() => [] as readonly string[]) ?? [],
+      ]);
+      projectFileIndex.set(pid, buildFileInventoryIndex({ artifacts, workspace }));
     }
 
     // Backfill task-refs on assistant messages that predate the
@@ -5123,6 +5430,16 @@ export class Store {
     const rows: TimelineMessage[] = [];
     for (const s of sessions) {
       const handoff = handoffOf.get(s.id);
+      // Sessions written before `ChatMessage.origin` existed carry no marker
+      // on their dispatch seed, so a task thread would still open with the
+      // machinery's words labelled "You". `startHandoffSession` always
+      // creates the session with a taskRef and *then* sends the seed, which
+      // makes "first user message of a task-scoped session" an exact
+      // structural stand-in — no matching on seed wording, which drifts.
+      const legacySeedAt =
+        s.taskRef && !s.messages.some((m) => m.origin)
+          ? s.messages.find((m) => m.role === 'user')?.at
+          : undefined;
       for (const m of s.messages) {
         if (m.role !== 'user' && m.role !== 'assistant') continue;
         // Hidden facilitation seeds (e.g. a project-type page reaction with
@@ -5130,16 +5447,20 @@ export class Store {
         // surface a transcript bubble.
         if (m.hidden) continue;
         if (before && m.at >= before) continue;
-        // Assistant-only: either forward the persisted list or compute
-        // one on the fly from the project's current artifact inventory.
-        let refs = m.referencedArtifacts;
+        // Assistant-only: either forward the persisted list or compute one
+        // on the fly from the project's current file inventory. A message
+        // carrying only the legacy artifact-only field is recomputed rather
+        // than widened, so existing history gains workspace references too.
+        let refs = m.referencedFiles;
         if (m.role === 'assistant' && !refs) {
-          const artifactPaths = projectArtifacts.get(s.projectId);
-          if (artifactPaths && artifactPaths.length > 0) {
-            const computed = matchReferencedArtifactsInContent(m.content, artifactPaths);
-            if (computed.length > 0) refs = computed;
+          const index = projectFileIndex.get(s.projectId);
+          const computed = index ? matchReferencedFilesWithIndex(m.content, index) : [];
+          if (computed.length > 0) refs = computed;
+          else if (m.referencedArtifacts?.length) {
+            refs = referencedFilesFromArtifactPaths(m.referencedArtifacts);
           }
         }
+        const legacyArtifactRefs = refs ? artifactPathsOf(refs) : [];
         let tRefs = m.referencedTasks;
         if (m.role === 'assistant' && !tRefs && taskRefs && taskRefs.length > 0) {
           const computed = matchReferencedTasksInContent(m.content, taskRefs);
@@ -5153,6 +5474,7 @@ export class Store {
           sessionCreatedAt: s.createdAt,
           sessionLastActivityAt: s.lastActivityAt,
           sessionProviderName: s.providerName,
+          ...(s.source ? { sessionSource: s.source } : {}),
           ...(s.model ? { sessionModel: s.model } : {}),
           ...(s.archived ? { sessionArchived: true } : {}),
           ...(s.lastTurnError ? { sessionLastTurnError: s.lastTurnError } : {}),
@@ -5164,7 +5486,11 @@ export class Store {
           at: m.at,
           ...(m.from ? { from: m.from } : {}),
           ...(m.nudge ? { nudge: true } : {}),
-          ...(refs && refs.length > 0 ? { referencedArtifacts: refs } : {}),
+          ...(m.origin === 'system' || (legacySeedAt !== undefined && m.at === legacySeedAt)
+            ? { origin: 'system' as const }
+            : {}),
+          ...(refs && refs.length > 0 ? { referencedFiles: refs } : {}),
+          ...(legacyArtifactRefs.length > 0 ? { referencedArtifacts: legacyArtifactRefs } : {}),
           ...(tRefs && tRefs.length > 0 ? { referencedTasks: tRefs } : {}),
           ...(m.toolCalls && m.toolCalls.length > 0 ? { toolCalls: m.toolCalls } : {}),
           ...(m.intents && m.intents.length > 0 ? { intents: m.intents } : {}),
@@ -6248,6 +6574,7 @@ export class Store {
       basedOn?: unknown;
       triggers?: unknown;
       toolsets?: unknown;
+      connectors?: unknown;
       hooks?: unknown;
       paramSchema?: unknown;
       command?: unknown;
@@ -6280,6 +6607,9 @@ export class Store {
       entryStepId: v.entryStepId,
       ...(Array.isArray(v.triggers) ? { triggers: v.triggers as string[] } : {}),
       ...(Array.isArray(v.toolsets) ? { toolsets: v.toolsets as Craftbook['toolsets'] } : {}),
+      ...(Array.isArray(v.connectors)
+        ? { connectors: v.connectors as Craftbook['connectors'] }
+        : {}),
       ...(Array.isArray(v.hooks) ? { hooks: v.hooks as Craftbook['hooks'] } : {}),
       ...(v.paramSchema && typeof v.paramSchema === 'object'
         ? { paramSchema: v.paramSchema as Craftbook['paramSchema'] }
@@ -6343,6 +6673,12 @@ export class Store {
       ...(book.defaultAssignee ? { defaultAssignee: book.defaultAssignee } : {}),
       ...(book.triggers ? { triggers: book.triggers } : {}),
       ...(book.toolsets ? { toolsets: book.toolsets } : {}),
+      // connectors decide whether the launch runs connector prep at all —
+      // the same drop that once disabled the feature for every catalog
+      // craftbook (see runtimeCraftbookFromTemplate). Without them a
+      // project-local book launches with no corpus and `{{corpusScope}}`
+      // survives interpolation straight into the step prompts and gates.
+      ...(book.connectors ? { connectors: book.connectors } : {}),
       ...(book.hooks ? { hooks: book.hooks } : {}),
       ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
       ...(book.command ? { command: book.command } : {}),

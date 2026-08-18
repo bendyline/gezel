@@ -1,6 +1,3 @@
-import { readdir, stat } from 'node:fs/promises';
-import { join } from 'node:path';
-import { backupsDir } from '@bendyline/gezel/paths';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
@@ -10,6 +7,7 @@ import {
   planMove,
   runMove,
   sourceRootForScope,
+  summarizeBackups,
 } from '../../folders/index.js';
 import type { ServiceContext } from '../context.js';
 
@@ -72,9 +70,9 @@ export function folderRoutes(ctx: ServiceContext) {
   });
 
   app.post('/move', async (c) => {
-    if (ctx.folderJobs.hasActive()) {
+    if (ctx.folderJobs.hasActive() || ctx.storageJobs?.hasActive()) {
       return c.json(
-        { error: 'job-in-progress', hint: 'Wait for the current move to finish.' },
+        { error: 'job-in-progress', hint: 'Wait for the current move or cleanup to finish.' },
         409,
       );
     }
@@ -139,9 +137,9 @@ export function folderRoutes(ctx: ServiceContext) {
   });
 
   app.post('/reset', async (c) => {
-    if (ctx.folderJobs.hasActive()) {
+    if (ctx.folderJobs.hasActive() || ctx.storageJobs?.hasActive()) {
       return c.json(
-        { error: 'job-in-progress', hint: 'Wait for the current move to finish.' },
+        { error: 'job-in-progress', hint: 'Wait for the current move or cleanup to finish.' },
         409,
       );
     }
@@ -190,46 +188,6 @@ export function folderRoutes(ctx: ServiceContext) {
   });
 
   return app;
-}
-
-async function summarizeBackups(home: string): Promise<{
-  count: number;
-  totalBytes: number;
-  path: string;
-}> {
-  const root = backupsDir(home);
-  let entries: string[] = [];
-  try {
-    entries = await readdir(root);
-  } catch {
-    return { count: 0, totalBytes: 0, path: root };
-  }
-  let totalBytes = 0;
-  for (const e of entries) {
-    totalBytes += await dirSize(join(root, e));
-  }
-  return { count: entries.length, totalBytes, path: root };
-}
-
-async function dirSize(p: string): Promise<number> {
-  let total = 0;
-  let entries: string[] = [];
-  try {
-    entries = await readdir(p);
-  } catch {
-    return 0;
-  }
-  for (const name of entries) {
-    const abs = join(p, name);
-    try {
-      const st = await stat(abs);
-      if (st.isDirectory()) total += await dirSize(abs);
-      else total += st.size;
-    } catch {
-      /* ignore */
-    }
-  }
-  return total;
 }
 
 // Re-export FOLDER_SCOPES so the routes file is self-contained.

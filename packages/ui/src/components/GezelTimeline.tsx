@@ -17,6 +17,7 @@ export function GezelTimeline({
   onToolActivity,
   onArtifactReference,
   onArtifactSeen,
+  onWorkspaceReference,
   onWorkspaceSeen,
   onTaskReference,
   emptyPlaceholder,
@@ -27,6 +28,7 @@ export function GezelTimeline({
   onToolActivity?: (tool: ToolActivity) => void;
   onArtifactReference?: (path: string, projectId?: string) => void;
   onArtifactSeen?: (path: string, projectId?: string) => void;
+  onWorkspaceReference?: (path: string, projectId?: string) => void;
   onWorkspaceSeen?: (path: string, projectId?: string) => void;
   onTaskReference?: (ref: string, opts?: { scoped?: boolean }) => void;
   emptyPlaceholder?: string;
@@ -46,6 +48,7 @@ export function GezelTimeline({
       onToolActivity={onToolActivity}
       onArtifactReference={onArtifactReference}
       onArtifactSeen={onArtifactSeen}
+      onWorkspaceReference={onWorkspaceReference}
       onWorkspaceSeen={onWorkspaceSeen}
       {...(onTaskReference ? { onTaskReference } : {})}
       emptyPlaceholder={emptyPlaceholder}

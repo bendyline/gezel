@@ -25,3 +25,57 @@ export const DEFAULT_PROJECT_MISSION_MD = `- Keep miscellaneous work moving: eac
 - Keep the artifacts in this project usable — accurate, current, and findable later.
 - Do not pursue coherence between items. This project has no single theme and is not meant to acquire one.
 `;
+
+/**
+ * Curated docs for the always-present `shared` project, whose workspace IS
+ * the shared documents library.
+ *
+ * Same reasoning as the Default docs above, mirrored: a reviewer walking the
+ * project list finds a project with no code, no build, and no tasks, and
+ * would otherwise report that as neglect. Saying plainly that this project's
+ * deliverable is the library itself stops that loop.
+ */
+export const SHARED_PROJECT_ABOUT_MD = `This project is the shared document library — the knowledge every gezel can reach, from any project. Mission statements, guidelines, policies, style guides, and reference material live here.
+
+Its files are the deliverable. There is no code to build and no feature to ship: the work is keeping the library accurate, current, and findable. Documents here are owned by the user, so treat an existing document as theirs — improve it when asked, and never reorganize or rewrite it uninvited.
+
+Knowledge that only matters to one project belongs in a folder named after that project; knowledge that applies everywhere belongs at the top level.
+`;
+
+/** Filename of the one document seeded into an empty library on first run. */
+export const SHARED_LIBRARY_STARTER_DOC = 'About this library.md';
+
+/**
+ * Written once, only when the library is completely empty. It explains the
+ * library to a first-run user and doubles as a worked example: the
+ * frontmatter shows the title/description keys the listing surfaces.
+ */
+export const SHARED_LIBRARY_STARTER_MD = `---
+title: About this library
+description: What the shared document library is and how gezels use it.
+---
+
+# About this library
+
+This is the shared document library. Everything filed here is readable by every gezel you work with, in every project — so it is the right home for the things that should be true everywhere: how you want writing to sound, what your team is trying to do, the rules a reviewer should apply, reference material worth keeping.
+
+## How your gezels use it
+
+Gezels see a listing of this library in every conversation, and they search its contents when a question touches team policy, guidelines, or conventions. You do not have to point them at a file: filing it here is enough.
+
+Word, PDF, PowerPoint, and Excel documents work too. Drop one in and its text becomes searchable alongside your markdown.
+
+## Filing suggestions
+
+- Keep documents that apply everywhere at the top level.
+- Put knowledge that only matters to one project in a folder named after it.
+- A short, plain title beats a clever one — it is what a gezel sees first.
+
+You can delete this document once the library has content of its own; nothing re-creates it.
+`;
+
+export const SHARED_PROJECT_MISSION_MD = `- Keep the library trustworthy: what it says should be true, current, and consistent with itself.
+- Keep it findable — clear names, sensible folders, no duplicate answers to the same question in two places.
+- Capture durable cross-project knowledge here rather than leaving it in a chat transcript.
+- Do not add churn: this library is read far more often than it is written.
+`;

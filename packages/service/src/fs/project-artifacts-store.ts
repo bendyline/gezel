@@ -1,5 +1,6 @@
-import { mkdir, readFile, rm } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import type { Stats } from 'node:fs';
+import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
+import { dirname, isAbsolute, relative } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
 import { isReservedShadowArtifactPath } from '@bendyline/gezel';
 import {
@@ -15,6 +16,7 @@ import {
   listDirEntries,
   safeReadTextFile,
   safeResolveRead,
+  safeStatFileSize,
   walkDir,
   walkDirDetailed,
 } from './tree.js';
@@ -84,6 +86,22 @@ export class ShadowPathWriteDeniedError extends Error {
   }
 }
 
+export class ArtifactPathNotFoundError extends Error {
+  readonly code = 'artifact-not-found' as const;
+  constructor(path: string) {
+    super(`artifact not found: ${path}`);
+    this.name = 'ArtifactPathNotFoundError';
+  }
+}
+
+export class ArtifactPathExistsError extends Error {
+  readonly code = 'artifact-exists' as const;
+  constructor(path: string) {
+    super(`an artifact already exists at ${path}`);
+    this.name = 'ArtifactPathExistsError';
+  }
+}
+
 /**
  * Owns the project-level artifacts tree.
  *
@@ -106,33 +124,68 @@ export class ProjectArtifactsStore {
     return projectArtifactsDir(this.home, id, this.external);
   }
 
-  async listProjectArtifacts(id: string, subpath = ''): Promise<ProjectFileEntry[]> {
-    const entries = await listDirEntries(this.projectArtifactsDir(id), subpath);
+  async listProjectArtifacts(
+    id: string,
+    subpath = '',
+    opts?: { includeHidden?: boolean },
+  ): Promise<ProjectFileEntry[]> {
+    const entries = await listDirEntries(this.projectArtifactsDir(id), subpath, {
+      includeHidden: opts?.includeHidden === true,
+    });
     // The reserved shadow cache stays out of listings (it would drown real
-    // artifacts); explicit-path reads under shadow/ still work.
-    if (subpath !== '') return entries;
+    // artifacts); explicit-path reads under shadow/ still work. `includeHidden`
+    // is the user asking to see it anyway.
+    if (subpath !== '' || opts?.includeHidden) return entries;
     return entries.filter((e) => !(e.isDirectory && e.name === PROJECT_SHADOW_DIR_NAME));
   }
 
   async listProjectArtifactsRecursive(
     id: string,
-    opts?: { withStats?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean; subpath?: string },
   ): Promise<ProjectFileEntry[]> {
     return (await this.listProjectArtifactsRecursiveDetailed(id, opts)).entries;
   }
 
+  /**
+   * Recursive artifact walk, optionally rooted at `subpath`.
+   *
+   * `subpath` is not a post-filter: the walk starts inside the subtree, so a
+   * caller asking for one connector corpus is not competing with the rest of
+   * the drawer for the walker's entry budget. Filtering a root-rooted walk
+   * instead would return a truncated slice of a truncated listing — which is
+   * how a 509-file PR corpus came back as 485 entries under a drawer-wide cap
+   * and a scoped request silently looked complete. Entry paths stay relative
+   * to the artifacts root either way, so every result is directly readable.
+   */
   async listProjectArtifactsRecursiveDetailed(
     id: string,
-    opts?: { withStats?: boolean },
+    opts?: { withStats?: boolean; includeHidden?: boolean; subpath?: string },
   ): Promise<WalkDirResult> {
-    return walkDirDetailed(this.projectArtifactsDir(id), {
+    const root = this.projectArtifactsDir(id);
+    const subpath = normalizeArtifactPath(opts?.subpath ?? '').replace(/\/+$/, '');
+    const base = subpath === '' ? root : safeJoin(root, subpath);
+    if (base === null) return { entries: [], truncated: false };
+    const walked = await walkDirDetailed(base, {
       ...(opts?.withStats ? { withStats: true } : {}),
-      skipRootDirs: SHADOW_SKIP,
+      ...(opts?.includeHidden ? { includeHidden: true } : {}),
+      // The reserved shadow cache only exists at the drawer root; scoping the
+      // walk into a subtree makes a same-named folder there an ordinary one.
+      ...(subpath === '' ? { skipRootDirs: SHADOW_SKIP } : {}),
     });
+    if (subpath === '') return walked;
+    return {
+      ...walked,
+      entries: walked.entries.map((entry) => ({ ...entry, path: `${subpath}/${entry.path}` })),
+    };
   }
 
   async readProjectArtifact(id: string, filePath: string): Promise<string | null> {
     return safeReadTextFile(this.projectArtifactsDir(id), filePath);
+  }
+
+  /** On-disk byte size of an artifact, or null when it is not a readable file. */
+  async projectArtifactSize(id: string, filePath: string): Promise<number | null> {
+    return safeStatFileSize(this.projectArtifactsDir(id), filePath);
   }
 
   async readProjectArtifactBinary(
@@ -353,6 +406,68 @@ export class ProjectArtifactsStore {
     await rm(full, { recursive: true, force: true });
     await this.touchProject(id);
   }
+
+  async createProjectArtifactFolder(id: string, folderPath: string): Promise<string> {
+    const base = this.projectArtifactsDir(id);
+    const cleaned = normalizeArtifactPath(folderPath);
+    if (!cleaned) throw new Error('empty artifact path');
+    if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
+    const full = safeJoin(base, cleaned);
+    if (!full) throw new Error('path traversal blocked');
+    await mkdir(full, { recursive: true });
+    await this.touchProject(id);
+    return cleaned;
+  }
+
+  /**
+   * Move/rename within the artifacts drawer. Same refusals as the documents
+   * library — the drawer root, a folder into its own subtree, and overwriting
+   * an existing path — so a rename can never silently destroy an artifact.
+   */
+  async renameProjectArtifactPath(
+    id: string,
+    fromPath: string,
+    toPath: string,
+  ): Promise<{ fromPath: string; toPath: string }> {
+    const base = this.projectArtifactsDir(id);
+    const from = normalizeArtifactPath(fromPath);
+    const to = normalizeArtifactPath(toPath);
+    if (!from || !to) throw new Error('the artifacts root cannot be renamed');
+    if (isReservedShadowArtifactPath(from) || isReservedShadowArtifactPath(to)) {
+      throw new ShadowPathWriteDeniedError();
+    }
+    const fromFull = safeJoin(base, from);
+    const toFull = safeJoin(base, to);
+    if (!fromFull || !toFull) throw new Error('path traversal blocked');
+    if (fromFull === toFull) return { fromPath: from, toPath: to };
+
+    let sourceStat: Stats;
+    try {
+      sourceStat = await stat(fromFull);
+    } catch {
+      throw new ArtifactPathNotFoundError(from);
+    }
+    if (await pathExists(toFull)) throw new ArtifactPathExistsError(to);
+    if (sourceStat.isDirectory()) {
+      const relativeTarget = relative(fromFull, toFull);
+      if (relativeTarget && !relativeTarget.startsWith('..') && !isAbsolute(relativeTarget)) {
+        throw new Error('a folder cannot be moved inside itself');
+      }
+    }
+    await mkdir(dirname(toFull), { recursive: true });
+    await rename(fromFull, toFull);
+    await this.touchProject(id);
+    return { fromPath: from, toPath: to };
+  }
+}
+
+async function pathExists(full: string): Promise<boolean> {
+  try {
+    await stat(full);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const SHADOW_SKIP: ReadonlySet<string> = new Set([PROJECT_SHADOW_DIR_NAME]);
@@ -361,8 +476,14 @@ const SHADOW_SKIP: ReadonlySet<string> = new Set([PROJECT_SHADOW_DIR_NAME]);
  * Strip leading `./`, `/`, and repeated `artifacts/` prefixes. Defense
  * in depth: the MCP layer already strips these, but direct HTTP callers
  * that pass the full prefix would otherwise create `artifacts/artifacts/`.
+ *
+ * Exported for the reference routes, which join a caller-supplied path
+ * under the artifacts root themselves instead of going through this
+ * store — a References-pane path carrying the drawer prefix (models copy
+ * it out of craftbook corpus scopes) resolved to `artifacts/artifacts/…`
+ * and 404'd on a file that was plainly on disk.
  */
-function normalizeArtifactPath(p: string): string {
+export function normalizeArtifactPath(p: string): string {
   let out = p.replace(/^\.?\/+/, '').trim();
   while (/^artifacts\/+/i.test(out)) out = out.replace(/^artifacts\/+/i, '');
   return out;

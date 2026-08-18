@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ProjectIconIdSchema } from '../project-icons.js';
 import { TaskAssigneeSchema } from './assignee.js';
 import {
   CraftbookBasedOnSchema,
@@ -1061,6 +1062,8 @@ const ProjectTypeCompositionShape = {
 export const ProjectTypeIdentitySchema = IdentityCommonSchema.extend({
   kind: z.literal('project-type'),
   category: ProjectTypeCategorySchema.optional(),
+  /** Small monochrome maker's mark inherited by project instances. */
+  icon: ProjectIconIdSchema.optional(),
 });
 export type ProjectTypeIdentity = z.infer<typeof ProjectTypeIdentitySchema>;
 
@@ -1084,6 +1087,8 @@ export const ProjectTypeManifestSchema = z.object({
   description: z.string(),
   tags: z.array(z.string()).default([]),
   category: ProjectTypeCategorySchema.optional(),
+  /** Small monochrome maker's mark inherited by project instances. */
+  icon: ProjectIconIdSchema.optional(),
   maintainer: z.object({
     name: z.string(),
     url: z.string().url().optional(),
@@ -1281,11 +1286,23 @@ export const ChatModelLlamaCppSourceSchema = z
     /** Total on-disk size: the GGUF for single-file, sum of all shards for sharded. */
     approxSizeBytes: z.number().int().positive(),
     /**
-     * Working-set footprint when loaded: weights + KV cache at default
-     * context + activations + buffers. Used by the local-engine capacity
-     * broker to decide how many models fit concurrently. Optional —
-     * absent entries fall back to `Math.round(approxSizeBytes * 1.20)`
-     * (a defensible default for llama.cpp at default ctx).
+     * Working-set footprint when loaded, **KV cache EXCLUDED**: weights as
+     * the engine actually buffers them, plus its compute/output buffers and
+     * process cost. Used by the local-engine capacity broker to decide how
+     * many models fit concurrently; it prices KV explicitly on top from the
+     * launch context (see `mlxPlannedReservationBytes` in the MLX builder).
+     *
+     * Folding KV in here double-counts it. This field used to be documented
+     * as "weights + KV cache at default context", and the pins authored to
+     * that reading carried a flat 1.2-1.3x that was mostly KV — worth ~10 GiB
+     * of phantom reservation on a 35B, while still under-reserving small
+     * models whose real overhead is a fixed process cost.
+     *
+     * Optional, and only worth setting when someone has MEASURED this model:
+     * absent entries fall back to `estimateLlamaCppResidentBytes` /
+     * `estimateMlxResidentBytes`, which are themselves measured (see their
+     * comments in model-fit.ts) and improve as the fleet is re-measured. A
+     * pin that merely restates the formula is drift waiting to happen.
      */
     residentBytes: z.number().int().positive().optional(),
     /** Short quant tag for display ('Q4_K_M', 'Q8_0', 'BF16'). */
@@ -1449,76 +1466,119 @@ export type ChatModelDs4Source = z.infer<typeof ChatModelDs4SourceSchema>;
  * installer downloads them as a batch. Apple Silicon only — `MlxProvider`
  * errors actionably on other platforms.
  */
-export const ChatModelMlxSourceSchema = z.object({
-  /** Hugging Face repo id, e.g. `mlx-community/gemma-4-e4b-it-4bit`. */
-  huggingfaceRepo: z.string().regex(/^[A-Za-z0-9_\-.]+\/[A-Za-z0-9_\-.]+$/),
-  /**
-   * Git revision (commit SHA, tag, or branch) to download from. When
-   * set, files are fetched from `…/resolve/<revision>/…` so the bytes
-   * are immutable and the pinned `sha256`s always match — upstream
-   * re-publishes to `main` can't drift us. Captured at catalog-build
-   * time alongside the sha256 pins (both describe the same snapshot).
-   * Optional for backward compatibility: absent → download from `main`
-   * (the legacy behavior, where an upstream update can cause a checksum
-   * mismatch). Prefer a full 40-char commit SHA; a branch name
-   * re-introduces drift and a tag can be force-moved.
-   */
-  revision: z.string().optional(),
-  /**
-   * Files to download from the repo, each with an LFS-derived sha256.
-   * Order is significant for progress reporting but not for install
-   * correctness. Typically 3–5 files: config.json, tokenizer.json,
-   * tokenizer_config.json, and one or more weight shards.
-   */
-  files: z
-    .array(
-      z.object({
-        name: z.string(),
-        sha256: z.string().regex(/^[a-f0-9]{64}$/),
-        sizeBytes: z.number().int().positive(),
-      }),
-    )
-    .min(1),
-  /** Total on-disk size across all files. */
-  approxSizeBytes: z.number().int().positive(),
-  /**
-   * Working-set footprint when loaded: weights + KV cache at default
-   * context + activations + Metal buffers. Used by the local-engine
-   * capacity broker. MLX's KV grows linearly with sequence length, so
-   * this is typically a bigger multiplier of `approxSizeBytes` than
-   * the llama.cpp equivalent. Optional — absent entries fall back to
-   * `Math.round(approxSizeBytes * 1.30)`.
-   */
-  residentBytes: z.number().int().positive().optional(),
-  /** Short quant tag for display (`4bit`, `8bit`, `bf16`). */
-  quantization: z.string().optional(),
-  /**
-   * Last-resort Jinja chat template to inject into `tokenizer_config.json`
-   * when the downloaded tokenizer_config has no `chat_template` and no
-   * `chat_template.jinja` sidecar is shipped alongside. Some MLX
-   * uploads omit the template that the upstream model was trained
-   * against — without it `mlx_lm.server` falls back to a generic
-   * template that may not match, and responses degrade from subtly
-   * off to fully incoherent. The install pipeline's recovery order is:
-   *   1. `tokenizer_config.chat_template` (upstream ships it) — use as is.
-   *   2. `chat_template.jinja` sidecar downloaded from the repo — merge
-   *      into tokenizer_config.
-   *   3. This field, if set — merge into tokenizer_config.
-   *   4. None — mark `chatTemplatePresent: false` and warn.
-   */
-  chatTemplate: z.string().optional(),
-  /**
-   * When set, this MLX build is KNOWN NOT TO LOAD/RUN and must be treated
-   * as if the model had no MLX source — hidden from the MLX install picker,
-   * refused by the install endpoint, and reported `mlx: false` by source
-   * probes — even though the repo/sha pins are retained for the day an
-   * upstream fix lands. The string is the human-readable reason (shown in
-   * logs / advanced UI). Use this instead of DELETING the `mlx` block when
-   * the incompatibility is expected to be temporary (an mlx-vlm arch/quant
-   * gap), so the repo pin isn't lost.
-   */
-  disabledReason: z.string().optional(),
-});
+function containsAsciiControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (code <= 0x1f || code === 0x7f) return true;
+  }
+  return false;
+}
+
+const ContainedPosixModelPathSchema = z
+  .string()
+  .min(1)
+  .max(1024)
+  .refine(
+    (path) =>
+      !path.includes('\\') &&
+      !containsAsciiControlCharacter(path) &&
+      !path.startsWith('/') &&
+      path.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..'),
+    'path must be a contained POSIX-style relative path',
+  );
+
+export const ChatModelMlxSourceSchema = z
+  .object({
+    /** Hugging Face repo id, e.g. `mlx-community/gemma-4-e4b-it-4bit`. */
+    huggingfaceRepo: z.string().regex(/^[A-Za-z0-9_\-.]+\/[A-Za-z0-9_\-.]+$/),
+    /**
+     * Optional model root inside a multi-build Hugging Face repository, e.g.
+     * `6bit`. Remote files are fetched below this directory, while their
+     * manifest `name`s are installed relative to the selected model root so
+     * `config.json` still lands at the local model directory root.
+     */
+    subdir: ContainedPosixModelPathSchema.optional(),
+    /**
+     * Git revision (commit SHA, tag, or branch) to download from. When
+     * set, files are fetched from `…/resolve/<revision>/…` so the bytes
+     * are immutable and the pinned `sha256`s always match — upstream
+     * re-publishes to `main` can't drift us. Captured at catalog-build
+     * time alongside the sha256 pins (both describe the same snapshot).
+     * Optional for backward compatibility: absent → download from `main`
+     * (the legacy behavior, where an upstream update can cause a checksum
+     * mismatch). Prefer a full 40-char commit SHA; a branch name
+     * re-introduces drift and a tag can be force-moved.
+     */
+    revision: z.string().optional(),
+    /**
+     * Files to download from the selected model root, each with an
+     * LFS-derived sha256. Names are contained, POSIX-style paths relative to
+     * that root; they may preserve nested model layout but cannot escape the
+     * install directory. Order is significant for progress reporting but not
+     * for install correctness.
+     */
+    files: z
+      .array(
+        z.object({
+          name: ContainedPosixModelPathSchema,
+          sha256: z.string().regex(/^[a-f0-9]{64}$/),
+          sizeBytes: z.number().int().positive(),
+        }),
+      )
+      .min(1),
+    /** Total on-disk size across all files. */
+    approxSizeBytes: z.number().int().positive(),
+    /**
+     * Working-set footprint when loaded: weights + KV cache at default
+     * context + activations + Metal buffers. Used by the local-engine
+     * capacity broker. MLX's KV grows linearly with sequence length, so
+     * this is typically a bigger multiplier of `approxSizeBytes` than
+     * the llama.cpp equivalent. Optional — absent entries fall back to
+     * `Math.round(approxSizeBytes * 1.30)`.
+     */
+    residentBytes: z.number().int().positive().optional(),
+    /** Short quant tag for display (`4bit`, `8bit`, `bf16`). */
+    quantization: z.string().optional(),
+    /**
+     * Last-resort Jinja chat template to inject into `tokenizer_config.json`
+     * when the downloaded tokenizer_config has no `chat_template` and no
+     * `chat_template.jinja` sidecar is shipped alongside. Some MLX
+     * uploads omit the template that the upstream model was trained
+     * against — without it `mlx_lm.server` falls back to a generic
+     * template that may not match, and responses degrade from subtly
+     * off to fully incoherent. The install pipeline's recovery order is:
+     *   1. `tokenizer_config.chat_template` (upstream ships it) — use as is.
+     *   2. `chat_template.jinja` sidecar downloaded from the repo — merge
+     *      into tokenizer_config.
+     *   3. This field, if set — merge into tokenizer_config.
+     *   4. None — mark `chatTemplatePresent: false` and warn.
+     */
+    chatTemplate: z.string().optional(),
+    /**
+     * When set, this MLX build is KNOWN NOT TO LOAD/RUN and must be treated
+     * as if the model had no MLX source — hidden from the MLX install picker,
+     * refused by the install endpoint, and reported `mlx: false` by source
+     * probes — even though the repo/sha pins are retained for the day an
+     * upstream fix lands. The string is the human-readable reason (shown in
+     * logs / advanced UI). Use this instead of DELETING the `mlx` block when
+     * the incompatibility is expected to be temporary (an mlx-vlm arch/quant
+     * gap), so the repo pin isn't lost.
+     */
+    disabledReason: z.string().optional(),
+  })
+  .superRefine((source, ctx) => {
+    const seen = new Set<string>();
+    source.files.forEach((file, index) => {
+      if (seen.has(file.name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['files', index, 'name'],
+          message: `duplicate MLX install path: ${file.name}`,
+        });
+      }
+      seen.add(file.name);
+    });
+  });
 export type ChatModelMlxSource = z.infer<typeof ChatModelMlxSourceSchema>;
 
 export const ChatModelIdentitySchema = IdentityCommonSchema.extend({

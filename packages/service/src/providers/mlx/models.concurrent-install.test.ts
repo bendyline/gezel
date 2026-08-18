@@ -56,6 +56,9 @@ function makeHarness(opts: {
   files: Record<string, Buffer>;
   /** File names present in the manifest but NOT served (force a 404). */
   missing?: string[];
+  /** Optional model root inside a multi-quant Hugging Face repository. */
+  subdir?: string;
+  requestedUrls?: string[];
   onInstallStart?: (info: { catalogId: string }) => void;
 }): Harness {
   const fileNames = [...Object.keys(opts.files), ...(opts.missing ?? [])];
@@ -81,6 +84,7 @@ function makeHarness(opts: {
           mlx: {
             huggingfaceRepo: 'test/repo',
             revision: 'deadbeef',
+            ...(opts.subdir ? { subdir: opts.subdir } : {}),
             approxSizeBytes: fileList.reduce((s, f) => s + f.sizeBytes, 0),
             files: fileList,
           },
@@ -92,7 +96,10 @@ function makeHarness(opts: {
   let active = 0;
   let max = 0;
   const fetchImpl = (async (url: string) => {
-    const name = decodeURIComponent((url.split('/').pop() ?? '').split('?')[0] ?? '');
+    opts.requestedUrls?.push(url);
+    const resolvedPath = new URL(url).pathname.split('/resolve/deadbeef/')[1] ?? '';
+    const repoPath = resolvedPath.split('/').map(decodeURIComponent).join('/');
+    const name = opts.subdir ? repoPath.slice(`${opts.subdir}/`.length) : repoPath;
     const bytes = opts.files[name];
     if (!bytes) {
       return new Response(null, { status: 404, statusText: 'Not Found' });
@@ -192,6 +199,41 @@ describe('MlxModelManager — concurrent multi-file install', () => {
     const onDisk = await readdir(join(home, 'engines', 'mlx', 'models', 'test-model'));
     for (const name of Object.keys(files)) expect(onDisk).toContain(name);
     expect(onDisk).toContain('manifest.json');
+  });
+
+  it('fetches below an MLX source subdirectory but installs at the selected model root', async () => {
+    const files: Record<string, Buffer> = {
+      'config.json': Buffer.from(JSON.stringify({ architectures: ['Qwen3_5'] })),
+      'tokenizer_config.json': Buffer.from(JSON.stringify({ chat_template: 'x' })),
+      'weights/model shard.safetensors': Buffer.from('weights'),
+    };
+    const requestedUrls: string[] = [];
+    const { manager } = makeHarness({
+      home,
+      files,
+      subdir: 'builds/6bit',
+      requestedUrls,
+    });
+
+    const events = await drain(manager.install('test-model'));
+
+    expect(events.some((event) => event.type === 'done')).toBe(true);
+    expect(requestedUrls).toHaveLength(Object.keys(files).length);
+    expect(requestedUrls).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('/resolve/deadbeef/builds/6bit/config.json?download=true'),
+        expect.stringContaining(
+          '/resolve/deadbeef/builds/6bit/weights/model%20shard.safetensors?download=true',
+        ),
+      ]),
+    );
+
+    const modelDir = join(home, 'engines', 'mlx', 'models', 'test-model');
+    await expect(readdir(modelDir)).resolves.toEqual(
+      expect.arrayContaining(['config.json', 'tokenizer_config.json', 'weights', 'manifest.json']),
+    );
+    await expect(readdir(join(modelDir, 'weights'))).resolves.toContain('model shard.safetensors');
+    await expect(readdir(join(modelDir, 'builds'))).rejects.toThrow();
   });
 
   it('starts runtime warming for installs initiated through the direct model manager', async () => {
