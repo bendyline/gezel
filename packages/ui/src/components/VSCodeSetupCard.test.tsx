@@ -127,7 +127,9 @@ describe('VSCodeSetupCard', () => {
     );
 
     render(<VSCodeSetupCard endpointsEnabled />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Repair VS Code setup…' }));
+    const repair = await screen.findByRole('button', { name: 'Repair VS Code setup…' });
+    await waitFor(() => expect(repair).toBeEnabled());
+    fireEvent.click(repair);
     const dialog = screen.getByRole('alertdialog', { name: 'Repair the VS Code setup?' });
     expect(
       within(dialog).getByText(/Providers that are not named Gezel remain untouched/),
