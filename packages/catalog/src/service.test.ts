@@ -78,7 +78,7 @@ describe('CatalogService against bundled data', () => {
     const detail = await service.get('gezel-template', 'developer');
     expect(detail).not.toBeNull();
     expect(detail!.manifest.kind).toBe('gezel-template');
-    expect(detail!.manifest.version).toBe('1.4.0');
+    expect(detail!.manifest.version).toBe('1.4.1');
     expect(detail!.about).toContain('Treat the latest request as the delta');
     expect(detail!.about).toContain('Finish the whole feature path');
     expect(detail!.about).toContain('Data shape, input, handler, persistence, render');

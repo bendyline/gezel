@@ -53,12 +53,12 @@ describe('DocBlocks catalog contract', () => {
     expect(docblocks, 'the bundled DocBlocks toolset should exist').toBeDefined();
     if (!docblocks) return;
 
-    expect(docblocks.version).toBe('2.3.4');
+    expect(docblocks.version).toBe('2.4.0');
     expect(docblocks.runtime).toEqual(
       expect.objectContaining({
         package: '@bendyline/docblocks-cli',
-        version: '2.3.4',
-        sha256: 'f9ebde4f7ea370778c9becf2a4f7a15fd435b4f2bcfdbcdf0f4242a1ef2db674',
+        version: '2.4.0',
+        sha256: '93ce7e3bbfe323911ef9398327259b8f41d28c030e9bd3ae1db8f4c398fc388e',
         entry: 'dist/bin.js',
         args: ['mcp'],
       }),
@@ -98,7 +98,7 @@ describe('DocBlocks catalog contract', () => {
     const expected = new Map([
       ['report-pdf', { version: '1.1.1', artifacts: ['report.pdf'] }],
       ['research-to-document', { version: '1.2.1', artifacts: ['report.docx'] }],
-      ['powerpoint-deck', { version: '1.7.1', artifacts: [], workspace: ['{{outputPath}}'] }],
+      ['powerpoint-deck', { version: '1.7.2', artifacts: [], workspace: ['{{outputPath}}'] }],
       ['narrated-slideshow', { version: '1.1.1', artifacts: ['slideshow.gif', 'slideshow.mp4'] }],
     ]);
 
