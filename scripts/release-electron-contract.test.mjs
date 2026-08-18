@@ -64,11 +64,11 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   const windowsSmokeStart = workflow.indexOf('- name: Smoke-test packaged Windows app');
   const windowsSmokeEnd = workflow.indexOf('- name: Verify Windows signatures', windowsSmokeStart);
   const windowsSmoke = workflow.slice(windowsSmokeStart, windowsSmokeEnd);
-  assert.match(windowsSmoke, /WaitForExit\(360000\)/);
+  assert.match(windowsSmoke, /WaitForExit\(900000\)/);
   assert.match(windowsSmoke, /RedirectStandardOutput/);
   assert.match(windowsSmoke, /RedirectStandardError/);
   assert.match(windowsSmoke, /Get-Content -LiteralPath \$path -Tail 400/);
-  assert.match(windowsSmoke, /timed out after 360 seconds/);
+  assert.match(windowsSmoke, /timed out after 900 seconds/);
   assert.match(windowsSmoke, /name: Preserve Windows packaged-smoke diagnostics/);
   assert.match(windowsSmoke, /if: failure\(\)/);
   assert.match(windowsSmoke, /service-bundle\.tar\.gz/);

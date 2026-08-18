@@ -55,6 +55,7 @@ describe('ExternalConversationRecorder', () => {
 
     expect(turn.projectId).toBe(project.id);
     const record = await store.getSession('sipho', turn.sessionId);
+    const canonicalWorkdir = await realpath(workdir);
     expect(record).toMatchObject({
       projectId: project.id,
       source: {
@@ -63,7 +64,8 @@ describe('ExternalConversationRecorder', () => {
         appName: 'Pi',
         externalConversationId: 'pi-session-123',
         readOnly: true,
-        workingDirectory: await realpath(workdir),
+        workingDirectory:
+          process.platform === 'win32' ? canonicalWorkdir.toLowerCase() : canonicalWorkdir,
       },
     });
     expect((await store.listSessions({ gezelId: 'sipho' }))[0]?.source?.appName).toBe('Pi');

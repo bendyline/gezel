@@ -3,9 +3,11 @@ import { link, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import * as tar from 'tar';
 
 import {
   createBundleArchive,
+  inventoryBundleArchiveEntries,
   inventoryBundleArchivePaths,
   inventoryBundleTree,
   verifyBundleArchiveRoundTrip,
@@ -73,6 +75,16 @@ describe('verifyBundleArchiveRoundTrip', () => {
     );
   });
 
+  it('reports same-size content changed in the archive', async () => {
+    await writeFile(join(archiveSourceDir, 'package.json'), '{"version":"9.9.9"}\n');
+    await archive();
+    const expectedFileCount = (await inventoryBundleTree(sourceDir)).length;
+    await assert.rejects(
+      verifyBundleArchiveRoundTrip({ sourceDir, archivePath, expectedFileCount }),
+      /extracted tree differs from source .* changed 1: package\.json/,
+    );
+  });
+
   it('archives every entry in a deep directory with many siblings', async () => {
     const relativeDir = join(
       'node_modules',
@@ -116,7 +128,7 @@ describe('verifyBundleArchiveRoundTrip', () => {
     });
   });
 
-  it('archives hardlinked files across sibling directories without stalling', async () => {
+  it('archives hardlinked source files as independent files without stalling', async () => {
     const relativeDir = join('node_modules', 'hardlinked-package');
 
     for (const dir of [sourceDir, archiveSourceDir]) {
@@ -140,14 +152,43 @@ describe('verifyBundleArchiveRoundTrip', () => {
     await archive();
 
     const expectedFileCount = (await inventoryBundleTree(sourceDir)).length;
-    const archivedPaths = await inventoryBundleArchivePaths(archivePath);
+    const archivedEntries = await inventoryBundleArchiveEntries(archivePath);
+    const archivedPaths = archivedEntries.map((entry) => entry.path);
     assert.equal(archivedPaths.length, expectedFileCount);
     assert.ok(archivedPaths.includes('node_modules/hardlinked-package/dir014/hardlink.txt'));
+    assert.equal(archivedEntries.filter((entry) => entry.type === 'Link').length, 0);
     await verifyBundleArchiveRoundTrip({
       sourceDir,
       archivePath,
       expectedFileCount,
     });
+  });
+
+  it('rejects archives that encode hardlink entries', async () => {
+    const source = join(archiveSourceDir, 'dist', 'bin', 'gezeld.js');
+    await link(source, join(archiveSourceDir, 'dist', 'bin', 'gezeld-link.js'));
+    await link(
+      join(sourceDir, 'dist', 'bin', 'gezeld.js'),
+      join(sourceDir, 'dist', 'bin', 'gezeld-link.js'),
+    );
+    tar.create(
+      {
+        cwd: archiveSourceDir,
+        file: archivePath,
+        gzip: true,
+        strict: true,
+        sync: true,
+      },
+      ['.'],
+    );
+
+    const entries = await inventoryBundleArchiveEntries(archivePath);
+    assert.equal(entries.filter((entry) => entry.type === 'Link').length, 1);
+    const expectedFileCount = (await inventoryBundleTree(sourceDir)).length;
+    await assert.rejects(
+      verifyBundleArchiveRoundTrip({ sourceDir, archivePath, expectedFileCount }),
+      /archive contains 1 hardlink entries/,
+    );
   });
 
   it('reports metadata files injected into the archive', async () => {

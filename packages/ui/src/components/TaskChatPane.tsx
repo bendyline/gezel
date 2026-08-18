@@ -69,6 +69,7 @@ export function TaskChatPane({ task, gezels }: { task: Task; gezels: GezelSummar
       <ChatComposer
         gezelId={targetGezel.id}
         gezelName={targetGezel.name}
+        gezelRoleBasedName={targetGezel.roleBasedName}
         gezelRole={targetGezel.role}
         gezelIcon={targetGezel.icon ?? null}
         gezelPoppetje={targetGezel.poppetje}

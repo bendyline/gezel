@@ -8,16 +8,15 @@ import { runIsolatedPnpmDeploy } from './pnpm-deploy.mjs';
  * True when two paths are the very same inode. Both trees are materialized by
  * pnpm out of one content-addressable store, so a dependency that lands in the
  * staging deploy AND in the bundle is one hardlinked file with two names on
- * any filesystem pnpm hardlinks into (Linux ext4). macOS clones instead, which
- * is why this only ever fired on CI.
- *
- * Windows reports `ino` as 0 for every entry, so treat 0 as "unknown" rather
- * than letting it collapse every comparison to true.
+ * any filesystem pnpm hardlinks into. Use BigInt stats because NTFS file IDs
+ * can exceed Number.MAX_SAFE_INTEGER; rounded numeric inode values can make
+ * distinct files compare equal. Treat inode 0 as "unknown" rather than
+ * letting it collapse every comparison to true.
  */
 async function isSameInode(src, dest) {
   try {
-    const [a, b] = await Promise.all([lstat(src), lstat(dest)]);
-    return a.ino !== 0 && a.ino === b.ino && a.dev === b.dev;
+    const [a, b] = await Promise.all([lstat(src, { bigint: true }), lstat(dest, { bigint: true })]);
+    return a.ino !== 0n && a.ino === b.ino && a.dev === b.dev;
   } catch {
     return false;
   }

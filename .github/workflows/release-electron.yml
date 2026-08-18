@@ -435,12 +435,16 @@ jobs:
             -RedirectStandardOutput $stdout `
             -RedirectStandardError $stderr `
             -PassThru
-          if (-not $process.WaitForExit(360000)) {
+          # A cold extraction writes ~49k service-bundle files. Hosted Windows
+          # runners can spend more than six minutes in Defender scanning even
+          # while extraction is still making progress, so keep a bounded but
+          # realistic ceiling for this deliberately fresh-home smoke.
+          if (-not $process.WaitForExit(900000)) {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
             [void]$process.WaitForExit(10000)
             Write-PackagedSmokeLog 'Packaged smoke stdout' $stdout
             Write-PackagedSmokeLog 'Packaged smoke stderr' $stderr
-            throw 'Packaged Electron smoke test timed out after 360 seconds'
+            throw 'Packaged Electron smoke test timed out after 900 seconds'
           }
           # Flush redirected streams before reading the files or ExitCode.
           $process.WaitForExit()
