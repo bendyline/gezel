@@ -115,31 +115,45 @@ test('sticky header does NOT show while the bubble header is visible', async () 
   // Position a middle assistant bubble so its top sits ~25 px BELOW
   // the timeline's visible top — header fully visible, bubble not
   // occluded.
-  await page.evaluate(() => {
-    const timeline = document.querySelector('.chat-timeline') as HTMLElement | null;
-    if (!timeline) return;
-    const bubbles = Array.from(
-      timeline.querySelectorAll<HTMLElement>('.msg-from-gezel, .msg-assistant'),
-    );
-    const target = bubbles[Math.max(0, Math.floor(bubbles.length / 2))];
-    if (!target) return;
-    const timelineRect = timeline.getBoundingClientRect();
-    const bubbleRect = target.getBoundingClientRect();
-    // Push the bubble down so its top is 25 px below timeline top.
-    const delta = bubbleRect.top - timelineRect.top - 25;
+  const timeline = page.getByTestId('chat-timeline');
+  const assistantBubbles = timeline.locator('.msg-from-gezel, .msg-assistant');
+  await expect(assistantBubbles).toHaveCount(4);
+  const target = assistantBubbles.nth(Math.floor((await assistantBubbles.count()) / 2));
+
+  // Explicitly leave auto-follow before applying the precise position.
+  // Waiting for the pin toggle proves React has processed the scroll and
+  // prevents a pending row-growth effect from snapping the timeline back
+  // to the bottom after the test has measured it.
+  await timeline.evaluate((el) => {
+    el.scrollBy({ top: -100, behavior: 'instant' as ScrollBehavior });
+  });
+  await expect(page.getByRole('button', { name: 'Jump to newest and follow' })).toBeVisible();
+
+  await target.evaluate((bubble) => {
+    const timeline = bubble.closest<HTMLElement>('.chat-timeline');
+    if (!timeline) throw new Error('assistant bubble is not inside the chat timeline');
+    const delta = bubble.getBoundingClientRect().top - timeline.getBoundingClientRect().top - 25;
     timeline.scrollBy({ top: delta, behavior: 'instant' as ScrollBehavior });
   });
-  await page.waitForTimeout(500);
+
+  // Assert the precondition instead of assuming a fixed sleep left the
+  // bubble where the test put it. This also gives a useful geometry failure
+  // if a future layout change makes the requested position unreachable.
+  await expect
+    .poll(() =>
+      target.evaluate((bubble) => {
+        const timeline = bubble.closest<HTMLElement>('.chat-timeline');
+        if (!timeline) throw new Error('assistant bubble is not inside the chat timeline');
+        return bubble.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
+      }),
+    )
+    .toBeCloseTo(25, 0);
+
+  await expect(page.locator('.chat-sticky-header')).toBeHidden();
   await page.screenshot({
     path: join(screenshotDir, 'sticky-02-no-trigger.png'),
     fullPage: true,
   });
-  const stickyVisible = await page
-    .locator('.chat-sticky-header')
-    .first()
-    .isVisible()
-    .catch(() => false);
-  expect(stickyVisible).toBe(false);
 });
 
 test('sticky header aligns with chat bubbles', async () => {
