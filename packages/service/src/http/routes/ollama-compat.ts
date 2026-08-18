@@ -11,6 +11,7 @@ import type {
   TurnUsage,
 } from '../../providers/types.js';
 import type { ServiceContext } from '../context.js';
+import { appendCallerOwnedActionLedger } from '../openai-compat/action-ledger.js';
 import { profileForCallerOwnedInference } from '../openai-compat/caller-owned-profile.js';
 import type { ChatTarget } from '../openai-compat/chat-target.js';
 import { resolveChatTarget } from '../openai-compat/chat-target.js';
@@ -360,6 +361,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
     model: string,
     provider: ProviderName,
     usage: TurnUsage | null,
+    actionReceiptCount = 0,
   ): void => {
     void ctx.history
       .log({
@@ -370,6 +372,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
           surface: 'ollama',
           model,
           provider,
+          actionReceiptCount,
           ...(usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : {}),
         },
       })
@@ -703,11 +706,15 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
     if (!target) return c.json({ error: `model "${parsed.model}" not found` }, 404);
 
     let translated: ReturnType<typeof translateMessagesWithPrefix>;
+    let actionReceiptCount = 0;
     try {
       translated = translateMessagesWithPrefix(
         toOpenAiMessages(parsed.messages),
         target.systemPrefix,
       );
+      const actionLedger = appendCallerOwnedActionLedger(translated);
+      translated = actionLedger.input;
+      actionReceiptCount = actionLedger.receiptCount;
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
@@ -784,7 +791,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       try {
         const content = await session.sendAndWait(prompt, sendOpts);
         const captured = session.capturedToolCalls?.() ?? [];
-        logCompletion(appId, parsed.model, target.provider, usageRef.value);
+        logCompletion(appId, parsed.model, target.provider, usageRef.value, actionReceiptCount);
         return c.json({
           model: parsed.model,
           created_at: new Date().toISOString(),
@@ -823,7 +830,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       try {
         await session.sendAndWait(prompt, sendOpts);
         const captured = session.capturedToolCalls?.() ?? [];
-        logCompletion(appId, parsed.model, target.provider, usageRef.value);
+        logCompletion(appId, parsed.model, target.provider, usageRef.value, actionReceiptCount);
         if (captured.length > 0) {
           const toolLine: OllamaChatStreamChunk = {
             model: parsed.model,

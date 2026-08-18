@@ -208,6 +208,49 @@ describe('POST /ollama/v1/chat — tool calling (Ollama-native shapes)', () => {
     const priors = (create?.opts?.priorMessages ?? []) as Array<Record<string, unknown>>;
     expect(priors.some((m) => m.role === 'tool' && m.toolCallId === 'call_0')).toBe(true);
   });
+
+  it('injects file-action receipts for Ollama-native tool loops too', async () => {
+    const before = mockCopilot.calls.length;
+    const res = await call('POST', '/ollama/v1/chat', {
+      body: {
+        model: 'copilot:mock-fast',
+        messages: [
+          { role: 'user', content: 'Write index.html and css/style.css.' },
+          {
+            role: 'assistant',
+            content: 'I will write both files.',
+            tool_calls: [
+              {
+                function: {
+                  name: 'write_file',
+                  arguments: { path: '/tmp/site/index.html', content: '<html>' },
+                },
+              },
+            ],
+          },
+          { role: 'tool', content: 'Wrote file successfully.', tool_name: 'write_file' },
+        ],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'write_file',
+              parameters: { type: 'object', properties: { path: { type: 'string' } } },
+            },
+          },
+        ],
+        stream: false,
+      },
+      token: rootToken,
+    });
+
+    expect(res.status).toBe(200);
+    const create = mockCopilot.calls.slice(before).find((entry) => entry.kind === 'create');
+    const providerInput = JSON.stringify(create?.opts?.priorMessages ?? []);
+    expect(providerInput).toContain('[Gezel caller-owned action ledger]');
+    expect(providerInput).toContain('write_file (call_0) -> \\"/tmp/site/index.html\\"');
+    expect(providerInput).not.toMatch(/-> .*css\/style\.css/u);
+  });
 });
 
 describe('POST /ollama/v1/chat — options + format overlay, done_reason', () => {

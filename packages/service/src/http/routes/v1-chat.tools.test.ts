@@ -69,6 +69,22 @@ const WEATHER_TOOL = {
   },
 };
 
+const WRITE_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'write',
+    description: 'Write one file.',
+    parameters: {
+      type: 'object',
+      properties: {
+        filePath: { type: 'string' },
+        content: { type: 'string' },
+      },
+      required: ['filePath', 'content'],
+    },
+  },
+};
+
 describe('POST /v1/chat/completions — tool calling (round-trip)', () => {
   it('Turn 1: model emits a tool call → response carries tool_calls + finish_reason=tool_calls', async () => {
     mockCopilot.scriptExternalToolCalls([
@@ -142,6 +158,44 @@ describe('POST /v1/chat/completions — tool calling (round-trip)', () => {
     // scripted external call. We just verify the round-trip succeeds.
     expect(body.choices[0]?.finish_reason).toBe('stop');
     expect(body.choices[0]?.message.tool_calls).toBeUndefined();
+  });
+
+  it('injects a path-scoped action ledger into a file-write continuation', async () => {
+    const callStart = mockCopilot.calls.length;
+    const res = await v1('POST', '/v1/chat/completions', {
+      body: {
+        model: 'copilot:mock-fast',
+        messages: [
+          { role: 'user', content: 'Build index.html, css/style.css, and js/app.js.' },
+          {
+            role: 'assistant',
+            content: 'I will create all three files.',
+            tool_calls: [
+              {
+                id: 'call-index',
+                type: 'function',
+                function: {
+                  name: 'write',
+                  arguments: '{"filePath":"/tmp/site/index.html","content":"<html>"}',
+                },
+              },
+            ],
+          },
+          { role: 'tool', tool_call_id: 'call-index', content: 'Wrote file successfully.' },
+        ],
+        tools: [WRITE_TOOL],
+      },
+      token: rootToken,
+    });
+
+    expect(res.status).toBe(200);
+    const create = mockCopilot.calls.slice(callStart).find((call) => call.kind === 'create');
+    const providerInput = JSON.stringify(create?.opts?.priorMessages ?? []);
+    expect(providerInput).toContain('[Gezel caller-owned action ledger]');
+    expect(providerInput).toContain('write (call-index) -> \\"/tmp/site/index.html\\"');
+    expect(providerInput).toContain('Planned or narrated actions are not receipts');
+    expect(providerInput).not.toMatch(/-> .*css\/style\.css/u);
+    expect(providerInput).not.toMatch(/-> .*js\/app\.js/u);
   });
 
   it('Streaming: emits a delta chunk with tool_calls then finishes with finish_reason=tool_calls', async () => {

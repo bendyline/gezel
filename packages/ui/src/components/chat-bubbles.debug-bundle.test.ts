@@ -61,4 +61,47 @@ describe('formatDebugBundle — registered tools line', () => {
     });
     expect(persisted).toContain('Registered tools (1, last known): `get_board`');
   });
+
+  it('labels captured external evidence without presenting a native reconstruction as fact', () => {
+    const out = render({
+      systemPrompt: 'Actual OpenCode system prompt',
+      registeredTools: ['write', 'read'],
+      registeredToolsSource: 'caller',
+      externalConversation: {
+        appId: 'opencode',
+        appName: 'OpenCode',
+        externalConversationId: 'oc-1',
+        workingDirectory: '/tmp/site',
+        request: {
+          capturedAt: '2026-08-18T13:00:00.000Z',
+          systemMessage: 'Actual OpenCode system prompt',
+          toolNames: ['write', 'read'],
+          messageCount: 3,
+          transcript: [
+            { role: 'user', content: 'Build it.' },
+            {
+              role: 'assistant',
+              content: '',
+              toolCalls: [{ id: 'call-1', name: 'write', arguments: '{"path":"index.html"}' }],
+            },
+            { role: 'tool', content: 'ok', toolCallId: 'call-1' },
+          ],
+          actionLedger: '[Gezel caller-owned action ledger]\n- write -> `index.html`',
+        },
+      },
+      diagnostics: {
+        sessionRecordPath: '/tmp/session.json',
+        logsDir: '/tmp/logs',
+      },
+    });
+
+    expect(out).toContain('Conversation owner: **OpenCode**');
+    expect(out).toContain('Registered tools (2, supplied by OpenCode)');
+    expect(out).toContain('System prompt (captured from OpenCode request)');
+    expect(out).not.toContain('System prompt (freshly computed)');
+    expect(out).toContain('Caller-owned request transcript (3 of 3 messages)');
+    expect(out).toContain('Tool call `write` (`call-1`) arguments');
+    expect(out).toContain('Action ledger injected into the completion');
+    expect(out).toContain('Gezel mirror record');
+  });
 });

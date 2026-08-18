@@ -56,6 +56,41 @@ export const ExpectedDeliverableSchema = z.object({
 export type ExpectedDeliverable = z.infer<typeof ExpectedDeliverableSchema>;
 
 /**
+ * Bounded evidence captured from the most recent caller-owned OpenAI-shaped
+ * request. External apps own their transcript and tool loop, so rebuilding a
+ * native Gezel prompt later is not evidence of what that model actually saw.
+ */
+export const ExternalRequestDiagnosticsSchema = z.object({
+  capturedAt: z.string(),
+  /** Effective system message after an optional gezel persona was prepended. */
+  systemMessage: z.string(),
+  /** Function names supplied by the caller on this request. */
+  toolNames: z.array(z.string()),
+  /** Count before the bounded diagnostic transcript window was applied. */
+  messageCount: z.number().int().nonnegative(),
+  transcriptTruncated: z.boolean().optional(),
+  transcript: z.array(
+    z.object({
+      role: z.enum(['system', 'developer', 'user', 'assistant', 'tool']),
+      content: z.string(),
+      toolCalls: z
+        .array(
+          z.object({
+            id: z.string(),
+            name: z.string(),
+            arguments: z.string(),
+          }),
+        )
+        .optional(),
+      toolCallId: z.string().optional(),
+    }),
+  ),
+  /** Exact receipt text appended to the final tool result sent to the model. */
+  actionLedger: z.string().optional(),
+});
+export type ExternalRequestDiagnostics = z.infer<typeof ExternalRequestDiagnosticsSchema>;
+
+/**
  * A chat session — one persistent thread of conversation between the user
  * and a gezel. Every session lives inside a (gezel, project) pair. The
  * `default` project fills in when the user hasn't picked one.
@@ -103,6 +138,8 @@ export const ChatSessionSchema = z.object({
   archived: z.boolean().optional(),
   /** Provenance for a read-only conversation mirrored from another app. */
   source: ChatSessionSourceSchema.optional(),
+  /** Latest actual caller-owned request, retained solely for diagnostics. */
+  externalRequestDiagnostics: ExternalRequestDiagnosticsSchema.optional(),
   messages: z.array(ChatMessageSchema),
   providerState: z.object({
     copilotSessionId: z.string().optional(),

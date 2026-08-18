@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChatEventEnvelope } from '@bendyline/gezel';
@@ -37,6 +37,8 @@ function beginInput(messages: ExternalTranscriptMessage[], workingDirectory?: st
     providerName: 'mlx' as const,
     model: 'qwen-test',
     messages,
+    effectiveSystemMessage: 'You are Pi through Gezel.',
+    toolNames: ['readFile', 'write'],
   };
 }
 
@@ -61,7 +63,7 @@ describe('ExternalConversationRecorder', () => {
         appName: 'Pi',
         externalConversationId: 'pi-session-123',
         readOnly: true,
-        workingDirectory: workdir,
+        workingDirectory: await realpath(workdir),
       },
     });
     expect((await store.listSessions({ gezelId: 'sipho' }))[0]?.source?.appName).toBe('Pi');
@@ -243,5 +245,43 @@ describe('ExternalConversationRecorder', () => {
     expect(record?.messages[1]?.toolCalls).toHaveLength(2);
     expect(envelopes.filter((envelope) => envelope.event.type === 'complete')).toHaveLength(1);
     expect(envelopes.filter((envelope) => envelope.event.type === 'done')).toHaveLength(1);
+  });
+
+  it('persists the actual caller request and does not mark explicit tool errors successful', async () => {
+    const recorder = new ExternalConversationRecorder({ store, events });
+    const turn = await recorder.begin({
+      ...beginInput([
+        { role: 'system', content: 'Caller-owned system prompt.' },
+        { role: 'user', content: 'Write index.html.' },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call-write', name: 'write', arguments: '{"path":"index.html"}' }],
+        },
+        { role: 'tool', content: 'Error: permission denied', toolCallId: 'call-write' },
+      ]),
+      effectiveSystemMessage: 'Gezel persona.\n\nCaller-owned system prompt.',
+      toolNames: ['write'],
+      actionLedger: '[Gezel caller-owned action ledger]\n- write -> "index.html"',
+    });
+
+    await turn.finish({ content: 'I could not write the file.', finishReason: 'stop' });
+    const record = await store.getSession('sipho', turn.sessionId);
+    expect(record?.externalRequestDiagnostics).toMatchObject({
+      systemMessage: 'Gezel persona.\n\nCaller-owned system prompt.',
+      toolNames: ['write'],
+      messageCount: 4,
+      actionLedger: '[Gezel caller-owned action ledger]\n- write -> "index.html"',
+    });
+    expect(record?.externalRequestDiagnostics?.transcript.at(-1)).toMatchObject({
+      role: 'tool',
+      toolCallId: 'call-write',
+      content: 'Error: permission denied',
+    });
+    expect(record?.messages.at(-1)?.toolCalls?.[0]).toMatchObject({
+      name: 'write',
+      success: false,
+      errorMessage: 'Error: permission denied',
+    });
   });
 });

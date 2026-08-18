@@ -871,13 +871,31 @@ export function formatDebugBundle(opts: {
   if (s.numCtx) lines.push(`- num_ctx: \`${s.numCtx}\``);
   lines.push(`- Session: \`${s.sessionId}\``);
   lines.push(`- Turn status at export: \`${s.turnStatus}\``);
+  if (s.externalConversation) {
+    lines.push(
+      `- Conversation owner: **${s.externalConversation.appName}** (caller-owned prompt and tool loop; Gezel is a read-only mirror)`,
+    );
+    if (s.externalConversation.workingDirectory) {
+      lines.push(`- Caller working directory: \`${s.externalConversation.workingDirectory}\``);
+    }
+    if (s.externalConversation.request) {
+      lines.push(`- Caller request captured: \`${s.externalConversation.request.capturedAt}\``);
+    }
+  }
   if (s.registeredTools.length > 0) {
-    const scope = s.registeredToolsSource === 'persisted' ? ', last known' : '';
+    const scope =
+      s.registeredToolsSource === 'persisted'
+        ? ', last known'
+        : s.registeredToolsSource === 'caller'
+          ? `, supplied by ${s.externalConversation?.appName ?? 'caller'}`
+          : '';
     lines.push(
       `- Registered tools (${s.registeredTools.length}${scope}): ${s.registeredTools.map((t) => `\`${t}\``).join(', ')}`,
     );
   } else if (s.registeredToolsSource === 'live') {
     lines.push('- Registered tools: **none** (live session reported an empty bridge)');
+  } else if (s.registeredToolsSource === 'caller') {
+    lines.push('- Registered tools: **none** (captured caller request supplied no functions)');
   } else {
     // Never assert "none" without having asked a live bridge. An empty
     // list from a cold session is missing evidence, not evidence of a
@@ -888,7 +906,9 @@ export function formatDebugBundle(opts: {
       '- Registered tools: **not recorded** (no live session at export — unknown, NOT an empty roster; read the "Tools available this turn" block in the prompt below)',
     );
   }
-  if (s.customToolsMd) {
+  if (s.registeredToolsSource === 'caller') {
+    lines.push('- Tools listing source: caller-supplied OpenAI-compatible `tools[]`');
+  } else if (s.customToolsMd) {
     lines.push(
       '- Tools listing source: **custom `tools.md`** (auto-injected listing fully replaced; gezel owner is responsible for accuracy)',
     );
@@ -907,7 +927,13 @@ export function formatDebugBundle(opts: {
   }
   pushFenced(lines, response);
   lines.push('');
-  lines.push('## System prompt (freshly computed)');
+  lines.push(
+    s.externalConversation
+      ? s.externalConversation.request
+        ? `## System prompt (captured from ${s.externalConversation.appName} request)`
+        : '## System prompt (not captured for this older external mirror)'
+      : '## System prompt (freshly computed)',
+  );
   lines.push('');
   pushFenced(lines, s.systemPrompt.trim());
   lines.push('');
@@ -916,6 +942,36 @@ export function formatDebugBundle(opts: {
     lines.push('');
     pushFenced(lines, s.volatileContext.trim());
     lines.push('');
+  }
+  const externalRequest = s.externalConversation?.request;
+  if (externalRequest) {
+    lines.push(
+      `## Caller-owned request transcript (${externalRequest.transcript.length} of ${externalRequest.messageCount} messages)`,
+    );
+    lines.push('');
+    if (externalRequest.transcriptTruncated) {
+      lines.push('> This diagnostic copy was bounded; the owning app remains authoritative.');
+      lines.push('');
+    }
+    for (const message of externalRequest.transcript) {
+      const id = message.toolCallId ? ` (tool_call_id: ${message.toolCallId})` : '';
+      lines.push(`### ${message.role}${id}`);
+      lines.push('');
+      pushFenced(lines, message.content.trim());
+      for (const call of message.toolCalls ?? []) {
+        lines.push('');
+        lines.push(`Tool call \`${call.name}\` (\`${call.id}\`) arguments:`);
+        lines.push('');
+        pushFenced(lines, call.arguments);
+      }
+      lines.push('');
+    }
+    if (externalRequest.actionLedger) {
+      lines.push('## Action ledger injected into the completion');
+      lines.push('');
+      pushFenced(lines, externalRequest.actionLedger);
+      lines.push('');
+    }
   }
   lines.push(`## Recent messages (${s.recentMessages.length})`);
   lines.push('');
@@ -982,7 +1038,9 @@ export function formatDebugBundle(opts: {
     );
     lines.push('');
     lines.push(
-      `- **Session transcript** (every turn, tool call, reasoning): \`${d.sessionRecordPath}\``,
+      s.externalConversation
+        ? `- **Gezel mirror record** (normalized completed turns; ${s.externalConversation.appName} owns the authoritative transcript and intermediate tool loop): \`${d.sessionRecordPath}\``
+        : `- **Session transcript** (every turn, tool call, reasoning): \`${d.sessionRecordPath}\``,
     );
     lines.push(`- **Logs directory** (daemon + engine): \`${d.logsDir}\``);
     if (d.engineLogGlob) {

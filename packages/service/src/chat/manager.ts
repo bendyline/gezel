@@ -2962,11 +2962,10 @@ export class ChatManager {
    * effort). Surfaced via `GET /api/sessions/:id/debug` and consumed
    * by the UI's debug-mode "copy debug bundle" button.
    *
-   * This re-runs `buildSessionOpts` rather than reading whatever was
-   * captured at session-creation time — the *current* prompt is what
-   * matters when an engineer is investigating "why did the model do
-   * X right now". Recent edits to the gezel's about, project context,
-   * or local-model-tuning rules show up immediately.
+   * Native sessions re-run `buildSessionOpts` because the *current* prompt
+   * matters when investigating "why did the model do X right now". External
+   * mirrors instead surface the latest captured caller-owned request; a native
+   * Gezel prompt reconstructed later is not execution evidence for that loop.
    *
    * `atMessageTimestamp`: when set (ISO string from `ChatMessage.at`),
    * slice messages whose `at <= atMessageTimestamp` so the bundle
@@ -2992,17 +2991,22 @@ export class ChatManager {
     const liveSession = this.states.get(sessionId)?.session;
     const liveRegisteredTools = liveSession?.getRegisteredToolNames?.();
     const persistedScriptTools = [...new Set((record.scriptTools ?? []).map((tool) => tool.name))];
-    const registeredTools = liveRegisteredTools ?? persistedScriptTools;
+    const externalRequest =
+      record.source?.kind === 'external' ? record.externalRequestDiagnostics : undefined;
+    const registeredTools =
+      externalRequest?.toolNames ?? liveRegisteredTools ?? persistedScriptTools;
     // An empty list means three very different things, and collapsing
     // them sent one investigation chasing a bridge that had never
     // dropped: the bundle said "Registered tools: none" for an aborted
     // turn whose own system prompt listed ~80 wired tools. Only the
     // `live` branch is evidence of absence.
-    const registeredToolsSource: 'live' | 'persisted' | 'unavailable' = liveRegisteredTools
-      ? 'live'
-      : persistedScriptTools.length > 0
-        ? 'persisted'
-        : 'unavailable';
+    const registeredToolsSource: 'live' | 'persisted' | 'unavailable' | 'caller' = externalRequest
+      ? 'caller'
+      : liveRegisteredTools
+        ? 'live'
+        : persistedScriptTools.length > 0
+          ? 'persisted'
+          : 'unavailable';
     // Build the prompt with the live tools when available — same
     // refresh logic the runtime applies right after session creation
     // (see `refreshSystemPromptForLiveTools`). This makes the debug
@@ -3010,7 +3014,7 @@ export class ChatManager {
     // sees after the post-spawn refresh, rather than the predicted
     // pre-spawn version.
     const toolsOverride =
-      registeredTools.length > 0
+      record.source?.kind !== 'external' && registeredTools.length > 0
         ? await this.buildToolsOverrideForLiveSession(record, registeredTools)
         : undefined;
     const cachedProvider = this.providers.get(record.providerName);
@@ -3091,7 +3095,8 @@ export class ChatManager {
     // auto-injected listing. Trim-then-empty-check matches the
     // renderer's behavior, so the debug bundle's flag aligns with
     // what actually fired in the prompt.
-    const customToolsMd = (gezel.toolsMd ?? '').trim().length > 0;
+    const customToolsMd =
+      record.source?.kind !== 'external' && (gezel.toolsMd ?? '').trim().length > 0;
 
     // On-disk pointers for deeper digging than the bundle can hold: the
     // full session transcript + the logs dir, plus the engine-log glob
@@ -3114,16 +3119,36 @@ export class ChatManager {
       leaksUntaggedReasoning: leaksUntaggedReasoning(modelId),
       ...(sessionOpts.reasoningEffort ? { reasoningEffort: sessionOpts.reasoningEffort } : {}),
       ...(sessionOpts.numCtx ? { numCtx: sessionOpts.numCtx } : {}),
-      systemPrompt: sessionOpts.systemMessage ?? '',
-      ...(sessionOpts.volatileContext ? { volatileContext: sessionOpts.volatileContext } : {}),
+      systemPrompt:
+        record.source?.kind === 'external'
+          ? (externalRequest?.systemMessage ?? '')
+          : (sessionOpts.systemMessage ?? ''),
+      ...(record.source?.kind !== 'external' && sessionOpts.volatileContext
+        ? { volatileContext: sessionOpts.volatileContext }
+        : {}),
       customToolsMd,
       registeredTools,
       registeredToolsSource,
-      turnStatus: this.inflight.has(sessionId)
-        ? 'in-progress'
-        : (this.pendingSends.get(sessionId)?.length ?? 0) > 0
-          ? 'queued'
-          : 'idle',
+      ...(record.source?.kind === 'external'
+        ? {
+            externalConversation: {
+              appId: record.source.appId,
+              appName: record.source.appName,
+              externalConversationId: record.source.externalConversationId,
+              ...(record.source.workingDirectory
+                ? { workingDirectory: record.source.workingDirectory }
+                : {}),
+              ...(externalRequest ? { request: externalRequest } : {}),
+            },
+          }
+        : {}),
+      turnStatus:
+        this.inflight.has(sessionId) ||
+        this.externalConversations.listActive().some((activity) => activity.sessionId === sessionId)
+          ? 'in-progress'
+          : (this.pendingSends.get(sessionId)?.length ?? 0) > 0
+            ? 'queued'
+            : 'idle',
       recentMessages,
       diagnostics: {
         sessionRecordPath: this.store.sessionRecordPath(record.gezelId, sessionId),

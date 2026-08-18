@@ -91,6 +91,22 @@ const EXEC_TOOL = {
   },
 };
 
+const WRITE_TOOL = {
+  type: 'function' as const,
+  name: 'write_file',
+  description: 'Write one file.',
+  strict: false,
+  parameters: {
+    type: 'object',
+    properties: {
+      path: { type: 'string' },
+      content: { type: 'string' },
+    },
+    required: ['path', 'content'],
+    additionalProperties: false,
+  },
+};
+
 describe('POST /v1/responses — Codex facade', () => {
   it('requires an OpenAI-scoped bearer token', async () => {
     const response = await postResponses({ model: 'copilot:mock-fast', input: 'hi' });
@@ -318,6 +334,39 @@ describe('POST /v1/responses — Codex facade', () => {
     expect(second.status).toBe(200);
     const secondBody = (await second.json()) as { output_text: string };
     expect(secondBody.output_text).toBeTruthy();
+  });
+
+  it('injects the same file-action ledger for Responses callers', async () => {
+    const callsBefore = mockCopilot.calls.length;
+    const response = await postResponses(
+      {
+        model: 'copilot:mock-fast',
+        input: [
+          { type: 'message', role: 'user', content: 'Write index.html and css/style.css.' },
+          {
+            type: 'function_call',
+            call_id: 'call_write',
+            name: 'write_file',
+            arguments: '{"path":"/tmp/site/index.html","content":"<html>"}',
+          },
+          {
+            type: 'function_call_output',
+            call_id: 'call_write',
+            output: 'Wrote file successfully.',
+          },
+        ],
+        tools: [WRITE_TOOL],
+        store: false,
+      },
+      rootToken,
+    );
+
+    expect(response.status).toBe(200);
+    const create = mockCopilot.calls.slice(callsBefore).find((call) => call.kind === 'create');
+    const providerInput = JSON.stringify(create?.opts?.priorMessages ?? []);
+    expect(providerInput).toContain('[Gezel caller-owned action ledger]');
+    expect(providerInput).toContain('write_file (call_write) -> \\"/tmp/site/index.html\\"');
+    expect(providerInput).not.toMatch(/-> .*css\/style\.css/u);
   });
 
   it('returns OpenAI validation envelopes for malformed requests', async () => {

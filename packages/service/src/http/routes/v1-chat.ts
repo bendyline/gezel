@@ -17,6 +17,7 @@ import {
   EXTERNAL_PROJECT_HEADER,
   EXTERNAL_WORKING_DIRECTORY_HEADER,
 } from '../external-conversation-headers.js';
+import { appendCallerOwnedActionLedger } from '../openai-compat/action-ledger.js';
 import { profileForCallerOwnedInference } from '../openai-compat/caller-owned-profile.js';
 import { resolveChatTarget, resolveFallbackGezelId } from '../openai-compat/chat-target.js';
 import type { ChatTarget } from '../openai-compat/chat-target.js';
@@ -300,8 +301,11 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
 
     let session: LLMSession | undefined;
     let externalTurn: ExternalConversationTurn | undefined;
+    const requestStartedAt = Date.now();
     try {
       let translated = translateMessagesWithPrefix(parsed.messages, target.systemPrefix);
+      const actionLedger = appendCallerOwnedActionLedger(translated);
+      translated = actionLedger.input;
       // Model-aware resolve: local providers route through the engine
       // pool so a request can name ANY installed local model — the
       // pool spools the right llama-server/MLX replica (evicting an
@@ -432,6 +436,9 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
             providerName: target.provider,
             ...(target.model ? { model: target.model } : {}),
             messages: externalTranscript(parsed.messages),
+            effectiveSystemMessage: translated.systemMessage,
+            toolNames: externalTools?.map((tool) => tool.name) ?? [],
+            ...(actionLedger.ledger ? { actionLedger: actionLedger.ledger } : {}),
           });
         } catch (err) {
           log.warn(
@@ -462,6 +469,8 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
               surface: 'openai',
               model: parsed.model,
               provider: target.provider,
+              actionReceiptCount: actionLedger.receiptCount,
+              ...(externalTurn ? { externalSessionId: externalTurn.sessionId } : {}),
               ...(usageRef.value
                 ? {
                     inputTokens: usageRef.value.inputTokens,
@@ -491,12 +500,14 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
         const lastMessage = parsed.messages[parsed.messages.length - 1];
         const requestContext = {
           appId,
+          ...(externalTurn ? { externalSessionId: externalTurn.sessionId } : {}),
           model: parsed.model,
           provider: target.provider,
           messageCount: parsed.messages.length,
           hasTools: (parsed.tools?.length ?? 0) > 0,
           lastMessageRole: lastMessage?.role,
           hasPriorToolMessages: parsed.messages.some((m) => m.role === 'tool'),
+          actionReceiptCount: actionLedger.receiptCount,
         };
         return streamSSE(c, async (stream) => {
           const diagnostics = createStreamingDiagnostics();
@@ -569,7 +580,14 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
                 );
               });
             const completedTelemetry = telemetry();
-            if (
+            if (externalTurn || requestContext.hasTools || requestContext.hasPriorToolMessages) {
+              log.info(
+                `caller-owned chat iteration completed: ${JSON.stringify({
+                  ...completedTelemetry,
+                  finishReason: result.finishReason,
+                })}`,
+              );
+            } else if (
               (completedTelemetry.elapsedMs as number) >= 60_000 ||
               (completedTelemetry.keepalives as number) > 0
             ) {
@@ -650,11 +668,45 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
             `external conversation mirror could not commit: ${err instanceof Error ? err.message : String(err)}`,
           );
         });
+      if (
+        externalTurn ||
+        (parsed.tools?.length ?? 0) > 0 ||
+        parsed.messages.some((message) => message.role === 'tool')
+      ) {
+        log.info(
+          `caller-owned chat iteration completed: ${JSON.stringify({
+            appId,
+            ...(externalTurn ? { externalSessionId: externalTurn.sessionId } : {}),
+            model: parsed.model,
+            provider: target.provider,
+            messageCount: parsed.messages.length,
+            toolCount: parsed.tools?.length ?? 0,
+            actionReceiptCount: actionLedger.receiptCount,
+            finishReason: choice.finish_reason,
+            elapsedMs: Date.now() - requestStartedAt,
+          })}`,
+        );
+      }
       logCompletion();
       return c.json(response);
     } catch (err) {
       await externalTurn?.fail(err).catch(() => {});
       if (session) await session.disconnect().catch(() => {});
+      if (
+        externalTurn ||
+        (parsed.tools?.length ?? 0) > 0 ||
+        parsed.messages.some((message) => message.role === 'tool')
+      ) {
+        log.warn(
+          `caller-owned chat iteration failed: ${JSON.stringify({
+            ...(externalTurn ? { externalSessionId: externalTurn.sessionId } : {}),
+            model: parsed.model,
+            messageCount: parsed.messages.length,
+            elapsedMs: Date.now() - requestStartedAt,
+            error: describeErrorChain(err),
+          })}`,
+        );
+      }
       if (err instanceof ModelNotInstalledError) {
         return c.json(
           {

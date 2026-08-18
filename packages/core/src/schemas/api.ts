@@ -134,7 +134,7 @@ import {
 } from './project.js';
 import { NpmInstallApprovalDecisionSchema, QuestionSchema } from './question.js';
 import { RecognitionModeSchema } from './recognition.js';
-import { ExpectedDeliverableSchema } from './session.js';
+import { ExpectedDeliverableSchema, ExternalRequestDiagnosticsSchema } from './session.js';
 import { TaskRefSchema } from './task.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
 
@@ -5917,7 +5917,10 @@ export const SessionDebugSnapshotSchema = z.object({
   leaksUntaggedReasoning: z.boolean(),
   reasoningEffort: z.string().optional(),
   numCtx: z.number().optional(),
-  /** Freshly-computed system prompt — what `buildInstructions` would emit RIGHT NOW. */
+  /**
+   * Native sessions: freshly computed prompt. External mirrors: the effective
+   * system message captured from the caller's latest request.
+   */
   systemPrompt: z.string(),
   /**
    * The volatile context layer — task/step/gate + other per-turn blocks
@@ -5950,7 +5953,8 @@ export const SessionDebugSnapshotSchema = z.object({
    * Where {@link registeredTools} came from, so an empty list can't be
    * misread as proof no tools were wired.
    *
-   * `live` — asked the running session's bridge; an empty list here is
+   * `caller` — captured from an external app's `tools[]`. `live` — asked the
+   * running session's bridge; an empty list here is
    * real evidence. `persisted` — no live session, so this is the
    * last-known project-type script tools off the record. `unavailable` —
    * no live session and nothing persisted, i.e. the bridge state is
@@ -5962,7 +5966,21 @@ export const SessionDebugSnapshotSchema = z.object({
    * listed ~80 wired tools, sending an investigation after a phantom
    * dropped bridge. Optional so older persisted snapshots still parse.
    */
-  registeredToolsSource: z.enum(['live', 'persisted', 'unavailable']).optional(),
+  registeredToolsSource: z.enum(['live', 'persisted', 'unavailable', 'caller']).optional(),
+  /**
+   * Present for a conversation whose loop is owned by another application.
+   * This is captured request evidence, unlike the native prompt reconstruction
+   * used for ordinary Gezel sessions.
+   */
+  externalConversation: z
+    .object({
+      appId: z.string(),
+      appName: z.string(),
+      externalConversationId: z.string(),
+      workingDirectory: z.string().optional(),
+      request: ExternalRequestDiagnosticsSchema.optional(),
+    })
+    .optional(),
   /** Live session state at export time; prevents an unfinished turn looking like an empty reply. */
   turnStatus: z.enum(['idle', 'in-progress', 'queued']),
   /**

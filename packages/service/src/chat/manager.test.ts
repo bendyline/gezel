@@ -1789,6 +1789,8 @@ describe('ChatManager — inflight visibility + cancel', () => {
       gezelId: 'ada',
       providerName: 'copilot',
       messages: [{ role: 'user', content: 'Build the rally game.' }],
+      effectiveSystemMessage: 'You are Ada.',
+      toolNames: [],
     });
 
     expect(manager.listInflight()).toEqual([
@@ -6260,6 +6262,49 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     } finally {
       internals.inflight.delete(session.id);
     }
+  });
+
+  it('uses captured caller evidence for external debug snapshots', async () => {
+    const turn = await manager.beginExternalConversation({
+      sourceId: 'opencode',
+      sourceName: 'OpenCode',
+      externalConversationId: 'opencode-debug-turn',
+      workingDirectory: '/tmp/external-project',
+      gezelId: 'ada',
+      providerName: 'mlx',
+      model: 'qwen-test',
+      messages: [
+        { role: 'system', content: 'Caller system prompt.' },
+        { role: 'user', content: 'Write the page.' },
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call-write', name: 'write', arguments: '{"path":"index.html"}' }],
+        },
+        { role: 'tool', content: 'Wrote file successfully.', toolCallId: 'call-write' },
+      ],
+      effectiveSystemMessage: 'Gezel persona.\n\n---\n\nCaller system prompt.',
+      toolNames: ['write', 'read'],
+      actionLedger: '[Gezel caller-owned action ledger]\n- write -> `index.html`',
+    });
+
+    const snap = await manager.getSessionDebug(turn.sessionId);
+    expect(snap.systemPrompt).toBe('Gezel persona.\n\n---\n\nCaller system prompt.');
+    expect(snap.systemPrompt).not.toContain('About this project');
+    expect(snap.registeredTools).toEqual(['write', 'read']);
+    expect(snap.registeredToolsSource).toBe('caller');
+    expect(snap.turnStatus).toBe('in-progress');
+    expect(snap.externalConversation).toMatchObject({
+      appId: 'opencode',
+      appName: 'OpenCode',
+      workingDirectory: '/tmp/external-project',
+      request: {
+        messageCount: 4,
+        actionLedger: '[Gezel caller-owned action ledger]\n- write -> `index.html`',
+      },
+    });
+
+    await turn.finish({ content: 'Done.', finishReason: 'stop' });
   });
 
   it('uses persisted project script tools in a cold debug snapshot', async () => {

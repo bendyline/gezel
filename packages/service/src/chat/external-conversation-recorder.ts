@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { isAbsolute, normalize } from 'node:path';
 import type {
   ChatMessage,
   ChatMessageToolCall,
   ChatSession,
   ChatSessionSource,
+  ExternalRequestDiagnostics,
   ProviderName,
 } from '@bendyline/gezel';
 import { redactCredentials } from '@bendyline/gezel';
@@ -14,6 +16,10 @@ import type { ChatEventBus, PublishScope } from './events.js';
 const DEFAULT_PROJECT_ID = 'default';
 const MAX_TOOL_RESULT_CHARS = 12_000;
 const MAX_TOOL_ARGUMENT_CHARS = 100_000;
+const MAX_DIAGNOSTIC_MESSAGE_CHARS = 12_000;
+const MAX_DIAGNOSTIC_TOOL_ARGUMENT_CHARS = 20_000;
+const MAX_DIAGNOSTIC_SYSTEM_CHARS = 100_000;
+const MAX_DIAGNOSTIC_MESSAGES = 24;
 const EXTERNAL_ACTIVITY_STALE_MS = 30 * 60_000;
 
 export interface ExternalTranscriptToolCall {
@@ -39,6 +45,11 @@ export interface BeginExternalConversationInput {
   providerName: ProviderName;
   model?: string;
   messages: ExternalTranscriptMessage[];
+  /** Effective prompt and tool roster that were actually supplied this request. */
+  effectiveSystemMessage: string;
+  toolNames: string[];
+  /** Receipt block injected into the model-facing final tool result, when any. */
+  actionLedger?: string;
 }
 
 export interface ExternalConversationFinish {
@@ -205,6 +216,7 @@ export class ExternalConversationRecorder {
       if (input.model) record.model = input.model;
       record.lastTurnError = undefined;
       record.lastTurnErrorDetail = undefined;
+      record.externalRequestDiagnostics = captureExternalRequestDiagnostics(input, this.now());
       // Every caller-owned inference request is activity even when the
       // completed logical transcript did not change (the normal tool-result
       // continuation case).
@@ -470,7 +482,17 @@ function normalizeWorkingDirectory(value: string | undefined): string | undefine
   const trimmed = value?.trim();
   if (!trimmed || !isAbsolute(trimmed)) return undefined;
   const normalized = normalize(trimmed);
-  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+  let canonical = normalized;
+  try {
+    // Store project paths are canonicalized. Resolve aliases such as macOS's
+    // `/var` -> `/private/var` too, or an external chat can miss the project
+    // even though both paths name the same working directory.
+    canonical = realpathSync.native(normalized);
+  } catch {
+    // A caller may report a directory before it exists. Lexical normalization
+    // still gives us a stable hint and preserves the existing fallback path.
+  }
+  return process.platform === 'win32' ? canonical.toLowerCase() : canonical;
 }
 
 function externalThreadTitle(messages: ExternalTranscriptMessage[], sourceName: string): string {
@@ -515,13 +537,15 @@ function normalizeTranscript(messages: ExternalTranscriptMessage[]): NormalizedE
       const result = toolResults.get(call.id);
       if (result === undefined) continue;
       const resultText = boundText(result, MAX_TOOL_RESULT_CHARS);
+      const failed = looksLikeFailedToolResult(result);
       completedTools.push({
         name: call.name,
         durationMs: 0,
-        success: true,
+        success: !failed,
         argsSummary: call.name,
         argsFull: boundText(call.arguments, MAX_TOOL_ARGUMENT_CHARS).text,
         resultText: resultText.text,
+        ...(failed ? { errorMessage: resultText.text } : {}),
         ...(resultText.truncated ? { resultTruncated: true } : {}),
       });
       completedToolIds.push(call.id);
@@ -617,4 +641,51 @@ function boundText(value: string, maxChars: number): { text: string; truncated: 
     text: `${value.slice(0, half)}\n… ${value.length - half * 2} characters omitted …\n${value.slice(-half)}`,
     truncated: true,
   };
+}
+
+function captureExternalRequestDiagnostics(
+  input: BeginExternalConversationInput,
+  capturedAt: Date,
+): ExternalRequestDiagnostics {
+  const transcript = input.messages.slice(-MAX_DIAGNOSTIC_MESSAGES);
+  let transcriptTruncated = transcript.length < input.messages.length;
+  const boundedTranscript = transcript.map((message) => {
+    const content = boundText(message.content, MAX_DIAGNOSTIC_MESSAGE_CHARS);
+    if (content.truncated) transcriptTruncated = true;
+    const toolCalls = message.toolCalls?.map((call) => {
+      const args = boundText(call.arguments, MAX_DIAGNOSTIC_TOOL_ARGUMENT_CHARS);
+      if (args.truncated) transcriptTruncated = true;
+      return { id: call.id, name: call.name, arguments: args.text };
+    });
+    return {
+      role: message.role,
+      content: content.text,
+      ...(toolCalls && toolCalls.length > 0 ? { toolCalls } : {}),
+      ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
+    };
+  });
+  const systemMessage = boundText(input.effectiveSystemMessage, MAX_DIAGNOSTIC_SYSTEM_CHARS);
+  if (systemMessage.truncated) transcriptTruncated = true;
+  const actionLedger = input.actionLedger
+    ? boundText(input.actionLedger, MAX_DIAGNOSTIC_MESSAGE_CHARS).text
+    : undefined;
+  return {
+    capturedAt: capturedAt.toISOString(),
+    systemMessage: systemMessage.text,
+    toolNames: [...new Set(input.toolNames)],
+    messageCount: input.messages.length,
+    ...(transcriptTruncated ? { transcriptTruncated: true } : {}),
+    transcript: boundedTranscript,
+    ...(actionLedger ? { actionLedger } : {}),
+  };
+}
+
+function looksLikeFailedToolResult(result: string): boolean {
+  const trimmed = result.trim();
+  if (!trimmed) return false;
+  return (
+    /^(?:error|failed|failure|permission denied|access denied|tool .{0,80} failed)\b/iu.test(
+      trimmed,
+    ) || /^\{\s*"(?:error|isError)"\s*:/u.test(trimmed)
+  );
 }
