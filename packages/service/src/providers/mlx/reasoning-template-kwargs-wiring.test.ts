@@ -99,6 +99,8 @@ describe('MLX chat_template_kwargs wiring', () => {
   it('keeps reasoning ON by default when the caller says nothing', () => {
     // Flipping this default would disable reasoning for ordinary turns,
     // which is a different regression in the opposite direction.
-    expect(SERVER_SRC).toMatch(/template_vars:\s*Dict\[str, Any\]\s*=\s*\{"enable_thinking": True\}/);
+    expect(SERVER_SRC).toMatch(
+      /template_vars:\s*Dict\[str, Any\]\s*=\s*\{"enable_thinking": True\}/,
+    );
   });
 });
