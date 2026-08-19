@@ -30,13 +30,19 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-const REGISTRY_KEY = 'HKLM\\Software\\Bendyline\\Gezel';
+/**
+ * Everything the Windows installer records about itself lives under this one
+ * key, so reading it lives in this one module — see
+ * `scripts/check-single-owner-symbols.mjs`.
+ */
+export const MACHINE_STATE_REGISTRY_KEY = 'HKLM\\Software\\Bendyline\\Gezel';
+const REGISTRY_KEY = MACHINE_STATE_REGISTRY_KEY;
 const REGISTRY_VALUE = 'MachineServiceInstalled';
 
 /** Injectable so tests never touch the real registry. */
 export type RegQuery = (key: string, value: string) => Promise<string>;
 
-const defaultRegQuery: RegQuery = async (key, value) => {
+export const defaultRegQuery: RegQuery = async (key, value) => {
   // `/reg:64` is explicit rather than incidental. The installer is a 32-bit
   // NSIS process and brackets its write with `SetRegView 64`, so the value
   // lives in the native view; a redirected read would silently find nothing
@@ -63,6 +69,22 @@ export function parseRegDword(stdout: string, value: string): number | null {
   if (!hit) return null;
   const parsed = Number(hit[1]);
   return Number.isNaN(parsed) ? null : parsed;
+}
+
+/**
+ * Parse `reg query` output for a REG_SZ.
+ *
+ * Same column-padding caveat as {@link parseRegDword}: match on the type token
+ * rather than position. The trailing capture is greedy to the end of the line
+ * because a REG_SZ may legitimately contain spaces; callers validate shape.
+ */
+export function parseRegSz(stdout: string, value: string): string | null {
+  const line = stdout.split(/\r?\n/).find((l) => l.includes(value) && l.includes('REG_SZ'));
+  if (!line) return null;
+  const hit = /REG_SZ\s+(.*)$/.exec(line);
+  if (!hit) return null;
+  const parsed = hit[1]!.trim();
+  return parsed.length > 0 ? parsed : null;
 }
 
 /**

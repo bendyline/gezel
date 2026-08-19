@@ -1,9 +1,29 @@
 import { describe, expect, it } from 'vitest';
-import { machineServiceInstallFailed, parseRegDword } from './machine-service-state.js';
+import { machineServiceInstallFailed, parseRegDword, parseRegSz } from './machine-service-state.js';
 
 /** Real `reg.exe query` output, including its leading blank line. */
 const regOutput = (value: string) =>
   `\r\nHKEY_LOCAL_MACHINE\\Software\\Bendyline\\Gezel\r\n    MachineServiceInstalled    REG_DWORD    ${value}\r\n\r\n`;
+
+describe('parseRegSz', () => {
+  const szOutput = (value: string) =>
+    `\r\nHKEY_LOCAL_MACHINE\\Software\\Bendyline\\Gezel\r\n    SharedServiceTreeSha    REG_SZ    ${value}\r\n\r\n`;
+  const sha = 'c4bc6fc51c2a40492954d0df42590a4533ab0738827f8e96f947ff4b56ffd13a';
+
+  it('reads the value regardless of column padding', () => {
+    expect(parseRegSz(szOutput(sha), 'SharedServiceTreeSha')).toBe(sha);
+    expect(parseRegSz(`    SharedServiceTreeSha REG_SZ ${sha}`, 'SharedServiceTreeSha')).toBe(sha);
+  });
+
+  it('returns null when the value is absent or empty', () => {
+    expect(parseRegSz('', 'SharedServiceTreeSha')).toBeNull();
+    expect(parseRegSz(szOutput(''), 'SharedServiceTreeSha')).toBeNull();
+    // A DWORD under the same name is not a string value.
+    expect(
+      parseRegSz('    SharedServiceTreeSha    REG_DWORD    0x1\r\n', 'SharedServiceTreeSha'),
+    ).toBeNull();
+  });
+});
 
 describe('parseRegDword', () => {
   it('reads the value regardless of radix or column padding', () => {

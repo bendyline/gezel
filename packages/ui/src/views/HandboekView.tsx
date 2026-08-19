@@ -11,7 +11,8 @@ import { getDocPlaybackDuration } from '@bendyline/squisq/schemas';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AreaIcon } from '../components/AreaIcon.js';
-import { gezelChatTheme } from '../components/chat-theme.js';
+import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from '../components/chat-theme.js';
+import { useEffectiveTheme } from '../theme.js';
 import {
   createHandboekMediaProvider,
   inlineBundledAssets,
@@ -53,6 +54,10 @@ export function HandboekView() {
   const [narrationLoading, setNarrationLoading] = useState(false);
   const [collapsedAreas, setCollapsedAreas] = useState<Set<string>>(() => new Set());
   const [expandedSubcategories, setExpandedSubcategories] = useState<Set<string>>(() => new Set());
+  // The gezellig theme's native pages are dark. Overlay the shared warm-paper
+  // surface in light mode, matching the Home screen's embedded Handboek article.
+  const effectiveTheme = useEffectiveTheme();
+  const surface = effectiveTheme === 'light' ? GEZEL_LIGHT_SURFACE : undefined;
 
   useEffect(() => {
     let alive = true;
@@ -448,6 +453,7 @@ export function HandboekView() {
                   doc={doc}
                   className="gezel-article-view"
                   theme={gezelChatTheme}
+                  surface={surface}
                   imageDisplayMode="inline"
                   showCover={false}
                 />
@@ -458,6 +464,7 @@ export function HandboekView() {
                   key={narratedDoc ? 'narrated' : 'synthetic'}
                   doc={narratedDoc ?? syntheticDoc ?? doc}
                   theme={gezelChatTheme}
+                  surface={surface}
                   displayMode="video"
                   audioMode={narratedDoc ? 'media' : 'synthetic'}
                   captionsEnabled

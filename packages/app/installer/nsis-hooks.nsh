@@ -26,6 +26,13 @@
 ; GEZEL_DATA_DIR: the failures worth recording are usually ACL problems in that
 ; very directory.
 !define GEZEL_STATE_REGISTRY_KEY "Software\Bendyline\Gezel"
+; Set to the sha of the bundle whose extracted tree this installer published
+; for per-user daemons (see PublishServiceTree below).  HKLM because it is the
+; attestation itself: ordinary users can read it and cannot forge it, so the
+; supervisor can tell "an elevated installer of this exact build applied the
+; published ACL" from "someone put a directory there".  Deleted before every
+; publish attempt so a failed one can never be covered by a stale record.
+!define GEZEL_PUBLISHED_TREE_VALUE "SharedServiceTreeSha"
 !define GEZEL_SERVICE_TREE "${GEZEL_DATA_DIR}\service"
 !define GEZEL_INTERPRETER "$INSTDIR\Gezel.exe"
 !define GEZEL_EXTRACT_CLI "$INSTDIR\resources\app.asar.unpacked\dist\extract-service-bundle.js"
@@ -292,6 +299,84 @@ FunctionEnd
   ${EndIf}
 !macroend
 
+; Publish the freshly-extracted service tree so every account's per-user
+; daemon can EXECUTE this copy instead of unpacking a byte-identical second
+; one into its own home.  That duplicate is the difference between one ~48k
+; file extraction per machine and one per account — roughly three minutes of
+; first launch each, since Defender scans every extracted file synchronously.
+; Linux and macOS have published their trees since the shared-tree work
+; landed; this is the Windows half of the same contract, and the supervisor
+; side lives in supervisor/shared-service-tree.ts.
+;
+; READ is widened here, never WRITE.  The identical bytes are already readable
+; by every local account inside $INSTDIR (resources\app.asar.unpacked\dist\
+; service-bundle.tar.gz), so this discloses nothing new; write stays with
+; SYSTEM, Administrators, and the service SID.  ${GEZEL_DATA_DIR} itself keeps
+; its traverse-only Users ACE and remains unlistable, exactly as $DATA_DIR
+; stays 0711 on Linux.
+;
+; Deliberately non-fatal, and deliberately quiet.  Publishing is an
+; optimization: every failure below simply leaves the tree private, and each
+; account falls back to extracting its own copy — today's behavior.  So this
+; must not reuse TakeTrustedOwnership, which raises a modal and aborts the
+; whole machine-service install.
+;
+; ORDERING: this runs AFTER extraction, and must.  The extractor commits by
+; renaming a sibling staging directory over the destination, so the live tree
+; is always a fresh object carrying only the ACEs it inherited from the
+; private parent.  An ACE applied before extraction would be discarded by the
+; very next upgrade.
+!macro PublishServiceTree
+  ; Withdraw any previous record first. Extraction has already replaced the
+  ; tree with a fresh, private one, so a record surviving a failed publish
+  ; below would tell the supervisor to adopt a tree it cannot even read.
+  SetRegView 64
+  DeleteRegValue SHELL_CONTEXT "${GEZEL_STATE_REGISTRY_KEY}" "${GEZEL_PUBLISHED_TREE_VALUE}"
+  SetRegView 32
+
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SERVICE_TREE}" /setowner "*S-1-5-32-544" /L /Q'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "Service tree kept a previous owner (icacls exit $0); each account will extract its own copy."
+    Goto GezelTreeUnpublished
+  ${EndIf}
+
+  ; Container ACE only — no /T.  The tree was just written by the extractor,
+  ; so every child is pure-inheritance and picks (OI)(CI) up automatically;
+  ; a recursive pass over ~48k files would cost more than the extraction this
+  ; is meant to save.  Same reasoning the asset-store ACL relies on above.
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_SERVICE_TREE}" /grant:r "*S-1-5-32-545:(OI)(CI)(RX)" /L'
+  Pop $0
+  ${If} $0 != 0
+    DetailPrint "Could not publish the service tree (icacls exit $0); each account will extract its own copy."
+    Goto GezelTreeUnpublished
+  ${EndIf}
+
+  ; Record which bundle was published.  Read from the extractor's own sentinel
+  ; rather than re-deriving it: a sha256 is exactly 64 hex characters and is
+  ; the first thing in the file, so a bounded FileRead needs no newline
+  ; handling and cannot pick up a partially-written value.
+  ClearErrors
+  FileOpen $1 "${GEZEL_SERVICE_TREE}\.gezel-bundle.sha256" r
+  ${If} ${Errors}
+    DetailPrint "Published tree carries no bundle sentinel; each account will extract its own copy."
+    Goto GezelTreeUnpublished
+  ${EndIf}
+  FileRead $1 $2 64
+  FileClose $1
+  StrLen $0 $2
+  ${If} $0 != 64
+    DetailPrint "Published tree has an unreadable bundle sentinel; each account will extract its own copy."
+    Goto GezelTreeUnpublished
+  ${EndIf}
+  SetRegView 64
+  WriteRegStr SHELL_CONTEXT "${GEZEL_STATE_REGISTRY_KEY}" "${GEZEL_PUBLISHED_TREE_VALUE}" "$2"
+  SetRegView 32
+  DetailPrint "Published the shared service tree; per-user daemons will reuse it."
+
+  GezelTreeUnpublished:
+!macroend
+
 ; `dir /A:L` selects reparse-point entries. A zero exit code means at least
 ; one descendant exists. The tree itself is checked separately above; this
 ; closes the upgrade case where an old broadly-writable service directory
@@ -546,6 +631,8 @@ FunctionEnd
     MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not extract its shared-engine bundle (exit code $0). The shared model engine will not be installed; Gezel will use an account-local model engine." /SD IDOK
     Goto SkipNssm
   ${EndIf}
+
+  !insertmacro PublishServiceTree
 
   ; One atomic registration: born disabled AND born LocalService — no
   ; transient LocalSystem window (NSSM's default account) ever exists.
@@ -802,6 +889,13 @@ FunctionEnd
   ; with it — leaving it behind would make the next fresh install look like it
   ; had already failed. User data is deliberately preserved; this key is not
   ; user data.
+  ;
+  ; This also withdraws ${GEZEL_PUBLISHED_TREE_VALUE}, which is what stops the
+  ; supervisor adopting the preserved service tree after uninstall. The tree's
+  ; read ACE is deliberately left alone rather than re-privatized: it holds
+  ; daemon code, not user data, and the same bytes were readable to every
+  ; account under $INSTDIR until a moment ago. Removing the attestation is the
+  ; control; the ACL is not load-bearing once no build claims that sha.
   SetRegView 64
   DeleteRegKey SHELL_CONTEXT "${GEZEL_STATE_REGISTRY_KEY}"
   SetRegView 32

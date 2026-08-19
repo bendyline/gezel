@@ -35,17 +35,70 @@
  *     least verified against a sha'd tarball ourselves; a sentinel file is no
  *     evidence when whoever wrote it could also have written the sentinel.
  *
- * POSIX only, deliberately. The ownership/mode test above is the whole basis
- * for trusting someone else's directory, and it does not exist on Windows —
- * `st.mode` is synthesized there, so the check would pass vacuously on a tree
- * whose real protection lives in an ACL we never read. Windows keeps
- * extracting its own copy until that ACL check is written.
+ * The two checks are expressed differently per platform, because the evidence
+ * available differs:
+ *
+ *   - POSIX reads ownership and mode directly. `stat` is nearly free, so
+ *     verifying beats trusting.
+ *   - Windows cannot. `st.mode` is synthesized there, so the POSIX test would
+ *     pass vacuously; and the DACL that carries the real answer is not even
+ *     readable — the installer keeps `%ProgramData%\Gezel` private, so an
+ *     ordinary account gets ACCESS_DENIED on the tree, on its DACL, and on
+ *     `GetNamedSecurityInfo`. A check written against the ACL would therefore
+ *     refuse on every machine, forever.
+ *
+ * Windows instead pairs an elevated attestation with an empirical probe:
+ *
+ *   - the installer publishes the tree (`Users:(OI)(CI)(RX)`, write left to
+ *     SYSTEM/Administrators/the service SID) and, only when that succeeded,
+ *     records the published bundle sha under HKLM. HKLM is writable by
+ *     administrators alone and readable by everyone, which is exactly the
+ *     shape an attestation needs: a low-privilege account can neither forge
+ *     the record nor suppress it.
+ *   - we then probe the tree, its parent, and the daemon entry for write
+ *     access *from this account*, which is the property the POSIX branch
+ *     ultimately cares about and the one thing a DACL read would have told us
+ *     that the registry cannot.
+ *
+ * KNOWN ASYMMETRY, stated rather than hidden: the POSIX branch rejects a tree
+ * writable by *anyone* outside its owner (`mode & 0o022`); the Windows branch
+ * can only prove it is not writable by *us*. A second unprivileged account
+ * holding an explicit write ACE would pass here and fail there. Closing that
+ * needs an enumerable DACL, which is precisely what we cannot read. It is
+ * acceptable because the parent is administrator-only: nothing below it can
+ * be created, replaced, or re-permissioned without administrator rights, so
+ * such an ACE can only exist if an administrator deliberately granted it —
+ * and an administrator is already inside the trust boundary.
  */
 
-import { lstat, realpath, stat } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { lstat, open, realpath, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { readBundleMeta, readInstalledBundleSha } from './extract-bundle.js';
+import {
+  MACHINE_STATE_REGISTRY_KEY,
+  type RegQuery,
+  defaultRegQuery,
+  parseRegSz,
+} from './machine-service-state.js';
 import { systemServiceHome } from './system-service.js';
+
+/**
+ * Registry value the Windows installer writes after publishing the tree.
+ * Mirrors `GEZEL_PUBLISHED_TREE_VALUE` in `installer/nsis-hooks.nsh`.
+ */
+const PUBLISHED_TREE_VALUE = 'SharedServiceTreeSha';
+
+/**
+ * Whether this account can write `path`.
+ *
+ * `unknown` is not `denied`: a probe that failed for a reason other than
+ * permissions tells us nothing, and "nothing" must not read as "safe".
+ */
+export type WriteProbe = (
+  path: string,
+  kind: 'dir' | 'file',
+) => Promise<'writable' | 'denied' | 'unknown'>;
 
 export interface SharedServiceTreeOptions {
   /** Path to the shipped `service-bundle.meta.json`. */
@@ -58,6 +111,10 @@ export interface SharedServiceTreeOptions {
   /** Defaults to `process.platform`. */
   platform?: NodeJS.Platform;
   logger?: { info?: (m: string) => void; warn?: (m: string) => void };
+  /** Windows only. Injectable so tests never touch the real registry. */
+  regQuery?: RegQuery;
+  /** Windows only. Injectable so tests need no real ACL to observe. */
+  writeProbe?: WriteProbe;
 }
 
 /**
@@ -69,8 +126,6 @@ export async function resolveSharedServiceTree(
   opts: SharedServiceTreeOptions,
 ): Promise<string | null> {
   const platform = opts.platform ?? process.platform;
-  if (platform === 'win32') return null;
-
   const home = opts.serviceHome === undefined ? systemServiceHome(platform) : opts.serviceHome;
   if (!home) return null;
   const treeDir = join(home, 'service');
@@ -88,10 +143,17 @@ export async function resolveSharedServiceTree(
     }
 
     const daemonEntry = join(treeDir, 'dist', 'bin', 'gezeld.js');
+    // On Windows an unpublished tree is unreadable rather than untrusted, so
+    // this throws EACCES and the catch below takes the extract path — which is
+    // the correct outcome and the ordinary one before the installer that
+    // publishes the tree has ever run.
     const entryInfo = await lstat(daemonEntry);
     if (!entryInfo.isFile()) return null;
 
-    const rejection = await rejectUntrustedTree(treeDir, daemonEntry);
+    const rejection =
+      platform === 'win32'
+        ? await rejectUntrustedWindowsTree(treeDir, daemonEntry, meta.sha256, opts)
+        : await rejectUntrustedTree(treeDir, daemonEntry);
     if (rejection) {
       opts.logger?.warn?.(
         `[supervisor] not adopting the machine service tree at ${treeDir}: ${rejection}`,
@@ -110,6 +172,89 @@ export async function resolveSharedServiceTree(
     );
     return null;
   }
+}
+
+/**
+ * Ask the filesystem, rather than the ACL, whether we can write here.
+ *
+ * A directory is probed by creating a uniquely-named file (`wx`, so it can
+ * never clobber anything) and removing it again. A file is probed by opening
+ * it `r+`, which requests write access without truncating — the only way to
+ * test FILE_WRITE_DATA on an existing file without destroying it.
+ */
+const defaultWriteProbe: WriteProbe = async (path, kind) => {
+  if (kind === 'file') {
+    try {
+      const handle = await open(path, 'r+');
+      await handle.close();
+      return 'writable';
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      return code === 'EACCES' || code === 'EPERM' || code === 'EROFS' ? 'denied' : 'unknown';
+    }
+  }
+
+  const probe = join(path, `.gezel-write-probe-${process.pid}-${randomUUID()}`);
+  try {
+    const handle = await open(probe, 'wx');
+    await handle.close();
+    return 'writable';
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === 'EACCES' || code === 'EPERM' || code === 'EROFS' ? 'denied' : 'unknown';
+  } finally {
+    // Only ever removes a file this call created: the name is unique and `wx`
+    // refuses to open an existing one.
+    await rm(probe, { force: true }).catch(() => {});
+  }
+};
+
+/**
+ * Windows counterpart to {@link rejectUntrustedTree}. Returns why the tree
+ * must not be executed, or null when it is safe to.
+ *
+ * See the module comment for why this reads an attestation plus a probe
+ * instead of a DACL, and for the one guarantee it gives up.
+ */
+async function rejectUntrustedWindowsTree(
+  treeDir: string,
+  daemonEntry: string,
+  shippedSha: string,
+  opts: SharedServiceTreeOptions,
+): Promise<string | null> {
+  const regQuery = opts.regQuery ?? defaultRegQuery;
+  const probe = opts.writeProbe ?? defaultWriteProbe;
+
+  let published: string | null = null;
+  try {
+    // reg.exe exits non-zero when the value is absent, which promisified
+    // execFile surfaces as a rejection — the ordinary state on any machine
+    // whose installer predates tree publishing.
+    published = parseRegSz(
+      await regQuery(MACHINE_STATE_REGISTRY_KEY, PUBLISHED_TREE_VALUE),
+      PUBLISHED_TREE_VALUE,
+    );
+  } catch {
+    published = null;
+  }
+  if (!published) return 'no elevated installer has published this tree';
+  if (published.toLowerCase() !== shippedSha.toLowerCase()) {
+    return `the published tree records bundle ${published.slice(0, 12).toLowerCase()}, not the shipped ${shippedSha.slice(0, 12).toLowerCase()}`;
+  }
+
+  // Parent first, and it is not redundant: write access to it is rename
+  // access to everything below, so being able to swap `<home>\service` for
+  // another directory is equivalent to being able to rewrite its contents.
+  for (const [path, kind] of [
+    [dirname(treeDir), 'dir'],
+    [treeDir, 'dir'],
+    [daemonEntry, 'file'],
+  ] as const) {
+    const verdict = await probe(path, kind);
+    if (verdict === 'writable') return `${path} accepts writes from this account`;
+    if (verdict === 'unknown') return `${path} could not be probed for write access`;
+  }
+  return null;
 }
 
 /**
