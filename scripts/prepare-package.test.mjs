@@ -231,7 +231,7 @@ test('core preparation rebuilds through the cross-platform pnpm JavaScript launc
         "const version = source.match(/GEZEL_VERSION = '([^']+)'/)?.[1];",
         "const compat = source.match(/GEZEL_CONTENT_COMPAT = '([^']+)'/)?.[1];",
         "mkdirSync(resolve('packages/core/dist'), { recursive: true });",
-        "writeFileSync(resolve('packages/core/dist/index.js'), `var GEZEL_VERSION = \"${version}\";\\nvar GEZEL_CONTENT_COMPAT = \"${compat}\";\\n`);",
+        'writeFileSync(resolve(\'packages/core/dist/index.js\'), `var GEZEL_VERSION = "${version}";\\nvar GEZEL_CONTENT_COMPAT = "${compat}";\\n`);',
       ].join('\n'),
     );
     const { stdout } = await run(root, 'packages/core', ['1.2.3'], {
