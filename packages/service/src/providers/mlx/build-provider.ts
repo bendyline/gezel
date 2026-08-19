@@ -619,6 +619,12 @@ export async function buildMlxProvider(opts: {
           // collectively overshoot. The server further caps at Metal's
           // recommended working set (whichever is tighter). Singleton path:
           // committedOther = 0 → full budget.
+          // Opt-in structured tool-call streaming (GEZEL_MLX_STREAM_TOOL_CALLS=1).
+          // Off by default: without a matching mlx_vlm tool parser the server
+          // falls back to streaming markup as content, which is the path the
+          // gezel-side salvage layer has always handled. On, the client gets a
+          // real call boundary and can end a turn once the write is usable.
+          ...(process.env.GEZEL_MLX_STREAM_TOOL_CALLS === '1' ? ['--stream-tool-calls'] : []),
           '--gpu-memory-limit-mb',
           String(Math.max(0, Math.floor((mlxBudgetBytes - mlxCommittedOther) / (1024 * 1024)))),
           // What this engine may PIN, as distinct from what it may use. Wiring
