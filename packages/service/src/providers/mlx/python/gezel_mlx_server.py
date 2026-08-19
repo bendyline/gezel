@@ -73,6 +73,7 @@ import cache_persist  # noqa: E402
 import think_budget  # noqa: E402
 import cache_seed  # noqa: E402
 import tool_grammar  # noqa: E402
+import tool_call_stream  # noqa: E402
 from lfm2_compat import ensure_lfm2_config_compat  # noqa: E402
 
 
@@ -97,6 +98,68 @@ _LEAKED_MARKER_RE = re.compile(
     r"<\|?(?:eos|bos|pad|unk|mask|turn|tool_response|start_of_turn|end_of_turn|im_start|im_end)\|?>",
     re.IGNORECASE,
 )
+
+
+def _make_tool_stream(request_id: str, tools=None):
+    """Build a splitter for this request, or None to keep the old behaviour.
+
+    Returns None whenever the flag is off OR the model's chat template
+    matches no mlx_vlm tool parser — in both cases the caller streams raw
+    content and the gezel-side salvage path stays in charge. Never guess a
+    marker pair: a wrong boundary would silently eat visible output.
+    """
+    if not getattr(ARGS, "stream_tool_calls", False):
+        return None
+    markers = tool_call_stream.resolve_tool_markers(PROCESSOR)
+    if markers is None:
+        return None
+    start, end = markers
+    return tool_call_stream.ToolCallStreamState(
+        start_marker=start, end_marker=end, request_id=request_id, tools=tools
+    )
+
+
+def _tool_stream_fragments(state, chunk_text: str):
+    """Fragments to emit for a chunk; empty when extraction is disabled."""
+    if state is None:
+        return []
+    return state.feed(chunk_text)
+
+
+def _tool_stream_payload(frag, request_id: str, model: str, chunk) -> Dict[str, Any]:
+    """Wrap one fragment in the same chunk envelope the content path uses."""
+    if frag.content is not None:
+        delta: Dict[str, Any] = {"role": "assistant", "content": frag.content}
+    else:
+        call: Dict[str, Any] = {
+            "index": frag.tool_call_index,
+            "function": {"arguments": frag.arguments or ""},
+        }
+        if frag.tool_call_id is not None:
+            call["id"] = frag.tool_call_id
+            call["type"] = "function"
+            # The grammar fixes the name inside the argument body, so the
+            # name field stays empty rather than being guessed here; the
+            # client's parser reads it from the arguments as it always has.
+            call["function"]["name"] = frag.name or ""
+        delta = {"role": "assistant", "tool_calls": [call]}
+    return {
+        "id": request_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+        "usage": {
+            "input_tokens": getattr(chunk, "prompt_tokens", 0),
+            "output_tokens": getattr(chunk, "generation_tokens", 0),
+            "total_tokens": (
+                getattr(chunk, "prompt_tokens", 0) + getattr(chunk, "generation_tokens", 0)
+            ),
+            "prompt_tps": getattr(chunk, "prompt_tps", 0.0),
+            "generation_tps": getattr(chunk, "generation_tps", 0.0),
+            "cached_tokens": getattr(chunk, "cached_tokens", 0),
+        },
+    }
 
 
 def _scrub_leaked_markers(text: str) -> str:
@@ -266,6 +329,19 @@ parser.add_argument(
         "starves the machine (a 27B wired 96 GiB for a ~45 GB working set and "
         "left 155 MB free on a 128 GB Mac). 0 (default) = leave the wired "
         "limit alone."
+    ),
+)
+parser.add_argument(
+    "--stream-tool-calls",
+    action="store_true",
+    help=(
+        "Emit OpenAI-shaped `tool_calls` argument deltas instead of streaming "
+        "the model's tool markup as content. OFF by default: the gezel-side "
+        "salvage path stays the fallback for models whose chat template "
+        "matches no mlx_vlm tool parser. On, the client gets a real tool-call "
+        "boundary and can end a turn once the call is usable — the same lever "
+        "llama-server gives us, and the reason MLX turns otherwise run to "
+        "completion (measured 41 turns at a 136s median, 203 min/10 trials)."
     ),
 )
 parser.add_argument(
@@ -1652,12 +1728,52 @@ class BatchEngine:
         )
 
 
+def _batched_tool_payload(frag, rid: str, model: str, in_toks: int, out_count: int, sub) -> Dict[str, Any]:
+    """Batched-route envelope for one tool-stream fragment.
+
+    Mirrors `_tool_stream_payload` but sources usage from the sub rather than
+    a generation chunk — the batched worker reports counters separately.
+    """
+    if frag.content is not None:
+        delta: Dict[str, Any] = {"role": "assistant", "content": frag.content}
+    else:
+        call: Dict[str, Any] = {
+            "index": frag.tool_call_index,
+            "function": {"arguments": frag.arguments or ""},
+        }
+        if frag.tool_call_id is not None:
+            call["id"] = frag.tool_call_id
+            call["type"] = "function"
+            call["function"]["name"] = frag.name or ""
+        delta = {"role": "assistant", "tool_calls": [call]}
+    return {
+        "id": rid,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+        "usage": {
+            "input_tokens": in_toks,
+            "output_tokens": out_count,
+            "total_tokens": in_toks + out_count,
+            "prompt_tps": 0.0,
+            "generation_tps": 0.0,
+            "cached_tokens": sub.reused_tokens,
+        },
+    }
+
+
 async def _batched_stream_iter(sub: "_Sub"):
     """SSE generator for the batched path — same wire frames as the serial
     route, fed from the engine worker's per-sub queue."""
     request = sub.request
     rid = sub.request_id
     in_toks = len(sub.prompt_tokens)
+    # Same structured tool-call split as the serial route. The batched path
+    # is the one the eval harness actually exercises (max-concurrency 1 still
+    # runs through the batch engine), so wiring only the serial route left
+    # the flag inert.
+    tool_stream = _make_tool_stream(rid, getattr(request, 'tools', None))
     try:
         while True:
             item = await sub.queue.get()
@@ -1667,6 +1783,12 @@ async def _batched_stream_iter(sub: "_Sub"):
                 if await sub.http_request.is_disconnected():
                     sub.cancelled = True
                     return
+                if tool_stream is not None:
+                    for _frag in tool_stream.feed(delta):
+                        yield "data: " + json.dumps(
+                            _batched_tool_payload(_frag, rid, request.model, in_toks, out_count, sub)
+                        ) + "\n\n"
+                    continue
                 yield "data: " + json.dumps(
                     {
                         "id": rid,
@@ -1696,6 +1818,13 @@ async def _batched_stream_iter(sub: "_Sub"):
                 ) + "\n\n"
             elif kind == "done":
                 _, reason, prompt_tps, generation_tps = item
+                if tool_stream is not None:
+                    for _frag in tool_stream.flush():
+                        yield "data: " + json.dumps(
+                            _batched_tool_payload(
+                                _frag, rid, request.model, in_toks, len(sub.token_ids), sub
+                            )
+                        ) + "\n\n"
                 yield "data: " + json.dumps(
                     {
                         "id": rid,
@@ -1860,6 +1989,14 @@ class ChatRequest(BaseModel):
     # Per-request chat-template override (gezel extension). Swaps the
     # model's stored Jinja template for a curated one without reinstalling.
     chat_template_override: Optional[str] = None
+    # Template variables the caller wants bound when rendering the prompt —
+    # `enable_thinking`, `reasoning_effort`, and friends. llama-server has
+    # honored this field for a while and the MLX provider has always SENT it;
+    # until it was declared here pydantic dropped it silently, so every
+    # constrained turn that asked for thinking to be off still rendered a
+    # prompt ending in `<think>`. That one missing field was the bulk of the
+    # measured MLX/llama-cpp divergence — see `_build_prompt`.
+    chat_template_kwargs: Optional[Dict[str, Any]] = None
 
 
 class CacheStatsEntry(BaseModel):
@@ -2222,10 +2359,17 @@ def _template_needs_tool_linkage(tokenizer: Any, chat_template_override: Any) ->
     return needs
 
 
+# Template variables naming reasoning DEPTH rather than the on/off switch.
+# Mirrors `REASONING_DEPTH_TEMPLATE_KWARGS` in providers/reasoning-depth.ts;
+# kept in sync by reasoning-template-kwargs-wiring.test.ts.
+_REASONING_DEPTH_KWARGS = frozenset({"reasoning_effort", "reasoning_strength"})
+
+
 def _build_prompt(
     messages: List[ChatMessageReq],
     tools: Optional[List[Dict[str, Any]]] = None,
     chat_template_override: Optional[str] = None,
+    chat_template_kwargs: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Apply the model's chat template to OpenAI-shape messages.
 
@@ -2295,24 +2439,62 @@ def _build_prompt(
         )
         if chat_template_override:
             base_kwargs["chat_template"] = chat_template_override
-        # Attempt order, most-capable first:
-        #   1. + enable_thinking  (Qwen3 reasoning forced inside <think>)
-        #   2. - enable_thinking  (kwarg rejected by this template)
-        #   3. - tools            (template can't render tools at all)
+        # Reasoning defaults ON (Qwen3 reasoning forced inside <think>), then
+        # the caller's template vars override it. The default has to stay True:
+        # every model whose template reads the switch was tuned here, and
+        # flipping the default would silently disable reasoning for ordinary
+        # turns rather than only the constrained ones the caller names.
+        template_vars: Dict[str, Any] = {"enable_thinking": True}
+        if chat_template_kwargs:
+            template_vars.update(chat_template_kwargs)
+        # Attempt order, most-capable first. The DEPTH dials get their own
+        # rung above the switch because they are the ones that reject values:
+        # Qwen 3.8's jinja `raise_exception`s on any effort outside
+        # {xhigh, medium, low}, and a template raises rather than returning —
+        # so a bad depth value must not cost us `enable_thinking`, which is
+        # worth far more (it decides whether the turn reasons at all).
+        #   1. + all template vars   (switch + caller's depth)
+        #   2. - depth dials         (template rejected a depth VALUE)
+        #   3. - template vars       (template reads none of them)
+        #   4. - tools               (template can't render tools at all)
+        #
+        # Each rung catches Exception, not (TypeError, ValueError): a Jinja
+        # TemplateError is neither, and the fallbacks are strictly more
+        # conservative than the rung above, so degrading beats a dead turn.
+        depth_keys = [k for k in template_vars if k in _REASONING_DEPTH_KWARGS]
         try:
-            return tokenizer.apply_chat_template(
-                raw, enable_thinking=True, **base_kwargs
-            )
-        except (TypeError, ValueError) as exc_thinking:
+            return tokenizer.apply_chat_template(raw, **template_vars, **base_kwargs)
+        except Exception as exc_vars:
+            if depth_keys:
+                without_depth = {
+                    k: v for k, v in template_vars.items() if k not in _REASONING_DEPTH_KWARGS
+                }
+                try:
+                    result = tokenizer.apply_chat_template(
+                        raw, **without_depth, **base_kwargs
+                    )
+                    print(
+                        f"[tool-prompt] template rejected reasoning depth "
+                        f"{ {k: template_vars[k] for k in depth_keys} }; retried "
+                        f"with the switch only: {exc_vars}",
+                        flush=True,
+                    )
+                    return result
+                except Exception:
+                    pass
             try:
                 result = tokenizer.apply_chat_template(raw, **base_kwargs)
+                # Loud, because falling back here silently restores the
+                # template's own reasoning defaults — which is exactly the
+                # divergence this parameter exists to close.
                 print(
-                    f"[tool-prompt] enable_thinking rejected by template; "
-                    f"retried without it: {exc_thinking}",
+                    f"[tool-prompt] template rejected {sorted(template_vars)}; "
+                    f"retried without them (reasoning falls back to the "
+                    f"template default): {exc_vars}",
                     flush=True,
                 )
                 return result
-            except (TypeError, ValueError) as exc_tools:
+            except Exception as exc_tools:
                 if tools:
                     print(
                         f"[tool-prompt] TOOLS DROPPED — apply_chat_template could "
@@ -2364,7 +2546,10 @@ async def chat_completions(request: ChatRequest, http_request: Request):
         )
 
     prompt_text = _build_prompt(
-        request.messages, request.tools, request.chat_template_override
+        request.messages,
+        request.tools,
+        request.chat_template_override,
+        request.chat_template_kwargs,
     )
 
     # Build the tool-call grammar logits processor once per request (the
@@ -2536,6 +2721,8 @@ async def chat_completions(request: ChatRequest, http_request: Request):
                 generation_kwargs["logits_processors"] = _lps
 
             output_text = ""
+
+            tool_stream = _make_tool_stream(request_id, getattr(request, 'tools', None))
             last_chunk = None
             # Serialize generation across concurrent requests — see
             # `_GENERATION_LOCK` doc. Held only across the
@@ -2575,6 +2762,18 @@ async def chat_completions(request: ChatRequest, http_request: Request):
                         continue
                     output_text += chunk_text
 
+                    # With --stream-tool-calls the raw text is split into
+                    # content and tool-call argument deltas, so the client
+                    # sees a real call boundary instead of markup embedded in
+                    # prose. Without it this is a no-op passthrough and the
+                    # gezel-side salvage path behaves exactly as before.
+                    for _frag in _tool_stream_fragments(tool_stream, chunk_text):
+                        yield "data: " + json.dumps(
+                            _tool_stream_payload(_frag, request_id, request.model, chunk)
+                        ) + "\n\n"
+                    if tool_stream is not None:
+                        continue
+
                     payload = {
                         "id": request_id,
                         "object": "chat.completion.chunk",
@@ -2605,6 +2804,16 @@ async def chat_completions(request: ChatRequest, http_request: Request):
                         },
                     }
                     yield f"data: {json.dumps(payload)}\n\n"
+
+            if tool_stream is not None and last_chunk is not None:
+
+                for _frag in tool_stream.flush():
+
+                    yield "data: " + json.dumps(
+
+                        _tool_stream_payload(_frag, request_id, request.model, last_chunk)
+
+                    ) + "\n\n"
 
             if client_gone:
                 # Skip terminal + [DONE] frames — there's nobody to

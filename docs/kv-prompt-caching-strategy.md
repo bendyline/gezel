@@ -713,6 +713,174 @@ KV state survives process death so a returning user doesn't pay cold prefill.
 
 ---
 
+## 12b. Open findings — measured 2026-08-18 (qwen3.8-27b-q4, M4 Max)
+
+Two prompt-cache defects surfaced while investigating why MLX runs ~3x
+slower than llama-cpp at equal task success (13/15 vs 13/15 on the
+productivity set, 10/10 vs 10/10 on tictactoe/tankcombat). One is measured
+and open; the other is llama-cpp's and is still unexamined. Note that
+llama-cpp wins the wall-clock race while *also* running with no prompt
+cache, so cache reuse cannot be the whole story on either side.
+
+> **Read this first (2026-08-18): the cache was never the main cause.**
+> Decomposing wall-clock into its terms showed prefill time is a *wash*
+> between the engines — MLX prefills 2x the tokens at 2x the speed (477 vs
+> 224 tok/s), for 55s vs 55s on tictactoe. The gap is decode VOLUME:
+>
+> | | tictactoe | tankcombat |
+> |---|---|---|
+> | wall-clock ratio (MLX/llama) | 3.17x | 3.35x |
+> | decode tokens (MLX/llama) | 2.45x | 2.31x |
+> | residual engine slowness | **1.29x** | **1.45x** |
+>
+> ~70-75% of the "3x slowdown" was MLX generating 2.4x more tokens for the
+> same task, not running slower. Those tokens were **reasoning**, emitted on
+> turns that had explicitly asked for thinking to be OFF — see
+> "the root cause" below. Fixing the cache would have recovered a term that
+> was already even. This is why four successive cache-shaped hypotheses all
+> measured as inert.
+
+### The root cause: `chat_template_kwargs` never reached the MLX template
+
+`MLX_TUNING_MAP` routes `reasoning.enableThinking` and
+`reasoning.templateKwargs` through `chat_template_kwargs`, and
+`applyConstrainedTurnShape` additionally writes `enable_thinking: false` plus
+a `reasoning_effort` downgrade for immediate-write turns. The MLX provider
+sent all of it. The sidecar's `ChatRequest` never declared the field —
+pydantic drops unknown keys silently — and `_build_prompt` then passed a
+hardcoded `enable_thinking=True` to `apply_chat_template`.
+
+So no reasoning setting of any kind could reach an MLX chat template. The
+logs stated the contradiction plainly and it went unread for weeks: the
+provider logged "thinking disabled" on 22 turns while the sidecar logged
+`[think-budget] armed budget=4096 opens_in_think=True` on 41 of 49 — that
+flag is derived from the rendered prompt literally ending in `<think>`.
+
+Verified against qwen3.8-27b-q4's own template (tokenizer only, no weights):
+
+```
+enable_thinking=True   -> ...assistant\n<think>\n            (must reason)
+enable_thinking=False  -> ...assistant\n<think>\n\n</think>\n (pre-closed)
+```
+
+Fixed by declaring the field and threading it through, defaulting to
+`enable_thinking: True` so ordinary turns are unaffected. Two hazards the fix
+had to handle, both discovered by probing the template rather than assuming:
+
+  * Qwen 3.8's jinja `raise_exception`s on any `reasoning_effort` outside
+    {xhigh, medium, low} — and a `TemplateError` is neither `TypeError` nor
+    `ValueError`, so the pre-existing ladder would have let a bad catalog
+    value kill every turn. The ladder now drops the depth dials one rung
+    before the switch, and each rung catches `Exception`.
+  * `xhigh` is the template's DEFAULT effort. Leaving the dial alone means
+    reasoning at the model's most expensive setting.
+
+Guarded by `providers/mlx/reasoning-template-kwargs-wiring.test.ts`.
+
+Measured, paired arms on qwen3.8-27b-q4 (tictactoe n=10, tankcombat n=5;
+llama-cpp n=5 as the reference target):
+
+| | mlx before | mlx after | llama-cpp |
+|---|---|---|---|
+| tictactoe wall | 673s | **321s** (−52%) | 213s |
+| tictactoe decode tokens | 5,262 | **1,524** (−71%) | 2,145 |
+| tankcombat wall | 911s | **352s** (−61%) | 272s |
+| tankcombat decode tokens | 7,816 | **1,947** (−75%) | 3,389 |
+| pass | 10/10 | 14/15 | 10/10 |
+
+The wall-clock gap closed from 3.2x/3.4x to ~1.5x/1.3x — which lands on the
+1.29-1.45x residual the decomposition had already attributed to genuine
+engine difference, so the remaining gap is the one term that was never a bug.
+MLX now emits FEWER tokens than llama-cpp. The single failure is a
+`model-stuck` repair loop; 14/15 vs 10/10 is Fisher p=1.0, and llama-cpp
+suppresses reasoning on the identical turns while scoring 10/10, so there is
+no evidence suppression harms repair.
+
+Cache reuse improved but did NOT resolve: hit rate 26.6%→34.7% (tictactoe)
+and 20.2%→26.5% (tankcombat), **median cached tokens still 0**. Reasoning
+tokens were one contributor to prompt divergence, not the whole of it. The
+re-prefill defect above remains open and independent.
+
+### MLX: every turn re-prefills — cause still open
+
+Measured over 10 trials on qwen3.8-27b-q4: 86 reuse events, **median 0
+cached tokens**, 230,572 tokens re-prefilled, a 23.5% hit rate, roughly 16
+minutes of avoidable prefill. The logs say it plainly — `[cache] prefix-hit
+... prior_tokens=2527` immediately followed by `WARNING full prefill: ...
+had divergent untrimmable state without a reusable prompt snapshot`. So
+`cache_seed.trim_layers` is refusing and `seed_from_state` falls through to
+`fresh-untrimmable`.
+
+**Why it refuses is not yet known.** A first diagnosis — that
+`mlx-vlm`'s `BatchKVCache` lacks `is_trimmable()`/`trim()`, by analogy with
+the known "`BatchKVCache` has no `to_quantized`, and
+`maybe_quantize_kv_cache` skips them silently" gap — was **wrong**: that
+inspection read `mlx_lm`'s copy of the class, while the sidecar imports
+`mlx_vlm`'s, and `mlx_vlm.models.cache.BatchKVCache` has implemented both
+methods since 0.6.6. Two independent lines of evidence now refute it: the
+class has the methods, and bumping to 0.6.14 (whose rewritten batched cache
+would have fixed it) did not change the outcome — see below.
+
+Leading remaining hypothesis: `trim_layers` is all-or-nothing across the
+layer stack, and qwen3.8 declares a hybrid `linear_attention` /
+`full_attention` stack. Linear-attention layers carry recurrent state that
+cannot be rewound by dropping trailing positions, so one honestly
+un-trimmable layer would veto the whole trim regardless of what the batched
+cache supports. This predicts the defect is **model-shaped, not
+version-shaped** — it should disappear on a pure full-attention model.
+Untested.
+
+The end-of-prompt snapshot fallback does not rescue it. That path assumes
+"the next turn's prompt re-templates the same history, so the snapshot is a
+pure extension" — but our LCP is *partial*, not total, so the snapshot is as
+unusable as the post-turn cache. It was also designed for windowed
+(`RotatingKVCache`) models; qwen3.8 declares no sliding window yet still
+runs with `prompt_snapshot=y`.
+
+#### mlx-vlm 0.6.14 was tried and reverted
+
+0.6.14 rewrites `BatchKVCache` (adding `finalize`/`state`/`filter`/`extend`/
+`pad`/`extract`/`merge`). Under the retracted diagnosis it was the fix. A
+paired A/B, 5 trials per scenario per arm, says otherwise:
+
+| | 0.6.14 | 0.6.6 |
+|---|---|---|
+| tictactoe | 5/5 · 603 s to 1st artifact · 15.9 min | 5/5 · 484 s · **8.4 min** |
+| tankcombat | 5/5 · 920 s · 23.3 min | 5/5 · 754 s · **12.7 min** |
+| cache hit rate | 20.8% | 23.5% |
+| median cached tokens | **0** | **0** |
+| probe throughput | 40.7 gen tok/s | **55.8 gen tok/s** |
+
+Task success is identical (10/10 both arms); duration is ~85% worse and the
+cache did not improve. The pin stays at 0.6.6. Do not re-bump without a
+hypothesis that survives this measurement.
+
+### llama-cpp: `cache_reuse` is disabled outright — INVESTIGATE
+
+llama-server logs, every launch:
+
+```
+srv load_model: cache_reuse is not supported by this context, it will be disabled
+srv load_model: initializing, n_slots = 1, n_ctx_slot = 262144, kv_unified = 'false'
+```
+
+So the default engine runs with **no prompt-prefix reuse at all**, and
+`--cache-reuse` is absent from the argv. `engine-flags.ts` documents
+suppressing the auto-on default because "b9843 rejects `--cache-reuse` under
+multi-slot non-unified KV" — but this launch is `n_slots = 1`, where that
+condition should not apply.
+
+Worth answering:
+1. Why is `kv_unified = 'false'` at a single slot? Unified KV is normally the
+   single-slot case, and it is what the server names as the blocker.
+2. If unified KV is enabled at `n_slots = 1`, does `cache_reuse` come back —
+   and what does it buy? This is the DEFAULT engine, so any win here has a
+   far wider blast radius than the MLX fix.
+3. Is the `engine-flags.ts` suppression rule wider than the b9843 bug it was
+   written for?
+
+Not chased yet: MLX was the larger regression and had a clearer fix.
+
 ## 13. Key-file index
 
 **Policy / contract**
