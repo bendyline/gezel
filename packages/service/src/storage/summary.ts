@@ -6,8 +6,8 @@ import { SizeCache, measureTree } from './sizes.js';
 
 /**
  * Turns the classification registry into the numbers a person actually sees:
- * how much space each category holds, and which parts of it live outside the
- * Gezel folder and are therefore off-limits to cleanup.
+ * how much space each category holds inside the active Gezel folder, and
+ * which configured paths live outside that cleanup boundary.
  */
 
 export interface SummaryDeps {
@@ -65,7 +65,13 @@ async function computeSummary(deps: SummaryDeps): Promise<StorageSummary> {
     const sized = await Promise.all(
       dedupeByPath(entries).map(async (entry) => ({
         entry,
-        size: await measureTree(entry.path, entry.excludePaths),
+        // Cleanup never removes anything outside this Gezel home. Do not walk
+        // or add those trees to the reclaimable totals: a linked source repo
+        // can be hundreds of gigabytes while the project record Gezel owns is
+        // only a few kilobytes.
+        size: entry.external
+          ? { bytes: 0, fileCount: 0 }
+          : await measureTree(entry.path, entry.excludePaths),
       })),
     );
 

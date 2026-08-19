@@ -49,9 +49,7 @@ export function StorageUsageCard() {
   const redownloadable = summary ? categoriesOfClass(summary, 'redownloadable') : [];
   const userContent = summary ? categoriesOfClass(summary, 'user-content') : [];
   const programFiles = summary ? categoriesOfClass(summary, 'uninstaller-owned') : [];
-  const externalPaths = summary
-    ? summary.categories.flatMap((c) => c.external).filter((e) => e.bytes > 0)
-    : [];
+  const externalPaths = summary ? summary.categories.flatMap((c) => c.external) : [];
 
   return (
     <section style={{ marginBottom: '2rem' }}>
@@ -104,7 +102,7 @@ export function StorageUsageCard() {
                 <div className="storage-group">
                   <h4>Stored outside the Gezel folder</h4>
                   <p className="muted small">
-                    Gezel never deletes these — they are folders you chose.
+                    Gezel does not measure or delete these — they are folders you chose.
                   </p>
                   <ul className="storage-list">
                     {externalPaths.map((entry) => (
@@ -112,7 +110,7 @@ export function StorageUsageCard() {
                         <span className="storage-list-label">
                           <code>{entry.path}</code>
                         </span>
-                        <span className="storage-list-bytes">{formatBytes(entry.bytes)}</span>
+                        <span className="storage-list-bytes">Not included</span>
                       </li>
                     ))}
                   </ul>

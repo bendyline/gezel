@@ -631,6 +631,11 @@ async function daemonSmoke(consumerDir, opts = {}) {
       ...process.env,
       GEZEL_HOME: home,
       GEZEL_MOCK_PROVIDER: '1',
+      // A developer workstation may already have the packaged machine-engine
+      // broker installed. This smoke test is proving only what the packed npm
+      // service can provide, so do not let broker capabilities (such as the
+      // bundled Kokoro runtime) leak into its catalog responses.
+      GEZEL_DISABLE_MACHINE_ENGINE: '1',
       // First boot otherwise background-downloads Playwright/Chromium and an
       // on-device model. Neither belongs in a packaging smoke test.
       GEZEL_SKIP_SYSTEM_BOOTSTRAP: '1',
@@ -670,6 +675,8 @@ async function daemonSmoke(consumerDir, opts = {}) {
     const health = await client.health();
     if (!health) {
       fail('health probe returned nothing');
+    } else if (health.machineEngineConnected) {
+      fail('clean npm consumer unexpectedly connected to a machine-engine broker');
     } else if (expectedVersion && health.version !== expectedVersion) {
       fail(`daemon health reports ${health.version ?? 'unknown'}; expected ${expectedVersion}`);
     } else {

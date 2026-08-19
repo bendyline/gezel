@@ -87,6 +87,9 @@ overrides:
   "@hono/node-server": "2.0.11"
   "adm-zip": "0.6.0"
   "axios": "1.18.1"
+  # html-to-text 10.x still declares deepmerge-ts ^7.1.5. Force the patched
+  # major until it widens that range (GHSA-ggr8-5vv4-36mx).
+  "deepmerge-ts": "8.0.1"
   "dompurify@>=3 <4": "3.4.13"
   "fast-uri": "3.1.5"
   "form-data": "4.0.6"

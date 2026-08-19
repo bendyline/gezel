@@ -75,7 +75,7 @@ describe('StorageUsageCard', () => {
     expect(screen.getByText('Downloaded models')).toBeInTheDocument();
   });
 
-  it('names folders outside the Gezel directory as untouchable', async () => {
+  it('names folders outside the Gezel directory without including a measured size', async () => {
     const user = userEvent.setup();
     vi.mocked(api.storageSummary).mockResolvedValue(
       summary({
@@ -85,8 +85,8 @@ describe('StorageUsageCard', () => {
             class: 'user-content',
             label: 'Projects',
             description: 'Your projects.',
-            bytes: 900,
-            external: [{ path: '/Users/someone/code/repo', bytes: 900 }],
+            bytes: 12,
+            external: [{ path: '/Users/someone/code/repo', bytes: 0 }],
           }),
         ],
       }),
@@ -99,7 +99,8 @@ describe('StorageUsageCard', () => {
       screen.getByRole('heading', { name: 'Stored outside the Gezel folder' }),
     ).toBeInTheDocument();
     expect(screen.getByText('/Users/someone/code/repo')).toBeInTheDocument();
-    expect(screen.getByText(/never deletes these/)).toBeInTheDocument();
+    expect(screen.getByText(/does not measure or delete these/)).toBeInTheDocument();
+    expect(screen.getByText('Not included')).toBeInTheDocument();
   });
 
   it('re-measures on demand rather than serving the cached numbers', async () => {
