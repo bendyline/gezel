@@ -30,7 +30,7 @@ import type {
   NormalizedRecord,
   RecordRef,
 } from '../types.js';
-import { slug } from '../writer.js';
+import { sha8, slug } from '../writer.js';
 
 const log = createLogger('connectors');
 
@@ -38,6 +38,12 @@ const log = createLogger('connectors');
 const DEFAULT_MAX_PULLS = 20;
 /** GitHub caps one PR at 3,000 changed files; overview adds one record. */
 const TASK_PR_RECORD_LIMIT = 3_001;
+/** Bump when persisted corpus metadata must be refreshed for unchanged PRs. */
+const CURSOR_SCHEMA = 'v2';
+
+function pullFileRecordId(num: number, filename: string): string {
+  return `pr-${num}-file-${filename}`;
+}
 
 /** A scope name is the durable handle a task launch uses to target one PR. */
 export function pullScope(num: number): string {
@@ -130,7 +136,7 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
     // `updatedAt` + head SHA is the whole change signal for a PR: a new
     // commit or a new comment moves one of them. Unchanged → nothing to
     // re-fetch, and the pass costs one API call.
-    const next = `${bundle.detail.updatedAt}:${bundle.detail.headRef}:${bundle.files.length}`;
+    const next = `${CURSOR_SCHEMA}:${bundle.detail.updatedAt}:${bundle.detail.headRef}:${bundle.files.length}`;
     if (typeof cursor === 'string' && cursor === next) {
       return { records: [], cursor: next, enumeratedAll: true };
     }
@@ -143,7 +149,7 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
         raw: { kind: 'overview', num },
       },
       ...bundle.files.map((file, index) => ({
-        id: `pr-${num}-file-${file.filename}`,
+        id: pullFileRecordId(num, file.filename),
         // Files sort after the overview and hold their listing order, so a
         // reviewer walking the corpus reads the summary first.
         ordinalKey: -(index + 1),
@@ -252,6 +258,10 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
       files: files.map((file, index) => ({
         ordinal: index + 1,
         path: file.filename,
+        // Stable join key into files/_flags.json. The writer owns the actual
+        // ordinal-prefixed filename and preserves it across refreshes/reorders;
+        // the sidecar therefore remains the authoritative path lookup.
+        recordHash: sha8(pullFileRecordId(num, file.filename)),
         status: file.status,
         additions: file.additions,
         deletions: file.deletions,
@@ -344,7 +354,7 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
         : ['_No patch available (binary file, or the change is too large for the API)._']),
     ];
     return {
-      recordId: `pr-${num}-file-${file.filename}`,
+      recordId: pullFileRecordId(num, file.filename),
       dirSegments: ['files'],
       fileStem: slug(file.filename, 96),
       frontmatter: {

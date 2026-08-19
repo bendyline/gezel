@@ -1,14 +1,15 @@
 import { type InferredInput, defineScript, gezel } from '@bendyline/gezel-sdk';
 
 /**
- * Publish a connector corpus's own batch manifest as a fanout input artifact.
+ * Publish a connector corpus's batch manifest as a fanout input artifact,
+ * enriched with the exact current artifact record paths for every batch.
  *
  * A declarative fanout reads `spawn.overFile` — a JSON array, one entry per
  * child. When the corpus already ships that array (the `github-pulls`
  * connector writes deterministic 25-file batches into its manifest), asking a
- * model to retype it is pure loss: the paths are the gate keys for every child
- * reviewer, and token emission is the wrong transport for data that already
- * exists on disk.
+ * model to retype it is pure loss: the paths and record identities are the gate
+ * keys for every child reviewer, and token emission is the wrong transport for
+ * data that already exists on disk.
  *
  * Wild-caught on a 509-file pull request. The batch array is 25 KB — roughly
  * 7.3k tokens of arguments — against a 6144-token per-turn cap, so the write
@@ -25,7 +26,7 @@ import { type InferredInput, defineScript, gezel } from '@bendyline/gezel-sdk';
 export const meta = defineScript({
   name: 'publishCorpusBatches',
   description:
-    "Action: copy a connector corpus manifest's batch array into a fanout-input artifact, verbatim, with completeness checks against the manifest's own file total.",
+    "Action: publish a connector corpus manifest's batch array into a fanout-input artifact, adding exact record paths from the writer identity sidecar and checking completeness against the manifest's own file total.",
   kind: 'action',
   inputs: {
     corpusDir: {
@@ -61,6 +62,10 @@ export const meta = defineScript({
     outFile: { type: 'string', description: 'Artifact path that was written.' },
     batches: { type: 'number', description: 'Number of batch entries published.' },
     paths: { type: 'number', description: 'Total distinct paths across every batch.' },
+    records: {
+      type: 'number',
+      description: 'Total exact per-file artifact record paths attached to the batches.',
+    },
     bytes: { type: 'number', description: 'Size of the written artifact in bytes.' },
   },
   requires: ['artifacts.read', 'artifacts.write'],
@@ -93,7 +98,11 @@ const manifestSuffix = String(input.manifestSuffix ?? '-files.json');
 const itemsField = String(input.itemsField ?? 'batches');
 const totalField = input.totalField === undefined ? 'totalFiles' : String(input.totalField);
 
-const entries = await gezel.artifacts.list(corpusDir, { recursive: true });
+// The changed-file directory can hold thousands of records, while a recursive
+// artifact listing is deliberately bounded. Manifests are small overview
+// attachments, so search only that subtree and never enumerate the corpus.
+const manifestDir = `${corpusDir}/attachments`;
+const entries = await gezel.artifacts.list(manifestDir, { recursive: true }).catch(() => []);
 const candidates = entries
   .map((entry) => entry.path.replace(/\\+/g, '/'))
   .filter((path) => path.endsWith(manifestSuffix))
@@ -136,6 +145,7 @@ interface Batch {
   start: number;
   end: number;
   paths: string[];
+  records: string[];
 }
 
 function isPositiveInt(value: unknown): value is number {
@@ -143,7 +153,7 @@ function isPositiveInt(value: unknown): value is number {
 }
 
 const seenPaths = new Set<string>();
-const batches: Batch[] = itemsRaw.map((item, index) => {
+const parsedBatches: Omit<Batch, 'records'>[] = itemsRaw.map((item, index) => {
   const where = `${itemsField}[${index}] of artifacts/${manifestPath}`;
   if (typeof item !== 'object' || item === null || Array.isArray(item)) {
     fail(`${where} is not an object.`);
@@ -201,6 +211,80 @@ if (totalField !== '') {
   }
 }
 
+// Join manifest paths to the writer-owned filenames without listing the
+// `files/` directory. `_flags.json` is a compact identity sidecar keyed by the
+// stable record hash; unlike an ordinal reconstructed from manifest order, it
+// stays correct when a PR refresh reorders, adds, or removes changed paths.
+const filesRaw = manifestFields.files;
+if (!Array.isArray(filesRaw) || filesRaw.length !== seenPaths.size) {
+  fail(
+    `artifacts/${manifestPath} must carry one files[] identity for each of its ${seenPaths.size} distinct batch paths.`,
+  );
+}
+const recordHashByPath = new Map<string, string>();
+for (let index = 0; index < filesRaw.length; index += 1) {
+  const where = `files[${index}] of artifacts/${manifestPath}`;
+  const item = filesRaw[index];
+  if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+    fail(`${where} is not an object.`);
+  }
+  const fields = item as Record<string, unknown>;
+  const path = fields.path;
+  const recordHash = fields.recordHash;
+  if (typeof path !== 'string' || !seenPaths.has(path)) {
+    fail(`${where} has no path claimed by the published batches.`);
+  }
+  if (typeof recordHash !== 'string' || !/^[0-9a-f]{8}$/.test(recordHash)) {
+    fail(`${where} has no eight-character lowercase recordHash.`);
+  }
+  if (recordHashByPath.has(path)) fail(`${where} repeats the manifest path '${path}'.`);
+  recordHashByPath.set(path, recordHash);
+}
+
+const sidecarPath = `${corpusDir}/files/_flags.json`;
+const sidecarRaw = await gezel.artifacts.read(sidecarPath).catch(() => null);
+if (sidecarRaw === null) {
+  fail(
+    `artifacts/${sidecarPath} is missing. Re-sync the pull-request corpus with this Gezel version before launching the review.`,
+  );
+}
+let sidecar: unknown;
+try {
+  sidecar = JSON.parse(sidecarRaw);
+} catch (err) {
+  fail(
+    `artifacts/${sidecarPath} is not valid JSON (${err instanceof Error ? err.message : String(err)}).`,
+  );
+}
+if (typeof sidecar !== 'object' || sidecar === null || Array.isArray(sidecar)) {
+  fail(`artifacts/${sidecarPath} must contain a JSON object.`);
+}
+const sidecarFields = sidecar as Record<string, unknown>;
+const recordsByPath = new Map<string, string>();
+for (const [path, recordHash] of recordHashByPath) {
+  const identity = sidecarFields[recordHash];
+  const file =
+    typeof identity === 'object' && identity !== null && !Array.isArray(identity)
+      ? (identity as Record<string, unknown>).file
+      : undefined;
+  if (
+    typeof file !== 'string' ||
+    file.includes('/') ||
+    file.includes('\\') ||
+    !file.endsWith(`--${recordHash}.md`)
+  ) {
+    fail(
+      `artifacts/${sidecarPath} has no valid current filename for '${path}' (${recordHash}). Re-sync the corpus before reviewing it.`,
+    );
+  }
+  recordsByPath.set(path, `${corpusDir}/files/${file}`);
+}
+
+const batches: Batch[] = parsedBatches.map((batch) => ({
+  ...batch,
+  records: batch.paths.map((path) => recordsByPath.get(path)!),
+}));
+
 const content = `${JSON.stringify(batches, null, 2)}\n`;
 await gezel.artifacts.write(outFile, content);
 
@@ -210,5 +294,6 @@ gezel.output({
   outFile,
   batches: batches.length,
   paths: seenPaths.size,
+  records: recordsByPath.size,
   bytes: content.length,
 });

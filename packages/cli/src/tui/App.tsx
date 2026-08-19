@@ -67,6 +67,13 @@ import {
   buildGezelPickerItems,
   resolveGezelArg,
 } from './gezel-picker.js';
+import {
+  connectManagedApp,
+  disconnectManagedApp,
+  listConnectedManagedApps,
+  managedAppUsage,
+  resolveManagedApp,
+} from './managed-apps.js';
 import type { TuiRuntimeDiagnostics } from './memory-diagnostics.js';
 import {
   type ModelChoice,
@@ -165,6 +172,8 @@ const HELP = [
   '/do — choose a craftbook and start it as a task',
   '/continue — process due schedules and active tasks in this project',
   '/nightshift start|stop|list — manage Night Shift',
+  '/connect vscode|pi|opencode|codex — connect a local app to Gezel',
+  '/disconnect [vscode|pi|opencode|codex] — remove one managed app setup',
   '/focus — send into another active chat   /cli — CLI mode   /chat — chat mode',
   '!cmd — run shell   @tools — list tools   @tool <name> {json} — run a tool',
   '/clear — clear feed   /quit — exit',
@@ -1389,6 +1398,44 @@ export function App(props: {
             note(formatNightShiftList(state, work));
           } catch (err) {
             note(`night shift command failed: ${errMsg(err)}`, 'error');
+          }
+          return;
+        }
+        case 'connect': {
+          const app = resolveManagedApp(rest);
+          if (!app) return note(managedAppUsage('connect'), 'error');
+          note(`connecting ${app}…`);
+          try {
+            const result = await connectManagedApp(client, app);
+            note(result.message);
+          } catch (err) {
+            note(`could not connect ${app}: ${errMsg(err)}`, 'error');
+          }
+          return;
+        }
+        case 'disconnect': {
+          let app = resolveManagedApp(rest);
+          if (!rest.trim()) {
+            try {
+              const connected = await listConnectedManagedApps(client);
+              if (connected.length === 0) return note('no managed local apps are connected.');
+              if (connected.length > 1) {
+                return note(
+                  `more than one app is connected (${connected.join(', ')}); ${managedAppUsage('disconnect')}`,
+                  'error',
+                );
+              }
+              app = connected[0] ?? null;
+            } catch (err) {
+              return note(`could not inspect connected apps: ${errMsg(err)}`, 'error');
+            }
+          }
+          if (!app) return note(managedAppUsage('disconnect'), 'error');
+          try {
+            const result = await disconnectManagedApp(client, app);
+            note(result.message);
+          } catch (err) {
+            note(`could not disconnect ${app}: ${errMsg(err)}`, 'error');
           }
           return;
         }

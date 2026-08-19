@@ -1418,15 +1418,9 @@ html.embedded-chat #root {
 .engine-pill-actor {
   font-weight: 600;
 }
-.engine-pill-live-rate {
-  opacity: 0.78;
-  font-variant-numeric: tabular-nums;
-}
-
 /* Compact prefill progress bar — replaces the verbose "X / Y tokens
    · Z tok/s" label when an `engine_phase` event carries a progress
-   value. The original detail string moves into the pill's tooltip
-   (button title + the bar's aria-label). */
+   value. The full phase telemetry remains in the engine detail dropdown. */
 .engine-pill-progress {
   display: inline-block;
   width: 4.5rem;
@@ -1435,10 +1429,10 @@ html.embedded-chat #root {
   background: rgba(243, 237, 224, 0.32);
   overflow: hidden;
   vertical-align: middle;
-  /* Nudge up 2px so the bar sits visually centred against the
+  /* Nudge up 1px so the bar sits visually centred against the
      tabular-nums label text instead of riding the baseline. */
   position: relative;
-  top: -2px;
+  top: -1px;
 }
 .engine-pill-progress-fill {
   display: block;
@@ -28333,7 +28327,8 @@ button.boekwachter-pill:focus-visible {
   flex-direction: column;
   align-items: stretch;
   gap: 4px;
-  margin-top: 0.2rem;
+  min-width: 0;
+  margin: 0.2rem 0 0;
 }
 
 .meester-greeting-opener {

@@ -1148,11 +1148,13 @@ function ProviderOverride({
           ))}
         </>
       )}
-      <AdvancedTuningDisclosure
-        gezel={gezel}
-        effectiveProvider={effectiveProvider}
-        onUpdated={onUpdated}
-      />
+      {gezel.model && (
+        <AdvancedTuningDisclosure
+          gezel={gezel}
+          effectiveProvider={effectiveProvider}
+          onUpdated={onUpdated}
+        />
+      )}
     </div>
   );
 }

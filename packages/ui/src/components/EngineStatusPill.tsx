@@ -13,10 +13,6 @@
  *      (e.g. "Processing prompt (47% · 6,144 tokens)", "Generating",
  *      "Loading model") surfaced live from the SSE stream.
  *
- * While a turn decodes, the busy label carries a live tok/s estimate
- * measured from the start of the generating phase — for engines that
- * don't already publish an exact rate in their own phase detail.
- *
  * Click opens a dropdown with richer telemetry — per-turn tokens
  * in/out, generation tokens/sec, a rolling average over the last
  * minute, a per-model speed table for the life of the page, and the
@@ -848,10 +844,10 @@ function EngineStatusPillForProvider({
     liveTokensPerSec !== null && liveTokensPerSec !== undefined
       ? `${rateIsExact ? '' : '≈'}${formatTokensPerSec(liveTokensPerSec)}`
       : '';
-  const liveRateTooltip =
-    liveTokensPerSec !== null && liveTokensPerSec !== undefined
-      ? ` · ${rateIsExact ? '' : 'about '}${formatTokensPerSec(liveTokensPerSec)}`
-      : '';
+  // Performance belongs in the detail dropdown, not in the compact header.
+  // Most engines publish the rate as structured telemetry, but tolerate an
+  // older engine that still includes it in the human-readable phase detail.
+  const pillBusyLabel = stripTokenRate(busyLabel);
   // Strip catalog qualifiers like " (MLX, 4-bit)" from the displayed
   // model name. The engine pill already conveys "this Mac / on-device"
   // context — repeating the runtime + quantization in the pill is
@@ -980,7 +976,7 @@ function EngineStatusPillForProvider({
         aria-expanded={open}
         title={
           busy
-            ? `${platformPillLabel}${tooltipModelSuffix} — ${activeGezelName ? `${activeGezelName} · ` : ''}${busyLabel}${liveOutputTokens !== null ? ` · ${tokensAreExact ? '' : 'about '}${liveOutputTokens.toLocaleString('en-US')} output tokens` : ''}${liveRateTooltip}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''}`
+            ? `${platformPillLabel}${tooltipModelSuffix} — ${activeGezelName ? `${activeGezelName} · ` : ''}${pillBusyLabel}${liveOutputTokens !== null ? ` · ${tokensAreExact ? '' : 'about '}${liveOutputTokens.toLocaleString('en-US')} output tokens` : ''}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''}`
             : `${platformPillLabel}${tooltipModelSuffix}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''} — click for details`
         }
       >
@@ -997,8 +993,8 @@ function EngineStatusPillForProvider({
               {showProgress ? (
                 <span
                   className="engine-pill-progress"
-                  title={busyLabel}
-                  aria-label={busyLabel}
+                  title={pillBusyLabel}
+                  aria-label={pillBusyLabel}
                   role="progressbar"
                   aria-valuenow={progressPct}
                   aria-valuemin={0}
@@ -1011,10 +1007,7 @@ function EngineStatusPillForProvider({
                   />
                 </span>
               ) : (
-                busyLabel
-              )}
-              {liveRateLabel && (
-                <span className="engine-pill-live-rate">{` · ${liveRateLabel}`}</span>
+                pillBusyLabel
               )}
             </>
           ) : (
@@ -1338,6 +1331,14 @@ function phaseLabelIncludesTokenCount(label: string): boolean {
 
 function phaseLabelIncludesTokenRate(label: string): boolean {
   return /\btok\/s\b/i.test(label);
+}
+
+function stripTokenRate(label: string): string {
+  return label
+    .replace(/\s*(?:[·—–-]\s*)?(?:about\s+|~|≈)?\d+(?:\.\d+)?\s*tok\/s\b/gi, '')
+    .replace(/\(\s*\)/g, '')
+    .replace(/\s*[·—–-]\s*$/, '')
+    .trim();
 }
 
 /** One in-flight local media-engine job (image / video / recognition). */

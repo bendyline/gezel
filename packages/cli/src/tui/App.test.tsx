@@ -299,6 +299,24 @@ describe('App interactions', () => {
     expect(client.runTerminalCommand).toHaveBeenCalledTimes(1);
   });
 
+  it('connects and disconnects a managed local app from slash commands', async () => {
+    const client = createClient();
+    const harness = mountApp(client);
+    await ready(client, harness);
+
+    await submit(harness, '/connect vscode');
+    await vi.waitFor(() => {
+      expect(client.configureVSCode).toHaveBeenCalledWith({ profileId: 'code:default' });
+      expect(harness.text()).toContain('connected VS Code (Default) to Gezel');
+    });
+
+    await submit(harness, '/disconnect');
+    await vi.waitFor(() => {
+      expect(client.removeVSCodeSetup).toHaveBeenCalledOnce();
+      expect(harness.text()).toContain('disconnected VS Code');
+    });
+  });
+
   it('opens project folders and recent files surfaced by chat', async () => {
     const client = createClient();
     const harness = mountApp(client);
@@ -906,6 +924,50 @@ function createClient(opts?: {
       voormanGezelId: 'archive-foreman',
     },
   ];
+  let vscodeConnected = false;
+  const harnessModels = [
+    {
+      id: 'gezel:builder',
+      label: 'Builder',
+      kind: 'gezel' as const,
+      provider: 'llama-cpp',
+      gezelId: 'builder',
+      supportsTools: true,
+    },
+  ];
+  const harnessBase = () => ({
+    state: 'not-configured' as const,
+    models: harnessModels,
+    recommendedModel: 'gezel:builder',
+    reasons: [],
+    endpointsEnabled: true,
+    launchCommand: 'run-with-gezel',
+    bridge: {
+      baseUrl: 'http://127.0.0.1:24567/v1',
+      listening: vscodeConnected,
+      port: 24_567,
+    },
+    canConfigure: true,
+    canRemove: false,
+    canRepair: false,
+  });
+  const vscodeStatus = () => ({
+    ...harnessBase(),
+    state: vscodeConnected ? ('configured' as const) : ('not-configured' as const),
+    vscodeInstalled: true,
+    providerId: 'customendpoint',
+    profiles: [
+      {
+        id: 'code:default',
+        label: 'Default',
+        product: 'code' as const,
+        configPath: 'C:/Code/User/chatLanguageModels.json',
+      },
+    ],
+    ...(vscodeConnected ? { configuredProfileId: 'code:default' } : {}),
+    configPath: 'C:/Code/User/chatLanguageModels.json',
+    canRemove: vscodeConnected,
+  });
 
   return {
     testGezels: gezels,
@@ -981,6 +1043,46 @@ function createClient(opts?: {
     cancelChatSessionTurn: vi.fn(),
     cancelTerminalRun: vi.fn(),
     sendTerminalInput: vi.fn(),
+    getVSCodeSetupStatus: vi.fn(async () => vscodeStatus()),
+    configureVSCode: vi.fn(async () => {
+      vscodeConnected = true;
+      return vscodeStatus();
+    }),
+    removeVSCodeSetup: vi.fn(async () => {
+      vscodeConnected = false;
+      return vscodeStatus();
+    }),
+    getPiSetupStatus: vi.fn(async () => ({
+      ...harnessBase(),
+      piInstalled: true,
+      providerId: 'gezel',
+      configPath: 'C:/Gezel/pi/models.json',
+      extensionPath: 'C:/Gezel/pi/extension.js',
+      extension: {
+        state: 'not-installed' as const,
+        canInstall: true,
+        canRemove: false,
+        canReplace: false,
+      },
+    })),
+    getOpenCodeSetupStatus: vi.fn(async () => ({
+      ...harnessBase(),
+      opencodeInstalled: true,
+      providerId: 'gezel',
+      configPath: 'C:/Gezel/opencode/config.json',
+      plugin: {
+        state: 'not-installed' as const,
+        canInstall: true,
+        canRemove: false,
+        canReplace: false,
+      },
+    })),
+    getCodexSetupStatus: vi.fn(async () => ({
+      ...harnessBase(),
+      codexInstalled: true,
+      profileName: 'gezel',
+      profilePath: 'C:/Codex/gezel.toml',
+    })),
   };
 }
 

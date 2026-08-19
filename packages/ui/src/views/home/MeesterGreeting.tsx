@@ -52,7 +52,7 @@ export function MeesterGreeting({
           which gezellen you need, bring them on, and set the project up around them. You can also
           just talk things through with me.
         </p>
-        <div className="meester-greeting-openers gz-tray" role="group" aria-label="Ways to start">
+        <fieldset className="meester-greeting-openers gz-tray" aria-label="Ways to start">
           {OPENERS.map((opener) => (
             <button
               key={opener}
@@ -63,7 +63,7 @@ export function MeesterGreeting({
               {opener}
             </button>
           ))}
-        </div>
+        </fieldset>
       </div>
     </div>
   );

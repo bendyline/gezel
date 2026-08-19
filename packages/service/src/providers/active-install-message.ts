@@ -36,22 +36,13 @@ export function installPercent(install: ActiveInstallLike): number | null {
  */
 export function noModelYetMessage(engineLabel: string, active: ActiveInstallLike | null): string {
   if (!active) {
-    return (
-      `${engineLabel}: no model is installed yet. ` +
-      'Download one from Settings → Artificial Intelligence, then try again.'
-    );
+    return `${engineLabel}: no model is installed yet. Download one from Settings → Artificial Intelligence, then try again.`;
   }
   if (active.phase !== 'downloading') {
     const verb = active.phase === 'verifying' ? 'being verified' : 'being prepared';
-    return (
-      `${engineLabel}: your model is ${verb} — hang tight, ` +
-      'this message will work as soon as it finishes.'
-    );
+    return `${engineLabel}: your model is ${verb} — hang tight, this message will work as soon as it finishes.`;
   }
   const pct = installPercent(active);
   const progress = pct === null ? 'still downloading' : `${pct}% downloaded`;
-  return (
-    `${engineLabel}: your model is ${progress} — hang tight. ` +
-    'Send this again once it finishes and it will go through.'
-  );
+  return `${engineLabel}: your model is ${progress} — hang tight. Send this again once it finishes and it will go through.`;
 }

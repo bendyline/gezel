@@ -39,10 +39,12 @@ class FakeDispatcher {
     roleBasedNameOnlyMode?: boolean;
     capabilityFloor?: string;
     bookCatalogId?: string;
+    resumeExisting?: boolean;
   }> = [];
   readonly providers = new Map<ProviderName, LLMProvider>();
   readonly activeSessionIds = new Set<string>();
   readonly cancelledSessionIds: string[] = [];
+  ensureProvider?: (name: ProviderName) => Promise<LLMProvider>;
 
   constructor(
     private readonly gezelProvider: Map<string, ProviderName>,
@@ -61,6 +63,7 @@ class FakeDispatcher {
     roleBasedNameOnlyMode?: boolean;
     capabilityFloor?: string;
     bookCatalogId?: string;
+    resumeExisting?: boolean;
   }): Promise<{ sessionId: string }> {
     await this.beforeDispatch?.();
     this.dispatches.push({
@@ -76,6 +79,7 @@ class FakeDispatcher {
         : {}),
       ...(args.capabilityFloor ? { capabilityFloor: args.capabilityFloor } : {}),
       ...(args.bookCatalogId ? { bookCatalogId: args.bookCatalogId } : {}),
+      ...(args.resumeExisting ? { resumeExisting: true } : {}),
     });
     // In production, startHandoffSession returns before the async
     // send actually acquires a queue slot. Mirror that — don't
@@ -359,6 +363,49 @@ describe('TaskRunner — dispatch + FIFO', () => {
     await runner.tick();
     expect(dispatcher.dispatches).toHaveLength(3);
     expect(runner.snapshot().pendingCount).toBe(2);
+  });
+
+  it('initializes a cold one-slot provider before admitting a 21-batch fanout', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    for (let num = 1; num <= 21; num++) {
+      await store.writeTask({
+        projectId: 'p1',
+        num,
+        ref: `p1/${num}`,
+        title: `PR batch ${num}`,
+        status: 'active',
+        assignee: { kind: 'gezel', gezelId: 'bea' },
+        craftbook: fixtureCraftbook([
+          {
+            id: 'review',
+            name: 'review',
+            assignee: { kind: 'gezel', gezelId: 'bea' },
+            createdAt: now,
+          },
+        ]),
+        activeStepId: 'review',
+        createdAt: now,
+        updatedAt: now,
+        createdBy: { kind: 'user' },
+      });
+    }
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'llama-cpp']]));
+    const initialize = vi.fn(async (name: ProviderName) => {
+      dispatcher.setProvider(name, new ProviderQueue({ concurrency: 1 }));
+      return dispatcher.getProvider(name)!;
+    });
+    dispatcher.ensureProvider = initialize;
+    const runner = new TaskRunner({ store, dispatcher });
+    await runner.rehydrateFromStore({ projectId: 'p1' });
+    await runner.tick();
+
+    expect(initialize).toHaveBeenCalledTimes(1);
+    expect(dispatcher.dispatches).toHaveLength(1);
+    expect(dispatcher.dispatches[0]?.resumeExisting).toBe(true);
+    expect(runner.snapshot().pendingCount).toBe(20);
   });
 
   it('holds restored work at the background cap and preserves foreground headroom', async () => {
@@ -888,7 +935,7 @@ describe('TaskRunner — startup rehydration', () => {
 
     const dispatcher = new FakeDispatcher(new Map([[bea.id, 'copilot']]));
     const runner = new TaskRunner({ store, dispatcher });
-    await runner.rehydrateFromStore();
+    await runner.rehydrateFromStore({ projectId: 'p1' });
     expect(runner.snapshot().pendingCount).toBe(1);
     expect(runner.workSnapshot().queuedTaskRefs).toEqual(['p1/1']);
   });

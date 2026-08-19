@@ -223,6 +223,32 @@ import {
 import { artifactPathsOf, extractReferencedFiles } from './file-references.js';
 
 /**
+ * Replace a value-taking CLI option with Gezel's authoritative value.
+ *
+ * Playwright MCP accepts both `--output-dir path` and
+ * `--output-dir=path`. Its catalog runtime arguments are not the right
+ * place to choose a destination: the active project is known only when a
+ * chat session is built. Removing either spelling before appending our
+ * value keeps every browser side file inside that project's artifacts tree.
+ */
+function withForcedCliOption(args: readonly string[], option: string, value: string): string[] {
+  const kept: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === option) {
+      // A separate-value spelling owns the next argv entry. A malformed
+      // option followed by another flag simply has no value to skip.
+      if (i + 1 < args.length && !args[i + 1]?.startsWith('--')) i++;
+      continue;
+    }
+    if (arg?.startsWith(`${option}=`)) continue;
+    if (arg !== undefined) kept.push(arg);
+  }
+  kept.push(option, value);
+  return kept;
+}
+
+/**
  * The slice of `WorkspaceIndexManager` the reference parser needs. Narrowed
  * to a structural type so the dependency stays one-way — the indexer already
  * takes this manager, and importing its class here would close the loop.
@@ -3630,6 +3656,11 @@ export class ChatManager {
     capabilityFloor?: ModelTier;
     /** Book join key for the routing ranker's gate-evidence lookup. */
     bookCatalogId?: string;
+    /**
+     * Continue the latest non-archived session for this task step. Used only
+     * by boot rehydration after the prior process (and its live turn) ended.
+     */
+    resumeExisting?: boolean;
   }): Promise<{ sessionId: string }> {
     const dispatchConfig = await this.store.readConfig();
     const roleBasedNameOnlyMode =
@@ -3696,7 +3727,25 @@ export class ChatManager {
         );
       }
     }
-    const session = await this.createSession({
+    let resumedExisting = false;
+    let session: ChatSession | null = null;
+    if (args.resumeExisting) {
+      const summaries = await this.store.listSessions({
+        gezelId: args.gezelId,
+        projectId: args.projectId,
+      });
+      const prior = summaries.find(
+        (candidate) =>
+          !candidate.archived &&
+          candidate.taskRef === args.taskRef &&
+          candidate.stepId === dispatchStepId,
+      );
+      if (prior) {
+        session = await this.store.getSession(args.gezelId, prior.id);
+        resumedExisting = session !== null;
+      }
+    }
+    session ??= await this.createSession({
       gezelId: args.gezelId,
       projectId: args.projectId,
       taskRef: args.taskRef,
@@ -3714,7 +3763,7 @@ export class ChatManager {
           }
         : {}),
     });
-    if (routed && session.model === routed.model) {
+    if (!resumedExisting && routed && session.model === routed.model) {
       log.info(
         `[chat] model-routing: step ${dispatchStepId} of ${args.taskRef} → ${routed.provider}/${routed.model} (${routed.reason})`,
       );
@@ -3798,8 +3847,9 @@ export class ChatManager {
       : roleBasedNameOnlyMode
         ? undefined
         : args.fromGezelName;
-    const seed =
-      args.kind === 'entry'
+    const seed = resumedExisting
+      ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Continue this existing task thread from the progress and tool evidence above. Re-read only what you still need, keep appending focused notes with \`write_task_note\`, and call \`advance_task_step\` when the step is done.`
+      : args.kind === 'entry'
         ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
         : selfHandoff
           ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well. Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
@@ -15159,6 +15209,7 @@ export class ChatManager {
       // configures. The only one today is `@playwright/mcp`, which needs
       // `PLAYWRIGHT_BROWSERS_PATH` to find Chromium in our managed dir.
       const extraArgs: string[] = [];
+      let runtimeArgs = t.runtime.args;
       const isLocalPreviewBrowser =
         isManagedSystemPlaywright(t) &&
         systemOnlyIds.has(t.toolsetId) &&
@@ -15169,12 +15220,25 @@ export class ChatManager {
       if (t.toolsetId === '@playwright/mcp') {
         const { playwrightBrowsersDir } = await import('@bendyline/gezel/paths');
         env.PLAYWRIGHT_BROWSERS_PATH = playwrightBrowsersDir(this.home);
+        // Playwright MCP otherwise falls back to `.playwright-mcp` beneath
+        // the daemon's inherited cwd. In an Electron dev run that is often
+        // packages/app/, which leaks screenshots, snapshots, and console
+        // logs into the source tree. The destination is session-resolved and
+        // absolute so every provider transport (bridge, Copilot, CLI) writes
+        // browser evidence into the active project's artifacts drawer.
+        // Override either catalog spelling instead of trusting a static path
+        // that cannot know which project owns this session.
+        runtimeArgs = withForcedCliOption(
+          runtimeArgs,
+          '--output-dir',
+          join(this.store.projectArtifactsDir(record.projectId), 'screenshots'),
+        );
         // Default to headless so `browser_*` tools don't pop a real Chrome
         // window every time a gezel navigates — users were surprised by a
         // `--no-sandbox` Chromium appearing mid-conversation. Set
         // `config.playwrightHeadless = false` to watch the browser for
         // debugging.
-        if (config.playwrightHeadless !== false && !t.runtime.args.includes('--headless')) {
+        if (config.playwrightHeadless !== false && !runtimeArgs.includes('--headless')) {
           extraArgs.push('--headless');
         }
         // Each session gets its own ephemeral browser profile. Without
@@ -15184,7 +15248,7 @@ export class ChatManager {
         // spawn gets a fresh tmpdir and crash-leftovers don't poison
         // future runs. We don't need cross-spawn cookie persistence —
         // sessions don't share auth state by design.
-        if (!t.runtime.args.includes('--isolated')) {
+        if (!runtimeArgs.includes('--isolated')) {
           extraArgs.push('--isolated');
         }
         // Permit explicitly requested loopback HTTPS targets that use a local
@@ -15193,7 +15257,7 @@ export class ChatManager {
         // short-lived path capability, so this TLS setting cannot bypass the
         // preview authorization boundary.
         if (
-          !t.runtime.args.includes('--ignore-https-errors') &&
+          !runtimeArgs.includes('--ignore-https-errors') &&
           env.PLAYWRIGHT_MCP_IGNORE_HTTPS_ERRORS !== '0'
         ) {
           extraArgs.push('--ignore-https-errors');
@@ -15201,7 +15265,7 @@ export class ChatManager {
         // Boundary flags are Gezel-owned in local-only mode. A modified
         // system manifest that tries to supply its own proxy/origin policy is
         // refused instead of relying on CLI duplicate-option precedence.
-        if (isLocalPreviewBrowser && hasLocalPreviewBrowserNetworkOverride(t.runtime.args)) {
+        if (isLocalPreviewBrowser && hasLocalPreviewBrowserNetworkOverride(runtimeArgs)) {
           log.warn(
             'security: refusing local-preview Playwright because its system manifest overrides network-boundary arguments',
           );
@@ -15210,7 +15274,7 @@ export class ChatManager {
         if (isLocalPreviewBrowser && opts.workspacePreview?.origin) {
           extraArgs.push(
             ...localPreviewBrowserLaunchArgs(opts.workspacePreview.origin, [
-              ...t.runtime.args,
+              ...runtimeArgs,
               ...extraArgs,
             ]),
           );
@@ -15250,7 +15314,7 @@ export class ChatManager {
         toolsetId: t.toolsetId,
         kind: 'stdio',
         command: 'node',
-        args: [runtimeEntry, ...t.runtime.args, ...extraArgs],
+        args: [runtimeEntry, ...runtimeArgs, ...extraArgs],
         env,
       };
       // The local-preview posture lives in the wrapper: `decorateTools`

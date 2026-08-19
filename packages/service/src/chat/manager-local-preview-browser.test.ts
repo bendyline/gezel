@@ -104,6 +104,8 @@ describe('ChatManager — local-preview browser security exception', () => {
     expect(playwright).toBeTruthy();
     expect(playwright?.args).toEqual(
       expect.arrayContaining([
+        '--output-dir',
+        join(store.projectArtifactsDir('default'), 'screenshots'),
         '--proxy-server',
         'http://127.0.0.1:41234',
         '--proxy-bypass',
@@ -122,6 +124,41 @@ describe('ChatManager — local-preview browser security exception', () => {
       'External URLs and arbitrary localhost services are blocked',
     );
   });
+
+  it.each(['separate value', 'equals value'])(
+    'forces the project screenshots directory over a %s runtime arg',
+    async (spelling) => {
+      const escaped = join(home, 'escaped');
+      const args =
+        spelling === 'separate value' ? ['--output-dir', escaped] : [`--output-dir=${escaped}`];
+      const installed = (await store.listInstalledToolsets({ kind: 'system' }))[0];
+      if (!installed || installed.runtime.kind !== 'npm-package') {
+        throw new Error('expected the system Playwright npm toolset');
+      }
+      await store.writeInstalledToolsets({ kind: 'system' }, [
+        {
+          ...installed,
+          runtime: { ...installed.runtime, args },
+        },
+      ]);
+
+      const opts = await latestCreateOpts();
+      const playwright = opts.extraMcpServers?.find((entry) => entry.id.includes('playwright'));
+      const outputOptionIndexes =
+        playwright?.args
+          ?.map((arg, index) =>
+            arg === '--output-dir' || arg.startsWith('--output-dir=') ? index : -1,
+          )
+          .filter((index) => index >= 0) ?? [];
+      expect(outputOptionIndexes).toHaveLength(1);
+      const outputOptionIndex = outputOptionIndexes[0]!;
+      expect(playwright?.args?.[outputOptionIndex]).toBe('--output-dir');
+      expect(playwright?.args?.[outputOptionIndex + 1]).toBe(
+        join(store.projectArtifactsDir('default'), 'screenshots'),
+      );
+      expect(playwright?.args?.join('\n')).not.toContain(escaped);
+    },
+  );
 
   it('does not extend the strict-mode exception to a user-installed copy', async () => {
     const installed = (await store.listInstalledToolsets({ kind: 'system' }))[0];

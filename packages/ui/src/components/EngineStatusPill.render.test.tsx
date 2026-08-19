@@ -245,7 +245,9 @@ describe('EngineStatusPill — simultaneous local engines', () => {
         {
           provider: 'llama-cpp',
           phase: 'generating',
-          label: 'Generating',
+          // Older engines may put performance only in the phase detail.
+          // The header strips it while the dropdown's Status row keeps it.
+          label: 'Generating · 24 tok/s',
           gezelId: 'liesel',
           outputChars: 400,
           startedAt: Date.now(),
@@ -282,6 +284,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     await user.click(pill);
     expect(await screen.findByText('This turn')).toBeInTheDocument();
     expect(screen.getByText('≈100 tok')).toBeInTheDocument();
+    expect(screen.getByText(/technical-writer · Generating · 24 tok\/s/)).toBeInTheDocument();
   });
 
   /**
@@ -290,7 +293,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
    * number there is nothing to approximate, and hedging a figure we were
    * handed reads as a bug.
    */
-  it('drops the approximation mark when the engine reports exact counters', async () => {
+  it('keeps exact performance counters in the detail dropdown, not the pill', async () => {
     mockLiveTurns = new Map([
       [
         'talkie-session',
@@ -322,6 +325,8 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     const pill = [...document.querySelectorAll('button')].find((el) =>
       (el.getAttribute('title') ?? '').includes('Generating'),
     )!;
+    expect(pill).not.toHaveTextContent('tok/s');
+    expect(pill.getAttribute('title')).not.toContain('tok/s');
     expect(pill.getAttribute('title')).toContain('59 output tokens');
     expect(pill.getAttribute('title')).not.toContain('about');
 

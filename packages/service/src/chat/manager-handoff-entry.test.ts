@@ -231,6 +231,45 @@ describe('handoff seed wording', () => {
     expect(seed).toContain('The previous step has been completed and handed step `report`');
   });
 
+  it('continues the latest persisted task-step session after a service restart', async () => {
+    const prior = await manager.createSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: 'p1/1',
+      stepId: 'report',
+    });
+    prior.messages.push({
+      role: 'assistant',
+      content: 'Reviewed records 1–10 and saved the first coverage checkpoint.',
+      at: new Date().toISOString(),
+    });
+    prior.lastActivityAt = new Date().toISOString();
+    await store.writeSession(prior);
+
+    mock.script('continued');
+    const resumed = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: 'p1/1',
+      stepId: 'report',
+      resumeExisting: true,
+    });
+    await manager.drainBackground();
+
+    expect(resumed.sessionId).toBe(prior.id);
+    const sessions = (await store.listSessions({ gezelId: 'worker' })).filter(
+      (session) => session.taskRef === 'p1/1' && session.stepId === 'report',
+    );
+    expect(sessions).toHaveLength(1);
+    const full = await store.getSession('worker', prior.id);
+    expect(
+      full?.messages.some((message) => message.content.includes('Reviewed records 1–10')),
+    ).toBe(true);
+    expect(full?.messages.some((message) => message.content.includes('service restarted'))).toBe(
+      true,
+    );
+  });
+
   /**
    * The seed is a `role: 'user'` message because that is the only role a
    * provider accepts mid-conversation — but the person never typed it. The

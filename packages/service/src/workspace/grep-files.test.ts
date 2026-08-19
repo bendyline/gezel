@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { rgPath as bundledRipgrepPath } from '@vscode/ripgrep';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -325,6 +325,31 @@ describe.runIf(HAS_RIPGREP)('grepWorkspace ripgrep engine', () => {
         engine: 'ripgrep',
         matches: [{ path: 'src/b.ts', line: 1, text: 'needle in b' }],
       });
+    } finally {
+      if (priorPath === undefined) delete process.env.PATH;
+      else process.env.PATH = priorPath;
+    }
+  });
+
+  it('trusts only the package-provided binary when the app reviews its own checkout', async () => {
+    const priorPath = process.env.PATH;
+    process.env.PATH = '';
+    try {
+      // @vscode/ripgrep exports <package>/bin/rg(.exe). Making that package
+      // root the workspace reproduces self-hosted Gezel development: the old
+      // general executable check rejected the bundle merely for being inside
+      // the reviewed checkout.
+      const packageRoot = dirname(dirname(bundledRipgrepPath));
+      const result = await grepWorkspace({
+        workspaceDir: packageRoot,
+        engine: 'ripgrep',
+        path: 'package.json',
+        pattern: '"name"',
+        literal: true,
+      });
+
+      expect(result.engine).toBe('ripgrep');
+      expect(result.matches.some((match) => match.path === 'package.json')).toBe(true);
     } finally {
       if (priorPath === undefined) delete process.env.PATH;
       else process.env.PATH = priorPath;

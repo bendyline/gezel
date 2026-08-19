@@ -1014,6 +1014,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         chat.listInflight().some((entry) => entry.sessionId === sessionId),
       resolveProviderName: (gezelId, opts) => chat.providerForGezel(gezelId, opts),
       getProvider: (name) => chat.getProviderIfReady(name),
+      ensureProvider: (name) =>
+        name === 'remote' ? Promise.resolve(null) : chat.getProvider(name),
     },
     isNightShiftActive: () => nightShift.isActive(),
     isNightShiftPending: (task) => nightShift.isPendingToday(task),

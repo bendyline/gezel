@@ -69,13 +69,6 @@ const SCROLLBAR_IDLE_MS = 700;
 /** How long the flash ring stays on a row a navigation jumped to. */
 const FOCUS_FLASH_MS = 2000;
 /**
- * How long a "jump to this session's failed turn" request keeps retrying
- * across renders while the timeline's first page loads. Past this, the
- * session's rows almost certainly aren't in the loaded window at all.
- */
-const FOCUS_RETRY_WINDOW_MS = 8000;
-
-/**
  * Quote a value for use inside a `[attr="…"]` selector. `CSS.escape`
  * isn't available in every environment we render in (jsdom, older
  * webviews), and session ids are opaque strings we don't control.
@@ -265,12 +258,6 @@ interface LiveSlot {
   lastActivityAt: number;
   /** True only after this turn emits an actual provider/model progress signal. */
   hasProgress: boolean;
-  /**
-   * Most-recent `at` we've seen for any message in this session, used to
-   * place the streaming row chronologically. Updated when the streaming
-   * session has prior messages in the loaded window.
-   */
-  anchorAt: string;
   /**
    * If we know the session metadata (because the session already has
    * messages in the timeline), keep a snapshot for the divider header.
@@ -653,6 +640,11 @@ export function ChatTimelineView({
   }, []);
   const [messages, setMessages] = useState<TimelineMessage[]>([]);
   const messagesRef = useRef<TimelineMessage[]>([]);
+  // Timeline snapshots are reconciled often while any thread starts, streams,
+  // or completes. Remember which persisted file sightings have already been
+  // handed to ChatReferences so those unrelated reconciliations do not replay
+  // the entire history and churn the open reference viewer.
+  const registeredFileSightingsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
@@ -688,9 +680,17 @@ export function ChatTimelineView({
   useEffect(() => {
     if (!onArtifactSeen && !onWorkspaceSeen) return;
     for (const message of messages) {
+      const messageKey = `${message.sessionId}\u0000${message.at}\u0000${message.role}`;
+      const register = (kind: 'artifact' | 'workspace', path: string) => {
+        const callback = kind === 'workspace' ? onWorkspaceSeen : onArtifactSeen;
+        if (!callback) return;
+        const sightingKey = `${messageKey}\u0000${kind}\u0000${path}`;
+        if (registeredFileSightingsRef.current.has(sightingKey)) return;
+        registeredFileSightingsRef.current.add(sightingKey);
+        callback(path, message.projectId);
+      };
       for (const file of referencedFilesOf(message)) {
-        if (file.kind === 'workspace') onWorkspaceSeen?.(file.path, message.projectId);
-        else onArtifactSeen?.(file.path, message.projectId);
+        register(file.kind, file.path);
       }
       for (const tool of message.toolCalls ?? []) {
         if (!tool.success) continue;
@@ -699,18 +699,18 @@ export function ChatTimelineView({
           ...(tool.audios ?? []),
           ...(tool.videos ?? []),
         ]) {
-          onArtifactSeen?.(media.path, message.projectId);
+          register('artifact', media.path);
         }
         const paths = tool.paths?.length ? tool.paths : tool.path ? [tool.path] : [];
         for (const path of paths) {
           if (tool.name === 'read_artifact' || tool.name === 'write_artifact') {
-            onArtifactSeen?.(path, message.projectId);
+            register('artifact', path);
           } else if (
             tool.name === 'read_file' ||
             tool.name === 'read_files' ||
             tool.name === 'write_file'
           ) {
-            onWorkspaceSeen?.(path, message.projectId);
+            register('workspace', path);
           }
         }
       }
@@ -916,6 +916,7 @@ export function ChatTimelineView({
     setTerminalEntries([]);
     setHasMore(false);
     setOldestAt(undefined);
+    registeredFileSightingsRef.current.clear();
     liveRef.current.clear();
     queuedRef.current.clear();
     contextStatusRef.current.clear();
@@ -982,7 +983,6 @@ export function ChatTimelineView({
                   ? Date.now() - entry.lastProgressAgoMs
                   : entry.startedAt,
               hasProgress: entry.lastProgressAgoMs != null,
-              anchorAt: lastForSession ? bumpIso(lastForSession.at) : new Date().toISOString(),
               ...(lastForSession
                 ? {
                     sessionTitle: lastForSession.sessionTitle,
@@ -1564,7 +1564,6 @@ export function ChatTimelineView({
           startedAt: slotStart,
           lastActivityAt: slotStart,
           hasProgress: false,
-          anchorAt: bumpIso(message.at),
           ...(lastForSession
             ? { sessionTitle: lastForSession.sessionTitle }
             : { sessionTitle: deriveThreadTitle(message.content) }),
@@ -1737,7 +1736,6 @@ export function ChatTimelineView({
             startedAt: slotStart,
             lastActivityAt: slotStart,
             hasProgress: false,
-            anchorAt: bumpIso(event.message.at),
             ...(lastForSession
               ? { sessionTitle: lastForSession.sessionTitle }
               : { sessionTitle: synthesized.sessionTitle }),
@@ -2000,9 +1998,8 @@ export function ChatTimelineView({
         // bubble drops back to thinking-dots while we wait for the
         // next iteration's first delta/tool. The completed message
         // lands as a regular timeline row via `refreshLatest`; the
-        // re-cleared slot sorts after it (we bump `anchorAt` to
-        // just past the new message's `at`). `done` is the only
-        // event that actually retires the slot.
+        // re-cleared slot stays in the live-work lane after it. `done` is
+        // the only event that actually retires the slot.
         //
         // PRESERVE `startedAt` — it's the wall-clock since the
         // user's send started, not since the most recent iteration.
@@ -2018,7 +2015,6 @@ export function ChatTimelineView({
           existing.segments = [];
           existing.lastActivityAt = Date.now();
           existing.hasProgress = true;
-          existing.anchorAt = bumpIso(event.message.at);
           existing.wirePulseCount = 0;
           // Drop the live think-phase block: the just-committed message
           // carries this iteration's reasoning on its `reasoning` field
@@ -2249,9 +2245,9 @@ export function ChatTimelineView({
       }
 
       function createSlot(gid: string, pid: string, sid: string): LiveSlot {
-        // Anchor the streaming bubble after the most-recent message in
-        // this session if we have one; otherwise mark it as "now" so it
-        // sorts to the bottom of the timeline.
+        // The live row sorts in the activity-ordered work lane and the
+        // thread builder attaches it after this session's persisted replies.
+        // Keep the latest message only to inherit divider/session metadata.
         const lastForSession = findLastForSession(messages, sid);
         const now = Date.now();
         return {
@@ -2261,7 +2257,6 @@ export function ChatTimelineView({
           startedAt: now,
           lastActivityAt: now,
           hasProgress: false,
-          anchorAt: lastForSession ? bumpIso(lastForSession.at) : nowIso(),
           ...(lastForSession ? { sessionTitle: lastForSession.sessionTitle } : {}),
           ...(lastForSession ? { sessionCreatedAt: lastForSession.sessionCreatedAt } : {}),
           ...(lastForSession?.taskRef ? { taskRef: lastForSession.taskRef } : {}),
@@ -2299,7 +2294,15 @@ export function ChatTimelineView({
       kind: 'streaming' as const,
       sessionId: r.sessionId,
       slot: r.slot,
-      at: r.slot.anchorAt,
+      // Active thread groups are re-queued at their streaming row's
+      // position by `buildTimelineThreads`. Use observable progress here,
+      // not the original trigger time, so whichever turn most recently
+      // emitted a token/tool/phase moves nearest the bottom of the chat.
+      // Fresh terminal work still owns the final lane below live chat.
+      at: new Date(r.slot.lastActivityAt).toISOString(),
+      // Rootless live work (notably one-shot background activity) needs a
+      // stable React key even as the activity timestamp changes per event.
+      threadAt: new Date(r.slot.startedAt).toISOString(),
     }));
     const terminalRows = terminalEntries.map((e) => ({
       kind: 'terminal' as const,
@@ -2341,10 +2344,13 @@ export function ChatTimelineView({
   // their session's most recent root even when other sessions' rows
   // landed in between chronologically — so the continuation loop's
   // trailing status bubbles render under their real trigger instead of
-  // floating above whatever message arrived next. Fan-out duplicate
-  // user rows (@-mention fan-out persists the same prompt into several
-  // sessions) don't render their own root; their sessions' replies
-  // merge into the kept root's thread. See `timeline-threads.ts`.
+  // floating above whatever message arrived next. Each group moves as one
+  // unit to its newest reply's position; live rows use latest observable
+  // progress, so active exchanges continually settle near the bottom and
+  // stay there when an iteration commits. Fan-out duplicate user rows
+  // (@-mention fan-out persists the same prompt into several sessions)
+  // don't render their own root; their sessions' replies merge into the
+  // kept root's thread. See `timeline-threads.ts`.
   const threadItems = useMemo(() => buildTimelineThreads(rows), [rows]);
 
   // Auto-scroll: snapshot whether the user is near the bottom *before*
@@ -2506,14 +2512,12 @@ export function ChatTimelineView({
   );
 
   /**
-   * Pending focus request: `{ sessionId, until }`. The timeline loads
-   * asynchronously, so the target row usually isn't in the DOM when the
-   * request arrives — we retry on each subsequent render until it is, or
-   * until the deadline passes (session too old to be in the first page).
+   * Pending focus request. The timeline loads asynchronously, so the target
+   * row usually isn't in the DOM when the request arrives. If it isn't in the
+   * first page, the focus effect below pages backward until the row appears.
    */
   const focusRequestRef = useRef<{
     sessionId: string;
-    until: number;
     notifyParent: boolean;
   } | null>(null);
   const [focusNonce, setFocusNonce] = useState(0);
@@ -2521,7 +2525,6 @@ export function ChatTimelineView({
     (sessionId: string, opts?: { notifyParent?: boolean }) => {
       focusRequestRef.current = {
         sessionId,
-        until: Date.now() + FOCUS_RETRY_WINDOW_MS,
         notifyParent: opts?.notifyParent !== false,
       };
       setFocusNonce((n) => n + 1);
@@ -2533,14 +2536,44 @@ export function ChatTimelineView({
   useEffect(() => {
     const req = focusRequestRef.current;
     if (!req) return;
-    if (Date.now() > req.until) {
+    if (focusSession(req.sessionId, { notifyParent: req.notifyParent })) {
       focusRequestRef.current = null;
       return;
     }
-    if (focusSession(req.sessionId, { notifyParent: req.notifyParent })) {
+
+    // A busy project can put hundreds of task/chat rows after the failed
+    // turn. The sidebar indicator names the exact session, so do the same
+    // work a user scrolling upward would do until that session's page is in
+    // the DOM. Previously the request only retried the newest 100 rows and
+    // silently expired, which made the indicator appear inert precisely in
+    // projects with the most ambient task traffic.
+    if (loading || paginatingRef.current) return;
+    if (!hasMore || !oldestAt) {
       focusRequestRef.current = null;
+      return;
     }
-  }, [rows, focusNonce, focusSession]);
+
+    paginatingRef.current = true;
+    void (async () => {
+      try {
+        const res = await loadTimeline({ limit: PAGE_SIZE, before: oldestAt });
+        // A newer click or a scope change supersedes this fetch. Don't prepend
+        // its page into the newly-selected timeline.
+        if (focusRequestRef.current !== req) return;
+        setMessages((prev) => [...res.messages, ...prev]);
+        setHasMore(res.hasMore);
+        setOldestAt(res.nextCursor);
+      } catch {
+        if (focusRequestRef.current === req) focusRequestRef.current = null;
+      } finally {
+        paginatingRef.current = false;
+        // State updates and the pagination ref can settle in either order;
+        // this guarantees one more pass to focus the row or fetch the next
+        // older page.
+        setFocusNonce((n) => n + 1);
+      }
+    })();
+  }, [rows, focusNonce, focusSession, loading, hasMore, oldestAt, loadTimeline]);
 
   // Live "jump to the failed turn" event — the already-open-project case.
   // Also drains the mailbox so the queued intent can't re-fire later.
@@ -2811,9 +2844,11 @@ export function ChatTimelineView({
                 behavior: 'instant' as ScrollBehavior,
               });
             paginatingRef.current = false;
+            if (focusRequestRef.current) setFocusNonce((n) => n + 1);
           });
         } catch {
           paginatingRef.current = false;
+          if (focusRequestRef.current) setFocusNonce((n) => n + 1);
         }
       })();
     }
@@ -3835,20 +3870,6 @@ function findLastForSession(
 
 function isModelUnavailableError(message: string): boolean {
   return /model\s+.*\bnot available\b/i.test(message) || /\bunknown model\b/i.test(message);
-}
-
-function bumpIso(iso: string): string {
-  // Make sure the streaming row sorts strictly after the prior message.
-  try {
-    const t = new Date(iso).getTime();
-    return new Date(t + 1).toISOString();
-  } catch {
-    return iso;
-  }
-}
-
-function nowIso(): string {
-  return new Date().toISOString();
 }
 
 const NO_FILES: readonly ReferencedFile[] = [];
