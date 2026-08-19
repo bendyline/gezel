@@ -71,7 +71,12 @@ function StandardQuestionPrompt(props: QuestionPromptProps): JSX.Element {
 
   const submit = async (body: AnswerQuestionRequest) => {
     if (submitting) return;
-    if (!body.writeIn && (!body.selectedChoices || body.selectedChoices.length === 0)) {
+    if (
+      !body.writeIn &&
+      (!body.selectedChoices || body.selectedChoices.length === 0) &&
+      body.declined !== true &&
+      body.silentSkip !== true
+    ) {
       setError('Choose an option or supply your own response.');
       return;
     }
@@ -103,10 +108,18 @@ function StandardQuestionPrompt(props: QuestionPromptProps): JSX.Element {
     (input, key) => {
       if (submitting) return;
       if (writing) {
-        if (key.escape && choices.length > 0) {
-          setWriting(false);
-          setError(null);
+        if (key.escape) {
+          if (choices.length > 0) {
+            setWriting(false);
+            setError(null);
+          } else {
+            void submit({ silentSkip: true });
+          }
         }
+        return;
+      }
+      if (key.escape) {
+        void submit({ silentSkip: true });
         return;
       }
       if (key.upArrow) {
@@ -157,7 +170,9 @@ function StandardQuestionPrompt(props: QuestionPromptProps): JSX.Element {
               placeholder="Type your response"
             />
           </Box>
-          <Text dimColor>Enter submit{choices.length > 0 ? ' · Esc return to choices' : ''}</Text>
+          <Text dimColor>
+            Enter submit{choices.length > 0 ? ' · Esc return to choices' : ' · Esc skip'}
+          </Text>
         </>
       ) : (
         <>
@@ -180,6 +195,7 @@ function StandardQuestionPrompt(props: QuestionPromptProps): JSX.Element {
             {options.length > QUESTION_OPTION_WINDOW_SIZE
               ? ` · ${activeOptionIndex + 1}/${options.length}`
               : ''}
+            {' · Esc skip'}
           </Text>
         </>
       )}
@@ -209,10 +225,19 @@ function NpmInstallApprovalPrompt(props: QuestionPromptProps): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const currentPackage = packages[packageIndex];
 
-  const submit = async (nextDecisions: Array<NpmDecision | undefined>) => {
+  const answer = async (body: AnswerQuestionRequest) => {
     if (submitting) return;
     setError(null);
     setSubmitting(true);
+    try {
+      onAnswered(await client.answerQuestion(question.id, body));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setSubmitting(false);
+    }
+  };
+
+  const submit = (nextDecisions: Array<NpmDecision | undefined>) => {
     const body: AnswerQuestionRequest =
       packages.length === 0
         ? { declined: true }
@@ -223,19 +248,18 @@ function NpmInstallApprovalPrompt(props: QuestionPromptProps): JSX.Element {
               decision: nextDecisions[index] ?? 'decline',
             })),
           };
-    try {
-      onAnswered(await client.answerQuestion(question.id, body));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setSubmitting(false);
-    }
+    void answer(body);
   };
 
   useInput(
     (_input, key) => {
       if (submitting) return;
+      if (key.escape) {
+        void answer({ silentSkip: true });
+        return;
+      }
       if (!currentPackage) {
-        if (key.return) void submit([]);
+        if (key.return) submit([]);
         return;
       }
       if (key.upArrow) {
@@ -266,7 +290,7 @@ function NpmInstallApprovalPrompt(props: QuestionPromptProps): JSX.Element {
       nextDecisions[packageIndex] = decision;
       setDecisions(nextDecisions);
       if (packageIndex >= packages.length - 1) {
-        void submit(nextDecisions);
+        submit(nextDecisions);
         return;
       }
       const nextPackageIndex = packageIndex + 1;
@@ -313,13 +337,14 @@ function NpmInstallApprovalPrompt(props: QuestionPromptProps): JSX.Element {
           })}
           <Text dimColor>
             ↑/↓ choose · Enter answer{packageIndex > 0 ? ' · ← previous package' : ''}
+            {' · Esc skip'}
           </Text>
         </>
       ) : (
         <>
           <Text color="red">This approval has no package details.</Text>
           <Text color="cyan">› Decline and dismiss</Text>
-          <Text dimColor>Enter dismiss</Text>
+          <Text dimColor>Enter dismiss · Esc skip</Text>
         </>
       )}
       {submitting ? <Text color="yellow">Submitting…</Text> : null}

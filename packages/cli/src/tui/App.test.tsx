@@ -144,6 +144,106 @@ describe('App interactions', () => {
     });
   });
 
+  it('silently skips a write-in question with Esc and restores the main prompt', async () => {
+    const question: Question = {
+      id: 'write-in-question',
+      projectId: 'studio',
+      gezelId: 'builder',
+      sessionId: 'builder-session',
+      prompt: 'What should I build?',
+      allowWriteIn: true,
+      createdAt: '2026-08-14T12:00:00.000Z',
+    };
+    const client = createClient();
+    client.listQuestions.mockResolvedValue({ questions: [question] });
+    client.answerQuestion.mockImplementation(async (_id, body) => ({
+      ...question,
+      answer: { ...body, at: '2026-08-14T12:01:00.000Z' },
+    }));
+
+    const harness = mountApp(client);
+    await ready(client, harness);
+    await vi.waitFor(() => expect(harness.text()).toContain('Enter submit · Esc skip'));
+
+    await pressKey(harness, '\u001B');
+    await vi.waitFor(() => {
+      expect(client.answerQuestion).toHaveBeenCalledWith('write-in-question', {
+        silentSkip: true,
+      });
+    });
+
+    await submit(harness, 'back at the main prompt');
+    await vi.waitFor(() => {
+      expect(client.sendToChatSession).toHaveBeenCalledWith(
+        'builder-session',
+        'back at the main prompt',
+      );
+    });
+  });
+
+  it('keeps the app-level Ctrl+C handler active while a question owns focus', async () => {
+    const question: Question = {
+      id: 'ctrl-c-question',
+      projectId: 'studio',
+      gezelId: 'builder',
+      sessionId: 'builder-session',
+      prompt: 'What should I build?',
+      allowWriteIn: true,
+      createdAt: '2026-08-14T12:00:00.000Z',
+    };
+    const client = createClient();
+    client.listQuestions.mockResolvedValue({ questions: [question] });
+
+    const harness = mountApp(client);
+    await ready(client, harness);
+    await vi.waitFor(() => expect(harness.text()).toContain('Enter submit · Esc skip'));
+
+    await pressKey(harness, '\x03');
+    await vi.waitFor(() => expect(harness.text()).toContain('press Ctrl+C again to exit.'));
+    expect(client.answerQuestion).not.toHaveBeenCalled();
+
+    const exit = harness.waitUntilExit();
+    harness.write('\x03');
+    const exited = await Promise.race([
+      exit.then(() => true),
+      new Promise<false>((resolve) => setTimeout(() => resolve(false), 250)),
+    ]);
+    expect(exited).toBe(true);
+  });
+
+  it('silently skips an npm approval with Esc', async () => {
+    const question: Question = {
+      id: 'npm-skip-question',
+      projectId: 'studio',
+      gezelId: 'builder',
+      sessionId: 'builder-session',
+      prompt: 'Approve left-pad?',
+      allowWriteIn: false,
+      intent: {
+        kind: 'npm-install-approval',
+        packages: [{ package: 'left-pad', version: 'latest' }],
+      },
+      createdAt: '2026-08-14T12:00:00.000Z',
+    };
+    const client = createClient();
+    client.listQuestions.mockResolvedValue({ questions: [question] });
+    client.answerQuestion.mockImplementation(async (_id, body) => ({
+      ...question,
+      answer: { ...body, at: '2026-08-14T12:01:00.000Z' },
+    }));
+
+    const harness = mountApp(client);
+    await ready(client, harness);
+    await vi.waitFor(() => expect(harness.text()).toContain('npm package approval'));
+
+    await pressKey(harness, '\u001B');
+    await vi.waitFor(() => {
+      expect(client.answerQuestion).toHaveBeenCalledWith('npm-skip-question', {
+        silentSkip: true,
+      });
+    });
+  });
+
   it('shows an edit-permission note when the initial folder is read-only', async () => {
     const client = createClient({ studioProject: { workingDir: '/tmp/studio' } });
     const harness = mountApp(client);

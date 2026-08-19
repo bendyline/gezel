@@ -1576,7 +1576,8 @@ export function App(props: {
   );
 
   // Esc / Ctrl+C interrupt in-flight work; a second Ctrl+C on an idle prompt
-  // exits. Esc with nothing running just re-homes focus to your own session.
+  // exits. Question cards own Esc (it means Skip there), but must never suppress
+  // the app-level Ctrl+C contract while they own the ordinary input focus.
   const cancelActiveRef = useRef(cancelActive);
   cancelActiveRef.current = cancelActive;
   useInput(
@@ -1594,6 +1595,7 @@ export function App(props: {
         return;
       }
       if (key.escape) {
+        if (pendingQuestion) return;
         if (turns.size > 0 || activeRuns.size > 0) {
           void cancelActiveRef.current().then((did) => did && note('interrupted.'));
         } else if (pendingInput) {
@@ -1606,10 +1608,7 @@ export function App(props: {
         }
       }
     },
-    {
-      isActive:
-        overlay === null && (!pendingQuestion || pendingInput !== null || taskPrompt !== null),
-    },
+    { isActive: overlay === null },
   );
 
   if (status) {
