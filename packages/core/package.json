@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Gezel core: types, schemas, path helpers, agent-markdown parser.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "schemas", "zod", "types"],
