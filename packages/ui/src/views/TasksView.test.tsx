@@ -170,6 +170,98 @@ describe('TasksView', () => {
     expect(window.localStorage.getItem('gezel:tasks:selectedRef')).toBe('pj-alpha/1');
   });
 
+  it('toggles individual tasks with Control-click and shows their titles in the bulk pane', async () => {
+    vi.mocked(api.listTasks).mockResolvedValue({
+      tasks: [
+        makeTask({ ref: 'pj-alpha/1', num: 1, title: 'First task' }),
+        makeTask({ ref: 'pj-alpha/2', num: 2, title: 'Second task' }),
+        makeTask({ ref: 'pj-alpha/3', num: 3, title: 'Third task' }),
+      ],
+    } as never);
+    render(<TasksView />);
+
+    const first = await screen.findByRole('button', { name: /First task/ });
+    const third = screen.getByRole('button', { name: /Third task/ });
+    await waitFor(() => expect(first).toHaveAttribute('aria-pressed', 'true'));
+
+    fireEvent.click(third, { ctrlKey: true });
+
+    expect(screen.getByTestId('task-bulk-detail')).toHaveTextContent('2 tasks selected');
+    const titles = within(screen.getByRole('list', { name: 'Selected task titles' }));
+    expect(titles.getByText('First task')).toBeInTheDocument();
+    expect(titles.getByText('Third task')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /First task/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: /Third task/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('selects a contiguous task range with Shift-click', async () => {
+    vi.mocked(api.listTasks).mockResolvedValue({
+      tasks: [
+        makeTask({ ref: 'pj-alpha/1', num: 1, title: 'First task' }),
+        makeTask({ ref: 'pj-alpha/2', num: 2, title: 'Second task' }),
+        makeTask({ ref: 'pj-alpha/3', num: 3, title: 'Third task' }),
+      ],
+    } as never);
+    render(<TasksView />);
+
+    const first = await screen.findByRole('button', { name: /First task/ });
+    fireEvent.click(first);
+    fireEvent.click(screen.getByRole('button', { name: /Third task/ }), { shiftKey: true });
+
+    expect(screen.getByTestId('task-bulk-detail')).toHaveTextContent('3 tasks selected');
+    expect(screen.getByRole('button', { name: /Second task/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('paints a contiguous selection by dragging across task rows', async () => {
+    vi.mocked(api.listTasks).mockResolvedValue({
+      tasks: [
+        makeTask({ ref: 'pj-alpha/1', num: 1, title: 'First task' }),
+        makeTask({ ref: 'pj-alpha/2', num: 2, title: 'Second task' }),
+        makeTask({ ref: 'pj-alpha/3', num: 3, title: 'Third task' }),
+      ],
+    } as never);
+    render(<TasksView />);
+
+    const first = await screen.findByRole('button', { name: /First task/ });
+    const third = screen.getByRole('button', { name: /Third task/ });
+    fireEvent.mouseDown(first, { button: 0, buttons: 1 });
+    fireEvent.mouseEnter(third, { buttons: 1 });
+    fireEvent.mouseUp(window, { button: 0, buttons: 0 });
+
+    expect(screen.getByTestId('task-bulk-detail')).toHaveTextContent('3 tasks selected');
+  });
+
+  it('applies a status change to every selected task', async () => {
+    const firstTask = makeTask({ ref: 'pj-alpha/1', num: 1, title: 'First task' });
+    const secondTask = makeTask({ ref: 'pj-alpha/2', num: 2, title: 'Second task' });
+    vi.mocked(api.listTasks).mockResolvedValue({ tasks: [firstTask, secondTask] } as never);
+    vi.mocked(api.setTaskStatus).mockImplementation(async (_projectId, num, status) => ({
+      ...(num === 1 ? firstTask : secondTask),
+      status,
+    }));
+    render(<TasksView />);
+
+    await screen.findByRole('button', { name: /First task/ });
+    fireEvent.click(screen.getByRole('button', { name: /Second task/ }), { ctrlKey: true });
+    fireEvent.click(screen.getByRole('radio', { name: 'Paused' }));
+
+    await waitFor(() => {
+      expect(api.setTaskStatus).toHaveBeenCalledTimes(2);
+    });
+    expect(api.setTaskStatus).toHaveBeenCalledWith('pj-alpha', 1, 'paused');
+    expect(api.setTaskStatus).toHaveBeenCalledWith('pj-alpha', 2, 'paused');
+    expect(await screen.findByText('Updated 2 tasks to paused.')).toBeInTheDocument();
+  });
+
   it('parents with children render an expand toggle that reveals the child rows', async () => {
     vi.mocked(api.listTasks).mockResolvedValue({
       tasks: [
@@ -189,11 +281,18 @@ describe('TasksView', () => {
     // Child should be hidden until the toggle is clicked.
     expect(screen.queryByText('Child run')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Expand instances/ }));
+    const toggle = screen.getByRole('button', { name: /Expand instances/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(toggle);
 
     await waitFor(() => {
       expect(screen.getByText('Child run')).toBeInTheDocument();
     });
+    expect(screen.getByRole('button', { name: /Collapse instances/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
   });
 
   it('filters top-level tasks with radio-style task type keys', async () => {

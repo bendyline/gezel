@@ -41,11 +41,11 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 | 5 | `### Lessons from past work` (distilled `memories/lessons.md`) | lessons exist | small, curated |
 | 6 | Project context: intro + voorman line, `### About this project` (tier-scoped for tiny/small/medium), `### Mission objectives` (**only for the project's voorman**), `### GitHub repository`, `### Where work belongs` | project set; sub-blocks by project state | varies |
 | 6b | `### Workspace map` — index-derived gestalt: deep-pass architecture note + folder purposes + entry points ([chat/workspace-gestalt.ts](../packages/service/src/chat/workspace-gestalt.ts)) | `prompt.workspace-gestalt` behavior on the profile (tier-default medium/large) AND the deep pass has produced summaries | ≤ ~300 tok |
-| 7 | `### Workspace files` listing (cap 200); with `prompt.retrieval-first` on the profile (tier-default tiny/small/medium) a one-line "locate with `search_code`/`grep_files`" steer is appended when those tools are in the session surface | project has files | varies |
+| 7 | `### Workspace files` listing (cap 200); with `prompt.retrieval-first` on the profile (tier-default tiny/small/medium) a one-line "locate with `search`/`grep_files`" steer is appended when those tools are in the session surface | project has files | varies |
 | 8 | Shared documents library listing | documents exist, not executor-trimmed | varies |
 | 9 | `### Current task` + `#### Step procedure` + `#### Phase gate` | task-scoped session | varies; procedures can be large |
 | 10 | `### Tasks assigned to you in this project` | not task-scoped, assignments exist | varies |
-| 11 | `### Recalled from prior sessions` (auto-recall memory hits; plus up to 3 `[workspace]` code hits from the content index when available — same query embedding, no extra embed; `package.json` and `tsconfig.json` payloads are excluded) | recall enabled, hits ≥ min score | ~4–7 bullets |
+| 11 | `### Recalled from prior sessions` legacy compatibility block | only when ChatManager is embedded without the scoped SearchService wiring | ~4–7 bullets |
 | 12 | Conduct core: **act-don't-narrate** (558 ch), **ask_user_question when stuck** incl. "a short message is not vague when task context is above" (1,414 ch), **markdown guidance** incl. the Squisq-dialect brief (`SQUISQ_DIALECT_BRIEF` from [prompts/squisq-dialect.ts](../packages/service/src/prompts/squisq-dialect.ts) — mermaid fences + `{[template]}` annotations; the long example-led sibling `SQUISQ_DIALECT_NOTE` goes into the transform one-shot prompt, context-gated) (~490 ch) | always, every provider | ~2.5K ch / ~620 tok total |
 | 13 | Browsing guidance (Playwright present vs "not installed, don't emit fake `browser_*`") | non-delegation roles | 1–3 lines |
 | 14 | `## Handling external (untrusted) content` | mail-enabled projects | ~850 ch |
@@ -129,6 +129,11 @@ the `just-chat` project type, which hides the work-oriented tabs to match. Tests
 
 ## Channel two: the user-message channel
 
+- **Indexed context** (`resolveTurnProjectRetrieval`): a scoped, diversified
+  evidence block from the active project, current gezel memory, and shared
+  library. Off/Lean/Balanced/Deep plus a context-window ceiling bound its size.
+  This changes with the turn without rebuilding the system prompt; see
+  [Project retrieval and indexed context](project-retrieval.md).
 - **Preludes** (`resolveUserPromptPrelude` — first non-null wins, prepended to the user's
   text): `prompt.meester-build-prelude` (meester + build-shaped request → one
   `start_project` kickoff; staffing is runtime-selected) and

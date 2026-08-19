@@ -394,6 +394,13 @@ export async function indexWorkspaceContent(
       store.putSymbols(file.path, hash, syms);
       stats.symbols += syms.length;
       store.putChunks(file.path, hash, chunkMarkdown(body));
+    } else if (cls.modality === 'text') {
+      // Plain text, config, data, and small unknown-text files previously had
+      // no keyword-searchable body until an asynchronous enrichment pass made
+      // a summary. Deterministic chunks make the static index useful
+      // immediately and preserve content beyond the old first-1,000-char
+      // fallback.
+      store.putChunks(file.path, hash, chunkMarkdown(content));
     }
 
     // Built-in security signals for any code file (regex + entropy — cheap, and

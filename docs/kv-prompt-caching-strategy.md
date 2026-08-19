@@ -305,9 +305,11 @@ as their content is deterministic (§3.4).
 - **Lessons** and **traits** are injected into the stable prefix right after the about body.
   Lessons "change at most once per daily sweep, so prompt-cache invalidation stays bounded"
   (`memory/lessons.ts:6-8`), and are hard-truncated so a runaway reply can't bloat the prefix.
-- **Auto-recall is frozen for the session's lifetime** (`chat/manager.ts:4900-4909`): per-turn
-  re-recall "would churn the volatile prompt band every turn (KV-cache tax on local providers)";
-  only the "(N days ago)" phrasing self-refreshes at render time.
+- **Indexed retrieval rides the user-message channel, not the system prompt.**
+  Relevant project/shared evidence can therefore change on every substantive
+  turn without invalidating the stable system-prefix cache. The older frozen
+  first-turn auto-recall path remains only as compatibility when the scoped
+  SearchService is not wired.
 - **AGENTS.md scoping** (`chat/scope-instructions.ts`) trims a project's imported instructions
   for small tiers — but **when nothing would be dropped it returns the original unchanged** "so
   the stable-prefix cache key doesn't churn for no benefit" (`scope-instructions.ts:296-299`).

@@ -105,6 +105,8 @@ import {
 import { ChannelsConfigSchema } from './channels.js';
 import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeCompatSchema, CodexPermissionModeSchema } from './codex.js';
+import { CraftbookSuggestionSchema } from './craftbook.js';
+import { EntityIdSchema } from './entity-id.js';
 import { FileReviewIssueSeveritySchema, FileReviewWireSchema } from './file-review.js';
 import {
   ChatMessageSchema,
@@ -134,6 +136,7 @@ import {
 } from './project.js';
 import { NpmInstallApprovalDecisionSchema, QuestionSchema } from './question.js';
 import { RecognitionModeSchema } from './recognition.js';
+import { RetrievalPolicySchema, RetrievalSourceSchema } from './retrieval.js';
 import { ExpectedDeliverableSchema, ExternalRequestDiagnosticsSchema } from './session.js';
 import { TaskRefSchema } from './task.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
@@ -1899,6 +1902,11 @@ export const GezelConfigSchema = z.object({
     })
     .optional(),
   /**
+   * Proactive project grounding on each substantive turn. When absent, the
+   * balanced preset is used (subject to the legacy autoRecall enabled flag).
+   */
+  retrieval: RetrievalPolicySchema.optional(),
+  /**
    * Auto-summarize: distill a session into project memory when it's
    * archived or has been idle past `idleHours`. The summarization itself
    * runs through the provider/model specified here; falls back to the
@@ -2836,6 +2844,8 @@ export const UpdateGezelSettingsRequestSchema = z.object({
   numCtx: z.number().int().positive().nullable().optional(),
   /** `null` inherits the global autoRecall default. */
   autoRecall: z.boolean().nullable().optional(),
+  /** `null` clears the per-gezel indexed-context policy. */
+  retrieval: RetrievalPolicySchema.nullable().optional(),
   /** `null` clears the chat bubble font override. */
   font: z.string().nullable().optional(),
   /** `null` inherits the install-level `GezelConfig.sandboxCopilot`. */
@@ -3810,6 +3820,12 @@ export const UpdateProjectRequestSchema = z.object({
   workingDir: z.string().nullable().optional(),
   /** null clears the voorman. */
   voormanGezelId: z.string().nullable().optional(),
+  /**
+   * Replace this project's one-way links. An empty array removes every link.
+   * The service rejects self-links, missing projects, duplicates, and the
+   * implicit shared-library project.
+   */
+  linkedProjectIds: z.array(EntityIdSchema).max(32).optional(),
   /** When passed, written to documents/about.md inside the project. */
   about: z.string().optional(),
   /** When passed, written to documents/missionObjectives.md inside the project. */
@@ -4694,6 +4710,7 @@ export const SearchDocsResponseSchema = z.object({
       /** Converted markdown path under .gezel/files/…_files/. */
       markdownPath: z.string(),
       lineStart: z.number().int().positive(),
+      lineEnd: z.number().int().positive(),
       snippet: z.string(),
     }),
   ),
@@ -4968,8 +4985,12 @@ export const UnifiedSearchResultSchema = z.object({
   path: z.string().optional(),
   /** Which file root `path` lives in — drives how the UI opens it. */
   source: z.enum(['workspace', 'artifacts']).optional(),
+  /** Corpus provenance for model-facing retrieval and audit telemetry. */
+  retrievalSource: RetrievalSourceSchema.optional(),
   /** 1-based line for content/symbol hits. */
   line: z.number().int().positive().optional(),
+  /** Inclusive end line when the underlying index provides a span. */
+  lineEnd: z.number().int().positive().optional(),
   /** Owning gezel for session hits — lets the palette navigate without parsing ids. */
   gezelId: z.string().optional(),
   /** Merged relevance score (higher = better). */
@@ -4991,6 +5012,44 @@ export const UnifiedSearchResponseSchema = z.object({
   truncated: z.boolean(),
 });
 export type UnifiedSearchResponse = z.infer<typeof UnifiedSearchResponseSchema>;
+
+/** Project-bound form used by the model-facing generic `search` tool. */
+export const ProjectSearchRequestSchema = z.object({
+  query: z.string().min(1).max(400),
+  maxResults: z.number().int().positive().max(100).optional(),
+  /** Current gezel id enables its private-memory arm. */
+  gezelId: z.string().min(1).optional(),
+  /** Shared documents are included by default. */
+  includeShared: z.boolean().optional(),
+  sources: z.array(RetrievalSourceSchema).min(1).optional(),
+});
+export type ProjectSearchRequest = z.infer<typeof ProjectSearchRequestSchema>;
+export const ProjectSearchCraftbookSuggestionSchema = CraftbookSuggestionSchema.pick({
+  id: true,
+  name: true,
+  description: true,
+  source: true,
+  version: true,
+  stepCount: true,
+  score: true,
+}).extend({
+  /** A compact, directly executable recipe for models that have this tool. */
+  invocation: z.object({
+    tool: z.literal('invoke_craftbook'),
+    arguments: z.object({
+      craftbookId: z.string().min(1),
+      description: z.string().min(1),
+    }),
+  }),
+});
+export type ProjectSearchCraftbookSuggestion = z.infer<
+  typeof ProjectSearchCraftbookSuggestionSchema
+>;
+export const ProjectSearchResponseSchema = UnifiedSearchResponseSchema.extend({
+  /** Strong, applicable Gilde or local procedures that may help execute the query. */
+  craftbooks: z.array(ProjectSearchCraftbookSuggestionSchema),
+});
+export type ProjectSearchResponse = z.infer<typeof ProjectSearchResponseSchema>;
 
 // ── global index search (sessions + documents) ──────────────────────────────
 
@@ -5031,6 +5090,7 @@ export type SearchDocumentsRequest = z.infer<typeof SearchDocumentsRequestSchema
 export const DocumentSearchResultSchema = z.object({
   path: z.string(),
   lineStart: z.number().int().positive(),
+  lineEnd: z.number().int().positive().optional(),
   snippet: z.string(),
   /** 0..1 relevance. Optional: older services returned unranked hits. */
   score: z.number().optional(),

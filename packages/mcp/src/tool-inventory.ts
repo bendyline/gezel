@@ -166,6 +166,7 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'wikipedia_search',
 
   // Search / files
+  'search',
   'grep_files',
   'find_files',
   'diff_files',

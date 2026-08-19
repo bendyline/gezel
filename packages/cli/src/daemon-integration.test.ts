@@ -256,7 +256,11 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
             GEZEL_SECRETS_BACKEND: 'file',
             GEZEL_LOG_LEVEL: 'info',
           },
-          timeout: 30_000,
+          // Cold service startup and shutdown contend with the other
+          // integration workers in a full package run. Keep the child
+          // deadline below the test deadline so failures surface from the
+          // command itself and the finally block still has time to clean up.
+          timeout: 45_000,
         },
       );
 
@@ -269,7 +273,7 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
       if (runtime && isProcessAlive(runtime.pid)) await stopProcessByPid(runtime.pid);
       await rm(runHome, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 
   it('starts a craftbook from the do subcommand', async () => {
     const result = await runCli('do', 'security-architecture-review');

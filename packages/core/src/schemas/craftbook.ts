@@ -12,6 +12,7 @@ import {
   normalizeStepGate,
 } from './gate.js';
 import { HookSpecSchema } from './hook.js';
+import { type RetrievalPolicy, RetrievalPolicySchema } from './retrieval.js';
 import {
   ScriptNameSchema,
   ScriptOutputPredicateSchema,
@@ -174,6 +175,8 @@ export const CraftbookStepSchema = z.object({
    * that clears the floor runs the step.
    */
   capabilityFloor: ModelTierSchema.optional(),
+  /** Per-phase indexed-context policy; overrides gezel and install defaults. */
+  retrieval: RetrievalPolicySchema.optional(),
   assignee: TaskAssigneeSchema.optional(),
   /** Setup scripts, run in order when the step activates. Single ref = legacy shape. */
   onEnter: ScriptRefListSchema.optional(),
@@ -751,6 +754,8 @@ export const NewCraftbookStepSchema = z.object({
   suggestedRole: z.string().optional(),
   /** See {@link CraftbookStepSchema.shape.capabilityFloor}. */
   capabilityFloor: ModelTierSchema.optional(),
+  /** See {@link CraftbookStepSchema.shape.retrieval}. */
+  retrieval: RetrievalPolicySchema.optional(),
   assignee: TaskAssigneeSchema.optional(),
   onEnter: ScriptRefListSchema.optional(),
   onExit: ScriptRefListSchema.optional(),
@@ -1077,6 +1082,7 @@ export interface StepPatch {
   prompt?: string;
   suggestedRole?: string | null;
   capabilityFloor?: ModelTier | null;
+  retrieval?: RetrievalPolicy | null;
   assignee?: TaskAssignee | null;
   suggestedGezelId?: string | null;
   onEnter?: ScriptRefList | null;
@@ -1115,6 +1121,10 @@ export function applyStepPatch<T extends CraftbookStep>(step: T, patch: StepPatc
   if (patch.capabilityFloor !== undefined) {
     if (patch.capabilityFloor === null) delete updated.capabilityFloor;
     else updated.capabilityFloor = patch.capabilityFloor;
+  }
+  if (patch.retrieval !== undefined) {
+    if (patch.retrieval === null) delete updated.retrieval;
+    else updated.retrieval = patch.retrieval;
   }
   if (patch.assignee !== undefined) {
     if (patch.assignee === null) delete updated.assignee;

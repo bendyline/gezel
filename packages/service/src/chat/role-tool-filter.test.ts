@@ -234,7 +234,7 @@ describe('permitsBrowserAutomation (role ∨ browser-facing project)', () => {
 describe('expandToolsetGroups', () => {
   it('expands a group id to its tool names', () => {
     const tools = expandToolsetGroups(['memory']);
-    expect(tools).toEqual(new Set(['search_memory', 'save_memory', 'list_memories']));
+    expect(tools).toEqual(new Set(['search', 'search_memory', 'save_memory', 'list_memories']));
   });
 
   it('unions tools across multiple groups', () => {
@@ -964,6 +964,7 @@ describe('computeToolAllowlist', () => {
       'ensure_gezel',
       'ask_gezel',
       'message_gezel',
+      'search',
       'search_code',
       'grep_files',
       'find_symbol',
@@ -997,6 +998,7 @@ describe('computeToolAllowlist', () => {
       'ensure_gezel',
       'ask_gezel',
       'message_gezel',
+      'search',
       'search_code',
       'grep_files',
       'find_symbol',

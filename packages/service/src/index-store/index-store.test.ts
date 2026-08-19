@@ -177,6 +177,52 @@ describe('IndexStore', () => {
     store.close();
   });
 
+  it('matches natural-language keyword queries without requiring the exact phrase', async () => {
+    const store = await openStore();
+    if (!store.ftsAvailable) return store.close();
+    store.putChunks('src/vehicle.ts', 'h1', [
+      {
+        kind: 'section',
+        lineStart: 12,
+        lineEnd: 30,
+        text: 'Vehicle physics tune tire friction and suspension response while driving.',
+      },
+    ]);
+
+    const hits = store.searchCodeHybrid(null, 'improve the physics for how cars drive', 10);
+    expect(hits[0]).toMatchObject({ path: 'src/vehicle.ts', lineStart: 12, lineEnd: 30 });
+    store.close();
+  });
+
+  it('diversifies hybrid results across paths and keeps semantic-only mode semantic', async () => {
+    const store = await openStore();
+    if (!store.ftsAvailable) return store.close();
+    store.putChunks(
+      'src/crowded.ts',
+      'h1',
+      Array.from({ length: 6 }, (_, i) => ({
+        kind: 'section',
+        lineStart: i * 10 + 1,
+        lineEnd: i * 10 + 5,
+        text: `vehicle physics suspension section ${i}`,
+      })),
+    );
+    store.putChunks('src/also-relevant.ts', 'h2', [
+      {
+        kind: 'section',
+        lineStart: 1,
+        lineEnd: 5,
+        text: 'vehicle physics steering response',
+      },
+    ]);
+
+    const keyword = store.searchCodeHybrid(null, 'vehicle physics', 4);
+    expect(keyword.filter((hit) => hit.path === 'src/crowded.ts')).toHaveLength(3);
+    expect(keyword.some((hit) => hit.path === 'src/also-relevant.ts')).toBe(true);
+    expect(store.searchCodeHybrid(null, null, 10)).toEqual([]);
+    store.close();
+  });
+
   it('roundtrips a vector and finds the nearest neighbour', async () => {
     const store = await openStore();
     if (!store.vecAvailable) return store.close();

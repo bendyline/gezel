@@ -54,8 +54,8 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     id: 'memory',
     name: 'Memory',
     description:
-      "Persistent notes a gezel can search, recall, and write back. Backed by the gezel's per-day memory files plus a vector index.",
-    tools: ['search_memory', 'save_memory', 'list_memories'],
+      'Search indexed project knowledge through one unified surface, plus persistent notes a gezel can recall and write back. The generic search spans workspace content, artifacts, project/gezel memory, and shared documents.',
+    tools: ['search', 'search_memory', 'save_memory', 'list_memories'],
   },
   {
     id: 'workspace-fs-read',

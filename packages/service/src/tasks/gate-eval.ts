@@ -592,7 +592,16 @@ async function evalCheckInner(
       };
     }
     case 'researchEvidence': {
+      const exactSourceRequired = Boolean(c.sourcePath?.trim());
+      const missingExternalAllowed = c.externalOptional === true && !exactSourceRequired;
       if (!deps?.researchEvidence) {
+        if (missingExternalAllowed) {
+          return {
+            ok: true,
+            detail:
+              'External research evidence is unavailable in this runtime; continuing because this topic-only step makes external acquisition optional.',
+          };
+        }
         return {
           ok: false,
           detail:
@@ -606,6 +615,13 @@ async function evalCheckInner(
         minSuccessful,
       });
       if (!result.observable) {
+        if (missingExternalAllowed) {
+          return {
+            ok: true,
+            detail:
+              'Research tool-call telemetry is unavailable; continuing because this topic-only step makes external acquisition optional.',
+          };
+        }
         return {
           ok: false,
           detail:
@@ -614,6 +630,14 @@ async function evalCheckInner(
       }
       const evidence = { matches: result.matches.slice(0, EVIDENCE_LIST_CAP) };
       if (result.matches.length < minSuccessful) {
+        if (missingExternalAllowed) {
+          return {
+            ok: true,
+            detail:
+              'No successful external source acquisition was observed; continuing because this topic-only step makes external research optional.',
+            evidence,
+          };
+        }
         const local = c.sourcePath?.trim();
         const requirement = local
           ? `successfully read the exact source file ${local} or use one of: ${c.tools.join(', ')}`

@@ -2728,6 +2728,11 @@ function ToolAudioRow({
  */
 function ToolImageRow({ projectId, images }: { projectId: string; images: ToolCallImage[] }) {
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
+  // Streaming turns re-render this row whenever new text/tool events land.
+  // Keep the callback stable so ToolImagePreviewLoader does not treat an
+  // unrelated parent update as a new load, revoke the live blob URL, and
+  // leave the dialog's image pointing at that revoked URL while it refetches.
+  const closePreview = useCallback(() => setPreviewIdx(null), []);
   return (
     <>
       <ul className="thinking-tool-images">
@@ -2750,7 +2755,7 @@ function ToolImageRow({ projectId, images }: { projectId: string; images: ToolCa
         <ToolImagePreviewLoader
           projectId={projectId}
           image={images[previewIdx]}
-          onClose={() => setPreviewIdx(null)}
+          onClose={closePreview}
         />
       )}
     </>

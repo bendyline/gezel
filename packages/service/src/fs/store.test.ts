@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { TaskSchema } from '@bendyline/gezel';
+import { TaskSchema, isSharedLibraryProject } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ConfigCorruptionError, Store, pickRoleBasedName } from './store.js';
 
@@ -288,6 +288,20 @@ describe('agents — settings', () => {
     expect(cleared.font).toBeUndefined();
     expect((await store.getGezel('stylist'))!.font).toBeUndefined();
   });
+
+  it('sets, persists, and clears the indexed-context policy', async () => {
+    await store.createGezel({ name: 'Researcher' });
+    const policy = { mode: 'lean' as const, maxTokens: 240, sources: ['workspace' as const] };
+
+    expect(
+      (await store.updateGezelSettings('researcher', { retrieval: policy })).retrieval,
+    ).toEqual(policy);
+    expect((await store.getGezel('researcher'))!.retrieval).toEqual(policy);
+    expect((await store.updateGezelSettings('researcher', {})).retrieval).toEqual(policy);
+    expect(
+      (await store.updateGezelSettings('researcher', { retrieval: null })).retrieval,
+    ).toBeUndefined();
+  });
 });
 
 describe('projects', () => {
@@ -365,6 +379,46 @@ describe('projects', () => {
     expect(updated.workingDir).toBe('/new/path');
     const cleared = await store.updateProjectWorkingDir('proj', undefined);
     expect(cleared.workingDir).toBeUndefined();
+  });
+
+  it('persists one-way project links, validates targets, and prunes deleted targets', async () => {
+    const projectA = await store.createProject({ name: 'Project A' });
+    const projectB = await store.createProject({ name: 'Project B' });
+
+    const linked = await store.updateProject(projectA.id, {
+      linkedProjectIds: [projectB.id],
+    });
+    expect(linked.linkedProjectIds).toEqual([projectB.id]);
+    expect(await store.linkedProjectIds(projectA.id)).toEqual([projectB.id]);
+    expect(await store.projectLinksTo(projectA.id, projectB.id)).toBe(true);
+    expect(await store.projectLinksTo(projectA.id, projectA.id)).toBe(false);
+    expect(await store.projectLinksTo(projectB.id, projectA.id)).toBe(false);
+
+    await expect(
+      store.updateProject(projectA.id, { linkedProjectIds: [projectA.id] }),
+    ).rejects.toThrow(/cannot link to itself/i);
+    await expect(
+      store.updateProject(projectA.id, { linkedProjectIds: ['missing'] }),
+    ).rejects.toThrow(/not found/i);
+    await expect(
+      store.updateProject(projectA.id, { linkedProjectIds: [projectB.id, projectB.id] }),
+    ).rejects.toThrow(/duplicates/i);
+    await expect(
+      store.updateProject(projectA.id, {
+        linkedProjectIds: Array.from({ length: 33 }, (_, index) => `project-${index}`),
+      }),
+    ).rejects.toThrow(/at most 32/i);
+
+    await store.ensureSharedProject();
+    const shared = (await store.listProjects()).find(isSharedLibraryProject);
+    expect(shared).toBeDefined();
+    await expect(
+      store.updateProject(projectA.id, { linkedProjectIds: [shared!.id] }),
+    ).rejects.toThrow(/shared document library/i);
+
+    await store.deleteProject(projectB.id);
+    expect((await store.getProject(projectA.id))?.linkedProjectIds).toBeUndefined();
+    expect(await store.linkedProjectIds(projectA.id)).toEqual([]);
   });
 
   it('writes about.md + missionObjectives.md at creation when supplied', async () => {

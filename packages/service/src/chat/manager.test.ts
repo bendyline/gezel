@@ -6540,14 +6540,14 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       }
     });
 
-    it('steers to search_documents and hides outside-in companion twins', async () => {
+    it('steers to search and hides outside-in companion twins', async () => {
       await store.writeDocument('brand/guidelines.md', 'House style.');
       // The editable markdown twin of a binary document. It is a derived
       // view of a document already listed, so offering it as a second
       // readable path invites the model to open the wrong one.
       await store.writeDocument('brand/deck.pptx_files/deck.md', 'converted twin');
       const sys = await sysFor({ role: 'voorman', force: false });
-      expect(sys).toContain('call `search_documents` with the topic');
+      expect(sys).toContain('call `search` with the topic');
       expect(sys).not.toContain('deck.pptx_files');
     });
   });

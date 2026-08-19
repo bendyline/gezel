@@ -1096,15 +1096,24 @@ export function SettingsView() {
     [],
   );
 
-  const setAutoRecall = useCallback(
-    async (patch: Partial<NonNullable<ConfigResponse['autoRecall']>>) => {
+  const setRetrieval = useCallback(
+    async (
+      patch: Omit<Partial<NonNullable<ConfigResponse['retrieval']>>, 'maxTokens'> & {
+        maxTokens?: number | null;
+      },
+    ) => {
       setStatus('saving…');
       try {
-        const res = await api.updateConfig({
-          autoRecall: { ...(config?.autoRecall ?? {}), ...patch },
-        });
+        const current = config?.retrieval ?? { mode: 'balanced' as const };
+        const { maxTokens: _currentMaxTokens, ...withoutMaxTokens } = current;
+        const { maxTokens, ...rest } = patch;
+        const retrieval =
+          maxTokens === null
+            ? { ...withoutMaxTokens, ...rest }
+            : { ...current, ...rest, ...(maxTokens === undefined ? {} : { maxTokens }) };
+        const res = await api.updateConfig({ retrieval });
         setConfig(res);
-        setStatus('recall settings saved');
+        setStatus('indexed context settings saved');
       } catch (err) {
         setStatus(`save failed: ${(err as Error).message}`);
       }
@@ -2537,7 +2546,7 @@ export function SettingsView() {
 
             <MemorySection
               config={config}
-              onAutoRecallChange={setAutoRecall}
+              onRetrievalChange={setRetrieval}
               onSummarizationChange={setSummarization}
             />
           </>
@@ -4371,52 +4380,67 @@ function SidebarSidePicker() {
 
 interface MemorySectionProps {
   config: ConfigResponse | null;
-  onAutoRecallChange: (patch: Partial<NonNullable<ConfigResponse['autoRecall']>>) => Promise<void>;
+  onRetrievalChange: (
+    patch: Omit<Partial<NonNullable<ConfigResponse['retrieval']>>, 'maxTokens'> & {
+      maxTokens?: number | null;
+    },
+  ) => Promise<void>;
   onSummarizationChange: (
     patch: Partial<NonNullable<ConfigResponse['summarization']>>,
   ) => Promise<void>;
 }
 
-function MemorySection({ config, onAutoRecallChange, onSummarizationChange }: MemorySectionProps) {
-  const recallEnabled = config?.autoRecall?.enabled !== false;
+function MemorySection({ config, onRetrievalChange, onSummarizationChange }: MemorySectionProps) {
+  const retrievalMode =
+    config?.retrieval?.mode ?? (config?.autoRecall?.enabled === false ? 'off' : 'balanced');
   const summarizeEnabled = config?.summarization?.enabled !== false;
-  const topK = config?.autoRecall?.topK ?? 4;
+  const retrievalBudget = config?.retrieval?.maxTokens;
   const minUserTurns = config?.summarization?.minUserTurns ?? 2;
   const idleHours = config?.summarization?.idleHours ?? 24;
   return (
     <section style={{ marginTop: '2rem' }}>
-      <h3>Memory</h3>
+      <h3>Project knowledge &amp; memory</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        Cross-thread context: pull relevant memories into new threads, and distill finished threads
-        into the project memory bank so the next gezel can pick up where you left off.
+        Ground relevant turns in indexed project files, artifacts, memories, and shared documents.
+        Finished threads can also be distilled into project memory for future work.
       </p>
 
       <div style={{ marginBottom: '1.25rem' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <input
-            type="checkbox"
-            checked={recallEnabled}
-            onChange={(e) => void onAutoRecallChange({ enabled: e.target.checked })}
-          />
-          <strong>Recall memories at the start of each new thread.</strong>
-        </label>
-        <p className="muted small" style={{ margin: '0.25rem 0 0 1.5rem' }}>
-          Before the first reply, look through project and gezel memories for the most relevant
-          notes and hand them to the model.
+        <strong>Indexed context per turn</strong>
+        <p className="muted small" style={{ margin: '0.25rem 0 0' }}>
+          Higher settings provide more direct evidence. Lower settings preserve context space on
+          memory-constrained models. The gezel can still call <code>search</code> when this is Off.
         </p>
-        <div className="new-row" style={{ marginTop: '0.5rem', alignItems: 'center' }}>
-          <label className="muted small">Memories to recall</label>
+        <div className="provider-switch" style={{ marginTop: '0.5rem' }}>
+          {(['off', 'lean', 'balanced', 'deep'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className={`provider-pill${retrievalMode === mode ? ' provider-pill-active' : ''}`}
+              onClick={() => void onRetrievalChange({ mode })}
+            >
+              {mode[0]!.toUpperCase() + mode.slice(1)}
+            </button>
+          ))}
+        </div>
+        <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
+          <label className="muted small">Optional token cap</label>
           <input
             type="number"
-            min={1}
-            max={20}
-            value={topK}
+            min={0}
+            max={16000}
+            value={retrievalBudget ?? ''}
+            placeholder="Mode default"
             onChange={(e) => {
+              if (e.target.value === '') {
+                void onRetrievalChange({ maxTokens: null });
+                return;
+              }
               const v = Number.parseInt(e.target.value, 10);
-              if (Number.isFinite(v) && v > 0) void onAutoRecallChange({ topK: v });
+              if (Number.isFinite(v) && v >= 0) void onRetrievalChange({ maxTokens: v });
             }}
-            style={{ width: '5rem' }}
-            disabled={!recallEnabled}
+            style={{ width: '8rem' }}
+            disabled={retrievalMode === 'off'}
           />
         </div>
       </div>

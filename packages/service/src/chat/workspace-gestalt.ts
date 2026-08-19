@@ -54,7 +54,7 @@ export function renderWorkspaceGestalt(map: MapRepoResponse): string {
     parts.push(`\n\nHealth: avg ${h.avgHealth}/10 (${h.reviewedFiles} files reviewed)${issues}.`);
   }
   parts.push(
-    '\n\nOrient from this map; use `map_repo` for the full picture and `search_code` to locate specifics.',
+    '\n\nOrient from this map; use `map_repo` for the full picture and `search` to locate specifics across project knowledge.',
   );
   return parts.join('');
 }

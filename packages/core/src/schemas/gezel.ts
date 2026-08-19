@@ -7,6 +7,7 @@ import { GezelGrowthSummarySchema } from './growth.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { QuestionSchema } from './question.js';
 import { MessageImageDigestSchema } from './recognition.js';
+import { RetrievalPolicySchema } from './retrieval.js';
 import { SessionGpuTaskSchema } from './session-telemetry.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
 
@@ -178,6 +179,12 @@ export const GezelFrontmatterSchema = z.object({
   /** When false, suppresses auto-recall on session start for this gezel. */
   autoRecall: z.boolean().optional(),
   /**
+   * Per-gezel proactive indexed-context policy. Supersedes `autoRecall` when
+   * present; absent inherits the install default. The generic `search` tool is
+   * still available in `off` mode.
+   */
+  retrieval: RetrievalPolicySchema.optional(),
+  /**
    * Chat bubble font id (one of `GEZEL_CHAT_FONTS[*].id`). When unset or
    * unrecognized, chat bubbles inherit the app default (Hanken Grotesk).
    */
@@ -302,6 +309,8 @@ export const GezelSummarySchema = z.object({
   suggestedTuningProfile: TuningProfileIdSchema.optional(),
   numCtx: z.number().int().positive().optional(),
   autoRecall: z.boolean().optional(),
+  /** Mirrors `GezelFrontmatter.retrieval`. */
+  retrieval: RetrievalPolicySchema.optional(),
   font: z.string().optional(),
   /** Mirrors `GezelFrontmatter.voice` — Kokoro TTS voice id. */
   voice: z.string().optional(),

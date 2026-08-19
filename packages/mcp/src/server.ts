@@ -37,6 +37,7 @@ import {
   NpmRegistryVersionSchema,
   type Outcome,
   ProviderNameSchema,
+  type ReadWorkspaceFilesResponse,
   type ScriptMeta,
   type StepDeliverable,
   StepGateUnionSchema,
@@ -97,6 +98,13 @@ import {
   inferSourceDeliverablePath,
   shouldPromoteStartJobToProject,
 } from './kickoff-text.js';
+import {
+  type LinkedWorkspaceTarget,
+  isLinkedWorkspacePath,
+  linkedProjectEntries,
+  prefixLinkedEntry,
+  resolveLinkedWorkspacePath,
+} from './linked-workspace.js';
 import { closestFileNames } from './near-miss.js';
 import { normalizeMarkdown } from './normalize.js';
 import { CAP, PartialEditRegistry } from './partial-edits.js';
@@ -197,6 +205,113 @@ const fetchImpl: typeof fetch = certPath
   : createPatientFetch();
 
 const api = new GezelClient({ baseUrl, token, fetch: fetchImpl });
+const linkedFetchImpl: typeof fetch = (input, init) => {
+  const headers = new Headers(init?.headers);
+  headers.set('x-gezel-linked-from', projectId);
+  return fetchImpl(input, { ...init, headers });
+};
+const linkedApi = new GezelClient({ baseUrl, token, fetch: linkedFetchImpl });
+
+type ConcreteWorkspaceTarget = Exclude<LinkedWorkspaceTarget, { kind: 'links-root' }>;
+let linkedIdsCache: { ids: string[]; expiresAt: number } | null = null;
+
+async function linkedProjectIds(): Promise<string[]> {
+  if (linkedIdsCache && linkedIdsCache.expiresAt > Date.now()) return linkedIdsCache.ids;
+  const project = await api.getProject(projectId);
+  const ids = project.linkedProjectIds ?? [];
+  linkedIdsCache = { ids, expiresAt: Date.now() + 2_000 };
+  return ids;
+}
+
+async function workspaceTarget(path: string): Promise<LinkedWorkspaceTarget> {
+  // Ordinary workspace calls keep their existing zero-request path. Project
+  // metadata is fetched only when the model addresses the virtual sibling
+  // namespace.
+  if (!isLinkedWorkspacePath(path)) return resolveLinkedWorkspacePath(projectId, [], path);
+  return resolveLinkedWorkspacePath(projectId, await linkedProjectIds(), path);
+}
+
+function workspaceClient(target: ConcreteWorkspaceTarget): GezelClient {
+  return target.kind === 'linked' ? linkedApi : api;
+}
+
+async function concreteWorkspaceTarget(path: string): Promise<ConcreteWorkspaceTarget> {
+  const target = await workspaceTarget(path);
+  if (target.kind === 'links-root') {
+    throw new Error('`..` is the linked-project directory; use list_dir({ path: ".." })');
+  }
+  return target;
+}
+
+async function readWorkspaceFile(path: string) {
+  const target = await concreteWorkspaceTarget(path);
+  const result = await workspaceClient(target).readProjectWorkspaceFile(
+    target.projectId,
+    target.path,
+  );
+  return { ...result, path: target.displayPath };
+}
+
+async function statWorkspacePath(path: string) {
+  const target = await concreteWorkspaceTarget(path);
+  return workspaceClient(target).statProjectWorkspacePath(target.projectId, target.path);
+}
+
+async function writeWorkspaceFile(path: string, content: string) {
+  const target = await concreteWorkspaceTarget(path);
+  return workspaceClient(target).writeProjectWorkspaceFile(target.projectId, {
+    path: target.path,
+    content,
+    ...(gezelId ? { gezelId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+  });
+}
+
+async function readWorkspaceFiles(
+  requests: readonly WorkspaceReadFileRequest[],
+): Promise<ReadWorkspaceFilesResponse> {
+  const resolved = await Promise.all(
+    requests.map(async (request, index) => ({
+      index,
+      request,
+      target: await concreteWorkspaceTarget(request.path),
+    })),
+  );
+  const results: ReadWorkspaceFilesResponse['results'] = new Array(resolved.length);
+  const groups = new Map<string, typeof resolved>();
+  for (const item of resolved) {
+    const key = `${item.target.kind}:${item.target.projectId}`;
+    const group = groups.get(key) ?? [];
+    group.push(item);
+    groups.set(key, group);
+  }
+  await Promise.all(
+    [...groups.values()].map(async (group) => {
+      const first = group[0]!;
+      const response = await workspaceClient(first.target).toolReadWorkspaceFiles(
+        first.target.projectId,
+        {
+          files: group.map(({ request, target }) => ({ ...request, path: target.path })),
+        },
+      );
+      response.results.forEach((result, resultIndex) => {
+        const source = group[resultIndex]!;
+        results[source.index] = { ...result, path: source.target.displayPath };
+      });
+    }),
+  );
+  return {
+    results,
+    truncated: results.some(
+      (result) => result.status === 'error' || (result.status === 'ok' && result.truncated),
+    ),
+    totalBytesReturned: results.reduce(
+      (total, result) => total + (result.status === 'ok' ? result.bytesReturned : 0),
+      0,
+    ),
+    totalScannedBytes: results.reduce((total, result) => total + (result.scannedBytes ?? 0), 0),
+  };
+}
 // Process lifetime is session lifetime — this server is spawned per chat
 // session — so module scope is exactly session scope for draft state.
 const partialEdits = new PartialEditRegistry();
@@ -964,20 +1079,32 @@ if (process.env.GEZEL_CONNECTORS_ENABLED === '1') {
 
 server.tool(
   'list_dir',
-  'List the files and subdirectories at a path in the project. The project root is the default — pass a subdirectory path to narrow.',
+  'List the files and subdirectories at a path in the project. The project root is the default. When this project links other projects, list `..` to discover them and use `../<project-id>/...` to browse one with this same tool.',
   {
     path: z.string().optional().describe('Subdirectory path to list (default: project root).'),
   },
   async ({ path }) => {
     try {
-      const res = await api.listProjectWorkspace(projectId, path ?? '', false);
-      const listing = res.files.map((f) => `${f.isDirectory ? '📁' : '📄'} ${f.path}`).join('\n');
-      const summary = res.files.length
-        ? `Listed ${res.files.length} ${res.files.length === 1 ? 'entry' : 'entries'}.`
+      const target = await workspaceTarget(path ?? '');
+      const files =
+        target.kind === 'links-root'
+          ? linkedProjectEntries(await linkedProjectIds())
+          : (
+              await workspaceClient(target).listProjectWorkspace(
+                target.projectId,
+                target.path,
+                false,
+              )
+            ).files.map((entry) =>
+              target.kind === 'linked' ? prefixLinkedEntry(target.projectId, entry) : entry,
+            );
+      const listing = files.map((f) => `${f.isDirectory ? '📁' : '📄'} ${f.path}`).join('\n');
+      const summary = files.length
+        ? `Listed ${files.length} ${files.length === 1 ? 'entry' : 'entries'}.`
         : 'Empty directory.';
       return okResult(
         ListToolOutputSchema,
-        { summary, items: res.files, count: res.files.length },
+        { summary, items: files, count: files.length },
         { text: listing ? `${summary}\n${listing}` : summary },
       );
     } catch (err) {
@@ -1025,7 +1152,7 @@ server.tool(
       // compatibility, raw full reads are used internally by the source-write
       // guard and must remain byte-for-byte text without pagination metadata.
       if (startLine === undefined && endLine === undefined) {
-        const res = await api.readProjectWorkspaceFile(projectId, path);
+        const res = await readWorkspaceFile(path);
         return {
           content: [
             { type: 'text' as const, text: raw ? res.content : withLineNumbers(res.content) },
@@ -1033,15 +1160,13 @@ server.tool(
         };
       }
 
-      const response = await api.toolReadWorkspaceFiles(projectId, {
-        files: [
-          {
-            path,
-            ...(startLine !== undefined ? { startLine } : {}),
-            ...(endLine !== undefined ? { endLine } : {}),
-          },
-        ],
-      });
+      const response = await readWorkspaceFiles([
+        {
+          path,
+          ...(startLine !== undefined ? { startLine } : {}),
+          ...(endLine !== undefined ? { endLine } : {}),
+        },
+      ]);
       const result = response.results[0];
       if (!result) throw new Error('ranged read returned no result');
       if (result.status === 'error') throw new Error(`[${result.code}] ${result.error}`);
@@ -1066,7 +1191,12 @@ server.tool(
         }
         try {
           const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-          const listing = await api.listProjectWorkspace(projectId, dir, false);
+          const targetDir = await concreteWorkspaceTarget(dir);
+          const listing = await workspaceClient(targetDir).listProjectWorkspace(
+            targetDir.projectId,
+            targetDir.path,
+            false,
+          );
           const names = listing.files
             .filter((f) => !f.isDirectory)
             .map((f) => f.path.split('/').pop() ?? f.path);
@@ -1136,7 +1266,7 @@ server.tool(
         const rangeError = workspaceReadRangeError(request);
         if (rangeError) throw new Error(`${request.path}: ${rangeError}`);
       }
-      const response = await api.toolReadWorkspaceFiles(projectId, { files: requests });
+      const response = await readWorkspaceFiles(requests);
       const index = response.results.map((result, index) => {
         if (result.status === 'error') {
           return `${index + 1} ERROR ${result.path} [${result.code}] ${result.error}`;
@@ -1233,7 +1363,7 @@ server.tool(
   },
   async ({ path }) => {
     try {
-      const res = await api.statProjectWorkspacePath(projectId, path);
+      const res = await statWorkspacePath(path);
       const text =
         res.kind === 'missing'
           ? `missing: ${path}`
@@ -1285,8 +1415,11 @@ server.tool(
       };
     }
     const result = validateFile(filePath, content);
+    const validationTarget =
+      drawer === 'workspace' ? await concreteWorkspaceTarget(filePath).catch(() => null) : null;
     if (
       drawer === 'workspace' &&
+      validationTarget?.kind === 'current' &&
       /\.html?$/i.test(filePath) &&
       !result.checks.some((c) => c.ok === false)
     ) {
@@ -1335,8 +1468,12 @@ async function loadFileForValidation(
   // is missing.
   const isBinaryExt = /\.(png|jpe?g|webp|gif|svg|pdf|mp3|wav|mp4|webm|zip|tar|gz)$/i.test(filePath);
   if (drawer === 'workspace') {
+    const target = await concreteWorkspaceTarget(filePath);
     if (isBinaryExt) {
-      const blob = await api.fetchProjectWorkspaceBlob(projectId, filePath);
+      const blob = await workspaceClient(target).fetchProjectWorkspaceBlob(
+        target.projectId,
+        target.path,
+      );
       const bytes = new Uint8Array(await blob.arrayBuffer());
       return {
         bytes,
@@ -1350,7 +1487,10 @@ async function loadFileForValidation(
       };
     }
     try {
-      const result = await api.readProjectWorkspaceFile(projectId, filePath);
+      const result = await workspaceClient(target).readProjectWorkspaceFile(
+        target.projectId,
+        target.path,
+      );
       const text = result.content;
       const bytes = new TextEncoder().encode(text);
       return { text, bytes, totalBytes: bytes.byteLength };
@@ -1865,7 +2005,11 @@ server.tool(
 async function htmlRuntimeCheckSuffix(path: string): Promise<string> {
   if (!/\.html?$/i.test(path)) return '';
   try {
-    const check = await api.checkProjectPage(projectId, path);
+    const target = await concreteWorkspaceTarget(path);
+    // Linked-project capability is deliberately file-only. Runtime preview
+    // execution remains scoped to a session's active project.
+    if (target.kind === 'linked') return '';
+    const check = await api.checkProjectPage(projectId, target.path);
     if (!check.ran || check.ok === undefined) return '';
     if (check.ok) {
       return `\n\n[Runtime check] ${path} loaded headlessly with no runtime errors.`;
@@ -1967,12 +2111,7 @@ server.tool(
       return { content: [{ type: 'text' as const, text: htmlQualityRejection }], isError: true };
     }
     try {
-      await api.writeProjectWorkspaceFile(projectId, {
-        path,
-        content: normalizedContent,
-        ...(gezelId ? { gezelId } : {}),
-        ...(sessionId ? { sessionId } : {}),
-      });
+      await writeWorkspaceFile(path, normalizedContent);
       // A complete, validated file supersedes any provisional sequence
       // the model had open on this path.
       partialEdits.close(path);
@@ -1996,7 +2135,7 @@ async function rejectRegressiveWorkspaceOverwrite(
 ): Promise<string | null> {
   let priorContent: string | null = null;
   try {
-    priorContent = (await api.readProjectWorkspaceFile(projectId, path)).content;
+    priorContent = (await readWorkspaceFile(path)).content;
   } catch {
     priorContent = null;
   }
@@ -2031,7 +2170,7 @@ async function tryPersistFirstWritePartial(
   | { saved: false; reason: 'write-failed'; error: string }
 > {
   try {
-    await api.readProjectWorkspaceFile(projectId, path);
+    await readWorkspaceFile(path);
     return { saved: false, reason: 'exists' };
   } catch {
     // Missing files are the expected case. If the read failed for another
@@ -2039,12 +2178,7 @@ async function tryPersistFirstWritePartial(
   }
 
   try {
-    await api.writeProjectWorkspaceFile(projectId, {
-      path,
-      content,
-      ...(gezelId ? { gezelId } : {}),
-      ...(sessionId ? { sessionId } : {}),
-    });
+    await writeWorkspaceFile(path, content);
     return { saved: true };
   } catch (err) {
     return { saved: false, reason: 'write-failed', error: explainWriteFailure(err) };
@@ -2068,7 +2202,7 @@ server.tool(
     try {
       let prior = '';
       try {
-        const existing = await api.readProjectWorkspaceFile(projectId, path);
+        const existing = await readWorkspaceFile(path);
         prior = existing.content;
       } catch (err) {
         // Treat any read failure as "file doesn't exist." If `create`
@@ -2099,12 +2233,7 @@ server.tool(
       if (htmlQualityRejection) {
         return { content: [{ type: 'text' as const, text: htmlQualityRejection }], isError: true };
       }
-      await api.writeProjectWorkspaceFile(projectId, {
-        path,
-        content: merged,
-        ...(gezelId ? { gezelId } : {}),
-        ...(sessionId ? { sessionId } : {}),
-      });
+      await writeWorkspaceFile(path, merged);
       partialEdits.close(path);
       return {
         content: [
@@ -2152,9 +2281,11 @@ server.tool(
   },
   async ({ path, find, replace, occurrence, partial }) => {
     try {
-      const before = await api.readProjectWorkspaceFile(projectId, path);
-      const result = await api.replaceInProjectWorkspaceFile(projectId, {
-        path,
+      const target = await concreteWorkspaceTarget(path);
+      const targetApi = workspaceClient(target);
+      const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
+      const result = await targetApi.replaceInProjectWorkspaceFile(target.projectId, {
+        path: target.path,
         find,
         replace,
         ...(occurrence !== undefined ? { occurrence } : {}),
@@ -2220,9 +2351,11 @@ server.tool(
   },
   async ({ path, startLine, endLine, content, partial }) => {
     try {
-      const before = await api.readProjectWorkspaceFile(projectId, path);
-      const result = await api.replaceLinesInProjectWorkspaceFile(projectId, {
-        path,
+      const target = await concreteWorkspaceTarget(path);
+      const targetApi = workspaceClient(target);
+      const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
+      const result = await targetApi.replaceLinesInProjectWorkspaceFile(target.projectId, {
+        path: target.path,
         startLine,
         endLine,
         content,
@@ -2246,7 +2379,8 @@ server.tool(
         startLine,
         addedLines: result.addedLines,
         removedLines: result.removedLines,
-        readFile: async () => (await api.readProjectWorkspaceFile(projectId, path)).content,
+        readFile: async () =>
+          (await targetApi.readProjectWorkspaceFile(target.projectId, target.path)).content,
       });
       return {
         content: [
@@ -2286,9 +2420,11 @@ server.tool(
   },
   async ({ path, diff, partial }) => {
     try {
-      const before = await api.readProjectWorkspaceFile(projectId, path);
-      const result = await api.applyPatchToProjectWorkspaceFile(projectId, {
-        path,
+      const target = await concreteWorkspaceTarget(path);
+      const targetApi = workspaceClient(target);
+      const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
+      const result = await targetApi.applyPatchToProjectWorkspaceFile(target.projectId, {
+        path: target.path,
         diff,
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
@@ -2346,9 +2482,11 @@ server.tool(
   },
   async ({ path, marker, content, where, partial }) => {
     try {
-      const before = await api.readProjectWorkspaceFile(projectId, path);
-      const result = await api.insertAtMarkerInProjectWorkspaceFile(projectId, {
-        path,
+      const target = await concreteWorkspaceTarget(path);
+      const targetApi = workspaceClient(target);
+      const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
+      const result = await targetApi.insertAtMarkerInProjectWorkspaceFile(target.projectId, {
+        path: target.path,
         marker,
         content,
         ...(where ? { where } : {}),
@@ -2402,7 +2540,8 @@ server.tool(
   },
   async ({ path, recursive }) => {
     try {
-      await api.rmProjectWorkspacePath(projectId, path, {
+      const target = await concreteWorkspaceTarget(path);
+      await workspaceClient(target).rmProjectWorkspacePath(target.projectId, target.path, {
         ...(recursive ? { recursive } : {}),
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
@@ -2425,8 +2564,9 @@ server.tool(
   },
   async ({ path }) => {
     try {
-      await api.mkdirProjectWorkspace(projectId, {
-        path,
+      const target = await concreteWorkspaceTarget(path);
+      await workspaceClient(target).mkdirProjectWorkspace(target.projectId, {
+        path: target.path,
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
       });
@@ -2449,9 +2589,18 @@ server.tool(
   },
   async ({ fromPath, toPath }) => {
     try {
-      await api.renameProjectWorkspacePath(projectId, {
-        fromPath,
-        toPath,
+      const [fromTarget, toTarget] = await Promise.all([
+        concreteWorkspaceTarget(fromPath),
+        concreteWorkspaceTarget(toPath),
+      ]);
+      if (fromTarget.projectId !== toTarget.projectId) {
+        throw new Error(
+          'rename cannot move files across project roots; read the source, write the destination, then delete the source explicitly',
+        );
+      }
+      await workspaceClient(fromTarget).renameProjectWorkspacePath(fromTarget.projectId, {
+        fromPath: fromTarget.path,
+        toPath: toTarget.path,
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
       });
@@ -2921,12 +3070,7 @@ async function editResultSuffix(path: string, partial: boolean | undefined): Pro
 
 async function restoreWorkspaceFile(path: string, content: string): Promise<string> {
   try {
-    await api.writeProjectWorkspaceFile(projectId, {
-      path,
-      content,
-      ...(gezelId ? { gezelId } : {}),
-      ...(sessionId ? { sessionId } : {}),
-    });
+    await writeWorkspaceFile(path, content);
     return 'The previous file content was restored.';
   } catch (err) {
     return `Automatic restore failed: ${unwrapApiError(err)}. Re-read the file before continuing.`;
@@ -2960,7 +3104,7 @@ async function rejectInvalidWorkspaceEdit(
 
   let after: { path: string; content: string };
   try {
-    after = await api.readProjectWorkspaceFile(projectId, path);
+    after = await readWorkspaceFile(path);
   } catch (err) {
     return `${toolName} changed ${path}, but the edited file could not be re-read for validation: ${unwrapApiError(err)}. Re-read the file before making another edit.`;
   }
@@ -3256,6 +3400,7 @@ async function workspaceCollisionForArtifactPath(
  */
 async function artifactCollisionForWorkspacePath(path: string): Promise<string | null> {
   try {
+    if ((await concreteWorkspaceTarget(path)).kind === 'linked') return null;
     const cleanPath = normalizeArtifactPath(path);
     const result = await api.readProjectArtifactSlice(projectId, cleanPath, { head: 0 });
     return result.kind === 'found' && !result.fuzzy ? result.path : null;
@@ -4052,7 +4197,7 @@ server.tool(
 
 server.tool(
   'search_documents',
-  'Search the CONTENT of every document in the shared library, including converted office documents. Returns path + line + snippet; call this first for any question the library might answer — team policy, guidelines, conventions — then read_document the best match.',
+  'Compatibility alias for shared-library-only content search. Prefer `search`, which searches shared documents together with relevant active-project content, artifacts, and memory. Follow a shared match with `read_document`.',
   {
     q: z.string().min(1).describe('Full-text query against document content'),
     limit: z.number().optional().describe('Max results (default 10)'),
@@ -10295,8 +10440,90 @@ server.tool(
 );
 
 server.tool(
+  'search',
+  "Search indexed knowledge by meaning and keywords through one simple surface. By default this covers the active project plus every directly linked project's workspace, artifacts, and project memory; this gezel's memory; and the shared document library. Every result includes project/corpus provenance and an exact path/line when available. Linked workspace hits use `../<project-id>/...` and can be opened with `read_file`; active-project artifacts use `read_artifact`, and shared hits use `read_document`. Strongly relevant Gilde, user-local, or active-project-local craftbooks may also be suggested with a direct invocation recipe; `suggest_craftbook` remains available for explicit procedure-only discovery. This is the preferred discovery tool; `grep_files` remains best for exact strings and regular expressions.",
+  {
+    query: z.string().min(1).describe('Natural-language description or keywords.'),
+    sources: z
+      .array(z.enum(['workspace', 'artifacts', 'project-memory', 'gezel-memory', 'shared']))
+      .optional()
+      .describe('Optional corpus filter. Omit to search all knowledge available to this project.'),
+    maxResults: z.number().int().positive().max(100).optional(),
+  },
+  async ({ query, sources, maxResults }) => {
+    try {
+      const res = await api.toolSearch(projectId, {
+        query,
+        gezelId,
+        includeShared: true,
+        ...(sources ? { sources } : {}),
+        ...(maxResults ? { maxResults } : {}),
+      });
+      const modelResults = res.results.map((result) => {
+        if (
+          result.projectId &&
+          result.projectId !== projectId &&
+          result.path &&
+          result.retrievalSource === 'workspace'
+        ) {
+          return { ...result, path: `../${result.projectId}/${result.path}` };
+        }
+        return result;
+      });
+      const lines = modelResults.map((r) => {
+        const provenance = r.retrievalSource ?? r.source ?? r.kind;
+        const projectScope =
+          r.projectId && r.projectId !== projectId ? ` project=${r.projectId}` : '';
+        const lineSpan = r.line
+          ? `:${r.line}${r.lineEnd && r.lineEnd !== r.line ? `-${r.lineEnd}` : ''}`
+          : '';
+        const where = r.path ? `${r.path}${lineSpan}` : r.title;
+        const preview = r.snippet ? ` — ${r.snippet.replace(/\s+/g, ' ').trim()}` : '';
+        return `[${provenance}${projectScope}] ${where}${preview}`;
+      });
+      const craftbookLines = res.craftbooks.map((craftbook) => {
+        const source =
+          craftbook.source === 'bundled'
+            ? 'Gilde'
+            : craftbook.source === 'project'
+              ? 'project-local'
+              : 'local';
+        const description = craftbook.description ? ` — ${craftbook.description}` : '';
+        const call = `invoke_craftbook(${JSON.stringify(craftbook.invocation.arguments)})`;
+        return `[craftbook:${source}] ${craftbook.name} (${craftbook.id})${description}\n  If this procedure fits and \`invoke_craftbook\` is available, call \`${call}\` directly; otherwise ignore it.`;
+      });
+      const resultSummary = modelResults.length
+        ? `Found ${modelResults.length} relevant result${modelResults.length === 1 ? '' : 's'} across active, linked, and shared project knowledge${res.truncated ? ' (truncated)' : ''}`
+        : 'No indexed project knowledge matched';
+      const summary = res.craftbooks.length
+        ? `${resultSummary}; suggested ${res.craftbooks.length} relevant craftbook${res.craftbooks.length === 1 ? '' : 's'}.`
+        : `${resultSummary}.`;
+      const sections = [
+        ...(lines.length ? [lines.join('\n')] : []),
+        ...(craftbookLines.length ? [`Craftbook options:\n${craftbookLines.join('\n')}`] : []),
+      ];
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary,
+          query,
+          matches: modelResults,
+          count: modelResults.length,
+          truncated: res.truncated,
+          engine: 'scoped-index',
+          craftbooks: res.craftbooks,
+        },
+        { text: sections.length ? `${summary}\n${sections.join('\n\n')}` : summary },
+      );
+    } catch (err) {
+      return errorResult(`search failed: ${unwrapApiError(err)}`);
+    }
+  },
+);
+
+server.tool(
   'search_code',
-  'Search the codebase by MEANING, not just exact text — "where is rate limiting handled?", "auth token refresh". Blends semantic vector search with keyword search and returns path + lineStart/lineEnd; follow with read_file({path,startLine:lineStart,endLine:lineEnd}). Use this when you don\'t know the exact name; use find_symbol when you do.',
+  'Compatibility alias for workspace-only semantic search. Prefer `search`, which also reaches project documents, artifacts, memories, and the shared library. Use `grep_files` for exact text or regular expressions.',
   {
     query: z.string().min(1).describe('Natural-language description or keywords.'),
     mode: z

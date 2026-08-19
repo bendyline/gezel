@@ -964,6 +964,19 @@ describe('evaluateGate — hardened kinds', () => {
       }),
     );
     expect(grounded.pass).toBe(true);
+
+    const noCitationRequired = await evaluateGate(
+      [{ kind: 'citationsResolve', file: 'review.md', minCitations: 0 }],
+      reader({ 'review.md': 'Original proposals only; no factual sources used.' }),
+    );
+    expect(noCitationRequired.pass).toBe(true);
+
+    const optionalStillRejectsFabrication = await evaluateGate(
+      [{ kind: 'citationsResolve', file: 'review.md', minCitations: 0 }],
+      reader({ 'review.md': 'See `invented/source.md`.' }),
+    );
+    expect(optionalStillRejectsFabrication.pass).toBe(false);
+    expect(optionalStillRejectsFabrication.failures.join('\n')).toContain('invented/source.md');
   });
 
   it('researchEvidence fails closed without observable successful source retrieval', async () => {
@@ -995,6 +1008,25 @@ describe('evaluateGate — hardened kinds', () => {
       }),
     });
     expect(observed.pass).toBe(true);
+
+    const optionalExternal = { ...check, externalOptional: true };
+    const optionalUnavailable = await evaluateGate([optionalExternal], reader({}));
+    expect(optionalUnavailable.pass).toBe(true);
+    expect(optionalUnavailable.checks[0]?.detail).toContain('optional');
+
+    const optionalEmpty = await evaluateGate([optionalExternal], reader({}), {
+      researchEvidence: async () => ({ observable: true, matches: [] }),
+    });
+    expect(optionalEmpty.pass).toBe(true);
+    expect(optionalEmpty.checks[0]?.detail).toContain('No successful external source acquisition');
+
+    const localSourceStillRequired = await evaluateGate(
+      [{ ...optionalExternal, sourcePath: 'source/brief.md' }],
+      reader({ 'source/brief.md': 'authoritative facts' }),
+      { researchEvidence: async () => ({ observable: true, matches: [] }) },
+    );
+    expect(localSourceStillRequired.pass).toBe(false);
+    expect(localSourceStillRequired.failures.join('\n')).toContain('source/brief.md');
   });
 
   it('markdownHeadingsMatch rejects a deck that drops a locked outline slide', async () => {

@@ -1080,7 +1080,7 @@ export class ContentIndex {
 
       const hits = index.searchCodeHybrid(
         mode === 'keyword' ? null : queryVector,
-        query,
+        mode === 'semantic' ? null : query,
         limit + 1,
       );
       const truncated = hits.length > limit;
@@ -1274,6 +1274,46 @@ export class ContentIndex {
     if (!opened) return null;
     try {
       return opened.index.getAreaSummary(ARCHITECTURE_KEY)?.summaryMd ?? null;
+    } finally {
+      opened.index.close();
+    }
+  }
+
+  /**
+   * Query the deep-pass folder/project rollups without another embedding or
+   * schema migration. These are a small corpus (usually tens of rows), so a
+   * deterministic token-overlap rank is cheaper and easier to keep current
+   * than a second FTS mirror.
+   */
+  async searchAreaSummaries(
+    projectId: string,
+    query: string,
+    maxResults = 5,
+  ): Promise<Array<{ areaPath: string; summary: string; score: number }>> {
+    const opened = await this.open(projectId);
+    if (!opened) return [];
+    try {
+      const queryTokens = searchTokens(query);
+      if (queryTokens.size === 0) return [];
+      return opened.index
+        .allAreaSummaries()
+        .map((area) => {
+          const haystack = searchTokens(`${area.areaPath} ${area.summaryMd}`);
+          let matches = 0;
+          for (const token of queryTokens) {
+            if (haystack.has(token)) matches++;
+          }
+          const coverage = matches / queryTokens.size;
+          const density = matches / Math.max(1, Math.min(12, haystack.size));
+          return {
+            areaPath: area.areaPath,
+            summary: area.summaryMd,
+            score: Math.min(1, coverage * 0.8 + density * 0.2),
+          };
+        })
+        .filter((area) => area.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, maxResults);
     } finally {
       opened.index.close();
     }
@@ -1639,6 +1679,7 @@ export class ContentIndex {
             sourcePath: h.filePath,
             markdownPath: shadow ? `artifacts/${shadow.mdRel}` : h.filePath,
             lineStart: h.lineStart,
+            lineEnd: h.lineEnd,
             snippet: h.snippet,
           };
         }),
@@ -1677,6 +1718,7 @@ export class ContentIndex {
         return {
           path: hit.path,
           lineStart: hit.lineStart,
+          lineEnd: hit.lineEnd,
           snippet: hit.snippet,
           score: hit.score,
           ...(shadow && isConvertibleDoc(hit.path.split('.').pop() ?? '')
@@ -1779,7 +1821,7 @@ export class ContentIndex {
     query: string,
     maxResults = 20,
   ): Promise<{
-    results: Array<{ path: string; lineStart: number; snippet: string }>;
+    results: Array<{ path: string; lineStart: number; lineEnd: number; snippet: string }>;
     truncated: boolean;
   }> {
     const index = await this.openArtifacts(projectId);
@@ -1791,6 +1833,7 @@ export class ContentIndex {
         results: hits.slice(0, maxResults).map((h) => ({
           path: h.filePath,
           lineStart: h.lineStart,
+          lineEnd: h.lineEnd,
           snippet: h.snippet,
         })),
         truncated: hits.length > maxResults,
@@ -2402,4 +2445,34 @@ function severityRank(s: SecuritySeverity): number {
 }
 function maxSeverity(a: SecuritySeverity, b: SecuritySeverity): SecuritySeverity {
   return severityRank(b) > severityRank(a) ? b : a;
+}
+
+const SEARCH_STOP_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'for',
+  'how',
+  'in',
+  'is',
+  'of',
+  'on',
+  'or',
+  'the',
+  'to',
+  'with',
+]);
+
+function searchTokens(text: string): Set<string> {
+  const tokens =
+    text
+      .normalize('NFKC')
+      .toLocaleLowerCase()
+      .match(/[\p{L}\p{N}_]+/gu) ?? [];
+  return new Set(
+    tokens
+      .filter((token) => !SEARCH_STOP_WORDS.has(token))
+      .map((token) => (token.length > 4 && token.endsWith('s') ? token.slice(0, -1) : token)),
+  );
 }

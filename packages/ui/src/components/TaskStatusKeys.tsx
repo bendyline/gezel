@@ -86,15 +86,17 @@ export function TaskStatusKeys({
   value,
   options = TASK_STATUS_KEY_ORDER,
   disabled = false,
+  ariaLabel = 'Task status',
   onChange,
 }: {
   value: TaskStatus;
   options?: Array<Exclude<TaskStatus, 'draft'>>;
   disabled?: boolean;
+  ariaLabel?: string;
   onChange: (status: TaskStatus) => void;
 }) {
   return (
-    <div className="gz-tray task-status-tray" role="radiogroup" aria-label="Task status">
+    <div className="gz-tray task-status-tray" role="radiogroup" aria-label={ariaLabel}>
       {options.map((status) => {
         const meta = STATUS_KEYS[status];
         const Icon = meta.icon;

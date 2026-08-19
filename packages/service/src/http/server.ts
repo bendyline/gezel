@@ -336,7 +336,12 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // own-project/own-gezel and explicitly shared MCP routes classified by the
   // deny-by-default guard. Root/UI callers bypass it.
   const sessionRouteLog = createLogger('session-route');
-  const scopedSessionRoutes = sessionRouteGuard({ log: (m) => sessionRouteLog.warn(m) });
+  const isProjectLinked = (sourceProjectId: string, targetProjectId: string) =>
+    ctx.store.projectLinksTo(sourceProjectId, targetProjectId);
+  const scopedSessionRoutes = sessionRouteGuard({
+    log: (m) => sessionRouteLog.warn(m),
+    isProjectLinked,
+  });
   app.use('/api/*', scopedSessionRoutes);
   app.use('/events/*', scopedSessionRoutes);
   // Per-session token scope (#10): confine a session-scoped MCP token to
@@ -349,6 +354,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     projectScopeGuard({
       mode: resolveTokenScopeMode(process.env.GEZEL_TOKEN_SCOPE),
       log: (m) => scopeLog.warn(m),
+      isProjectLinked,
     }),
   );
   // Team-route gating (#10 increment 2): deny a NON-coordinator session

@@ -1,5 +1,5 @@
 import { createLogger, isSharedLibraryProject } from '@bendyline/gezel';
-import type { UnifiedSearchResult } from '@bendyline/gezel';
+import type { RetrievalSource, UnifiedSearchResult } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import { isLibraryInternalPath } from '../fs/sync-junk.js';
 import type { ContentIndex } from '../index-store/content-index.js';
@@ -166,6 +166,39 @@ export class SearchService {
     };
   }
 
+  /**
+   * Model-facing retrieval over an explicitly bounded project set. Unlike the
+   * titlebar search, this never fans out through unrelated projects, gezels, or
+   * transcripts. The array-shaped project boundary is intentional: project
+   * linking can supply additional authorized ids later without changing the
+   * search contract or ranking pipeline.
+   */
+  async searchProject(
+    query: string,
+    opts: {
+      projectIds: readonly string[];
+      gezelId?: string;
+      includeShared?: boolean;
+      sources?: readonly RetrievalSource[];
+      maxResults?: number;
+    },
+  ): Promise<{ results: UnifiedSearchResult[]; truncated: boolean }> {
+    const q = query.trim();
+    if (!q || opts.projectIds.length === 0) return { results: [], truncated: false };
+    const maxResults = opts.maxResults ?? DEFAULT_MAX_RESULTS;
+    const found = await this.contentFanOut(q, maxResults, {
+      projectIds: new Set(opts.projectIds),
+      ...(opts.gezelId ? { gezelId: opts.gezelId } : {}),
+      includeShared: opts.includeShared !== false,
+      ...(opts.sources ? { sources: new Set(opts.sources) } : {}),
+    });
+    const results = this.merge(found.results, maxResults);
+    return {
+      results,
+      truncated: found.truncated || results.length < found.results.length,
+    };
+  }
+
   // ── catalog ────────────────────────────────────────────────────────────
 
   private async getCatalog(): Promise<CatalogEntry[]> {
@@ -312,11 +345,21 @@ export class SearchService {
   private async contentFanOut(
     query: string,
     maxResults: number,
+    scope?: {
+      projectIds: ReadonlySet<string>;
+      gezelId?: string;
+      includeShared: boolean;
+      sources?: ReadonlySet<RetrievalSource>;
+    },
   ): Promise<{ results: UnifiedSearchResult[]; truncated: boolean }> {
-    const [projects, gezels] = await Promise.all([
+    const [allProjects, allGezels] = await Promise.all([
       this.store.listProjects().catch(() => []),
       this.store.listGezels().catch(() => []),
     ]);
+    const projects = scope ? allProjects.filter((p) => scope.projectIds.has(p.id)) : allProjects;
+    const gezels = scope ? allGezels.filter((g) => g.id === scope.gezelId) : allGezels;
+    const wants = (source: RetrievalSource): boolean =>
+      !scope?.sources || scope.sources.has(source);
 
     // Embed the query once; thread the vector into every per-project call.
     let vector: number[] | null = null;
@@ -339,22 +382,25 @@ export class SearchService {
       const codeOpts = vector
         ? { queryVector: vector, maxResults: PER_SOURCE_RESULTS }
         : { mode: 'keyword' as const, maxResults: PER_SOURCE_RESULTS };
-      const [code, docs, artifacts, symbols, mem] = await Promise.all([
-        workspaceIndexing
+      const [code, docs, artifacts, symbols, areas, mem] = await Promise.all([
+        workspaceIndexing && wants('workspace')
           ? this.contentIndex.searchCode(p.id, query, codeOpts).catch(() => null)
           : Promise.resolve(null),
-        workspaceIndexing
+        workspaceIndexing && wants('workspace')
           ? this.contentIndex.searchDocs(p.id, query, PER_SOURCE_RESULTS).catch(() => null)
           : Promise.resolve(null),
-        workspaceIndexing
+        workspaceIndexing && wants('artifacts')
           ? this.contentIndex.searchArtifacts(p.id, query, PER_SOURCE_RESULTS).catch(() => null)
           : Promise.resolve(null),
-        workspaceIndexing
+        workspaceIndexing && wants('workspace')
           ? this.contentIndex
               .findSymbol(p.id, query, { maxResults: PER_SOURCE_RESULTS })
               .catch(() => null)
           : Promise.resolve(null),
-        vector
+        workspaceIndexing && wants('workspace')
+          ? this.contentIndex.searchAreaSummaries(p.id, query, PER_SOURCE_RESULTS).catch(() => [])
+          : Promise.resolve([]),
+        vector && wants('project-memory')
           ? this.memory.searchVector('project', p.id, vector, PER_MEMORY_RESULTS).catch(() => [])
           : Promise.resolve([]),
       ]);
@@ -369,7 +415,9 @@ export class SearchService {
           projectName: p.name,
           path: r.path,
           source: 'workspace',
+          retrievalSource: 'workspace',
           line: r.lineStart,
+          lineEnd: r.lineEnd,
           score: clamp01(r.score) * WEIGHT.content,
         });
       }
@@ -384,7 +432,9 @@ export class SearchService {
           projectName: p.name,
           path: r.sourcePath,
           source: 'workspace',
+          retrievalSource: 'workspace',
           line: r.lineStart,
+          lineEnd: r.lineEnd,
           score: 0.6 * WEIGHT.content,
         });
       }
@@ -399,7 +449,9 @@ export class SearchService {
           projectName: p.name,
           path: r.path,
           source: 'artifacts',
+          retrievalSource: 'artifacts',
           line: r.lineStart,
+          lineEnd: r.lineEnd,
           score: 0.6 * WEIGHT.content,
         });
       }
@@ -414,8 +466,23 @@ export class SearchService {
           projectName: p.name,
           path: m.path,
           source: 'workspace',
+          retrievalSource: 'workspace',
           line: m.lineStart,
           score: rel * WEIGHT.symbol,
+        });
+      }
+      for (const area of areas) {
+        const projectOverview = area.areaPath === '::project';
+        out.push({
+          kind: 'content',
+          id: `overview:${p.id}:${area.areaPath}`,
+          title: projectOverview ? `${p.name} overview` : `${area.areaPath}/ overview`,
+          subtitle: projectOverview ? `Project architecture · ${p.name}` : `Area map · ${p.name}`,
+          snippet: area.summary,
+          projectId: p.id,
+          projectName: p.name,
+          retrievalSource: 'workspace',
+          score: clamp01(area.score) * WEIGHT.content,
         });
       }
       for (const r of mem) {
@@ -428,6 +495,7 @@ export class SearchService {
           snippet: r.text,
           projectId: p.id,
           projectName: p.name,
+          retrievalSource: 'project-memory',
           score: clamp01(r.score) * WEIGHT.memory,
         });
       }
@@ -435,30 +503,32 @@ export class SearchService {
     });
 
     // One pool unit per gezel: gezel memory (vector-only).
-    const perGezel = vector
-      ? gezels.map((g) => async () => {
-          const mem = await this.memory
-            .searchVector('gezel', g.id, vector as number[], PER_MEMORY_RESULTS)
-            .catch(() => []);
-          return mem
-            .filter((r) => r.score >= MEMORY_MIN_SIMILARITY)
-            .map((r) => ({
-              kind: 'memory' as const,
-              id: `memory:gezel:${g.id}:${r.day}:${hashText(r.text)}`,
-              title: r.text.slice(0, 80),
-              subtitle: `Memory · ${g.name}`,
-              snippet: r.text,
-              score: clamp01(r.score) * WEIGHT.memory,
-            }));
-        })
-      : [];
+    const perGezel =
+      vector && wants('gezel-memory')
+        ? gezels.map((g) => async () => {
+            const mem = await this.memory
+              .searchVector('gezel', g.id, vector as number[], PER_MEMORY_RESULTS)
+              .catch(() => []);
+            return mem
+              .filter((r) => r.score >= MEMORY_MIN_SIMILARITY)
+              .map((r) => ({
+                kind: 'memory' as const,
+                id: `memory:gezel:${g.id}:${r.day}:${hashText(r.text)}`,
+                title: r.text.slice(0, 80),
+                subtitle: `Memory · ${g.name}`,
+                snippet: r.text,
+                retrievalSource: 'gezel-memory' as const,
+                score: clamp01(r.score) * WEIGHT.memory,
+              }));
+          })
+        : [];
 
     // Global collections (session transcripts + documents content) — one task
     // each, not per-project: the global index answers across all scopes in a
     // single FTS query.
     const globalTasks: Array<() => Promise<UnifiedSearchResult[]>> = [];
     const globalIndex = this.globalIndex;
-    if (globalIndex) {
+    if (globalIndex && !scope) {
       const projectNames = new Map(projects.map((p) => [p.id, p.name]));
       const gezelNames = new Map(gezels.map((g) => [g.id, g.name]));
       globalTasks.push(async () => {
@@ -481,11 +551,12 @@ export class SearchService {
           };
         });
       });
+    }
+    if ((!scope || scope.includeShared) && wants('shared')) {
       globalTasks.push(async () => {
         // The library is a project now, so its content search is the ranked
-        // hybrid one. It is emitted as `document` rather than `content` (and
-        // skipped in the per-project loop) so a library hit reads as "a
-        // document" wherever it surfaces, not as a file in some project.
+        // hybrid one. It is emitted as `document` rather than `content` so a
+        // library hit keeps its global provenance wherever it surfaces.
         const libraryId = await this.store.sharedProjectId().catch(() => null);
         if (!libraryId) return [];
         const found = await this.contentIndex
@@ -494,16 +565,16 @@ export class SearchService {
             ...(vector ? { queryVector: vector } : {}),
           })
           .catch(() => null);
-        // Same id scheme as the catalog's document entries, so a name hit and
-        // a content hit on one document collapse to a single row in merge().
         return (found?.results ?? []).map((h) => ({
           kind: 'document' as const,
           id: `document:${h.path}`,
           title: basename(h.path),
-          subtitle: h.path,
+          subtitle: `Shared library · ${h.path}`,
           snippet: h.snippet,
           path: h.path,
+          retrievalSource: 'shared' as const,
           line: h.lineStart,
+          lineEnd: h.lineEnd,
           score: clamp01(h.score ?? 0.6) * WEIGHT.document,
         }));
       });

@@ -65,6 +65,7 @@ import {
   type ProjectTabVisibility,
   type ProviderName,
   type Question,
+  type RetrievalPolicy,
   SHARED_PROJECT_FALLBACK_ID,
   SHARED_PROJECT_ID,
   SHARED_PROJECT_MARKER,
@@ -1927,6 +1928,7 @@ export class Store {
       reasoningEffort?: string | null;
       numCtx?: number | null;
       autoRecall?: boolean | null;
+      retrieval?: RetrievalPolicy | null;
       font?: string | null;
       sandboxCopilot?: boolean | null;
       claudePermissionMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | null;
@@ -1982,6 +1984,8 @@ export class Store {
     else if (patch.numCtx !== undefined) frontmatter.numCtx = patch.numCtx;
     if (patch.autoRecall === null) delete frontmatter.autoRecall;
     else if (patch.autoRecall !== undefined) frontmatter.autoRecall = patch.autoRecall;
+    if (patch.retrieval === null) delete frontmatter.retrieval;
+    else if (patch.retrieval !== undefined) frontmatter.retrieval = patch.retrieval;
     if (patch.font === null) delete frontmatter.font;
     else if (patch.font !== undefined) frontmatter.font = patch.font;
     if (patch.sandboxCopilot === null) delete frontmatter.sandboxCopilot;
@@ -2011,6 +2015,7 @@ export class Store {
     if (patch.reasoningEffort !== undefined) changed.push('reasoningEffort');
     if (patch.numCtx !== undefined) changed.push('numCtx');
     if (patch.autoRecall !== undefined) changed.push('autoRecall');
+    if (patch.retrieval !== undefined) changed.push('retrieval');
     if (patch.font !== undefined) changed.push('font');
     if (patch.sandboxCopilot !== undefined) changed.push('sandboxCopilot');
     if (patch.claudePermissionMode !== undefined) changed.push('claudePermissionMode');
@@ -2231,6 +2236,7 @@ export class Store {
         reasoningEffort: parsed.frontmatter.reasoningEffort,
         numCtx: parsed.frontmatter.numCtx,
         autoRecall: parsed.frontmatter.autoRecall,
+        retrieval: parsed.frontmatter.retrieval,
         font: parsed.frontmatter.font,
         voice: parsed.frontmatter.voice,
         templateId: parsed.frontmatter.templateId,
@@ -2642,6 +2648,30 @@ export class Store {
     const projects = metas.filter((m): m is Project => m !== null);
     projects.sort((a, b) => a.name.localeCompare(b.name));
     return projects;
+  }
+
+  /**
+   * Resolve the live, direct project links for a source project. Stale ids are
+   * ignored defensively and the shared library never appears here because it
+   * is an implicit search source with its own document-tool boundary.
+   */
+  async linkedProjectIds(id: string): Promise<string[]> {
+    const source = await this.tryGetProjectMeta(id);
+    if (!source || isSharedLibraryProject(source)) return [];
+    const resolved: string[] = [];
+    for (const linkedId of source.linkedProjectIds ?? []) {
+      if (linkedId === id || resolved.includes(linkedId)) continue;
+      const target = await this.tryGetProjectMeta(linkedId);
+      if (!target || isSharedLibraryProject(target)) continue;
+      resolved.push(linkedId);
+    }
+    return resolved;
+  }
+
+  /** Server-side authorization backstop for linked-workspace requests. */
+  async projectLinksTo(sourceProjectId: string, targetProjectId: string): Promise<boolean> {
+    if (sourceProjectId === targetProjectId) return false;
+    return (await this.linkedProjectIds(sourceProjectId)).includes(targetProjectId);
   }
 
   async createProject(
@@ -3266,6 +3296,8 @@ export class Store {
       icon?: ProjectIconId | null;
       workingDir?: string | null;
       voormanGezelId?: string | null;
+      /** Replaces this project's one-way linked-project set. */
+      linkedProjectIds?: string[];
       voormanAutoAssignedAt?: string;
       about?: string;
       missionObjectives?: string;
@@ -3328,6 +3360,30 @@ export class Store {
       }
     }
     if (typeof patch.workingDir === 'string') this.assertSafeWorkingDir(patch.workingDir);
+    let nextLinkedProjectIds: string[] | undefined;
+    if (patch.linkedProjectIds !== undefined) {
+      if (isSharedLibraryProject(meta)) {
+        throw new Error(
+          'the shared library is already available to every project and cannot link projects',
+        );
+      }
+      if (patch.linkedProjectIds.length > 32) {
+        throw new Error('a project may link at most 32 other projects');
+      }
+      if (new Set(patch.linkedProjectIds).size !== patch.linkedProjectIds.length) {
+        throw new Error('linkedProjectIds must not contain duplicates');
+      }
+      for (const linkedId of patch.linkedProjectIds) {
+        if (linkedId === id) throw new Error('a project cannot link to itself');
+        const target = await this.tryGetProjectMeta(linkedId);
+        if (!target) throw new Error(`linked project ${linkedId} not found`);
+        if (isSharedLibraryProject(target)) {
+          throw new Error('the shared document library is already linked implicitly');
+        }
+      }
+      nextLinkedProjectIds =
+        patch.linkedProjectIds.length > 0 ? [...patch.linkedProjectIds] : undefined;
+    }
     let nextGitHub = mergeGitHubPatch(meta.github, patch.github);
     // Auto-link: if the user is pointing workingDir at an existing
     // github clone, populate the github link silently (origin URL +
@@ -3373,6 +3429,7 @@ export class Store {
       ...(patch.voormanAutoAssignedAt !== undefined
         ? { voormanAutoAssignedAt: patch.voormanAutoAssignedAt }
         : {}),
+      ...(patch.linkedProjectIds !== undefined ? { linkedProjectIds: nextLinkedProjectIds } : {}),
       ...(patch.github !== undefined ? { github: nextGitHub } : {}),
       ...(patch.connectors === null
         ? { connectors: undefined }
@@ -3456,6 +3513,12 @@ export class Store {
       metaChanged.push('description');
     if (patch.icon !== undefined && patch.icon !== meta.icon) metaChanged.push('icon');
     if (patch.workingDir !== undefined) metaChanged.push('workingDir');
+    if (
+      patch.linkedProjectIds !== undefined &&
+      !isDeepStrictEqual(nextLinkedProjectIds ?? [], meta.linkedProjectIds ?? [])
+    ) {
+      metaChanged.push('linkedProjectIds');
+    }
     if (
       patch.nudgeConfig !== undefined &&
       !isDeepStrictEqual(patch.nudgeConfig, meta.nudgeConfig)
@@ -3689,6 +3752,28 @@ export class Store {
       summary: `Deleted project "${meta.name}"${removeWorkspace ? ' and its workspace' : ''}`,
       details: { name: meta.name, removedWorkspace: removeWorkspace, workspaceSource: source },
     });
+
+    // Links are one-way capabilities. Once the target no longer exists,
+    // remove its id from every source project so settings and prompts do not
+    // retain a dead capability. Cleanup failure never makes an already-safe
+    // deletion look reversible; unresolved ids are ignored by linkedProjectIds.
+    const remaining = await this.listProjects().catch(() => []);
+    await Promise.all(
+      remaining.map(async (project) => {
+        if (!(project.linkedProjectIds ?? []).includes(id)) return;
+        const linkedProjectIds = project.linkedProjectIds!.filter((linkedId) => linkedId !== id);
+        await this.writeProjectMeta({
+          ...project,
+          linkedProjectIds: linkedProjectIds.length > 0 ? linkedProjectIds : undefined,
+          updatedAt: nowIso(),
+        }).catch((err) => {
+          log.warn(
+            `[store] failed to remove deleted project ${id} from links on ${project.id}:`,
+            err,
+          );
+        });
+      }),
+    );
 
     return { name: meta.name, removedWorkspace: removeWorkspace, workspaceSource: source };
   }

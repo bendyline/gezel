@@ -153,6 +153,19 @@ describe('applyStepPatch', () => {
     const cleared = applyStepPatch(set, { capabilityFloor: null });
     expect('capabilityFloor' in cleared).toBe(false);
   });
+  it('sets and clears the phase retrieval policy', () => {
+    const base: CraftbookStep = { id: 'a', name: 'A' };
+    const set = applyStepPatch(base, {
+      retrieval: { mode: 'deep', maxTokens: 1_800, sources: ['workspace', 'shared'] },
+    });
+    expect(set.retrieval).toEqual({
+      mode: 'deep',
+      maxTokens: 1_800,
+      sources: ['workspace', 'shared'],
+    });
+    expect(applyStepPatch(set, { name: 'A2' }).retrieval).toEqual(set.retrieval);
+    expect('retrieval' in applyStepPatch(set, { retrieval: null })).toBe(false);
+  });
   it('sets and clears declared inputs', () => {
     const base: CraftbookStep = { id: 'a', name: 'A', prompt: 'Call `read_artifact`.' };
     const set = applyStepPatch(base, {

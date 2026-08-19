@@ -77,6 +77,13 @@ const DEFAULT_MIN_SCORE = 0.15;
 // a no-op and left every kickoff task gate-less (wild-caught: zero gate
 // firings across two full 56-trial eval baselines).
 const DEFAULT_MIN_SCORE_LEXICAL = 0.04;
+// Omni-search suggestions should be rarer than a dedicated craftbook lookup:
+// the user asked for knowledge, so a merely-best procedure is distracting.
+// An exact lexical signal can independently qualify a book when embeddings
+// are absent or unhelpful.
+const SEARCH_MIN_BLEND_SCORE = 0.28;
+const SEARCH_MIN_LEXICAL_SCORE = 0.08;
+const SEARCH_MAX_SUGGESTIONS = 2;
 
 /**
  * Production vector cache keyed by `id@version`. Bundled books bump their
@@ -222,6 +229,24 @@ export async function suggestCraftbooks(
     ...(opts.topK !== undefined ? { topK: opts.topK } : {}),
     ...(opts.minScore !== undefined ? { minScore: opts.minScore } : {}),
   });
+}
+
+/**
+ * Keep only high-confidence craftbook matches suitable for attaching to a
+ * general project search response. The dedicated suggester intentionally uses
+ * a lower floor because its caller explicitly asked for a procedure shortlist.
+ */
+export function usefulCraftbooksForSearch(
+  suggestions: CraftbookSuggestion[],
+  limit = SEARCH_MAX_SUGGESTIONS,
+): CraftbookSuggestion[] {
+  return suggestions
+    .filter(
+      (suggestion) =>
+        suggestion.lexical >= SEARCH_MIN_LEXICAL_SCORE ||
+        (suggestion.semantic !== undefined && suggestion.score >= SEARCH_MIN_BLEND_SCORE),
+    )
+    .slice(0, limit);
 }
 
 async function gatherCandidates(

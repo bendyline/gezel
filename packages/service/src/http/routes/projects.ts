@@ -344,11 +344,13 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       body.managedWorkspaceWritePolicy !== undefined ||
       body.allowGezelWrites !== undefined ||
       body.codexPermissionMode !== undefined ||
-      body.claudePermissionMode !== undefined
+      body.claudePermissionMode !== undefined ||
+      body.linkedProjectIds !== undefined
     ) {
-      // Permission posture is baked into managed MCP allowlists and native
-      // CLI sessions. Tear down this project's cached surfaces so the next
-      // turn/list/invoke observes the new setting immediately.
+      // Permission posture and linked-project guidance are baked into managed
+      // MCP surfaces and the system prompt. Tear down this project's cached
+      // surfaces so the next turn/list/invoke observes the new setting
+      // immediately.
       await ctx.chat.resetProjectToolsets(id);
     }
     return c.json(project);

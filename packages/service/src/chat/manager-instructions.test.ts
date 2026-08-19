@@ -301,6 +301,38 @@ describe('buildInstructions connected data', () => {
   });
 });
 
+describe('buildInstructions linked projects', () => {
+  it('teaches the existing search and workspace tools the one-way virtual namespace', () => {
+    const { full } = buildInstructions({
+      name: 'Wren',
+      about: 'Improve the vehicle simulation.',
+      project: {
+        id: 'racing-game',
+        name: 'Racing game',
+        linkedProjectIds: ['vehicle-physics', 'shared-renderer'],
+      } as unknown as ProjectDetail,
+    });
+
+    expect(full).toContain('### Linked projects');
+    expect(full).toContain('`../vehicle-physics/`');
+    expect(full).toContain('`../shared-renderer/`');
+    expect(full).toContain('The `search` tool already includes their indexed knowledge');
+    expect(full).toContain('Links are direct, not transitive');
+    expect(full).toContain("linked project's own workspace-write setting");
+    expect(full).toContain('shared document library is also searched automatically');
+  });
+
+  it('omits the stable prompt block when no project links are configured', () => {
+    const { full } = buildInstructions({
+      name: 'Wren',
+      about: 'Improve the vehicle simulation.',
+      project: { id: 'racing-game', name: 'Racing game' } as unknown as ProjectDetail,
+    });
+
+    expect(full).not.toContain('### Linked projects');
+  });
+});
+
 describe('buildInstructions structured step inputs', () => {
   it('renders artifact provenance and makes read_artifact the first small-model action', () => {
     const step = {

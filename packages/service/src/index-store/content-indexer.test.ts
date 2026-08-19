@@ -167,6 +167,24 @@ describe('runWorkspaceContentIndex', () => {
     store.close();
   });
 
+  it('makes plain-text bodies keyword-searchable during the static pass', async () => {
+    await writeFile(
+      join(dir, 'driving-notes.txt'),
+      `${'general notes\n'.repeat(500)}zqLimitedSlipDifferentialTail\n`,
+    );
+    await runWorkspaceContentIndex(dir, 'text-search', artifacts);
+    const store = (await IndexStore.open(join(dir, '.gezel', 'index', 'index.db'), {
+      collectionId: 'text-search',
+      kind: 'workspace',
+      rootPath: dir,
+    }))!;
+
+    expect(store.searchDocs('zqLimitedSlipDifferentialTail')).toEqual([
+      expect.objectContaining({ filePath: 'driving-notes.txt' }),
+    ]);
+    store.close();
+  });
+
   it('re-extracts when content changes but mtime-only touches do not', async () => {
     await writeFile(join(dir, 'a.ts'), 'export function one() {}\n');
     await runWorkspaceContentIndex(dir, 'c', artifacts);

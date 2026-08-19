@@ -24,16 +24,26 @@ function makeService(
     code?: ContentIndex['searchCode'];
     sessionHits?: SessionSearchHit[];
     documentHits?: Array<{ path: string; lineStart: number; snippet: string }>;
+    libraryHits?: Array<{
+      path: string;
+      lineStart: number;
+      lineEnd?: number;
+      snippet: string;
+      score?: number;
+    }>;
     artifactFiles?: Record<string, string[]>;
     artifactHits?: Array<{ path: string; lineStart: number; snippet: string }>;
+    areaHits?: Array<{ areaPath: string; summary: string; score: number }>;
     /** Vector-memory rows returned for every scope the fan-out asks about. */
     memoryHits?: Array<{ text: string; score: number; day: string }>;
+    memorySearch?: MemoryManager['searchVector'];
   } = {},
 ) {
   const store = {
     listProjects: vi.fn(async () => opts.projects ?? []),
     listGezels: vi.fn(async () => opts.gezels ?? []),
     listDocumentsRecursive: vi.fn(async () => opts.documents ?? []),
+    sharedProjectId: vi.fn(async () => 'shared'),
   } as unknown as Store;
 
   const contentIndex = {
@@ -55,10 +65,15 @@ function makeService(
       truncated: false,
       engine: 'unavailable' as const,
     })),
+    searchAreaSummaries: vi.fn(async () => opts.areaHits ?? []),
+    searchLibrary: vi.fn(async () => ({
+      results: opts.libraryHits ?? [],
+      engine: 'hybrid' as const,
+    })),
   } as unknown as ContentIndex;
 
   const memory = {
-    searchVector: vi.fn(async () => opts.memoryHits ?? []),
+    searchVector: opts.memorySearch ?? vi.fn(async () => opts.memoryHits ?? []),
   } as unknown as MemoryManager;
 
   const indexManager = {
@@ -355,5 +370,122 @@ describe('SearchService.search (full)', () => {
       projectId: 'p1',
       path: record,
     });
+  });
+});
+
+describe('SearchService.searchProject', () => {
+  it('stays inside the authorized project and current gezel while including shared documents', async () => {
+    const code = vi.fn(async (projectId: string) => ({
+      results: [
+        {
+          path: `src/${projectId}.ts`,
+          lineStart: 10,
+          lineEnd: 24,
+          kind: 'chunk',
+          snippet: `${projectId} vehicle physics`,
+          score: 0.9,
+          source: 'vector' as const,
+        },
+      ],
+      engine: 'semantic' as const,
+      truncated: false,
+    })) as unknown as ContentIndex['searchCode'];
+    const memorySearch = vi.fn(async (scope: string, id: string) => [
+      { text: `${scope}:${id}:physics decision`, score: 0.84, day: '2026-08-19' },
+    ]) as unknown as MemoryManager['searchVector'];
+    const svc = makeService({
+      projects: [
+        { id: 'p1', name: 'Driving Game' },
+        { id: 'p2', name: 'Unrelated App' },
+      ],
+      gezels: [
+        { id: 'g1', name: 'Ada' },
+        { id: 'g2', name: 'Bram' },
+      ],
+      code,
+      memorySearch,
+      libraryHits: [
+        {
+          path: 'guides/vehicle-physics.md',
+          lineStart: 4,
+          lineEnd: 18,
+          snippet: 'shared vehicle physics conventions',
+          score: 0.8,
+        },
+      ],
+      areaHits: [
+        {
+          areaPath: '::project',
+          summary: 'The driving model separates tire grip, suspension, and input response.',
+          score: 0.75,
+        },
+      ],
+      sessionHits: [
+        {
+          sessionId: 'unrelated-session',
+          gezelId: 'g2',
+          projectId: 'p2',
+          title: 'Must not leak',
+          snippet: 'private transcript',
+          messageStart: 1,
+          lastActivityAt: '2026-08-19T00:00:00Z',
+          archived: false,
+        },
+      ],
+    });
+
+    const { results } = await svc.searchProject('improve vehicle physics', {
+      projectIds: ['p1'],
+      gezelId: 'g1',
+    });
+
+    expect(code as unknown as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1);
+    expect((code as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toBe('p1');
+    expect(memorySearch as unknown as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(
+      'project',
+      'p1',
+      expect.any(Array),
+      expect.any(Number),
+    );
+    expect(memorySearch as unknown as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(
+      'gezel',
+      'g1',
+      expect.any(Array),
+      expect.any(Number),
+    );
+    expect(results.some((result) => result.projectId === 'p2')).toBe(false);
+    expect(results.some((result) => result.kind === 'session')).toBe(false);
+    expect(new Set(results.map((result) => result.retrievalSource))).toEqual(
+      new Set(['workspace', 'project-memory', 'gezel-memory', 'shared']),
+    );
+    expect(results.find((result) => result.id === 'overview:p1:::project')).toMatchObject({
+      title: 'Driving Game overview',
+      retrievalSource: 'workspace',
+    });
+    expect(results.find((result) => result.retrievalSource === 'shared')).toMatchObject({
+      path: 'guides/vehicle-physics.md',
+      line: 4,
+      lineEnd: 18,
+    });
+  });
+
+  it('honors corpus filters without disabling the generic search surface', async () => {
+    const code = vi.fn(async () => ({
+      results: [],
+      engine: 'fts',
+      truncated: false,
+    })) as unknown as ContentIndex['searchCode'];
+    const svc = makeService({
+      projects: [{ id: 'p1', name: 'Driving Game' }],
+      code,
+      libraryHits: [{ path: 'guides/physics.md', lineStart: 1, snippet: 'physics', score: 0.9 }],
+    });
+
+    const { results } = await svc.searchProject('physics', {
+      projectIds: ['p1'],
+      sources: ['shared'],
+    });
+    expect(code as unknown as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+    expect(results.map((result) => result.retrievalSource)).toEqual(['shared']);
   });
 });

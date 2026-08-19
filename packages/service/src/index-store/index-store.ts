@@ -177,6 +177,7 @@ export interface ChunkInput {
 export interface DocHit {
   filePath: string;
   lineStart: number;
+  lineEnd: number;
   chunkId: number;
   snippet: string;
 }
@@ -248,9 +249,53 @@ function symbolId(filePath: string, name: string): string {
   return `${filePath}#${name}`;
 }
 
-/** Escape a user string into a safe FTS5 MATCH term (quoted phrase). */
+const FTS_STOP_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'for',
+  'how',
+  'in',
+  'is',
+  'me',
+  'my',
+  'of',
+  'on',
+  'or',
+  'our',
+  'please',
+  'the',
+  'to',
+  'we',
+  'with',
+  'you',
+  'your',
+]);
+
+/**
+ * Escape user text into a recall-oriented, injection-safe FTS5 query.
+ *
+ * Quoting the whole user sentence made keyword search an exact phrase search:
+ * "improve the physics for how cars drive" could not match a chunk containing
+ * "vehicle driving physics". Token ORs let BM25 rank partial matches, while
+ * quoted tokens keep every FTS operator supplied by the user inert.
+ */
 function ftsPhrase(query: string): string {
-  return `"${query.replace(/"/g, '""')}"`;
+  const normalized = query.normalize('NFKC');
+  const explicitlyQuoted = normalized.match(/^\s*"([^"]+)"\s*$/u);
+  if (explicitlyQuoted) {
+    const phrase = explicitlyQuoted[1]?.match(/[\p{L}\p{N}_]+/gu)?.join(' ') ?? '';
+    return phrase ? `"${phrase.replace(/"/g, '""')}"` : '"__gezel_no_match__"';
+  }
+  const raw = normalized.match(/[\p{L}\p{N}_]+/gu) ?? [];
+  const unique = [...new Set(raw.map((token) => token.toLocaleLowerCase()))].slice(0, 16);
+  const meaningful = unique.filter((token) => !FTS_STOP_WORDS.has(token));
+  const tokens = meaningful.length > 0 ? meaningful : unique;
+  if (tokens.length === 0) return '"__gezel_no_match__"';
+  return tokens
+    .map((token) => `"${token.replace(/"/g, '""')}"${token.length >= 3 ? '*' : ''}`)
+    .join(' OR ');
 }
 
 /** Tolerant parse of the file_reviews.issues JSON column — bad JSON → []. */
@@ -843,7 +888,7 @@ export class IndexStore {
    *  symbols + summaries + doc chunks, de-duplicated by (path, lineStart). */
   searchCodeHybrid(
     queryVector: number[] | Float32Array | null,
-    queryText: string,
+    queryText: string | null,
     limit: number,
   ): Array<{
     path: string;
@@ -855,7 +900,7 @@ export class IndexStore {
     score: number;
     source: 'vector' | 'fts';
   }> {
-    const out: Array<{
+    type RankedHit = {
       path: string;
       lineStart: number;
       lineEnd: number;
@@ -864,76 +909,91 @@ export class IndexStore {
       snippet: string;
       score: number;
       source: 'vector' | 'fts';
-    }> = [];
-    const seen = new Set<string>();
+    };
+    const candidates = new Map<string, RankedHit>();
     const key = (p: string, l: number) => `${p}:${l}`;
+    const addArm = (hits: Omit<RankedHit, 'score'>[], weight: number) => {
+      const rrfK = 10;
+      for (let rank = 0; rank < hits.length; rank++) {
+        const hit = hits[rank]!;
+        const k = key(hit.path, hit.lineStart);
+        const contribution = (weight * (rrfK + 1)) / (rrfK + rank + 1);
+        const prior = candidates.get(k);
+        if (!prior) {
+          candidates.set(k, { ...hit, score: contribution });
+          continue;
+        }
+        // Preserve the richer vector excerpt when one arm found it, but let
+        // corroboration from independent arms lift the candidate's rank.
+        const preferred = hit.source === 'vector' && prior.source !== 'vector' ? hit : prior;
+        candidates.set(k, {
+          ...preferred,
+          score: Math.min(1, prior.score + contribution),
+        });
+      }
+    };
 
     if (queryVector && this.caps.vec) {
-      for (const v of this.searchTextVectors(queryVector, limit)) {
-        const k = key(v.filePath, v.lineStart);
-        if (seen.has(k)) continue;
-        seen.add(k);
-        out.push({
+      addArm(
+        this.searchTextVectors(queryVector, limit).map((v) => ({
           path: v.filePath,
           lineStart: v.lineStart,
           lineEnd: v.lineEnd,
           kind: 'chunk',
-          snippet: v.text.slice(0, 200),
-          score: 1 / (1 + v.distance),
-          source: 'vector',
-        });
-      }
+          snippet: v.text.slice(0, 800),
+          source: 'vector' as const,
+        })),
+        1,
+      );
     }
 
-    for (const s of this.ftsSymbols(queryText, limit)) {
-      const k = key(s.filePath, s.lineStart);
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push({
-        path: s.filePath,
-        lineStart: s.lineStart,
-        lineEnd: s.lineEnd,
-        kind: s.kind,
-        name: s.name,
-        snippet: s.signature,
-        score: 0.5,
-        source: 'fts',
-      });
-    }
-    // Third FTS arm: the LLM summaries. Long write-only (populated on every
-    // upsertSummary, never queried) — this is the keyword arm's only NL prose,
-    // so natural-language queries stop scoring zero without vectors. Scored
-    // between symbols (0.5) and doc chunks (0.4); whole-file hits at line 1.
-    for (const s of this.ftsSummaries(queryText, limit)) {
-      const k = key(s.filePath, 1);
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push({
-        path: s.filePath,
-        lineStart: 1,
-        lineEnd: 1,
-        kind: 'summary',
-        snippet: s.snippet,
-        score: 0.45,
-        source: 'fts',
-      });
-    }
-    for (const d of this.searchDocs(queryText, limit)) {
-      const k = key(d.filePath, d.lineStart);
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push({
-        path: d.filePath,
-        lineStart: d.lineStart,
-        lineEnd: d.lineStart,
-        kind: 'doc',
-        snippet: d.snippet,
-        score: 0.4,
-        source: 'fts',
-      });
+    if (queryText) {
+      addArm(
+        this.ftsSymbols(queryText, limit).map((s) => ({
+          path: s.filePath,
+          lineStart: s.lineStart,
+          lineEnd: s.lineEnd,
+          kind: s.kind,
+          name: s.name,
+          snippet: s.signature,
+          source: 'fts' as const,
+        })),
+        0.95,
+      );
+      addArm(
+        this.ftsSummaries(queryText, limit).map((s) => ({
+          path: s.filePath,
+          lineStart: 1,
+          lineEnd: 1,
+          kind: 'summary',
+          snippet: s.snippet,
+          source: 'fts' as const,
+        })),
+        0.82,
+      );
+      addArm(
+        this.searchDocs(queryText, limit).map((d) => ({
+          path: d.filePath,
+          lineStart: d.lineStart,
+          lineEnd: d.lineEnd,
+          kind: 'doc',
+          snippet: d.snippet,
+          source: 'fts' as const,
+        })),
+        0.9,
+      );
     }
 
-    return out.sort((a, b) => b.score - a.score).slice(0, limit);
+    const ranked = [...candidates.values()].sort((a, b) => b.score - a.score);
+    const selected: RankedHit[] = [];
+    const perPath = new Map<string, number>();
+    for (const hit of ranked) {
+      if ((perPath.get(hit.path) ?? 0) >= 3) continue;
+      selected.push(hit);
+      perPath.set(hit.path, (perPath.get(hit.path) ?? 0) + 1);
+      if (selected.length >= limit) break;
+    }
+    return selected;
   }
 
   // ── chunks + fts_docs ──────────────────────────────────────────────────
@@ -999,18 +1059,23 @@ export class IndexStore {
         // FTS5 bm25() is lower-is-better, so plain ascending order is the
         // best-first order. Without it FTS5 yields rowid (insertion) order and
         // a LIMIT returns the oldest-indexed matches, not the closest ones.
-        `SELECT file_path, line_start, chunk_id, snippet(fts_docs, 0, '', '', '…', 12) AS snip
-         FROM fts_docs WHERE fts_docs MATCH ? AND collection_id = ?
+        `SELECT fts_docs.file_path, fts_docs.line_start, c.line_end, fts_docs.chunk_id,
+                snippet(fts_docs, 0, '', '', '…', 12) AS snip
+         FROM fts_docs JOIN chunks c ON c.id = fts_docs.chunk_id
+         WHERE fts_docs MATCH ? AND fts_docs.collection_id = ?
          ORDER BY bm25(fts_docs) LIMIT ?`,
       )
-      .all<{ file_path: string; line_start: number; chunk_id: number; snip: string }>(
-        ftsPhrase(query),
-        this.collectionId,
-        limit,
-      )
+      .all<{
+        file_path: string;
+        line_start: number;
+        line_end: number;
+        chunk_id: number;
+        snip: string;
+      }>(ftsPhrase(query), this.collectionId, limit)
       .map((r) => ({
         filePath: r.file_path,
         lineStart: r.line_start,
+        lineEnd: r.line_end,
         chunkId: r.chunk_id,
         snippet: r.snip,
       }));

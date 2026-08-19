@@ -244,6 +244,8 @@ import type {
   ProjectApprovalsResponse,
   ProjectFolderPreviewResponse,
   ProjectResponse,
+  ProjectSearchRequest,
+  ProjectSearchResponse,
   ProviderName,
   Question,
   ReadArtifactSliceOpts,
@@ -277,6 +279,7 @@ import type {
   RestoreConfirm,
   RestoreReview,
   RestoreScanRequest,
+  RetrievalPolicy,
   RevertGezelIconRequest,
   RewriteTextRequest,
   RewriteTextResponse,
@@ -1134,6 +1137,8 @@ export interface ConfigResponse {
     topK?: number;
     minScore?: number;
   };
+  /** Proactive indexed-context policy for substantive turns. */
+  retrieval?: RetrievalPolicy;
   summarization?: {
     enabled?: boolean;
     provider?: 'copilot' | 'openai' | 'ollama';
@@ -5886,6 +5891,11 @@ export class GezelClient {
 
   toolSearchCode(id: string, body: SearchCodeRequest): Promise<SearchCodeResponse> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/search-code`, body);
+  }
+
+  /** Unified indexed search across project content, artifacts, memory, and shared documents. */
+  toolSearch(id: string, body: ProjectSearchRequest): Promise<ProjectSearchResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/search`, body);
   }
 
   toolSecurityScan(id: string, body: SecurityScanRequest = {}): Promise<SecurityScanResponse> {

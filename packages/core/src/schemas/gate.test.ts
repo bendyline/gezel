@@ -111,6 +111,7 @@ describe('research and Markdown-outline gate checks', () => {
             sourcePath: '',
             tools: ['wikipedia_search', 'fetch_url', 'browser_navigate'],
             minSuccessful: 1,
+            externalOptional: true,
           },
           {
             kind: 'markdownHeadingsMatch',
@@ -121,6 +122,7 @@ describe('research and Markdown-outline gate checks', () => {
       },
     });
     expect(step.gate).toBeDefined();
+    expect(step.gate?.checks?.[0]).toMatchObject({ externalOptional: true });
   });
 });
 

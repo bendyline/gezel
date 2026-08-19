@@ -190,6 +190,8 @@ import type { MlxRuntimeStatusBus } from '../python/mlx-runtime-status-bus.js';
 import { getPairedRemoteFetch } from '../remotes/pinned-fetch.js';
 import type { RemotesRegistry } from '../remotes/registry.js';
 import { listStdlibScripts } from '../scripts/stdlib-source.js';
+import { retrieveProjectContext } from '../search/project-retrieval.js';
+import type { SearchService } from '../search/search-service.js';
 import type { SecretStore } from '../secrets/types.js';
 import { resolveInstalledSystemLibrary } from '../system-toolsets/resolve.js';
 import {
@@ -636,6 +638,8 @@ interface LiveSessionState {
    * model too.
    */
   libraryRecallPaths?: Set<string>;
+  /** Query fingerprints already injected through per-turn project retrieval. */
+  retrievalQueryHashes?: Set<string>;
   /** Live LLM session. May be rebuilt on provider reset or resume failure. */
   session: LLMSession | null;
   /** Model shared by provider binding, prompt construction, and live telemetry. */
@@ -1498,6 +1502,12 @@ export class ChatManager {
     this.contentIndexRef = index;
   }
   private contentIndexRef?: import('../index-store/content-index.js').ContentIndex;
+
+  /** Unified scoped search used for per-turn project grounding. */
+  setSearchService(search: SearchService): void {
+    this.searchServiceRef = search;
+  }
+  private searchServiceRef?: SearchService;
 
   /**
    * Workspace file index, used to recognize workspace paths an assistant
@@ -6697,7 +6707,17 @@ export class ChatManager {
       // build-request — see migration plan). New behaviors land
       // here without manager.ts changes.
       const messageOrigin = resolveTurnMessageOrigin(opts);
-      const libraryRecall = await this.resolveTurnLibraryRecall(state, userText, messageOrigin);
+      const projectRetrieval = await this.resolveTurnProjectRetrieval(
+        state,
+        userText,
+        messageOrigin,
+      );
+      // The unified retrieval includes the shared library. Keep the older
+      // library-only behavior as a graceful fallback for tests/embedders that
+      // have not wired SearchService yet.
+      const libraryRecall = projectRetrieval
+        ? []
+        : await this.resolveTurnLibraryRecall(state, userText, messageOrigin);
       const preludeForTurn = await this.resolveUserPromptPrelude(
         state,
         userText,
@@ -6711,6 +6731,12 @@ export class ChatManager {
         promptForTurn = `${preludeForTurn.text}\n\n${promptForTurn}`;
         log.info(
           `session ${sessionId}: behavior ${preludeForTurn.behaviorId} fired — prepending prelude`,
+        );
+      }
+      if (projectRetrieval) {
+        promptForTurn = `${projectRetrieval.prompt}\n\n${promptForTurn}`;
+        log.info(
+          `session ${sessionId}: indexed context injected (${projectRetrieval.policy.mode}, ${projectRetrieval.estimatedTokens} est. tokens, ${projectRetrieval.hits.length} hits)`,
         );
       }
       // Live-preview loopback: runtime errors the preview iframe's shim
@@ -8863,6 +8889,10 @@ export class ChatManager {
     userText: string,
     scope: PublishScope,
   ): Promise<void> {
+    // Production uses the per-turn user-message retrieval planner. Keep this
+    // frozen-system-prompt path only as compatibility for tests/embedders that
+    // have not wired SearchService; running both duplicates the same evidence.
+    if (this.searchServiceRef) return;
     const record = state.record;
     try {
       const config = await this.store.readConfig();
@@ -12848,6 +12878,72 @@ export class ChatManager {
     } catch (err) {
       log.warn('[library-recall] search failed:', err instanceof Error ? err.message : err);
       return [];
+    }
+  }
+
+  private async resolveTurnProjectRetrieval(
+    state: LiveSessionState,
+    userText: string,
+    messageOrigin: TurnMessageOrigin,
+  ) {
+    const search = this.searchServiceRef;
+    if (!search) return null;
+    try {
+      const [gezel, config] = await Promise.all([
+        this.store.getGezel(state.record.gezelId),
+        this.store.readConfig(),
+      ]);
+      if (!gezel) return null;
+      const contextWindow =
+        state.record.numCtx ??
+        state.session?.numCtx ??
+        this.providers.get(state.record.providerName)?.getContextWindow?.();
+      const linkedProjectIds = await this.store.linkedProjectIds(state.record.projectId);
+      const result = await retrieveProjectContext({
+        store: this.store,
+        search,
+        record: state.record,
+        gezel,
+        config,
+        userText,
+        messageOrigin,
+        projectIds: [state.record.projectId, ...linkedProjectIds],
+        ...(contextWindow ? { contextWindow } : {}),
+      });
+      if (!result) return null;
+      const already = state.retrievalQueryHashes ?? new Set<string>();
+      if (already.has(result.queryHash)) return null;
+      already.add(result.queryHash);
+      state.retrievalQueryHashes = already;
+      await this.historyManager
+        ?.log({
+          kind: 'retrieval.context-injected',
+          projectId: state.record.projectId,
+          gezelId: state.record.gezelId,
+          summary: `Injected ${result.hits.length} indexed context ${result.hits.length === 1 ? 'hit' : 'hits'} (${result.policy.mode})`,
+          details: {
+            sessionId: state.record.id,
+            queryHash: result.queryHash,
+            mode: result.policy.mode,
+            inheritedFrom: result.policy.inheritedFrom,
+            estimatedTokens: result.estimatedTokens,
+            maxTokens: result.policy.maxTokens,
+            truncated: result.truncated,
+            hits: result.hits.map((hit) => ({
+              source: hit.source,
+              projectId: hit.projectId,
+              path: hit.path,
+              line: hit.line,
+              lineEnd: hit.lineEnd,
+              score: hit.score,
+            })),
+          },
+        })
+        .catch(() => {});
+      return result;
+    } catch (err) {
+      log.warn('[project-retrieval] search failed:', err instanceof Error ? err.message : err);
+      return null;
     }
   }
 

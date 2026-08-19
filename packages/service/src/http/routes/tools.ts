@@ -43,6 +43,7 @@ import {
   ListFileIssuesRequestSchema,
   MapRepoRequestSchema,
   OutlineFileRequestSchema,
+  ProjectSearchRequestSchema,
   ReadDocAsMarkdownRequestSchema,
   ReadImageBase64RequestSchema,
   type ReadImageBase64Response,
@@ -67,6 +68,7 @@ import {
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { Hono } from 'hono';
 import type { ReadEntry } from 'tar';
+import { suggestCraftbooks, usefulCraftbooksForSearch } from '../../craftbook/suggest.js';
 import { buildPrOverlay } from '../../filemap/pr-overlay.js';
 import { PathSafetyError, resolveInside, safeJoin } from '../../fs/safe-paths.js';
 import { ensureGezel } from '../../gezels/ensure.js';
@@ -597,6 +599,44 @@ export function toolRoutes(ctx: ServiceContext): Hono {
         ...(body.maxResults ? { maxResults: body.maxResults } : {}),
       }),
     );
+  });
+
+  app.post('/:id/tools/search', async (c) => {
+    const id = c.req.param('id');
+    if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
+    const body = ProjectSearchRequestSchema.parse(await c.req.json());
+    const linkedProjectIds = await ctx.store.linkedProjectIds(id);
+    const [searchResult, rankedCraftbooks] = await Promise.all([
+      ctx.search.searchProject(body.query, {
+        projectIds: [id, ...linkedProjectIds],
+        ...(body.gezelId ? { gezelId: body.gezelId } : {}),
+        includeShared: body.includeShared !== false,
+        ...(body.sources ? { sources: body.sources } : {}),
+        ...(body.maxResults ? { maxResults: body.maxResults } : {}),
+      }),
+      // Craftbooks are an optional execution hint, never a reason for indexed
+      // knowledge search to fail. Project-local, user-local, and Gilde books
+      // are all gathered by the shared resolver; linked projects' local books
+      // are excluded because they are not invokable from this project.
+      suggestCraftbooks(
+        { catalog: ctx.catalog, store: ctx.store, git: ctx.git },
+        { projectId: id, query: body.query, topK: 5 },
+      ).catch(() => []),
+    ]);
+    const craftbooks = usefulCraftbooksForSearch(rankedCraftbooks).map((suggestion) => ({
+      id: suggestion.id,
+      name: suggestion.name,
+      ...(suggestion.description ? { description: suggestion.description } : {}),
+      source: suggestion.source,
+      ...(suggestion.version ? { version: suggestion.version } : {}),
+      stepCount: suggestion.stepCount,
+      score: suggestion.score,
+      invocation: {
+        tool: 'invoke_craftbook' as const,
+        arguments: { craftbookId: suggestion.id, description: body.query },
+      },
+    }));
+    return c.json({ ...searchResult, craftbooks });
   });
 
   // ── security-intel ─────────────────────────────────────────────────────────

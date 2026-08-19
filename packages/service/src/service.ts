@@ -1933,6 +1933,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   history.setRewriteBackend(() => globalIndexManager.rebuildHistoryMirror());
   // Cross-project unified search (titlebar quick-open + content fan-out).
   const search = new SearchService(store, contentIndex, memory, workspaceIndex, globalIndex);
+  chat.setSearchService(search);
   // Drop the cached name catalog when a project/gezel/document is
   // created/renamed/deleted, so a just-created entity is quick-openable
   // immediately instead of after the catalog's TTL. The audit log is the

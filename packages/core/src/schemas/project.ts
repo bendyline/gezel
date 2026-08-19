@@ -217,6 +217,13 @@ export const ProjectSchema = z.object({
    */
   gezelIds: z.array(z.string()).optional(),
   /**
+   * One-way links to other projects whose indexed knowledge and workspace
+   * files are available from this project. A link from A to B does not make A
+   * visible from B. The shared documents library is intentionally absent: it
+   * is an implicit search source for every project.
+   */
+  linkedProjectIds: z.array(EntityIdSchema).max(32).optional(),
+  /**
    * Suggested-work keys the user has dismissed ("don't offer this again
    * here"). Advisory UI state, same spirit as `gezelIds`: enabling a
    * dismissed key un-dismisses it, and a materialized host always

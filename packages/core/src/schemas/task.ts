@@ -16,6 +16,7 @@ import {
   StepGateUnionSchema,
 } from './craftbook.js';
 import { HookSpecSchema } from './hook.js';
+import { RetrievalPolicySchema } from './retrieval.js';
 import { ScriptRefListSchema } from './script.js';
 
 // Re-export so existing consumers of `TaskAssignee` from this module keep working.
@@ -695,6 +696,8 @@ export const UpdateTaskStepRequestSchema = z.object({
   description: z.string().optional(),
   prompt: z.string().optional(),
   suggestedRole: z.string().nullable().optional(),
+  /** Per-step indexed-context policy. `null` restores inherited behavior. */
+  retrieval: RetrievalPolicySchema.nullable().optional(),
   assignee: TaskAssigneeSchema.nullable().optional(),
   suggestedGezelId: z.string().nullable().optional(),
   /** Step automation hooks (single ref or ordered list). `null` detaches. */
