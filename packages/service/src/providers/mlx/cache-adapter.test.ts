@@ -184,7 +184,9 @@ describe('MlxCacheAdapter — evict', () => {
 describe('MlxCacheAdapter — tool roster in the prefix identity', () => {
   it('separates prefixes whose tool rosters differ', () => {
     const sys = 'IDENTICAL SYSTEM PROMPT';
-    const rosterA = [{ function: { name: 'write_file', parameters: { properties: { path: {} } } } }];
+    const rosterA = [
+      { function: { name: 'write_file', parameters: { properties: { path: {} } } } },
+    ];
     const rosterB = [{ function: { name: 'read_file', parameters: { properties: { path: {} } } } }];
     // Qwen renders the tool block at the top of the system message, so two
     // sessions with different rosters share no token prefix even with the
@@ -200,7 +202,13 @@ describe('MlxCacheAdapter — tool roster in the prefix identity', () => {
     ];
     const b = [
       { function: { name: 'b', description: 'REWORDED', parameters: { properties: { q: {} } } } },
-      { function: { name: 'a', description: 'ALSO REWORDED', parameters: { properties: { p: {} } } } },
+      {
+        function: {
+          name: 'a',
+          description: 'ALSO REWORDED',
+          parameters: { properties: { p: {} } },
+        },
+      },
     ];
     expect(gezelPrefixId(sys, a)).toBe(gezelPrefixId(sys, b));
   });
@@ -226,7 +234,9 @@ describe('MlxCacheAdapter — tool roster in the prefix identity', () => {
           return { ok: true, json: async () => ({}) };
         }) as unknown as typeof fetch,
       });
-      const tools = [{ function: { name: 'write_file', parameters: { properties: { path: {} } } } }];
+      const tools = [
+        { function: { name: 'write_file', parameters: { properties: { path: {} } } } },
+      ];
       await a.prepareForSend(`sess-${flag ?? 'off'}`, 'system prompt', undefined, tools);
       if (prev === undefined) delete process.env.GEZEL_MLX_STABLE_PREFIX;
       else process.env.GEZEL_MLX_STABLE_PREFIX = prev;

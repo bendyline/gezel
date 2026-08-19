@@ -190,8 +190,7 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
     // adds ~5-6K tokens of warm prefill and the payoff needs the snapshot
     // boundary too — measured as a net reuse regression without it.
     const stablePrefix =
-      process.env.GEZEL_MLX_STABLE_PREFIX === '1' ||
-      process.env.GEZEL_MLX_STABLE_PREFIX === 'true';
+      process.env.GEZEL_MLX_STABLE_PREFIX === '1' || process.env.GEZEL_MLX_STABLE_PREFIX === 'true';
     const warmTools = stablePrefix ? tools : undefined;
     const prefixId = this.setSessionPrefix(sessionId, systemPrompt, warmTools);
     await this.warmPrefix(prefixId, systemPrompt, warmTools);

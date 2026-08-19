@@ -970,6 +970,26 @@ one layer down and in a different engine. On qwen3.5+ the feature is
 genuinely unavailable on both engines; that is a model-family property, not
 an engine defect.
 
+**But `cache_reuse` turns out to be a non-lever, so none of this is worth
+chasing further.** Measured directly against gemma4-e4b:
+
+  * *Basic prefix reuse does not depend on it.* Two turns sharing a 2,822-token
+    prefix: the second prefilled **7 tokens** whether `cache_reuse` was
+    enabled (`--swa-full`) or disabled (windowed). Cross-request extension
+    comes from `cache_prompt` + slot KV retention and works either way. The
+    "not supported" warning is therefore much narrower than it reads.
+  * *It does not rescue a mid-prompt divergence either.* Prompt shaped
+    `[shared][divergence][long shared tail]`, second turn re-prefilled
+    **2,014 of 2,320 tokens with `--cache-reuse 256` AND with
+    `--cache-reuse 0`** — byte-identical outcomes.
+
+Combined with the catalog composition — **every** installed model is HYBRID
+(qwen3.5+, can never use it) or SWA (gemma4, only with `--swa-full`), and not
+one is plain dense — the practical value of this flag on this product is
+approximately zero. The `engine-flags.ts` relaxation below is kept because the
+rationale it replaced was factually wrong and would be re-derived otherwise,
+NOT because it buys measurable performance. Do not spend an A/B arm on it.
+
 Two consequences were acted on:
 
 1. **The `slots === 1` suppression in `engine-flags.ts` was stale.** It
