@@ -130,6 +130,7 @@ import type {
   GezelIconHistoryResponse,
   GezelResponse,
   GezmodelEngine,
+  GezmodelImportProgress,
   GezmodelImportReview,
   GildeUpdateStatusResponse,
   GitAbandonMergeResponse,
@@ -392,6 +393,15 @@ import {
   SseStreamStaleError,
   consumeSseJson,
 } from './sse.js';
+
+export interface ScanModelBundleOptions {
+  scanId?: string;
+  totalBytes?: number;
+  signal?: AbortSignal;
+  onProgress?: (progress: GezmodelImportProgress) => void;
+}
+
+class ModelBundleScanError extends Error {}
 
 const MODEL_DOWNLOAD_STALL_TIMEOUT_MS = 40 * 60_000;
 const MODEL_DOWNLOAD_STALLED_MESSAGE = 'Download stopped: server has gone quiet.';
@@ -3318,6 +3328,7 @@ export class GezelClient {
   /** Upload + fully scan a bundle. This stages bytes but does not install. */
   async scanModelBundle(
     data: Blob | ArrayBuffer | Uint8Array | ReadableStream<Uint8Array>,
+    options: ScanModelBundleOptions = {},
   ): Promise<GezmodelImportReview> {
     const body =
       data instanceof Blob || data instanceof ReadableStream
@@ -3326,20 +3337,101 @@ export class GezelClient {
           ? data
           : new Uint8Array(data);
     const streaming = body instanceof ReadableStream;
-    const res = await this.fetchImpl(`${this.baseUrl}/api/model-bundles/imports/scan`, {
+    const scanId = options.scanId ?? globalThis.crypto.randomUUID();
+    let finished = false;
+    options.onProgress?.({
+      phase: 'receiving',
+      bytesCompleted: 0,
+      ...(options.totalBytes === undefined ? {} : { bytesTotal: options.totalBytes }),
+    });
+    const scanRequest = this.fetchImpl(`${this.baseUrl}/api/model-bundles/imports/scan`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.token}`,
         'Content-Type': 'application/vnd.gezel.model+zip',
+        Prefer: 'respond-async',
+        'X-Gezel-Import-Id': scanId,
+        ...(options.totalBytes === undefined
+          ? {}
+          : { 'X-Gezel-Upload-Bytes': String(options.totalBytes) }),
       },
       body: body as never,
+      signal: options.signal,
       ...(streaming ? ({ duplex: 'half' } as RequestInit & { duplex: 'half' }) : {}),
     });
-    if (!res.ok) {
-      const payload = (await res.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(payload?.error ?? `model bundle scan failed (${res.status})`);
+    const progressTask = this.pollModelBundleImportProgress(
+      scanId,
+      () => finished,
+      options.onProgress,
+      options.signal,
+    );
+    // If the upload request itself fails, this companion poll is stopped in
+    // `finally`; attach a handler now so its shutdown rejection is never
+    // reported as an unhandled promise.
+    void progressTask.catch(() => {});
+    try {
+      const res = await scanRequest;
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? `model bundle scan failed (${res.status})`);
+      }
+      const accepted = (await res.json()) as { importId?: string; manifest?: unknown };
+      // Compatibility with a pre-progress daemon, which holds this request
+      // open and returns the review directly instead of a 202 job handle.
+      if (res.status === 201 && accepted.manifest) {
+        return accepted as GezmodelImportReview;
+      }
+      return await progressTask;
+    } finally {
+      finished = true;
     }
-    return res.json() as Promise<GezmodelImportReview>;
+  }
+
+  private async pollModelBundleImportProgress(
+    scanId: string,
+    finished: () => boolean,
+    onProgress?: (progress: GezmodelImportProgress) => void,
+    signal?: AbortSignal,
+  ): Promise<GezmodelImportReview> {
+    let consecutiveFailures = 0;
+    while (!finished() && !signal?.aborted) {
+      try {
+        const response = await this.fetchImpl(
+          `${this.baseUrl}/api/model-bundles/imports/${encodeURIComponent(scanId)}/progress`,
+          { headers: { Authorization: `Bearer ${this.token}` }, signal },
+        );
+        if (response.ok) {
+          const status = (await response.json()) as
+            | { status: 'active'; progress: GezmodelImportProgress }
+            | { status: 'complete'; review: GezmodelImportReview }
+            | { status: 'error'; error: string };
+          consecutiveFailures = 0;
+          if (status.status === 'complete') return status.review;
+          if (status.status === 'error') throw new ModelBundleScanError(status.error);
+          onProgress?.(status.progress);
+        } else {
+          consecutiveFailures += 1;
+          await response.body?.cancel().catch(() => {});
+        }
+      } catch (error) {
+        if (error instanceof ModelBundleScanError) throw error;
+        if (signal?.aborted) throw error;
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= 20) {
+          throw new Error(
+            `Lost contact with the model bundle scan: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+      if (consecutiveFailures >= 20) {
+        throw new Error('The model bundle scan disappeared from the service.');
+      }
+      if (!finished() && !signal?.aborted) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+    }
+    signal?.throwIfAborted();
+    throw new Error('Model bundle progress ended before the security scan completed.');
   }
 
   confirmModelBundleImport(

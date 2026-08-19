@@ -1,4 +1,9 @@
-import type { GezmodelEngine, GezmodelImportReview, SecurityPolicy } from '@bendyline/gezel';
+import type {
+  GezmodelEngine,
+  GezmodelImportProgress,
+  GezmodelImportReview,
+  SecurityPolicy,
+} from '@bendyline/gezel';
 import { GezelClient } from '@bendyline/gezel-client';
 
 /**
@@ -41,6 +46,11 @@ export type ModelBundleExportProgress = {
       bytesTotal?: number;
     }
 );
+
+export type ModelBundleImportProgress = {
+  scanId: string;
+  filename: string;
+} & GezmodelImportProgress;
 
 /**
  * Build a client against the daemon that served this HTML. When the Electron
@@ -228,7 +238,18 @@ declare global {
        */
       scanOpenedModelBundle?: (
         requestId: string,
-      ) => Promise<{ ok: true; review: GezmodelImportReview } | { ok: false; error: string }>;
+        scanId: string,
+      ) => Promise<
+        | { ok: true; review: GezmodelImportReview }
+        | { ok: true; canceled: true }
+        | { ok: false; error: string }
+      >;
+      cancelModelBundleImport?: (
+        scanId: string,
+      ) => Promise<{ ok: true } | { ok: false; error: string }>;
+      onModelBundleImportProgress?: (
+        callback: (progress: ModelBundleImportProgress) => void,
+      ) => () => void;
       /** Receive `.gezmodel` double-click/open-file handoffs from the OS. */
       onOpenModelBundle?: (
         callback: (request: { requestId: string; filename: string }) => void,

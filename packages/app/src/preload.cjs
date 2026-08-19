@@ -35,6 +35,10 @@ const modelBundleExportProgressCallbacks = new Set();
 ipcRenderer.on('gezel:model-bundle-export-progress', (_event, progress) => {
   for (const callback of modelBundleExportProgressCallbacks) callback(progress);
 });
+const modelBundleImportProgressCallbacks = new Set();
+ipcRenderer.on('gezel:model-bundle-import-progress', (_event, progress) => {
+  for (const callback of modelBundleImportProgressCallbacks) callback(progress);
+});
 
 // The native Help menu can be clicked after the page load finishes but before
 // React's passive effects register the dialog callback. Buffer that one-shot
@@ -139,8 +143,14 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
     modelBundleExportProgressCallbacks.add(callback);
     return () => modelBundleExportProgressCallbacks.delete(callback);
   },
-  scanOpenedModelBundle: (requestId) =>
-    ipcRenderer.invoke('gezel:scan-opened-model-bundle', requestId),
+  scanOpenedModelBundle: (requestId, scanId) =>
+    ipcRenderer.invoke('gezel:scan-opened-model-bundle', { requestId, scanId }),
+  cancelModelBundleImport: (scanId) =>
+    ipcRenderer.invoke('gezel:cancel-model-bundle-import', scanId),
+  onModelBundleImportProgress: (callback) => {
+    modelBundleImportProgressCallbacks.add(callback);
+    return () => modelBundleImportProgressCallbacks.delete(callback);
+  },
   onOpenModelBundle: (callback) => {
     modelBundleOpenCallback = callback;
     while (pendingModelBundleOpens.length > 0) callback(pendingModelBundleOpens.shift());

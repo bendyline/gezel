@@ -776,10 +776,13 @@ jobs:
             --gezel-expected-version="${{ needs.release-preflight.outputs.version }}" \
             --gezel-home="${{ runner.temp }}/gezel-packaged-smoke" &
           pid=$!
-          deadline=$((SECONDS + 180))
+          # This deliberately uses a fresh home, so first launch must extract
+          # roughly 49k service-bundle files before the app can report ready.
+          # Hosted macOS runners have approached or exceeded the old 180s cap.
+          deadline=$((SECONDS + 360))
           while kill -0 "$pid" 2>/dev/null; do
             if (( SECONDS >= deadline )); then
-              echo "::error::packaged Electron smoke test timed out after 180 seconds"
+              echo "::error::packaged Electron smoke test timed out after 360 seconds"
               kill -TERM "$pid" 2>/dev/null || true
               sleep 2
               kill -KILL "$pid" 2>/dev/null || true

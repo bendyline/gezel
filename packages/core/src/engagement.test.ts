@@ -78,6 +78,15 @@ describe('getWorkshopTempo', () => {
 });
 
 describe('workshopTempoDefaults', () => {
+  it('uses the expanded rapid interval for every tempo', () => {
+    expect(TEMPOS.map((t) => workshopTempoDefaults(t).rapidIntervalMs)).toEqual([
+      120 * 60_000,
+      20 * 60_000,
+      8 * 60_000,
+      3 * 60_000,
+    ]);
+  });
+
   it('orders rapid intervals from longest to shortest across tempos', () => {
     const rapids = TEMPOS.map((t) => workshopTempoDefaults(t).rapidIntervalMs);
     // gezellig > bedrijvig > druk > dolle-boel — each strictly smaller.
@@ -86,14 +95,9 @@ describe('workshopTempoDefaults', () => {
     }
   });
 
-  it('bedrijvig matches the historical pre-tempo defaults', () => {
+  it('bedrijvig keeps the established slow cadence and backoff', () => {
     const b = workshopTempoDefaults('bedrijvig');
-    expect(b.rapidIntervalMs).toBe(5 * 60_000);
     expect(b.slowIntervalMs).toBe(6 * 60 * 60_000);
     expect(b.rapidAttemptsBeforeBackoff).toBe(3);
-  });
-
-  it('dolle-boel is under a minute so the joke tier actually feels like one', () => {
-    expect(workshopTempoDefaults('dolle-boel').rapidIntervalMs).toBeLessThan(60_000);
   });
 });

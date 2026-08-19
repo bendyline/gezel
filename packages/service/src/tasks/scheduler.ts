@@ -81,7 +81,7 @@ export interface CronTickResult {
 /** Hard-coded global defaults applied when nothing's set in config. */
 const NUDGE_DEFAULTS = {
   enabled: true,
-  rapidIntervalMs: 5 * 60_000,
+  rapidIntervalMs: 20 * 60_000,
   slowIntervalMs: 6 * 60 * 60_000,
   recentActivityWindowMs: 60 * 60_000,
   rapidAttemptsBeforeBackoff: 3,

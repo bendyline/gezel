@@ -3829,8 +3829,7 @@ function AutostartToggle() {
         <span>
           <strong>Run gezel service in the background at login.</strong>{' '}
           <span className="muted small">
-            (Installs a {autostartLabel()} so gezeld starts even when the app window isn't open —
-            required for scheduled tasks.)
+            (Installs as a {autostartLabel()} so Gezel starts even when the app window isn't open.)
           </span>
         </span>
       </label>
@@ -3845,7 +3844,7 @@ function AutostartToggle() {
 
 function autostartLabel(): string {
   const platform = window.__GEZEL__?.platform;
-  if (platform === 'darwin') return 'LaunchAgent plist';
+  if (platform === 'darwin') return 'LaunchAgent configuration';
   if (platform === 'linux') return 'systemd --user unit';
   if (platform === 'win32') return 'Task Scheduler task';
   return 'startup item';
@@ -4502,28 +4501,28 @@ const TEMPOS: {
     label: 'Gezellig',
     hint: 'cozy',
     description:
-      'Meester checks in rarely and warmly. 30-minute rapid cadence, 12-hour slow. Nudges sound like "no rush, let me know."',
+      'Meester checks in rarely and warmly. 2-hour rapid cadence, 12-hour slow. Nudges sound like "no rush, let me know."',
   },
   {
     id: 'bedrijvig',
     label: 'Bedrijvig',
     hint: 'busy (default)',
     description:
-      'The standard pace. 5-minute rapid cadence, 6-hour slow. Nudges are neutral and structured.',
+      'The standard pace. 20-minute rapid cadence, 6-hour slow. Nudges are neutral and structured.',
   },
   {
     id: 'druk',
     label: 'Druk',
     hint: 'pressured',
     description:
-      'Short gaps, direct tone. 2-minute rapid cadence, 1-hour slow. Meester expects a blocker-or-status answer.',
+      'Short gaps, direct tone. 8-minute rapid cadence, 1-hour slow. Meester expects a blocker-or-status answer.',
   },
   {
     id: 'dolle-boel',
     label: 'Dolle boel',
     hint: 'madhouse',
     description:
-      "45-second rapid cadence, 20-minute slow. Nudges arrive IN CAPS and end with 'this is fine 🔥'.",
+      "3-minute rapid cadence, 20-minute slow. Nudges arrive IN CAPS and end with 'this is fine 🔥'.",
   },
 ];
 

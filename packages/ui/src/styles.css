@@ -19687,7 +19687,8 @@ a.license-button:hover {
    hashing, bundle writing, and checksum verification. Keep that work in one
    calm surface with an explicit cancellation path until the verified partial
    file is published. */
-.gz-dialog.model-export-dialog {
+.gz-dialog.model-export-dialog,
+.gz-dialog.model-import-dialog {
   width: min(31rem, 90vw);
   min-width: min(31rem, 90vw);
 }
