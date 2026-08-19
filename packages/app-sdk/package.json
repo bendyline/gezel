@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-app-sdk",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Public SDK for building third-party local apps against gezel — discovery, consent, OpenAI-shaped chat, ensure-model.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "sdk", "embedding"],
