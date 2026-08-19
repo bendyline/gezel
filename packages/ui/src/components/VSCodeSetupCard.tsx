@@ -124,6 +124,11 @@ export function VSCodeSetupCard({
             {hasManagedProfile && (
               <p className="muted small">Clear this setup before choosing a different profile.</p>
             )}
+            <p className="muted small">
+              If VS Code is already open, you may need to run{' '}
+              <strong>Developer: Reload Window</strong> or restart VS Code after setup before the
+              models work.
+            </p>
           </>
         ) : null
       }
@@ -179,7 +184,8 @@ export function VSCodeSetupCard({
             <br />
             Because no extension is involved, the dedicated inference-only credential is stored as
             plain text in this profile file. It works only through Gezel&apos;s loopback inference
-            bridge and can be revoked by clearing this setup.
+            bridge and can be revoked by clearing this setup. If VS Code is already open, reload its
+            window or restart it after setup so it picks up the new credential.
           </>
         }
         confirmLabel={status?.state === 'not-configured' ? 'Set up VS Code' : 'Update VS Code'}

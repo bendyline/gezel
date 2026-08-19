@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -76,6 +76,16 @@ export function resolvePnpmCli(args, options = {}) {
 export function spawnPnpm(args, options = {}) {
   const invocation = resolvePnpmCli(args, options);
   return spawn(invocation.command, invocation.args, {
+    ...options,
+    env: options.env ?? process.env,
+    shell: invocation.shell,
+  });
+}
+
+/** Synchronous counterpart for semantic-release hooks and release rehearsals. */
+export function spawnPnpmSync(args, options = {}) {
+  const invocation = resolvePnpmCli(args, options);
+  return spawnSync(invocation.command, invocation.args, {
     ...options,
     env: options.env ?? process.env,
     shell: invocation.shell,

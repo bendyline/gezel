@@ -98,11 +98,13 @@ describe('VSCodeSetupCard', () => {
     render(<VSCodeSetupCard endpointsEnabled />);
 
     expect(await screen.findByText('Not configured')).toBeInTheDocument();
+    expect(screen.getByText(/Developer: Reload Window/)).toBeInTheDocument();
     fireEvent.change(screen.getByTestId('mock-select'), { target: { value: 'code:work' } });
     fireEvent.click(screen.getByRole('button', { name: 'Set up VS Code…' }));
     const dialog = screen.getByRole('alertdialog', { name: 'Set up VS Code with Gezel?' });
     expect(within(dialog).getByText(/plain text/)).toBeInTheDocument();
     expect(within(dialog).getByText(/inference-only/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/reload its window or restart it/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Set up VS Code' }));
 
     await waitFor(() => expect(configureVSCode).toHaveBeenCalledWith({ profileId: 'code:work' }));

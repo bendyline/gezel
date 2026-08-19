@@ -23,10 +23,10 @@
  * Env:
  *   GEZEL_RELEASE_DRY_RUN=1  print the command instead of running it.
  */
-import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnPnpmSync } from './pnpm-cli.mjs';
 import {
   clearReleasePackageState,
   materializeReleasePackageState,
@@ -101,14 +101,18 @@ if (workspaceDependencies.length > 0 && !materialized.materialized) {
 }
 
 let result;
+let spawnError;
 try {
-  result = spawnSync('pnpm', args, { cwd: packageDir, stdio: 'inherit' });
+  result = spawnPnpmSync(args, { cwd: packageDir, stdio: 'inherit' });
+  spawnError = result.error;
+} catch (error) {
+  spawnError = error;
 } finally {
   materialized.restore();
 }
 
-if (result.error) {
-  console.error(`publish-package: failed to spawn pnpm: ${result.error.message}`);
+if (spawnError) {
+  console.error(`publish-package: failed to spawn pnpm: ${spawnError.message}`);
   process.exit(1);
 }
 process.exit(result.status ?? 1);

@@ -32,6 +32,7 @@ async function fixture() {
   );
   // prepare-package imports it to derive the content-compat calendar line.
   await copyFile(join(here, 'calver.mjs'), join(root, 'scripts', 'calver.mjs'));
+  await copyFile(join(here, 'pnpm-cli.mjs'), join(root, 'scripts', 'pnpm-cli.mjs'));
   await writeFile(join(root, 'packages', 'core', 'src', 'index.ts'), DECLARATION);
   await writeFile(
     join(root, 'packages', 'core', 'package.json'),
@@ -212,6 +213,35 @@ test('dry run reports both stamps without writing or rebuilding', async () => {
     // The compat line is derived from today, not from the published version.
     assert.match(stdout, /GEZEL_CONTENT_COMPAT = '1\.\d{5}'/);
     assert.equal(await readFile(join(root, 'packages/core/src/index.ts'), 'utf8'), DECLARATION);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('core preparation rebuilds through the cross-platform pnpm JavaScript launcher', async () => {
+  const root = await fixture();
+  const pnpmCli = join(root, 'pnpm.mjs');
+  try {
+    await writeFile(
+      pnpmCli,
+      [
+        "import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';",
+        "import { resolve } from 'node:path';",
+        "const source = readFileSync(resolve('packages/core/src/index.ts'), 'utf8');",
+        "const version = source.match(/GEZEL_VERSION = '([^']+)'/)?.[1];",
+        "const compat = source.match(/GEZEL_CONTENT_COMPAT = '([^']+)'/)?.[1];",
+        "mkdirSync(resolve('packages/core/dist'), { recursive: true });",
+        "writeFileSync(resolve('packages/core/dist/index.js'), `var GEZEL_VERSION = \"${version}\";\\nvar GEZEL_CONTENT_COMPAT = \"${compat}\";\\n`);",
+      ].join('\n'),
+    );
+    const { stdout } = await run(root, 'packages/core', ['1.2.3'], {
+      GEZEL_PNPM_CLI: pnpmCli,
+    });
+    assert.match(stdout, /core dist carries 1\.2\.3/);
+    assert.match(
+      await readFile(join(root, 'packages/core/src/index.ts'), 'utf8'),
+      /GEZEL_VERSION = '1\.2\.3'/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
