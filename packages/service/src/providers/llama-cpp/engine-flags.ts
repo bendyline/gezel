@@ -217,14 +217,31 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
   if (flashAttn !== undefined) args.push('--flash-attn', flashAttn);
 
   // ── Cross-request prefix KV reuse (`--cache-reuse`) ───────────────
-  // Auto-on ONLY for single-slot engines: b9843 rejects `--cache-reuse`
-  // under multi-slot non-unified KV (`kv_unified=false`) and disables it
-  // with a warning. gezel's default is multi-slot, so emitting the
-  // default there just adds a misleading "not supported" log line for no
-  // benefit. An explicit config/manifest value is always passed — the
-  // operator's call, even if the engine then declines it.
+  // Passed regardless of slot count. The old rule withheld the default
+  // whenever `slots !== 1`, because b9843 was believed to reject
+  // `--cache-reuse` under multi-slot non-unified KV. Re-measured against
+  // the bundled 0.1.36 engine (upstream f8def7f) by launching it directly:
+  //
+  //   dense model, --parallel 1  -> accepted, no warning, no error
+  //   dense model, --parallel 4  -> accepted, no warning, no error
+  //
+  // `kv_unified='false'` turns out to be normal at EVERY slot count — the
+  // dense control reports it at `--parallel 1` too — so it was never the
+  // discriminator the old comment took it for. What actually decides
+  // support is whether the context's cache can be partially rewound:
+  //
+  //   dense (granite 4b)            -> supported
+  //   hybrid recurrent (qwen3.5+)   -> "not supported ... will be disabled"
+  //   gemma windowed (SWA)          -> "not supported ... will be disabled"
+  //   gemma + `--swa-full`          -> supported
+  //
+  // So the engine already declines it precisely when it cannot honour it,
+  // which is what the warning is for. Withholding the flag ourselves only
+  // cost reuse on multi-slot dense engines. Note the coupling this exposes:
+  // the memory-driven `--swa-full` decision below also silently decides
+  // whether Gemma gets any cross-request prefix reuse at all.
   const explicitCacheReuse = config.llamaCppCacheReuse ?? perModel?.cacheReuse;
-  const cacheReuse = explicitCacheReuse ?? (slots === 1 ? DEFAULT_CACHE_REUSE : 0);
+  const cacheReuse = explicitCacheReuse ?? DEFAULT_CACHE_REUSE;
   if (cacheReuse > 0) args.push('--cache-reuse', String(cacheReuse));
 
   // ── SWA full cache (`--swa-full`) ─────────────────────────────────

@@ -801,7 +801,87 @@ and 20.2%→26.5% (tankcombat), **median cached tokens still 0**. Reasoning
 tokens were one contributor to prompt divergence, not the whole of it. The
 re-prefill defect above remains open and independent.
 
-### MLX: every turn re-prefills — cause still open
+### MLX: every turn re-prefills — CAUSE FOUND 2026-08-19
+
+**The prefix cache is not a prefix of anything real.** `POST /v1/cache/warm`
+renders its prompt with `_build_prompt(warm_messages)` — no tools — and
+`CacheWarmRequest` has no `tools` field to pass, so it *structurally* cannot
+render the tool-aware prompt. `_build_prompt` only takes the tokenizer's
+tool-aware branch when `bool(tools) or bool(chat_template_override)`, so the
+warm path renders through an entirely different branch than every real turn.
+
+Qwen 3.8 puts the tool block at the TOP of the system message, so the two
+prompts diverge at token 3 — `<|im_start|>system\n` and nothing more:
+
+```
+cached='<|im_start|>system\nYour role is "Meester".\n\n---\n\n## Your job is to ROUTE…'
+prompt='<|im_start|>system\n# Tools\n\nYou have access to the following functions:…'
+```
+
+Measured: 6/6 untrimmable turns at `lcp=3` against caches of 2,311-3,347
+tokens. So **every `prefix-hit` is a false hit** — it pays a disk load, an
+eviction pin, and a misleading log line, then re-prefills from zero anyway.
+This is why cache SIZE looked 52% recoverable while nothing was recoverable:
+2,437 tokens were available and 3 matched.
+
+Fixing it is not just "pass tools to the warm call". The prefix cache id must
+then incorporate the tool roster, because a prefix warmed with roster A is a
+false hit for a session with roster B — the same defect one layer down, and
+harder to see. Roles carry different rosters, so this is the common case, not
+an edge case.
+
+Two hypotheses were tested and killed on the way, both worth not re-running:
+
+  * **Snapshot boundary cut too far forward.** No: 6/6 diverged EARLY
+    (lcp/cached = 0.00), 0/6 near the boundary. The boundary logic is fine.
+  * **Fall back to the prefix cache when the session state is untrimmable.**
+    No: the prefix shares the same 3 tokens, so the fallback recovers
+    nothing. This one was derived from cache sizes and looked like a 52% win.
+
+`ArraysCache` (below) remains true and remains the reason none of this can be
+solved by trimming — but it is not the lever.
+
+### Attempted fix — MEASURED AS A REGRESSION, gated off (2026-08-19)
+
+Three changes were built against the false-prefix cause above, behind
+`GEZEL_MLX_STABLE_PREFIX` (default OFF):
+
+1. **Relocate the reasoning preamble** below the tool + about block, via a
+   verified transform of the model's own template (`template_stability.py`)
+   — anchored edit, adopted only if the patched render has the same token
+   multiset AND actually buys prefix, else the original is kept.
+2. **Warm with tools**, and key the prefix id by tool roster.
+3. **Snapshot at the reasoning-stable boundary**, on both the session and
+   warm paths, so the saved entry stops carrying a per-turn-volatile tail.
+
+They work as designed. Divergence moved from token 3 to 6,830 of a
+6,857-token cache, and a turn reused 6,980 tokens against 165 prefilled.
+They still made the target metric WORSE, monotonically:
+
+| arm | reuse % | prefill/trial | wall (median) | pass |
+|---|---|---|---|---|
+| off (baseline) | **34%** | **37,486** | 376s | 4/5 |
+| +relocate +warm | 26% | 49,875 | 307s | 4/5 |
+| +boundary (session) | 22% | 48,632 | 277s | 4/5 |
+| +boundary (session+warm) | 14% | 43,586 | 292s | 1/1 |
+
+Why: truncating saves at the stable boundary wins more matches but shrinks
+what each match is worth, and warming with tools adds ~5-6K tokens of warm
+prefill to the denominator. The wall-clock column looks better but the trial
+spread is 255-793s against 260-759s at n=5 — **not established**, and driven
+by decode, not prefill.
+
+Two cautions for whoever picks this up:
+
+  * **Fewer decode tokens after relocation is not self-evidently good.**
+    Burying the reasoning-effort instruction after the about text may simply
+    make the model obey it less. Any retry needs a QUALITY arm, not a speed
+    arm.
+  * **Prefill is ~20% of MLX wall-clock** (and the Theme F reframing above
+    puts caching at ~14% of engine time for product-target models), so even
+    a total success here is single-digit percent. Size the effort to that.
+
+### MLX: why trimming can never be the answer
 
 Measured over 10 trials on qwen3.8-27b-q4: 86 reuse events, **median 0
 cached tokens**, 230,572 tokens re-prefilled, a 23.5% hit rate, roughly 16
@@ -811,24 +891,23 @@ had divergent untrimmable state without a reusable prompt snapshot`. So
 `cache_seed.trim_layers` is refusing and `seed_from_state` falls through to
 `fresh-untrimmable`.
 
-**Why it refuses is not yet known.** A first diagnosis — that
-`mlx-vlm`'s `BatchKVCache` lacks `is_trimmable()`/`trim()`, by analogy with
-the known "`BatchKVCache` has no `to_quantized`, and
-`maybe_quantize_kv_cache` skips them silently" gap — was **wrong**: that
-inspection read `mlx_lm`'s copy of the class, while the sidecar imports
-`mlx_vlm`'s, and `mlx_vlm.models.cache.BatchKVCache` has implemented both
-methods since 0.6.6. Two independent lines of evidence now refute it: the
-class has the methods, and bumping to 0.6.14 (whose rewritten batched cache
-would have fixed it) did not change the outcome — see below.
+**CONFIRMED 2026-08-19.** `qwen3_5/language.py` builds the cache as
+`[ArraysCache(size=2) if l.is_linear else KVCache() for l in self.layers]`,
+and qwen3.8 is 48 `linear_attention` + 16 `full_attention` layers.
+`ArraysCache.is_trimmable()` is `False` and it has **no `trim()` at all** —
+correctly, because a linear-attention layer holds a fixed-size RECURRENT
+state summarising every token it has seen; you cannot subtract the last N
+tokens from it. `trim_layers` is all-or-nothing, so 48 honest refusals veto
+the trim. **Trimming is therefore permanently off the table for this model
+family** — every remaining avenue must make the prompt a pure EXTENSION
+rather than rewind the cache.
 
-Leading remaining hypothesis: `trim_layers` is all-or-nothing across the
-layer stack, and qwen3.8 declares a hybrid `linear_attention` /
-`full_attention` stack. Linear-attention layers carry recurrent state that
-cannot be rewound by dropping trailing positions, so one honestly
-un-trimmable layer would veto the whole trim regardless of what the batched
-cache supports. This predicts the defect is **model-shaped, not
-version-shaped** — it should disappear on a pure full-attention model.
-Untested.
+An earlier diagnosis — that `mlx-vlm`'s `BatchKVCache` lacks
+`is_trimmable()`/`trim()` — was **wrong**: that inspection read `mlx_lm`'s
+copy while the sidecar imports `mlx_vlm`'s, which has had both since 0.6.6.
+It was refuted twice: the class has the methods, and 0.6.14's rewritten
+batched cache changed nothing. Both were aimed at the 16 full-attention
+layers that were never the problem.
 
 The end-of-prompt snapshot fallback does not rescue it. That path assumes
 "the next turn's prompt re-templates the same history, so the snapshot is a
@@ -855,31 +934,64 @@ Task success is identical (10/10 both arms); duration is ~85% worse and the
 cache did not improve. The pin stays at 0.6.6. Do not re-bump without a
 hypothesis that survives this measurement.
 
-### llama-cpp: `cache_reuse` is disabled outright — INVESTIGATE
+### llama-cpp: `cache_reuse` — ANSWERED 2026-08-19
 
-llama-server logs, every launch:
+Every llama-server launch logs:
 
 ```
 srv load_model: cache_reuse is not supported by this context, it will be disabled
 srv load_model: initializing, n_slots = 1, n_ctx_slot = 262144, kv_unified = 'false'
 ```
 
-So the default engine runs with **no prompt-prefix reuse at all**, and
-`--cache-reuse` is absent from the argv. `engine-flags.ts` documents
-suppressing the auto-on default because "b9843 rejects `--cache-reuse` under
-multi-slot non-unified KV" — but this launch is `n_slots = 1`, where that
-condition should not apply.
+Both of the earlier guesses about this were wrong, and are corrected here:
 
-Worth answering:
-1. Why is `kv_unified = 'false'` at a single slot? Unified KV is normally the
-   single-slot case, and it is what the server names as the blocker.
-2. If unified KV is enabled at `n_slots = 1`, does `cache_reuse` come back —
-   and what does it buy? This is the DEFAULT engine, so any win here has a
-   far wider blast radius than the MLX fix.
-3. Is the `engine-flags.ts` suppression rule wider than the b9843 bug it was
-   written for?
+  * **"`--cache-reuse` is absent from the argv."** No — it is passed. The
+    warning is only emitted when the flag WAS requested; that line is the
+    engine declining it, not us omitting it.
+  * **"Why is `kv_unified='false'` at a single slot? Unified KV is normally
+    the single-slot case."** False premise. A dense control reports
+    `kv_unified='false'` at `--parallel 1` too. It is normal at every slot
+    count and was never the discriminator.
 
-Not chased yet: MLX was the larger regression and had a clearer fix.
+Measured by launching the bundled 0.1.36 engine (upstream `f8def7f`)
+directly, one model at a time:
+
+| context | `--cache-reuse` |
+|---|---|
+| dense (granite-vision 4b) | accepted |
+| hybrid recurrent (qwen3.5/3.6/3.8) | declined — "not supported" |
+| gemma windowed (SWA) | declined — "not supported" |
+| gemma + `--swa-full` | accepted |
+| dense, `--parallel 1` and `--parallel 4` | accepted both, no warning, no error |
+
+So the discriminator is **whether the context's cache can be partially
+rewound** — the same constraint that makes MLX's `ArraysCache` untrimmable,
+one layer down and in a different engine. On qwen3.5+ the feature is
+genuinely unavailable on both engines; that is a model-family property, not
+an engine defect.
+
+Two consequences were acted on:
+
+1. **The `slots === 1` suppression in `engine-flags.ts` was stale.** It
+   withheld the auto-on default whenever slots !== 1, citing a b9843
+   rejection that the current engine does not reproduce. Since the engine
+   declines the flag itself exactly when it cannot honour it, withholding it
+   only cost reuse on multi-slot dense engines. Now passed at any slot count.
+   (Blast radius is modest here: all 55 observed launches on this box
+   auto-sized to `slots: 1` under the KV memory ceiling.)
+2. **`--swa-full` silently decides whether Gemma gets prefix reuse at all.**
+   The flag is auto-enabled for Gemma only when weights + full KV fit fast
+   memory (`swaFullAutoFits`). On a machine where they do not, Gemma launches
+   windowed and *also* loses `cache_reuse`. A memory decision is therefore
+   doubling as a cache-reuse decision, which is worth knowing when a
+   smaller-RAM machine shows unexpectedly poor prefill reuse.
+
+Still open: whether the qwen preamble-above-tools problem (see the MLX
+section) is worth fixing on llama-cpp too. It is the same template property
+and hits both engines, but llama-server takes its template from the GGUF and
+would need `--chat-template-file`. llama-cpp already achieves 43% prompt-token
+reuse on qwen3.8 (one turn at 92%), so any gain there sits on top of a
+working baseline — unlike MLX, where reuse was ~0.
 
 ## 13. Key-file index
 

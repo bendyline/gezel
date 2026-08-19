@@ -24,11 +24,20 @@ import { describe, expect, it } from 'vitest';
 
 const PYTHON_DIR = fileURLToPath(new URL('./python', import.meta.url));
 
-/** Suites that must pass with nothing but the standard library. */
-const STDLIB_SUITES = [
-  'tool_call_stream_test.py',
-  'tool_args_json_test.py',
-  'tool_args_json_fuzz_test.py',
+/**
+ * Suites that must pass with nothing but the standard library, each with the
+ * line that proves it actually ran. A suite whose imports broke can still
+ * exit 0 with no cases, so the marker is what separates green from silent.
+ */
+const STDLIB_SUITES: ReadonlyArray<{ file: string; ranMarker: RegExp }> = [
+  { file: 'tool_call_stream_test.py', ranMarker: /PASS / },
+  { file: 'tool_args_json_test.py', ranMarker: /PASS / },
+  { file: 'tool_args_json_fuzz_test.py', ranMarker: /PASS / },
+  // cache_seed_test.py predates this runner and was never executed by
+  // anything — its own docstring says "No pytest harness is wired for the
+  // MLX python sidecar". It is pure stdlib, so it can simply gate.
+  { file: 'cache_seed_test.py', ranMarker: /all cache_seed tests passed/ },
+  { file: 'template_stability_test.py', ranMarker: /PASS / },
 ];
 
 function python3(): string | null {
@@ -46,7 +55,7 @@ function python3(): string | null {
 describe('MLX sidecar python suites', () => {
   const py = python3();
 
-  for (const suite of STDLIB_SUITES) {
+  for (const { file: suite, ranMarker } of STDLIB_SUITES) {
     it(`passes: ${suite}`, () => {
       const path = `${PYTHON_DIR}/${suite}`;
       expect(existsSync(path), `${suite} is missing`).toBe(true);
@@ -67,7 +76,7 @@ describe('MLX sidecar python suites', () => {
       }
       // A suite that skipped EVERYTHING would pass vacuously; require that at
       // least one case actually ran, so a broken import cannot read as green.
-      expect(output, `${suite} ran no cases`).toMatch(/PASS /);
+      expect(output, `${suite} ran no cases`).toMatch(ranMarker);
     });
   }
 });
