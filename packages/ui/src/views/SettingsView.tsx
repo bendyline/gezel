@@ -55,10 +55,18 @@ import { SecurityComplianceSettings } from './SecurityComplianceSettings.js';
 import { VideoEngineSettings } from './VideoEngineSettings.js';
 import { detectDs4Availability } from './ds4-availability.js';
 import { localEngineSettingsLabel } from './local-engine-label.js';
+import {
+  type WebSearchProviderSetting,
+  visibleWebSearchProviderSetting,
+  webSearchProviderOptions,
+} from './web-search-provider-options.js';
 
 type CodexCliReasoningEffort = NonNullable<
   NonNullable<ConfigResponse['codexCli']>['defaultReasoningEffort']
 >;
+
+const INCLUDE_TESTING_WEB_SEARCH_PROVIDER = import.meta.env.DEV;
+const WEB_SEARCH_PROVIDER_OPTIONS = webSearchProviderOptions(INCLUDE_TESTING_WEB_SEARCH_PROVIDER);
 
 const CLAUDE_PERMISSION_CHOICES: ReadonlyArray<{
   id: ClaudePermissionMode;
@@ -858,7 +866,7 @@ export function SettingsView() {
   }, []);
 
   const saveWebSearchProvider = useCallback(
-    async (next: 'brave' | 'wikipedia' | 'mock' | 'unset') => {
+    async (next: WebSearchProviderSetting) => {
       setStatus('saving…');
       try {
         const provider = next === 'unset' ? undefined : next;
@@ -3395,17 +3403,19 @@ export function SettingsView() {
                 Provider
               </label>
               <select
-                value={config?.webSearch?.provider ?? 'unset'}
+                value={visibleWebSearchProviderSetting(
+                  config?.webSearch?.provider,
+                  INCLUDE_TESTING_WEB_SEARCH_PROVIDER,
+                )}
                 onChange={(e) =>
-                  void saveWebSearchProvider(
-                    e.target.value as 'brave' | 'wikipedia' | 'mock' | 'unset',
-                  )
+                  void saveWebSearchProvider(e.target.value as WebSearchProviderSetting)
                 }
               >
-                <option value="unset">Default (Wikipedia, no key)</option>
-                <option value="wikipedia">Wikipedia (no key)</option>
-                <option value="brave">Brave Search (requires key)</option>
-                <option value="mock">Mock (testing)</option>
+                {WEB_SEARCH_PROVIDER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="new-row" style={{ alignItems: 'center', marginTop: '0.5rem' }}>

@@ -4843,7 +4843,9 @@ server.tool(
           ? topManifest.manifest.paramSchema
           : undefined,
     });
-    const nextCall = `invoke_craftbook(${JSON.stringify(nextInvocation)})`;
+    const nextCall = nextInvocation.params
+      ? `invoke_craftbook({"craftbookId":${JSON.stringify(nextInvocation.craftbookId)},"description":${JSON.stringify(nextInvocation.description)},"params":${JSON.stringify(nextInvocation.params)}})`
+      : `invoke_craftbook({"craftbookId":${JSON.stringify(nextInvocation.craftbookId)},"description":${JSON.stringify(nextInvocation.description)}})`;
     const nextAction =
       topMissing.length > 0
         ? `Next call: ${nextCall}. It will install any exact trusted zero-configuration bundled dependency; if setup still remains, it returns a hard error and creates no task. Preserve the supplied description and params; do not call suggest_craftbook again with a rephrased query, switch to a generic project/job kickoff, or delegate the job raw.`
