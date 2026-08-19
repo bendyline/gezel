@@ -272,6 +272,22 @@ export function VideoModelManager({
     [attachSubscription],
   );
 
+  const retryPull = useCallback(
+    (id: string) => {
+      // A failed row remains in pullsRef until React renders the queued
+      // deletion. Bypass startPull's duplicate guard for this deliberate
+      // replacement, otherwise Retry removes the row but starts no request.
+      pullsRef.current.get(id)?.controller.abort();
+      setPulls((prev) => {
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
+      attachSubscription(id, (cb, signal) => api.pullVideoModel(id, cb, signal));
+    },
+    [attachSubscription],
+  );
+
   const cancelPull = useCallback((id: string) => {
     const pull = pullsRef.current.get(id);
     pull?.controller.abort();
@@ -321,14 +337,7 @@ export function VideoModelManager({
                 key={pull.id}
                 pull={pull}
                 onCancel={() => cancelPull(pull.id)}
-                onRetry={() => {
-                  setPulls((prev) => {
-                    const next = new Map(prev);
-                    next.delete(pull.id);
-                    return next;
-                  });
-                  void startPull(pull.id);
-                }}
+                onRetry={() => retryPull(pull.id)}
               />
             ))}
           </div>
