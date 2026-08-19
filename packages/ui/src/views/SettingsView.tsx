@@ -54,6 +54,7 @@ import { OllamaSettings, TimeoutRow } from './OllamaSettings.js';
 import { SecurityComplianceSettings } from './SecurityComplianceSettings.js';
 import { VideoEngineSettings } from './VideoEngineSettings.js';
 import { detectDs4Availability } from './ds4-availability.js';
+import { localEngineSettingsLabel } from './local-engine-label.js';
 
 type CodexCliReasoningEffort = NonNullable<
   NonNullable<ConfigResponse['codexCli']>['defaultReasoningEffort']
@@ -117,17 +118,6 @@ type SectionId =
   | 'about'
   | 'benchmarks';
 
-// Label for the llama.cpp on-device tab / pill. MLX owns the "This Mac"
-// slot on Apple Silicon, so llama.cpp reads as the Windows / Linux
-// equivalent — and falls back to "On-device (llama)" on macOS so the
-// two tabs don't collide. UX-only; the underlying `llama-cpp` provider
-// id is unchanged.
-function llamaCppPlatformLabel(platform: string | undefined): string {
-  if (platform === 'win32') return 'This Windows PC';
-  if (platform === 'linux') return 'This Linux device';
-  return 'On-device (llama)';
-}
-
 // A visual/collapsible nav group. `group` marks a child item (drawn with a
 // small vertical rail on the left so it reads as nested); `groupHeader` marks
 // the item that labels and expand/collapses that group.
@@ -161,9 +151,13 @@ function buildSections(platform: string | undefined): SettingsSection[] {
     { id: 'folders', label: 'Folders' },
     { id: 'securityCompliance', label: 'Security & Compliance' },
     { id: 'defaults', label: 'Artificial Intelligence', groupHeader: 'ai' },
-    { id: 'mlx', label: 'This Mac', group: 'ai' },
-    { id: 'llamaCpp', label: llamaCppPlatformLabel(platform), group: 'ai' },
-    { id: 'ds4', label: 'On-device (DwarfStar - DS4)', group: 'ai' },
+    { id: 'mlx', label: localEngineSettingsLabel('mlx', platform), group: 'ai' },
+    {
+      id: 'llamaCpp',
+      label: localEngineSettingsLabel('llama-cpp', platform),
+      group: 'ai',
+    },
+    { id: 'ds4', label: localEngineSettingsLabel('ds4', platform), group: 'ai' },
     { id: 'copilot', label: 'GitHub Copilot', group: 'ai' },
     { id: 'openai', label: 'OpenAI', group: 'ai' },
     { id: 'codexCli', label: 'OpenAI Codex CLI', group: 'ai' },
@@ -1141,38 +1135,13 @@ export function SettingsView() {
   const uiPlatform = window.__GEZEL__?.platform ?? health?.platform;
   const isDarwin = uiPlatform === 'darwin';
 
-  // UI-only preference: when true on a Mac, the llama.cpp path is
-  // surfaced alongside MLX (settings tab + extra provider pill).
-  // Persisted to localStorage so the toggle sticks across reloads
-  // without requiring a service-side config field.
-  const [showLlamaCppOnMac, setShowLlamaCppOnMac] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    try {
-      return window.localStorage.getItem('gezel.showLlamaCppOnMac') === '1';
-    } catch {
-      return false;
-    }
-  });
-  useEffect(() => {
-    try {
-      window.localStorage.setItem('gezel.showLlamaCppOnMac', showLlamaCppOnMac ? '1' : '0');
-    } catch {}
-  }, [showLlamaCppOnMac]);
-
-  // On a Mac, llama.cpp is an opt-in fallback; on Windows/Linux it's
-  // the primary on-device surface. We still keep the tab visible on
-  // Mac when config.provider is already 'llama-cpp', so a user who
-  // previously picked it doesn't lose access to its settings.
-  const showLlamaCppTab = isDarwin
-    ? showLlamaCppOnMac || provider === 'llama-cpp' || nightShiftProvider === 'llama-cpp'
-    : true;
-
   // Primary "this device" pill for the default-provider picker.
   // Mac steers to MLX; everything else steers to llama.cpp.
   const onDeviceProvider: ProviderName = isDarwin ? 'mlx' : 'llama-cpp';
-  const onDeviceSectionId: SectionId = isDarwin ? 'mlx' : 'llamaCpp';
-  const onDeviceLabel = isDarwin ? 'This Mac' : llamaCppPlatformLabel(uiPlatform);
-  const llamaCppTabLabel = llamaCppPlatformLabel(uiPlatform);
+  const mlxTabLabel = localEngineSettingsLabel('mlx', uiPlatform);
+  const llamaCppTabLabel = localEngineSettingsLabel('llama-cpp', uiPlatform);
+  const ds4TabLabel = localEngineSettingsLabel('ds4', uiPlatform);
+  const onDeviceLabel = isDarwin ? mlxTabLabel : llamaCppTabLabel;
 
   // DwarfStar (ds4) is a separate on-device engine with hard platform
   // constraints (Apple-Silicon Metal / Linux CUDA; no Intel-Mac or Windows
@@ -1222,7 +1191,7 @@ export function SettingsView() {
       label: onDeviceLabel,
       title: 'Run models directly on this device — weights live on disk, with no cloud round-trip.',
     },
-    ...(isDarwin && showLlamaCppTab
+    ...(isDarwin
       ? [
           {
             id: 'llama-cpp' as const,
@@ -1235,7 +1204,7 @@ export function SettingsView() {
       ? [
           {
             id: 'ds4' as const,
-            label: 'DwarfStar',
+            label: ds4TabLabel,
             title: 'Use the DwarfStar (ds4) engine for Night Shift work.',
           },
         ]
@@ -1252,7 +1221,6 @@ export function SettingsView() {
     const all = buildSections(uiPlatform);
     return all.filter((s) => {
       if (s.id === 'mlx' && !isDarwin) return false;
-      if (s.id === 'llamaCpp' && !showLlamaCppTab) return false;
       // Keep the section available for supported native installs, configured
       // external servers, and an already-selected provider. The latter two
       // matter on Windows, where ds4 has no native build but remains usable
@@ -1271,7 +1239,6 @@ export function SettingsView() {
   }, [
     uiPlatform,
     isDarwin,
-    showLlamaCppTab,
     showDs4Provider,
     showOpenaiProvider,
     showAnthropicProvider,
@@ -2255,7 +2222,7 @@ export function SettingsView() {
                 >
                   {onDeviceLabel}
                 </button>
-                {isDarwin && showLlamaCppTab && (
+                {isDarwin && (
                   <button
                     type="button"
                     className={`provider-pill${provider === 'llama-cpp' ? ' provider-pill-active' : ''}`}
@@ -2272,7 +2239,7 @@ export function SettingsView() {
                     onClick={() => void setProvider('ds4')}
                     title="DwarfStar (ds4) — antirez's specialized engine for very large mixture-of-experts models (DeepSeek V4, GLM 5.2). Streams the experts from disk so a frontier-class model runs on this device."
                   >
-                    DwarfStar
+                    {ds4TabLabel}
                   </button>
                 )}
                 {showCopilotProvider && (
@@ -2403,7 +2370,7 @@ export function SettingsView() {
                     onClick={() => setSection(provider === 'mlx' ? 'mlx' : 'llamaCpp')}
                     style={{ padding: 0 }}
                   >
-                    {provider === 'mlx' ? 'This Mac' : llamaCppTabLabel}
+                    {provider === 'mlx' ? mlxTabLabel : llamaCppTabLabel}
                   </button>{' '}
                   tab.
                 </p>
@@ -2433,7 +2400,7 @@ export function SettingsView() {
                       onClick={() => setSection('ds4')}
                       style={{ padding: 0 }}
                     >
-                      DwarfStar (ds4)
+                      {ds4TabLabel}
                     </button>{' '}
                     tab.
                   </p>
@@ -3366,24 +3333,29 @@ export function SettingsView() {
 
         {section === 'llamaCpp' && (
           <section className="provider-card">
-            <LlamaCppSettings config={config} onConfigChanged={setConfig} health={health} />
+            <LlamaCppSettings
+              config={config}
+              onConfigChanged={setConfig}
+              health={health}
+              title={llamaCppTabLabel}
+            />
           </section>
         )}
 
         {section === 'ds4' && (
           <section className="provider-card">
-            <Ds4Settings config={config} onConfigChanged={setConfig} health={health} />
+            <Ds4Settings
+              config={config}
+              onConfigChanged={setConfig}
+              health={health}
+              title={ds4TabLabel}
+            />
           </section>
         )}
 
         {section === 'mlx' && (
           <section className="provider-card">
-            <MlxSettings
-              config={config}
-              onConfigChanged={setConfig}
-              showLlamaCpp={showLlamaCppOnMac}
-              onShowLlamaCppChange={setShowLlamaCppOnMac}
-            />
+            <MlxSettings config={config} onConfigChanged={setConfig} />
           </section>
         )}
 

@@ -955,16 +955,17 @@ describe('TaskScheduler — ambient project nudges', () => {
   });
 
   it('grace period only applies to the very first nudge — subsequent nudges follow normal cadence', async () => {
-    // Same young (10-min-old) project, but it has already received a
-    // nudge in the past. The grace guard is a one-shot — once
-    // `lastNudgedAt` is set, normal rapid/slow cadence takes over.
+    // The project is still inside the 10-minute first-nudge grace, but it
+    // has already received a nudge. The grace guard is a one-shot — once
+    // `lastNudgedAt` is set, its configured rapid/slow cadence takes over.
     const now = new Date('2026-05-01T12:00:00Z');
     await setupProject({
       voormanGezelId: 'leo',
       meesterGezelId: 'meester-1',
-      createdAt: new Date(now.getTime() - 10 * 60_000).toISOString(),
+      createdAt: new Date(now.getTime() - 9 * 60_000).toISOString(),
       updatedAt: new Date(now.getTime() - 5 * 60_000).toISOString(),
       lastNudgedAt: new Date(now.getTime() - 6 * 60_000).toISOString(), // 6 min ago, > 5 min rapid interval
+      nudgeConfig: { rapidIntervalMs: 5 * 60_000 },
     });
     const chat = fakeChat();
     const scheduler = new TaskScheduler({
@@ -1087,6 +1088,7 @@ describe('TaskScheduler — ambient project nudges', () => {
       updatedAt: new Date(now.getTime() - 2 * 60_000).toISOString(),
       lastNudgedAt: new Date(now.getTime() - 10 * 60_000).toISOString(),
       consecutiveRapidNudges: 3,
+      nudgeConfig: { rapidIntervalMs: 5 * 60_000 },
     });
     const chat = fakeChat();
     const scheduler = new TaskScheduler({

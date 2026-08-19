@@ -9,8 +9,6 @@ import { MlxModelManager } from '../components/MlxModelManager.js';
 interface Props {
   config: ConfigResponse | null;
   onConfigChanged: (cfg: ConfigResponse) => void;
-  showLlamaCpp?: boolean;
-  onShowLlamaCppChange?: (next: boolean) => void;
 }
 
 const IS_APPLE_SILICON =
@@ -27,15 +25,9 @@ const IS_APPLE_SILICON =
  * delegated to MlxModelManager so the UX stays in lockstep with the
  * llama.cpp and Ollama managers; this component owns only the
  * MLX-specific surfaces (Python-runtime status, external mlx_lm.server
- * URL, override model directory, mlx-lm package pin, and the
- * "show llama.cpp" escape hatch).
+ * URL, override model directory, and mlx-lm package pin).
  */
-export function MlxSettings({
-  config,
-  onConfigChanged,
-  showLlamaCpp,
-  onShowLlamaCppChange,
-}: Props) {
+export function MlxSettings({ config, onConfigChanged }: Props) {
   const [baseUrlDraft, setBaseUrlDraft] = useState(config?.mlxBaseUrl ?? '');
   const [modelPathDraft, setModelPathDraft] = useState(config?.mlxModelPath ?? '');
   const [packageSpecDraft, setPackageSpecDraft] = useState(config?.mlxPackageSpec ?? '');
@@ -149,7 +141,7 @@ export function MlxSettings({
   return (
     <div>
       <section style={{ marginBottom: '2rem' }}>
-        <h3>This Mac</h3>
+        <h3>This Mac (Apple MLX)</h3>
         <p className="muted" style={{ marginTop: 0 }}>
           On-device AI powered by Apple's MLX framework.
         </p>
@@ -219,30 +211,6 @@ export function MlxSettings({
         <summary style={{ cursor: 'pointer' }}>
           <strong>Advanced</strong>
         </summary>
-
-        {onShowLlamaCppChange && (
-          <section style={{ marginTop: '1rem' }}>
-            <label
-              className="new-row"
-              style={{ alignItems: 'flex-start', gap: '0.6rem', cursor: 'pointer' }}
-            >
-              <input
-                type="checkbox"
-                checked={Boolean(showLlamaCpp)}
-                onChange={(e) => onShowLlamaCppChange(e.target.checked)}
-                style={{ marginTop: '0.25rem' }}
-              />
-              <span>
-                <strong>Show llama local device processing</strong>
-                <div className="muted small">
-                  Reveals an additional "On-device (llama)" provider option and its settings tab.
-                  Use this as a fallback when MLX isn't a fit — for example, Intel Macs or models
-                  that only ship in GGUF.
-                </div>
-              </span>
-            </label>
-          </section>
-        )}
 
         <section style={{ marginTop: '1.25rem' }}>
           <h4 style={{ marginBottom: '0.35rem' }}>Python runtime</h4>
