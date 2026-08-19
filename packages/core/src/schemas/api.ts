@@ -2087,7 +2087,7 @@ export const GezelConfigSchema = z.object({
    * Global defaults for ambient voorman nudges on active projects. Each
    * project can override any of these via `project.nudgeConfig`. Defaults
    * applied when unset (see `packages/service/src/tasks/scheduler.ts`):
-   *   rapidIntervalMs:            5 * 60_000      (5 min)
+   *   rapidIntervalMs:            20 * 60_000     (20 min)
    *   slowIntervalMs:             6 * 60 * 60_000 (6 h)
    *   recentActivityWindowMs:     60 * 60_000     (1 h)
    *   rapidAttemptsBeforeBackoff: 3

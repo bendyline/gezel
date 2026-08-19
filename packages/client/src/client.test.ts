@@ -157,6 +157,46 @@ describe('GezelClient model bundle export', () => {
   });
 });
 
+describe('GezelClient model bundle import', () => {
+  it('reports scan progress and forwards the scan identity and cancellation signal', async () => {
+    const controller = new AbortController();
+    const scanId = '11111111-1111-4111-8111-111111111111';
+    const progress: Array<import('@bendyline/gezel').GezmodelImportProgress> = [];
+    let progressPolls = 0;
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      if (href.endsWith(`/imports/${scanId}/progress`)) {
+        progressPolls += 1;
+        if (progressPolls === 1) {
+          return Response.json({
+            status: 'active',
+            progress: { phase: 'verifying', bytesCompleted: 40, bytesTotal: 100 },
+          });
+        }
+        return Response.json({ status: 'complete', review: { importId: scanId } });
+      }
+      expect(href).toBe('http://test/api/model-bundles/imports/scan');
+      expect(init?.signal).toBe(controller.signal);
+      expect(new Headers(init?.headers).get('X-Gezel-Import-Id')).toBe(scanId);
+      expect(new Headers(init?.headers).get('X-Gezel-Upload-Bytes')).toBe('100');
+      expect(new Headers(init?.headers).get('Prefer')).toBe('respond-async');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      return Response.json({ importId: scanId }, { status: 202 });
+    }) as unknown as typeof fetch;
+    const client = new GezelClient({ baseUrl: 'http://test', token: 't', fetch: fetchImpl });
+
+    await client.scanModelBundle(new Uint8Array([1, 2, 3]), {
+      scanId,
+      totalBytes: 100,
+      signal: controller.signal,
+      onProgress: (next) => progress.push(next),
+    });
+
+    expect(progress[0]).toEqual({ phase: 'receiving', bytesCompleted: 0, bytesTotal: 100 });
+    expect(progress).toContainEqual({ phase: 'verifying', bytesCompleted: 40, bytesTotal: 100 });
+  });
+});
+
 describe('GezelClient shared model migration', () => {
   it('uses the typed candidate and move endpoints', async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {

@@ -43,6 +43,7 @@ async function fixture() {
       id: 'coder.gguf',
       name: 'Local Coder',
       supportsTools: true,
+      supportsReasoning: true,
       contextWindow: 16_384,
     },
   ];
@@ -94,16 +95,20 @@ describe('VSCodeSetupManager', () => {
       apiKey: string;
       models: Array<Record<string, unknown>>;
     };
+    const record = f.tokenStore.list().find((entry) => entry.appId === VSCODE_SETUP_APP_ID);
     expect(provider.models).toEqual([
       expect.objectContaining({
         id: 'llama-cpp:coder.gguf',
         url: 'http://127.0.0.1:23456/v1/chat/completions',
+        requestHeaders: {
+          Authorization: `Bearer ${record?.token}`,
+        },
         toolCalling: true,
+        thinking: true,
         maxInputTokens: 12_288,
         maxOutputTokens: 4_096,
       }),
     ]);
-    const record = f.tokenStore.list().find((entry) => entry.appId === VSCODE_SETUP_APP_ID);
     expect(record?.scopes).toEqual(['openai']);
     expect(provider.apiKey).toBe(record?.token);
   });

@@ -144,25 +144,13 @@ describe('MlxSettings', () => {
     });
   });
 
-  it('the show-llamaCpp checkbox is wired to onShowLlamaCppChange', async () => {
-    const onShowLlamaCppChange = vi.fn();
-    render(
-      <MlxSettings
-        config={BASE_CONFIG}
-        onConfigChanged={vi.fn()}
-        showLlamaCpp={false}
-        onShowLlamaCppChange={onShowLlamaCppChange}
-      />,
-    );
-    await waitFor(() => {
-      expect(screen.getByText(/Show llama local device processing/)).toBeInTheDocument();
-    });
+  it('identifies the Apple MLX engine in its heading', async () => {
+    render(<MlxSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} />);
 
-    const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
-    const user = userEvent.setup();
-    await user.click(checkbox);
-
-    expect(onShowLlamaCppChange).toHaveBeenCalledWith(true);
+    expect(
+      await screen.findByRole('heading', { name: 'This Mac (Apple MLX)' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Show llama local device processing/)).not.toBeInTheDocument();
   });
 
   it('renders the cache controls panel for mlx', async () => {

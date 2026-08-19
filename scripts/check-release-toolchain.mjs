@@ -71,6 +71,7 @@ for (const relativePath of [
   'scripts/format-release-manifest.mjs',
   'scripts/publish-package.mjs',
   'scripts/release-package-state.mjs',
+  'scripts/pnpm-cli.mjs',
   'scripts/workspace-dependencies.mjs',
   'scripts/check-workspace-dependencies.mjs',
   'scripts/rehearse-npm-release.mjs',
@@ -81,6 +82,26 @@ for (const relativePath of [
     readFileSync(path);
   } catch {
     failures.push(`missing ${path} — required by the npm release dependency/version boundary`);
+  }
+}
+
+for (const relativePath of [
+  'scripts/prepare-package.mjs',
+  'scripts/rehearse-npm-release.mjs',
+  'scripts/publish-package.mjs',
+]) {
+  try {
+    const source = readFileSync(resolve(repoRoot, relativePath), 'utf8');
+    if (!source.includes('spawnPnpmSync')) {
+      failures.push(`${relativePath} must use the cross-platform synchronous pnpm launcher`);
+    }
+    if (/spawnSync\(\s*['"]pnpm['"]/.test(source)) {
+      failures.push(
+        `${relativePath} must not spawn the Windows pnpm.cmd shim as a bare executable`,
+      );
+    }
+  } catch (err) {
+    failures.push(`could not validate pnpm spawning in ${relativePath}: ${err.message}`);
   }
 }
 

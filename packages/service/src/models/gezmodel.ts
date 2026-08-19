@@ -12,6 +12,7 @@ import {
   GezmodelBundleManifestSchema,
   type GezmodelEngine,
   type GezmodelFile,
+  type GezmodelImportProgress,
   type GezmodelImportReview,
   GezmodelImportReviewSchema,
 } from '@bendyline/gezel';
@@ -31,6 +32,7 @@ const MAX_ENTRY_UNCOMPRESSED_BYTES = 2 * 1024 ** 4;
 const MAX_COMPRESSION_RATIO = 200;
 const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
 const IMPORT_TTL_MS = 24 * 60 * 60_000;
+const SCAN_YIELD_BYTES = 16 * 1024 * 1024;
 const BLOCKED_EXTENSIONS = new Set([
   '.app',
   '.bat',
@@ -77,6 +79,14 @@ export interface GezmodelExport {
   stream: NodeJS.ReadableStream;
   filename: string;
   manifest: GezmodelBundleManifest;
+}
+
+export interface GezmodelScanOptions {
+  importId?: string;
+  bytesTotal?: number;
+  signal?: AbortSignal;
+  onProgress?: (progress: GezmodelImportProgress) => void;
+  onUploadComplete?: () => void;
 }
 
 export class GezmodelManager {
@@ -226,15 +236,22 @@ export class GezmodelManager {
    * central directory, extract through hash-verifying streams, then return a
    * review token. No engine directory is touched here.
    */
-  async scanUpload(input: Readable): Promise<GezmodelImportReview> {
+  async scanUpload(input: Readable, opts: GezmodelScanOptions = {}): Promise<GezmodelImportReview> {
     await mkdir(this.importsRoot, { recursive: true });
     await this.cleanupExpired();
-    const importId = randomUUID();
-    const stage = join(this.importsRoot, importId);
+    const importId = opts.importId ?? randomUUID();
+    const stage = this.stagePath(importId);
     const archivePath = join(stage, 'bundle.gezmodel');
     await mkdir(stage, { recursive: true });
     try {
+      opts.signal?.throwIfAborted();
       let uploaded = 0;
+      opts.onProgress?.({
+        phase: 'receiving',
+        bytesCompleted: 0,
+        ...(opts.bytesTotal === undefined ? {} : { bytesTotal: opts.bytesTotal }),
+      });
+      let uploadedSinceYield = 0;
       const limiter = new Transform({
         transform(chunk: Buffer, _encoding, callback) {
           uploaded += chunk.byteLength;
@@ -242,12 +259,28 @@ export class GezmodelManager {
             callback(new Error('model bundle exceeds the 2 TiB archive limit'));
             return;
           }
+          opts.onProgress?.({
+            phase: 'receiving',
+            bytesCompleted: uploaded,
+            ...(opts.bytesTotal === undefined ? {} : { bytesTotal: opts.bytesTotal }),
+          });
+          uploadedSinceYield += chunk.byteLength;
+          if (uploadedSinceYield >= SCAN_YIELD_BYTES) {
+            uploadedSinceYield = 0;
+            setImmediate(callback, null, chunk);
+            return;
+          }
           callback(null, chunk);
         },
       });
-      await pipeline(input, limiter, createWriteStream(archivePath, { flags: 'wx' }));
+      const archiveWriter = createWriteStream(archivePath, { flags: 'wx' });
+      if (opts.signal) await pipeline(input, limiter, archiveWriter, { signal: opts.signal });
+      else await pipeline(input, limiter, archiveWriter);
+      opts.onUploadComplete?.();
 
-      const entries = await inspectArchive(archivePath);
+      opts.signal?.throwIfAborted();
+      opts.onProgress?.({ phase: 'inspecting' });
+      const entries = await inspectArchive(archivePath, opts.signal);
       const root = entries.get('manifest.json');
       if (!root) throw new Error('not a .gezmodel bundle: root manifest.json is missing');
       if (root.entry.uncompressedSize > MAX_MANIFEST_BYTES) {
@@ -255,14 +288,24 @@ export class GezmodelManager {
       }
       const manifest = GezmodelBundleManifestSchema.parse(
         JSON.parse(
-          (await readZipEntry(archivePath, root.entry, MAX_MANIFEST_BYTES)).toString('utf8'),
+          (await readZipEntry(archivePath, root.entry, MAX_MANIFEST_BYTES, opts.signal)).toString(
+            'utf8',
+          ),
         ),
       );
       validateEntryTable(manifest, entries);
 
       const extractedRoot = join(stage, 'extracted');
       await mkdir(extractedRoot, { recursive: true });
-      await extractVerified(archivePath, entries, manifest, extractedRoot);
+      const bytesTotal = manifest.files.reduce((sum, file) => sum + file.sizeBytes, 0);
+      let bytesCompleted = 0;
+      opts.onProgress?.({ phase: 'verifying', bytesCompleted, bytesTotal });
+      await extractVerified(archivePath, entries, manifest, extractedRoot, opts.signal, (bytes) => {
+        bytesCompleted += bytes;
+        opts.onProgress?.({ phase: 'verifying', bytesCompleted, bytesTotal });
+      });
+      opts.signal?.throwIfAborted();
+      opts.onProgress?.({ phase: 'validating' });
       const installedManifest = await readJsonObject(
         join(extractedRoot, 'manifests', 'installed.json'),
       );
@@ -280,7 +323,9 @@ export class GezmodelManager {
         throw new Error('installed manifest identity does not match the bundle manifest');
       }
       await validateRawCatalogFiles(extractedRoot, manifest);
+      opts.signal?.throwIfAborted();
       await validateModelPayload(join(extractedRoot, 'model'), manifest);
+      opts.signal?.throwIfAborted();
       await rm(archivePath, { force: true });
 
       const alreadyInstalled = Boolean(await this.owner(manifest.engine).resolveModel(manifest.id));
@@ -399,8 +444,9 @@ function portableFilename(id: string): string {
   return id.replace(/[^a-z0-9._-]+/gi, '-').replace(/^[.-]+/, '') || 'model';
 }
 
-function inspectArchive(path: string): Promise<Map<string, ScannedEntry>> {
+function inspectArchive(path: string, signal?: AbortSignal): Promise<Map<string, ScannedEntry>> {
   return new Promise((resolve, reject) => {
+    signal?.throwIfAborted();
     yauzl.open(
       path,
       { lazyEntries: true, decodeStrings: true, validateEntrySizes: true },
@@ -415,15 +461,21 @@ function inspectArchive(path: string): Promise<Map<string, ScannedEntry>> {
         let totalUncompressed = 0;
         let count = 0;
         let settled = false;
+        const cleanup = () => signal?.removeEventListener('abort', abort);
         const fail = (error: Error) => {
           if (settled) return;
           settled = true;
+          cleanup();
           zip.close();
           reject(error);
         };
+        const abort = () => fail(abortReason(signal));
+        signal?.addEventListener('abort', abort, { once: true });
+        if (signal?.aborted) return abort();
         zip.on('error', fail);
         zip.on('entry', (entry) => {
           try {
+            signal?.throwIfAborted();
             count += 1;
             if (count > MAX_ENTRIES)
               throw new Error(`archive has more than ${MAX_ENTRIES} entries`);
@@ -461,10 +513,12 @@ function inspectArchive(path: string): Promise<Map<string, ScannedEntry>> {
             totalUncompressed / Math.max(totalCompressed, 1) > MAX_COMPRESSION_RATIO
           ) {
             settled = true;
+            cleanup();
             reject(new Error(`archive compression ratio exceeds ${MAX_COMPRESSION_RATIO}:1`));
             return;
           }
           settled = true;
+          cleanup();
           resolve(entries);
         });
         zip.readEntry();
@@ -473,22 +527,34 @@ function inspectArchive(path: string): Promise<Map<string, ScannedEntry>> {
   });
 }
 
-function readZipEntry(path: string, wanted: yauzl.Entry, maxBytes: number): Promise<Buffer> {
+function readZipEntry(
+  path: string,
+  wanted: yauzl.Entry,
+  maxBytes: number,
+  signal?: AbortSignal,
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
+    signal?.throwIfAborted();
     yauzl.open(
       path,
       { lazyEntries: true, decodeStrings: true, validateEntrySizes: true },
       (err, zip) => {
         if (err || !zip) return reject(err ?? new Error('could not open ZIP'));
         let settled = false;
+        const cleanup = () => signal?.removeEventListener('abort', abort);
         const fail = (error: unknown) => {
           if (settled) return;
           settled = true;
+          cleanup();
           zip.close();
           reject(error instanceof Error ? error : new Error(String(error)));
         };
+        const abort = () => fail(abortReason(signal));
+        signal?.addEventListener('abort', abort, { once: true });
+        if (signal?.aborted) return abort();
         zip.on('error', fail);
         zip.on('entry', (entry) => {
+          if (signal?.aborted) return fail(abortReason(signal));
           if (entry.fileName !== wanted.fileName) {
             zip.readEntry();
             return;
@@ -507,6 +573,7 @@ function readZipEntry(path: string, wanted: yauzl.Entry, maxBytes: number): Prom
             stream.on('end', () => {
               if (settled) return;
               settled = true;
+              cleanup();
               zip.close();
               resolve(Buffer.concat(chunks));
             });
@@ -573,14 +640,17 @@ async function extractVerified(
   entries: Map<string, ScannedEntry>,
   manifest: GezmodelBundleManifest,
   extractedRoot: string,
+  signal?: AbortSignal,
+  onBytes?: (bytes: number) => void,
 ): Promise<void> {
   for (const file of manifest.files) {
+    signal?.throwIfAborted();
     const scanned = entries.get(file.path);
     if (!scanned) throw new Error(`missing ZIP entry: ${file.path}`);
     const dest = safeJoin(extractedRoot, file.path);
     if (!dest) throw new Error(`unsafe extraction path: ${file.path}`);
     await mkdir(dirname(dest), { recursive: true });
-    await extractOne(archivePath, scanned.entry, dest, file);
+    await extractOne(archivePath, scanned.entry, dest, file, signal, onBytes);
   }
 }
 
@@ -589,22 +659,31 @@ function extractOne(
   wanted: yauzl.Entry,
   dest: string,
   expected: GezmodelFile,
+  signal?: AbortSignal,
+  onBytes?: (bytes: number) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    signal?.throwIfAborted();
     yauzl.open(
       archivePath,
       { lazyEntries: true, decodeStrings: true, validateEntrySizes: true },
       (err, zip) => {
         if (err || !zip) return reject(err ?? new Error('could not open ZIP'));
         let settled = false;
+        const cleanup = () => signal?.removeEventListener('abort', abort);
         const fail = (error: unknown) => {
           if (settled) return;
           settled = true;
+          cleanup();
           zip.close();
           reject(error instanceof Error ? error : new Error(String(error)));
         };
+        const abort = () => fail(abortReason(signal));
+        signal?.addEventListener('abort', abort, { once: true });
+        if (signal?.aborted) return abort();
         zip.on('error', fail);
         zip.on('entry', (entry) => {
+          if (signal?.aborted) return fail(abortReason(signal));
           if (entry.fileName !== wanted.fileName) {
             zip.readEntry();
             return;
@@ -614,20 +693,32 @@ function extractOne(
               return fail(streamErr ?? new Error('could not read ZIP entry'));
             const hash = createHash('sha256');
             let bytes = 0;
+            let bytesSinceYield = 0;
             const verifier = new Transform({
               transform(chunk: Buffer, _encoding, callback) {
                 bytes += chunk.byteLength;
+                bytesSinceYield += chunk.byteLength;
                 hash.update(chunk);
+                onBytes?.(chunk.byteLength);
+                if (bytesSinceYield >= SCAN_YIELD_BYTES) {
+                  bytesSinceYield = 0;
+                  setImmediate(callback, null, chunk);
+                  return;
+                }
                 callback(null, chunk);
               },
             });
-            pipeline(stream, verifier, createWriteStream(dest, { flags: 'wx' }))
+            const extraction = signal
+              ? pipeline(stream, verifier, createWriteStream(dest, { flags: 'wx' }), { signal })
+              : pipeline(stream, verifier, createWriteStream(dest, { flags: 'wx' }));
+            extraction
               .then(() => {
                 if (bytes !== expected.sizeBytes || hash.digest('hex') !== expected.sha256) {
                   throw new Error(`checksum verification failed for ${expected.path}`);
                 }
                 if (settled) return;
                 settled = true;
+                cleanup();
                 zip.close();
                 resolve();
               })
@@ -639,6 +730,13 @@ function extractOne(
       },
     );
   });
+}
+
+function abortReason(signal?: AbortSignal): Error {
+  if (signal?.reason instanceof Error) return signal.reason;
+  const error = new Error('model bundle scan canceled');
+  error.name = 'AbortError';
+  return error;
 }
 
 async function verifyExtractedFiles(root: string, manifest: GezmodelBundleManifest): Promise<void> {

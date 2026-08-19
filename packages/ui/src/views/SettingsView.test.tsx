@@ -408,20 +408,46 @@ describe('SettingsView', () => {
     });
   });
 
-  it('uses llama as the user-facing engine name on Mac', async () => {
+  it('shows all local engine tabs with Mac-specific labels by default', async () => {
     window.__GEZEL__ = { ...window.__GEZEL__, token: 'test-token', platform: 'darwin' };
     vi.mocked(api.getConfig).mockResolvedValue({
-      provider: 'llama-cpp',
+      provider: 'mock',
+      ds4BaseUrl: 'http://127.0.0.1:58585',
       meesterGezelId: 'gz-meester',
       hasGithubToken: true,
     } as never);
 
     render(<SettingsView />);
 
-    expect(
-      (await screen.findAllByRole('button', { name: 'On-device (llama)' })).length,
-    ).toBeGreaterThan(0);
-    expect(screen.queryByText('On-device (llama.cpp)')).not.toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'This Mac (Apple MLX)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'This Mac (llama)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'This Mac (DwarfStar - DS4)' })).toBeInTheDocument();
+  });
+
+  it('uses the same Mac engine names in the default and Night Shift provider trays', async () => {
+    window.__GEZEL__ = { ...window.__GEZEL__, token: 'test-token', platform: 'darwin' };
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mlx',
+      ds4BaseUrl: 'http://127.0.0.1:58585',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+      nightShift: {
+        modelOverride: { enabled: true, provider: 'ds4', model: 'deepseek-v4-flash' },
+      },
+    } as never);
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Artificial Intelligence' }));
+
+    const expected = ['This Mac (Apple MLX)', 'This Mac (llama)', 'This Mac (DwarfStar - DS4)'];
+    const defaultTray = within(await screen.findByTestId('default-provider-switch'));
+    const nightShiftTray = within(
+      await screen.findByRole('radiogroup', { name: 'Night Shift provider' }),
+    );
+    for (const label of expected) {
+      expect(defaultTray.getByRole('button', { name: label })).toBeInTheDocument();
+      expect(nightShiftTray.getByRole('radio', { name: label })).toBeInTheDocument();
+    }
   });
 
   it('hides DwarfStar on Windows unless it has an external server or is selected', async () => {
@@ -433,7 +459,7 @@ describe('SettingsView', () => {
     } as never);
     const { unmount } = render(<SettingsView />);
     expect(
-      await screen.findByRole('button', { name: 'On-device (DwarfStar - DS4)' }),
+      await screen.findByRole('button', { name: 'This PC (DwarfStar - DS4)' }),
     ).toBeInTheDocument();
     unmount();
 
@@ -446,7 +472,7 @@ describe('SettingsView', () => {
     const windowsView = render(<SettingsView />);
     await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
     expect(
-      screen.queryByRole('button', { name: 'On-device (DwarfStar - DS4)' }),
+      screen.queryByRole('button', { name: 'This PC (DwarfStar - DS4)' }),
     ).not.toBeInTheDocument();
     windowsView.unmount();
 
@@ -457,7 +483,7 @@ describe('SettingsView', () => {
     } as never);
     render(<SettingsView />);
     expect(
-      await screen.findByRole('button', { name: 'On-device (DwarfStar - DS4)' }),
+      await screen.findByRole('button', { name: 'This PC (DwarfStar - DS4)' }),
     ).toBeInTheDocument();
   });
 

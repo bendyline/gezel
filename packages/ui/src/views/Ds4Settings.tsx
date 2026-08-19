@@ -5,6 +5,7 @@ import { api } from '../api.js';
 import { Ds4ModelManager } from '../components/Ds4ModelManager.js';
 import { useTotalRamBytes } from '../components/useTotalRamBytes.js';
 import { detectDs4Availability } from './ds4-availability.js';
+import { localEngineSettingsLabel } from './local-engine-label.js';
 
 interface Props {
   config: ConfigResponse | null;
@@ -15,6 +16,8 @@ interface Props {
    * guessing the device from `navigator`, which cannot see a GPU at all.
    */
   health?: HealthResponse | null;
+  /** Matches the platform-aware Settings navigation label. */
+  title?: string;
 }
 
 /**
@@ -26,7 +29,7 @@ interface Props {
  * service keeps SSD streaming on by default and rejects overrides that cannot
  * safely fit.
  */
-export function Ds4Settings({ config, health }: Props) {
+export function Ds4Settings({ config, health, title }: Props) {
   const totalRamBytes = useTotalRamBytes();
   const availability = detectDs4Availability({
     externalBaseUrl: config?.ds4BaseUrl,
@@ -40,7 +43,7 @@ export function Ds4Settings({ config, health }: Props) {
   return (
     <div>
       <section style={{ marginBottom: '2rem' }}>
-        <h3>On-device (DwarfStar - DS4)</h3>
+        <h3>{title ?? localEngineSettingsLabel('ds4', health?.platform)}</h3>
         <p className="muted" style={{ marginTop: 0 }}>
           DwarfStar (ds4) is an inference engine built for a handful of very large
           mixture-of-experts models — DeepSeek V4 and GLM 5.2. They may not fit in memory; DwarfStar

@@ -58,8 +58,9 @@ import { SHARED_ASSETS_ENV, modelStorageRoots } from '../models/storage-roots.js
  * gets classified once rather than three times inconsistently.
  *
  * The registry only *describes* paths. It never deletes, and it deliberately
- * marks rather than hides the paths that resolve outside the home directory
- * so the accounting stays honest while cleanup refuses to touch them.
+ * marks rather than hides paths that resolve outside the home directory so
+ * callers can explain why cleanup leaves them alone. Storage accounting does
+ * not traverse or include those external paths.
  */
 
 /** Engines with a per-engine model store under `engines/<engine>/models`. */
@@ -79,7 +80,7 @@ export interface StoragePathEntry {
   /**
    * True when the path resolves outside the home directory — an externalized
    * folder scope, a real project working directory, or the machine-shared
-   * root. Never deletable; counted so the totals still make sense.
+   * root. Never deletable and never included in storage totals.
    */
   external: boolean;
   /** Stable id for item-granular categories (a model id, gezel id, ...). */

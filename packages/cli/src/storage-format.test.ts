@@ -76,24 +76,25 @@ describe('formatStorageSummary', () => {
     expect(out).not.toContain('Downloaded models');
   });
 
-  it('calls out folders Gezel will never delete', () => {
+  it('calls out external folders without reporting a measured size', () => {
     const out = formatStorageSummary(
       summary({
-        userContentBytes: 900,
+        userContentBytes: 12,
         categories: [
           category({
             id: 'projects',
             class: 'user-content',
             label: 'Projects',
             description: 'Your projects.',
-            bytes: 900,
-            external: [{ path: '/Users/someone/code/repo', bytes: 900 }],
+            bytes: 12,
+            external: [{ path: '/Users/someone/code/repo', bytes: 0 }],
           }),
         ],
       }),
     );
-    expect(out).toContain('Stored outside the Gezel folder — never removed by Gezel:');
+    expect(out).toContain('Outside the Gezel folder — not measured or removed by Gezel:');
     expect(out).toContain('/Users/someone/code/repo');
+    expect(out).not.toContain('900 B');
   });
 });
 

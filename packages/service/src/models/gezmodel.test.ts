@@ -167,9 +167,28 @@ describe('.gezmodel bundles', () => {
         .some((entry) => /catalog\/chat-models\/.+\/manifest\.json$/.test(entry.entryName)),
     ).toBe(true);
 
-    const review = await bundles.scanUpload(Readable.from(bytes));
+    const progress: Array<import('@bendyline/gezel').GezmodelImportProgress> = [];
+    const uploadComplete = vi.fn();
+    const review = await bundles.scanUpload(Readable.from(bytes), {
+      bytesTotal: bytes.length,
+      onProgress: (next) => progress.push(next),
+      onUploadComplete: uploadComplete,
+    });
     expect(review.manifest.id).toBe(catalog.id);
     expect(review.alreadyInstalled).toBe(false);
+    expect(uploadComplete).toHaveBeenCalledOnce();
+    expect(progress.map((next) => next.phase)).toEqual(
+      expect.arrayContaining(['receiving', 'inspecting', 'verifying', 'validating']),
+    );
+    expect([...progress].reverse().find((next) => next.phase === 'receiving')).toMatchObject({
+      bytesCompleted: bytes.length,
+      bytesTotal: bytes.length,
+    });
+    const verified = [...progress].reverse().find((next) => next.phase === 'verifying');
+    expect(verified).toMatchObject({ phase: 'verifying' });
+    if (verified?.phase === 'verifying') {
+      expect(verified.bytesCompleted).toBe(verified.bytesTotal);
+    }
     await expect(
       access(join(home, '.transactions', 'gezmodel-imports', review.importId, 'bundle.gezmodel')),
     ).rejects.toThrow();
@@ -178,6 +197,44 @@ describe('.gezmodel bundles', () => {
       id: catalog.id,
     });
     expect(owner.importModelBundle).toHaveBeenCalledOnce();
+  });
+
+  it('aborts an active scan and removes its private staging directory', async () => {
+    const bytes = await makeMlxBundle();
+    const importId = '11111111-1111-4111-8111-111111111111';
+    const controller = new AbortController();
+    let releaseUpload!: () => void;
+    const uploadPaused = new Promise<void>((resolve) => {
+      releaseUpload = resolve;
+    });
+    let receivedFirstChunk!: () => void;
+    const firstChunkReceived = new Promise<void>((resolve) => {
+      receivedFirstChunk = resolve;
+    });
+    async function* slowUpload() {
+      yield bytes.subarray(0, 32);
+      await uploadPaused;
+      yield bytes.subarray(32);
+    }
+
+    const scan = manager(fakeOwner()).scanUpload(Readable.from(slowUpload()), {
+      importId,
+      bytesTotal: bytes.length,
+      signal: controller.signal,
+      onProgress: (progress) => {
+        if (progress.phase === 'receiving' && progress.bytesCompleted > 0) {
+          receivedFirstChunk();
+        }
+      },
+    });
+    await firstChunkReceived;
+    controller.abort();
+    releaseUpload();
+
+    await expect(scan).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(
+      access(join(home, '.transactions', 'gezmodel-imports', importId)),
+    ).rejects.toThrow();
   });
 
   it('requires a separate replacement confirmation for an installed model', async () => {

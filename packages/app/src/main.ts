@@ -22,6 +22,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import {
   type FatalProcessErrorSource,
+  type GezmodelImportProgress,
   type ReferenceFileLocationRequest,
   ReferenceFileLocationRequestSchema,
   installProcessErrorHandlers,
@@ -116,6 +117,10 @@ let trayActivityAbort: AbortController | null = null;
 // rebuilt whenever the supervisor rotates the token/cert on restart.
 let apiClient: GezelClient | null = null;
 const activeModelBundleExports = new Map<
+  string,
+  { controller: AbortController; webContentsId: number }
+>();
+const activeModelBundleImports = new Map<
   string,
   { controller: AbortController; webContentsId: number }
 >();
@@ -1465,20 +1470,74 @@ ipcMain.handle(
 ipcMain.handle(
   'gezel:scan-opened-model-bundle',
   async (
-    _event,
-    requestId: string,
+    event,
+    args: { requestId?: string; scanId?: string },
   ): Promise<
     | { ok: true; review: Awaited<ReturnType<GezelClient['scanModelBundle']>> }
+    | { ok: true; canceled: true }
     | { ok: false; error: string }
   > => {
-    if (!apiClient) return { ok: false, error: 'service is unavailable' };
-    const opened = openedModelBundles.get(requestId);
+    const client = apiClient;
+    if (!client) return { ok: false, error: 'service is unavailable' };
+    if (!args?.scanId || !/^[0-9a-f-]{36}$/i.test(args.scanId)) {
+      return { ok: false, error: 'model bundle scan request is invalid' };
+    }
+    const opened = args.requestId ? openedModelBundles.get(args.requestId) : undefined;
     if (!opened) return { ok: false, error: 'model bundle open request is invalid or expired' };
-    openedModelBundles.delete(requestId);
+    if (activeModelBundleImports.has(args.scanId)) {
+      return { ok: false, error: 'model bundle scan request is already active' };
+    }
+    openedModelBundles.delete(args.requestId!);
+    const controller = new AbortController();
+    const activeImport = { controller, webContentsId: event.sender.id };
+    activeModelBundleImports.set(args.scanId, activeImport);
+    const abortOnRendererClose = () => controller.abort();
+    event.sender.once('destroyed', abortOnRendererClose);
     try {
+      const info = await stat(opened.path);
       const stream = Readable.toWeb(createReadStream(opened.path)) as ReadableStream<Uint8Array>;
-      return { ok: true, review: await apiClient.scanModelBundle(stream) };
+      const publishProgress = (progress: GezmodelImportProgress) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('gezel:model-bundle-import-progress', {
+            scanId: args.scanId,
+            filename: opened.filename,
+            ...progress,
+          });
+        }
+      };
+      const review = await client.scanModelBundle(stream, {
+        scanId: args.scanId,
+        totalBytes: info.size,
+        signal: controller.signal,
+        onProgress: publishProgress,
+      });
+      return { ok: true, review };
     } catch (err) {
+      if (controller.signal.aborted) return { ok: true, canceled: true };
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      event.sender.removeListener('destroyed', abortOnRendererClose);
+      if (activeModelBundleImports.get(args.scanId) === activeImport) {
+        activeModelBundleImports.delete(args.scanId);
+      }
+    }
+  },
+);
+
+ipcMain.handle(
+  'gezel:cancel-model-bundle-import',
+  async (event, scanId?: string): Promise<{ ok: true } | { ok: false; error: string }> => {
+    if (!scanId || !/^[0-9a-f-]{36}$/i.test(scanId)) {
+      return { ok: false, error: 'invalid model bundle import cancellation request' };
+    }
+    const active = activeModelBundleImports.get(scanId);
+    if (!active || active.webContentsId !== event.sender.id) return { ok: true };
+    try {
+      await apiClient?.cancelModelBundleImport(scanId);
+      active.controller.abort();
+      return { ok: true };
+    } catch (err) {
+      active.controller.abort();
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   },

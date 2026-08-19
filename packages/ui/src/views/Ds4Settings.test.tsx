@@ -37,9 +37,7 @@ describe('Ds4Settings', () => {
       <Ds4Settings config={{ provider: 'ds4' } as ConfigResponse} onConfigChanged={vi.fn()} />,
     );
 
-    expect(
-      screen.getByRole('heading', { name: 'On-device (DwarfStar - DS4)' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'This PC (DwarfStar - DS4)' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'DwarfStar models' })).toBeInTheDocument();
     expect(screen.getByText(/engine available · metal/i)).toBeInTheDocument();
     expect(screen.getByText(/SSD streaming stays on automatically/i)).toBeInTheDocument();

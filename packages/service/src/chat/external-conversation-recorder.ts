@@ -12,6 +12,7 @@ import type {
 import { redactCredentials } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { ChatEventBus, PublishScope } from './events.js';
+import { externalUserMessageForDisplay } from './external-message-display.js';
 
 const DEFAULT_PROJECT_ID = 'default';
 const MAX_TOOL_RESULT_CHARS = 12_000;
@@ -50,6 +51,14 @@ export interface BeginExternalConversationInput {
   toolNames: string[];
   /** Receipt block injected into the model-facing final tool result, when any. */
   actionLedger?: string;
+}
+
+export interface ResolveExternalConversationInput {
+  sourceId: string;
+  gezelId: string;
+  messages: ExternalTranscriptMessage[];
+  /** Unique id for a genuinely new thread, normally the caller's request id. */
+  fallbackExternalConversationId: string;
 }
 
 export interface ExternalConversationFinish {
@@ -126,13 +135,49 @@ export class ExternalConversationRecorder {
     this.now = opts.now ?? (() => new Date());
   }
 
+  /**
+   * Recover conversation affinity for clients that send the authoritative
+   * transcript but no stable thread id (VS Code's native Custom Endpoint is
+   * the current example).
+   *
+   * A prior external thread is reused only when every durable message in it
+   * is an exact prefix of the incoming transcript. This continues tool rounds
+   * and later user turns, while a new/branched chat whose transcript is
+   * shorter or diverges receives the caller's fresh fallback id.
+   */
+  async resolveConversationId(input: ResolveExternalConversationInput): Promise<string> {
+    const authoritative = normalizeTranscript(input.messages, input.sourceId).messages;
+    if (!authoritative.some((message) => message.role === 'user')) {
+      return input.fallbackExternalConversationId;
+    }
+
+    const summaries = await this.opts.store.listSessions({ gezelId: input.gezelId });
+    let best: { externalConversationId: string; messageCount: number } | null = null;
+    for (const summary of summaries) {
+      const source = summary.source;
+      if (source?.kind !== 'external' || source.appId !== input.sourceId) continue;
+      const record = await this.opts.store.getSession(input.gezelId, summary.id);
+      if (!record || !record.messages.some((message) => message.role === 'user')) continue;
+      const existing = normalizeStoredMessagesForSource(record.messages, input.sourceId);
+      if (existing.length > authoritative.length) continue;
+      if (commonPrefixLength(existing, authoritative) !== existing.length) continue;
+      if (!best || existing.length > best.messageCount) {
+        best = {
+          externalConversationId: source.externalConversationId,
+          messageCount: existing.length,
+        };
+      }
+    }
+    return best?.externalConversationId ?? input.fallbackExternalConversationId;
+  }
+
   async begin(input: BeginExternalConversationInput): Promise<ExternalConversationTurn> {
     const sessionId = externalSessionId(
       input.sourceId,
       input.externalConversationId,
       input.gezelId,
     );
-    const normalized = normalizeTranscript(input.messages);
+    const normalized = normalizeTranscript(input.messages, input.sourceId);
     const turnKey = externalTurnKey(input.messages);
     const state = await this.withLock(sessionId, async () => {
       let record = await this.opts.store.getSession(input.gezelId, sessionId);
@@ -157,7 +202,7 @@ export class ExternalConversationRecorder {
           projectId,
           providerName: input.providerName,
           ...(input.model ? { model: input.model } : {}),
-          title: externalThreadTitle(input.messages, input.sourceName),
+          title: externalThreadTitle(normalized.messages, input.sourceName),
           createdAt,
           lastActivityAt: createdAt,
           source,
@@ -175,6 +220,11 @@ export class ExternalConversationRecorder {
       ) {
         throw new Error(`External conversation session collision for ${sessionId}`);
       }
+
+      // Recompute from the normalized first request. Besides keeping titles
+      // aligned with the visible transcript, this repairs VS Code mirrors
+      // created before its XML-like prompt envelope was unwrapped.
+      record.title = externalThreadTitle(normalized.messages, input.sourceName);
 
       let draft = this.drafts.get(sessionId);
       if (
@@ -197,8 +247,9 @@ export class ExternalConversationRecorder {
       // arrives. Otherwise every reconciliation refresh produces another
       // bubble (and empty rounds render as "No written response").
       const authoritative = normalized.messages;
-      const common = commonPrefixLength(record.messages, authoritative);
-      const nextMessages = record.messages.slice(0, common);
+      const storedMessages = normalizeStoredMessagesForSource(record.messages, input.sourceId);
+      const common = commonPrefixLength(storedMessages, authoritative);
+      const nextMessages = storedMessages.slice(0, common);
       let nextAt = nextTimestamp(nextMessages.at(-1)?.at, this.now().getTime());
       for (let i = common; i < authoritative.length; i++) {
         const draft = authoritative[i]!;
@@ -252,7 +303,7 @@ export class ExternalConversationRecorder {
 
     const nowMs = this.now().getTime();
     const existingActivity = this.active.get(sessionId);
-    const latestUserText = [...input.messages]
+    const latestUserText = [...normalized.messages]
       .reverse()
       .find((message) => message.role === 'user')?.content;
     this.active.set(sessionId, {
@@ -495,14 +546,20 @@ function normalizeWorkingDirectory(value: string | undefined): string | undefine
   return process.platform === 'win32' ? canonical.toLowerCase() : canonical;
 }
 
-function externalThreadTitle(messages: ExternalTranscriptMessage[], sourceName: string): string {
+function externalThreadTitle(
+  messages: Array<Pick<ExternalTranscriptMessage, 'role' | 'content'>>,
+  sourceName: string,
+): string {
   const firstUser = messages.find((message) => message.role === 'user')?.content.trim();
   if (!firstUser) return `${sourceName} conversation`;
   const oneLine = firstUser.replace(/\s+/g, ' ');
   return oneLine.length > 80 ? `${oneLine.slice(0, 77)}…` : oneLine;
 }
 
-function normalizeTranscript(messages: ExternalTranscriptMessage[]): NormalizedExternalTranscript {
+function normalizeTranscript(
+  messages: ExternalTranscriptMessage[],
+  sourceId: string,
+): NormalizedExternalTranscript {
   const toolResults = new Map<string, string>();
   for (const message of messages) {
     if (message.role === 'tool' && message.toolCallId) {
@@ -527,7 +584,8 @@ function normalizeTranscript(messages: ExternalTranscriptMessage[]): NormalizedE
       // Ordinary Pi traffic closes it with a non-tool assistant response,
       // but preserving the suffix here is safer than silently dropping it.
       commitAssistant();
-      normalized.push({ role: 'user', content: message.content });
+      const content = externalUserMessageForDisplay(sourceId, message.content);
+      if (content !== null) normalized.push({ role: 'user', content });
       continue;
     }
     if (message.role !== 'assistant') continue;
@@ -570,6 +628,23 @@ function normalizeTranscript(messages: ExternalTranscriptMessage[]): NormalizedE
     ...(assistant ? { openAssistant: assistant } : {}),
     openToolIds: assistantToolIds,
   };
+}
+
+function normalizeStoredMessagesForSource(
+  messages: ChatMessage[],
+  sourceId: string,
+): ChatMessage[] {
+  const normalized: ChatMessage[] = [];
+  for (const message of messages) {
+    if (message.role !== 'user') {
+      normalized.push(message);
+      continue;
+    }
+    const content = externalUserMessageForDisplay(sourceId, message.content);
+    if (content === null) continue;
+    normalized.push(content === message.content ? message : { ...message, content });
+  }
+  return normalized;
 }
 
 function externalTurnKey(messages: ExternalTranscriptMessage[]): string {

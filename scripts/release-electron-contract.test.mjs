@@ -74,16 +74,21 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   assert.match(windowsSmoke, /service-bundle\.tar\.gz/);
   assert.match(windowsSmoke, /service\/node_modules\/entities/);
   assert.match(windowsSmoke, /service\/node_modules\/parse5/);
-  assert.ok(
-    (workflow.match(/180(?:s| seconds)/g)?.length ?? 0) >= 2,
-    'macOS and Linux packaged smoke tests must have bounded timeouts',
+  const macosSmokeStart = workflow.indexOf('- name: Smoke-test packaged macOS app');
+  const macosSmokeEnd = workflow.indexOf(
+    '- name: Smoke-test macOS PKG install and recovery',
+    macosSmokeStart,
   );
+  const macosSmoke = workflow.slice(macosSmokeStart, macosSmokeEnd);
+  assert.match(macosSmoke, /deadline=\$\(\(SECONDS \+ 360\)\)/);
+  assert.match(macosSmoke, /timed out after 360 seconds/);
   const linuxSmokeStart = workflow.indexOf('- name: Smoke-test packaged Linux app');
   const linuxSmokeEnd = workflow.indexOf(
     '- name: Verify Linux installer legal payloads',
     linuxSmokeStart,
   );
   const linuxSmoke = workflow.slice(linuxSmokeStart, linuxSmokeEnd);
+  assert.match(linuxSmoke, /180s/);
   assert.match(linuxSmoke, /sudo apt-get install -y/);
   assert.match(linuxSmoke, /executable=\/opt\/Gezel\/gezel/);
   assert.doesNotMatch(

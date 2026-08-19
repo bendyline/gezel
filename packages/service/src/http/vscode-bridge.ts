@@ -23,6 +23,7 @@ const VSCODE_BRIDGE_IDENTITY: LocalBridgeIdentity = {
 };
 
 const log = createLogger(VSCODE_BRIDGE_IDENTITY.channel);
+const VSCODE_STREAM_KEEPALIVE_INTERVAL_MS = 15_000;
 
 /** Narrow OpenAI chat-completions surface for VS Code's built-in endpoint. */
 export function buildVSCodeBridgeApp(ctx: ServiceContext): Hono {
@@ -33,7 +34,24 @@ export function buildVSCodeBridgeApp(ctx: ServiceContext): Hono {
 
   mountAuthenticatedRoute(app, '/v1/chat', ctx);
   mountAuthenticatedRoute(app, '/v1/models', ctx);
-  app.route('/v1/chat', v1ChatRoutes(ctx));
+  app.route(
+    '/v1/chat',
+    v1ChatRoutes(ctx, {
+      // VS Code's Custom Endpoint parser recognizes reasoning_content when
+      // the generated model declares thinking support.
+      includeReasoning: true,
+      keepaliveIntervalMs: VSCODE_STREAM_KEEPALIVE_INTERVAL_MS,
+      externalConversation: {
+        sourceId: 'vscode',
+        sourceName: 'VS Code',
+        sessionIdHeaders: [],
+      },
+      // Native Custom Endpoint requests include the full transcript but no
+      // stable chat id. Recover affinity from the persisted transcript and
+      // use X-Request-Id only when this is a genuinely new thread.
+      inferConversationFromTranscript: true,
+    }),
+  );
   app.route('/v1/models', v1ModelsRoutes(ctx));
 
   app.all('*', (c) =>

@@ -60,7 +60,7 @@ export const StorageItemSchema = z.object({
   /**
    * True when this item resolves outside `~/.gezel` — an externalized folder
    * scope or a project pointed at a real working directory. Cleanup refuses
-   * these; the UI shows them so the accounting still adds up.
+   * these, and their bytes are not measured or included in storage totals.
    */
   external: z.boolean(),
   /** Set when the item cannot be deleted, explaining why. */
@@ -79,7 +79,7 @@ export const StorageCategorySchema = z.object({
   deletable: z.boolean(),
   /** Whether this category's content is written into a content backup. */
   inBackup: z.boolean(),
-  /** Paths resolved outside the home directory, with their sizes. */
+  /** Paths outside the home. Bytes are zero because storage accounting does not measure them. */
   external: z.array(z.object({ path: z.string(), bytes: z.number() })),
   /** Populated for item-granular categories (models, gezels, projects). */
   items: z.array(StorageItemSchema).optional(),
@@ -89,9 +89,9 @@ export type StorageCategory = z.infer<typeof StorageCategorySchema>;
 export const StorageSummarySchema = z.object({
   home: z.string(),
   categories: z.array(StorageCategorySchema),
-  /** Sum over `redownloadable` categories — the "safe to reclaim" headline. */
+  /** Sum over locally stored `redownloadable` categories — the "safe to reclaim" headline. */
   redownloadableBytes: z.number(),
-  /** Sum over `user-content` categories. */
+  /** Sum over `user-content` categories stored inside this Gezel home. */
   userContentBytes: z.number(),
   /** ISO timestamp of the walk these numbers came from. */
   measuredAt: z.string(),

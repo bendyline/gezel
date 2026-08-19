@@ -98,11 +98,13 @@ describe('VSCodeSetupCard', () => {
     render(<VSCodeSetupCard endpointsEnabled />);
 
     expect(await screen.findByText('Not configured')).toBeInTheDocument();
+    expect(screen.getByText(/Developer: Reload Window/)).toBeInTheDocument();
     fireEvent.change(screen.getByTestId('mock-select'), { target: { value: 'code:work' } });
     fireEvent.click(screen.getByRole('button', { name: 'Set up VS Code…' }));
     const dialog = screen.getByRole('alertdialog', { name: 'Set up VS Code with Gezel?' });
     expect(within(dialog).getByText(/plain text/)).toBeInTheDocument();
     expect(within(dialog).getByText(/inference-only/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/reload its window or restart it/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Set up VS Code' }));
 
     await waitFor(() => expect(configureVSCode).toHaveBeenCalledWith({ profileId: 'code:work' }));
@@ -162,5 +164,21 @@ describe('VSCodeSetupCard', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove setup' }));
 
     await waitFor(() => expect(removeVSCodeSetup).toHaveBeenCalledOnce());
+  });
+
+  it('omits the VS Code build hash from the configured summary', async () => {
+    getVSCodeSetupStatus.mockResolvedValue(
+      setupStatus({
+        state: 'configured',
+        configuredProfileId: 'code:default',
+        canRemove: true,
+        vscodeVersion: '1.133.0\na5b500951314efd502d07465bd138dfbd714a960\nx64',
+      }),
+    );
+
+    render(<VSCodeSetupCard endpointsEnabled />);
+
+    expect(await screen.findByText(/VS Code 1\.133\.0 x64 was found/)).toBeInTheDocument();
+    expect(screen.queryByText(/a5b500951314efd502d07465bd138dfbd714a960/)).not.toBeInTheDocument();
   });
 });

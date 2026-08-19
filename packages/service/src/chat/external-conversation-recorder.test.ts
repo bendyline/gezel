@@ -96,6 +96,147 @@ describe('ExternalConversationRecorder', () => {
     expect(ambiguousTurn.projectId).toBe('default');
   });
 
+  it('recovers transcript affinity for a client without stable conversation ids', async () => {
+    const recorder = new ExternalConversationRecorder({ store, events });
+    const firstMessages: ExternalTranscriptMessage[] = [
+      { role: 'user', content: 'Build a flight simulator.' },
+    ];
+    const first = await recorder.begin({
+      ...beginInput(firstMessages),
+      sourceId: 'vscode',
+      sourceName: 'VS Code',
+      externalConversationId: 'vscode-request-1',
+    });
+    await first.finish({ content: 'I built the simulator.', finishReason: 'stop' });
+
+    await expect(
+      recorder.resolveConversationId({
+        sourceId: 'vscode',
+        gezelId: 'sipho',
+        messages: [
+          ...firstMessages,
+          { role: 'assistant', content: 'I built the simulator.' },
+          { role: 'user', content: 'Add clouds.' },
+        ],
+        fallbackExternalConversationId: 'vscode-request-2',
+      }),
+    ).resolves.toBe('vscode-request-1');
+
+    // A shorter transcript is a new/branched chat, even if its opening
+    // prompt happens to be identical to a completed thread.
+    await expect(
+      recorder.resolveConversationId({
+        sourceId: 'vscode',
+        gezelId: 'sipho',
+        messages: firstMessages,
+        fallbackExternalConversationId: 'vscode-request-new-thread',
+      }),
+    ).resolves.toBe('vscode-request-new-thread');
+  });
+
+  it('shows only the VS Code user request and repairs a legacy raw-envelope mirror', async () => {
+    const recorder = new ExternalConversationRecorder({ store, events });
+    const contextOnly = `<environment_info>Windows</environment_info>
+<workspace_info>D:\\work\\flight</workspace_info>
+<userMemory>No saved preferences.</userMemory>`;
+    const wrappedRequest = `<context>The current date is 2026-08-18.</context>
+<reminderInstructions>Prefer the replace tool.</reminderInstructions>
+<userRequest>
+Build a 3D flight simulator.
+</userRequest>`;
+    const firstInput = {
+      ...beginInput([
+        { role: 'user' as const, content: contextOnly },
+        { role: 'user' as const, content: wrappedRequest },
+      ]),
+      sourceId: 'vscode',
+      sourceName: 'VS Code',
+      externalConversationId: 'vscode-wrapped-request-1',
+    };
+    const first = await recorder.begin(firstInput);
+    await first.finish({ content: 'I built it.', finishReason: 'stop' });
+
+    let record = await store.getSession('sipho', first.sessionId);
+    expect(record?.title).toBe('Build a 3D flight simulator.');
+    expect(record?.messages.map(({ role, content }) => ({ role, content }))).toEqual([
+      { role: 'user', content: 'Build a 3D flight simulator.' },
+      { role: 'assistant', content: 'I built it.' },
+    ]);
+    // Diagnostics retain the caller's exact envelope for troubleshooting;
+    // only the user-visible mirrored ledger is normalized.
+    expect(
+      record?.externalRequestDiagnostics?.transcript.map((message) => message.content),
+    ).toEqual([contextOnly, wrappedRequest]);
+
+    if (!record) throw new Error('expected mirrored session');
+    record.title = '<environment_info>Windows</environment_info>';
+    record.messages = [
+      { role: 'user', content: contextOnly, at: '2026-08-18T00:00:00.000Z' },
+      { role: 'user', content: wrappedRequest, at: '2026-08-18T00:00:00.001Z' },
+      { role: 'assistant', content: 'I built it.', at: '2026-08-18T00:00:00.002Z' },
+    ];
+    await store.writeSession(record);
+
+    const wrappedFollowup = `<context>The current date is 2026-08-18.</context>
+<userRequest>Add clouds.</userRequest>`;
+    const nextMessages: ExternalTranscriptMessage[] = [
+      { role: 'user', content: contextOnly },
+      { role: 'user', content: wrappedRequest },
+      { role: 'assistant', content: 'I built it.' },
+      { role: 'user', content: wrappedFollowup },
+    ];
+    await expect(
+      recorder.resolveConversationId({
+        sourceId: 'vscode',
+        gezelId: 'sipho',
+        messages: nextMessages,
+        fallbackExternalConversationId: 'vscode-wrapped-request-2',
+      }),
+    ).resolves.toBe('vscode-wrapped-request-1');
+
+    const continuation = await recorder.begin({ ...firstInput, messages: nextMessages });
+    record = await store.getSession('sipho', continuation.sessionId);
+    expect(record?.title).toBe('Build a 3D flight simulator.');
+    expect(record?.messages.map(({ role, content }) => ({ role, content }))).toEqual([
+      { role: 'user', content: 'Build a 3D flight simulator.' },
+      { role: 'assistant', content: 'I built it.' },
+      { role: 'user', content: 'Add clouds.' },
+    ]);
+    expect(recorder.listActive()[0]?.userText).toBe('Add clouds.');
+    await continuation.finish({ content: 'Clouds added.', finishReason: 'stop' });
+  });
+
+  it('keeps a transcript-inferred thread together across a tool continuation', async () => {
+    const recorder = new ExternalConversationRecorder({ store, events });
+    const firstMessages: ExternalTranscriptMessage[] = [
+      { role: 'user', content: 'Inspect the project.' },
+    ];
+    const first = await recorder.begin({
+      ...beginInput(firstMessages),
+      sourceId: 'vscode',
+      sourceName: 'VS Code',
+      externalConversationId: 'vscode-tool-request-1',
+    });
+    await first.finish({ content: '', finishReason: 'tool_calls' });
+
+    await expect(
+      recorder.resolveConversationId({
+        sourceId: 'vscode',
+        gezelId: 'sipho',
+        messages: [
+          ...firstMessages,
+          {
+            role: 'assistant',
+            content: '',
+            toolCalls: [{ id: 'call-1', name: 'read_file', arguments: '{"path":"app.ts"}' }],
+          },
+          { role: 'tool', content: 'source text', toolCallId: 'call-1' },
+        ],
+        fallbackExternalConversationId: 'vscode-tool-request-2',
+      }),
+    ).resolves.toBe('vscode-tool-request-1');
+  });
+
   it('accepts one exact project id/name hint without guessing between duplicate names', async () => {
     const project = await store.createProject({ name: 'Racing game' });
     await store.createProject({ name: 'Duplicate name' });

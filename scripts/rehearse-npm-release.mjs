@@ -26,6 +26,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnPnpmSync } from './pnpm-cli.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outputFlag = process.argv.indexOf('--output');
@@ -83,6 +84,22 @@ function run(command, args, options = {}) {
   return result;
 }
 
+function runPnpm(args, options = {}) {
+  const result = spawnPnpmSync(args, {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    maxBuffer: 128 * 1024 * 1024,
+    ...options,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(
+      `pnpm ${args.join(' ')} failed (${result.status})\n${result.stdout ?? ''}\n${result.stderr ?? ''}`,
+    );
+  }
+  return result;
+}
+
 let failed = false;
 try {
   console.log(`rehearsal: stamping @bendyline/gezel ${coreVersion}`);
@@ -92,8 +109,7 @@ try {
   });
 
   console.log(`rehearsal: packing ${packageNames.length} packages to ${outputDir}`);
-  run(
-    'pnpm',
+  runPnpm(
     [
       '--recursive',
       ...packageNames.flatMap((name) => ['--filter', name]),
@@ -121,14 +137,21 @@ try {
   console.error(err.message);
 } finally {
   writeFileSync(sourcePath, originalSource, 'utf8');
-  const restore = spawnSync('pnpm', ['--filter', '@bendyline/gezel', 'run', 'build'], {
-    cwd: repoRoot,
-    stdio: 'inherit',
-  });
-  if (restore.error || restore.status !== 0) {
+  let restore;
+  let restoreError;
+  try {
+    restore = spawnPnpmSync(['--filter', '@bendyline/gezel', 'run', 'build'], {
+      cwd: repoRoot,
+      stdio: 'inherit',
+    });
+    restoreError = restore.error;
+  } catch (error) {
+    restoreError = error;
+  }
+  if (restoreError || restore?.status !== 0) {
     failed = true;
     console.error(
-      `rehearsal: failed to restore the development core build (${restore.error?.message ?? restore.status})`,
+      `rehearsal: failed to restore the development core build (${restoreError?.message ?? restore?.status})`,
     );
   }
   if (temporaryRoot) rmSync(temporaryRoot, { recursive: true, force: true });

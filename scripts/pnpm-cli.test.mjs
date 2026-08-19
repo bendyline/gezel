@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { readPathVar, resolveNpmCli, resolvePnpmCli } from './pnpm-cli.mjs';
+import { readPathVar, resolveNpmCli, resolvePnpmCli, spawnPnpmSync } from './pnpm-cli.mjs';
 
 test('reads PATH whatever case the platform stored it under', () => {
   assert.equal(readPathVar({ PATH: '/a:/b' }), '/a:/b');
@@ -25,6 +25,23 @@ test('resolves pnpm from a spread environment', () => {
   delete env.npm_execpath;
   delete env.GEZEL_PNPM_CLI;
   assert.doesNotThrow(() => resolvePnpmCli(['--version'], { env }));
+});
+
+test('synchronously launches pnpm through a resolved JavaScript CLI', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gezel-pnpm-sync-'));
+  const cli = join(dir, 'pnpm.mjs');
+  try {
+    writeFileSync(cli, 'process.stdout.write(JSON.stringify(process.argv.slice(2)));\n', 'utf8');
+    const result = spawnPnpmSync(['pack', '--json'], {
+      env: { GEZEL_PNPM_CLI: cli },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0);
+    assert.equal(result.error, undefined);
+    assert.deepEqual(JSON.parse(result.stdout), ['pack', '--json']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('launches npm through its JavaScript CLI when the environment names one', () => {

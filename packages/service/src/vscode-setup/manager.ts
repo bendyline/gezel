@@ -608,7 +608,17 @@ export function buildVSCodeProvider(input: {
           id: model.id,
           name: model.description ? `${model.label} — ${model.description}` : model.label,
           url: `${input.baseUrl}/chat/completions`,
+          // Some VS Code distributions load an injected model roster without
+          // hydrating the provider-level apiKey into their secret-backed BYOK
+          // state. An explicit model header is part of the Custom Endpoint
+          // contract and makes the already-plaintext setup credential work in
+          // those builds too. VS Code suppresses its inferred auth header when
+          // this well-known header is present, so only one credential is sent.
+          requestHeaders: {
+            Authorization: `Bearer ${input.token}`,
+          },
           toolCalling: true,
+          ...(model.supportsReasoning === true ? { thinking: true } : {}),
           vision: false,
           maxInputTokens: Math.max(1, context - output),
           maxOutputTokens: output,

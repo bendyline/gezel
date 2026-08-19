@@ -54,7 +54,7 @@ export function workshopTempoDefaults(tempo: WorkshopTempo): WorkshopTempoDefaul
   switch (tempo) {
     case 'gezellig':
       return {
-        rapidIntervalMs: 30 * 60_000,
+        rapidIntervalMs: 120 * 60_000,
         slowIntervalMs: 12 * 60 * 60_000,
         recentActivityWindowMs: 90 * 60_000,
         rapidAttemptsBeforeBackoff: 2,
@@ -62,7 +62,7 @@ export function workshopTempoDefaults(tempo: WorkshopTempo): WorkshopTempoDefaul
       };
     case 'druk':
       return {
-        rapidIntervalMs: 2 * 60_000,
+        rapidIntervalMs: 8 * 60_000,
         slowIntervalMs: 60 * 60_000,
         recentActivityWindowMs: 45 * 60_000,
         rapidAttemptsBeforeBackoff: 5,
@@ -70,7 +70,7 @@ export function workshopTempoDefaults(tempo: WorkshopTempo): WorkshopTempoDefaul
       };
     case 'dolle-boel':
       return {
-        rapidIntervalMs: 45_000,
+        rapidIntervalMs: 3 * 60_000,
         slowIntervalMs: 20 * 60_000,
         recentActivityWindowMs: 30 * 60_000,
         rapidAttemptsBeforeBackoff: 8,
@@ -78,7 +78,7 @@ export function workshopTempoDefaults(tempo: WorkshopTempo): WorkshopTempoDefaul
       };
     default:
       return {
-        rapidIntervalMs: 5 * 60_000,
+        rapidIntervalMs: 20 * 60_000,
         slowIntervalMs: 6 * 60 * 60_000,
         recentActivityWindowMs: 60 * 60_000,
         rapidAttemptsBeforeBackoff: 3,

@@ -2391,6 +2391,13 @@ export const GezmodelImportReviewSchema = z.object({
 });
 export type GezmodelImportReview = z.infer<typeof GezmodelImportReviewSchema>;
 
+/** Live work reported while a `.gezmodel` bundle is staged and security-checked. */
+export type GezmodelImportProgress =
+  | { phase: 'receiving'; bytesCompleted: number; bytesTotal?: number }
+  | { phase: 'inspecting' }
+  | { phase: 'verifying'; bytesCompleted: number; bytesTotal: number }
+  | { phase: 'validating' };
+
 // ─ Private → shared model migration ─────────────────────────────────────
 //
 // A user daemon may discover complete models in its own writable store (or

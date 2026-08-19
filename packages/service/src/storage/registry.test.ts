@@ -145,7 +145,7 @@ describe('storage summary', () => {
     expect(category(after, 'derived-caches').bytes).toBeGreaterThanOrEqual(50_000);
   });
 
-  it('flags an externalized gezels folder instead of counting it as deletable', async () => {
+  it('does not measure or count an externalized gezels folder', async () => {
     const externalGezels = join(elsewhere, 'my-gezels');
     await mkdir(externalGezels, { recursive: true });
     const store = new Store({ home, external: { gezels: externalGezels } });
@@ -157,24 +157,31 @@ describe('storage summary', () => {
     const gezels = category(summary, 'gezels');
     const item = gezels.items?.find((i) => i.id === gezel.id);
     expect(item?.external).toBe(true);
-    expect(gezels.external.some((e) => e.path.startsWith(externalGezels))).toBe(true);
+    expect(item?.bytes).toBe(0);
+    expect(gezels.bytes).toBe(0);
+    expect(gezels.external.some((e) => e.path.startsWith(externalGezels) && e.bytes === 0)).toBe(
+      true,
+    );
   });
 
-  it('never reports a project working directory as safe to remove', async () => {
+  it('does not measure or count a project working directory', async () => {
     const workingDir = join(elsewhere, 'repo');
     await mkdir(workingDir, { recursive: true });
-    await seedFile(join(workingDir, 'README.md'), 300);
     const store = new Store({ home });
     await store.ensureLayout();
     const project = await store.createProject({ name: 'Linked', workingDir });
 
-    const summary = await summarize(store);
-    const entry = category(summary, 'projects').items?.find(
-      (i) => i.id === `${project.id}:workingDir`,
-    );
+    const before = await summarize(store);
+    await seedFile(join(workingDir, 'README.md'), 300);
+    const after = await summarize(store);
+    const projects = category(after, 'projects');
+    const entry = projects.items?.find((i) => i.id === `${project.id}:workingDir`);
     expect(entry).toBeDefined();
     expect(entry?.external).toBe(true);
+    expect(entry?.bytes).toBe(0);
     expect(entry?.blockedReason).toBeTruthy();
+    expect(projects.bytes).toBe(category(before, 'projects').bytes);
+    expect(after.userContentBytes).toBe(before.userContentBytes);
   });
 
   it('leaves the document library out of the projects category', async () => {

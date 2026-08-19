@@ -38,12 +38,11 @@ export function formatStorageSummary(summary: StorageSummary): string {
 
   const external = summary.categories
     .flatMap((c) => c.external)
-    .filter((e) => e.bytes > 0)
-    .sort((a, b) => b.bytes - a.bytes);
+    .sort((a, b) => a.path.localeCompare(b.path));
   if (external.length > 0) {
-    lines.push('', 'Stored outside the Gezel folder — never removed by Gezel:');
+    lines.push('', 'Outside the Gezel folder — not measured or removed by Gezel:');
     for (const entry of external) {
-      lines.push(`  ${pad(formatBytes(entry.bytes), 10)} ${entry.path}`);
+      lines.push(`  ${entry.path}`);
     }
   }
 
@@ -187,7 +186,7 @@ export function formatCleanupPreview(
   if (chosen.length === 0) lines.push('  (nothing — these categories are already empty)');
   lines.push('', `Frees about ${formatBytes(total)}.`);
 
-  const external = chosen.flatMap((c) => c.external).filter((e) => e.bytes > 0);
+  const external = chosen.flatMap((c) => c.external);
   if (external.length > 0) {
     lines.push('', 'Not touched (stored outside the Gezel folder):');
     for (const entry of external) lines.push(`  ${entry.path}`);

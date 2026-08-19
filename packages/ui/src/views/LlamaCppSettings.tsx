@@ -7,6 +7,7 @@ import { EngineBudgetStrip } from '../components/EngineBudgetStrip.js';
 import { EngineClonePicker } from '../components/EngineClonePicker.js';
 import { LlamaCppModelManager } from '../components/LlamaCppModelManager.js';
 import { MachineHealthSettings } from '../components/MachineHealthSettings.js';
+import { localEngineSettingsLabel } from './local-engine-label.js';
 
 interface Props {
   config: ConfigResponse | null;
@@ -17,6 +18,8 @@ interface Props {
    *  auto-detect picked. May be undefined when the supervisor hasn't
    *  populated GEZEL_LLAMA_SERVER_BACKEND (e.g. CLI launches). */
   health?: HealthResponse | null;
+  /** Matches the platform-aware Settings navigation label. */
+  title?: string;
 }
 
 type BackendOverride = NonNullable<ConfigResponse['llamaCppBackendOverride']>;
@@ -133,7 +136,7 @@ function needsRestart(
  * override the auto-detected supervisor with an external
  * llama-server URL for dev / LAN scenarios.
  */
-export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
+export function LlamaCppSettings({ config, onConfigChanged, health, title }: Props) {
   const [baseUrlDraft, setBaseUrlDraft] = useState(config?.llamaCppBaseUrl ?? '');
   const [modelPathDraft, setModelPathDraft] = useState(config?.llamaCppModelPath ?? '');
   const [installed, setInstalled] = useState<LlamaCppInstalledModel[]>([]);
@@ -367,7 +370,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health }: Props) {
   return (
     <div>
       <section style={{ marginBottom: '2rem' }}>
-        <h3>On-device</h3>
+        <h3>{title ?? localEngineSettingsLabel('llama-cpp', health?.platform)}</h3>
         <p className="muted" style={{ marginTop: 0 }}>
           Run AI models directly on this device, making the best use of the hardware you already
           have. Your conversations stay on your computer — no account to set up, no data sent to the

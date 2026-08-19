@@ -28,11 +28,11 @@
  * Env:
  *   GEZEL_RELEASE_DRY_RUN=1  print what would happen instead of doing it.
  */
-import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { calVerPrefix } from './calver.mjs';
+import { spawnPnpmSync } from './pnpm-cli.mjs';
 import { writeReleasePackageState } from './release-package-state.mjs';
 import {
   findWorkspaceDependencies,
@@ -142,7 +142,7 @@ console.log(
 
 // Rebuild so the tarball packed by publish-package.mjs carries the stamp. The
 // workflow's earlier `pnpm build` predates the version being known.
-const result = spawnSync('pnpm', ['--filter', '@bendyline/gezel', 'run', 'build'], {
+const result = spawnPnpmSync(['--filter', '@bendyline/gezel', 'run', 'build'], {
   cwd: repoRoot,
   stdio: 'inherit',
 });

@@ -49,6 +49,7 @@ export function VSCodeSetupCard({
     );
   }, [status]);
   const selectedProfile = status?.profiles.find((profile) => profile.id === profileId);
+  const visibleVSCodeVersion = displayVSCodeVersion(status?.vscodeVersion);
   const hasManagedProfile = Boolean(status?.configuredProfileId);
   const configureLabel = card.repairable
     ? 'Repair VS Code setup…'
@@ -93,7 +94,7 @@ export function VSCodeSetupCard({
             configuredNote: (
               <>
                 Gezel is available in <strong>{selectedProfile.label}</strong>.
-                {status?.vscodeVersion ? ` VS Code ${status.vscodeVersion} was found.` : ''} Keep
+                {visibleVSCodeVersion ? ` VS Code ${visibleVSCodeVersion} was found.` : ''} Keep
                 Gezel running while you use the models.
               </>
             ),
@@ -124,6 +125,11 @@ export function VSCodeSetupCard({
             {hasManagedProfile && (
               <p className="muted small">Clear this setup before choosing a different profile.</p>
             )}
+            <p className="muted small">
+              If VS Code is already open, you may need to run{' '}
+              <strong>Developer: Reload Window</strong> or restart VS Code after setup before the
+              models work.
+            </p>
           </>
         ) : null
       }
@@ -179,7 +185,8 @@ export function VSCodeSetupCard({
             <br />
             Because no extension is involved, the dedicated inference-only credential is stored as
             plain text in this profile file. It works only through Gezel&apos;s loopback inference
-            bridge and can be revoked by clearing this setup.
+            bridge and can be revoked by clearing this setup. If VS Code is already open, reload its
+            window or restart it after setup so it picks up the new credential.
           </>
         }
         confirmLabel={status?.state === 'not-configured' ? 'Set up VS Code' : 'Update VS Code'}
@@ -228,4 +235,10 @@ function actionErrorPrefix(confirmation: Confirmation, state: string | undefined
   return state === 'not-configured'
     ? 'Could not set up the VS Code setup'
     : 'Could not update the VS Code setup';
+}
+
+function displayVSCodeVersion(version: string | undefined): string | undefined {
+  if (!version) return undefined;
+  const visibleParts = version.split(/\s+/).filter((part) => part && !/^[a-f\d]{40}$/i.test(part));
+  return visibleParts.length > 0 ? visibleParts.join(' ') : undefined;
 }

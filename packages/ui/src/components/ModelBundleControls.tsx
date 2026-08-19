@@ -1,4 +1,8 @@
-import type { GezmodelEngine, GezmodelImportReview } from '@bendyline/gezel';
+import type {
+  GezmodelEngine,
+  GezmodelImportProgress,
+  GezmodelImportReview,
+} from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { type ModelBundleExportProgress, api } from '../api.js';
 import { announceModelInventoryChanged } from '../model-inventory.js';
@@ -8,6 +12,20 @@ import { ConfirmDialog } from './ConfirmDialog.js';
 interface OpenedBundleRequest {
   requestId: string;
   filename: string;
+}
+
+interface ActiveBundleScan {
+  scanId: string;
+  filename: string;
+  source: 'browser' | 'native';
+  progress: GezmodelImportProgress;
+}
+
+interface ActiveBundleScanOperation {
+  scanId: string;
+  source: ActiveBundleScan['source'];
+  controller?: AbortController;
+  canceled: boolean;
 }
 
 export type ModelBundleExportState =
@@ -353,7 +371,10 @@ export function ModelBundleImportController({
   onEngineIdentified?: (engine: GezmodelEngine) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [scanning, setScanning] = useState<string | null>(null);
+  const activeScanRef = useRef<ActiveBundleScanOperation | null>(null);
+  const pendingOpenedScansRef = useRef<OpenedBundleRequest[]>([]);
+  const [scan, setScan] = useState<ActiveBundleScan | null>(null);
+  const [canceling, setCanceling] = useState(false);
   const [review, setReview] = useState<GezmodelImportReview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -366,39 +387,90 @@ export function ModelBundleImportController({
     [onEngineIdentified],
   );
 
+  const startScan = useCallback(
+    (filename: string, source: ActiveBundleScan['source'], totalBytes?: number) => {
+      const scanId = globalThis.crypto.randomUUID();
+      const operation: ActiveBundleScanOperation = {
+        scanId,
+        source,
+        ...(source === 'browser' ? { controller: new AbortController() } : {}),
+        canceled: false,
+      };
+      activeScanRef.current = operation;
+      setCanceling(false);
+      setError(null);
+      setScan({
+        scanId,
+        filename,
+        source,
+        progress: {
+          phase: 'receiving',
+          bytesCompleted: 0,
+          ...(totalBytes === undefined ? {} : { bytesTotal: totalBytes }),
+        },
+      });
+      return operation;
+    },
+    [],
+  );
+
+  const updateScanProgress = useCallback((scanId: string, progress: GezmodelImportProgress) => {
+    setScan((current) => (current?.scanId === scanId ? { ...current, progress } : current));
+  }, []);
+
+  const finishScan = useCallback((operation: ActiveBundleScanOperation) => {
+    if (activeScanRef.current !== operation) return;
+    activeScanRef.current = null;
+    setScan(null);
+    setCanceling(false);
+  }, []);
+
   const scanFile = useCallback(
     async (file: File) => {
-      setScanning(file.name);
-      setError(null);
+      if (activeScanRef.current) return;
+      const operation = startScan(file.name, 'browser', file.size);
       try {
-        acceptReview(await api.scanModelBundle(file));
+        const next = await api.scanModelBundle(file, {
+          scanId: operation.scanId,
+          totalBytes: file.size,
+          signal: operation.controller?.signal,
+          onProgress: (progress) => updateScanProgress(operation.scanId, progress),
+        });
+        if (!operation.canceled) acceptReview(next);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        if (!operation.canceled && !isAbortError(err)) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
       } finally {
-        setScanning(null);
+        finishScan(operation);
         if (inputRef.current) inputRef.current.value = '';
       }
     },
-    [acceptReview],
+    [acceptReview, finishScan, startScan, updateScanProgress],
   );
 
   const scanOpened = useCallback(
     async (request: OpenedBundleRequest) => {
       const native = window.__GEZEL__?.scanOpenedModelBundle;
       if (!native) return;
-      setScanning(request.filename);
-      setError(null);
+      if (activeScanRef.current) {
+        pendingOpenedScansRef.current.push(request);
+        return;
+      }
+      const operation = startScan(request.filename, 'native');
       try {
-        const result = await native(request.requestId);
+        const result = await native(request.requestId, operation.scanId);
         if (!result.ok) throw new Error(result.error);
-        acceptReview(result.review);
+        if ('review' in result && !operation.canceled) acceptReview(result.review);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        if (!operation.canceled && !isAbortError(err)) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
       } finally {
-        setScanning(null);
+        finishScan(operation);
       }
     },
-    [acceptReview],
+    [acceptReview, finishScan, startScan],
   );
 
   useEffect(() => {
@@ -407,6 +479,58 @@ export function ModelBundleImportController({
     window.__GEZEL__?.onOpenModelBundle?.((request) => void scanOpened(request));
     return () => window.removeEventListener('gezel:import-model-bundle', openPicker);
   }, [scanOpened]);
+
+  useEffect(() => {
+    return window.__GEZEL__?.onModelBundleImportProgress?.((progress) => {
+      updateScanProgress(progress.scanId, progress);
+    });
+  }, [updateScanProgress]);
+
+  useEffect(() => {
+    if (scan || activeScanRef.current) return;
+    const next = pendingOpenedScansRef.current.shift();
+    if (next) void scanOpened(next);
+  }, [scan, scanOpened]);
+
+  useEffect(() => {
+    return () => {
+      const operation = activeScanRef.current;
+      if (!operation) return;
+      operation.canceled = true;
+      if (operation.source === 'native') {
+        void window.__GEZEL__?.cancelModelBundleImport?.(operation.scanId);
+      } else {
+        void api.cancelModelBundleImport(operation.scanId).catch(() => {});
+      }
+      operation.controller?.abort();
+    };
+  }, []);
+
+  const cancelScan = useCallback(async () => {
+    const operation = activeScanRef.current;
+    if (!operation || canceling) return;
+    operation.canceled = true;
+    setCanceling(true);
+    let cleanupError: string | null = null;
+    try {
+      if (operation.source === 'native') {
+        const cancel = window.__GEZEL__?.cancelModelBundleImport;
+        if (!cancel) throw new Error('This version of Gezel cannot cancel model imports.');
+        const result = await cancel(operation.scanId);
+        if (!result.ok) throw new Error(result.error);
+      } else {
+        await api.cancelModelBundleImport(operation.scanId);
+      }
+    } catch (err) {
+      cleanupError = err instanceof Error ? err.message : String(err);
+    } finally {
+      operation.controller?.abort();
+      finishScan(operation);
+      if (cleanupError) {
+        setError(`The import was stopped, but cleanup could not be confirmed: ${cleanupError}`);
+      }
+    }
+  }, [canceling, finishScan]);
 
   const cancelReview = useCallback(() => {
     const current = review;
@@ -441,26 +565,45 @@ export function ModelBundleImportController({
         }}
       />
 
-      <Dialog.Root open={Boolean(scanning || (error && !review))}>
+      <Dialog.Root open={Boolean(scan || (error && !review))}>
         <Dialog.Portal>
           <Dialog.Overlay />
           <Dialog.Content
+            className="model-import-dialog"
             onEscapeKeyDown={(event) => {
-              if (scanning) event.preventDefault();
+              if (scan) event.preventDefault();
             }}
             onPointerDownOutside={(event) => {
-              if (scanning) event.preventDefault();
+              if (scan) event.preventDefault();
             }}
           >
             <Dialog.Title asChild>
-              <h3>{scanning ? 'Checking model bundle' : 'Model bundle could not be imported'}</h3>
+              <h3>{scan ? 'Checking model bundle' : 'Model bundle could not be imported'}</h3>
             </Dialog.Title>
-            <Dialog.Description className={scanning ? 'muted small' : 'error small'}>
-              {scanning
-                ? `Scanning ${scanning} for unsafe paths, executable content, malformed model files, and checksum mismatches. Large models can take a few minutes.`
-                : error}
+            <Dialog.Description asChild>
+              {scan ? (
+                <div className="model-export-dialog-body">
+                  <p className="muted small">{importProgressDescription(scan)}</p>
+                  <progress
+                    className="model-export-progress"
+                    aria-label="Model bundle scan progress"
+                    {...importProgressMeter(scan.progress)}
+                  />
+                  <span className="model-export-progress-copy" aria-live="polite">
+                    {importProgressCopy(scan.progress)}
+                  </span>
+                </div>
+              ) : (
+                <p className="error small">{error}</p>
+              )}
             </Dialog.Description>
-            {!scanning && (
+            {scan ? (
+              <Dialog.Actions>
+                <button type="button" disabled={canceling} onClick={() => void cancelScan()}>
+                  {canceling ? 'Canceling…' : 'Cancel'}
+                </button>
+              </Dialog.Actions>
+            ) : (
               <Dialog.Actions>
                 <Dialog.Close asChild>
                   <button type="button" onClick={() => setError(null)}>
@@ -483,6 +626,64 @@ export function ModelBundleImportController({
         onCancel={cancelReview}
       />
     </>
+  );
+}
+
+function importProgressDescription(scan: ActiveBundleScan): string {
+  switch (scan.progress.phase) {
+    case 'receiving':
+      return `Copying ${scan.filename} into private staging before opening it.`;
+    case 'inspecting':
+      return `Inspecting ${scan.filename} for unsafe paths, executable content, and malformed entries.`;
+    case 'verifying':
+      return `Reading every file in ${scan.filename} and checking its SHA-256 checksum.`;
+    case 'validating':
+      return `Checking the model metadata and file formats in ${scan.filename}.`;
+  }
+}
+
+function importProgressMeter(
+  progress: GezmodelImportProgress,
+): { max: number; value: number } | Record<string, never> {
+  if (progress.phase === 'verifying' && progress.bytesTotal > 0) {
+    return {
+      max: progress.bytesTotal,
+      value: Math.min(progress.bytesCompleted, progress.bytesTotal),
+    };
+  }
+  if (
+    progress.phase === 'receiving' &&
+    progress.bytesTotal !== undefined &&
+    progress.bytesTotal > 0
+  ) {
+    return {
+      max: progress.bytesTotal,
+      value: Math.min(progress.bytesCompleted, progress.bytesTotal),
+    };
+  }
+  return {};
+}
+
+function importProgressCopy(progress: GezmodelImportProgress): string {
+  switch (progress.phase) {
+    case 'receiving':
+      return progress.bytesTotal === undefined
+        ? `${formatBytes(progress.bytesCompleted)} copied`
+        : `${formatBytes(progress.bytesCompleted)} of ${formatBytes(progress.bytesTotal)} copied`;
+    case 'inspecting':
+      return 'Inspecting archive structure…';
+    case 'verifying':
+      return `${formatBytes(progress.bytesCompleted)} of ${formatBytes(
+        progress.bytesTotal,
+      )} verified`;
+    case 'validating':
+      return 'Validating model metadata and file formats…';
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return Boolean(
+    error && typeof error === 'object' && 'name' in error && error.name === 'AbortError',
   );
 }
 

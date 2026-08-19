@@ -1,4 +1,5 @@
-import { createLogger } from '@bendyline/gezel';
+import { randomUUID } from 'node:crypto';
+import { type ProviderName, createLogger, isLocalProvider } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { ZodError } from 'zod';
@@ -37,6 +38,21 @@ import {
 } from '../openai-compat/translate.js';
 
 const log = createLogger('v1-chat');
+
+// Match ChatManager's user-turn ceilings. Caller-owned app routes create a
+// fresh provider session and previously omitted timeoutMs altogether, which
+// made llama.cpp fall back to its low-level 120s default even while tokens
+// were still arriving. Local reasoning/tool turns routinely need longer;
+// provider idle watchdogs and the HTTP abort signal remain the real stall and
+// cancellation controls inside these generous hard backstops.
+const CALLER_OWNED_CLOUD_TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+const CALLER_OWNED_LOCAL_TURN_TIMEOUT_MS = 8 * 60 * 60 * 1000;
+
+function callerOwnedTurnTimeoutMs(provider: ProviderName): number {
+  return isLocalProvider(provider) || provider === 'remote'
+    ? CALLER_OWNED_LOCAL_TURN_TIMEOUT_MS
+    : CALLER_OWNED_CLOUD_TURN_TIMEOUT_MS;
+}
 
 export type ExternalConversationRouteOptions = {
   sessionIdHeaders?: string[];
@@ -80,6 +96,11 @@ export interface V1ChatRoutesOptions {
    * and a concrete gezel target are both present.
    */
   externalConversation?: ExternalConversationRouteOptions;
+  /**
+   * Recover a stable external thread by matching the caller's authoritative
+   * transcript when the client protocol supplies no conversation id.
+   */
+  inferConversationFromTranscript?: boolean;
 }
 
 function visibleMessageContent(
@@ -374,6 +395,7 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
       // Effective output cap for finish_reason: 'length' inference —
       // per-request max_tokens wins, else the resolved tuning cap.
       const lengthCapTokens = tuning?.sampling.maxTokens;
+      const turnTimeoutMs = callerOwnedTurnTimeoutMs(target.provider);
 
       const sessionOpts: SessionOpts = {
         systemMessage,
@@ -401,7 +423,7 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
           : {}),
       };
       const externalOptions = opts.externalConversation;
-      const externalConversationId = (
+      let externalConversationId = (
         externalOptions?.sessionIdHeaders ?? [EXTERNAL_CONVERSATION_ID_HEADER]
       )
         .map((header) => c.req.header(header)?.trim())
@@ -416,6 +438,30 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
             })()
           : { sourceId: externalOptions.sourceId, sourceName: externalOptions.sourceName }
         : null;
+      const transcript = externalOptions ? externalTranscript(parsed.messages) : [];
+      if (
+        !externalConversationId &&
+        opts.inferConversationFromTranscript === true &&
+        externalSource &&
+        target.gezelId
+      ) {
+        const requestId = c.req.header('x-request-id')?.trim();
+        const fallbackExternalConversationId =
+          requestId && requestId.length <= 512 ? requestId : randomUUID();
+        externalConversationId = await ctx.chat
+          .resolveExternalConversationId({
+            sourceId: externalSource.sourceId,
+            gezelId: target.gezelId,
+            messages: transcript,
+            fallbackExternalConversationId,
+          })
+          .catch((err) => {
+            log.warn(
+              `external conversation affinity could not be resolved: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            return fallbackExternalConversationId;
+          });
+      }
       if (externalOptions && externalSource && externalConversationId && target.gezelId) {
         const workingDirectory = c.req
           .header(externalOptions.workingDirectoryHeader ?? EXTERNAL_WORKING_DIRECTORY_HEADER)
@@ -435,7 +481,7 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
             gezelId: target.gezelId,
             providerName: target.provider,
             ...(target.model ? { model: target.model } : {}),
-            messages: externalTranscript(parsed.messages),
+            messages: transcript,
             effectiveSystemMessage: translated.systemMessage,
             toolNames: externalTools?.map((tool) => tool.name) ?? [],
             ...(actionLedger.ledger ? { actionLedger: actionLedger.ledger } : {}),
@@ -544,7 +590,7 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
               () => Math.floor(Date.now() / 1000),
               {
                 ...(attachments.length > 0 ? { attachments } : {}),
-                sendOptions: { queue },
+                sendOptions: { queue, timeoutMs: turnTimeoutMs },
                 ...(opts.includeReasoning === true ? { includeReasoning: true } : {}),
                 ...(opts.keepaliveIntervalMs !== undefined
                   ? { keepaliveIntervalMs: opts.keepaliveIntervalMs }
@@ -653,7 +699,7 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
         () => Math.floor(Date.now() / 1000),
         {
           ...(attachments.length > 0 ? { attachments } : {}),
-          sendOptions: { queue },
+          sendOptions: { queue, timeoutMs: turnTimeoutMs },
           ...(lengthCapTokens !== undefined ? { lengthCapTokens } : {}),
         },
       );
