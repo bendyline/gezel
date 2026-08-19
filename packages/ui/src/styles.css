@@ -28286,3 +28286,66 @@ button.boekwachter-pill:focus-visible {
   gap: 0.5rem;
   flex-wrap: wrap;
 }
+
+/* ── First-run: the meester's introduction ─────────────────────────────
+   The workshop conversation used to open as a blank panel under a
+   composer. This is static — no model turn — so it is on screen while a
+   model is still downloading and never puts words in the meester's mouth
+   that they did not say. */
+.meester-greeting {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.25rem 1.25rem 1.5rem;
+  max-width: 62ch;
+}
+
+.meester-greeting-figure {
+  flex: none;
+  padding-top: 0.15rem;
+}
+
+.meester-greeting-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.meester-greeting-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.meester-greeting-lede {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+/* Openers stack rather than sit in a row: they are full sentences, and a
+   horizontal tray would either truncate them or force a scroller. */
+.meester-greeting-openers {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  margin-top: 0.2rem;
+}
+
+.meester-greeting-opener {
+  text-align: left;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  white-space: normal;
+}
+
+/* Reading material offered while a multi-gigabyte download runs. */
+.first-run-banner-wait {
+  margin: 0.6rem 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}

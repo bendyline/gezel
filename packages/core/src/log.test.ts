@@ -2,16 +2,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createLogger,
   getLogLevel,
+  getLogOutput,
   guardProcessOutputStream,
   setDebugNamespaces,
   setLogLevel,
+  setLogOutput,
 } from './log.js';
 
 describe('logger', () => {
   const initialLevel = getLogLevel();
+  const initialOutput = getLogOutput();
 
   afterEach(() => {
     setLogLevel(initialLevel);
+    setLogOutput(initialOutput);
     setDebugNamespaces(null);
     vi.restoreAllMocks();
   });
@@ -84,6 +88,25 @@ describe('logger', () => {
     captureStderr();
     createLogger('test').debug('seen');
     expect(out.lines.some((l) => l.includes('DEBUG [test] seen'))).toBe(true);
+  });
+
+  it('can route info and debug records to stderr for result-only commands', () => {
+    setLogLevel('debug');
+    setLogOutput('stderr');
+    const out = captureStdout();
+    const err = captureStderr();
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = createLogger('result-command');
+
+    log.info('booting');
+    log.debug('details', { phase: 'setup' });
+
+    expect(out.lines).toEqual([]);
+    expect(err.lines.some((line) => line.includes('INFO  [result-command] booting'))).toBe(true);
+    expect(err.lines.some((line) => line.includes('DEBUG [result-command] details'))).toBe(true);
+    expect(consoleLogSpy).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith({ phase: 'setup' });
   });
 
   it('per-namespace debug works at info level', () => {

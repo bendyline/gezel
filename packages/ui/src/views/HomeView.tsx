@@ -15,6 +15,7 @@ import { requestSettingsSection } from '../settings-nav.js';
 import { useUpdateState } from '../update-state.js';
 import { HomeWorkshop } from './home/HomeWorkshop.js';
 import { IntroHandboekArticle } from './home/IntroHandboekArticle.js';
+import { FIRST_RUN_INTRO_ANCHOR_ID } from './home/first-run-intro-anchor.js';
 
 type Provider = ProviderName;
 
@@ -662,7 +663,8 @@ function IntroSection({
     );
   }
   return (
-    <section className="home-intro">
+    // The download banner scrolls a waiting first-run user to this section.
+    <section className="home-intro" id={FIRST_RUN_INTRO_ANCHOR_ID}>
       <div className="home-intro-body">
         <header>
           <h2>

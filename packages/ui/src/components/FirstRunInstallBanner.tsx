@@ -28,6 +28,7 @@ import type { ConfigResponse, LocalActiveInstall } from '@bendyline/gezel-client
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { announceModelInventoryChanged } from '../model-inventory.js';
+import { FIRST_RUN_INTRO_ANCHOR_ID } from '../views/home/first-run-intro-anchor.js';
 import { ReportErrorLink } from './ReportErrorLink.js';
 import { useCopilotAvailability } from './useCopilotAvailability.js';
 
@@ -444,6 +445,7 @@ export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalle
           gezellen as soon as this finishes.
         </p>
         <FirstRunProgressBar progress={state.progress} />
+        <WhileYouWait />
       </output>
     );
   }
@@ -537,6 +539,35 @@ export function FirstRunInstallBanner({ config, onConfigChanged, onModelInstalle
         )}
       </div>
     </output>
+  );
+}
+
+/**
+ * Something to do during a multi-gigabyte download.
+ *
+ * The "What is gezel?" article is already embedded further down this very
+ * page, but setup deliberately owns the top of the screen, so a first-time
+ * user watching a progress bar never scrolls far enough to find it. This is
+ * the one moment they have nothing to do and every reason to read it, so
+ * point at it — in place, without navigating away, because leaving the Home
+ * view would drop the progress they are watching.
+ */
+function WhileYouWait() {
+  return (
+    <p className="first-run-banner-wait">
+      Nothing to do until this finishes — a good moment to read{' '}
+      <button
+        type="button"
+        className="home-link"
+        onClick={() => {
+          document
+            .getElementById(FIRST_RUN_INTRO_ANCHOR_ID)
+            ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }}
+      >
+        what gezel is and how to work with your crew →
+      </button>
+    </p>
   );
 }
 

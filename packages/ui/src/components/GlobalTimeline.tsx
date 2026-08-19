@@ -20,6 +20,7 @@ export function GlobalTimeline({
   onWorkspaceSeen,
   onTaskReference,
   emptyPlaceholder,
+  emptyContent,
 }: {
   activeSessionId: string | undefined;
   onFocusSession?: (sessionId: string, gezelId: string, projectId: string) => void;
@@ -30,6 +31,8 @@ export function GlobalTimeline({
   onWorkspaceSeen?: (path: string, projectId?: string) => void;
   onTaskReference?: (ref: string, opts?: { scoped?: boolean }) => void;
   emptyPlaceholder?: string;
+  /** Rich empty state; see ChatTimelineView. */
+  emptyContent?: import('react').ReactNode;
 }) {
   const loadTimeline = useCallback(
     (opts: { limit: number; before?: string }) => api.listGlobalTimeline(opts),
@@ -49,6 +52,7 @@ export function GlobalTimeline({
       onWorkspaceSeen={onWorkspaceSeen}
       {...(onTaskReference ? { onTaskReference } : {})}
       emptyPlaceholder={emptyPlaceholder}
+      emptyContent={emptyContent}
       loadTimeline={loadTimeline}
       streamUrl={streamUrl}
       showProjectName

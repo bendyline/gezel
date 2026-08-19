@@ -7,6 +7,7 @@ import {
 import { gezelPaths } from '@bendyline/gezel/paths';
 import type { Store } from '../../fs/store.js';
 import type { MlxRuntimeStatusBus } from '../../python/mlx-runtime-status-bus.js';
+import { noModelYetMessage } from '../active-install-message.js';
 import { estimateExactPerSlotKvBytesF16 } from '../llama-cpp/offload-planner.js';
 import {
   CapacityDeniedError,
@@ -166,6 +167,11 @@ export async function buildMlxProvider(opts: {
     // maps to an installed model, e.g. after the model was deleted or the
     // catalog ID changed. Naming the ID tells the user exactly which saved
     // selection to fix rather than implying nothing is downloaded.
+    // See the llama.cpp twin: a first run downloads a multi-gigabyte model and
+    // the user chats while waiting. Say what is happening rather than telling
+    // them to start a download that is already running.
+    const activeInstall = () =>
+      opts.mlxModels?.getActiveInstalls().find((i) => i.phase !== undefined) ?? null;
     let message: string;
     if (defaultModelId && !modelCatalogInfo) {
       const installed = opts.mlxModels ? await opts.mlxModels.listInstalled() : [];
@@ -174,9 +180,9 @@ export async function buildMlxProvider(opts: {
           `Pick a local model in Settings → This Mac (${installed
             .map((m) => m.id)
             .join(', ')}), or download "${defaultModelId}" again.`
-        : `Apple MLX: the selected model "${defaultModelId}" is not available locally, and no models are downloaded. Download a model from the list above.`;
+        : noModelYetMessage('Apple MLX', activeInstall());
     } else {
-      message = 'Apple MLX: no model downloaded. Download a model from the list above.';
+      message = noModelYetMessage('Apple MLX', activeInstall());
     }
     const err = new Error(message);
     (err as Error & { isActionable: boolean }).isActionable = true;

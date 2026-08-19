@@ -7,6 +7,7 @@ import { GlobalTimeline } from '../../components/GlobalTimeline.js';
 import { SessionSwitcher } from '../../components/SessionSwitcher.js';
 import { pickChatPlaceholder } from '../../components/chat-placeholder.js';
 import { useRoleBasedNameOnlyMode } from '../../components/useRoleBasedNameOnlyMode.js';
+import { MeesterGreeting } from './MeesterGreeting.js';
 
 /**
  * The meester conversation in the workshop's main column. Reuses the
@@ -128,6 +129,21 @@ export function MeesterConversation({
               onWorkspaceSeen={onWorkspaceSeen}
               onTaskReference={onTaskReference}
               emptyPlaceholder={emptyPlaceholder}
+              emptyContent={
+                // Only the meester's own thread gets the introduction; a
+                // handoff thread with another gezel keeps the plain state.
+                // Falsy selection means "not chosen yet" — the same fallback
+                // activeGezelId above makes.
+                !selectedGezelId || selectedGezelId === meesterGezelId ? (
+                  <MeesterGreeting
+                    meesterName={meesterName}
+                    meesterIcon={meesterIcon}
+                    meesterPoppetje={meesterPoppetje}
+                    meesterIconOverride={meesterIconOverride}
+                    projectId={projectId}
+                  />
+                ) : undefined
+              }
             />
             <ChatComposer
               gezelId={activeGezelId}

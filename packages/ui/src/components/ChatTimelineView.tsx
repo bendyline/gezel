@@ -461,6 +461,12 @@ export interface ChatTimelineViewProps {
   /** Empty-state copy shown above the composer when no messages exist. */
   emptyPlaceholder?: string;
   /**
+   * Rich empty state, rendered instead of {@link emptyPlaceholder} when the
+   * conversation has no messages. The meester's workshop uses it to introduce
+   * itself rather than opening as a blank panel.
+   */
+  emptyContent?: import('react').ReactNode;
+  /**
    * Backend fetcher — `ProjectTimeline` calls `listProjectTimeline`,
    * `GlobalTimeline` calls `listGlobalTimeline`.
    */
@@ -586,6 +592,7 @@ export function ChatTimelineView({
   onWorkspaceSeen,
   onTaskReference,
   emptyPlaceholder,
+  emptyContent,
   loadTimeline,
   streamUrl,
   terminalStreamUrl,
@@ -2879,7 +2886,8 @@ export function ChatTimelineView({
   if (rows.length === 0) {
     return (
       <div className="chat-timeline" ref={scrollRef} data-testid="chat-timeline">
-        {emptyPlaceholder && <p className="placeholder">{emptyPlaceholder}</p>}
+        {emptyContent ??
+          (emptyPlaceholder ? <p className="placeholder">{emptyPlaceholder}</p> : null)}
       </div>
     );
   }
@@ -3576,7 +3584,14 @@ export function ChatTimelineView({
             {paginatingRef.current ? 'Loading older messages…' : 'Scroll up for older messages'}
           </div>
         )}
-        {els}
+        {/* `rows` can be non-empty while nothing visible comes out of it — a
+            session with no renderable turns still produces a row. The reader
+            sees a blank panel either way, so the empty state keys off what
+            actually rendered rather than off the row count. */}
+        {els.length === 0
+          ? (emptyContent ??
+            (emptyPlaceholder ? <p className="placeholder">{emptyPlaceholder}</p> : null))
+          : els}
         {showResponseRunway && <div className="timeline-response-runway" aria-hidden="true" />}
       </div>
       {!pinnedToBottom && (

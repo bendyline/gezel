@@ -1,5 +1,5 @@
 import { basename, isAbsolute as isAbsolutePath, join as joinPath } from 'node:path';
-import { GEZEL_VERSION, type StorageJob } from '@bendyline/gezel';
+import { GEZEL_VERSION, type StorageJob, getLogOutput, setLogOutput } from '@bendyline/gezel';
 import {
   type LlamaCppInstallEvent,
   type MlxInstallEvent,
@@ -455,13 +455,23 @@ program
       process.exitCode = 1;
       return;
     }
-    const conn = await connectForRun(cliGlobals());
-    const removeSignalCleanup = installSignalCleanup(conn.stop, {
-      onError: (error) => {
-        console.error(`shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
-      },
-    });
+    // stdout is the command's result channel. A fresh-home run starts the
+    // service in this process, so route its structured info/debug records to
+    // stderr for the whole owned-service lifetime and restore the caller's
+    // previous logger behavior afterwards.
+    const previousLogOutput = getLogOutput();
+    setLogOutput('stderr');
+    let conn: Awaited<ReturnType<typeof connectForRun>> | undefined;
+    let removeSignalCleanup: (() => void) | undefined;
     try {
+      conn = await connectForRun(cliGlobals());
+      removeSignalCleanup = installSignalCleanup(conn.stop, {
+        onError: (error) => {
+          console.error(
+            `shutdown failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        },
+      });
       const { client } = conn;
       const projectId = await resolveRunProject(client, cliGlobals());
       const gezelId = opts.gezel ?? (await ensureCliProjectLead(client, projectId));
@@ -491,8 +501,12 @@ program
       if (printed) process.stdout.write('\n');
       if (errored) process.exitCode = 1;
     } finally {
-      removeSignalCleanup();
-      if (conn.stop) await conn.stop();
+      removeSignalCleanup?.();
+      try {
+        if (conn?.stop) await conn.stop();
+      } finally {
+        setLogOutput(previousLogOutput);
+      }
     }
   });
 
