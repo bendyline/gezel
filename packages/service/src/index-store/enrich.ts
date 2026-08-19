@@ -42,7 +42,7 @@ const SUMMARIZE_TIMEOUT_MS = 120_000;
 const REVIEW_TIMEOUT_MS = 180_000;
 
 export interface EnrichDeps {
-  summarize: (prompt: string) => Promise<EnrichCompletionResult>;
+  summarize: (prompt: string, activity?: string) => Promise<EnrichCompletionResult>;
   embed: (texts: string[]) => Promise<number[][]>;
   model?: string;
   /**
@@ -51,7 +51,7 @@ export interface EnrichDeps {
    * output tokens than a 2-3 sentence summary. Absent when no local model is
    * configured; the review pass skips entirely then.
    */
-  review?: (prompt: string) => Promise<EnrichCompletionResult>;
+  review?: (prompt: string, activity?: string) => Promise<EnrichCompletionResult>;
   /**
    * Default/primary attribution for legacy bare-string completions and
    * non-completion work. Runtime completions carry their own actual target so
@@ -272,6 +272,8 @@ export async function buildEnrichDeps(
     ambient?: boolean;
     /** The project-roster Boekwachter whose persona owns this pass. */
     boekwachter?: Pick<GezelSummary, 'id' | 'name' | 'provider' | 'model'>;
+    /** Project owning the indexed paths, for queue and chat activity context. */
+    projectId?: string;
   } = {},
 ): Promise<EnrichDeps> {
   const { embedBatch } = await import('../memory/embeddings.js');
@@ -299,12 +301,13 @@ export async function buildEnrichDeps(
     : { actorLabel: 'Boekwachter' };
   const oneShot =
     (target: { providerName: ProviderName; model: string }, timeoutMs: number, jobLabel: string) =>
-    async (prompt: string): Promise<EnrichCompletion> => ({
+    async (prompt: string, activity?: string): Promise<EnrichCompletion> => ({
       text: await chat.oneShotCompletion(prompt, timeoutMs, {
         providerName: target.providerName,
         model: target.model,
         ...gezelOpts,
-        jobLabel,
+        ...(opts.projectId ? { projectId: opts.projectId } : {}),
+        jobLabel: activity?.trim() || jobLabel,
         tuningProfileId: INDEX_TUNING_PROFILE,
         ...(opts.ambient ? { ambient: true } : {}),
       }),
@@ -322,13 +325,13 @@ export async function buildEnrichDeps(
   // three markup-heavy files burned their attempt caps with zero log lines).
   const withPolicyFallback =
     (
-      primary: (prompt: string) => Promise<EnrichCompletion>,
-      fallback: ((prompt: string) => Promise<EnrichCompletion>) | null,
+      primary: (prompt: string, activity?: string) => Promise<EnrichCompletion>,
+      fallback: ((prompt: string, activity?: string) => Promise<EnrichCompletion>) | null,
       label: string,
     ) =>
-    async (prompt: string): Promise<EnrichCompletionResult> => {
+    async (prompt: string, activity?: string): Promise<EnrichCompletionResult> => {
       try {
-        return await primary(prompt);
+        return await primary(prompt, activity);
       } catch (err) {
         const message = errorMessage(err);
         if (isPolicyBlockMessage(message)) {
@@ -337,7 +340,7 @@ export async function buildEnrichDeps(
               `${label} blocked by ${providerName} policy filter; retrying on ${fallbackTarget.providerName}:${fallbackTarget.model}`,
             );
             try {
-              return await fallback(prompt);
+              return await fallback(prompt, activity);
             } catch (fallbackErr) {
               // Local-engine failure is transient (deferred, cold, busy) —
               // burn a normal retry attempt instead of giving up on the hash.
@@ -543,7 +546,7 @@ export async function enrichFile(
     let completion: ResolvedEnrichCompletion | undefined;
     try {
       completion = resolveEnrichCompletion(
-        await deps.summarize(buildSummaryPrompt(file, content)),
+        await deps.summarize(buildSummaryPrompt(file, content), `Indexing ${file.path}`),
         deps,
       );
       summary = completion.text.trim();
@@ -581,7 +584,10 @@ export async function enrichFile(
         let completion: ResolvedEnrichCompletion | undefined;
         try {
           completion = resolveEnrichCompletion(
-            await deps.summarize(buildSymbolSummaryPrompt(file, content, picked)),
+            await deps.summarize(
+              buildSymbolSummaryPrompt(file, content, picked),
+              `Indexing ${file.path}`,
+            ),
             deps,
           );
           raw = completion.text;

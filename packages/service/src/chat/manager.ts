@@ -9723,6 +9723,11 @@ export class ChatManager {
        */
       actorLabel?: string;
       /**
+       * Project that owns this ephemeral work. Display/scope metadata only:
+       * provider scheduling still follows the explicit model and gezel fields.
+       */
+      projectId?: string;
+      /**
        * Short label describing the job — surfaced in the QueueMeter so
        * the user can see what a busy gezel is actually doing. Examples:
        * "icon · Maya", "summary · session ae463fc7", "about · Reviewer",
@@ -9934,7 +9939,7 @@ export class ChatManager {
     const oneShotScope: PublishScope = {
       sessionId: `one-shot:${randomUUID()}`,
       gezelId: gezelId ?? '',
-      projectId: '',
+      projectId: opts.projectId ?? '',
     };
     const oneShotModel = session.model ?? model;
     let publishedEngineTelemetry = false;
@@ -9962,6 +9967,7 @@ export class ChatManager {
         type: 'engine_phase',
         provider: telemetryProvider,
         phase: ev.phase,
+        ...(opts.jobLabel ? { activity: opts.jobLabel } : {}),
         ...(ev.detail ? { detail: ev.detail } : {}),
         ...(typeof ev.progress === 'number' ? { progress: ev.progress } : {}),
         ...(typeof ev.ttftMs === 'number' ? { ttftMs: ev.ttftMs } : {}),
@@ -10003,6 +10009,7 @@ export class ChatManager {
             signal: oneShotSignal,
             ...(opts.ambient ? { ambient: true } : {}),
             ...(gezelId ? { gezelId } : {}),
+            ...(opts.projectId ? { projectId: opts.projectId } : {}),
             ...(actorLabel ? { actorLabel } : {}),
             ...(opts.jobLabel ? { job: opts.jobLabel } : {}),
             ...(opts.onQueueWait ? { onQueueWait: opts.onQueueWait } : {}),

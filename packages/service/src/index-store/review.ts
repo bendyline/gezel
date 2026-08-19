@@ -292,7 +292,10 @@ export async function reviewFile(
         // runner converts ordinary failures to empty replies and continues.
         const slot = completions.length;
         completions.push(undefined);
-        const completion = resolveEnrichCompletion(await complete(prompt), deps);
+        const completion = resolveEnrichCompletion(
+          await complete(prompt, `Reviewing ${file.path}`),
+          deps,
+        );
         completions[slot] = completion;
         return completion.text;
       },

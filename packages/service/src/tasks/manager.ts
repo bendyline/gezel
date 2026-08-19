@@ -240,6 +240,70 @@ function craftbookParamDefaults(paramSchema: Craftbook['paramSchema']): Record<s
 }
 
 /**
+ * Enforce the launch-time input constraints craftbooks use to prevent an
+ * active worker from receiving an impossible first step. The catalog schema
+ * is intentionally permissive JSON Schema, so this focuses on the two
+ * declarative constraints task creation can report cleanly: top-level
+ * `required`, and `anyOf` branches made from required non-empty strings.
+ */
+function assertCraftbookParamRequirements(
+  craftbookId: string,
+  paramSchema: Craftbook['paramSchema'],
+  params: Record<string, string>,
+): void {
+  if (!paramSchema || typeof paramSchema !== 'object') return;
+  const schema = paramSchema as {
+    required?: unknown;
+    anyOf?: unknown;
+  };
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((key): key is string => typeof key === 'string')
+    : [];
+  const missing = required.filter((key) => !Object.prototype.hasOwnProperty.call(params, key));
+  if (missing.length > 0) {
+    throw new Error(
+      `Craftbook "${craftbookId}" requires invocation parameter${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}`,
+    );
+  }
+
+  if (!Array.isArray(schema.anyOf) || schema.anyOf.length === 0) return;
+  const alternatives = schema.anyOf.flatMap((rawBranch) => {
+    if (!rawBranch || typeof rawBranch !== 'object' || Array.isArray(rawBranch)) return [];
+    const branch = rawBranch as { required?: unknown; properties?: unknown };
+    if (!Array.isArray(branch.required) || branch.required.length === 0) return [];
+    const keys = branch.required.filter((key): key is string => typeof key === 'string');
+    if (keys.length !== branch.required.length) return [];
+    const properties =
+      branch.properties &&
+      typeof branch.properties === 'object' &&
+      !Array.isArray(branch.properties)
+        ? (branch.properties as Record<string, unknown>)
+        : {};
+    const requirements = keys.map((key) => {
+      const property = properties[key];
+      const minLength =
+        property && typeof property === 'object' && !Array.isArray(property)
+          ? (property as { minLength?: unknown }).minLength
+          : undefined;
+      return { key, minLength: typeof minLength === 'number' ? minLength : 0 };
+    });
+    // Only enforce branches that explicitly express non-empty string input;
+    // other JSON-Schema anyOf uses remain outside this focused validator.
+    return requirements.every(({ minLength }) => minLength >= 1) ? [requirements] : [];
+  });
+  if (alternatives.length !== schema.anyOf.length) return;
+  const satisfied = alternatives.some((branch) =>
+    branch.every(({ key, minLength }) => (params[key]?.trim().length ?? 0) >= minLength),
+  );
+  if (satisfied) return;
+
+  const choices = [...new Set(alternatives.flatMap((branch) => branch.map(({ key }) => key)))];
+  throw new Error(
+    `Craftbook "${craftbookId}" requires at least one non-empty invocation parameter: ${choices.join(', ')}`,
+  );
+}
+
+/**
  * Resolve placeholders inside declared string defaults against explicit launch
  * params plus the task's reserved runtime context. Only defaults are expanded:
  * user-supplied values can legitimately contain `{{…}}` (inline templates,
@@ -1077,6 +1141,11 @@ export class TaskManager {
       ),
       ...craftbookParamOverrides,
     };
+    assertCraftbookParamRequirements(
+      input.craftbookId ?? mainBook.id,
+      mainBook.paramSchema,
+      effectiveCraftbookParams,
+    );
     const craftbookInterpolationContext = {
       ...effectiveCraftbookParams,
       // Reserved runtime values win if a caller tries to spoof one as a

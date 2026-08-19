@@ -239,6 +239,8 @@ interface TerminalLiveSlot {
 interface LiveSlot {
   gezelId: string;
   projectId: string;
+  /** User-facing subject for an ephemeral one-shot (for example a file being indexed). */
+  activity?: string;
   /**
    * Ordered timeline of text + tool segments — mutated in place by
    * the SSE handlers as `delta` and `tool` events arrive. Adjacent
@@ -392,6 +394,14 @@ interface LiveSlot {
    * dragging or why the provider dropped into degraded mode.
    */
   warnings?: InlineWarning[];
+}
+
+function liveStatusLabel(slot: Pick<LiveSlot, 'activity' | 'thinkingLabel'>): string | undefined {
+  const activity = slot.activity?.trim();
+  const phase = slot.thinkingLabel?.trim();
+  if (!activity) return phase || undefined;
+  if (!phase || phase === activity) return activity;
+  return `${activity} · ${phase}`;
 }
 
 /**
@@ -2111,6 +2121,7 @@ export function ChatTimelineView({
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.lastActivityAt = Date.now();
         slot.hasProgress = true;
+        if (event.activity?.trim()) slot.activity = event.activity.trim();
         if (event.phase === 'ready') {
           delete slot.thinkingLabel;
           delete slot.thinkingProgress;
@@ -3166,7 +3177,7 @@ export function ChatTimelineView({
             : providerForGezel(slot.gezelId) === 'ds4'
               ? { localEngine: 'ds4' as const }
               : {})}
-        {...(slot.sessionSource
+        {...(slot.sessionSource || sessionId.startsWith('one-shot:')
           ? {}
           : {
               onCancel: async () => {
@@ -3201,7 +3212,7 @@ export function ChatTimelineView({
         {...(slot.wirePulseCount && slot.wirePulseCount > 0
           ? { wirePulseCount: slot.wirePulseCount }
           : {})}
-        {...(slot.thinkingLabel ? { thinkingLabel: slot.thinkingLabel } : {})}
+        {...(liveStatusLabel(slot) ? { thinkingLabel: liveStatusLabel(slot) } : {})}
         {...(slot.thinkingProgress !== undefined
           ? { thinkingProgress: slot.thinkingProgress }
           : {})}
@@ -3667,6 +3678,27 @@ function renderDivider(args: {
     ? displayName({ name: gezel.name, roleBasedName: gezel.roleBasedName }, roleBasedNameOnlyMode)
     : 'Gezel';
 
+  const isBackgroundActivity = row.kind === 'streaming' && sessionId.startsWith('one-shot:');
+  if (isBackgroundActivity) {
+    const activity = row.slot.activity?.trim() || 'Background work';
+    return (
+      <output key={key} className="timeline-session-divider timeline-session-divider-activity">
+        <GezelIcon
+          svg={gezel?.icon ?? null}
+          poppetje={gezel?.poppetje}
+          iconOverride={gezel?.iconOverride}
+          name={gezelName}
+          size={16}
+        />
+        <span className="timeline-divider-meta">
+          {gezelName} · {activity}
+          {project && <> · in {project.name}</>}
+          {' · '}started {formatRelativeTime(createdAt)}
+        </span>
+      </output>
+    );
+  }
+
   return (
     <button
       key={key}
@@ -3901,7 +3933,9 @@ export function ChatStickyHeader({
             elapsedSeconds={liveElapsed}
             toolCount={countSegmentTools(slotForLive.segments)}
             wirePulseCount={slotForLive.wirePulseCount}
-            {...(slotForLive.thinkingLabel ? { thinkingLabel: slotForLive.thinkingLabel } : {})}
+            {...(liveStatusLabel(slotForLive)
+              ? { thinkingLabel: liveStatusLabel(slotForLive) }
+              : {})}
             {...(slotForLive.thinkingProgress !== undefined
               ? { thinkingProgress: slotForLive.thinkingProgress }
               : {})}

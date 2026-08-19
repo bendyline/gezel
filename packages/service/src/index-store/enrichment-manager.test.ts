@@ -527,8 +527,8 @@ describe('buildEnrichDeps enricher override', () => {
     delete process.env.GEZEL_ENRICH_MODEL;
     delete process.env.GEZEL_ENRICH_PROVIDER;
     const { chat, store, oneShotCompletion } = makeDepsFixture();
-    const deps = await buildEnrichDeps(store, chat, { boekwachter: BOOK });
-    await deps.summarize('p');
+    const deps = await buildEnrichDeps(store, chat, { boekwachter: BOOK, projectId: 'p1' });
+    await deps.summarize('p', 'Indexing src/app.ts');
     expect(oneShotCompletion).toHaveBeenCalledWith(
       'p',
       expect.any(Number),
@@ -536,6 +536,8 @@ describe('buildEnrichDeps enricher override', () => {
         gezelId: 'noor',
         useGezelPersona: true,
         actorLabel: 'Noor',
+        projectId: 'p1',
+        jobLabel: 'Indexing src/app.ts',
       }),
     );
   });

@@ -47,7 +47,7 @@ export async function runAreaPass(index: IndexStore, deps: EnrichDeps): Promise<
     const inputHash = hashLines(entries.map((e) => `${e.path}:${e.hash}`));
     if (index.getAreaSummary(area)?.inputHash === inputHash) continue;
     const completion = resolveEnrichCompletion(
-      await deps.summarize(buildAreaPrompt(area, entries)),
+      await deps.summarize(buildAreaPrompt(area, entries), `Mapping ${area}`),
       deps,
     );
     const summary = completion.text.trim();
@@ -70,7 +70,7 @@ export async function runAreaPass(index: IndexStore, deps: EnrichDeps): Promise<
     const archHash = hashLines(areas.map((a) => `${a.areaPath}:${a.inputHash}`));
     if (index.getAreaSummary(ARCHITECTURE_KEY)?.inputHash !== archHash) {
       const completion = resolveEnrichCompletion(
-        await deps.summarize(buildArchitecturePrompt(areas)),
+        await deps.summarize(buildArchitecturePrompt(areas), 'Mapping the project'),
         deps,
       );
       const note = completion.text.trim();

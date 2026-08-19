@@ -3967,7 +3967,11 @@ describe('ChatManager — one-shot attribution', () => {
   });
 
   it('fans ephemeral local-engine telemetry out to the global engine pill feed', async () => {
-    const received: Array<{ sessionId: string; event: { type: string } }> = [];
+    const received: Array<{
+      sessionId: string;
+      projectId: string;
+      event: { type: string; activity?: string };
+    }> = [];
     const unsubscribe = events.subscribeAll((envelope) => received.push(envelope));
     mock.script('done');
     mock.scriptEngineTelemetry({
@@ -3989,10 +3993,15 @@ describe('ChatManager — one-shot attribution', () => {
       },
     });
 
-    await manager.oneShotCompletion('background summary', 1_000);
+    await manager.oneShotCompletion('background summary', 1_000, {
+      projectId: 'project-7',
+      jobLabel: 'Indexing src/app.ts',
+    });
 
     expect(received.map(({ event }) => event.type)).toEqual(['engine_phase', 'turn_stats', 'done']);
     expect(received[0]?.sessionId).toMatch(/^one-shot:/);
+    expect(received[0]?.projectId).toBe('project-7');
+    expect(received[0]?.event).toMatchObject({ activity: 'Indexing src/app.ts' });
     expect(received[1]?.sessionId).toBe(received[0]?.sessionId);
     unsubscribe();
   });

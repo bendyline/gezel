@@ -9,7 +9,7 @@ const FULL_RESULT = `Best craftbook matches for "create a PowerPoint presentatio
 1. PowerPoint from Content (id: powerpoint-deck) [bundled, 7 step(s), 49% match] [SETUP REQUIRED: docblocks] — Turn source content into a real editable PowerPoint file.
 2. Slide Deck from Content (id: content-deck) [bundled, 5 step(s), 44% match] — Build HTML slides.
 
-Next call: invoke_craftbook({ craftbookId: "powerpoint-deck" }). It will install any exact trusted zero-configuration bundled dependency; if setup still remains, it returns a hard error and creates no task. Do not call suggest_craftbook again.`;
+Next call: invoke_craftbook({"craftbookId":"powerpoint-deck","description":"create a PowerPoint presentation about Honduras","params":{"topic":"create a PowerPoint presentation about Honduras"}}). It will install any exact trusted zero-configuration bundled dependency; if setup still remains, it returns a hard error and creates no task. Do not call suggest_craftbook again.`;
 
 function ctx(modelTier: McpToolWrapperContext['modelTier']): McpToolWrapperContext {
   return { modelTier } as McpToolWrapperContext;
@@ -31,7 +31,10 @@ describe('CraftbookSuggestionCompactor', () => {
         matchPercent: number;
         setupRequired: string[];
       };
-      nextCall: { tool: string; arguments: { craftbookId: string } };
+      nextCall: {
+        tool: string;
+        arguments: { craftbookId: string; description: string; params: { topic: string } };
+      };
       instruction: string;
     };
     expect(compact.recommendedCraftbook).toEqual({
@@ -42,7 +45,11 @@ describe('CraftbookSuggestionCompactor', () => {
     });
     expect(compact.nextCall).toEqual({
       tool: 'invoke_craftbook',
-      arguments: { craftbookId: 'powerpoint-deck' },
+      arguments: {
+        craftbookId: 'powerpoint-deck',
+        description: 'create a PowerPoint presentation about Honduras',
+        params: { topic: 'create a PowerPoint presentation about Honduras' },
+      },
     });
     expect(compact.instruction).toContain('Do not call suggest_craftbook again');
     expect(result.text).not.toContain('content-deck');

@@ -666,10 +666,6 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
         name: 'invoke_craftbook',
         arguments: {
           craftbookId: 'powerpoint-deck',
-          title: 'Battle of Ypres Presentation',
-          description:
-            'Create a historically accurate PowerPoint presentation about the Battle of Ypres.',
-          outputPath: 'battle-of-ypres.pptx',
         },
       },
     ]);
@@ -691,7 +687,10 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
       'suggest_craftbook',
       'invoke_craftbook',
     ]);
-    expect(mock.toolCallOutputs[0]?.output).toContain('craftbookId: "powerpoint-deck"');
+    expect(mock.toolCallOutputs[0]?.output).toContain('"craftbookId":"powerpoint-deck"');
+    expect(mock.toolCallOutputs[0]?.output).toContain(
+      'create a PowerPoint about the Battle of Ypres',
+    );
     expect(mock.toolCallOutputs[1]?.output).toContain('Invoked craftbook "powerpoint-deck"');
     expect(mock.toolCallOutputs.map((output) => output.name)).not.toContain('start_project');
     expect(mock.toolCallOutputs.map((output) => output.name)).not.toContain('message_gezel');
@@ -703,6 +702,17 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
       .join('\n');
     expect(assistantText).not.toMatch(/(?:created|initiated|started).*project/i);
     expect(assistantText).not.toMatch(/voorman.*(?:recruited|is on it)/i);
+
+    const launched = (await store.listProjectTasks('default')).find(
+      (task) => task.craftbook.id === 'powerpoint-deck',
+    );
+    expect(launched?.description).toBe('Can you create a PowerPoint about the Battle of Ypres?');
+    expect(launched?.craftbookParams?.topic).toBe(
+      'Can you create a PowerPoint about the Battle of Ypres?',
+    );
+    expect(launched?.craftbook.steps[0]?.prompt).toContain(
+      'Topic: `Can you create a PowerPoint about the Battle of Ypres?`',
+    );
   }, 30_000);
 
   it('persists gate infrastructure diagnostics on the assistant message', async () => {

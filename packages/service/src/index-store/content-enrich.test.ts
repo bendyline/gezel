@@ -170,9 +170,10 @@ describe('per-symbol summaries', () => {
     await runWorkspaceContentIndex(dir, 'c', artifacts);
   };
 
-  const dispatchingDeps = (prompts: string[]): EnrichDeps => ({
-    summarize: async (prompt: string) => {
+  const dispatchingDeps = (prompts: string[], activities: string[] = []): EnrichDeps => ({
+    summarize: async (prompt: string, activity?: string) => {
       prompts.push(prompt);
+      if (activity) activities.push(activity);
       if (prompt.startsWith('For each listed symbol')) {
         // Fenced + preamble on purpose: the parser must tolerate both.
         return 'Sure! ```json\n{"foo":"Counts characters.","bar":"Calls foo.","ghost":"ignored"}\n```';
@@ -186,10 +187,12 @@ describe('per-symbol summaries', () => {
   it('stores one-liners from a single batched JSON reply and serves them via fileContext', async () => {
     await seed();
     const prompts: string[] = [];
-    await ci.enrich('c', dispatchingDeps(prompts), 10);
+    const activities: string[] = [];
+    await ci.enrich('c', dispatchingDeps(prompts, activities), 10);
 
     // One file-summary call + one symbol-summary call for the code file.
     expect(prompts.filter((p) => p.startsWith('For each listed symbol')).length).toBe(1);
+    expect(activities).toEqual(['Indexing src/b.ts', 'Indexing src/b.ts']);
 
     const ctx = await ci.fileContext('c', 'src/b.ts');
     expect(ctx.summary).toBe('A file about foo and bar.');

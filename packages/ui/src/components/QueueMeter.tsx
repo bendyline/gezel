@@ -158,6 +158,7 @@ function systemFallbackColors(actor: QueueActorIdentity): {
 interface QueueActorContext {
   actor: QueueActorIdentity;
   projectId?: string;
+  job?: string;
 }
 
 function resolveQueueActor(
@@ -183,6 +184,7 @@ function providerRepresentative(
   return {
     actor: resolveQueueActor(turn?.gezelId, turn?.actorLabel, gezels),
     ...(turn?.projectId ? { projectId: turn.projectId } : {}),
+    ...(turn?.job ? { job: turn.job } : {}),
   };
 }
 
@@ -205,12 +207,15 @@ function queueActorTooltip(
   projectId: string | undefined,
   projects: Map<string, Project>,
   provider?: QueueProviderName,
+  job?: string,
 ): string {
   const lines = [actor.label];
   const role = queueActorRole(actor);
   const project = queueProjectLabel(projectId, projects);
   if (role) lines.push(`Role: ${role}`);
   if (project) lines.push(`Project: ${project}`);
+  const activity = queueJobContext(job, projectId, project);
+  if (activity) lines.push(`Activity: ${activity}`);
   if (provider) lines.push(`Provider: ${getPlatformPillLabel(provider)}`);
   return lines.join('\n');
 }
@@ -302,18 +307,23 @@ function QueueChipIdentity({
   provider,
   actor,
   projectId,
+  job,
   projects,
   boringMode,
 }: {
   provider: QueueProviderName;
   actor: QueueActorIdentity;
   projectId: string | undefined;
+  job: string | undefined;
   projects: Map<string, Project>;
   boringMode: boolean;
 }) {
+  const project = queueProjectLabel(projectId, projects);
+  const activity = queueJobContext(job, projectId, project);
+  const activityContext = activity && project ? `${activity} in ${project}` : activity;
   if (!boringMode) {
     const { gezel } = actor;
-    const tooltip = queueActorTooltip(actor, projectId, projects, provider);
+    const tooltip = queueActorTooltip(actor, projectId, projects, provider, job);
     return (
       <>
         <span className="queue-meter-chip-avatar" aria-hidden="true">
@@ -334,22 +344,26 @@ function QueueChipIdentity({
         >
           {actor.label}
         </span>
+        {activityContext && <span className="queue-meter-chip-job">{activityContext}</span>}
       </>
     );
   }
 
   return (
-    <span className="queue-meter-chip-label">
-      {/* Full + short labels rendered together; the chip's container
-          query in styles.css shows whichever fits. The full provider
-          label remains available on hover in compact mode. */}
-      <span className="queue-meter-chip-label-full" title={getPlatformPillLabel(provider)}>
-        {getPlatformPillLabel(provider)}
+    <>
+      <span className="queue-meter-chip-label">
+        {/* Full + short labels rendered together; the chip's container
+            query in styles.css shows whichever fits. The full provider
+            label remains available on hover in compact mode. */}
+        <span className="queue-meter-chip-label-full" title={getPlatformPillLabel(provider)}>
+          {getPlatformPillLabel(provider)}
+        </span>
+        <span className="queue-meter-chip-label-short" title={getPlatformPillLabel(provider)}>
+          {getCompactPillLabel(provider)}
+        </span>
       </span>
-      <span className="queue-meter-chip-label-short" title={getPlatformPillLabel(provider)}>
-        {getCompactPillLabel(provider)}
-      </span>
-    </span>
+      {activityContext && <span className="queue-meter-chip-job">{activityContext}</span>}
+    </>
   );
 }
 
@@ -594,6 +608,7 @@ export function QueueMeter() {
         representative.projectId,
         projects,
         firstBusy.name,
+        representative.job,
       )}\nClick for queue details`;
     } else {
       const preparing = preparingTurns[0]?.[1];
@@ -632,6 +647,7 @@ export function QueueMeter() {
                       representative.projectId,
                       projects,
                       name,
+                      representative.job,
                     )
               }
             >
@@ -639,6 +655,7 @@ export function QueueMeter() {
                 provider={name}
                 actor={representative.actor}
                 projectId={representative.projectId}
+                job={representative.job}
                 projects={projects}
                 boringMode={boringMode}
               />
@@ -671,6 +688,7 @@ export function QueueMeter() {
               provider={onDeviceProvider}
               actor={resolveQueueActor(preparingTurns[0]?.[1].gezelId, undefined, gezels)}
               projectId={preparingTurns[0]?.[1].projectId}
+              job={undefined}
               projects={projects}
               boringMode={boringMode}
             />

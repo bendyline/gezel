@@ -81,7 +81,9 @@ import {
   CraftbookInvocationParamsArgSchema,
   binaryDocumentCraftbookRequest,
   buildBinaryDocumentTaskDescription,
+  inferCraftbookJobParams,
   normalizeCraftbookInvocationParams,
+  suggestedCraftbookInvocation,
 } from './craftbook-routing.js';
 import {
   binaryDocumentCraftbookRoute,
@@ -4606,11 +4608,20 @@ type CraftbookLaunchResult =
 
 const invokeCraftbookRootTurnCache = new RootTurnInvocationCache<CraftbookLaunchResult>();
 
-async function currentRootTurnId(): Promise<string | null> {
+async function currentRootTurnContext(): Promise<{
+  rootTurnId: string;
+  userText?: string;
+} | null> {
   if (!sessionId) return null;
   try {
     const session = await api.getChatSession(sessionId);
-    return rootTurnIdFromMessages(sessionId, session.messages);
+    const rootTurnId = rootTurnIdFromMessages(sessionId, session.messages);
+    if (!rootTurnId) return null;
+    const latestUser = [...session.messages].reverse().find((message) => message.role === 'user');
+    return {
+      rootTurnId,
+      ...(latestUser?.content.trim() ? { userText: latestUser.content.trim() } : {}),
+    };
   } catch {
     // Fail open: inability to read the transcript must not block a legitimate
     // invocation. The ordinary task API remains the final mutation boundary.
@@ -4670,13 +4681,21 @@ async function launchCraftbookTask(args: {
   const craftbookName =
     projectCraftbooks.items.find((item) => item.manifest.id === args.craftbookId)?.manifest.name ??
     args.craftbookId;
+  const effectiveParams = inferCraftbookJobParams({
+    paramSchema:
+      declaredCraftbook?.manifest.kind === 'craftbook-template'
+        ? declaredCraftbook.manifest.paramSchema
+        : undefined,
+    params: args.params,
+    jobDescription: args.description,
+  });
   const task = await api.createTask(args.project, {
     ...sessionTaskNamingMode,
     title: args.title ?? craftbookName,
     description: normalizedCraftbookTaskDescription(args.description, args.craftbookId),
     craftbookId: args.craftbookId,
     ...(args.version ? { craftbookVersion: args.version } : {}),
-    ...(args.params && Object.keys(args.params).length > 0 ? { craftbookParams: args.params } : {}),
+    ...(Object.keys(effectiveParams).length > 0 ? { craftbookParams: effectiveParams } : {}),
     ...(args.assignee ? { assignee: assigneeFromArg(args.assignee) } : {}),
     ...(args.craftbookInvocationKey ? { craftbookInvocationKey: args.craftbookInvocationKey } : {}),
     ...(gezelId ? { createdBy: { kind: 'gezel', gezelId } as const } : {}),
@@ -4813,10 +4832,22 @@ server.tool(
       .join('\n');
     const top = res.suggestions[0]!;
     const topMissing = projectCraftbooks?.missingToolsets[top.id] ?? [];
+    const topManifest = projectCraftbooks?.items.find(
+      (item) => item.manifest.kind === 'craftbook-template' && item.manifest.id === top.id,
+    );
+    const nextInvocation = suggestedCraftbookInvocation({
+      craftbookId: top.id,
+      query,
+      paramSchema:
+        topManifest?.manifest.kind === 'craftbook-template'
+          ? topManifest.manifest.paramSchema
+          : undefined,
+    });
+    const nextCall = `invoke_craftbook(${JSON.stringify(nextInvocation)})`;
     const nextAction =
       topMissing.length > 0
-        ? `Next call: invoke_craftbook({ craftbookId: "${top.id}" }). It will install any exact trusted zero-configuration bundled dependency; if setup still remains, it returns a hard error and creates no task. Do not call suggest_craftbook again with a rephrased query, switch to a generic project/job kickoff, or delegate the job raw.`
-        : `Next call: invoke_craftbook({ craftbookId: "${top.id}" }) — send it now unless a lower match clearly fits the job better. Do not call suggest_craftbook again with a rephrased query, switch to a generic project/job kickoff, delegate the job raw, or hand-write task steps; the recipe's gated steps already handle assignment and quality checks.`;
+        ? `Next call: ${nextCall}. It will install any exact trusted zero-configuration bundled dependency; if setup still remains, it returns a hard error and creates no task. Preserve the supplied description and params; do not call suggest_craftbook again with a rephrased query, switch to a generic project/job kickoff, or delegate the job raw.`
+        : `Next call: ${nextCall} — send it now unless a lower match clearly fits the job better. Preserve the supplied description and params; do not call suggest_craftbook again with a rephrased query, switch to a generic project/job kickoff, delegate the job raw, or hand-write task steps; the recipe's gated steps already handle assignment and quality checks.`;
     return {
       content: [
         {
@@ -4943,17 +4974,19 @@ server.tool(
   async ({ craftbookId, project, title, description, version, assignee, params, outputPath }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
     try {
+      const rootTurn = await currentRootTurnContext();
+      const effectiveDescription = description?.trim() || rootTurn?.userText;
       const invocationParams = normalizeCraftbookInvocationParams(params, outputPath);
       const invocation = {
         craftbookId,
         project: resolvedProject,
         title,
-        description,
+        description: effectiveDescription,
         version,
         assignee,
         params: invocationParams,
       };
-      const rootTurnId = await currentRootTurnId();
+      const rootTurnId = rootTurn?.rootTurnId ?? null;
       const launchInvocation = rootTurnId
         ? {
             ...invocation,

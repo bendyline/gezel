@@ -1449,6 +1449,97 @@ describe('TaskManager craftbookParams interpolation', () => {
     expect(overridden.craftbookParams).toEqual({ reviewId: 'release-candidate' });
   });
 
+  it('rejects a launch when every declared source alternative is empty', async () => {
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            ...bookWithPlaceholders,
+            id,
+            paramSchema: {
+              type: 'object',
+              properties: {
+                sourcePath: { type: 'string', default: '' },
+                topic: { type: 'string', default: '' },
+                content: { type: 'string', default: '' },
+              },
+              anyOf: [
+                {
+                  required: ['sourcePath'],
+                  properties: { sourcePath: { type: 'string', minLength: 1 } },
+                },
+                {
+                  required: ['topic'],
+                  properties: { topic: { type: 'string', minLength: 1 } },
+                },
+                {
+                  required: ['content'],
+                  properties: { content: { type: 'string', minLength: 1 } },
+                },
+              ],
+            },
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+    await expect(
+      tasks.create('website', {
+        title: 'Empty deck',
+        craftbookId: 'powerpoint-deck',
+        assignee: { kind: 'user' },
+      }),
+    ).rejects.toThrow(
+      'requires at least one non-empty invocation parameter: sourcePath, topic, content',
+    );
+    await expect(tasks.list({ projectId: 'website' })).resolves.toEqual([]);
+  });
+
+  it('accepts a launch when one declared source alternative is non-empty', async () => {
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            ...bookWithPlaceholders,
+            id,
+            paramSchema: {
+              type: 'object',
+              properties: {
+                sourcePath: { type: 'string', default: '' },
+                topic: { type: 'string', default: '' },
+                content: { type: 'string', default: '' },
+              },
+              anyOf: [
+                {
+                  required: ['sourcePath'],
+                  properties: { sourcePath: { type: 'string', minLength: 1 } },
+                },
+                {
+                  required: ['topic'],
+                  properties: { topic: { type: 'string', minLength: 1 } },
+                },
+                {
+                  required: ['content'],
+                  properties: { content: { type: 'string', minLength: 1 } },
+                },
+              ],
+            },
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+    const task = await tasks.create('website', {
+      title: 'Ireland deck',
+      craftbookId: 'powerpoint-deck',
+      craftbookParams: { topic: 'Ireland' },
+      assignee: { kind: 'user' },
+    });
+    expect(task.craftbookParams).toMatchObject({ topic: 'Ireland' });
+  });
+
   it('provides per-task runtime placeholders and expands only declared defaults', async () => {
     tasks.setCraftbookResolver({
       async resolve(id) {

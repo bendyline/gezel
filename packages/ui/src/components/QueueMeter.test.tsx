@@ -255,7 +255,8 @@ describe('QueueMeter — preparing window', () => {
             {
               sessionId: 'index-enrichment',
               actorLabel: 'Boekwachter',
-              job: 'index enrichment',
+              projectId: 'project-7',
+              job: 'Indexing src/app.ts',
               runningForMs: 16_000,
             },
           ],
@@ -269,6 +270,12 @@ describe('QueueMeter — preparing window', () => {
     });
 
     await waitFor(() => expect(button).toHaveTextContent('Boekwachter'));
+    expect(button).toHaveTextContent('Indexing src/app.ts');
+    expect(button).toHaveTextContent('Spanish lessons');
+    expect(button).toHaveAttribute(
+      'title',
+      expect.stringContaining('Activity: Indexing src/app.ts'),
+    );
     expect(button).not.toHaveTextContent(/This (Windows|Linux|Mac)/);
     expect(button.querySelector('.queue-meter-chip .gezel-icon-fallback')).not.toBeNull();
     expect(screen.queryByText(/Unknown/i)).not.toBeInTheDocument();
@@ -276,7 +283,7 @@ describe('QueueMeter — preparing window', () => {
     await userEvent.click(button);
     const panel = await screen.findByLabelText('AI chat queue');
     expect(within(panel).getByText('Boekwachter')).toBeInTheDocument();
-    expect(within(panel).getByText(/index enrichment/)).toBeInTheDocument();
+    expect(within(panel).getByText(/Indexing src\/app\.ts/)).toBeInTheDocument();
   });
 
   it('uses System as the final fallback for unattributed service work', async () => {

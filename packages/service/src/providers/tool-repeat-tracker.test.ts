@@ -53,6 +53,20 @@ describe('ToolRepeatTracker', () => {
     expect(duplicate.output).toContain('Already selected craftbook `powerpoint-deck`');
   });
 
+  it('extracts the selected id from a context-preserving suggestion call', () => {
+    const t = new ToolRepeatTracker();
+    const output =
+      'Next call: invoke_craftbook({"craftbookId":"powerpoint-deck","description":"PowerPoint about Honduras","params":{"topic":"PowerPoint about Honduras"}}).';
+    t.recordCall('suggest_craftbook', { query: 'PowerPoint about Honduras' }, output);
+    const duplicate = t.recordCall(
+      'suggest_craftbook',
+      { query: 'PowerPoint about Honduras' },
+      output,
+    );
+
+    expect(duplicate.output).toContain('Already selected craftbook `powerpoint-deck`');
+  });
+
   it('annotates with a soft warning at the 3rd same-args call', () => {
     const t = new ToolRepeatTracker();
     t.recordCall('read_task_notes', { ref: 'a/3' }, 'notes...');

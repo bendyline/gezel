@@ -312,6 +312,7 @@ export class IndexEnrichmentManager {
         // so the local engine holds it behind live chat.
         ambient: !full,
         boekwachter,
+        projectId,
       });
       const gezel = { gezelId: boekwachter.id, gezelName: boekwachter.name };
       const batch = full ? NIGHT_BATCH : BATCH;
@@ -450,7 +451,7 @@ export class IndexEnrichmentManager {
           projectId: p.id,
           ...(p.name ? { projectName: p.name } : {}),
         };
-        const deps = await this.buildDeps(night, boekwachter);
+        const deps = await this.buildDeps(night, boekwachter, p.id);
         const rubrics: Map<string, ResolvedRubric> = deps.model
           ? await resolveRubrics(this.store).catch(() => new Map<string, ResolvedRubric>())
           : new Map<string, ResolvedRubric>();
@@ -611,11 +612,16 @@ export class IndexEnrichmentManager {
   }
 
   /** Resolve the configured summarizer (if any) + the always-local embedder. */
-  private async buildDeps(nightShift: boolean, boekwachter: GezelDetail): Promise<EnrichDeps> {
+  private async buildDeps(
+    nightShift: boolean,
+    boekwachter: GezelDetail,
+    projectId: string,
+  ): Promise<EnrichDeps> {
     return buildEnrichDeps(this.store, this.chat, {
       nightShift,
       ambient: true,
       boekwachter,
+      projectId,
     });
   }
 }
