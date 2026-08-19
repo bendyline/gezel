@@ -165,4 +165,20 @@ describe('VSCodeSetupCard', () => {
 
     await waitFor(() => expect(removeVSCodeSetup).toHaveBeenCalledOnce());
   });
+
+  it('omits the VS Code build hash from the configured summary', async () => {
+    getVSCodeSetupStatus.mockResolvedValue(
+      setupStatus({
+        state: 'configured',
+        configuredProfileId: 'code:default',
+        canRemove: true,
+        vscodeVersion: '1.133.0\na5b500951314efd502d07465bd138dfbd714a960\nx64',
+      }),
+    );
+
+    render(<VSCodeSetupCard endpointsEnabled />);
+
+    expect(await screen.findByText(/VS Code 1\.133\.0 x64 was found/)).toBeInTheDocument();
+    expect(screen.queryByText(/a5b500951314efd502d07465bd138dfbd714a960/)).not.toBeInTheDocument();
+  });
 });

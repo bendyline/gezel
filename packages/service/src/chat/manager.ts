@@ -218,6 +218,7 @@ import {
   type BeginExternalConversationInput,
   ExternalConversationRecorder,
   type ExternalConversationTurn,
+  type ResolveExternalConversationInput,
 } from './external-conversation-recorder.js';
 import { artifactPathsOf, extractReferencedFiles } from './file-references.js';
 
@@ -2882,7 +2883,7 @@ export class ChatManager {
   }
 
   /**
-   * Begin one request in a caller-owned conversation loop (currently Pi).
+   * Begin one request in a caller-owned conversation loop (Pi, OpenCode, or VS Code).
    * The recorder reconciles the caller's authoritative transcript into a
    * read-only Gezel session and returns live-event hooks for this response.
    */
@@ -2892,6 +2893,10 @@ export class ChatManager {
     const turn = await this.externalConversations.begin(input);
     this.cancelDeferredExtraction(turn.sessionId);
     return turn;
+  }
+
+  async resolveExternalConversationId(input: ResolveExternalConversationInput): Promise<string> {
+    return this.externalConversations.resolveConversationId(input);
   }
 
   /**

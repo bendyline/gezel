@@ -49,6 +49,7 @@ export function VSCodeSetupCard({
     );
   }, [status]);
   const selectedProfile = status?.profiles.find((profile) => profile.id === profileId);
+  const visibleVSCodeVersion = displayVSCodeVersion(status?.vscodeVersion);
   const hasManagedProfile = Boolean(status?.configuredProfileId);
   const configureLabel = card.repairable
     ? 'Repair VS Code setup…'
@@ -93,7 +94,7 @@ export function VSCodeSetupCard({
             configuredNote: (
               <>
                 Gezel is available in <strong>{selectedProfile.label}</strong>.
-                {status?.vscodeVersion ? ` VS Code ${status.vscodeVersion} was found.` : ''} Keep
+                {visibleVSCodeVersion ? ` VS Code ${visibleVSCodeVersion} was found.` : ''} Keep
                 Gezel running while you use the models.
               </>
             ),
@@ -234,4 +235,10 @@ function actionErrorPrefix(confirmation: Confirmation, state: string | undefined
   return state === 'not-configured'
     ? 'Could not set up the VS Code setup'
     : 'Could not update the VS Code setup';
+}
+
+function displayVSCodeVersion(version: string | undefined): string | undefined {
+  if (!version) return undefined;
+  const visibleParts = version.split(/\s+/).filter((part) => part && !/^[a-f\d]{40}$/i.test(part));
+  return visibleParts.length > 0 ? visibleParts.join(' ') : undefined;
 }

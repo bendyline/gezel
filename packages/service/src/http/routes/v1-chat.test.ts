@@ -210,6 +210,7 @@ describe('POST /v1/chat/completions — non-streaming', () => {
     });
     expect(send?.sendOpts?.queue?.sessionId).toBeUndefined();
     expect(send?.sendOpts?.queue?.signal).toBeInstanceOf(AbortSignal);
+    expect(send?.sendOpts?.timeoutMs).toBe(2 * 60 * 60 * 1000);
   });
 });
 
@@ -257,6 +258,7 @@ describe('POST /v1/chat/completions — streaming', () => {
       job: 'Gezel (root)',
     });
     expect(send?.sendOpts?.queue?.signal).toBeInstanceOf(AbortSignal);
+    expect(send?.sendOpts?.timeoutMs).toBe(2 * 60 * 60 * 1000);
   });
 
   it('keeps private reasoning off the general OpenAI-compatible endpoint', async () => {
