@@ -475,7 +475,15 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(strip).not.toHaveAccessibleName(/Core Gezel infra/i);
     expect(strip).toHaveAccessibleName(/Model weights about 4\.0 GB/i);
     expect(strip).toHaveAccessibleName(/Model cache about 1\.0 GB/i);
-    expect(screen.getByText('Other 4.0 GB')).toBeInTheDocument();
+    const unattributed = screen.getByText('Unattributed 4.0 GB');
+    expect(unattributed).toBeInTheDocument();
+    expect(unattributed).toHaveAttribute(
+      'title',
+      'Per-process VRAM use is unavailable; this may include retained Gezel models',
+    );
+    expect(strip).toHaveAccessibleName(
+      /unattributed use 4\.0 GB; this may include retained Gezel models/i,
+    );
     expect(screen.getByText(/Test GPU/)).toBeInTheDocument();
 
     const weightsSegment = strip.querySelector('.machine-memory-segment-gezel-weights');
@@ -550,6 +558,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       await screen.findByText(/Gezel machine engine · gezel-llama-server\.exe/i),
     ).toBeVisible();
     expect(screen.getByText(/Gezel development engine · gezel-llama-server\.exe/i)).toBeVisible();
+    expect(screen.getByText('Other 5.0 GB')).toBeVisible();
     expect(screen.getByText(/Unloads in 5:00|Unloads in 4:59/i)).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Unload Talkie 1930 13B now' }));
     expect(api.unloadIdleEngine).toHaveBeenCalledWith({

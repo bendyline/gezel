@@ -114,7 +114,11 @@ export interface DiscoverOrSpawnOptions {
    * a compatible daemon entry of their own.
    */
   spawnIfMissing?: boolean;
-  logger?: { info?: (msg: string) => void; warn?: (msg: string) => void };
+  logger?: {
+    info?: (msg: string) => void;
+    warn?: (msg: string) => void;
+    error?: (msg: string) => void;
+  };
   // Test-only injection points. Defaults wire to the real implementations.
   spawnFn?: SpawnLike;
   readRuntimeFn?: (home?: string) => Promise<RuntimeInfo | null>;
@@ -349,12 +353,21 @@ export async function stopOwnedDaemon(
   logger?: DiscoverOrSpawnOptions['logger'],
   options: StopOwnedDaemonOptions = {},
 ): Promise<void> {
-  if (!child || childHasExited(child)) return;
+  if (!child) return;
+  if (childHasExited(child)) {
+    logger?.info?.(`[gezel] owned daemon already exited; ${childStopState(child)}`);
+    return;
+  }
   const platform = options.platform ?? process.platform;
   const graceMs = options.graceMs ?? 3_000;
   const forceMs = options.forceMs ?? 3_000;
   let requestedGraceful = false;
   let gracefulExit: Promise<boolean> | undefined;
+  let gracefulChannel = 'none';
+
+  logger?.info?.(
+    `[gezel] stopping owned daemon platform=${platform} graceMs=${graceMs} forceMs=${forceMs}; ${childStopState(child)}`,
+  );
 
   if (child.stdin && !child.stdin.destroyed && !child.stdin.writableEnded) {
     try {
@@ -363,8 +376,14 @@ export async function stopOwnedDaemon(
       gracefulExit = waitForExit(child, graceMs);
       child.stdin.end();
       requestedGraceful = true;
-      logger?.info?.('[gezel] requested graceful daemon shutdown through stdin EOF');
-    } catch {
+      gracefulChannel = 'stdin-EOF';
+      logger?.info?.(
+        `[gezel] requested graceful daemon shutdown through stdin EOF; ${childStopState(child)}`,
+      );
+    } catch (error) {
+      logger?.warn?.(
+        `[gezel] stdin EOF shutdown request failed: ${stopErrorMessage(error)}; ${childStopState(child)}`,
+      );
       // Fall through to the platform hard-stop ladder.
     }
   }
@@ -372,15 +391,35 @@ export async function stopOwnedDaemon(
   if (!requestedGraceful && platform !== 'win32') {
     try {
       gracefulExit = waitForExit(child, graceMs);
-      child.kill('SIGTERM');
+      const accepted = child.kill('SIGTERM');
       requestedGraceful = true;
-    } catch {
+      gracefulChannel = 'SIGTERM';
+      logger?.info?.(
+        `[gezel] sent SIGTERM to owned daemon accepted=${accepted}; ${childStopState(child)}`,
+      );
+    } catch (error) {
+      logger?.warn?.(
+        `[gezel] SIGTERM shutdown request failed: ${stopErrorMessage(error)}; ${childStopState(child)}`,
+      );
       /* process may have exited between the predicate and signal */
     }
   }
 
-  if (requestedGraceful && gracefulExit && (await gracefulExit)) return;
-  if (childHasExited(child)) return;
+  if (requestedGraceful && gracefulExit && (await gracefulExit)) {
+    logger?.info?.(
+      `[gezel] owned daemon confirmed exit after ${gracefulChannel}; ${childStopState(child)}`,
+    );
+    return;
+  }
+  if (childHasExited(child)) {
+    logger?.info?.(
+      `[gezel] owned daemon exited at the graceful deadline after ${gracefulChannel}; ${childStopState(child)}`,
+    );
+    return;
+  }
+  logger?.warn?.(
+    `[gezel] owned daemon did not confirm exit within ${graceMs}ms after ${gracefulChannel}; escalating; ${childStopState(child)}`,
+  );
 
   const forcedExit = waitForExit(child, forceMs);
   if (platform === 'win32' && Number.isInteger(child.pid) && (child.pid ?? 0) > 0) {
@@ -401,12 +440,35 @@ export async function stopOwnedDaemon(
     }
   } else {
     try {
-      child.kill('SIGKILL');
-    } catch {
+      const accepted = child.kill('SIGKILL');
+      logger?.warn?.(
+        `[gezel] sent SIGKILL to owned daemon accepted=${accepted}; ${childStopState(child)}`,
+      );
+    } catch (error) {
+      logger?.warn?.(
+        `[gezel] SIGKILL request failed: ${stopErrorMessage(error)}; ${childStopState(child)}`,
+      );
       /* process may have exited immediately before escalation */
     }
   }
-  await forcedExit;
+  const forceConfirmed = await forcedExit;
+  if (forceConfirmed || childHasExited(child)) {
+    logger?.info?.(
+      `[gezel] owned daemon confirmed exit after forced stop; ${childStopState(child)}`,
+    );
+  } else {
+    logger?.error?.(
+      `[gezel] owned daemon did not confirm exit within ${forceMs}ms after forced stop; ${childStopState(child)}`,
+    );
+  }
+}
+
+function childStopState(child: ChildProcess): string {
+  return `pid=${child.pid ?? 'unknown'} killed=${child.killed ?? false} exitCode=${child.exitCode ?? 'null'} signalCode=${child.signalCode ?? 'null'}`;
+}
+
+function stopErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message.replace(/[\r\n\t]+/g, ' ') : String(error);
 }
 
 function childHasExited(child: ChildProcess): boolean {

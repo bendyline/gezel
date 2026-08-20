@@ -232,6 +232,9 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
       : `${formatBytes(usage.usedBytes)} of ${formatBytes(usage.totalBytes)} used`;
   const observed = typeof usage.gezelBytesObserved === 'number';
   const gezelBytes = usage.gezelBytesObserved ?? usage.gezelBytesEstimated;
+  const otherLabel = usage.kind === 'vram' && !observed ? 'Unattributed' : 'Other';
+  const unattributedDescription =
+    'Per-process VRAM use is unavailable; this may include retained Gezel models';
   const otherPercent = usage.otherBytes === null ? 0 : percent(usage.otherBytes, usage.totalBytes);
   const cachedBytes = typeof usage.cachedBytes === 'number' ? usage.cachedBytes : null;
   const cachedPercent = cachedBytes === null ? 0 : percent(cachedBytes, usage.totalBytes);
@@ -383,7 +386,11 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
           usage.orphanedGezelEngineProcessCount === 1 ? 'process' : 'processes'
         } from an earlier service session`
       : null,
-    usage.otherBytes === null ? null : `other use ${formatBytes(usage.otherBytes)}`,
+    usage.otherBytes === null
+      ? null
+      : `${otherLabel.toLowerCase()} use ${formatBytes(usage.otherBytes)}${
+          otherLabel === 'Unattributed' ? '; this may include retained Gezel models' : ''
+        }`,
     cachedBytes === null
       ? null
       : `borrowed for cache ${formatBytes(cachedBytes)}, reclaimable by the operating system`,
@@ -443,9 +450,9 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
             </span>
           )}
           {usage.otherBytes !== null && (
-            <span>
+            <span title={otherLabel === 'Unattributed' ? unattributedDescription : undefined}>
               <i className="machine-memory-swatch machine-memory-swatch-other" aria-hidden />
-              Other {formatBytes(usage.otherBytes)}
+              {otherLabel} {formatBytes(usage.otherBytes)}
             </span>
           )}
           {cachedBytes !== null && (

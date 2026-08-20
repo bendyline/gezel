@@ -303,7 +303,7 @@ export const GpuProcessOwnerSchema = z.enum([
 ]);
 export type GpuProcessOwner = z.infer<typeof GpuProcessOwnerSchema>;
 
-/** Windows driver accounting for one process holding dedicated GPU memory. */
+/** Driver accounting for one process holding dedicated GPU memory. */
 export const GpuProcessMemorySchema = z.object({
   pid: z.number().int().positive(),
   name: z.string().optional(),
@@ -333,7 +333,8 @@ export type LocalEngineLifecycle = z.infer<typeof LocalEngineLifecycleSchema>;
  * On macOS, `gezelBytesObserved` is the combined physical footprint of gezeld
  * and same-home engine processes — the metric Activity Monitor uses, including
  * Metal-backed allocations. On Windows, the bundled device-health helper uses
- * the OS GPU Process Memory counters to attribute dedicated VRAM to processes.
+ * the OS GPU Process Memory counters; on NVIDIA Linux it uses NVML process
+ * accounting to attribute dedicated VRAM to supervised engine PIDs.
  *
  * `engineReservedBytes` stays separate: it is capacity planning, not observed
  * use, and it is NOT a quantity of this pool. Attributing it to the pool once

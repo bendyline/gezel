@@ -25,6 +25,7 @@ import {
   resolveAvailableLlamaBinary,
 } from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
+import { describeOwnedChildState, formatDiagnosticError } from './diagnostics.js';
 import { defaultBundlePaths, extractBundleIfNeeded, readBundleMeta } from './extract-bundle.js';
 import { defaultNodeBundleDir, installNodeIfNeeded } from './extract-node.js';
 import { defaultPnpmBundleDir, installPnpmIfNeeded } from './extract-pnpm.js';
@@ -179,6 +180,9 @@ export class SupervisedService extends EventEmitter {
   private healthGeneration = 0;
   private healthProbe?: { generation: number; controller: AbortController };
   private consecutiveHealthFailures = 0;
+  private lastHealthSuccessAt: string;
+  private lastHealthVersion?: string;
+  private lastHealthFailure?: { at: string; elapsedMs: number; error: string };
   private restartAttempts: number[] = [];
   private transitionInFlight?: Promise<void>;
   private shuttingDown = false;
@@ -199,6 +203,9 @@ export class SupervisedService extends EventEmitter {
     this._cert = cert;
     this._fallbackReason = init.fallbackReason ?? null;
     this.logRotator = new LogRotator({ dir: gezelPaths(opts.home).logs });
+    // connectOrStart verifies every candidate before constructing the handle,
+    // so construction time is an honest initial health-success timestamp.
+    this.lastHealthSuccessAt = new Date().toISOString();
   }
 
   get mode(): ConnectionMode {
@@ -247,6 +254,30 @@ export class SupervisedService extends EventEmitter {
       this.opts.logger?.warn?.(`[gezeld] ${line}`);
       void this.logRotator.write(line);
     });
+  }
+
+  /**
+   * Supervisor failures happen in Electron, not in gezeld, so console output
+   * alone disappears for ordinary desktop launches. Mirror the diagnostic
+   * chain into the same durable service log as the child's stdout/stderr.
+   */
+  private recordSupervisorDiagnostic(level: 'info' | 'warn' | 'error', message: string): void {
+    const line = `[supervisor] ${message}`;
+    this.opts.logger?.[level]?.(line);
+    void this.logRotator.write(line).catch((error: unknown) => {
+      this.opts.logger?.warn?.(
+        `[supervisor] failed to persist diagnostic: ${formatDiagnosticError(error)}`,
+      );
+    });
+  }
+
+  private durableChildLogger(): NonNullable<ConnectOptions['logger']> {
+    const timestamped = (message: string) => `at=${new Date().toISOString()} ${message}`;
+    return {
+      info: (message) => this.recordSupervisorDiagnostic('info', timestamped(message)),
+      warn: (message) => this.recordSupervisorDiagnostic('warn', timestamped(message)),
+      error: (message) => this.recordSupervisorDiagnostic('error', timestamped(message)),
+    };
   }
 
   attachEmbedded(stop: () => Promise<void>): void {
@@ -463,6 +494,8 @@ export class SupervisedService extends EventEmitter {
   private markReady(): void {
     this._state = 'ready';
     this._failure = null;
+    this.lastHealthSuccessAt = new Date().toISOString();
+    this.lastHealthFailure = undefined;
   }
 
   private markRestartUnrecoverable(
@@ -480,14 +513,20 @@ export class SupervisedService extends EventEmitter {
     const recoveryDetail = fallbackError
       ? `; embedded recovery also failed: ${errorMessage(fallbackError)}`
       : '';
+    const healthDetail = this.lastHealthFailure
+      ? `; preceding health failure at ${this.lastHealthFailure.at} after ${this.lastHealthFailure.elapsedMs}ms: ${this.lastHealthFailure.error}`
+      : '';
     const failure: ServiceConnectionFailure = {
       code: 'restart-unrecoverable',
       sourceMode,
-      message: `The background service stopped but its replacement failed: ${errorMessage(primaryError)}${recoveryDetail}`,
+      message: `The background service stopped but its replacement failed: ${errorMessage(primaryError)}${recoveryDetail}${healthDetail}`,
     };
     this._state = 'failed';
     this._failure = failure;
-    this.opts.logger?.error?.(`[supervisor] ${failure.message}`);
+    this.recordSupervisorDiagnostic(
+      'error',
+      `fatal restart failure at=${new Date().toISOString()} mode=${sourceMode}: ${failure.message}`,
+    );
     this.emit('fatal', failure);
   }
 
@@ -499,19 +538,32 @@ export class SupervisedService extends EventEmitter {
    * writer would risk corruption.
    */
   private async handleStopFailure(label: string, stopError: unknown): Promise<void> {
+    const stopDiagnostic = formatDiagnosticError(stopError);
     try {
-      await healthWithTimeout(buildHealthClient(this._baseUrl, this._token, this._cert));
+      const health = await healthWithTimeout(
+        buildHealthClient(this._baseUrl, this._token, this._cert),
+      );
+      this.lastHealthVersion = health.version;
       this.markReady();
       if (this.child) this.startHealthWatch();
-      this.opts.logger?.warn?.(
-        `[supervisor] ${label} rejected shutdown but remains healthy; retaining the existing connection`,
+      this.recordSupervisorDiagnostic(
+        'warn',
+        `${label} rejected shutdown but remains healthy at=${new Date().toISOString()}; retaining the existing connection; stopError=${stopDiagnostic}`,
       );
     } catch (healthError) {
+      const healthDiagnostic = formatDiagnosticError(healthError);
+      const childDiagnostic = await describeOwnedChildState(this.child);
+      this.recordSupervisorDiagnostic(
+        'error',
+        `${label} shutdown unconfirmed at=${new Date().toISOString()}; stopError=${stopDiagnostic}; reprobeError=${healthDiagnostic}; child={${childDiagnostic}}`,
+      );
       this.markRestartUnrecoverable(
         this._mode,
-        new AggregateError(
-          [stopError, healthError],
-          `${label} shutdown could not be confirmed and its old endpoint is unhealthy`,
+        new Error(
+          `${label} shutdown could not be confirmed and its old endpoint is unhealthy; stopError=${stopDiagnostic}; reprobeError=${healthDiagnostic}; child={${childDiagnostic}}`,
+          {
+            cause: new AggregateError([stopError, healthError], `${label} stop and reprobe failed`),
+          },
         ),
         undefined,
         { preserveResources: true },
@@ -522,7 +574,10 @@ export class SupervisedService extends EventEmitter {
   private async verifyReplacement(
     candidate: Pick<LocalAdoptRuntime, 'baseUrl' | 'token' | 'cert'>,
   ): Promise<void> {
-    await healthWithTimeout(buildHealthClient(candidate.baseUrl, candidate.token, candidate.cert));
+    const health = await healthWithTimeout(
+      buildHealthClient(candidate.baseUrl, candidate.token, candidate.cert),
+    );
+    this.lastHealthVersion = health.version;
   }
 
   private async installEmbeddedCandidate(
@@ -570,7 +625,7 @@ export class SupervisedService extends EventEmitter {
     // installed. This avoids racing a newly spawned child past shutdown.
     if (this.transitionInFlight) await this.transitionInFlight.catch(() => {});
     this.stopHealthWatch();
-    if (this.child) await gracefullyStop(this.child, this.opts.logger);
+    if (this.child) await gracefullyStop(this.child, this.durableChildLogger());
     if (this.embeddedStop) await this.embeddedStop();
     await this.logRotator.close();
     this.child = undefined;
@@ -620,10 +675,14 @@ export class SupervisedService extends EventEmitter {
           fetch: createTrustingFetch({ cert: this._cert }),
         })
       : new GezelClient({ baseUrl: this._baseUrl, token: this._token });
+    const probeStartedAt = Date.now();
     try {
       const health = await healthWithTimeout(client, HEALTH_REQUEST_TIMEOUT_MS, probe.controller);
       if (generation !== this.healthGeneration) return;
       this.consecutiveHealthFailures = 0;
+      this.lastHealthSuccessAt = new Date().toISOString();
+      this.lastHealthVersion = health.version;
+      this.lastHealthFailure = undefined;
       // `machine-service-not-installed` is included deliberately. The installer
       // now records the START outcome rather than the `sc create` result, so a
       // service that was registered but could not come up during install
@@ -644,14 +703,24 @@ export class SupervisedService extends EventEmitter {
         // This does not restart either daemon or rotate the user token.
         this.emit('restart');
       }
-    } catch {
+    } catch (error) {
       if (generation !== this.healthGeneration) return;
       this.consecutiveHealthFailures += 1;
-      this.opts.logger?.warn?.(
-        `[supervisor] health-check failure ${this.consecutiveHealthFailures}/${HEALTH_FAILURES_BEFORE_RESTART}`,
+      const at = new Date().toISOString();
+      const elapsedMs = Math.max(0, Date.now() - probeStartedAt);
+      const diagnostic = formatDiagnosticError(error);
+      this.lastHealthFailure = { at, elapsedMs, error: diagnostic };
+      this.recordSupervisorDiagnostic(
+        'warn',
+        `health-check failure ${this.consecutiveHealthFailures}/${HEALTH_FAILURES_BEFORE_RESTART} at=${at} elapsedMs=${elapsedMs} endpoint=${this._baseUrl} lastSuccessAt=${this.lastHealthSuccessAt} lastVersion=${this.lastHealthVersion ?? 'unknown'} error=${diagnostic}`,
       );
       if (this.consecutiveHealthFailures >= HEALTH_FAILURES_BEFORE_RESTART) {
         this.consecutiveHealthFailures = 0;
+        const childDiagnostic = await describeOwnedChildState(this.child);
+        this.recordSupervisorDiagnostic(
+          'error',
+          `health restart threshold reached at=${new Date().toISOString()} mode=${this._mode} host=${process.platform}/${process.arch} child={${childDiagnostic}}`,
+        );
         await this.handleCrash('health check failed 3 times');
       }
     } finally {
@@ -718,7 +787,7 @@ export class SupervisedService extends EventEmitter {
     this.stopHealthWatch();
     if (this.child) {
       try {
-        await gracefullyStop(this.child, this.opts.logger);
+        await gracefullyStop(this.child, this.durableChildLogger());
       } catch (error) {
         await this.handleStopFailure('spawned service', error);
         throw error;
@@ -737,7 +806,7 @@ export class SupervisedService extends EventEmitter {
       await this.verifyReplacement(result);
     } catch (error) {
       try {
-        await gracefullyStop(result.child, this.opts.logger);
+        await gracefullyStop(result.child, this.durableChildLogger());
       } catch (stopError) {
         this.child = result.child;
         this.markRestartUnrecoverable(mode, error, stopError, { preserveResources: true });
@@ -760,7 +829,7 @@ export class SupervisedService extends EventEmitter {
     try {
       if (this.child) {
         try {
-          await gracefullyStop(this.child, this.opts.logger);
+          await gracefullyStop(this.child, this.durableChildLogger());
         } catch (error) {
           await this.handleStopFailure('spawned service', error);
           throw error;
@@ -2047,7 +2116,9 @@ export async function gracefullyStop(
     forceMs: GRACEFUL_STOP_MS,
   });
   if (child.exitCode == null && child.signalCode == null) {
-    throw new Error('gezeld child did not confirm exit after the bounded stop ladder');
+    throw new Error(
+      `gezeld child did not confirm exit after the bounded stop ladder (pid=${child.pid ?? 'unknown'} killed=${child.killed} exitCode=null signalCode=null)`,
+    );
   }
 }
 

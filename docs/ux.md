@@ -537,7 +537,11 @@ separate meter against the broker budget, but it must say `reserved` (never
 measured-use meter. Name what is holding the reservation underneath. Memory
 borrowed for a reclaimable system cache uses alternating cache-color and
 empty-pool stripes: it is physically occupied, but remains available when the
-operating system needs the capacity.
+operating system needs the capacity. When a discrete-GPU driver exposes only
+aggregate use and no process accounting, the remainder must say `Unattributed`
+rather than `Other`, with a note that it may include retained Gezel models;
+`Other` is only a defensible claim after the Gezel process footprint was
+actually observed.
 [MachineMemoryStrip](../packages/ui/src/components/MachineMemoryStrip.tsx) is
 the reference.
 

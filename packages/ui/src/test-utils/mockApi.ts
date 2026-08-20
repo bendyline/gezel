@@ -70,6 +70,7 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
   searchDocuments: { results: [], engine: 'unavailable' },
   search: { results: [], truncated: false },
   quickOpen: { results: [], truncated: false },
+  listPeople: { people: [], available: false },
   listTasks: { tasks: [] },
   listProjectTasks: { tasks: [] },
   // Chat-thread surfaces (the pill row, SessionSwitcher) fetch these on

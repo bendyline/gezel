@@ -208,6 +208,40 @@ describe('discoverOrSpawn', () => {
       expect(terminateWindowsTree).toHaveBeenCalledWith(43210);
       expect(child.kill).not.toHaveBeenCalled();
     });
+
+    it('logs the complete POSIX escalation and unconfirmed child state', async () => {
+      const child = makeFakeChild();
+      const mutable = child as unknown as {
+        stdin: { end: ReturnType<typeof vi.fn> };
+        kill: ReturnType<typeof vi.fn>;
+      };
+      mutable.stdin.end.mockImplementation(() => {
+        // Keep the fake alive through the graceful deadline.
+      });
+      mutable.kill.mockImplementation(() => false);
+      const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+      await stopOwnedDaemon(child, logger, {
+        platform: 'linux',
+        graceMs: 1,
+        forceMs: 1,
+      });
+
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.stringContaining('stopping owned daemon platform=linux'),
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('did not confirm exit within 1ms after stdin-EOF'),
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('sent SIGKILL to owned daemon accepted=false'),
+      );
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'did not confirm exit within 1ms after forced stop; pid=9999 killed=false exitCode=null signalCode=null',
+        ),
+      );
+    });
   });
 
   it('adopts a running daemon when runtime files + pid are live', async () => {
