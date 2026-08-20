@@ -31,11 +31,14 @@ export interface WriteOptions {
  * `{root}/toolsets/{shard}/{slug}/`. Merging rules:
  *
  *   - Identity manifest: if it already exists with the same slug,
- *     preserve `name`/`description`/`tags` (editorial fields a human
- *     may have curated). License is overwritten when the new value
- *     is permissive and disagrees with the stored one. `yankedVersions`
- *     is unioned across runs so a once-deprecated version stays
- *     yanked.
+ *     refresh registry-owned metadata such as `name`, `description`,
+ *     `tags`, maintainer, license, and derived category. Community
+ *     manifests are bot-managed, so preserving an earlier imported
+ *     description would leave stale upstream facts in the catalog.
+ *     Local-only fields absent from the imported identity (for example
+ *     `logo` or `minSupportedVersion`) survive via the merge. The
+ *     `yankedVersions` arrays are unioned across runs so a
+ *     once-deprecated version stays yanked.
  *
  *   - Version manifest: if a manifest at the same `versions/{ver}/`
  *     already exists, compare the stored `runtime.sha256` with the
@@ -99,53 +102,29 @@ function detectIntegrityConflict(
 }
 
 /**
- * Merge an existing identity with a freshly-computed one. Editorial
- * fields a human may have curated (`name`, `description`, `tags`,
- * `logo`) win over the imported value. License is treated as a fact:
- * if the new value differs from the stored one, the new one wins.
- * `yankedVersions` is unioned.
+ * Merge an existing identity with a freshly-computed one. Community
+ * identities are bot-managed: fields present in the freshly-computed
+ * identity are registry-owned and advance with upstream. Existing
+ * local-only fields that the mapper does not emit survive the spread.
+ * `yankedVersions` is unioned rather than replaced.
  */
 function mergeIdentity(existing: ToolsetIdentity, next: ToolsetIdentity): ToolsetIdentity {
   return {
     ...existing,
-    // Always advance these — they're the import's responsibility, not
-    // the human's.
-    license: next.license ?? existing.license,
-    maintainer: next.maintainer ?? existing.maintainer,
+    ...next,
     yankedVersions: unionArr(existing.yankedVersions, next.yankedVersions),
     // Identity invariants — never change after first import.
     schemaVersion: 1,
     kind: 'toolset',
     id: existing.id,
-    // Editorial — preserve existing if non-empty.
-    name: existing.name?.trim() ? existing.name : next.name,
-    description: existing.description?.trim() ? existing.description : next.description,
-    tags: existing.tags && existing.tags.length > 0 ? existing.tags : next.tags,
-    ...(existing.logo !== undefined
-      ? { logo: existing.logo }
-      : next.logo !== undefined
-        ? { logo: next.logo }
-        : {}),
-    ...(existing.minSupportedVersion !== undefined
-      ? { minSupportedVersion: existing.minSupportedVersion }
-      : {}),
-    // Category — keep existing when set (human override wins), else
-    // adopt the freshly-computed one from the importer.
-    ...(existing.category !== undefined
-      ? { category: existing.category }
-      : next.category !== undefined
-        ? { category: next.category }
-        : {}),
   };
 }
 
 function diffIdentityFields(a: ToolsetIdentity, b: ToolsetIdentity): string[] {
-  const out: string[] = [];
-  if (a.license !== b.license) out.push('license');
-  if (JSON.stringify(a.maintainer) !== JSON.stringify(b.maintainer)) out.push('maintainer');
-  if (JSON.stringify(a.yankedVersions) !== JSON.stringify(b.yankedVersions))
-    out.push('yankedVersions');
-  return out;
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  return [...keys].filter((key) => JSON.stringify(left[key]) !== JSON.stringify(right[key]));
 }
 
 function unionArr<T>(a: T[] | undefined, b: T[] | undefined): T[] {

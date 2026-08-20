@@ -9,10 +9,10 @@
  * and a genuinely chatty publisher still accumulates one per release
  * forever.
  *
- * Retention is deliberately **opt-in and off by default**. Compacting
- * history rewrites files that are already in gilde's git history, which
- * is churn a routine refresh has no business producing. Ask for it
- * explicitly (`--keep-versions=N`) when the sprawl is worth a diff.
+ * Retention is deliberately **opt-in and off by default** at the CLI
+ * level. The routine community refresh opts into the current policy
+ * explicitly (`--keep-versions=2`), while smoke tests and targeted
+ * imports avoid sweeping unrelated toolsets.
  *
  * ── What "keep the newest N" means ──────────────────────────────────
  *
@@ -20,7 +20,10 @@
  * packages/catalog/src/source.ts and gilde's manifest-merge.mjs): a
  * folder is eligible when its name is semver, it isn't in the
  * identity's `yankedVersions`, and it isn't below `minSupportedVersion`.
- * We keep the newest N eligible and drop everything else in the folder.
+ * We keep the newest N eligible versions plus every on-disk version
+ * referenced by `yankedVersions`, and drop everything else in the folder.
+ * Gilde validates yank references against the version tree, so deleting a
+ * referenced folder would leave the identity manifest structurally invalid.
  *
  * Keeping N > 1 is functional, not sentimental. When the newest version
  * is later yanked, `pickVersion` falls through to the next eligible
@@ -101,7 +104,8 @@ export interface RetentionResult {
 
 /**
  * Trim `{root}/toolsets/{shard}/{slug}/versions/` down to the newest
- * `keep` eligible versions, for every importer-owned toolset.
+ * `keep` eligible versions plus every folder referenced by
+ * `yankedVersions`, for every importer-owned toolset.
  */
 export async function retainNewestVersions(opts: RetentionOptions): Promise<RetentionResult> {
   if (!Number.isInteger(opts.keep) || opts.keep < 1) {
@@ -145,7 +149,9 @@ export async function retainNewestVersions(opts: RetentionOptions): Promise<Rete
     for (const version of folders) {
       // Non-semver names are invisible to the loaders and unorderable
       // here; leave them for a human to look at.
-      if (!isSemver(version) || keepSet.has(version)) continue;
+      if (!isSemver(version) || keepSet.has(version) || identity.yankedVersions.has(version)) {
+        continue;
+      }
       result.candidates.push({ slug, version, dir: join(dir, 'versions', version) });
     }
   }

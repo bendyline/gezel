@@ -145,9 +145,9 @@ Flags:
                           older folders, so an unfiltered sweep just backfills
                           every publisher's history into the gilde diff.
   --keep-versions=<N>     Trim each imported toolset to its newest N eligible
-                          versions. Off by default — compacting rewrites files
-                          already in gilde's history. 3 is a good starting
-                          point: two fallbacks deep if the newest gets yanked.
+                          versions, plus folders referenced by yankedVersions.
+                          Off by default; routine community refreshes use 2,
+                          retaining the current version and one fallback.
                           Not valid with --package/--limit.
   --retain-only           Trim version history and nothing else — no import, no
                           reconcile, no network at all. Requires --keep-versions.
@@ -175,16 +175,16 @@ Examples:
   ... import-mcp-registry --prune-only
 
   # routine refresh: pull what changed, drop what's gone
-  GITHUB_TOKEN=ghp_xxx ... import-mcp-registry --prune
+  GITHUB_TOKEN=ghp_xxx ... import-mcp-registry --prune --keep-versions=2
 
   # full re-import
-  GITHUB_TOKEN=ghp_xxx ... import-mcp-registry --full --prune
+  GITHUB_TOKEN=ghp_xxx ... import-mcp-registry --full --prune --keep-versions=2
 
   # see how much version history a trim would drop (local only, seconds)
-  ... import-mcp-registry --retain-only --keep-versions=3 --dry-run
+  ... import-mcp-registry --retain-only --keep-versions=2 --dry-run
 
-  # compact accumulated version history (a deliberate, separate PR)
-  ... import-mcp-registry --retain-only --keep-versions=3
+  # apply the current + previous retention policy
+  ... import-mcp-registry --retain-only --keep-versions=2
 `;
 
 async function main(): Promise<void> {

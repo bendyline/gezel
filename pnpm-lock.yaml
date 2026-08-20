@@ -24,7 +24,6 @@ overrides:
   sharp: workspace:0.35.3
   tar: 7.5.21
   ws: 8.21.1
-  '@bendyline/gilde': link:../gilde
 
 patchedDependencies:
   app-builder-lib@26.15.3: 5bea164c302e5c19f6a3fe8904903f7826c3488716aafdbff62b65f256758d43
@@ -214,8 +213,8 @@ importers:
         specifier: workspace:*
         version: link:../core
       '@bendyline/gilde':
-        specifier: link:../../../gilde
-        version: link:../../../gilde
+        specifier: 0.1.37
+        version: 0.1.37
       tar:
         specifier: 7.5.21
         version: 7.5.21
@@ -878,6 +877,9 @@ packages:
   '@bcoe/v8-coverage@1.0.2':
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
     engines: {node: '>=18'}
+
+  '@bendyline/gilde@0.1.37':
+    resolution: {integrity: sha512-dRuPwTVch2fgpaHEL7jlseCY3rOb4PL8uMuIoqE3SaNYk//f1262uPpepxM/JsquiE7wohEVee6UUGAkYJhWgg==}
 
   '@bendyline/squisq-cli@2.6.0':
     resolution: {integrity: sha512-uQUCAg6jhHFiDiMDjxmI1kwvF5tLurxxtE5W0TdC11uofu7l30Wqrhjh9MXpYeeDK4GzQk0923BMbDiZR4bP2Q==}
@@ -8129,6 +8131,8 @@ snapshots:
       '@babel/helper-validator-identifier': 7.29.7
 
   '@bcoe/v8-coverage@1.0.2': {}
+
+  '@bendyline/gilde@0.1.37': {}
 
   '@bendyline/squisq-cli@2.6.0(supports-color@8.1.1)':
     dependencies:
