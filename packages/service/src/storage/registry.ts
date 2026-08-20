@@ -1,4 +1,4 @@
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import {
   type StorageCategoryId,
   type StorageClass,
@@ -21,6 +21,9 @@ import {
   globalHistoryFile,
   globalIndexDir,
   keurmeesterDir,
+  knowledgeCatalogsDir,
+  knowledgeDownloadsDir,
+  knowledgeRegistryFile,
   meesterStatusDir,
   pendingGrantsFile,
   playwrightBrowsersDir,
@@ -462,6 +465,56 @@ export const STORAGE_CATEGORIES: StorageCategoryDef[] = [
       return [localEntry(backupsDir(home))];
     },
   },
+  {
+    id: 'knowledge-user',
+    // A locally-built catalog may be the only copy (the registry file and
+    // downloads are bookkeeping, but the extracted versions can originate
+    // from a `gezel knowledge build` with no source folder left) — so this
+    // rides the backup, unlike the redownloadable shared tier.
+    class: 'user-content',
+    label: 'Knowledge catalogs (this user)',
+    description: 'Installed reference catalogs private to this user, plus their registry.',
+    deletable: true,
+    inBackup: true,
+    itemGranular: true,
+    async resolve({ home }) {
+      const entries: StoragePathEntry[] = [localEntry(knowledgeRegistryFile(home))];
+      const catalogsRoot = knowledgeCatalogsDir(home);
+      for (const publisherId of await safeReaddir(catalogsRoot)) {
+        for (const catalogId of await safeReaddir(join(catalogsRoot, publisherId))) {
+          entries.push({
+            path: join(catalogsRoot, publisherId, catalogId),
+            external: false,
+            itemId: `${publisherId}/${catalogId}`,
+            itemLabel: catalogId,
+          });
+        }
+      }
+      entries.push(localEntry(knowledgeDownloadsDir(home)));
+      return entries;
+    },
+  },
+  {
+    id: 'knowledge-shared',
+    class: 'redownloadable',
+    label: 'Knowledge catalogs (all users)',
+    description:
+      'Public catalogs in the machine-shared asset store. Reclaimed machine-wide by the installer, never from one user account.',
+    deletable: false,
+    inBackup: false,
+    async resolve({ env }) {
+      const configured = env[SHARED_ASSETS_ENV]?.trim();
+      if (!configured || !isAbsolute(configured)) return [];
+      return [
+        {
+          path: join(resolve(configured), 'knowledge'),
+          external: true,
+          blockedReason:
+            'Shared catalogs are removed machine-wide from the machine service, not per user.',
+        },
+      ];
+    },
+  },
 ];
 
 export function categoryById(id: StorageCategoryId): StorageCategoryDef | undefined {
@@ -507,6 +560,7 @@ export function classifiedTopLevelNames(): string[] {
     'toolsets.json',
     'playwright-browsers',
     'git-clones',
+    'knowledge',
     'secrets.enc',
     'secrets.key',
     'secrets.backend',

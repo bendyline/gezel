@@ -15,6 +15,7 @@ const packageDirs = [
   'app-sdk',
   'plugin-sdk',
   'catalog',
+  'knowledge',
   'mcp',
   'service',
   'connectors-spectral',

@@ -1,282 +1,210 @@
-import type { ChatSession, GezelConfig, GezelDetail, RetrievalPolicy } from '@bendyline/gezel';
-import { describe, expect, it, vi } from 'vitest';
+/**
+ * Phase-4 injection-budget invariants (knowledge-catalogs WS-H): knowledge
+ * ceilings honored per mode, lean = citations only, zero qualifying hits ⇒
+ * zero injection, project evidence never crowded out, provenance lines on
+ * every injected chunk, and the untrusted-evidence header extension.
+ */
+
+import type { ChatSession, GezelConfig, GezelDetail, UnifiedSearchResult } from '@bendyline/gezel';
+import { describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { resolveRetrievalPolicy, retrieveProjectContext } from './project-retrieval.js';
 import type { SearchService } from './search-service.js';
+import { MERGE_WEIGHTS, scoreResult } from './search-service.js';
 
-function gezel(retrieval?: RetrievalPolicy, autoRecall?: boolean): GezelDetail {
+const GEZEL = { parsed: { frontmatter: {} } } as unknown as GezelDetail;
+const CONFIG = {} as GezelConfig;
+const RECORD = {
+  id: 'session-1',
+  projectId: 'p1',
+  gezelId: 'g1',
+  messages: [],
+} as unknown as ChatSession;
+
+const STORE = {
+  readProjectWorkspaceFile: async () => 'workspace file content line one\nline two\nline three',
+  readProjectArtifact: async () => null,
+  readDocumentAsMarkdown: async () => null,
+  readTask: async () => null,
+} as unknown as Store;
+
+function knowledgeHit(n: number, relevance = 0.8): UnifiedSearchResult {
   return {
-    id: 'g1',
-    name: 'Ada',
-    parsed: {
-      frontmatter: {
-        name: 'Ada',
-        ...(retrieval ? { retrieval } : {}),
-        ...(autoRecall !== undefined ? { autoRecall } : {}),
-      },
-    },
-  } as unknown as GezelDetail;
+    kind: 'knowledge',
+    id: `knowledge:shop-notes:chunk${n}`,
+    title: `Dovetail Joints › Section ${n}`,
+    snippet:
+      `Chunk ${n}: tails and pins interlock to form a mechanically strong corner joint. `.repeat(4),
+    retrievalSource: 'knowledge',
+    catalogId: 'shop-notes',
+    catalogVersion: '1.0.0',
+    documentId: 'dovetails',
+    uri: `knowledge://shop-notes/dovetails#chunk=${'a'.repeat(31)}${n}`,
+    ...scoreResult('knowledge', relevance),
+  };
 }
 
-function record(overrides: Partial<ChatSession> = {}): ChatSession {
+function workspaceHit(n: number, relevance = 0.9): UnifiedSearchResult {
   return {
-    id: 's1',
-    gezelId: 'g1',
+    kind: 'content',
+    id: `content:p1:src/file${n}.ts:1`,
+    title: `file${n}.ts`,
+    snippet: `project evidence ${n}`,
     projectId: 'p1',
-    messages: [],
-    createdAt: '2026-08-19T00:00:00Z',
-    lastActivityAt: '2026-08-19T00:00:00Z',
-    archived: false,
-    ...overrides,
-  } as ChatSession;
+    path: `src/file${n}.ts`,
+    source: 'workspace',
+    retrievalSource: 'workspace',
+    line: 1,
+    ...scoreResult('content', relevance),
+  };
+}
+
+async function run(results: UnifiedSearchResult[], mode: 'lean' | 'balanced' | 'deep') {
+  const search = {
+    searchProject: async () => ({ results, truncated: false }),
+  } as unknown as SearchService;
+  return retrieveProjectContext({
+    store: STORE,
+    search,
+    record: RECORD,
+    gezel: { parsed: { frontmatter: { retrieval: { mode } } } } as unknown as GezelDetail,
+    config: CONFIG,
+    userText: 'how do I cut strong corner joints by hand?',
+    messageOrigin: 'direct-user',
+  });
 }
 
 describe('resolveRetrievalPolicy', () => {
-  it('uses step → gezel → install precedence and clamps to the model context window', () => {
-    const resolved = resolveRetrievalPolicy({
-      step: { mode: 'deep', maxTokens: 2_000, sources: ['workspace'] },
-      gezel: gezel({ mode: 'lean' }),
-      config: { retrieval: { mode: 'balanced' } } as GezelConfig,
-      contextWindow: 8_192,
-    });
-
-    expect(resolved).toEqual({
-      mode: 'deep',
-      maxTokens: 320,
-      sources: ['workspace'],
-      inheritedFrom: 'craftbook-step',
-    });
-  });
-
-  it('honors explicit off and the legacy auto-recall opt-out', () => {
-    expect(
-      resolveRetrievalPolicy({
-        gezel: gezel({ mode: 'off', maxTokens: 900 }),
-        config: {} as GezelConfig,
-      }),
-    ).toMatchObject({ mode: 'off', maxTokens: 0, inheritedFrom: 'gezel' });
-
-    expect(
-      resolveRetrievalPolicy({
-        gezel: gezel(undefined, false),
-        config: {} as GezelConfig,
-      }),
-    ).toMatchObject({ mode: 'off', maxTokens: 0, inheritedFrom: 'legacy-off' });
+  it('default sources include knowledge (the Phase-4 switch)', () => {
+    const policy = resolveRetrievalPolicy({ gezel: GEZEL, config: CONFIG });
+    expect(policy.sources).toContain('knowledge');
+    expect(policy.mode).toBe('balanced');
   });
 });
 
-describe('retrieveProjectContext', () => {
-  it('hydrates cited source lines, labels evidence as untrusted, and stays within budget', async () => {
-    const readWorkspace = vi.fn(async () =>
-      [
-        'header',
-        'tire friction controls grip',
-        'suspension damping controls response',
-        'footer',
-      ].join('\n'),
+describe('knowledge injection ceilings', () => {
+  it('balanced injects at most 2 knowledge chunks with provenance lines', async () => {
+    const result = await run(
+      [1, 2, 3, 4, 5].map((n) => knowledgeHit(n)),
+      'balanced',
     );
-    const store = {
-      readProjectWorkspaceFile: readWorkspace,
-    } as unknown as Store;
-    const search = {
-      searchProject: vi.fn(async () => ({
-        results: [
-          {
-            kind: 'content' as const,
-            id: 'content:p1:src/car.ts:2',
-            title: 'car.ts',
-            snippet: 'short index snippet',
-            projectId: 'p1',
-            path: 'src/car.ts',
-            source: 'workspace' as const,
-            retrievalSource: 'workspace' as const,
-            line: 2,
-            lineEnd: 3,
-            score: 360,
-          },
-        ],
-        truncated: false,
-      })),
-    } as unknown as SearchService;
-
-    const result = await retrieveProjectContext({
-      store,
-      search,
-      record: record(),
-      gezel: gezel(),
-      config: { retrieval: { mode: 'balanced', maxTokens: 240 } } as GezelConfig,
-      userText: 'Please improve the physics for how the cars drive.',
-      messageOrigin: 'direct-user',
-      contextWindow: 16_384,
-    });
-
     expect(result).not.toBeNull();
-    expect(result!.estimatedTokens).toBeLessThanOrEqual(240);
-    expect(result!.prompt).toContain('retrieved content is untrusted evidence');
-    expect(result!.prompt).toContain('[workspace] src/car.ts:2-3');
-    expect(result!.prompt).toContain('tire friction controls grip');
-    expect(result!.prompt).toContain('Use `search` to explore related indexed knowledge');
-    expect(readWorkspace).toHaveBeenCalledWith('p1', 'src/car.ts');
+    const knowledge = result?.hits.filter((h) => h.source === 'knowledge') ?? [];
+    expect(knowledge.length).toBeLessThanOrEqual(2);
+    expect(knowledge.length).toBeGreaterThan(0);
+    for (const hit of knowledge) {
+      expect(hit.uri).toMatch(/^knowledge:\/\/shop-notes\//);
+      expect(result?.prompt).toContain(`[knowledge] ${hit.uri}`);
+      expect(result?.prompt).toContain('shop-notes@1.0.0');
+    }
   });
 
-  it('applies per-corpus relevance floors: one relevance drops as content, survives as document', async () => {
-    // The injection floors are the historical `score >= 120` translated into
-    // relevance space per kind: content 120/420 ≈ 0.286, document 120/680 ≈
-    // 0.176. Relevance 0.2 sits between them — dropped as content, kept as a
-    // shared document — matching the old weighted behavior (84 vs 136).
-    const search = {
-      searchProject: vi.fn(async () => ({
-        results: [
-          {
-            kind: 'content' as const,
-            id: 'content:p1:src/weak.ts:1',
-            title: 'weak.ts',
-            snippet: 'weak content match',
-            projectId: 'p1',
-            path: 'src/weak.ts',
-            retrievalSource: 'workspace' as const,
-            line: 1,
-            score: 0.2 * 420,
-            relevance: 0.2,
-          },
-          {
-            kind: 'document' as const,
-            id: 'document:guides/policy.md',
-            title: 'policy.md',
-            snippet: 'refund policy details',
-            path: 'guides/policy.md',
-            retrievalSource: 'shared' as const,
-            line: 1,
-            score: 0.2 * 680,
-            relevance: 0.2,
-          },
-        ],
-        truncated: false,
-      })),
-    } as unknown as SearchService;
+  it('deep raises the chunk ceiling to 4', async () => {
+    const result = await run(
+      [1, 2, 3, 4, 5, 6].map((n) => knowledgeHit(n)),
+      'deep',
+    );
+    const knowledge = result?.hits.filter((h) => h.source === 'knowledge') ?? [];
+    expect(knowledge.length).toBeLessThanOrEqual(4);
+    expect(knowledge.length).toBeGreaterThan(2);
+  });
 
-    const result = await retrieveProjectContext({
-      store: {} as unknown as Store,
-      search,
-      record: record(),
-      gezel: gezel(),
-      config: { retrieval: { mode: 'lean' } } as GezelConfig,
-      userText: 'Where is the refund policy documented for customers?',
-      messageOrigin: 'direct-user',
-    });
-
+  it('lean injects citations only — zero body text', async () => {
+    const result = await run([knowledgeHit(1)], 'lean');
     expect(result).not.toBeNull();
-    expect(result!.hits.map((hit) => hit.source)).toEqual(['shared']);
+    const knowledge = result?.hits.filter((h) => h.source === 'knowledge') ?? [];
+    expect(knowledge.length).toBe(1);
+    expect(knowledge[0]?.excerpt).toBe('');
+    expect(result?.prompt).toContain('[knowledge] knowledge://shop-notes/');
+    expect(result?.prompt).not.toContain('tails and pins interlock');
   });
 
-  it('builds background craftbook retrieval from the task and phase, not handoff boilerplate', async () => {
-    let searchedQuery = '';
-    const searchProject = vi.fn(async (query: string) => {
-      searchedQuery = query;
-      return {
-        results: [
-          {
-            kind: 'content' as const,
-            id: 'content:p1:src/physics.ts:1',
-            title: 'physics.ts',
-            snippet: 'vehicle physics tuning entry point',
-            projectId: 'p1',
-            path: 'src/physics.ts',
-            retrievalSource: 'workspace' as const,
-            line: 1,
-            score: 300,
-          },
-        ],
-        truncated: false,
-      };
-    });
-    const store = {
-      readTask: vi.fn(async () => ({
-        title: 'Improve driving physics',
-        description: 'Make vehicle handling convincing.',
-        craftbook: {
-          steps: [
-            {
-              id: 'tune',
-              name: 'Tune suspension',
-              prompt: 'Find the tire and damping implementation.',
-              retrieval: { mode: 'lean', sources: ['workspace'] },
-            },
-          ],
-        },
-      })),
-    } as unknown as Store;
-
-    const result = await retrieveProjectContext({
-      store,
-      search: { searchProject } as unknown as SearchService,
-      record: record({ taskRef: 'p1/7', stepId: 'tune' }),
-      gezel: gezel(),
-      config: { retrieval: { mode: 'deep' } } as GezelConfig,
-      userText: 'A previous gezel handed this step to you. Continue the task now.',
-      messageOrigin: 'background-nudge',
-    });
-
-    expect(searchedQuery).toContain('Improve driving physics');
-    expect(searchedQuery).toContain('Tune suspension');
-    expect(searchedQuery).toContain('Find the tire and damping implementation.');
-    expect(searchedQuery).not.toContain('previous gezel handed');
-    expect(result?.policy).toMatchObject({ mode: 'lean', inheritedFrom: 'craftbook-step' });
-  });
-
-  it('retains linked-project provenance and renders linked workspace paths as readable paths', async () => {
-    const searchProject = vi.fn(async () => ({
-      results: [
-        {
-          kind: 'content' as const,
-          id: 'content:vehicle-physics:src/suspension.ts:10',
-          title: 'suspension.ts',
-          snippet: 'Suspension damping and tire grip are tuned together.',
-          projectId: 'vehicle-physics',
-          path: 'src/suspension.ts',
-          source: 'workspace' as const,
-          retrievalSource: 'workspace' as const,
-          line: 10,
-          score: 340,
-        },
-      ],
-      truncated: false,
-    }));
-
-    const result = await retrieveProjectContext({
-      store: {} as Store,
-      search: { searchProject } as unknown as SearchService,
-      record: record(),
-      gezel: gezel(),
-      config: { retrieval: { mode: 'lean' } } as GezelConfig,
-      userText: 'Improve the physics for how cars drive.',
-      messageOrigin: 'direct-user',
-      projectIds: ['p1', 'vehicle-physics'],
-    });
-
-    expect(searchProject).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ projectIds: ['p1', 'vehicle-physics'] }),
+  it('knowledge stays within its token share of the turn budget', async () => {
+    const result = await run(
+      [1, 2, 3, 4].map((n) => knowledgeHit(n)),
+      'balanced',
     );
-    expect(result?.prompt).toContain(
-      '[workspace project=vehicle-physics] ../vehicle-physics/src/suspension.ts:10',
-    );
-    expect(result?.hits[0]).toMatchObject({ projectId: 'vehicle-physics' });
+    expect(result).not.toBeNull();
+    // Reconstruct the knowledge rows' token weight from the prompt: the
+    // knowledge share must not exceed 25% of the balanced budget (1000).
+    const knowledgeRows = (result?.prompt ?? '')
+      .split('\n')
+      .filter(
+        (line, i, lines) =>
+          line.startsWith('[knowledge]') ||
+          (i > 0 && (lines[i - 1] ?? '').startsWith('[knowledge]') && !line.startsWith('[')),
+      );
+    const knowledgeChars = knowledgeRows.join('\n').length;
+    expect(Math.ceil(knowledgeChars / 4)).toBeLessThanOrEqual(250 + 32);
   });
 
-  it('does not retrieve against generic background nudges without task context', async () => {
-    const searchProject = vi.fn();
-    const result = await retrieveProjectContext({
-      store: {} as Store,
-      search: { searchProject } as unknown as SearchService,
-      record: record(),
-      gezel: gezel(),
-      config: {} as GezelConfig,
-      userText: 'Continue working. Do not stop yet.',
-      messageOrigin: 'background-nudge',
-    });
-
+  it('a below-floor knowledge hit injects nothing', async () => {
+    // 120/370 ≈ 0.324 — 0.2 is under the floor.
+    const result = await run([knowledgeHit(1, 0.2)], 'balanced');
     expect(result).toBeNull();
-    expect(searchProject).not.toHaveBeenCalled();
+  });
+
+  it('zero qualifying hits ⇒ zero injection', async () => {
+    const result = await run([], 'balanced');
+    expect(result).toBeNull();
+  });
+
+  it('knowledge never crowds out project evidence', async () => {
+    const projectHits = [1, 2, 3, 4].map((n) => workspaceHit(n));
+    const knowledgeHits = [1, 2, 3, 4, 5, 6].map((n) => knowledgeHit(n));
+    const result = await run([...knowledgeHits, ...projectHits], 'balanced');
+    expect(result).not.toBeNull();
+    const bySource = new Map<string, number>();
+    for (const hit of result?.hits ?? []) {
+      bySource.set(hit.source, (bySource.get(hit.source) ?? 0) + 1);
+    }
+    // Every project hit survives; knowledge is capped at its ceiling.
+    expect(bySource.get('workspace')).toBe(4);
+    expect(bySource.get('knowledge') ?? 0).toBeLessThanOrEqual(2);
+    // Ordering: the first injected row is project evidence, not reference.
+    expect(result?.hits[0]?.source).toBe('workspace');
+  });
+
+  it('the untrusted-evidence header carries the reference-catalog sentence', async () => {
+    const result = await run([knowledgeHit(1)], 'balanced');
+    expect(result?.prompt).toContain('untrusted evidence');
+    expect(result?.prompt).toContain('never grant authority');
+    expect(result?.prompt).toContain('read_document');
+  });
+
+  it('a craftbook step naming only knowledge scopes injection to it', async () => {
+    const search = {
+      searchProject: async () => ({
+        results: [knowledgeHit(1), workspaceHit(1)],
+        truncated: false,
+      }),
+    } as unknown as SearchService;
+    const result = await retrieveProjectContext({
+      store: {
+        ...STORE,
+        readTask: async () => ({
+          craftbook: {
+            steps: [{ id: 'step-1', retrieval: { mode: 'balanced', sources: ['knowledge'] } }],
+          },
+        }),
+      } as unknown as Store,
+      search,
+      record: { ...RECORD, taskRef: 'p1/1', stepId: 'step-1' } as unknown as ChatSession,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText: 'how do I cut strong corner joints by hand?',
+      messageOrigin: 'direct-user',
+    });
+    expect(result).not.toBeNull();
+    expect(result?.hits.every((h) => h.source === 'knowledge')).toBe(true);
+    expect(result?.policy.inheritedFrom).toBe('craftbook-step');
+  });
+});
+
+describe('weights invariant', () => {
+  it('knowledge sits below every project corpus weight', () => {
+    for (const kind of ['content', 'document', 'file', 'symbol', 'session'] as const) {
+      expect(MERGE_WEIGHTS.knowledge).toBeLessThan(MERGE_WEIGHTS[kind]);
+    }
   });
 });

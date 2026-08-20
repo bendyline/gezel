@@ -50,6 +50,7 @@ import { ProjectConnectionsTab } from '../components/ProjectConnectionsTab.js';
 import { ProjectCrewRoster } from '../components/ProjectCrewRoster.js';
 import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
 import { ProjectIcon } from '../components/ProjectIcon.js';
+import { ProjectKnowledgeRow } from '../components/ProjectKnowledgeRow.js';
 import { ProjectMailTab } from '../components/ProjectMailTab.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
@@ -2671,6 +2672,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               </small>
                             </fieldset>
                           )}
+
+                          <ProjectKnowledgeRow project={selected} onUpdated={setSelected} />
 
                           <div className="config-label" style={{ marginTop: '0.75rem' }}>
                             Project properties

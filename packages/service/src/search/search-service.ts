@@ -127,7 +127,7 @@ export const MERGE_WEIGHTS: Record<UnifiedSearchResultKind, number> = {
  * merged score is bit-identical to the pre-calibration behavior and later
  * ranks decay instead of tying.
  */
-function ftsRankRelevance(rank: number): number {
+export function ftsRankRelevance(rank: number): number {
   return 0.6 * (11 / (11 + rank));
 }
 
@@ -159,7 +159,7 @@ export interface RetrievalArmTiming {
  * this, so relevance stays a calibrated 0–1, tiers derive from one constant,
  * and `score` remains purely relevance × corpus priority.
  */
-function scoreResult(
+export function scoreResult(
   kind: UnifiedSearchResultKind,
   relevance: number,
 ): { relevance: number; tier: 'strong' | 'weak'; score: number } {
@@ -176,6 +176,25 @@ function scoreResult(
  * subsystems built later in service boot). Titlebar quick-open only — the
  * model-scoped project search never consumes the name catalog.
  */
+/**
+ * Late-wired knowledge-catalog arm (KnowledgeManager builds after the
+ * SearchService). Returns FINISHED UnifiedSearchResults — provenance,
+ * topic-name resolution, and scoring live with the catalog owner, keeping
+ * this service ignorant of the .gezk runtime.
+ */
+export interface KnowledgeSearchProvider {
+  search(
+    query: string,
+    opts: {
+      /** The already-embedded query vector; null → FTS-only catalogs search. */
+      vector: number[] | null;
+      maxResults: number;
+      /** The session project (scoped search) — resolves the project policy. */
+      projectId?: string;
+    },
+  ): Promise<UnifiedSearchResult[]>;
+}
+
 export interface ExtraSearchCatalogs {
   /** Handboek TOC entries (id + title + optional keywords). */
   handboekEntries?: () => Promise<Array<{ id: string; title: string; keywords?: string[] }>>;
@@ -219,6 +238,7 @@ export class SearchService {
   private catalogBuilding: Promise<CatalogEntry[]> | null = null;
 
   private extraCatalogs: ExtraSearchCatalogs = {};
+  private knowledgeSearch: KnowledgeSearchProvider | null = null;
 
   constructor(
     private readonly store: Store,
@@ -232,6 +252,11 @@ export class SearchService {
   setExtraCatalogs(extra: ExtraSearchCatalogs): void {
     this.extraCatalogs = extra;
     this.invalidateCatalog();
+  }
+
+  /** Wire the knowledge-catalog arm (late-boot, like the extra catalogs). */
+  setKnowledgeSearch(provider: KnowledgeSearchProvider | null): void {
+    this.knowledgeSearch = provider;
   }
 
   /** Drop the cached catalog — called when projects/gezels/documents change. */
@@ -312,6 +337,7 @@ export class SearchService {
       ...(opts.gezelId ? { gezelId: opts.gezelId } : {}),
       includeShared: opts.includeShared !== false,
       ...(opts.sources ? { sources: new Set(opts.sources) } : {}),
+      ...(opts.projectIds[0] ? { primaryProjectId: opts.projectIds[0] } : {}),
       // Scale per-source fetch with paging depth so page 2 has material to
       // page into; identical to PER_SOURCE_RESULTS at offset 0.
       perSourceResults: Math.min(25, Math.max(PER_SOURCE_RESULTS, Math.ceil(fetchDepth / 6))),
@@ -542,6 +568,8 @@ export class SearchService {
       sources?: ReadonlySet<RetrievalSource>;
       /** Per-source fetch cap override — paging scales it with depth. */
       perSourceResults?: number;
+      /** The session project — resolves the knowledge-catalog policy. */
+      primaryProjectId?: string;
     },
   ): Promise<{
     results: UnifiedSearchResult[];
@@ -867,6 +895,29 @@ export class SearchService {
             // pseudo-relevance for keyword-only rows.
             ...scoreResult('document', h.score ?? ftsRankRelevance(rank)),
           }));
+        },
+      });
+    }
+    if (wants('knowledge') && this.knowledgeSearch) {
+      // Installed reference catalogs — one arm across every active catalog
+      // (the global routing budget lives with the catalog owner). Results
+      // arrive finished: provenance, citation URIs, calibrated scores.
+      const knowledgeSearch = this.knowledgeSearch;
+      globalTasks.push({
+        label: 'knowledge',
+        run: async () => {
+          const hits = await timed(
+            'knowledge',
+            undefined,
+            (r) => r?.length ?? 0,
+            () =>
+              knowledgeSearch.search(query, {
+                vector,
+                maxResults: Math.max(10, perSource * 2),
+                ...(scope?.primaryProjectId ? { projectId: scope.primaryProjectId } : {}),
+              }),
+          );
+          return hits ?? [];
         },
       });
     }

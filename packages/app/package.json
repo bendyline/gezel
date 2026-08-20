@@ -44,6 +44,7 @@
     "yauzl": "^3.4.0"
   },
   "devDependencies": {
+    "@bendyline/gezel-knowledge": "workspace:*",
     "@bendyline/gezel-service": "workspace:*",
     "@bendyline/gezel-ui": "workspace:*",
     "@electron/asar": "^4.2.1",

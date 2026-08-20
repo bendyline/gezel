@@ -1,5 +1,6 @@
 import { type OpenFileIntent, queueOpenFile } from './pending-open-file.js';
 import { type OpenHandboekIntent, queueOpenHandboek } from './pending-open-handboek.js';
+import { type OpenKnowledgeIntent, queueOpenKnowledge } from './pending-open-knowledge.js';
 import { type OpenSessionIntent, queueOpenSession } from './pending-open-session.js';
 import type { RecentTabInput } from './recent-tabs.js';
 
@@ -14,7 +15,8 @@ export type NavAction =
   | { kind: 'event'; type: string; detail: unknown }
   | { kind: 'open-file'; intent: OpenFileIntent }
   | { kind: 'open-session'; intent: OpenSessionIntent }
-  | { kind: 'open-handboek'; intent: OpenHandboekIntent };
+  | { kind: 'open-handboek'; intent: OpenHandboekIntent }
+  | { kind: 'open-knowledge'; intent: OpenKnowledgeIntent };
 
 export function openTabAction(detail: RecentTabInput): NavAction {
   return { kind: 'event', type: 'gezel:open-tab', detail };
@@ -44,6 +46,8 @@ export function runNavActions(actions: NavAction[]): void {
       queueOpenSession(action.intent);
     } else if (action.kind === 'open-handboek') {
       queueOpenHandboek(action.intent);
+    } else if (action.kind === 'open-knowledge') {
+      queueOpenKnowledge(action.intent);
     } else {
       window.dispatchEvent(new CustomEvent(action.type, { detail: action.detail }));
     }

@@ -77,6 +77,7 @@ const PUBLISHED = [
   'app-sdk',
   'plugin-sdk',
   'catalog',
+  'knowledge',
   'mcp',
   'service',
   'connectors-spectral',
@@ -110,6 +111,7 @@ const IMPORTABLE = [
   '@bendyline/gezel-app-sdk',
   '@bendyline/gezel-plugin-sdk',
   '@bendyline/gezel-catalog',
+  '@bendyline/gezel-knowledge',
   '@bendyline/gezel-mcp',
 ];
 

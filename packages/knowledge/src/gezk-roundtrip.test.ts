@@ -14,6 +14,12 @@ import { GezkArchiveError, extractGezkVerified, readGezkManifest } from './archi
 import type { CompileReport } from './compiler/compile.js';
 import { compileKnowledgeCatalog } from './compiler/compile.js';
 import { CatalogHandle } from './reader/catalog-handle.js';
+import { validateExtractedCatalog } from './reader/validate.js';
+import {
+  generateKnowledgeSigningKeyPair,
+  signManifest,
+  verifyManifestSignature,
+} from './signatures/signing.js';
 import {
   FIXTURE_CHUNKING_PROFILE,
   FIXTURE_EMBEDDING_PROFILE,
@@ -168,4 +174,71 @@ describe('read-only catalog handle', () => {
   it('passes the embedder-free self-KNN smoke', () => {
     expect(handle.selfKnnSmoke(0)).toBe(true);
   });
+});
+
+describe('validation', () => {
+  it('deep validation passes on the extracted fixture', async () => {
+    const report = await validateExtractedCatalog(extractedDir, { deep: true });
+    const failed = report.checks.filter((c) => !c.ok);
+    expect(failed, JSON.stringify(failed)).toEqual([]);
+    expect(report.ok).toBe(true);
+    expect(report.manifest?.id).toBe('fixture-en');
+  });
+
+  it('deep validation flags a corrupted database file', async () => {
+    const { cp } = await import('node:fs/promises');
+    const corruptDir = join(dir, 'corrupt');
+    await cp(extractedDir, corruptDir, { recursive: true });
+    const dbPath = join(corruptDir, 'index', 'router.db');
+    const bytes = Buffer.from(await readFile(dbPath));
+    bytes[Math.floor(bytes.length / 2)] = (bytes[Math.floor(bytes.length / 2)] as number) ^ 0xff;
+    await writeFile(dbPath, bytes);
+    const report = await validateExtractedCatalog(corruptDir, { deep: true });
+    expect(report.ok).toBe(false);
+  });
+});
+
+describe('signed build', () => {
+  it(
+    'a finalizeManifest-signed archive round-trips and verifies',
+    { timeout: 60_000 },
+    async () => {
+      const keys = generateKnowledgeSigningKeyPair();
+      const signedPath = join(dir, 'signed.gezk');
+      await compileKnowledgeCatalog({
+        catalog: {
+          id: 'fixture-signed',
+          version: '1.0.0',
+          name: 'Signed Fixture',
+          language: 'en',
+          publisher: { id: 'gezel-tests', name: 'Gezel Tests' },
+          createdAt: '2026-01-01T00:00:00.000Z',
+          license: { name: 'MIT', attributionRequired: false },
+        },
+        topics: FIXTURE_TOPICS,
+        documents: (async function* () {
+          for (const doc of DOCS.slice(0, 20)) yield doc;
+        })(),
+        outputPath: signedPath,
+        embeddingProfile: FIXTURE_EMBEDDING_PROFILE,
+        chunkingProfile: FIXTURE_CHUNKING_PROFILE,
+        embed: fakeEmbed,
+        countTokens: fakeCountTokens,
+        workDir: join(dir, 'work-signed'),
+        finalizeManifest: (manifest) => signManifest(manifest, keys.privateKeyPem),
+      });
+      const manifest = await readGezkManifest(signedPath);
+      expect(manifest.signature?.keyId).toBe(keys.keyId);
+      const verdict = verifyManifestSignature(manifest, [
+        { keyId: keys.keyId, publicKeyPem: keys.publicKeyPem },
+      ]);
+      expect(verdict).toEqual({ ok: true, keyId: keys.keyId });
+      const wrongKeys = generateKnowledgeSigningKeyPair();
+      expect(
+        verifyManifestSignature(manifest, [
+          { keyId: wrongKeys.keyId, publicKeyPem: wrongKeys.publicKeyPem },
+        ]).ok,
+      ).toBe(false);
+    },
+  );
 });

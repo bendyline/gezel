@@ -15,6 +15,8 @@ subcategory:
 
 This differs from `@bendyline/gezel-sdk`, whose scripts run *inside* Gezel's sandbox. A connected app owns its own interface and process. Gezel owns model discovery and downloads, consent, revocation, and the local inference service.
 
+If the experience should live inside a Gezel project as a custom crew, dashboard, craftbooks, scripts, and data, see [Building AI Apps inside Gezel](building-ai-apps-inside-gezel.md) instead.
+
 The [Connected apps](../conceptual/connected-apps.md) article explains what the user sees. This article covers the developer side.
 
 ## Install and connect

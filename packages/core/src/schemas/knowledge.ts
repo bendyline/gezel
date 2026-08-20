@@ -357,6 +357,37 @@ export function parseKnowledgeUri(raw: string): KnowledgeUri | null {
   return null;
 }
 
+// ── HTTP request shapes ─────────────────────────────────────────────────────
+
+export const KnowledgeInstallRequestSchema = z.object({
+  source: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('file'), path: z.string().min(1) }),
+    z.object({
+      kind: z.literal('url'),
+      url: z.string().url(),
+      expectedSha256: z
+        .string()
+        .regex(/^[0-9a-fA-F]{64}$/)
+        .optional(),
+    }),
+  ]),
+});
+export type KnowledgeInstallRequest = z.infer<typeof KnowledgeInstallRequestSchema>;
+
+export const UpdateKnowledgeCatalogRequestSchema = z.object({
+  enabled: z.boolean().optional(),
+  autoUpdate: z.boolean().optional(),
+});
+export type UpdateKnowledgeCatalogRequest = z.infer<typeof UpdateKnowledgeCatalogRequestSchema>;
+
+export const KnowledgeSearchRequestSchema = z.object({
+  query: z.string().min(1),
+  maxResults: z.number().int().min(1).max(50).optional(),
+  /** Restrict to these catalog ids (default: every enabled catalog). */
+  catalogs: z.array(KnowledgeIdSchema).optional(),
+});
+export type KnowledgeSearchRequest = z.infer<typeof KnowledgeSearchRequestSchema>;
+
 // ── history events ──────────────────────────────────────────────────────────
 
 export const KNOWLEDGE_HISTORY_KINDS = [

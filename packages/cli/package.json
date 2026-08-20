@@ -44,6 +44,7 @@
     "@bendyline/gezel-app-sdk": "workspace:*",
     "@bendyline/gezel-catalog": "workspace:*",
     "@bendyline/gezel-client": "workspace:*",
+    "@bendyline/gezel-knowledge": "workspace:*",
     "@bendyline/gezel-service": "workspace:*",
     "@bendyline/squisq": "2.8.0",
     "@bendyline/squisq-formats": "2.4.5",

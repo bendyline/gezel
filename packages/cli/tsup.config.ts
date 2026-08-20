@@ -13,12 +13,14 @@ export default defineConfig({
   // splitting disabled, a literal import() is bundled back into its caller.
   // Same shape for the handboek exporter: the squisq render stack (incl.
   // the multi-MB standalone player bundle) loads only when `gezel
-  // handboek export` actually runs.
+  // handboek export` actually runs — and for the knowledge commands, which
+  // pull @bendyline/gezel-knowledge (sqlite-vec, and transformers on build).
   entry: {
     'bin/gezel': 'src/bin/gezel-launcher.ts',
     'bin/gezel-main': 'src/bin/gezel.ts',
     'tui/index': 'src/tui/index.tsx',
     'handboek-export': 'src/handboek-export.ts',
+    'knowledge-command': 'src/knowledge-command.ts',
   },
   format: ['esm'],
   dts: false,

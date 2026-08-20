@@ -58,6 +58,7 @@ const AREA_NAMES: RecentTabArea[] = [
   'craftbooks',
   'scripts',
   'history',
+  'knowledge',
   'handboek',
   'benchmarks',
   'settings',

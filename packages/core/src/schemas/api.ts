@@ -117,6 +117,7 @@ import {
   ProviderNameSchema,
 } from './gezel.js';
 import { GezelGrowthStateSchema } from './growth.js';
+import { ProjectKnowledgeCatalogsSchema } from './knowledge.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { NativeEngineNameSchema } from './native-engines.js';
 import {
@@ -3875,6 +3876,8 @@ export const UpdateProjectRequestSchema = z.object({
   about: z.string().optional(),
   /** When passed, written to documents/missionObjectives.md inside the project. */
   missionObjectives: z.string().optional(),
+  /** Which of the user's knowledge catalogs are in scope for this project. */
+  knowledgeCatalogs: ProjectKnowledgeCatalogsSchema.optional(),
   /** Patch the github association. `null` unlinks. Pass an object with `url`
    *  to link or change the repo, or with only `branch` to switch the
    *  tracked branch. `checkoutDir` and `lastSyncedAt` are managed by the

@@ -21,7 +21,6 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { brotliCompressSync, constants as zlibConstants } from 'node:zlib';
 import type {
   CatalogDocument,
@@ -47,6 +46,7 @@ import {
 } from '../format/constants.js';
 import { ROUTER_DDL, SHARD_DDL, vecChunksDdl } from '../format/ddl.js';
 import { chunkContentHash, chunkUid, documentSlug } from '../format/ids.js';
+import { DatabaseSync } from '../format/node-sqlite.js';
 import { l2Normalize, quantizeBinary, quantizeInt8 } from '../format/quantize.js';
 import { loadVecExtension } from './vec-load.js';
 
@@ -92,6 +92,13 @@ export interface CompileKnowledgeCatalogOptions {
   toolchain?: KnowledgeCatalogManifest['toolchain'];
   /** Extra archive files (README.md, LICENSES/…): path → utf8 content. */
   extraFiles?: Record<string, string>;
+  /**
+   * Last touch before the manifest is archived — the signing seam
+   * (signatures/signing.ts `signManifest`). Must only add/replace the
+   * `signature` field; the result is re-parsed, so structural edits fail
+   * loudly rather than shipping.
+   */
+  finalizeManifest?: (manifest: KnowledgeCatalogManifest) => KnowledgeCatalogManifest;
   onProgress?: (progress: { phase: string; done: number; total: number }) => void;
   embedBatchSize?: number;
 }
@@ -521,7 +528,7 @@ export async function compileKnowledgeCatalog(
       });
     }
 
-    const manifest: KnowledgeCatalogManifest = KnowledgeCatalogManifestSchema.parse({
+    const unsignedManifest: KnowledgeCatalogManifest = KnowledgeCatalogManifestSchema.parse({
       kind: 'gezel-knowledge-catalog',
       formatVersion: GEZK_FORMAT_VERSION,
       indexSchemaVersion: GEZK_INDEX_SCHEMA_VERSION,
@@ -548,6 +555,9 @@ export async function compileKnowledgeCatalog(
       ...(opts.smokeQueries ? { smokeQueries: opts.smokeQueries } : {}),
       ...(opts.toolchain ? { toolchain: opts.toolchain } : {}),
     });
+    const manifest = opts.finalizeManifest
+      ? KnowledgeCatalogManifestSchema.parse(opts.finalizeManifest(unsignedManifest))
+      : unsignedManifest;
 
     const archiveEntries: Array<{ path: string; absPath?: string; content?: Buffer }> = [
       {

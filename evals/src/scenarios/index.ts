@@ -19,6 +19,7 @@ import { incidentPostmortemScenario } from './incident-postmortem.ts';
 import { indexBenchScenario } from './index-bench.ts';
 import { interfaceContractScenario } from './interface-contract.ts';
 import { jobHuntScenario } from './job-hunt.ts';
+import { knowledgeBenchScenario } from './knowledge-bench.ts';
 import { largePrReviewScenario } from './large-pr-review.ts';
 import { meetingFollowupScenario } from './meeting-followup.ts';
 import { opsRunbookScenario } from './ops-runbook.ts';
@@ -101,6 +102,11 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   // retrieval before/after enrichment on a pinned squisq corpus. The
   // `index-bench` bin sweeps it across models (= enricher A/B).
   [indexBenchScenario.id]: indexBenchScenario,
+  // Knowledge-catalog retrieval benchmark (no agent): golden-query recall +
+  // warm explicit-search latency on a catalog compiled with the daemon's
+  // own embedder (Phase-4 gate: p95 < 750 ms; injection budgets are
+  // CI-guarded in the service suite).
+  [knowledgeBenchScenario.id]: knowledgeBenchScenario,
   // Index-leverage agent probes on the same pinned corpus:
   // a 34-file mechanical rename and a 6-question "where does X live" Q&A.
   // Run warm-vs-cold via the ab-index bin (GEZEL_INDEX_ARM).

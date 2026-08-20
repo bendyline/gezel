@@ -3336,6 +3336,8 @@ export class Store {
       claudePermissionMode?: import('@bendyline/gezel').ClaudePermissionMode;
       /** Replaces the stored per-project ambient nudge override. */
       nudgeConfig?: ProjectNudgeConfig;
+      /** Which of the user's knowledge catalogs are in scope here. */
+      knowledgeCatalogs?: import('@bendyline/gezel').ProjectKnowledgeCatalogs;
       /** Replaces the optional project-tab visibility overrides. */
       tabVisibility?: ProjectTabVisibility;
       /** Project shape — `solo` (a single-gezel job/game) vs `crew`. */
@@ -3474,6 +3476,9 @@ export class Store {
         ? { claudePermissionMode: patch.claudePermissionMode }
         : {}),
       ...(patch.nudgeConfig !== undefined ? { nudgeConfig: patch.nudgeConfig } : {}),
+      ...(patch.knowledgeCatalogs !== undefined
+        ? { knowledgeCatalogs: patch.knowledgeCatalogs }
+        : {}),
       ...(patch.tabVisibility !== undefined ? { tabVisibility: patch.tabVisibility } : {}),
       ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
       ...(patch.leadLabel === null

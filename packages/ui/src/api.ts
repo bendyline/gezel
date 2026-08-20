@@ -97,6 +97,8 @@ declare global {
         title?: string;
         defaultPath?: string;
       }) => Promise<string | null>;
+      /** Native open dialog filtered to .gezk knowledge catalogs. */
+      selectKnowledgeArchive?: () => Promise<string | null>;
       /**
        * Mailbox OAuth (desktop shell). `mailOAuthListen` opens a loopback
        * redirect listener and returns its URI to feed into the service's

@@ -28,6 +28,10 @@ export default defineConfig({
     // metadata can be enormous, so the first inspection must not run on the
     // embedded Electron main thread; subsequent polls hit the parent cache.
     'providers/llama-cpp/gguf-metadata-worker': 'src/providers/llama-cpp/gguf-metadata-worker.ts',
+    // Owns every knowledge-catalog SQLite connection: CatalogHandle is
+    // synchronous (node:sqlite), so shard scans must run off the daemon
+    // loop (gezk-format-v1.md §9).
+    'knowledge/search-worker': 'src/knowledge/search-worker.ts',
     // Standalone subpath (`@bendyline/gezel-service/handboek`) so the CLI's
     // static-site export can run the documentation engine without importing
     // the whole daemon.

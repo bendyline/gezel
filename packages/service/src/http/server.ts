@@ -48,6 +48,7 @@ import { handboekRoutes } from './routes/handboek.js';
 import { historyRoutes } from './routes/history.js';
 import { imageGenRoutes } from './routes/image-gen.js';
 import { imagesRoutes } from './routes/images.js';
+import { knowledgeRoutes } from './routes/knowledge.js';
 import { llamaCppRoutes } from './routes/llama-cpp.js';
 import { machineEngineProxy } from './routes/machine-engine-proxy.js';
 import { machineServingRoutes } from './routes/machine-serving.js';
@@ -104,6 +105,7 @@ import { v1ChatRoutes } from './routes/v1-chat.js';
 import { v1EmbeddingsRoutes } from './routes/v1-embeddings.js';
 import { v1GezelsRoutes } from './routes/v1-gezels.js';
 import { v1IdentityRoutes } from './routes/v1-identity.js';
+import { v1KnowledgeAssetsRoutes } from './routes/v1-knowledge-assets.js';
 import { v1ModelsEnsureRoutes } from './routes/v1-models-ensure.js';
 import { v1ModelsRoutes } from './routes/v1-models.js';
 import { v1OpenApiRoutes } from './routes/v1-openapi.js';
@@ -510,9 +512,17 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     app.use('/v1/remote/*', requireScope('remote-inference'));
     app.use('/v1/remote/models/ensure', requireScope('machine-models'));
     app.use('/v1/remote/models/ensure/*', requireScope('machine-models'));
-    app.use('/v1/remote/manage/*', requireScope('machine-models'));
+    // The knowledge overlay must register BEFORE the broad manage gate so a
+    // machine-models-only token cannot reach the knowledge broker, and a
+    // machine-knowledge-assets token cannot reach model management.
+    app.use('/v1/remote/manage/knowledge/*', requireScope('machine-knowledge-assets'));
+    app.use('/v1/remote/manage/*', (c, next) => {
+      if (c.req.path.startsWith('/v1/remote/manage/knowledge/')) return next();
+      return requireScope('machine-models')(c, next);
+    });
     // Model ensure must win over the exact `/models` discovery handler.
     app.route('/v1/remote/models/ensure', v1ModelsEnsureRoutes(ctx));
+    app.route('/v1/remote/manage/knowledge', v1KnowledgeAssetsRoutes());
     app.route('/v1/remote/manage/llama-cpp', llamaCppRoutes(ctx));
     app.route('/v1/remote/manage/ds4', ds4Routes(ctx));
     app.route('/v1/remote/manage/mlx', mlxRoutes(ctx));
@@ -651,6 +661,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/ambient-dashboard', ambientDashboardRoutes(ctx));
   app.route('/api/system-toolsets', systemToolsetRoutes(ctx));
   app.route('/api/gilde-updates', gildeUpdateRoutes(ctx));
+  app.route('/api/knowledge', knowledgeRoutes(ctx));
   app.route('/api/codex-setup', codexSetupRoutes(ctx));
   app.route('/api/opencode-setup', opencodeSetupRoutes(ctx));
   app.route('/api/pi-setup', piSetupRoutes(ctx));

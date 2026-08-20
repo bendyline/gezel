@@ -24,6 +24,7 @@ import type { ContentIndex } from '../index-store/content-index.js';
 import type { IndexEnrichmentManager } from '../index-store/enrichment-manager.js';
 import type { GlobalIndex } from '../index-store/global-index.js';
 import type { IndexingJobControl } from '../index-store/indexing-job.js';
+import type { KnowledgeManager } from '../knowledge/manager.js';
 import type { MeesterStatusGenerator } from '../meester/status-generator.js';
 import type { MemoryManager } from '../memory/manager.js';
 import type { EnsureModelOrchestrator } from '../models/ensure.js';
@@ -106,6 +107,11 @@ export interface ServiceContext {
    * `/api/gilde-updates` and the config toggle dispatcher.
    */
   gildeUpdates: GildeUpdateManager;
+  /**
+   * Installed `.gezk` knowledge catalogs: registry, mounts, install jobs,
+   * and the SearchService knowledge arm. Absent on the machine-engine role.
+   */
+  knowledge?: KnowledgeManager;
   /**
    * The built-in documentation engine (TOC + articles, personalized per
    * render mode). Backs `/api/handboek` and the `how_do_i` MCP tool.

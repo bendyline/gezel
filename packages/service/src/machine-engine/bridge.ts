@@ -270,7 +270,7 @@ async function inspectMachineRuntime(runtime: SystemServiceRuntime): Promise<Pai
       pinnedIdentityKey: identity.publicKeyPem,
       pinnedIdentityFingerprint: identity.fingerprint,
       tlsCertPem: identity.tlsCertPem,
-      scopes: ['remote-inference', 'machine-models'],
+      scopes: ['remote-inference', 'machine-models', 'machine-knowledge-assets'],
       pairedAt: Date.now(),
       lastSeenAt: Date.now(),
       managed: 'machine-engine',

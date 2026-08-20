@@ -11,6 +11,41 @@ MiniLM/float32); the chunking profile is `gezel-markdown-chunks@2`; the
 knowledge merge weight is 370; and every catalog must ship a topics table of
 contents.
 
+Implementation state (2026-08-20): Phases 0–2 are landed — the
+`@bendyline/gezel-knowledge` package ships the compiler, verified archive
+reader, read-only two-stage retrieval handle, deep validator, Markdown
+adapter, profile registry, profile-driven embedder, and RFC 8785 Ed25519
+manifest signing; `gezel knowledge init/build/validate/inspect/search` works
+entirely offline. The daemon owns the private install tier
+(`/api/knowledge/*`, resumable downloads, quarantine-with-reason, the
+knowledge worker thread, and the explicit `knowledge` arm in unified/omni
+search with `knowledge://` citations through `read_document`), and the
+machine broker serves `machine-knowledge-assets`-scoped
+ensure/status/inventory/reclaim of signed coordinates at
+`/v1/remote/manage/knowledge/*` (archives resolved broker-side from
+`GEZEL_KNOWLEDGE_REGISTRY_DIR` until the Phase-6 signed CDN registry). The
+Knowledge UI (Phase 3) is landed: Settings → Knowledge (install from file
+path/URL/native picker, enable/disable, quarantine reasons, remove with
+confirmation), the conditional sidebar Knowledge area (appears exactly at
+registered-count ≥ 1), the three-pane browser (catalog + topic rail, paged
+document directory, squisq-rendered article with license/source/citation
+provenance, Copy citation, Ask a gezel), titlebar-search deep links via the
+open-knowledge intent, and the per-project scope row (inherit / selected /
+off) in Project Settings. Proactive RAG (Phase 4) is on: `knowledge` rides
+`ALL_SOURCES` (last, so project evidence leads every diversify round), the
+per-mode ceilings are enforced in project-retrieval (Lean = citations only;
+Balanced ≤2 chunks within 25% of the turn budget; Deep ≤4 within 35%;
+injection floor 120/370), every injected chunk carries its provenance line
+(`[knowledge] <uri> — <title> · <catalog>@<version>`), the untrusted-evidence
+header names reference catalogs explicitly, telemetry records citation
+coordinates (never text), and craftbook steps can scope retrieval to
+`sources: ['knowledge']`. The invariants are CI-guarded
+(project-retrieval.test.ts + the knowledge-routes integration test), and the
+`knowledge-bench` eval measures the empirical gates with the daemon's real
+embedder — first run (bge-small-en-v1.5, 2026-08-20): paraphrased-query
+R@1 0.75 / R@5 1.00 / MRR 0.88, warm explicit search p50 8 ms / p95 22 ms
+against the 750 ms gate.
+
 ## Executive decision
 
 A **knowledge catalog** is a versioned, read-only body of reference material that

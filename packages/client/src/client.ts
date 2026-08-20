@@ -9,6 +9,9 @@ import type {
   ImageGenerationRequest,
   ImageGenerationResponse,
   ImageModelPullEvent,
+  KnowledgeCatalogRef,
+  KnowledgeInstallRequest,
+  KnowledgeSearchRequest,
   ListActiveImagePullsResponse,
   ListActiveVideoPullsResponse,
   ListAudioCatalogResponse,
@@ -344,6 +347,7 @@ import type {
   TransformStreamEvent,
   TransformTextRequest,
   UnifiedSearchResponse,
+  UnifiedSearchResult,
   UpdateBoekwachterIssueRequest,
   UpdateBoekwachterIssueResponse,
   UpdateConfigRequest,
@@ -2166,6 +2170,53 @@ const OllamaPullEventSchema: z.ZodType<OllamaPullEvent> = z.discriminatedUnion('
   z.object({ type: z.literal('done') }),
 ]);
 
+/** One installed knowledge catalog as reported by `/api/knowledge/catalogs`. */
+export interface KnowledgeCatalogStatus {
+  ref: KnowledgeCatalogRef;
+  enabled: boolean;
+  addedAt: string;
+  disabledReason?: string;
+  mounted: boolean;
+  name?: string;
+  description?: string;
+  language?: string;
+  license?: string;
+  documents?: number;
+  chunks?: number;
+  sizeBytes?: number;
+  vectorCompatible?: boolean;
+}
+
+export interface KnowledgeInstallJobSnapshot {
+  id: string;
+  startedAt: string;
+  finished: boolean;
+  error?: string;
+  events: Array<Record<string, unknown> & { type: string }>;
+}
+
+export interface KnowledgeTopicNode {
+  id: string;
+  parentId: string | null;
+  name: string;
+  description: string | null;
+  sortKey: string;
+  documentCount: number;
+}
+
+export interface KnowledgeDocumentMeta {
+  id: string;
+  title: string;
+  slug: string;
+  summary: string | null;
+  language: string;
+  topicId: string;
+  sourceUrl: string | null;
+  sourceRevision: string | null;
+  sourceUpdatedAt: string | null;
+  attribution: Record<string, string> | null;
+}
+
 export class GezelClient {
   private readonly baseUrl: string;
   private readonly token: string;
@@ -2547,6 +2598,71 @@ export class GezelClient {
     displayTarget: AmbientDashboardDisplayTarget,
   ): Promise<{ displayTarget: AmbientDashboardDisplayTarget }> {
     return this.request('PUT', '/api/ambient-dashboard/display-target', displayTarget);
+  }
+
+  // ── knowledge catalogs ──
+
+  /** Installed catalogs: refs, enabled state, health, counts, sizes. */
+  listKnowledgeCatalogs(): Promise<{ catalogs: KnowledgeCatalogStatus[] }> {
+    return this.request('GET', '/api/knowledge/catalogs');
+  }
+
+  /** Kick off a catalog install (file path or URL); poll or stream the job. */
+  installKnowledgeCatalog(body: KnowledgeInstallRequest): Promise<{ jobId: string }> {
+    return this.request('POST', '/api/knowledge/install', body);
+  }
+
+  getKnowledgeJob(jobId: string): Promise<KnowledgeInstallJobSnapshot> {
+    return this.request('GET', `/api/knowledge/jobs/${encodeURIComponent(jobId)}`);
+  }
+
+  cancelKnowledgeJob(jobId: string): Promise<{ cancelled: boolean }> {
+    return this.request('DELETE', `/api/knowledge/jobs/${encodeURIComponent(jobId)}`);
+  }
+
+  updateKnowledgeCatalog(
+    catalogId: string,
+    body: { enabled?: boolean; autoUpdate?: boolean },
+  ): Promise<{ ok: boolean }> {
+    return this.request('PATCH', `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}`, body);
+  }
+
+  removeKnowledgeCatalog(catalogId: string): Promise<{ ok: boolean }> {
+    return this.request('DELETE', `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}`);
+  }
+
+  searchKnowledge(body: KnowledgeSearchRequest): Promise<{ results: UnifiedSearchResult[] }> {
+    return this.request('POST', '/api/knowledge/search', body);
+  }
+
+  knowledgeCatalogTopics(catalogId: string): Promise<{ topics: KnowledgeTopicNode[] }> {
+    return this.request('GET', `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/topics`);
+  }
+
+  knowledgeCatalogDocuments(
+    catalogId: string,
+    opts?: { topicId?: string; offset?: number; limit?: number },
+  ): Promise<{ documents: KnowledgeDocumentMeta[]; total: number }> {
+    const params = new URLSearchParams();
+    if (opts?.topicId) params.set('topic', opts.topicId);
+    if (opts?.offset) params.set('offset', String(opts.offset));
+    if (opts?.limit) params.set('limit', String(opts.limit));
+    const query = params.toString();
+    return this.request(
+      'GET',
+      `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/documents${query ? `?${query}` : ''}`,
+    );
+  }
+
+  /** Metadata + normalized Markdown body for one catalog document. */
+  readKnowledgeDocument(
+    catalogId: string,
+    documentId: string,
+  ): Promise<KnowledgeDocumentMeta & { markdown: string }> {
+    return this.request(
+      'GET',
+      `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/document?id=${encodeURIComponent(documentId)}`,
+    );
   }
 
   // ── storage accounting, cleanup & backup ──

@@ -27,6 +27,7 @@ there is no unstyled intermediate render.
 | `15-village-and-overview.css` | Village, task planning, project overview, machine budget, and remote serving |
 | `16-controls-handbook-and-admin.css` | Late shared control recipes, storage cleanup, backup/restore, and first-run content |
 | `16-handbook.css` | **On demand:** Handboek master/detail surface (owned by `HandboekView`) |
+| `17-knowledge.css` | **On demand:** Knowledge catalog browser (owned by `KnowledgeView`) |
 
 ## Editing rules
 

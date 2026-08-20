@@ -207,12 +207,12 @@ export class CatalogHandle {
   }
 
   /**
-   * Route: score every centroid against the (unit float32) query, shard
-   * score = max over its centroids, return the top-S shard ids. Catalogs
-   * with ≤ S shards skip scoring entirely.
+   * Score every shard against the (unit float32) query: shard score = max
+   * cosine over its centroids (§3.4). This is the cross-catalog routing
+   * primitive — the daemon merges scores from every active catalog and
+   * takes the top-S GLOBALLY, so multiple catalogs share one scan budget.
    */
-  routeShards(queryVector: Float32Array, shardBudget: number): number[] {
-    if (this.shards.length <= shardBudget) return this.shards.map((s) => s.id);
+  scoreShards(queryVector: Float32Array): Array<{ shardId: number; score: number }> {
     const rows = this.router.db
       .prepare('SELECT shard_id, embedding FROM route_centroids')
       .all() as Array<{ shard_id: number | bigint; embedding: Uint8Array }>;
@@ -229,10 +229,17 @@ export class CatalogHandle {
       const id = Number(row.shard_id);
       if (dot > (best.get(id) ?? Number.NEGATIVE_INFINITY)) best.set(id, dot);
     }
-    return [...best.entries()]
-      .sort((a, b) => b[1] - a[1])
+    // A shard with no centroid row (empty shard) simply never routes.
+    return [...best.entries()].map(([shardId, score]) => ({ shardId, score }));
+  }
+
+  /** Top-S shard ids within THIS catalog (single-catalog callers, tests). */
+  routeShards(queryVector: Float32Array, shardBudget: number): number[] {
+    if (this.shards.length <= shardBudget) return this.shards.map((s) => s.id);
+    return this.scoreShards(queryVector)
+      .sort((a, b) => b.score - a.score)
       .slice(0, shardBudget)
-      .map(([id]) => id);
+      .map((s) => s.shardId);
   }
 
   /**
@@ -243,8 +250,15 @@ export class CatalogHandle {
     queryVector: Float32Array,
     opts: { shardBudget?: number; finalK?: number } = {},
   ): CatalogChunkHit[] {
-    const finalK = opts.finalK ?? RERANK_FINAL_K;
     const shardIds = this.routeShards(queryVector, opts.shardBudget ?? ROUTE_SHARDS_EXPLICIT);
+    return this.searchShards(queryVector, shardIds, opts.finalK ?? RERANK_FINAL_K);
+  }
+
+  /**
+   * The scan stage against an EXPLICIT shard list — what the daemon calls
+   * after global cross-catalog routing has already spent the S budget.
+   */
+  searchShards(queryVector: Float32Array, shardIds: number[], finalK: number): CatalogChunkHit[] {
     const queryBits = Buffer.from(quantizeBinary(queryVector));
     const hits: CatalogChunkHit[] = [];
     for (const shardId of shardIds) {

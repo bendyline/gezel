@@ -742,6 +742,153 @@ handboek
     for (const id of result.skipped) console.error(`  skipped (no body): ${id}`);
   });
 
+const knowledge = program
+  .command('knowledge')
+  .description('Build, validate, inspect and search .gezk knowledge catalogs (no daemon)');
+
+type KnowledgeCommandModule = typeof import('../knowledge-command.js');
+const loadKnowledgeCommand = async (): Promise<KnowledgeCommandModule> => {
+  const knowledgeModule = '../knowledge-command.js';
+  return (await import(knowledgeModule)) as KnowledgeCommandModule;
+};
+
+knowledge
+  .command('init <dir>')
+  .description('Scaffold a catalog folder (catalog.json + content/)')
+  .action(async (dir: string) => {
+    const { runKnowledgeInit } = await loadKnowledgeCommand();
+    await runKnowledgeInit(dir);
+  });
+
+knowledge
+  .command('build <dir>')
+  .description('Compile a catalog folder into a .gezk archive')
+  .option('--out <file>', 'output path (default <dir>/<id>-<version>.gezk)')
+  .option('--sign-key <pemfile>', 'Ed25519 private key (PKCS#8 PEM) to sign the manifest')
+  .action(async (dir: string, opts: { out?: string; signKey?: string }) => {
+    const { runKnowledgeBuild } = await loadKnowledgeCommand();
+    await runKnowledgeBuild(dir, opts);
+  });
+
+knowledge
+  .command('validate <path>')
+  .description('Verify a .gezk archive or extracted catalog directory')
+  .option('--deep', 'also run quick_check, vector alignment, self-KNN and smoke queries')
+  .action(async (path: string, opts: { deep?: boolean }) => {
+    const { runKnowledgeValidate } = await loadKnowledgeCommand();
+    await runKnowledgeValidate(path, opts);
+  });
+
+knowledge
+  .command('inspect <path>')
+  .description('Print a catalog summary from its manifest')
+  .action(async (path: string) => {
+    const { runKnowledgeInspect } = await loadKnowledgeCommand();
+    await runKnowledgeInspect(path);
+  });
+
+knowledge
+  .command('search <path> <query>')
+  .description('Search a catalog file offline (full-text; --semantic adds vector search)')
+  .option('--semantic', 'embed the query with the catalog profile (loads the model)')
+  .option('--limit <n>', 'maximum results', (v: string) => Number.parseInt(v, 10), 10)
+  .action(async (path: string, query: string, opts: { semantic?: boolean; limit?: number }) => {
+    const { runKnowledgeSearch } = await loadKnowledgeCommand();
+    await runKnowledgeSearch(path, query, opts);
+  });
+
+knowledge
+  .command('install <source>')
+  .description('Install a .gezk catalog into the running gezel (file path or URL)')
+  .action(async (source: string) => {
+    const client = await connectOwned(cliGlobals());
+    const isUrl = /^https?:\/\//i.test(source);
+    const { resolve: resolvePath } = await import('node:path');
+    const { jobId } = await client.installKnowledgeCatalog({
+      source: isUrl ? { kind: 'url', url: source } : { kind: 'file', path: resolvePath(source) },
+    });
+    for (;;) {
+      const job = await client.getKnowledgeJob(jobId);
+      const last = job.events[job.events.length - 1];
+      if (process.stderr.isTTY && last?.type === 'progress') {
+        const done = Number(last.bytesDone ?? 0);
+        const total = Number(last.bytesTotal ?? 0);
+        const pct = total > 0 ? ` (${Math.floor((done / total) * 100)}%)` : '';
+        process.stderr.write(`\r${String(last.phase ?? 'working')}${pct}   `);
+      }
+      if (job.finished) {
+        if (process.stderr.isTTY) process.stderr.write('\n');
+        if (job.error) throw new CliError(`install failed: ${job.error}`);
+        const doneEvent = job.events.find((e) => e.type === 'done') as
+          | { ref?: { catalogId?: string; version?: string } }
+          | undefined;
+        console.log(
+          `Installed ${doneEvent?.ref?.catalogId ?? 'catalog'}@${doneEvent?.ref?.version ?? ''} — enabled for search.`,
+        );
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  });
+
+knowledge
+  .command('list')
+  .description('List catalogs installed in the running gezel')
+  .action(async () => {
+    const client = await connectOwned(cliGlobals());
+    const { catalogs } = await client.listKnowledgeCatalogs();
+    if (catalogs.length === 0) {
+      console.log('No knowledge catalogs installed. Add one with: gezel knowledge install <file>');
+      return;
+    }
+    for (const c of catalogs) {
+      const state = c.disabledReason
+        ? `quarantined — ${c.disabledReason}`
+        : c.enabled
+          ? c.mounted
+            ? 'active'
+            : 'enabled'
+          : 'disabled';
+      const size = c.sizeBytes ? ` ${(c.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : '';
+      console.log(
+        `${c.ref.catalogId.padEnd(24)} ${c.ref.version.padEnd(10)} ${String(c.documents ?? '?').padStart(6)} docs${size}  ${state}`,
+      );
+    }
+  });
+
+knowledge
+  .command('remove <catalogId>')
+  .description('Remove an installed catalog and its private files')
+  .action(async (catalogId: string) => {
+    const client = await connectOwned(cliGlobals());
+    const { ok } = await client.removeKnowledgeCatalog(catalogId).catch((err) => {
+      throw new CliError(err instanceof Error ? err.message : String(err));
+    });
+    if (!ok) throw new CliError(`catalog not found: ${catalogId}`);
+    console.log(`Removed ${catalogId}.`);
+  });
+
+knowledge
+  .command('find <query>')
+  .description('Search installed catalogs through the running gezel')
+  .option('--limit <n>', 'maximum results', (v: string) => Number.parseInt(v, 10), 10)
+  .action(async (query: string, opts: { limit?: number }) => {
+    const client = await connectOwned(cliGlobals());
+    const { results } = await client.searchKnowledge({
+      query,
+      ...(opts.limit ? { maxResults: opts.limit } : {}),
+    });
+    if (results.length === 0) {
+      console.log(`No results for "${query}".`);
+      process.exitCode = 1;
+      return;
+    }
+    for (const r of results) {
+      console.log(`${r.title}  ${r.uri ?? ''}`);
+      if (r.snippet) console.log(`  ${r.snippet.replace(/\s+/g, ' ').slice(0, 160)}`);
+    }
+  });
+
 const task = program.command('task').description('Manage tasks');
 
 task
@@ -1404,8 +1551,13 @@ async function pollStorageJob(
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   // CliError is a user-facing failure (e.g. a guest connection trying to run
-  // a management command) — print just the message, no stack.
-  if (err instanceof CliError) console.error(err.message);
-  else console.error(err);
+  // a management command) — print just the message, no stack. The name check
+  // covers lazily-loaded command chunks: with splitting disabled each chunk
+  // bundles its own copy of the class, so instanceof fails across chunks.
+  if (err instanceof CliError || (err instanceof Error && err.name === 'CliError')) {
+    console.error(err.message);
+  } else {
+    console.error(err);
+  }
   process.exit(1);
 });

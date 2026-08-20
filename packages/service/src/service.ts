@@ -104,6 +104,8 @@ import { readImageStaticMeta } from './index-store/image-meta.js';
 import { IndexingJobControl, ensureIndexingJobTask } from './index-store/indexing-job.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
+import { KnowledgeManager } from './knowledge/manager.js';
+import { createWorkerCatalogHost } from './knowledge/worker-host.js';
 import { createLocalHarnessModelSource } from './local-harness/model-source.js';
 import { startMachineEngineBridge } from './machine-engine/bridge.js';
 import { registerMailAdapters } from './mail/registry.js';
@@ -489,7 +491,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       // daemon's credential retains the first-party product API scopes.
       scopes:
         serviceRole === 'machine-engine'
-          ? ['remote-inference', 'machine-models']
+          ? ['remote-inference', 'machine-models', 'machine-knowledge-assets']
           : ['ui', 'openai'],
       token: clientToken,
     },
@@ -1942,6 +1944,27 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // Cross-project unified search (titlebar quick-open + content fan-out).
   const search = new SearchService(store, contentIndex, memory, workspaceIndex, globalIndex);
   chat.setSearchService(search);
+  // Knowledge catalogs: registry + mounts + install jobs + the search arm.
+  // SQLite work lives on the knowledge worker thread (in-process fallback).
+  // User daemons only — the machine broker installs shared bytes but never
+  // mounts, searches, or holds a per-user registry.
+  const knowledge =
+    serviceRole === 'machine-engine'
+      ? undefined
+      : new KnowledgeManager({
+          home,
+          host: createWorkerCatalogHost(),
+          projectPolicy: async (projectId) => {
+            const project = await store.getProject(projectId);
+            return project?.knowledgeCatalogs ?? null;
+          },
+        });
+  if (knowledge) {
+    await knowledge.start();
+    search.setKnowledgeSearch({
+      search: (query, opts) => knowledge.searchUnified(query, opts),
+    });
+  }
   // Drop the cached name catalog when a project/gezel/document is
   // created/renamed/deleted, so a just-created entity is quick-openable
   // immediately instead of after the catalog's TTL. The audit log is the
@@ -2426,6 +2449,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     scriptRunner,
     catalog,
     gildeUpdates,
+    ...(knowledge ? { knowledge } : {}),
     handboek,
     secrets,
     git,
@@ -3016,6 +3040,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       memoryCompactor.stop();
       digestGenerator.stop();
       gildeUpdates.stop();
+      await knowledge?.stop();
       keurmeesterDigest.stop();
       meesterStatus.stop();
       ambientDashboard.stop();

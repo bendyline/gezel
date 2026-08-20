@@ -2,6 +2,7 @@ import type { UnifiedSearchResult, UnifiedSearchResultKind } from '@bendyline/ge
 import { type NavAction, openTabAction as openTab } from './nav-actions.js';
 import type { OpenFileIntent } from './pending-open-file.js';
 import type { OpenHandboekIntent } from './pending-open-handboek.js';
+import type { OpenKnowledgeIntent } from './pending-open-knowledge.js';
 import type { OpenSessionIntent } from './pending-open-session.js';
 
 /** Fixed display order + labels for the result groups in the palette. */
@@ -18,6 +19,7 @@ const GROUP_ORDER: Array<{ kind: UnifiedSearchResultKind; label: string }> = [
   { kind: 'memory', label: 'Memories' },
   { kind: 'craftbook', label: 'Craftbooks' },
   { kind: 'handboek', label: 'Handboek' },
+  { kind: 'knowledge', label: 'Knowledge' },
 ];
 
 export interface SearchGroup {
@@ -132,10 +134,19 @@ export function resultToActions(r: UnifiedSearchResult): NavAction[] {
         { kind: 'event', type: 'gezel:open-handboek-article', detail: intent },
       ];
     }
-    case 'knowledge':
-      // Placeholder until the Knowledge browser lands (knowledge-catalogs
-      // WS-I): the daemon emits no 'knowledge' results yet, and when it does
-      // this becomes an open-knowledge intent + area tab, handboek-style.
-      return [];
+    case 'knowledge': {
+      if (!r.catalogId) return [];
+      const intent: OpenKnowledgeIntent = {
+        catalogId: r.catalogId,
+        ...(r.documentId ? { documentId: r.documentId } : {}),
+      };
+      return [
+        // Queue first so the freshly-mounted Knowledge view can consume it.
+        { kind: 'open-knowledge', intent },
+        openTab({ kind: 'area', area: 'knowledge' }),
+        // Live event for the already-open case (no remount).
+        { kind: 'event', type: 'gezel:open-knowledge-document', detail: intent },
+      ];
+    }
   }
 }

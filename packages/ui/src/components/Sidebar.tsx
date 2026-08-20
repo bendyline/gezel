@@ -36,6 +36,7 @@ import { documentLabel } from './document-label.js';
 import { type CreateKind, requestCreate } from './nav-intents.js';
 import { queueFocusSessionError } from './pending-focus-session-error.js';
 import { tabKey, toRecentTab } from './recent-tabs.js';
+import { useHasKnowledgeCatalogs } from './useHasKnowledgeCatalogs.js';
 import { useIsFirstRun } from './useIsFirstRun.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useShowAdvancedFeatures } from './useShowAdvancedFeatures.js';
@@ -148,6 +149,7 @@ const AREA_LINKS: RecentTabArea[] = [
   'craftbooks',
   'scripts',
   'history',
+  'knowledge',
   'handboek',
   'settings',
 ];
@@ -246,6 +248,7 @@ export function Sidebar({
   const [collapsed, setCollapsed] = useState<boolean>(() => readStoredCollapsed());
   const roleBasedNameOnly = useRoleBasedNameOnlyMode();
   const showAdvancedFeatures = useShowAdvancedFeatures();
+  const hasKnowledgeCatalogs = useHasKnowledgeCatalogs();
   // Until setup is done, the home tab reads "Get started" instead of "Home".
   const firstRun = useIsFirstRun();
   const meester = gezels.find((gezel) => gezel.id === meesterGezelId);
@@ -263,7 +266,13 @@ export function Sidebar({
   // Advanced → "Show advanced features".
   const currentArea = selection?.kind === 'area' ? selection.area : null;
   const areaLinks = useMemo(() => {
-    const links = AREA_LINKS.filter((area) => area !== 'scripts' || showAdvancedFeatures);
+    const links = AREA_LINKS.filter((area) => {
+      if (area === 'scripts') return showAdvancedFeatures;
+      // Knowledge appears the moment the user registers ≥1 catalog — the
+      // rail flips exactly at that count, never from machine inventory.
+      if (area === 'knowledge') return hasKnowledgeCatalogs;
+      return true;
+    });
     // A hidden area that is nevertheless the current destination gets a
     // transient row, the same way HIDDEN_PROJECT_IDS surfaces the Default
     // project while it is selected. Without it the rail matches nothing and
@@ -276,7 +285,7 @@ export function Sidebar({
       links.splice(settingsAt < 0 ? links.length : settingsAt, 0, currentArea);
     }
     return links;
-  }, [showAdvancedFeatures, currentArea]);
+  }, [showAdvancedFeatures, hasKnowledgeCatalogs, currentArea]);
   // Installation and updater notices live beneath Settings, which is the
   // lower corner of the rail in the default right-sidebar layout. Routine
   // "up to date" feedback clears after a moment; download and ready states

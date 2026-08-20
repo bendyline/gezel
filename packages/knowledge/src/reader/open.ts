@@ -7,9 +7,9 @@
  */
 
 import { createRequire } from 'node:module';
-import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { GEZK_APPLICATION_ID, GEZK_INDEX_SCHEMA_VERSION } from '../format/constants.js';
+import { DatabaseSync } from '../format/node-sqlite.js';
 
 const nodeRequire = createRequire(import.meta.url);
 

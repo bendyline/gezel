@@ -21,6 +21,11 @@ const HandboekView = lazy(() =>
   import('../views/HandboekView.js').then(({ HandboekView }) => ({ default: HandboekView })),
 );
 
+// Lazy for the same reason as Handboek: the reader pane pulls in squisq.
+const KnowledgeView = lazy(() =>
+  import('../views/KnowledgeView.js').then(({ KnowledgeView }) => ({ default: KnowledgeView })),
+);
+
 interface TabContentProps {
   tab: RecentTab;
   activeProjectsByGezel?: ReadonlyMap<string, ReadonlySet<string>>;
@@ -73,6 +78,11 @@ export function TabContent({ tab, activeProjectsByGezel, activeTurnsReady }: Tab
           return <HistoryView />;
         case 'handboek':
           return <HandboekView />;
+        case 'knowledge':
+          // The view itself renders an install pointer when no catalog is
+          // registered (a restored selection can outlive the last catalog),
+          // so no gate is needed here the way benchmarks needs one.
+          return <KnowledgeView />;
         case 'benchmarks':
           // Developer surface, not a shipped one: unstyled selects, inline
           // hex colours, and a runner that cannot execute in a packaged

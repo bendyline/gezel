@@ -14,6 +14,7 @@ const packageThresholds = {
   ui: 54.7,
   app: 69.7,
   catalog: 88.9,
+  knowledge: 57.9,
   mcp: 95.5,
   client: 66.7,
   cli: 82.6,

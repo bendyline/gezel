@@ -148,6 +148,7 @@ describe('handboek engine', () => {
       ['npm-packages', 'The Gezel Command Line'],
       ['writing-scripts-with-gezel-sdk', 'Developer'],
       ['building-connected-apps-with-gezel-app-sdk', 'Developer'],
+      ['building-ai-apps-inside-gezel', 'Developer'],
       ['how-we-test-models', 'Models and Testing'],
       ['model-scorecard', 'Models and Testing'],
     ]);
@@ -169,6 +170,10 @@ describe('handboek engine', () => {
       ['roles-index', 'https://gezelgilde.com/roles/'],
       ['tools-and-toolsets', 'https://gezelgilde.com/toolsets/'],
       ['tools-and-toolsets', 'https://gezelgilde.com/community/'],
+      ['building-ai-apps-inside-gezel', 'https://gezelgilde.com/toolsets/#project-types'],
+      ['building-ai-apps-inside-gezel', 'https://gezelgilde.com/craftbooks/'],
+      ['building-ai-apps-inside-gezel', 'https://gezelgilde.com/roles/'],
+      ['building-ai-apps-inside-gezel', 'https://gezelgilde.com/models/'],
     ] as const) {
       const article = await engine.article(articleId, { mode: 'site' });
       expect(article!.markdown).toContain(url);

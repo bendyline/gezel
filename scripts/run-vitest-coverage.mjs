@@ -34,6 +34,12 @@ export const targets = [
     thresholds: { statements: 73, branches: 66, functions: 72, lines: 76 },
   },
   {
+    id: 'knowledge',
+    root: 'packages/knowledge',
+    include: sourceInclude,
+    thresholds: { statements: 70, branches: 55, functions: 75, lines: 72 },
+  },
+  {
     id: 'mcp',
     root: 'packages/mcp',
     include: sourceInclude,

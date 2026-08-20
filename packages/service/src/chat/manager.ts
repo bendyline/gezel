@@ -13026,6 +13026,10 @@ export class ChatManager {
               line: hit.line,
               lineEnd: hit.lineEnd,
               score: hit.score,
+              // Knowledge provenance (citation coordinates only, never text).
+              ...(hit.uri ? { uri: hit.uri } : {}),
+              ...(hit.catalogId ? { catalogId: hit.catalogId } : {}),
+              ...(hit.catalogVersion ? { catalogVersion: hit.catalogVersion } : {}),
             })),
             // Per-arm timing/outcome telemetry (non-content — never snippets).
             ...(probeArms ? { arms: probeArms } : {}),

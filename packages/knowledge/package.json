@@ -50,11 +50,20 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@types/node": "^24.10.1",
     "@types/yauzl": "^2.10.3",
     "@types/yazl": "^2.4.6",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
+  },
+  "peerDependencies": {
+    "@huggingface/transformers": "^3.8.1"
+  },
+  "peerDependenciesMeta": {
+    "@huggingface/transformers": {
+      "optional": true
+    }
   }
 }

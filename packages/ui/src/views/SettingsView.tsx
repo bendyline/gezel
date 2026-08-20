@@ -26,6 +26,7 @@ import { GezelIcon } from '../components/GezelIcon.js';
 import { GildeUpdatesCard } from '../components/GildeUpdatesCard.js';
 import { HealthStrip } from '../components/HealthStrip.js';
 import { InstallModelTuningEditor } from '../components/InstallModelTuningEditor.js';
+import { KnowledgeCatalogsCard } from '../components/KnowledgeCatalogsCard.js';
 import { requestMacUninstall } from '../components/MacUninstallDialog.js';
 import { EffortPicker, EffortTray, ModelPicker } from '../components/ModelPicker.js';
 import { RemoteServersPanel } from '../components/RemoteServersPanel.js';
@@ -123,6 +124,7 @@ type SectionId =
   | 'connectedApps'
   | 'remoteServers'
   | 'toolsets'
+  | 'knowledge'
   | 'securityCompliance'
   | 'about'
   | 'benchmarks';
@@ -180,6 +182,7 @@ function buildSections(platform: string | undefined): SettingsSection[] {
     { id: 'audio', label: 'Audio', group: 'workloads' },
     { id: 'webSearch', label: 'Web search', group: 'workloads' },
     { id: 'channels', label: 'Channels' },
+    { id: 'knowledge', label: 'Knowledge' },
     { id: 'connectedApps', label: 'Connected Apps' },
     { id: 'remoteServers', label: 'Remote Servers' },
     { id: 'toolsets', label: 'Shared Toolsets' },
@@ -338,6 +341,7 @@ export function SettingsView() {
       'webSearch',
       'channels',
       'toolsets',
+      'knowledge',
       'securityCompliance',
       'about',
     ]);
@@ -3497,6 +3501,8 @@ export function SettingsView() {
 
         {section === 'connectedApps' && <ConnectedAppsPanel />}
         {section === 'remoteServers' && <RemoteServersPanel />}
+
+        {section === 'knowledge' && <KnowledgeCatalogsCard />}
 
         {section === 'toolsets' && (
           <section>

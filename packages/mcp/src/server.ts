@@ -59,6 +59,7 @@ import {
   inferDeliverableKind,
   isReservedShadowArtifactPath,
   isTrustedConstrainedToolset,
+  parseKnowledgeUri,
   pickRandomNameWithGender,
   prioritizePullsForCurrentBranch,
   removeStepAndCleanEdges,
@@ -4169,13 +4170,33 @@ server.tool(
 
 server.tool(
   'read_document',
-  'Read one document from the shared library by path. Office documents (.docx, .pdf, .pptx, .xlsx) come back converted to markdown. Get paths from the library listing, list_documents, or a search_documents match.',
+  'Read one document from the shared library by path, or a knowledge-catalog article by its knowledge:// URI (from a `search` result with the knowledge source). Office documents (.docx, .pdf, .pptx, .xlsx) come back converted to markdown. Get paths from the library listing, list_documents, or a search_documents match.',
   {
     path: z
       .string()
-      .describe('File path relative to the documents root (e.g. "guidelines/coding.md")'),
+      .describe(
+        'File path relative to the documents root (e.g. "guidelines/coding.md"), or a knowledge:// URI (e.g. "knowledge://world-history/1234#line=10-40")',
+      ),
   },
   async ({ path }) => {
+    const knowledgeUri = parseKnowledgeUri(path);
+    if (knowledgeUri) {
+      const doc = await api.readKnowledgeDocument(knowledgeUri.catalogId, knowledgeUri.documentId);
+      let body = doc.markdown;
+      // Honor a #line=N[-M] fragment: bounded deep reads, not whole articles.
+      if (knowledgeUri.fragment && 'lineStart' in knowledgeUri.fragment) {
+        const lines = body.split('\n');
+        const start = Math.max(1, knowledgeUri.fragment.lineStart);
+        const end = knowledgeUri.fragment.lineEnd ?? Math.min(lines.length, start + 120);
+        body = lines.slice(start - 1, end).join('\n');
+      }
+      const provenance = [
+        `Source: ${doc.title} — ${path.split('#')[0]}`,
+        ...(doc.sourceUrl ? [`Origin: ${doc.sourceUrl}`] : []),
+        ...(doc.sourceUpdatedAt ? [`Snapshot: ${doc.sourceUpdatedAt}`] : []),
+      ].join('\n');
+      return { content: [{ type: 'text' as const, text: `${provenance}\n\n${body}` }] };
+    }
     const res = await api.readDocument(path, { as: 'markdown' });
     return { content: [{ type: 'text' as const, text: res.content }] };
   },
@@ -10517,11 +10538,13 @@ function searchTextBudgetTokens(): number {
 
 server.tool(
   'search',
-  "Search indexed knowledge by meaning and keywords through one simple surface. Covers the active and linked projects' workspaces, artifacts, and memories, plus the shared document library. Every result carries provenance and an exact path/line when available — open hits with `read_file` (workspace, including `../<project-id>/...` linked paths), `read_artifact` (artifacts), or `read_document` (shared). This is the preferred discovery tool; `grep_files` remains best for exact strings and regular expressions.",
+  "Search indexed knowledge by meaning and keywords through one simple surface. Covers the active and linked projects' workspaces, artifacts, and memories, the shared document library, and any installed knowledge catalogs (reference material with citation URIs). Every result carries provenance and an exact path/line when available — open hits with `read_file` (workspace, including `../<project-id>/...` linked paths), `read_artifact` (artifacts), or `read_document` (shared paths and knowledge:// URIs). This is the preferred discovery tool; `grep_files` remains best for exact strings and regular expressions.",
   {
     query: z.string().min(1).describe('Natural-language description or keywords.'),
     sources: z
-      .array(z.enum(['workspace', 'artifacts', 'project-memory', 'gezel-memory', 'shared']))
+      .array(
+        z.enum(['workspace', 'artifacts', 'project-memory', 'gezel-memory', 'shared', 'knowledge']),
+      )
       .optional()
       .describe('Optional corpus filter. Omit to search all knowledge available to this project.'),
     maxResults: z
@@ -10580,9 +10603,12 @@ server.tool(
         const lineSpan = r.line
           ? `:${r.line}${r.lineEnd && r.lineEnd !== r.line ? `-${r.lineEnd}` : ''}`
           : '';
-        const where = r.path ? `${r.path}${lineSpan}` : r.title;
+        // Knowledge rows have no filesystem path — the citation URI is the
+        // handle the model passes to read_document.
+        const where = r.path ? `${r.path}${lineSpan}` : (r.uri ?? r.title);
+        const title = !r.path && r.uri ? ` ${r.title}` : '';
         const preview = r.snippet ? ` — ${clampSearchSnippet(r.snippet)}` : '';
-        return `[${provenance}${projectScope}${confidence}] ${where}${preview}`;
+        return `[${provenance}${projectScope}${confidence}] ${where}${title}${preview}`;
       });
       const craftbookLines = res.craftbooks.map((craftbook) => {
         const source =
