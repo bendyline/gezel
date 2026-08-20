@@ -1125,6 +1125,143 @@ html.embedded-chat #root {
   font-size: var(--text-xs);
 }
 
+.search-palette-see-all {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Full search surface behind the palette's "See all results" — a centered
+   panel over a dimmed backdrop; the palette stays the fast path, this is the
+   research view (grouped sections, highlighting, no result cap pressure). */
+.search-results-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 6vh 16px 16px;
+}
+
+.search-results-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.search-results-panel {
+  position: relative;
+  width: min(760px, 100%);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel, var(--bg, #fff));
+  border: 1px solid var(--border, #4443);
+  border-radius: 6px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+.search-results-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border, #4443);
+}
+
+.search-results-header input {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: var(--text-sm, 0.9rem);
+  border: 1px solid var(--border, #4443);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+}
+
+.search-results-count {
+  font-size: var(--text-xs, 0.75rem);
+  white-space: nowrap;
+}
+
+.search-results-close {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 4px 6px;
+}
+
+.search-results-note {
+  margin: 8px 14px 0;
+  font-size: var(--text-xs, 0.75rem);
+}
+
+.search-results-body {
+  overflow-y: auto;
+  padding: 8px 14px 14px;
+}
+
+.search-results-group-title {
+  margin: 12px 0 4px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #6b7280);
+}
+
+.search-results-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.search-results-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-results-row:hover,
+.search-results-row:focus-visible {
+  background: var(--hover, rgba(127, 127, 127, 0.12));
+}
+
+.search-results-title {
+  font-size: var(--text-sm, 0.9rem);
+}
+
+.search-results-subtitle,
+.search-results-snippet {
+  font-size: var(--text-xs, 0.75rem);
+  overflow-wrap: anywhere;
+}
+
+.search-results-row mark {
+  background: color-mix(in srgb, var(--accent, #b58a3c) 30%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 .search-palette-group + .search-palette-group {
   margin-top: 4px;
 }

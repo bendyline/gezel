@@ -21,6 +21,8 @@ interface SearchPaletteProps {
   sourcesIncomplete?: boolean;
   onPick: (result: UnifiedSearchResult) => void;
   onHover: (index: number) => void;
+  /** Renders a "See all results" footer action when provided. */
+  onSeeAll?: () => void;
 }
 
 /**
@@ -36,6 +38,7 @@ export function SearchPalette({
   sourcesIncomplete = false,
   onPick,
   onHover,
+  onSeeAll,
 }: SearchPaletteProps) {
   const total = groups.reduce((n, g) => n + g.items.length, 0);
   const activeRef = useRef<HTMLButtonElement | null>(null);
@@ -135,6 +138,21 @@ export function SearchPalette({
           Some sources didn't answer in time — results may be partial.
         </div>
       ) : null}
+      {!loading && onSeeAll && (
+        <div className="search-palette-more">
+          <button
+            type="button"
+            className="search-palette-see-all"
+            // mousedown + preventDefault, same reason as the option rows.
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onSeeAll();
+            }}
+          >
+            See all results
+          </button>
+        </div>
+      )}
     </div>
   );
 }

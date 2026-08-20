@@ -10609,7 +10609,8 @@ server.tool(
         ? `Craftbook options:\n${craftbookLines.join('\n')}`
         : null;
       const budget = searchTextBudgetTokens();
-      let usedTokens = estimateTokens(summary) + (craftbookSection ? estimateTokens(craftbookSection) : 0);
+      let usedTokens =
+        estimateTokens(summary) + (craftbookSection ? estimateTokens(craftbookSection) : 0);
       const shownLines: string[] = [];
       for (const line of lines) {
         const cost = estimateTokens(line);

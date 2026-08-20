@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Popover } from '../primitives/index.js';
 import { SearchPalette } from './SearchPalette.js';
+import { openSearchResults } from './SearchResultsOverlay.js';
 import { runNavActions } from './nav-actions.js';
 import { type SearchGroup, flattenGroups, groupResults, resultToActions } from './search-nav.js';
 
@@ -203,6 +204,12 @@ export function TitlebarSearch() {
             sourcesIncomplete={sourcesIncomplete}
             onPick={pick}
             onHover={setActiveIndex}
+            onSeeAll={() => {
+              const q = query.trim();
+              if (!q) return;
+              setOpen(false);
+              openSearchResults(q);
+            }}
           />
         </Popover.Content>
       ) : null}

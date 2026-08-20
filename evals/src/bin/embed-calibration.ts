@@ -24,12 +24,12 @@
  */
 
 import {
+  type Pair,
   distinctFactPairs,
   paraphrasePairs,
   relevantQueryPairs,
   unrelatedPairs,
   unrelatedQueryPairs,
-  type Pair,
 } from '../embed-calibration/pairs.js';
 
 import { embed, embedBatch, embedModelId, embedQuery } from '@bendyline/gezel-service';
@@ -52,7 +52,14 @@ interface BandStats {
 function stats(scores: number[]): BandStats {
   const s = [...scores].sort((x, y) => x - y);
   const at = (q: number) => s[Math.min(s.length - 1, Math.floor(q * s.length))]!;
-  return { n: s.length, min: s[0]!, p25: at(0.25), median: at(0.5), p95: at(0.95), max: s[s.length - 1]! };
+  return {
+    n: s.length,
+    min: s[0]!,
+    p25: at(0.25),
+    median: at(0.5),
+    p95: at(0.95),
+    max: s[s.length - 1]!,
+  };
 }
 
 function fmt(v: number): string {
@@ -64,7 +71,7 @@ function row(label: string, b: BandStats): string {
 }
 
 async function passageScores(pairs: Pair[]): Promise<number[]> {
-  const vecs = await embedBatch(pairs.flatMap(([a, b]) => [a, b]));
+  const vecs = await embedBatch(pairs.flat());
   const out: number[] = [];
   for (let i = 0; i < pairs.length; i++) out.push(dot(vecs[i * 2]!, vecs[i * 2 + 1]!));
   return out;
@@ -114,21 +121,23 @@ async function run(): Promise<void> {
   console.log(row('paraphrase (must dedup)', p));
   console.log(row('distinct fact (must keep)', d));
   console.log(row('unrelated (noise anchor)', u));
+  const dedupNote =
+    p.min > d.max
+      ? `  (candidate threshold ~${fmt((d.max + p.min) / 2)})`
+      : '  (BANDS OVERLAP — inspect pairs before trusting any threshold)';
   console.log(
-    `  → dedup gap: distinct max=${fmt(d.max)} … paraphrase min=${fmt(p.min)}` +
-      (p.min > d.max
-        ? `  (candidate threshold ~${fmt((d.max + p.min) / 2)})`
-        : '  (BANDS OVERLAP — inspect pairs before trusting any threshold)'),
+    `  → dedup gap: distinct max=${fmt(d.max)} … paraphrase min=${fmt(p.min)}${dedupNote}`,
   );
 
   console.log('\nquery→passage (search/recall floors: MEMORY_MIN_SIMILARITY, recall.ts floors)');
   console.log(row('relevant (must surface)', rq));
   console.log(row('unrelated (must not)', uq));
+  const floorNote =
+    rq.min > uq.max
+      ? `  (candidate floor ~${fmt((uq.max + rq.min) / 2)})`
+      : '  (BANDS OVERLAP — inspect pairs before trusting any floor)';
   console.log(
-    `  → floor gap: unrelated max=${fmt(uq.max)} … relevant min=${fmt(rq.min)}` +
-      (rq.min > uq.max
-        ? `  (candidate floor ~${fmt((uq.max + rq.min) / 2)})`
-        : '  (BANDS OVERLAP — inspect pairs before trusting any floor)'),
+    `  → floor gap: unrelated max=${fmt(uq.max)} … relevant min=${fmt(rq.min)}${floorNote}`,
   );
   console.log(
     '\nNote: floors sit inside the gap, biased toward the unrelated band ' +

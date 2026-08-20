@@ -574,143 +574,162 @@ export class SearchService {
     const perProject = projects.map((p) => ({
       label: `project:${p.id}`,
       run: async () => {
-      const out: UnifiedSearchResult[] = [];
-      // The shared library has its own arm below, emitting `document` rows.
-      // Running it here too would list every document a second time as
-      // project content.
-      if (isSharedLibraryProject(p)) return out;
-      const workspaceIndexing = p.indexingEnabled !== false;
-      const codeOpts = vector
-        ? { queryVector: vector, maxResults: perSource }
-        : { mode: 'keyword' as const, maxResults: perSource };
-      const [code, docs, artifacts, symbols, areas, mem] = await Promise.all([
-        workspaceIndexing && wants('workspace')
-          ? timed('workspace:code', p.id, (r) => r?.results.length ?? 0, () =>
-              this.contentIndex.searchCode(p.id, query, codeOpts),
-            )
-          : Promise.resolve(null),
-        workspaceIndexing && wants('workspace')
-          ? timed('workspace:docs', p.id, (r) => r?.results.length ?? 0, () =>
-              this.contentIndex.searchDocs(p.id, query, perSource),
-            )
-          : Promise.resolve(null),
-        workspaceIndexing && wants('artifacts')
-          ? timed('artifacts', p.id, (r) => r?.results.length ?? 0, () =>
-              this.contentIndex.searchArtifacts(p.id, query, perSource),
-            )
-          : Promise.resolve(null),
-        workspaceIndexing && wants('workspace')
-          ? timed('workspace:symbols', p.id, (r) => r?.matches.length ?? 0, () =>
-              this.contentIndex.findSymbol(p.id, query, { maxResults: perSource }),
-            )
-          : Promise.resolve(null),
-        workspaceIndexing && wants('workspace')
-          ? timed('workspace:areas', p.id, (r) => r?.length ?? 0, () =>
-              this.contentIndex.searchAreaSummaries(p.id, query, perSource),
-            )
-          : Promise.resolve(null),
-        vector && wants('project-memory')
-          ? timed('project-memory', p.id, (r) => r?.length ?? 0, () =>
-              this.memory.searchVector('project', p.id, vector as number[], PER_MEMORY_RESULTS),
-            )
-          : Promise.resolve(null),
-      ]);
-      for (const r of code?.results ?? []) {
-        out.push({
-          kind: 'content',
-          id: `content:${p.id}:${r.path}:${r.lineStart}`,
-          title: r.name ?? basename(r.path),
-          subtitle: `${p.name} · ${r.path}`,
-          snippet: r.snippet,
-          projectId: p.id,
-          projectName: p.name,
-          path: r.path,
-          source: 'workspace',
-          retrievalSource: 'workspace',
-          line: r.lineStart,
-          lineEnd: r.lineEnd,
-          ...scoreResult('content', r.score),
-        });
-      }
-      for (const [rank, r] of (docs?.results ?? []).entries()) {
-        out.push({
-          kind: 'content',
-          id: `content:${p.id}:${r.sourcePath}:${r.lineStart}`,
-          title: basename(r.sourcePath),
-          subtitle: `${p.name} · ${r.sourcePath}`,
-          snippet: r.snippet,
-          projectId: p.id,
-          projectName: p.name,
-          path: r.sourcePath,
-          source: 'workspace',
-          retrievalSource: 'workspace',
-          line: r.lineStart,
-          lineEnd: r.lineEnd,
-          ...scoreResult('content', ftsRankRelevance(rank)),
-        });
-      }
-      for (const [rank, r] of (artifacts?.results ?? []).entries()) {
-        out.push({
-          kind: 'content',
-          id: `content:${p.id}:artifacts:${r.path}:${r.lineStart}`,
-          title: basename(r.path),
-          subtitle: `${p.name} · ${r.path}`,
-          snippet: r.snippet,
-          projectId: p.id,
-          projectName: p.name,
-          path: r.path,
-          source: 'artifacts',
-          retrievalSource: 'artifacts',
-          line: r.lineStart,
-          lineEnd: r.lineEnd,
-          ...scoreResult('content', ftsRankRelevance(rank)),
-        });
-      }
-      for (const m of symbols?.matches ?? []) {
-        const rel = fuzzyScore(query, m.name) ?? SYMBOL_FALLBACK_RELEVANCE;
-        out.push({
-          kind: 'symbol',
-          id: `symbol:${p.id}:${m.path}:${m.name}`,
-          title: m.name,
-          subtitle: `${m.kind} · ${p.name} · ${m.path}`,
-          projectId: p.id,
-          projectName: p.name,
-          path: m.path,
-          source: 'workspace',
-          retrievalSource: 'workspace',
-          line: m.lineStart,
-          ...scoreResult('symbol', rel),
-        });
-      }
-      for (const area of areas ?? []) {
-        const projectOverview = area.areaPath === '::project';
-        out.push({
-          kind: 'content',
-          id: `overview:${p.id}:${area.areaPath}`,
-          title: projectOverview ? `${p.name} overview` : `${area.areaPath}/ overview`,
-          subtitle: projectOverview ? `Project architecture · ${p.name}` : `Area map · ${p.name}`,
-          snippet: area.summary,
-          projectId: p.id,
-          projectName: p.name,
-          retrievalSource: 'workspace',
-          ...scoreResult('content', area.score),
-        });
-      }
-      for (const r of mem ?? []) {
-        if (r.score < MEMORY_MIN_SIMILARITY) continue;
-        out.push({
-          kind: 'memory',
-          id: `memory:project:${p.id}:${r.day}:${hashText(r.text)}`,
-          title: r.text.slice(0, 80),
-          subtitle: `Memory · ${p.name}`,
-          snippet: r.text,
-          projectId: p.id,
-          projectName: p.name,
-          retrievalSource: 'project-memory',
-          ...scoreResult('memory', r.score),
-        });
-      }
-      return out;
+        const out: UnifiedSearchResult[] = [];
+        // The shared library has its own arm below, emitting `document` rows.
+        // Running it here too would list every document a second time as
+        // project content.
+        if (isSharedLibraryProject(p)) return out;
+        const workspaceIndexing = p.indexingEnabled !== false;
+        const codeOpts = vector
+          ? { queryVector: vector, maxResults: perSource }
+          : { mode: 'keyword' as const, maxResults: perSource };
+        const [code, docs, artifacts, symbols, areas, mem] = await Promise.all([
+          workspaceIndexing && wants('workspace')
+            ? timed(
+                'workspace:code',
+                p.id,
+                (r) => r?.results.length ?? 0,
+                () => this.contentIndex.searchCode(p.id, query, codeOpts),
+              )
+            : Promise.resolve(null),
+          workspaceIndexing && wants('workspace')
+            ? timed(
+                'workspace:docs',
+                p.id,
+                (r) => r?.results.length ?? 0,
+                () => this.contentIndex.searchDocs(p.id, query, perSource),
+              )
+            : Promise.resolve(null),
+          workspaceIndexing && wants('artifacts')
+            ? timed(
+                'artifacts',
+                p.id,
+                (r) => r?.results.length ?? 0,
+                () => this.contentIndex.searchArtifacts(p.id, query, perSource),
+              )
+            : Promise.resolve(null),
+          workspaceIndexing && wants('workspace')
+            ? timed(
+                'workspace:symbols',
+                p.id,
+                (r) => r?.matches.length ?? 0,
+                () => this.contentIndex.findSymbol(p.id, query, { maxResults: perSource }),
+              )
+            : Promise.resolve(null),
+          workspaceIndexing && wants('workspace')
+            ? timed(
+                'workspace:areas',
+                p.id,
+                (r) => r?.length ?? 0,
+                () => this.contentIndex.searchAreaSummaries(p.id, query, perSource),
+              )
+            : Promise.resolve(null),
+          vector && wants('project-memory')
+            ? timed(
+                'project-memory',
+                p.id,
+                (r) => r?.length ?? 0,
+                () =>
+                  this.memory.searchVector('project', p.id, vector as number[], PER_MEMORY_RESULTS),
+              )
+            : Promise.resolve(null),
+        ]);
+        for (const r of code?.results ?? []) {
+          out.push({
+            kind: 'content',
+            id: `content:${p.id}:${r.path}:${r.lineStart}`,
+            title: r.name ?? basename(r.path),
+            subtitle: `${p.name} · ${r.path}`,
+            snippet: r.snippet,
+            projectId: p.id,
+            projectName: p.name,
+            path: r.path,
+            source: 'workspace',
+            retrievalSource: 'workspace',
+            line: r.lineStart,
+            lineEnd: r.lineEnd,
+            ...scoreResult('content', r.score),
+          });
+        }
+        for (const [rank, r] of (docs?.results ?? []).entries()) {
+          out.push({
+            kind: 'content',
+            id: `content:${p.id}:${r.sourcePath}:${r.lineStart}`,
+            title: basename(r.sourcePath),
+            subtitle: `${p.name} · ${r.sourcePath}`,
+            snippet: r.snippet,
+            projectId: p.id,
+            projectName: p.name,
+            path: r.sourcePath,
+            source: 'workspace',
+            retrievalSource: 'workspace',
+            line: r.lineStart,
+            lineEnd: r.lineEnd,
+            ...scoreResult('content', ftsRankRelevance(rank)),
+          });
+        }
+        for (const [rank, r] of (artifacts?.results ?? []).entries()) {
+          out.push({
+            kind: 'content',
+            id: `content:${p.id}:artifacts:${r.path}:${r.lineStart}`,
+            title: basename(r.path),
+            subtitle: `${p.name} · ${r.path}`,
+            snippet: r.snippet,
+            projectId: p.id,
+            projectName: p.name,
+            path: r.path,
+            source: 'artifacts',
+            retrievalSource: 'artifacts',
+            line: r.lineStart,
+            lineEnd: r.lineEnd,
+            ...scoreResult('content', ftsRankRelevance(rank)),
+          });
+        }
+        for (const m of symbols?.matches ?? []) {
+          const rel = fuzzyScore(query, m.name) ?? SYMBOL_FALLBACK_RELEVANCE;
+          out.push({
+            kind: 'symbol',
+            id: `symbol:${p.id}:${m.path}:${m.name}`,
+            title: m.name,
+            subtitle: `${m.kind} · ${p.name} · ${m.path}`,
+            projectId: p.id,
+            projectName: p.name,
+            path: m.path,
+            source: 'workspace',
+            retrievalSource: 'workspace',
+            line: m.lineStart,
+            ...scoreResult('symbol', rel),
+          });
+        }
+        for (const area of areas ?? []) {
+          const projectOverview = area.areaPath === '::project';
+          out.push({
+            kind: 'content',
+            id: `overview:${p.id}:${area.areaPath}`,
+            title: projectOverview ? `${p.name} overview` : `${area.areaPath}/ overview`,
+            subtitle: projectOverview ? `Project architecture · ${p.name}` : `Area map · ${p.name}`,
+            snippet: area.summary,
+            projectId: p.id,
+            projectName: p.name,
+            retrievalSource: 'workspace',
+            ...scoreResult('content', area.score),
+          });
+        }
+        for (const r of mem ?? []) {
+          if (r.score < MEMORY_MIN_SIMILARITY) continue;
+          out.push({
+            kind: 'memory',
+            id: `memory:project:${p.id}:${r.day}:${hashText(r.text)}`,
+            title: r.text.slice(0, 80),
+            subtitle: `Memory · ${p.name}`,
+            snippet: r.text,
+            projectId: p.id,
+            projectName: p.name,
+            retrievalSource: 'project-memory',
+            ...scoreResult('memory', r.score),
+          });
+        }
+        return out;
       },
     }));
 
@@ -721,8 +740,12 @@ export class SearchService {
             label: `gezel:${g.id}`,
             run: async () => {
               const mem =
-                (await timed('gezel-memory', g.id, (r) => r?.length ?? 0, () =>
-                  this.memory.searchVector('gezel', g.id, vector as number[], PER_MEMORY_RESULTS),
+                (await timed(
+                  'gezel-memory',
+                  g.id,
+                  (r) => r?.length ?? 0,
+                  () =>
+                    this.memory.searchVector('gezel', g.id, vector as number[], PER_MEMORY_RESULTS),
                 )) ?? [];
               return mem
                 .filter((r) => r.score >= MEMORY_MIN_SIMILARITY)
@@ -750,28 +773,31 @@ export class SearchService {
       globalTasks.push({
         label: 'sessions',
         run: async () => {
-        const hits =
-          (await timed('sessions', undefined, (r) => r?.length ?? 0, () =>
-            globalIndex.searchSessions(query, { maxResults: perSource }),
-          )) ?? [];
-        return hits.map((h, rank) => {
-          const projectName = projectNames.get(h.projectId);
-          const gezelName = gezelNames.get(h.gezelId) ?? h.gezelId;
-          return {
-            kind: 'session' as const,
-            id: `session:${h.sessionId}`,
-            title: h.title || 'Untitled session',
-            subtitle: projectName ? `${gezelName} · ${projectName}` : gezelName,
-            snippet: h.snippet,
-            ...(h.projectId ? { projectId: h.projectId } : {}),
-            ...(projectName ? { projectName } : {}),
-            gezelId: h.gezelId,
-            // 1-based index of the matched message in the session — the
-            // deep-link coordinate (global-index chunk lineStart semantics).
-            ...(h.messageStart ? { line: h.messageStart } : {}),
-            ...scoreResult('session', ftsRankRelevance(rank)),
-          };
-        });
+          const hits =
+            (await timed(
+              'sessions',
+              undefined,
+              (r) => r?.length ?? 0,
+              () => globalIndex.searchSessions(query, { maxResults: perSource }),
+            )) ?? [];
+          return hits.map((h, rank) => {
+            const projectName = projectNames.get(h.projectId);
+            const gezelName = gezelNames.get(h.gezelId) ?? h.gezelId;
+            return {
+              kind: 'session' as const,
+              id: `session:${h.sessionId}`,
+              title: h.title || 'Untitled session',
+              subtitle: projectName ? `${gezelName} · ${projectName}` : gezelName,
+              snippet: h.snippet,
+              ...(h.projectId ? { projectId: h.projectId } : {}),
+              ...(projectName ? { projectName } : {}),
+              gezelId: h.gezelId,
+              // 1-based index of the matched message in the session — the
+              // deep-link coordinate (global-index chunk lineStart semantics).
+              ...(h.messageStart ? { line: h.messageStart } : {}),
+              ...scoreResult('session', ftsRankRelevance(rank)),
+            };
+          });
         },
       });
     }
@@ -779,31 +805,35 @@ export class SearchService {
       globalTasks.push({
         label: 'shared',
         run: async () => {
-        // The library is a project now, so its content search is the ranked
-        // hybrid one. It is emitted as `document` rather than `content` so a
-        // library hit keeps its global provenance wherever it surfaces.
-        const libraryId = await this.store.sharedProjectId().catch(() => null);
-        if (!libraryId) return [];
-        const found = await timed('shared', undefined, (r) => r?.results.length ?? 0, () =>
-          this.contentIndex.searchLibrary(libraryId, query, {
-            maxResults: perSource,
-            ...(vector ? { queryVector: vector } : {}),
-          }),
-        );
-        return (found?.results ?? []).map((h, rank) => ({
-          kind: 'document' as const,
-          id: `document:${h.path}`,
-          title: basename(h.path),
-          subtitle: `Shared library · ${h.path}`,
-          snippet: h.snippet,
-          path: h.path,
-          retrievalSource: 'shared' as const,
-          line: h.lineStart,
-          lineEnd: h.lineEnd,
-          // Hybrid score when the library index reports one; rank-based
-          // pseudo-relevance for keyword-only rows.
-          ...scoreResult('document', h.score ?? ftsRankRelevance(rank)),
-        }));
+          // The library is a project now, so its content search is the ranked
+          // hybrid one. It is emitted as `document` rather than `content` so a
+          // library hit keeps its global provenance wherever it surfaces.
+          const libraryId = await this.store.sharedProjectId().catch(() => null);
+          if (!libraryId) return [];
+          const found = await timed(
+            'shared',
+            undefined,
+            (r) => r?.results.length ?? 0,
+            () =>
+              this.contentIndex.searchLibrary(libraryId, query, {
+                maxResults: perSource,
+                ...(vector ? { queryVector: vector } : {}),
+              }),
+          );
+          return (found?.results ?? []).map((h, rank) => ({
+            kind: 'document' as const,
+            id: `document:${h.path}`,
+            title: basename(h.path),
+            subtitle: `Shared library · ${h.path}`,
+            snippet: h.snippet,
+            path: h.path,
+            retrievalSource: 'shared' as const,
+            line: h.lineStart,
+            lineEnd: h.lineEnd,
+            // Hybrid score when the library index reports one; rank-based
+            // pseudo-relevance for keyword-only rows.
+            ...scoreResult('document', h.score ?? ftsRankRelevance(rank)),
+          }));
         },
       });
     }

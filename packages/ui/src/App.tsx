@@ -22,6 +22,7 @@ import { MacUninstallDialog } from './components/MacUninstallDialog.js';
 import { ModelBundleImportController } from './components/ModelBundleControls.js';
 import { NeedsInputPanel } from './components/NeedsInputPanel.js';
 import { QueueMeter } from './components/QueueMeter.js';
+import { SearchResultsOverlay } from './components/SearchResultsOverlay.js';
 import { Sidebar } from './components/Sidebar.js';
 import { StorageCleanupDialog } from './components/StorageCleanupDialog.js';
 import { TabContent } from './components/TabContent.js';
@@ -715,6 +716,7 @@ function FullApp() {
             widths do not recenter it. It stays shrinkable in the flex row, so
             crowded titlebars still give the pills room without overlap. */}
         <TitlebarSearch />
+        <SearchResultsOverlay />
         {/* The empty stretch between the brand and the status cluster is the
             primary OS drag target — `.app-header-right`'s `margin-left: auto`
             pushes the pills right, leaving the remaining gap (and the

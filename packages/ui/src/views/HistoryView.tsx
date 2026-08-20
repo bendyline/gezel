@@ -129,7 +129,9 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
               ...(gezelFilter ? { gezel: gezelFilter } : {}),
               maxResults: 10,
             })
-            .then((r) => (r?.engine !== 'unavailable' && Array.isArray(r?.results) ? r.results : []))
+            .then((r) =>
+              r?.engine !== 'unavailable' && Array.isArray(r?.results) ? r.results : [],
+            )
             .catch(() => [])
         : Promise.resolve([]);
       const res = await api.listHistory(filter);

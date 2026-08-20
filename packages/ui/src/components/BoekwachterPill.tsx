@@ -33,19 +33,19 @@ export function BoekwachterPill() {
   // once per mount; a rename mid-burst shows the old name for a moment, which
   // beats an id every time.
   const projectNamesRef = useRef<Map<string, string> | null>(null);
-  const projectName = async (id: string): Promise<string> => {
-    if (!projectNamesRef.current) {
-      try {
-        const res = await api.listProjects();
-        projectNamesRef.current = new Map(res.projects.map((p) => [p.id, p.name]));
-      } catch {
-        return id;
-      }
-    }
-    return projectNamesRef.current.get(id) ?? id;
-  };
 
   useEffect(() => {
+    const projectName = async (id: string): Promise<string> => {
+      if (!projectNamesRef.current) {
+        try {
+          const res = await api.listProjects();
+          projectNamesRef.current = new Map(res.projects.map((p) => [p.id, p.name]));
+        } catch {
+          return id;
+        }
+      }
+      return projectNamesRef.current.get(id) ?? id;
+    };
     const ctrl = new AbortController();
     (async () => {
       try {

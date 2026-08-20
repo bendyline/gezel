@@ -572,6 +572,16 @@ describe('cross-corpus merge ordering (scoring tripwire)', () => {
     // now below the 0.9-scored code hit at 378) and the second docs hit
     // (252→231, now below the rank-0 session at 240). Every rank-0 and
     // every real-scored row is in its pre-refactor position.
+    // Memory ids end in a content hash the test cannot precompute — read the
+    // suffix off the live rows and pin the deterministic prefix around it.
+    const projectMemoryHash = results
+      .find((r) => r.retrievalSource === 'project-memory')!
+      .id.split(':')
+      .at(-1);
+    const gezelMemoryHash = results
+      .find((r) => r.retrievalSource === 'gezel-memory')!
+      .id.split(':')
+      .at(-1);
     expect(results.map((r) => r.id)).toEqual([
       'project:p1', // project name prefix match: 0.95 × 1000
       'document:guides/thrust.md', // library, real hybrid score 0.9 × 680
@@ -579,22 +589,14 @@ describe('cross-corpus merge ordering (scoring tripwire)', () => {
       'content:p1:src/engine.ts:3', // code hybrid 0.9 × 420
       'document:guides/nozzles.md', // library, no score → FTS rank-1 pseudo-relevance × 680
       'overview:p1:src', // area lexical 0.7 × 420
-      'memory:project:p1:2026-08-01:' +
-        results
-          .find((r) => r.retrievalSource === 'project-memory')!
-          .id.split(':')
-          .at(-1), // project memory 0.8 × 360
+      `memory:project:p1:2026-08-01:${projectMemoryHash}`, // project memory 0.8 × 360
       'content:p1:docs/thrust.docx:2', // docs FTS rank 0 (0.6 × 420, bit-identical)
       'content:p1:artifacts:reports/thrust.md:1', // artifacts FTS rank 0
       'session:s1', // session FTS rank 0 (0.6 × 400)
       'content:p1:docs/nozzle.docx:5', // docs FTS rank 1 (decayed)
       'content:p1:src/hud.ts:1', // code hybrid 0.5 × 420
       'symbol:p1:src/engine.ts:applyForce', // symbol fallback 0.4 × 520
-      'memory:gezel:g1:2026-08-02:' +
-        results
-          .find((r) => r.retrievalSource === 'gezel-memory')!
-          .id.split(':')
-          .at(-1), // gezel memory 0.5 × 360
+      `memory:gezel:g1:2026-08-02:${gezelMemoryHash}`, // gezel memory 0.5 × 360
     ]);
 
     // Calibration invariants: every row carries a 0–1 relevance, tier derives

@@ -66,8 +66,7 @@ export function HandboekView() {
       .flatMap((area) => area.entries)
       .filter(
         (entry) =>
-          entry.title.toLowerCase().includes(q) ||
-          (entry.summary ?? '').toLowerCase().includes(q),
+          entry.title.toLowerCase().includes(q) || (entry.summary ?? '').toLowerCase().includes(q),
       );
   }, [toc, tocFilter]);
   // The gezellig theme's native pages are dark. Overlay the shared warm-paper
@@ -375,61 +374,61 @@ export function HandboekView() {
         ) : null}
         {!tocFilter.trim() &&
           toc?.areas.map((area) => {
-          const collapsed = collapsedAreas.has(area.area);
-          const panelId = `handboek-area-${area.area}`;
-          const { ungrouped, subcategories } = organizeTocArea(area);
-          return (
-            <section key={area.area} className="handboek-toc-area">
-              <h3 className="handboek-toc-area-title">
-                <button
-                  type="button"
-                  className="handboek-toc-disclosure handboek-toc-area-toggle"
-                  aria-expanded={!collapsed}
-                  aria-controls={panelId}
-                  onClick={() => toggleArea(area.area)}
-                >
-                  <span className="handboek-toc-caret" aria-hidden="true">
-                    &rsaquo;
-                  </span>
-                  <span>{area.title}</span>
-                </button>
-              </h3>
-              {!collapsed && (
-                <div id={panelId} className="handboek-toc-area-contents">
-                  {ungrouped.length > 0 && renderEntries(ungrouped)}
-                  {subcategories.map((subcategory) => {
-                    const key = subcategoryKey(area.area, subcategory.id);
-                    const expanded = expandedSubcategories.has(key);
-                    const subcategoryPanelId = `handboek-subcategory-${area.area}-${subcategory.id}`;
-                    return (
-                      <section key={subcategory.id} className="handboek-toc-subcategory">
-                        <h4 className="handboek-toc-subcategory-title">
-                          <button
-                            type="button"
-                            className="handboek-toc-disclosure handboek-toc-subcategory-toggle"
-                            aria-expanded={expanded}
-                            aria-controls={subcategoryPanelId}
-                            onClick={() => toggleSubcategory(key)}
-                          >
-                            <span className="handboek-toc-caret" aria-hidden="true">
-                              &rsaquo;
-                            </span>
-                            <span>{subcategory.title}</span>
-                          </button>
-                        </h4>
-                        {expanded && (
-                          <div id={subcategoryPanelId}>
-                            {renderEntries(subcategory.entries, true)}
-                          </div>
-                        )}
-                      </section>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-          );
-        })}
+            const collapsed = collapsedAreas.has(area.area);
+            const panelId = `handboek-area-${area.area}`;
+            const { ungrouped, subcategories } = organizeTocArea(area);
+            return (
+              <section key={area.area} className="handboek-toc-area">
+                <h3 className="handboek-toc-area-title">
+                  <button
+                    type="button"
+                    className="handboek-toc-disclosure handboek-toc-area-toggle"
+                    aria-expanded={!collapsed}
+                    aria-controls={panelId}
+                    onClick={() => toggleArea(area.area)}
+                  >
+                    <span className="handboek-toc-caret" aria-hidden="true">
+                      &rsaquo;
+                    </span>
+                    <span>{area.title}</span>
+                  </button>
+                </h3>
+                {!collapsed && (
+                  <div id={panelId} className="handboek-toc-area-contents">
+                    {ungrouped.length > 0 && renderEntries(ungrouped)}
+                    {subcategories.map((subcategory) => {
+                      const key = subcategoryKey(area.area, subcategory.id);
+                      const expanded = expandedSubcategories.has(key);
+                      const subcategoryPanelId = `handboek-subcategory-${area.area}-${subcategory.id}`;
+                      return (
+                        <section key={subcategory.id} className="handboek-toc-subcategory">
+                          <h4 className="handboek-toc-subcategory-title">
+                            <button
+                              type="button"
+                              className="handboek-toc-disclosure handboek-toc-subcategory-toggle"
+                              aria-expanded={expanded}
+                              aria-controls={subcategoryPanelId}
+                              onClick={() => toggleSubcategory(key)}
+                            >
+                              <span className="handboek-toc-caret" aria-hidden="true">
+                                &rsaquo;
+                              </span>
+                              <span>{subcategory.title}</span>
+                            </button>
+                          </h4>
+                          {expanded && (
+                            <div id={subcategoryPanelId}>
+                              {renderEntries(subcategory.entries, true)}
+                            </div>
+                          )}
+                        </section>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            );
+          })}
       </nav>
       <div className="handboek-pane">
         <header className="handboek-pane-header">

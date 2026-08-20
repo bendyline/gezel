@@ -40,7 +40,6 @@ import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
 import { AudioPlayer } from './AudioPlayer.js';
 import { DraftPlanCard } from './DraftPlanCard.js';
-import { openTabAction, runNavActions } from './nav-actions.js';
 import { GezelIcon } from './GezelIcon.js';
 import { ImagePreview } from './ImagePreview.js';
 import { PendingQuestionCard } from './PendingQuestionCard.js';
@@ -50,6 +49,7 @@ import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from './chat-theme.js';
 import { formatElapsedClock } from './elapsed-time.js';
 import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
 import { shouldDisplayIntent } from './intent-display.js';
+import { openTabAction, runNavActions } from './nav-actions.js';
 import {
   type PendingToolCall,
   dropExecutedPending,

@@ -19,40 +19,106 @@
 export type Pair = [a: string, b: string];
 
 export const paraphrasePairs: Pair[] = [
-  ['The user prefers dark mode in every app.', 'User likes all their applications in a dark theme.'],
-  ['Deploys go to the staging server at 10.0.0.12 first.', 'We deploy to staging (10.0.0.12) before anything else.'],
-  ['The quarterly report is due on the last Friday of March.', 'Quarterly report deadline: final Friday in March.'],
-  ['Mike decided to use PostgreSQL for the orders service.', 'Decision: the orders service will run on PostgreSQL (Mike).'],
-  ['The client wants weekly status emails on Mondays.', 'Send the client a status email every Monday — their request.'],
-  ['Build times regressed after the webpack 5 upgrade.', 'The webpack 5 upgrade made builds slower.'],
+  [
+    'The user prefers dark mode in every app.',
+    'User likes all their applications in a dark theme.',
+  ],
+  [
+    'Deploys go to the staging server at 10.0.0.12 first.',
+    'We deploy to staging (10.0.0.12) before anything else.',
+  ],
+  [
+    'The quarterly report is due on the last Friday of March.',
+    'Quarterly report deadline: final Friday in March.',
+  ],
+  [
+    'Mike decided to use PostgreSQL for the orders service.',
+    'Decision: the orders service will run on PostgreSQL (Mike).',
+  ],
+  [
+    'The client wants weekly status emails on Mondays.',
+    'Send the client a status email every Monday — their request.',
+  ],
+  [
+    'Build times regressed after the webpack 5 upgrade.',
+    'The webpack 5 upgrade made builds slower.',
+  ],
   ['Sarah owns the billing integration work.', 'Billing integration is Sarah’s responsibility.'],
-  ['The API rate limit is 100 requests per minute per key.', 'Each API key is limited to 100 requests/minute.'],
-  ['We agreed to keep all user data on the local disk.', 'Decision: user data stays on the local machine’s disk.'],
-  ['The logo files live in the shared drive under Brand/2026.', 'Brand/2026 on the shared drive holds the logo assets.'],
+  [
+    'The API rate limit is 100 requests per minute per key.',
+    'Each API key is limited to 100 requests/minute.',
+  ],
+  [
+    'We agreed to keep all user data on the local disk.',
+    'Decision: user data stays on the local machine’s disk.',
+  ],
+  [
+    'The logo files live in the shared drive under Brand/2026.',
+    'Brand/2026 on the shared drive holds the logo assets.',
+  ],
   ['The user’s working hours are 9 to 5 Eastern.', 'User works 9am–5pm Eastern time.'],
-  ['Invoices must include the PO number in the subject line.', 'Always put the PO number in an invoice’s subject.'],
+  [
+    'Invoices must include the PO number in the subject line.',
+    'Always put the PO number in an invoice’s subject.',
+  ],
   ['The test suite takes about twelve minutes on CI.', 'CI runs the tests in roughly 12 minutes.'],
   ['Customer demo scheduled for Thursday at 2pm.', 'Thursday 2pm: demo for the customer.'],
-  ['The old importer is deprecated; use the v2 pipeline.', 'Use the v2 pipeline — the legacy importer is deprecated.'],
+  [
+    'The old importer is deprecated; use the v2 pipeline.',
+    'Use the v2 pipeline — the legacy importer is deprecated.',
+  ],
   ['Backups run nightly at 3am local time.', 'Nightly backups happen at 3:00am local.'],
 ];
 
 export const distinctFactPairs: Pair[] = [
   ['The user prefers dark mode in every app.', 'The user prefers large fonts in every app.'],
   ['Deploys go to the staging server first.', 'Deploys require sign-off from two reviewers.'],
-  ['The quarterly report is due the last Friday of March.', 'The quarterly report must include a churn analysis.'],
-  ['Mike decided to use PostgreSQL for the orders service.', 'Mike decided to shard the orders service by region.'],
-  ['The client wants weekly status emails on Mondays.', 'The client wants all invoices sent as PDFs.'],
-  ['Build times regressed after the webpack upgrade.', 'Bundle size dropped 20% after the webpack upgrade.'],
+  [
+    'The quarterly report is due the last Friday of March.',
+    'The quarterly report must include a churn analysis.',
+  ],
+  [
+    'Mike decided to use PostgreSQL for the orders service.',
+    'Mike decided to shard the orders service by region.',
+  ],
+  [
+    'The client wants weekly status emails on Mondays.',
+    'The client wants all invoices sent as PDFs.',
+  ],
+  [
+    'Build times regressed after the webpack upgrade.',
+    'Bundle size dropped 20% after the webpack upgrade.',
+  ],
   ['Sarah owns the billing integration work.', 'Sarah is on leave the first week of April.'],
-  ['The API rate limit is 100 requests per minute.', 'The API returns paginated results in pages of 50.'],
+  [
+    'The API rate limit is 100 requests per minute.',
+    'The API returns paginated results in pages of 50.',
+  ],
   ['We keep all user data on the local disk.', 'We encrypt user data at rest with AES-256.'],
-  ['The logo files live in the shared drive under Brand/2026.', 'The logo was redesigned in February 2026.'],
-  ['The user’s working hours are 9 to 5 Eastern.', 'The user is unavailable on Wednesday afternoons.'],
-  ['Invoices must include the PO number in the subject.', 'Invoices over $10k need finance approval.'],
-  ['The test suite takes about twelve minutes on CI.', 'The test suite has three known flaky specs.'],
-  ['Customer demo scheduled for Thursday at 2pm.', 'The customer asked for an on-prem deployment option.'],
-  ['The old importer is deprecated; use the v2 pipeline.', 'The v2 pipeline still lacks CSV support.'],
+  [
+    'The logo files live in the shared drive under Brand/2026.',
+    'The logo was redesigned in February 2026.',
+  ],
+  [
+    'The user’s working hours are 9 to 5 Eastern.',
+    'The user is unavailable on Wednesday afternoons.',
+  ],
+  [
+    'Invoices must include the PO number in the subject.',
+    'Invoices over $10k need finance approval.',
+  ],
+  [
+    'The test suite takes about twelve minutes on CI.',
+    'The test suite has three known flaky specs.',
+  ],
+  [
+    'Customer demo scheduled for Thursday at 2pm.',
+    'The customer asked for an on-prem deployment option.',
+  ],
+  [
+    'The old importer is deprecated; use the v2 pipeline.',
+    'The v2 pipeline still lacks CSV support.',
+  ],
   ['Backups run nightly at 3am local time.', 'Backup restores were last tested in January.'],
 ];
 
@@ -79,7 +145,10 @@ export const relevantQueryPairs: Pair[] = [
   ['what theme does the user like', 'The user prefers dark mode in every app.'],
   ['where do we deploy first', 'Deploys go to the staging server at 10.0.0.12 first.'],
   ['when is the quarterly report due', 'The quarterly report is due on the last Friday of March.'],
-  ['which database did we pick for orders', 'Mike decided to use PostgreSQL for the orders service.'],
+  [
+    'which database did we pick for orders',
+    'Mike decided to use PostgreSQL for the orders service.',
+  ],
   ['how often does the client want updates', 'The client wants weekly status emails on Mondays.'],
   ['why are builds slow', 'Build times regressed after the webpack 5 upgrade.'],
   ['who is working on billing', 'Sarah owns the billing integration work.'],
@@ -87,7 +156,10 @@ export const relevantQueryPairs: Pair[] = [
   ['where is user data stored', 'We agreed to keep all user data on the local disk.'],
   ['where are the logo assets', 'The logo files live in the shared drive under Brand/2026.'],
   ['what hours does the user work', 'The user’s working hours are 9 to 5 Eastern.'],
-  ['what goes in an invoice subject line', 'Invoices must include the PO number in the subject line.'],
+  [
+    'what goes in an invoice subject line',
+    'Invoices must include the PO number in the subject line.',
+  ],
   ['how long do the tests take', 'The test suite takes about twelve minutes on CI.'],
   ['when is the customer demo', 'Customer demo scheduled for Thursday at 2pm.'],
   ['which importer should I use', 'The old importer is deprecated; use the v2 pipeline.'],
