@@ -60,7 +60,12 @@ async function sendAndWaitForReply(
   await editor.click();
   await editor.fill(message);
   await editor.press('Enter');
-  await expect(timeline).toContainText(`Mock reply: ${replyMarker}`, { timeout: replyTimeout });
+  const reply = timeline
+    .locator('.msg-from-gezel, .msg-assistant')
+    .filter({ hasText: 'Mock reply:' })
+    .filter({ hasText: replyMarker })
+    .last();
+  await expect(reply).toBeVisible({ timeout: replyTimeout });
   await expect(composer.getByTestId('chat-send')).toBeVisible({ timeout: WARM_REPLY_MS });
 }
 

@@ -125,8 +125,10 @@ describe('ChatTimelineView — canonical completion reconciliation', () => {
 
     renderTimeline(loadTimeline, onArtifactSeen);
 
-    await waitFor(() => expect(loadTimeline).toHaveBeenCalledTimes(2));
-    expect(onArtifactSeen).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(loadTimeline).toHaveBeenCalledTimes(2);
+      expect(onArtifactSeen).toHaveBeenCalledTimes(1);
+    });
     expect(onArtifactSeen).toHaveBeenCalledWith('reports/status.md', 'p1');
   });
 

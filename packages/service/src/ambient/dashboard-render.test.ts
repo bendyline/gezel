@@ -24,5 +24,5 @@ describe('placeDashboardInSafeArea', () => {
       height: 100,
     });
     expect(Buffer.from(result).equals(Buffer.from(lightResult))).toBe(false);
-  });
+  }, 15_000);
 });

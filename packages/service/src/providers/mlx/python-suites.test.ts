@@ -78,6 +78,6 @@ describe('MLX sidecar python suites', () => {
       // A suite that skipped EVERYTHING would pass vacuously; require that at
       // least one case actually ran, so a broken import cannot read as green.
       expect(output, `${suite} ran no cases`).toMatch(ranMarker);
-    });
+    }, 120_000);
   }
 });

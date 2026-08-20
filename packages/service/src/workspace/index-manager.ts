@@ -133,6 +133,7 @@ export class WorkspaceIndexManager {
 
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly backgroundTicks = new Set<Promise<void>>();
 
   constructor(opts: WorkspaceIndexManagerOptions) {
     this.home = opts.home;
@@ -148,21 +149,17 @@ export class WorkspaceIndexManager {
   start(): void {
     this.startupTimer = setTimeout(() => {
       this.startupTimer = null;
-      void this.tick().catch((err) => {
-        log.warn(`[index] startup tick failed: ${describe(err)}`);
-      });
+      this.launchBackgroundTick('startup');
     }, this.startupDelayMs);
     unref(this.startupTimer);
 
     this.tickTimer = setInterval(() => {
-      void this.tick().catch((err) => {
-        log.warn(`[index] tick failed: ${describe(err)}`);
-      });
+      this.launchBackgroundTick('periodic');
     }, this.intervalMs);
     unref(this.tickTimer);
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.startupTimer) {
       clearTimeout(this.startupTimer);
       this.startupTimer = null;
@@ -171,6 +168,21 @@ export class WorkspaceIndexManager {
       clearInterval(this.tickTimer);
       this.tickTimer = null;
     }
+    await Promise.allSettled([
+      ...this.backgroundTicks,
+      ...[...this.state.values()].flatMap((state) => (state.inflight ? [state.inflight] : [])),
+      ...this.locks.values(),
+    ]);
+  }
+
+  private launchBackgroundTick(kind: 'startup' | 'periodic'): void {
+    const run = this.tick()
+      .catch((err) => {
+        const label = kind === 'startup' ? 'startup tick' : 'tick';
+        log.warn(`[index] ${label} failed: ${describe(err)}`);
+      })
+      .finally(() => this.backgroundTicks.delete(run));
+    this.backgroundTicks.add(run);
   }
 
   /**

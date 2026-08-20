@@ -129,9 +129,11 @@ export class IndexEnrichmentManager {
   private readonly drives = new Map<string, { mode: DriveIntensity; run: Promise<void> }>();
   /** Nonzero while a night-shift catch-up sweep is holding task dispatch. */
   private catchUpRuns = 0;
+  private readonly catchUps = new Set<Promise<void>>();
 
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly backgroundTicks = new Set<Promise<void>>();
   private running = false;
   private activity: IndexEnrichmentActivity | null = null;
 
@@ -157,20 +159,35 @@ export class IndexEnrichmentManager {
   start(): void {
     this.startupTimer = setTimeout(() => {
       this.startupTimer = null;
-      void this.tick().catch((err) => log.warn(`[enrich] startup tick failed: ${describe(err)}`));
+      this.launchBackgroundTick('startup');
     }, this.startupDelayMs);
     unref(this.startupTimer);
     this.tickTimer = setInterval(() => {
-      void this.tick().catch((err) => log.warn(`[enrich] tick failed: ${describe(err)}`));
+      this.launchBackgroundTick('periodic');
     }, this.intervalMs);
     unref(this.tickTimer);
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.startupTimer) clearTimeout(this.startupTimer);
     if (this.tickTimer) clearInterval(this.tickTimer);
     this.startupTimer = null;
     this.tickTimer = null;
+    await Promise.allSettled([
+      ...this.backgroundTicks,
+      ...this.catchUps,
+      ...[...this.drives.values()].map(({ run }) => run),
+    ]);
+  }
+
+  private launchBackgroundTick(kind: 'startup' | 'periodic'): void {
+    const run = this.tick()
+      .catch((err) => {
+        const label = kind === 'startup' ? 'startup tick' : 'tick';
+        log.warn(`[enrich] ${label} failed: ${describe(err)}`);
+      })
+      .finally(() => this.backgroundTicks.delete(run));
+    this.backgroundTicks.add(run);
   }
 
   /** Live, durable-for-the-tick status consumed by the Night Shift menu. */
@@ -250,7 +267,13 @@ export class IndexEnrichmentManager {
    * catch-up flag is raised synchronously so a caller that kicks this (not
    * awaited) and then wakes the TaskRunner still gets the dispatch hold.
    */
-  async catchUpAll(): Promise<void> {
+  catchUpAll(): Promise<void> {
+    const run = this.runCatchUpAll().finally(() => this.catchUps.delete(run));
+    this.catchUps.add(run);
+    return run;
+  }
+
+  private async runCatchUpAll(): Promise<void> {
     this.catchUpRuns++;
     try {
       const projects = await this.store.listProjects().catch(() => []);

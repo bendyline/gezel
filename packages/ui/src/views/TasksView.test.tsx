@@ -250,7 +250,8 @@ describe('TasksView', () => {
     }));
     render(<TasksView />);
 
-    await screen.findByRole('button', { name: /First task/ });
+    const first = await screen.findByRole('button', { name: /First task/ });
+    await waitFor(() => expect(first).toHaveAttribute('aria-pressed', 'true'));
     fireEvent.click(screen.getByRole('button', { name: /Second task/ }), { ctrlKey: true });
     fireEvent.click(screen.getByRole('radio', { name: 'Paused' }));
 

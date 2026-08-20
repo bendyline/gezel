@@ -240,13 +240,17 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
 
   it('keeps stdout reply-only when run owns an in-process service', async () => {
     const runHome = await mkdtemp(join(tmpdir(), 'gezel-cli-run-output-'));
+    const runCwd = await mkdtemp(join(tmpdir(), 'gezel-cli-run-workspace-'));
     const prompt = 'Reply exactly with: cli-stdout-only';
     try {
       const result = await execFileAsync(
         process.execPath,
         [cliEntry, '--home', runHome, '--standalone', 'run', prompt],
         {
-          cwd: process.cwd(),
+          // This case verifies the CLI's stdout/stderr boundary, not workspace
+          // retrieval. Keep the empty project cwd separate from the service
+          // home so the indexer cannot ingest state the daemon is still writing.
+          cwd: runCwd,
           env: {
             ...process.env,
             GEZEL_HOME: runHome,
@@ -260,7 +264,7 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
           // integration workers in a full package run. Keep the child
           // deadline below the test deadline so failures surface from the
           // command itself and the finally block still has time to clean up.
-          timeout: 45_000,
+          timeout: 75_000,
         },
       );
 
@@ -272,8 +276,9 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
       const runtime = await readRuntime(runHome).catch(() => null);
       if (runtime && isProcessAlive(runtime.pid)) await stopProcessByPid(runtime.pid);
       await rm(runHome, { recursive: true, force: true });
+      await rm(runCwd, { recursive: true, force: true });
     }
-  }, 60_000);
+  }, 90_000);
 
   it('starts a craftbook from the do subcommand', async () => {
     const result = await runCli('do', 'security-architecture-review');

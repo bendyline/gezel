@@ -70,8 +70,21 @@ function target(overrides: Partial<ResolvedSearchTarget> = {}): ResolvedSearchTa
 async function withFakeRipgrep<T>(source: string, run: () => Promise<T>): Promise<T> {
   const fakeBin = join(outsideDir, 'fake-bin');
   const executable = join(fakeBin, process.platform === 'win32' ? 'rg.cmd' : 'rg');
+  const fixture = join(fakeBin, 'fixture.mjs');
   await mkdir(fakeBin, { recursive: true });
-  await writeFile(executable, `#!${process.execPath}\n${source}\n`);
+  await writeFile(fixture, `${source}\n`);
+  if (process.platform === 'win32') {
+    await writeFile(
+      executable,
+      `@echo off\r\nif "%~1"=="--version" (\r\n  echo ripgrep 99.0.0\r\n  exit /b 0\r\n)\r\n"${process.execPath}" "${fixture}" %*\r\n`,
+    );
+  } else {
+    const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
+    await writeFile(
+      executable,
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then\n  echo "ripgrep 99.0.0"\n  exit 0\nfi\nexec ${shellQuote(process.execPath)} ${shellQuote(fixture)} "$@"\n`,
+    );
+  }
   if (process.platform !== 'win32') await chmod(executable, 0o755);
   const priorPath = process.env.PATH;
   process.env.PATH = fakeBin;
@@ -487,7 +500,9 @@ describe.runIf(process.platform !== 'win32')('grepWorkspace ripgrep process cont
           engine: 'ripgrep',
           pattern: 'needle',
           literal: true,
-          timeoutMs: 100,
+          // Leave enough headroom for the executable health probe on a busy
+          // CI host; the search process itself still has a short deadline.
+          timeoutMs: 1_000,
         }),
       ),
     ).rejects.toMatchObject({ status: 504, code: 'timeout' });

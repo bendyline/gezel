@@ -2989,9 +2989,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       meesterStatus.stop();
       ambientDashboard.stop();
       await activityTracker.stop();
-      workspaceIndex.stop();
+      if (libraryRefreshTimer) {
+        clearTimeout(libraryRefreshTimer);
+        libraryRefreshTimer = null;
+      }
+      await workspaceIndex.stop();
       workspaceWatch.stop();
-      indexEnrichment.stop();
+      await indexEnrichment.stop();
       globalIndexManager.stop();
       // An open document-edit window would otherwise lose its audit event.
       await store.flushDocumentAudit().catch(() => {});
