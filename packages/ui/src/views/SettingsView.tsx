@@ -2383,7 +2383,7 @@ export function SettingsView() {
                   Download models and tune advanced settings in the{' '}
                   <button
                     type="button"
-                    className="home-link"
+                    className="gz-link-button"
                     onClick={() => setSection(provider === 'mlx' ? 'mlx' : 'llamaCpp')}
                     style={{ padding: 0 }}
                   >
@@ -2413,7 +2413,7 @@ export function SettingsView() {
                     Download DwarfStar models and tune SSD streaming in the{' '}
                     <button
                       type="button"
-                      className="home-link"
+                      className="gz-link-button"
                       onClick={() => setSection('ds4')}
                       style={{ padding: 0 }}
                     >
@@ -2596,7 +2596,7 @@ export function SettingsView() {
                     </h4>
                     <button
                       type="button"
-                      className="home-link"
+                      className="gz-link-button"
                       onClick={() => setShowCliHelp((s) => !s)}
                       style={{ marginLeft: 'auto' }}
                     >
@@ -2652,7 +2652,7 @@ export function SettingsView() {
                 {!hasGithubToken && !showPatForm && (
                   <button
                     type="button"
-                    className="home-link"
+                    className="gz-link-button"
                     onClick={() => setShowPatForm(true)}
                     style={{ marginLeft: '0.5rem' }}
                   >
@@ -3527,7 +3527,7 @@ export function SettingsView() {
               <p className="muted small" style={{ marginTop: '0.75rem' }}>
                 Something not working right?{' '}
                 <ReportErrorLink
-                  className="home-link"
+                  className="gz-link-button"
                   label="Report a problem on GitHub"
                   report={{ surface: 'settings-about', message: '' }}
                 />
@@ -3870,7 +3870,7 @@ function SystemNoticeNote({ notice }: { notice: SystemNotice }) {
       )}
       {notice.reportable && (
         <ReportErrorLink
-          className="home-link"
+          className="gz-link-button"
           report={{
             surface: 'install-health',
             message: notice.title,

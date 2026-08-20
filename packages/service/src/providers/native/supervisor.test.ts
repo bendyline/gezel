@@ -167,6 +167,35 @@ describe('NativeEngineSupervisor', () => {
     await sup.stop();
   });
 
+  it('retains reachedReady on an expected stop snapshot', async () => {
+    const child = makeFakeChild(4243);
+    const exits: Array<import('./supervisor.js').NativeEngineExitSnapshot> = [];
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: 'fake-engine',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9999',
+      }),
+      spawn: (() => child as never) as never,
+      fetchImpl: async () => new Response('ok', { status: 200 }),
+      idleTimeoutMs: 0,
+      healthIntervalMs: 10_000_000,
+      onLog: () => {},
+      onExit: (snapshot) => void exits.push(snapshot),
+      psRunner: async () => [],
+    });
+
+    await sup.ensureRunning();
+    await sup.stop();
+
+    expect(exits).toHaveLength(1);
+    expect(exits[0]).toMatchObject({
+      expected: true,
+      expectedReason: 'stop',
+      reachedReady: true,
+    });
+  });
+
   it('exposes the live launch snapshot and hides it once the child exits', async () => {
     const child = makeFakeChild(5150);
     const fakeSpawn = (() =>

@@ -57,6 +57,14 @@ let disabledReason: string | null = null;
 let unavailableReason: string | null = null;
 let unavailableUntil = 0;
 
+export type EmbeddingPipelineStatus = 'cold' | 'warming' | 'ready' | 'disabled' | 'unavailable';
+
+// Interactive callers need to know whether a query is about to pay the model's
+// one-time load cost. Keep this deliberately coarse: it is process-local
+// readiness, not durable health state. A cold/warming caller can fail open and
+// let the already-started load finish in the background.
+let pipelineStatus: 'cold' | 'warming' | 'ready' = 'cold';
+
 /** Avoid hammering the model registry when a first-use download is offline. */
 const EMBEDDING_RETRY_COOLDOWN_MS = 60_000;
 
@@ -69,6 +77,12 @@ function disabledByEnv(): boolean {
 
 export function embeddingsDisabledReason(): string | null {
   return disabledByEnv() ? ENV_DISABLED_REASON : (disabledReason ?? currentUnavailableReason());
+}
+
+export function embeddingPipelineStatus(): EmbeddingPipelineStatus {
+  if (disabledByEnv() || disabledReason) return 'disabled';
+  if (currentUnavailableReason()) return 'unavailable';
+  return pipelineStatus;
 }
 
 // ── worker plumbing ───────────────────────────────────────────────────────
@@ -233,23 +247,33 @@ async function embedMany(texts: string[]): Promise<number[][]> {
   if (disabledReason) throw new EmbeddingsDisabledError(disabledReason);
   const temporaryReason = currentUnavailableReason();
   if (temporaryReason) throw new EmbeddingsUnavailableError(temporaryReason);
-  const w = ensureWorker();
-  if (w) {
-    try {
-      return await sendToWorker(w, texts);
-    } catch (err) {
-      // A retryable pipeline-load failure already has a cooldown and should not
-      // immediately repeat the same download in-process.
-      if (err instanceof EmbeddingsUnavailableError) throw err;
-      // The model is unloadable — the worker tagged it fatal and we've already
-      // set disabledReason. Surface the canonical error.
-      if (disabledReason) throw new EmbeddingsDisabledError(disabledReason);
-      // Transient worker failure (it crashed mid-request and we rejected the
-      // in-flight call). Fall through so this call still completes in-process.
-      log.warn(`[memory] embed via worker failed; retrying in-process: ${describe(err)}`);
+  if (pipelineStatus === 'cold') pipelineStatus = 'warming';
+  try {
+    const w = ensureWorker();
+    if (w) {
+      try {
+        const vectors = await sendToWorker(w, texts);
+        pipelineStatus = 'ready';
+        return vectors;
+      } catch (err) {
+        // A retryable pipeline-load failure already has a cooldown and should not
+        // immediately repeat the same download in-process.
+        if (err instanceof EmbeddingsUnavailableError) throw err;
+        // The model is unloadable — the worker tagged it fatal and we've already
+        // set disabledReason. Surface the canonical error.
+        if (disabledReason) throw new EmbeddingsDisabledError(disabledReason);
+        // Transient worker failure (it crashed mid-request and we rejected the
+        // in-flight call). Fall through so this call still completes in-process.
+        log.warn(`[memory] embed via worker failed; retrying in-process: ${describe(err)}`);
+      }
     }
+    const vectors = await embedInProcess(texts);
+    pipelineStatus = 'ready';
+    return vectors;
+  } catch (err) {
+    if (!disabledReason && !currentUnavailableReason()) pipelineStatus = 'cold';
+    throw err;
   }
-  return embedInProcess(texts);
 }
 
 function firstLine(s: string): string {
@@ -298,6 +322,7 @@ export async function embedBatch(texts: string[]): Promise<number[][]> {
  */
 export async function warmEmbeddings(): Promise<boolean> {
   if (disabledByEnv() || disabledReason) return false;
+  if (pipelineStatus === 'ready') return true;
   try {
     await embed('warm');
     return true;

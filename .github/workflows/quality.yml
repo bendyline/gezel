@@ -74,7 +74,9 @@ jobs:
     name: Build, lint, typecheck, and unit tests
     needs: workflow-policy
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Runtime coverage executes the Vitest suites a second time with V8
+    # instrumentation after the ordinary unit pass.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
@@ -95,16 +97,26 @@ jobs:
         # runs several package suites at once, each with its own worker pool.
         # Serialising the packages keeps fixed test timeouts meaningful.
         run: pnpm test:ci
-      - name: Enforce test-surface coverage floors
+      - name: Enforce direct-import test-surface floors
+        run: pnpm test:surface
+      - name: Measure executable V8 coverage
         run: pnpm test:coverage
-      - name: Preserve coverage inventory
+      - name: Preserve direct-import test-surface inventory
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: test-surface-coverage
+          name: test-surface-inventory
           path: artifacts/test-surface-coverage.json
-          # The coverage command is the authoritative check. If an earlier
+          # The surface command is the authoritative check. If an earlier
           # step fails, do not add a second, misleading artifact failure.
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Preserve executable coverage reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtime-coverage
+          path: artifacts/coverage/
           if-no-files-found: ignore
           retention-days: 30
 

@@ -180,6 +180,9 @@ if __name__ == "__main__":
         except AssertionError as exc:
             failed += 1
             print(f"  FAIL {name}: {exc}")
+        except _ReferenceUnavailable as exc:
+            skipped += 1
+            print(f"  SKIP {name}: {exc}")
         except Exception as exc:  # import/venv problems should be loud, not silent
             failed += 1
             print(f"  ERROR {name}: {type(exc).__name__}: {exc}")

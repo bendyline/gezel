@@ -76,6 +76,7 @@ import tool_grammar  # noqa: E402
 import tool_call_stream  # noqa: E402
 import template_stability  # noqa: E402
 from lfm2_compat import ensure_lfm2_config_compat  # noqa: E402
+from qwen3_5_text_compat import is_text_only_qwen3_5_checkpoint  # noqa: E402
 
 
 # ───────── Leaked special-token scrub ─────────
@@ -473,7 +474,13 @@ print(f"Loading model from: {ARGS.model}", flush=True)
 _LFM2_FF_DIM = ensure_lfm2_config_compat(ARGS.model)
 if _LFM2_FF_DIM is not None:
     print(f"Applied lfm2 config compat: block_ff_dim={_LFM2_FF_DIM}", flush=True)
-MODEL, PROCESSOR = load(ARGS.model)
+_QWEN3_5_TEXT_ONLY = is_text_only_qwen3_5_checkpoint(ARGS.model)
+if _QWEN3_5_TEXT_ONLY:
+    print(
+        "Detected text-only Qwen 3.5 checkpoint; allowing absent vision-tower weights.",
+        flush=True,
+    )
+MODEL, PROCESSOR = load(ARGS.model, strict=not _QWEN3_5_TEXT_ONLY)
 print("Model and processor loaded successfully.", flush=True)
 
 

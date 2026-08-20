@@ -379,10 +379,10 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
           <span className="muted small">Status:</span>
-          <span className="home-status-pill home-status-ok">ready</span>
+          <span className="gz-status-pill gz-status-pill--ok">ready</span>
           {hasExternalBaseUrl && (
             <span
-              className="home-status-pill home-status-warn"
+              className="gz-status-pill gz-status-pill--warn"
               title={`Using an external engine at: ${config?.llamaCppBaseUrl}`}
             >
               using external engine

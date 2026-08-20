@@ -3,7 +3,12 @@ import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import { DEFAULT_MEMORY_KIND, type MemoryKind, parseMemoryDay } from './daily-markdown.js';
-import { embed, embedQuery } from './embeddings.js';
+import {
+  type EmbeddingPipelineStatus,
+  embed,
+  embedQuery,
+  embeddingPipelineStatus,
+} from './embeddings.js';
 import {
   type MemoryEntry,
   type SearchResult,
@@ -216,6 +221,10 @@ export class MemoryManager {
    */
   async embedQuery(text: string): Promise<number[]> {
     return embedQuery(text);
+  }
+
+  embeddingStatus(): EmbeddingPipelineStatus {
+    return embeddingPipelineStatus();
   }
 
   /**

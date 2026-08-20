@@ -125,7 +125,7 @@ export function IntroHandboekArticle() {
       <p>
         <button
           type="button"
-          className="home-link"
+          className="gz-link-button"
           onClick={() => openHandboek(ARTICLE_ID)}
           data-testid="home-intro-handboek-fallback"
         >
@@ -148,7 +148,7 @@ export function IntroHandboekArticle() {
       <div className="home-intro-article-controls">
         <button
           type="button"
-          className="home-link"
+          className="gz-link-button"
           onClick={() => openHandboek(ARTICLE_ID)}
           title="Read this article in the Handboek"
         >

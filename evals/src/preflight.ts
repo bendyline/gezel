@@ -230,12 +230,18 @@ export function buildPreflightChecks(ev: PreflightEvidence): {
   // packages/service/src/providers/native/provider-pool.ts.
   const capacityDenied = /capacity broker denied [^\n]*budget exhausted/.exec(log);
   const spawnFailed = ev.result.failureMode === 'spawn-error' || capacityDenied !== null;
+  const nativeLaunch = /\[(?:llama-server|mlx|ds4-server)\] launch\b/.exec(log);
   const spawn: PreflightCheck = spawnFailed
     ? {
         ok: false,
         detail: capacityDenied?.[0] ?? `spawn failed: ${ev.result.reason}`,
       }
-    : { ok: true, detail: 'daemon + engine spawned' };
+    : nativeLaunch
+      ? { ok: true, detail: `native engine launch observed: ${nativeLaunch[0]}` }
+      : {
+          ok: false,
+          detail: 'daemon started, but no native engine launch record was observed',
+        };
 
   const toolRoundTrip: PreflightCheck = ev.result.success
     ? { ok: true, detail: ev.result.reason }
@@ -362,7 +368,9 @@ export interface PreflightOptions
   minGenTokensPerSec?: number;
 }
 
-const PREFLIGHT_POLICY_VERSION = 1;
+// v2 requires an observed native supervisor launch; old cached reports only
+// proved that the daemon process itself came up.
+const PREFLIGHT_POLICY_VERSION = 2;
 
 const PREFLIGHT_LAUNCH_ENV_KEYS = [
   'GEZEL_CAPACITY_BUDGET_GB',

@@ -10592,8 +10592,8 @@ server.tool(
               ? 'project-local'
               : 'local';
         const description = craftbook.description ? ` — ${craftbook.description}` : '';
-        const call = `invoke_craftbook(${JSON.stringify(craftbook.invocation.arguments)})`;
-        return `[craftbook:${source}] ${craftbook.name} (${craftbook.id})${description}\n  If this procedure fits and \`invoke_craftbook\` is available, call \`${call}\` directly; otherwise ignore it.`;
+        const callArguments = JSON.stringify(craftbook.invocation.arguments);
+        return `[craftbook:${source}] ${craftbook.name} (${craftbook.id})${description}\n  If this procedure fits and \`invoke_craftbook\` is available, call \`invoke_craftbook\` directly with arguments \`${callArguments}\`; otherwise ignore it.`;
       });
       const resultSummary = modelResults.length
         ? `Found ${modelResults.length} relevant result${modelResults.length === 1 ? '' : 's'} across active, linked, and shared project knowledge${res.truncated ? ' (truncated)' : ''}`

@@ -396,13 +396,17 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
                     <td>{formatContextWindow(m.contextWindow)}</td>
                     <td>
                       {m.supportsTools ? (
-                        <span className="home-status-pill home-status-ok">✓</span>
+                        <span className="gz-status-pill gz-status-pill--ok">✓</span>
                       ) : (
-                        <span className="home-status-pill home-status-warn">no</span>
+                        <span className="gz-status-pill gz-status-pill--warn">no</span>
                       )}
                     </td>
                     <td>
-                      <button type="button" className="home-link" onClick={() => setToDelete(m.id)}>
+                      <button
+                        type="button"
+                        className="gz-link-button"
+                        onClick={() => setToDelete(m.id)}
+                      >
                         Delete
                       </button>
                     </td>
@@ -477,7 +481,7 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
                     <LicenseButton manifest={m} allowOllamaLink />
                     {recommended && (
                       <span
-                        className="home-status-pill home-status-ok"
+                        className="gz-status-pill gz-status-pill--ok"
                         title="Largest model in this category that fits your device's memory budget — a good default."
                       >
                         ★ recommended
@@ -485,7 +489,7 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
                     )}
                     {tight && (
                       <span
-                        className="home-status-pill home-status-warn"
+                        className="gz-status-pill gz-status-pill--warn"
                         title="This model is larger than the memory Gezel estimates your device can dedicate to inference. It may run very slowly or fail to load."
                       >
                         may not fit
@@ -565,7 +569,7 @@ function MemoryBudgetLine({
   return (
     <p className="muted small" style={{ marginTop: 0 }}>
       Models larger than your ~{usable} budget are hidden by default.{' '}
-      <button type="button" className="home-link" onClick={() => setShowAll(!showAll)}>
+      <button type="button" className="gz-link-button" onClick={() => setShowAll(!showAll)}>
         {showAll ? 'Hide oversized models' : 'Include oversized models'}
       </button>
     </p>
@@ -637,7 +641,7 @@ function OllamaPullProgress({
       <div className="ollama-pull-head">
         <code>{pull.name}</code>
         <span className="muted small">{statusLine}</span>
-        <button type="button" className="home-link" onClick={onCancel}>
+        <button type="button" className="gz-link-button" onClick={onCancel}>
           Cancel
         </button>
       </div>

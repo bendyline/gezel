@@ -1,0 +1,860 @@
+/* --- Script editor (full-screen Monaco tab) --------------------------- */
+
+.script-editor-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.script-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.script-editor-back {
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 8px;
+}
+
+.script-editor-title {
+  min-width: 0;
+}
+
+.script-editor-title h1 {
+  margin: 0;
+  font-size: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.script-editor-title p {
+  margin: 2px 0 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 480px;
+}
+
+.script-editor-usages {
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.script-editor-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.script-editor-dirty {
+  color: var(--accent);
+}
+
+.script-editor-rail-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.script-editor-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.script-editor-banner--info {
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+
+.script-editor-banner--warn {
+  background: color-mix(in srgb, #c9a227 14%, var(--panel));
+}
+
+.script-editor-banner--error {
+  background: color-mix(in srgb, #b3402e 14%, var(--panel));
+}
+
+.script-editor-banner button {
+  flex-shrink: 0;
+}
+
+.script-editor-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* Three-tab editor (Raw / Properties / Script) takes the place the single
+   editor used to occupy inside .script-editor-body, beside the rail. */
+.script-editor-tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.script-editor-tabs > .gz-tabs-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.script-editor-tabs .gz-tabs-list {
+  padding: 4px 8px 0;
+  flex: 0 0 auto;
+}
+
+.script-editor-tabs__panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The panels use `forceMount` so the Monaco editors persist across tab
+   switches — which means Radix keeps them all mounted and never sets the
+   `[hidden]` attribute. Hide the inactive ones via the `data-state` Radix
+   always sets instead, so only the selected lens shows. */
+.script-editor-tabs__panel[hidden],
+.script-editor-tabs__panel[data-state="inactive"] {
+  display: none;
+}
+
+.script-meta-form {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+
+.script-meta-form__issues {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+.script-code-editor {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.script-code-editor > p {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  margin: 0;
+}
+
+.script-code-editor__error {
+  color: var(--danger, #b3402e);
+}
+
+.script-code-editor__host {
+  flex: 1;
+  min-height: 0;
+}
+
+.script-editor-rail {
+  width: 380px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  overflow-y: auto;
+  padding: 10px 14px;
+}
+
+.script-editor-rail .gz-tabs-content {
+  padding-top: 10px;
+}
+
+.script-editor-about section {
+  margin-top: 14px;
+}
+
+.script-editor-about h4,
+.script-editor-run h4,
+.script-editor-logs h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
+
+.script-editor-about ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.script-editor-about li {
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.script-editor-run .script-detail__inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.script-editor-run .script-detail__inputs label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.script-editor-run .script-detail__actions {
+  margin: 12px 0;
+}
+
+.script-editor-capfix {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.script-editor-capfix p {
+  margin: 0 0 6px;
+}
+
+.script-editor-logs pre {
+  max-height: 220px;
+  overflow: auto;
+  font-size: 12px;
+  background: var(--bg);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.script-editor-problems {
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 6px 16px 10px;
+}
+
+.script-editor-problems ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.script-editor-problem {
+  display: flex;
+  width: 100%;
+  gap: 10px;
+  align-items: baseline;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.script-editor-problem--error .script-editor-problem-msg {
+  color: var(--danger, #b3402e);
+}
+
+.script-editor-problem--warning .script-editor-problem-msg {
+  color: #9a7b1f;
+}
+
+.script-editor-problem-msg {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Capability pills — shared trust vocabulary */
+
+.capability-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.capability-pill {
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  white-space: nowrap;
+}
+
+/* New-script dialog */
+
+.new-script-dialog {
+  max-width: 560px;
+}
+
+.new-script-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+
+.new-script-ai {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.new-script-templates {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.new-script-template {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.new-script-template.active {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+}
+
+/* Single toolbar row: project picker, script picker, then the New button. */
+.scripts-view__toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.scripts-view__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.scripts-view__detail {
+  margin-top: 1rem;
+}
+
+/* New-craftbook dialog */
+
+.new-craftbook-dialog {
+  width: 32rem;
+  max-width: 90vw;
+}
+
+.new-craftbook-modes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.new-craftbook-mode {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--panel);
+  cursor: pointer;
+  color: var(--text);
+}
+
+.new-craftbook-mode.active {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+}
+
+.new-craftbook-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.new-craftbook-field-label {
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.new-craftbook-picker-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 14rem;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.new-craftbook-picker-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  color: var(--text);
+}
+
+.new-craftbook-picker-list li:last-child .new-craftbook-picker-row {
+  border-bottom: 0;
+}
+
+.new-craftbook-picker-row:hover {
+  background: var(--panel);
+}
+
+.new-craftbook-picker-row.active {
+  background: rgba(176, 114, 76, 0.1);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.new-craftbook-picker-name {
+  font-size: 0.95rem;
+}
+
+.new-craftbook-picker-empty {
+  padding: 0.6rem;
+}
+
+/* Task-step automation rows */
+
+.step-script-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.step-script-sentence {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+}
+
+/* ── Craftbook editor ───────────────────────────────────────────────── */
+.craftbooks-view {
+  gap: 0;
+  padding: 0;
+}
+.craftbooks-layout {
+  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+}
+.craftbooks-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.craftbooks-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.7rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 72%, var(--panel));
+}
+.craftbooks-search-field {
+  display: block;
+  min-width: 0;
+}
+.craftbook-search {
+  width: 100%;
+  min-width: 0;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  font-size: var(--text-md);
+}
+.craftbooks-toolbar button {
+  width: 100%;
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+}
+.craftbooks-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.craftbooks-list-error {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-sm);
+}
+.craftbooks-empty {
+  margin: 0;
+  padding: 0.75rem;
+  font-size: var(--text-sm);
+}
+.craftbooks-detail {
+  min-height: 0;
+}
+.craftbook-group + .craftbook-group {
+  margin-top: 10px;
+}
+.craftbook-group-header {
+  padding: 4px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.craftbook-group-hint {
+  font-weight: 400;
+  opacity: 0.7;
+}
+.task-badge-local {
+  background: var(--accent-soft, #2b6);
+  color: #fff;
+}
+.task-badge-bundled,
+.task-badge-project {
+  background: var(--surface-3, #555);
+  color: #fff;
+}
+.craftbook-tab,
+.craftbook-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.craftbook-tab {
+  padding: 0;
+}
+.craftbook-editor {
+  padding: 12px 4px 4rem;
+}
+.craftbook-editor-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.craftbook-editor-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.craftbook-name-input {
+  font-size: 1.1rem;
+  font-weight: 600;
+  min-width: 220px;
+}
+.craftbook-bench-row {
+  gap: 0;
+  border-bottom: 0;
+}
+.craftbook-bench-row > .bench-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* The selected step's caption is the tab for the settings page below, just
+   like it is in Task detail. Pull the page through the bench's bottom padding
+   + margin and this editor's 12px flex gap, so the two borders meet instead
+   of the settings page rising over the step labels. */
+.craftbook-editor > .task-step-panel:not(.empty) {
+  margin-top: calc(-1.65rem - 1px);
+}
+.craftbook-editor-tabs {
+  border-bottom: 1px solid var(--border, #333);
+}
+.craftbook-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.craftbook-chat-pane {
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+}
+.step-dot.entry .step-dot-label {
+  font-weight: 600;
+}
+.step-dot.entry .step-dot-badge {
+  outline: 2px solid var(--accent, #6af);
+  outline-offset: 1px;
+}
+.step-script-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.step-script-moment {
+  min-width: 56px;
+}
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent, #6af);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.link-button:hover {
+  text-decoration: underline;
+}
+.link-button.muted {
+  color: var(--text-muted, #999);
+}
+
+/* --- Step automation chips + gate row -------------------------------- */
+
+.step-script-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 10px;
+  background: var(--panel);
+}
+
+.step-gate-rejection {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--danger, #b3402e);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 10px 0;
+}
+
+.step-gate-rejection p {
+  margin: 6px 0;
+  white-space: pre-wrap;
+}
+
+/* The dialog is a flex column capped at 85vh; let the list (and the
+   settings pane) take the leftover space and scroll, so a long standard
+   library doesn't push the dialog past the viewport. min-height:0 is what
+   actually lets a flex child shrink below its content and scroll. */
+.hook-dialog-picker,
+.hook-dialog-settings {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.hook-dialog-picker section {
+  margin-bottom: 10px;
+}
+
+.hook-dialog-picker h4 {
+  margin: 8px 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+
+/* Picker entries are flat, left-aligned cards — explicitly reset off the
+   global primary-button style (accent fill + white text), which used to
+   render each choice as a solid terracotta slab with unreadable text. */
+.script-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.script-picker-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.script-picker-item:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+
+.script-picker-item-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.script-picker-item-desc {
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.script-picker-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+/* --- Gate conditions box (task step) -------------------------------- */
+
+.gate-row {
+  align-items: flex-start;
+}
+
+.gate-conditions {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--panel);
+}
+
+.gate-conditions-empty,
+.gate-conditions-builtin {
+  margin: 0;
+}
+
+.gate-condition {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--bg);
+}
+
+.gate-condition-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gate-condition-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.gate-condition-spacer {
+  flex: 1;
+}
+
+.gate-condition-desc {
+  margin: 0;
+  line-height: 1.35;
+}
+
+.gate-condition-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.gate-condition-inputs label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.gate-condition-inputs .script-input__checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+/* "Add condition" — a quiet dashed affordance, not a primary button. */
+.gate-condition-add {
+  align-self: flex-start;
+  background: transparent;
+  color: var(--accent);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.gate-condition-add:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+
+.gate-settings-link {
+  flex: 0 0 auto;
+}

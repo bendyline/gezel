@@ -160,6 +160,87 @@ describe('recall cold-start guard', () => {
     });
     expect(hits!.map((h) => h.scope)).toEqual(['workspace']);
   });
+
+  it('fails open when a ready embedding pipeline exceeds the interactive deadline', async () => {
+    const embedQuery = vi.fn(() => new Promise<number[]>(() => {}));
+    const memory = {
+      hasIndex: () => true,
+      embeddingStatus: () => 'ready',
+      searchVector: async () => [],
+    } as unknown as MemoryManager;
+    const startedAt = Date.now();
+
+    const hits = await runAutoRecall({
+      gezelId: 'ada',
+      projectId: 'default',
+      query: 'do not block this turn',
+      providerName: 'openai',
+      config: {},
+      memory,
+      embedQuery,
+      interactiveDeadlineMs: 20,
+    });
+
+    expect(hits).toBeNull();
+    expect(embedQuery).toHaveBeenCalledOnce();
+    expect(Date.now() - startedAt).toBeLessThan(500);
+  });
+
+  it('warms a cold embedding pipeline in the background without delaying the turn', async () => {
+    const embedQuery = vi.fn(() => new Promise<number[]>(() => {}));
+    const memory = {
+      hasIndex: () => true,
+      embeddingStatus: () => 'cold',
+      searchVector: async () => [],
+    } as unknown as MemoryManager;
+
+    const hits = await runAutoRecall({
+      gezelId: 'ada',
+      projectId: 'default',
+      query: 'warm for later',
+      providerName: 'openai',
+      config: {},
+      memory,
+      embedQuery,
+      interactiveDeadlineMs: 10_000,
+    });
+
+    expect(hits).toBeNull();
+    expect(embedQuery).toHaveBeenCalledOnce();
+  });
+
+  it('cancels an in-flight embedding wait without waiting for its deadline', async () => {
+    const controller = new AbortController();
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const embedQuery = vi.fn(() => {
+      markStarted();
+      return new Promise<number[]>(() => {});
+    });
+    const memory = {
+      hasIndex: () => true,
+      embeddingStatus: () => 'ready',
+      searchVector: async () => [],
+    } as unknown as MemoryManager;
+
+    const recall = runAutoRecall({
+      gezelId: 'ada',
+      projectId: 'default',
+      query: 'cancel me',
+      providerName: 'openai',
+      config: {},
+      memory,
+      embedQuery,
+      interactiveDeadlineMs: 10_000,
+      signal: controller.signal,
+    });
+    await started;
+    controller.abort();
+
+    await expect(recall).resolves.toBeNull();
+  });
 });
 
 describe('shared-library recall', () => {

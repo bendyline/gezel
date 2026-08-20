@@ -1,0 +1,1792 @@
+/* ── Tasks view ── */
+
+.tasks-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  /* Bottom gets +2px so the pane's lower edge lines up with the chat
+     window's effective bottom padding when the two sit side by side. */
+  padding: 1rem 1rem calc(1rem + 2px);
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* The top-level Tasks area uses the app canvas itself as the list/detail
+   surface. Keep the controls inset, then let both working panes run flush to
+   the canvas edges; the project-embedded Tasks tab retains its local panel
+   spacing. */
+.tasks-view-overall {
+  padding: 1rem 0 0;
+}
+
+.tasks-view-overall > .tasks-header,
+.tasks-view-overall > .error {
+  margin-inline: 1rem;
+}
+
+.tasks-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.tasks-header h2 {
+  margin: 0;
+}
+
+.tasks-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.tasks-filters select,
+.tasks-filters input {
+  padding: 0.35rem 0.5rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.tasks-filters button.primary {
+  background: var(--accent, #b0724c);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+}
+
+.tasks-filters button.primary[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tasks-kind-filter {
+  flex-shrink: 0;
+}
+
+/* Split creation key: the main action stays one click away while the narrow
+   attached key opens less-common task modes. Both halves share the normal
+   button radius on their outside corners and meet on a single seam. */
+.tasks-create-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.tasks-filters button.tasks-create-main {
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+
+.tasks-filters button.tasks-create-more {
+  min-width: 2rem;
+  padding-inline: 0.55rem;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 72%, var(--border));
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+.tasks-create-menu .app-nav-menu-item {
+  display: flex;
+  min-width: 15rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+}
+
+.tasks-create-menu .app-nav-menu-item small {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.tasks-create-menu .app-nav-menu-item[data-highlighted] small {
+  color: inherit;
+}
+
+.tasks-layout {
+  display: grid;
+  /* `1fr` has an automatic min-content floor. The task header + workshop
+     bench can be much wider than the space beside the list, which used to
+     widen this whole grid past the project viewport and clip the right side.
+     Give the detail track a real zero floor; the bench owns its own
+     horizontal scroller. */
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 1rem;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tasks-view-overall .tasks-layout {
+  gap: 0;
+}
+
+.tasks-empty-state {
+  display: grid;
+  place-items: center;
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-size: var(--text-md);
+}
+
+.tasks-empty-state p {
+  margin: 0;
+}
+
+.tasks-list {
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  user-select: none;
+}
+
+.tasks-view-overall .tasks-list {
+  border-radius: 0;
+}
+
+.tasks-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.task-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  text-align: left;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+/* Stacked card body: ref + meta on the first line, title on its own line. */
+.task-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.task-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.task-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Tasks selection states use the gezel titlebar green (--titlebar:
+   #667f62 → rgb(102, 127, 98)) instead of a generic blue accent so the
+   list reads as part of the same crew/workshop palette as the header. */
+.task-row-active {
+  background: rgba(102, 127, 98, 0.22);
+}
+
+.task-row-selected {
+  background: rgba(102, 127, 98, 0.32);
+}
+
+.task-row-selected:hover {
+  background: rgba(102, 127, 98, 0.38);
+}
+
+.task-status {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  text-align: center;
+}
+
+.task-status-active {
+  background: rgba(102, 127, 98, 0.42);
+  color: #e2ecdf;
+}
+.task-status-paused {
+  background: rgba(255, 200, 60, 0.2);
+  color: #ffeab0;
+}
+.task-status-complete {
+  background: rgba(80, 200, 120, 0.2);
+  color: #bfe8cd;
+}
+.task-status-canceled {
+  background: rgba(255, 100, 100, 0.15);
+  color: #ffbcbc;
+}
+
+/* Compact status indicator for list rows — a single colored dot in place
+   of the wider text badge, freeing horizontal space for the title. The
+   status word is exposed via title/aria-label for hover + assistive tech. */
+.task-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 0.3rem;
+  background: var(--muted);
+}
+.task-status-dot.task-status-active {
+  background: #7faa76;
+}
+/* Draft = "ready to fire" — the same ember the fire button carries. */
+.task-status-dot.task-status-draft {
+  background: var(--terra, #c9722e);
+}
+.task-status-dot.task-status-paused {
+  background: #e8c34a;
+}
+.task-status-dot.task-status-complete {
+  background: #5cc878;
+}
+.task-status-dot.task-status-canceled {
+  background: #e57373;
+}
+
+/* Task status keys (docs/ux.md → "State groups latch in the state's color").
+   The tray sets a lifecycle state rather than a preference, so the latched
+   key wears that state's own color and its glyph — go-green play, held-amber
+   pause, sealed-green check, struck-brick circle-slash. Only one key is ever
+   latched, so the tray still shows a single color at a time. Fixed inks, like
+   the engagement switch's emergency red: these fills hold on both themes. */
+.task-status-tray {
+  gap: 0.25rem;
+}
+
+.task-status-key {
+  padding: 0.35rem 0.65rem;
+}
+
+.task-status-key svg {
+  opacity: 0.7;
+}
+
+/* The latch has to survive the brief disabled window while the change saves,
+   or the current state visibly pops out mid-click. Unlatched keys still dim,
+   which is the saving signal. */
+.task-status-key.gz-key-active:disabled {
+  opacity: 1;
+  transform: translateY(1px);
+  box-shadow: var(--key-pressed-shadow);
+}
+
+.task-status-key.gz-key-active svg {
+  opacity: 1;
+}
+
+.task-status-key.gz-key-active[data-status="active"] {
+  background: linear-gradient(to bottom, #587f46, #689154);
+  border-color: #446837;
+  color: #f1f7ea;
+}
+
+.task-status-key.gz-key-active[data-status="paused"] {
+  background: linear-gradient(to bottom, #a87e22, #bb9132);
+  border-color: #8a671b;
+  color: #2b2007;
+}
+
+.task-status-key.gz-key-active[data-status="complete"] {
+  background: linear-gradient(to bottom, #446551, #4f785e);
+  border-color: #365343;
+  color: #ecf4ee;
+}
+
+.task-status-key.gz-key-active[data-status="canceled"] {
+  background: linear-gradient(to bottom, #8b463a, #9d5344);
+  border-color: #6c352b;
+  color: #fbeae6;
+}
+
+.task-ref {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.task-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-row-wrap {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+}
+
+.task-expand {
+  display: grid;
+  place-items: center;
+  flex: 0 0 1.75rem;
+  min-width: 1.75rem;
+  padding: 0;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: none;
+  border-right: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 1.2rem;
+  line-height: 1;
+  transition: background 140ms ease-out, color 140ms ease-out;
+}
+
+.task-expand:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+.task-expand:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+
+.task-children {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 1.2rem;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.task-row-child {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.task-badge {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 8px;
+  background: rgba(150, 120, 255, 0.18);
+  color: #dccfff;
+}
+.task-badge-template {
+  background: rgba(150, 120, 255, 0.22);
+  color: #dccfff;
+}
+.task-badge-cron {
+  background: rgba(80, 180, 200, 0.22);
+  color: #c0ebf3;
+}
+.task-badge-coordinator {
+  background: rgba(255, 180, 80, 0.2);
+  color: #ffe2b6;
+}
+.task-badge-instance {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.task-child-count {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.task-template,
+.task-children,
+.task-fanout,
+.task-parent-link {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.task-template-steps,
+.task-children-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+}
+
+.task-template-steps li,
+.task-children-list li {
+  padding: 0.3rem 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.task-template-actions {
+  margin-top: 0.5rem;
+}
+
+.task-cron-overlap {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.template-toggle {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.task-assignee {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.task-detail-panel {
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 0.25rem;
+}
+
+.tasks-view-overall .task-detail-panel {
+  padding-inline: 0;
+}
+
+.task-bulk-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+  padding: 0.25rem 1rem 1rem;
+}
+
+.task-bulk-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.task-bulk-header h3 {
+  margin: 0.2rem 0 0;
+}
+
+.task-bulk-header p {
+  margin: 0.3rem 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.task-bulk-message {
+  color: var(--success);
+  font-size: var(--text-sm);
+}
+
+.task-bulk-list {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-bulk-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 90%, var(--accent));
+}
+
+.task-bulk-item .task-status-dot {
+  margin-top: 0.35rem;
+}
+
+.task-bulk-item strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-bulk-current-status {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-transform: capitalize;
+}
+
+.task-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+/* Task pane → Chat tab. Mirrors the gezel-chat-tab flex column so the
+   timeline scrolls and the composer stays pinned at the bottom. */
+.task-detail-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+  flex: 1;
+}
+
+.task-detail-chat-empty {
+  padding: 1rem;
+  font-size: 0.9rem;
+}
+
+.task-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+/* The top-level detail pane otherwise begins exactly on the list seam.
+   Inset its identity + status controls while leaving the workflow bench
+   below full-width for horizontal scrolling. */
+.tasks-view-overall .task-detail-header {
+  padding-inline-start: 1rem;
+}
+
+.task-detail-header > :first-child {
+  min-width: 0;
+}
+
+/* The plan body is rendered as <pre> to preserve any intentional indent
+   from the gezel — but a long single-line plan paragraph would otherwise
+   stretch past the right edge of the detail pane. Wrap on whitespace while
+   leaving genuine line breaks (`\n`) intact. */
+.task-plan-body {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  margin: 0;
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.task-detail-ref {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.task-detail-project {
+  margin-left: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.task-detail h3 {
+  margin: 0.2rem 0 0 0;
+  overflow-wrap: anywhere;
+}
+
+.task-detail-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.task-detail-actions select {
+  padding: 0.3rem 0.5rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.task-detail-actions .primary {
+  background: var(--accent, #b0724c);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+}
+
+.task-system-owner {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 32px;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--key-bg);
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
+.task-system-owner small {
+  color: var(--muted);
+  font-size: var(--text-2xs);
+}
+
+.task-description {
+  color: var(--muted);
+  margin: 0;
+}
+
+.task-description-section {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+}
+
+.task-description-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.task-description-header h4 {
+  margin: 0;
+}
+
+.task-description-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.task-description-editor {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+/* ── Step tracker (Domino's-tracker style) ──────────────────────── */
+
+.step-tracker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0;
+  padding: 0.75rem 0.25rem 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.step-tracker-empty {
+  margin-right: 0.5rem;
+}
+
+.step-dot-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+.step-dot {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.1rem 0.5rem;
+  font: inherit;
+  color: var(--text);
+}
+
+.step-dot:disabled {
+  cursor: default;
+}
+
+.step-dot-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  background: var(--surface, #fff);
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+
+.step-dot-label {
+  font-size: 0.78rem;
+  color: var(--text-muted, var(--muted));
+  white-space: nowrap;
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.step-dot.status-done .step-dot-badge {
+  background: var(--accent, #b0724c);
+  border-color: var(--accent, #b0724c);
+  color: var(--surface, #fff);
+}
+
+/* Active = "this is live work right now". Loud on purpose: green
+   (vs the brown of done) for color separation, larger badge, full-
+   opacity ring, slow pulse. The label is always bold + colored so it
+   reads even at a glance, and an "Active" tag sits below the phase
+   name as a redundant cue. */
+.step-dot.status-active .step-dot-badge {
+  background: var(--success, #27ae60);
+  border-color: var(--success, #27ae60);
+  color: #fff;
+  width: 26px;
+  height: 26px;
+  font-size: 0.85rem;
+  box-shadow: 0 0 0 3px var(--success-bg, rgba(39, 174, 96, 0.25));
+  animation: step-active-pulse 2.4s ease-in-out infinite;
+}
+
+.step-dot.status-active .step-dot-label {
+  color: var(--success, #27ae60);
+  font-weight: 700;
+}
+
+.step-dot.status-active::after {
+  content: "Active now";
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--success, #27ae60);
+  margin-top: -0.15rem;
+}
+
+@keyframes step-active-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px var(--success-bg, rgba(39, 174, 96, 0.25));
+  }
+  50% {
+    box-shadow: 0 0 0 6px var(--success-bg, rgba(39, 174, 96, 0.18));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-dot.status-active .step-dot-badge {
+    animation: none;
+  }
+}
+
+.step-dot.status-pending .step-dot-badge {
+  background: var(--surface, #fff);
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+/* Selection underline. When the active phase is also the selected
+   one (the default), the green-bold label still wins on color and
+   the underline reads as a secondary "you're viewing this" cue. */
+.step-dot.selected .step-dot-label {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 1.5px;
+}
+
+.step-dot.selected:not(.status-active) .step-dot-label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.step-dot:hover:not(:disabled) .step-dot-label {
+  color: var(--text);
+}
+
+.step-dot.status-active:hover:not(:disabled) .step-dot-label {
+  color: var(--success, #27ae60);
+}
+
+/* Connector segment between two adjacent steps. Color tracks the
+   *previous* step's status so a chain of completes paints all the way
+   to the current active. */
+.step-dot-connector {
+  flex: 0 0 24px;
+  height: 2px;
+  background: var(--border);
+  margin: 0 -0.25rem;
+  position: relative;
+  top: -0.6rem; /* lift to align with the badge centerline */
+}
+
+.step-dot-connector.status-done {
+  background: var(--accent, #b0724c);
+}
+
+/* Connector AFTER the active step: fades from active green to pending
+   gray. Visually anchors where "now" sits in the chain. */
+.step-dot-connector.status-active {
+  background: linear-gradient(to right, var(--success, #27ae60), var(--border));
+}
+
+.step-dot-add .step-dot-badge {
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
+}
+
+.step-dot-add .step-dot-label {
+  color: var(--muted);
+}
+
+/* ── Step tracker · bench-rail variant (task mode) ──────────────────
+   The workshop "bench": numbered stations whose pegs — or, for the step
+   that's active, a carved poppetje — stand on a continuous wooden rail, with
+   the assignee captioned above and the lifecycle word below. The rail is
+   one absolutely-positioned beam; stations are flex columns sized off a
+   shared set of height vars so every peg's base lands on the rail. */
+
+.step-bench {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  gap: 0.25rem;
+  padding: var(--bench-pad-top) 0.75rem 0.4rem;
+  margin-bottom: 0.5rem;
+  /* Fit content but never narrower than the viewport: few steps stretch to
+     fill, many steps hold their min-width and the viewport scrolls. */
+  width: max-content;
+  min-width: 100%;
+
+  /* Geometry — the rail's top sits at pad-top + stage. Assignee captions
+     are out of flow (centered above a peg, or beside the active figure),
+     so they don't add to the column height. */
+  --bench-pad-top: 0.5rem;
+  --bench-stage-h: 84px;
+  --bench-rail-h: 9px;
+  --bench-tab-gap: 4px;
+
+  /* Carved-wood palette (day). */
+  --bench-rail-hi: #dcc79c;
+  --bench-rail-mid: #c8ad7c;
+  --bench-rail-lo: #a98a5a;
+  --bench-peg-hi: #d9c9a3;
+  --bench-peg-lo: #bfa87d;
+  --bench-done: #8a9a76;
+  --bench-active-hi: #d98a68;
+  --bench-active-lo: #b85c3c;
+}
+
+[data-theme="dark"] .step-bench {
+  --bench-rail-hi: #6a5838;
+  --bench-rail-mid: #564527;
+  --bench-rail-lo: #3c2f1c;
+  --bench-peg-hi: #6b5a3c;
+  --bench-peg-lo: #4e4029;
+  --bench-done: #6f7e5c;
+  --bench-active-hi: #c0875d;
+  --bench-active-lo: #9a4e30;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .step-bench {
+    --bench-rail-hi: #6a5838;
+    --bench-rail-mid: #564527;
+    --bench-rail-lo: #3c2f1c;
+    --bench-peg-hi: #6b5a3c;
+    --bench-peg-lo: #4e4029;
+    --bench-done: #6f7e5c;
+    --bench-active-hi: #c0875d;
+    --bench-active-lo: #9a4e30;
+  }
+}
+
+.step-rail {
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  top: calc(var(--bench-pad-top) + var(--bench-stage-h));
+  height: var(--bench-rail-h);
+  border-radius: 4px;
+  background: linear-gradient(
+    180deg,
+    var(--bench-rail-hi),
+    var(--bench-rail-mid) 55%,
+    var(--bench-rail-lo)
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 1px 2px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.step-bench .step-tracker-empty {
+  align-self: center;
+}
+
+.bench-step {
+  position: relative;
+  z-index: 1;
+  /* Equal widths when they fit; a firm min-width so the caption + dropdown
+     never crush into the neighbour — past that the bench scrolls. */
+  flex: 1 1 0;
+  min-width: 10rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Out of flow so it never adds to the column height. Default: centered
+   near the top of the stage, reading as a caption above the peg. */
+.bench-step-assignee {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  line-height: 1.15;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.bench-step-assignee-name {
+  font-family: Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-size: 0.84rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.bench-step-assignee-role {
+  font-size: 0.66rem;
+  color: var(--text-muted, var(--muted));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Inline assignee picker — reads as the caption text (italic serif) with a
+   small caret so it's clearly a dropdown, instead of the heavy brown app
+   select that would dominate the rail. The three-class selector intentionally
+   out-specifies the global `:root:not([data-theme="dark"]) select` rule.
+   Re-enables pointer events (the caption wrapper sets none so it can't block
+   the peg). */
+.step-bench .bench-step-assignee .bench-step-select {
+  appearance: none;
+  -webkit-appearance: none;
+  pointer-events: auto;
+  max-width: 11rem;
+  font-family: Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-size: 0.84rem;
+  color: var(--text);
+  background-color: transparent;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%238b7e6b' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.3rem center;
+  background-size: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 1.15rem 1px 0.45rem;
+  cursor: pointer;
+  text-align: center;
+  text-align-last: center;
+}
+
+.step-bench .bench-step-assignee .bench-step-select:hover:not(:disabled),
+.step-bench .bench-step-assignee .bench-step-select:focus-visible {
+  border-color: var(--border);
+  background-color: var(--panel, var(--surface));
+}
+
+.step-bench .bench-step-assignee .bench-step-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.step-bench .bench-step-assignee .bench-step-select:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.bench-step-stage {
+  height: var(--bench-stage-h);
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  /* Let a tall poppetje rise a hair past the stage top if needed. */
+  overflow: visible;
+}
+
+.bench-step-marker {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font: inherit;
+  border-radius: 8px;
+  transition: transform 120ms ease;
+}
+
+.bench-step-marker:disabled {
+  cursor: default;
+}
+
+.bench-step-marker:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+
+.bench-step-marker:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.bench-step-marker svg {
+  display: block;
+}
+
+/* CSS pegs (every station but the active one, which gets a figure). */
+.bench-peg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  line-height: 1;
+}
+
+.bench-step.status-pending .bench-peg {
+  width: 18px;
+  height: 34px;
+  border-radius: 7px 7px 3px 3px;
+  background: linear-gradient(180deg, var(--bench-peg-hi), var(--bench-peg-lo));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 2px 3px rgba(0, 0, 0, 0.18);
+}
+
+.bench-step.status-done .bench-peg {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--bench-done);
+  color: #fff;
+  font-size: 0.8rem;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.18);
+}
+
+/* Fallback peg for the active step when poppetjes are off or the
+   assignee has no figure — a taller, terracotta peg. */
+.bench-step.status-active .bench-peg {
+  width: 22px;
+  height: 44px;
+  border-radius: 9px 9px 3px 3px;
+  background: linear-gradient(180deg, var(--bench-active-hi), var(--bench-active-lo));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 3px 5px rgba(0, 0, 0, 0.2);
+}
+
+/* Terminal dot — the whole task's end state, pinned to the rail's right
+   end. A flat disc (no peg), green for complete, muted for canceled. */
+.bench-step-terminal {
+  flex: 0 0 auto;
+}
+
+.bench-peg-terminal {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 0.8rem;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.18);
+}
+
+.terminal-complete .bench-peg-terminal {
+  background: var(--bench-done);
+}
+
+.terminal-canceled .bench-peg-terminal {
+  background: var(--ink-3, #8b7e6b);
+}
+
+.bench-step-terminal .bench-step-status {
+  color: var(--text-muted, var(--muted));
+}
+
+.terminal-complete .bench-step-status {
+  color: var(--bench-done);
+}
+
+.bench-step-foot {
+  margin-top: calc(var(--bench-rail-h) + 0.5rem + var(--bench-tab-gap));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.12rem;
+  text-align: center;
+  max-width: 100%;
+  padding: 0 0.2rem;
+  /* Regular step feet are <button>s (click the title to select the step);
+     these resets keep them looking like the plain caption they replaced. */
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+}
+button.bench-step-foot {
+  cursor: pointer;
+}
+button.bench-step-foot:disabled {
+  cursor: default;
+}
+
+.bench-step-num {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  color: var(--text-muted, var(--muted));
+  min-height: 0.8rem;
+}
+
+.bench-step-name {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.bench-step-status {
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted, var(--muted));
+}
+
+/* The active step: terracotta status word with a pulsing tracker dot. */
+.bench-step.status-active .bench-step-status {
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+}
+
+.bench-step.status-active .bench-step-status::before {
+  content: "";
+  width: 0.4em;
+  height: 0.4em;
+  border-radius: 50%;
+  background: currentColor;
+  animation: bench-active-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes bench-active-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 28%, transparent);
+  }
+  50% {
+    opacity: 0.72;
+    transform: scale(1.16);
+    box-shadow: 0 0 0 0.32em transparent;
+  }
+}
+
+/* The active step is marked by its poppetje, the terracotta "Active" word,
+   and the peg glyph — deliberately NOT a card fill/border, so it doesn't read
+   like the selected tab. It sits on the rail like any other pending step. */
+
+/* Viewing a station that isn't the live one: a quiet underline so selection
+   reads without competing with the active highlight. (The card itself is
+   the shared selected-foot rule below.) */
+.bench-step.selected:not(.status-active) .bench-step-name {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1.5px;
+}
+
+/* Selected step = the active tab for the editor panel below. Its foot turns
+   into a bordered card that merges into the docked panel's top edge: square
+   bottom corners, no bottom border, and a raised z-index so the panel's top
+   border is hidden beneath it. Wins over the active / selected foot rules
+   above (equal-or-higher specificity, later in source), so it applies whether
+   or not this is also the live (active) step.
+
+   The margin backs off by exactly the card's block padding + top border
+   (0.4rem + 1px), so the step's number/name/status land on the SAME line as
+   its unselected neighbours' — the card grows downward around the text
+   rather than pushing it down. Keep that relationship if you retune the
+   padding: the card's downward growth is also what
+   `.task-bench-row.has-selected-step .task-tab-rail` compensates for. */
+.step-bench .bench-step.selected .bench-step-foot {
+  margin-top: calc(var(--bench-rail-h) + 0.1rem + var(--bench-tab-gap) - 1px);
+  padding: 0.4rem 0.6rem;
+  background: var(--panel, var(--surface));
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  box-shadow: none;
+  position: relative;
+  z-index: 2;
+}
+
+/* "add a step" and the terminal marker hug their content — exempt from the
+   regular step min-width. */
+.bench-step-add,
+.bench-step-terminal {
+  flex: 0 0 auto;
+  min-width: auto;
+}
+
+.bench-step-add .bench-peg.is-add {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--border);
+  background: transparent;
+  color: var(--text-muted, var(--muted));
+  font-size: 0.95rem;
+  box-shadow: none;
+}
+
+.bench-step-add .bench-step-name {
+  font-weight: 400;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bench-step.status-active .bench-step-status::before {
+    animation: none;
+  }
+
+  .bench-step-marker {
+    transition: none;
+  }
+}
+
+/* ── Per-phase editor panel ───────────────────────────────────────── */
+
+.task-step-panel {
+  position: relative;
+  z-index: 0;
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+/* The Task/Chat view switch lives as two tall buttons seated to the left of
+   the bench (replacing the old middle-of-page tab row). The rail stretches to
+   the bench height; the buttons split that height. */
+.task-bench-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.6rem;
+  min-width: 0;
+  /* Divider the Task/Chat tabs sit on: the active tab's open bottom overlaps
+     this line (see .task-tab-btn.active) so it reads as a browser-style tab
+     fused into the view below rather than a floating pill. */
+  border-bottom: 1px solid var(--border);
+}
+
+/* When a docked panel sits below (the Task overview page, or a selected
+   step's panel), it — not the row divider — is what the active tab/foot
+   fuses into. Drop the divider so it doesn't sit between them (its 1px also
+   throws off the panel's docking offset). The Chat tab keeps the divider,
+   since its pane isn't a docked page. */
+.task-bench-row.has-docked-panel {
+  border-bottom: none;
+}
+
+/* The Task overview "page": docks up to merge under the active Task tab —
+   same fill, hidden seam — exactly like the step panel docks under a selected
+   step's foot. The active tab (z-index 2, no bottom border) covers this
+   panel's top border where they meet. */
+.task-view-panel {
+  margin-top: calc(-1rem - 1px);
+  margin-bottom: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel, var(--surface));
+  position: relative;
+  z-index: 0;
+}
+
+.task-bench-row > .bench-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Bench horizontal-scroll scaffold. The viewport scrolls natively (wheel /
+   trackpad) with its native scrollbar hidden; a synthetic thumb is drawn
+   ABOVE the rail so it never sits between the bench and the docked panel. */
+.bench-scroll {
+  position: relative;
+  min-width: 0;
+}
+.bench-viewport {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.bench-viewport::-webkit-scrollbar {
+  display: none;
+}
+.bench-scrollbar {
+  position: relative;
+  height: 6px;
+  margin: 0 0.75rem 0.15rem;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.14);
+}
+.bench-scrollbar-thumb {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  min-width: 28px;
+  border-radius: 999px;
+  background: var(--bench-rail-mid, #c8ad7c);
+  cursor: grab;
+  touch-action: none;
+}
+.bench-scrollbar-thumb:active {
+  cursor: grabbing;
+}
+
+.task-tab-rail {
+  flex: 0 0 auto;
+  /* Sit at the BOTTOM of the (taller) bench row rather than stretching to fill
+     it — the tabs' bottom edge feeds straight into the view below, while the
+     step tracker beside them keeps its own height. The buttons carry block
+     padding (see .task-tab-btn) so the strip rises into the bench's step-label
+     band and the labels line up with the steps. (No clip worry: a step panel
+     only docks up when a step is selected, i.e. when these tabs are the
+     transparent, unselected state.) */
+  align-self: flex-end;
+  display: flex;
+  flex-direction: row;
+  gap: 0.4rem;
+  padding: 0;
+}
+
+/* Selecting a step makes the bench taller: that step's foot grows into a
+   card whose block padding hangs BELOW the step labels (see
+   `.step-bench .bench-step.selected .bench-step-foot`). A bottom-anchored
+   rail would ride that growth down and the Task/Chat labels would drop out
+   of the step-label band they're meant to sit in. Lift the rail by exactly
+   the card's downward growth (its 0.4rem bottom padding) so the labels hold
+   their line whichever tab or step is showing. */
+.task-bench-row.has-selected-step .task-tab-rail {
+  margin-bottom: 0.4rem;
+}
+
+.task-tab-btn {
+  flex: 0 0 80px;
+  width: 80px;
+  /* Block padding above and below the label so the tab grows from a thin strip
+     into a band that lines up with the bench's step labels beside it (num /
+     name / status). The rail is bottom-anchored (see .task-tab-rail), so this
+     padding lifts the centered label up off the seam into that band without
+     moving the tab's bottom edge — which must stay fused to the view below.
+     Tune the block value to raise or lower where the label lands. */
+  min-height: 25px;
+  padding: 1.35rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Mirror the bench timeline steps: no chrome until selected, then a lighter
+     parchment fill shaped like a tab (rounded top, open bottom) that blends
+     into the Task/Chat view beneath it. */
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--text-muted, var(--muted));
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.task-tab-btn:hover:not(.active) {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.task-tab-btn.active {
+  background: var(--panel, var(--surface));
+  border-color: var(--border);
+  color: var(--text);
+  position: relative;
+  z-index: 2;
+  /* Drop over the bench-row divider so the tab's open bottom covers that 1px
+     segment — no seam between the active tab and the view it feeds into. */
+  margin-bottom: -1px;
+}
+
+.task-tab-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* The populated panel is the editor "page" the selected step docks into:
+   a border around the whole area, a panel fill, and a small upward pull so
+   its top edge meets the selected bench-step's foot (the active tab). The
+   pull spans the bench's bottom padding (0.4rem) + margin (0.5rem) + the
+   .task-detail flex gap (1rem) that otherwise sits between them, plus 1px
+   so the tab's fill hides the panel's own top border beneath it. */
+.task-step-panel:not(.empty) {
+  margin-top: calc(-1.9rem - 1px);
+  border: 1px solid var(--border);
+  background: var(--panel, var(--surface));
+}
+
+.task-step-panel.empty {
+  background: transparent;
+  text-align: center;
+  padding: 1.5rem 1rem;
+}
+
+.task-step-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.task-step-panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.task-step-panel-title h4 {
+  margin: 0;
+}
+
+.step-status-pill {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  background: transparent;
+}
+
+.step-status-pill.status-done {
+  background: var(--accent, #b0724c);
+  color: var(--surface, #fff);
+  border-color: var(--accent, #b0724c);
+}
+
+.step-status-pill.status-active {
+  background: var(--success-bg, rgba(39, 174, 96, 0.12));
+  color: var(--success, #27ae60);
+  border-color: var(--success, #27ae60);
+}
+
+.task-step-panel-actions {
+  display: inline-flex;
+  gap: 0.4rem;
+}
+
+.task-step-panel-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.7rem 1rem;
+}
+
+.task-step-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.task-step-field.full-width {
+  grid-column: 1 / -1;
+}
+
+.task-step-field-label {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.task-step-field textarea {
+  font: inherit;
+  font-size: 0.88rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  resize: vertical;
+  min-height: 3.5rem;
+}
+
+.task-step-field textarea:focus {
+  outline: none;
+  border-color: var(--accent, #b0724c);
+}
+
+/* The Squisq markdown editor (MarkdownField) standing in for the plain
+   description/prompt textareas. Wrap it in the same bordered, rounded
+   box so it reads as one field among the others; the editor's own
+   toolbar + surface live inside. */
+.markdown-field {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.markdown-field:focus-within {
+  border-color: var(--accent, #b0724c);
+}
+
+.step-scripts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.step-script-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.step-script-moment {
+  min-width: 4.5rem;
+}
+
+.step-script-name {
+  font-size: 0.85rem;
+}
+
+.step-script-configure {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.task-notes-feed {
+  list-style: none;
+  margin: 0 0 1rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.task-notes-empty {
+  padding: 0.5rem 0;
+}
+
+.task-note-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+}
+
+.task-note-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+}
+
+.task-note-author {
+  font-weight: 600;
+}
+
+.task-note-author-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.task-note-author-identity > .gezel-icon {
+  flex: 0 0 auto;
+}
+
+.task-note-step {
+  margin-left: 0.2rem;
+}
+
+.task-note-delete {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0 0.3rem;
+}
+
+.task-note-delete:hover {
+  color: var(--text);
+}
+
+/* Subtle edit affordance — sits left of the delete button. Pushed
+   right via auto margin so the author/time/phase clump stays anchored
+   to the left edge of the header. */
+.task-note-edit {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.task-note-card:hover .task-note-edit,
+.task-note-edit:focus-visible {
+  opacity: 0.7;
+}
+.task-note-edit:hover {
+  opacity: 1;
+  color: var(--text);
+  background: var(--bg-subtle, rgba(0, 0, 0, 0.05));
+}
+
+/* Read-only notes hide the EditorShell's toolbar entirely so the body
+   reads as rendered prose with no chrome. The status bar is suppressed
+   via the `showStatusBar={editing}` prop. Edit mode restores both. */
+.task-note-card.read-only .squisq-toolbar {
+  display: none;
+}
+
+/* Task notes are supporting history, not long-form document prose. Keep the
+   read-only body and its edit state at the dense secondary-copy size. */
+.task-note-card .squisq-editor-shell {
+  --squisq-write-text-size: var(--text-sm);
+}
+
+.task-note-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.task-notes-composer {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem;
+}
+
+.task-notes-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.4rem;
+}
+
+.task-sessions ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.task-sessions li {
+  display: grid;
+  grid-template-columns: 120px 1fr auto;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.task-new-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: 42rem;
+}
+
+.task-new-form label,
+.task-new-form fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.task-new-form fieldset > legend {
+  padding: 0 0 0.25rem 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.task-new-form input,
+.task-new-form textarea,
+.task-new-form select {
+  padding: 0.4rem 0.55rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.task-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.task-form-actions .primary {
+  background: var(--accent, #b0724c);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 0.4rem 1rem;
+  cursor: pointer;
+}

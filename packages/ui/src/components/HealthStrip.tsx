@@ -108,7 +108,7 @@ export function HealthStrip({ label }: { label?: string } = {}) {
       )}
       {config?.debugMode === true && (
         <span
-          className="home-status-pill home-status-debug"
+          className="gz-status-pill gz-status-pill--debug"
           title="Verbose diagnostics are being written to ~/.gezel/logs/. Turn off under Settings → General when you're done troubleshooting."
         >
           ⚙ Debug mode on
@@ -120,7 +120,7 @@ export function HealthStrip({ label }: { label?: string } = {}) {
 
 function StatusPill({ ok, label }: { ok: boolean; label: string }) {
   return (
-    <span className={`home-status-pill home-status-${ok ? 'ok' : 'warn'}`}>
+    <span className={`gz-status-pill gz-status-pill--${ok ? 'ok' : 'warn'}`}>
       {ok ? '✓' : '!'} {label}
     </span>
   );
@@ -185,7 +185,7 @@ function LlamaCppEnginePill({ health }: { health: HealthResponse }) {
     ? `No bundled llama-server for ${humanBackend(detected)} on this build. Install a Gezel build that bundles the engine, or set an External engine URL under Settings → On-device → Advanced.`
     : 'No llama-server binary bundled with this build. Install a Gezel build that bundles the engine, or set an External engine URL under Settings → On-device → Advanced.';
   return (
-    <span className="home-status-pill home-status-warn" title={title}>
+    <span className="gz-status-pill gz-status-pill--warn" title={title}>
       ✗ On-device engine missing
     </span>
   );
@@ -206,7 +206,7 @@ function MlxRuntimePill({ status }: { status: MlxRuntimeStatus }) {
   if (status.phase === 'error') {
     return (
       <span
-        className="home-status-pill home-status-warn"
+        className="gz-status-pill gz-status-pill--warn"
         title={status.error ?? 'MLX runtime failed to provision'}
       >
         ✗ {label}
@@ -218,7 +218,7 @@ function MlxRuntimePill({ status }: { status: MlxRuntimeStatus }) {
   // alarming. The optional message goes in the title attribute.
   return (
     <span
-      className="home-status-pill home-status-warn"
+      className="gz-status-pill gz-status-pill--warn"
       title={status.message ?? 'Installing MLX runtime…'}
     >
       ⏳ {label}

@@ -533,7 +533,7 @@ export function RecommendedMediaDownloads() {
                     <span className="muted small">Downloading {r.name}…</span>
                     <button
                       type="button"
-                      className="home-link"
+                      className="gz-link-button"
                       onClick={() => void cancelInstall(r)}
                       aria-label={`Cancel ${r.name} download`}
                     >

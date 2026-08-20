@@ -9,7 +9,7 @@ import type {
 } from '@bendyline/gezel';
 import type { NightShiftStatusResponse, QuotaBucket, UsageResponse } from '@bendyline/gezel-client';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
 import logotypeUrl from './assets/gezellogotype.png';
 import woodtexUrl from './assets/woodtex.png';
@@ -40,7 +40,10 @@ import { requestSettingsSection } from './settings-nav.js';
 import { streamSharedAllChatEvents } from './shared-chat-events.js';
 import { syncSidebarSideFromConfig } from './sidebar-side.js';
 import { syncThemeFromConfig } from './theme.js';
-import { HomeView } from './views/HomeView.js';
+
+const HomeView = lazy(() =>
+  import('./views/HomeView.js').then(({ HomeView }) => ({ default: HomeView })),
+);
 
 // Navigation is a single `selection` driven by the left Sidebar:
 //   - `null`         → the Meester home / dashboard view
@@ -793,23 +796,25 @@ function FullApp() {
           poisonedProjects={poisonedProjects}
         />
         <main className="app-main">
-          {selection === null ? (
-            <HomeView
-              platform={window.__GEZEL__?.platform}
-              onNavigate={(v) => {
-                if (v === 'home') commitSelection(null);
-                else openArea(v);
-              }}
-            />
-          ) : (
-            <TabErrorBoundary key={tabKey(selection)} resetKey={tabKey(selection)}>
-              <TabContent
-                tab={selection}
-                activeProjectsByGezel={activeProjectsByGezel}
-                activeTurnsReady={activeTurnsReady}
+          <Suspense fallback={<div className="placeholder">Loading view…</div>}>
+            {selection === null ? (
+              <HomeView
+                platform={window.__GEZEL__?.platform}
+                onNavigate={(v) => {
+                  if (v === 'home') commitSelection(null);
+                  else openArea(v);
+                }}
               />
-            </TabErrorBoundary>
-          )}
+            ) : (
+              <TabErrorBoundary key={tabKey(selection)} resetKey={tabKey(selection)}>
+                <TabContent
+                  tab={selection}
+                  activeProjectsByGezel={activeProjectsByGezel}
+                  activeTurnsReady={activeTurnsReady}
+                />
+              </TabErrorBoundary>
+            )}
+          </Suspense>
         </main>
       </div>
     </div>

@@ -558,7 +558,7 @@ function WhileYouWait() {
       Nothing to do until this finishes — a good moment to read{' '}
       <button
         type="button"
-        className="home-link"
+        className="gz-link-button"
         onClick={() => {
           document
             .getElementById(FIRST_RUN_INTRO_ANCHOR_ID)

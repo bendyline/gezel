@@ -30,6 +30,7 @@ const PYTHON_DIR = fileURLToPath(new URL('./python', import.meta.url));
  * exit 0 with no cases, so the marker is what separates green from silent.
  */
 const STDLIB_SUITES: ReadonlyArray<{ file: string; ranMarker: RegExp }> = [
+  { file: 'qwen3_5_text_compat_test.py', ranMarker: /PASS / },
   { file: 'tool_call_stream_test.py', ranMarker: /PASS / },
   { file: 'tool_args_json_test.py', ranMarker: /PASS / },
   { file: 'tool_args_json_fuzz_test.py', ranMarker: /PASS / },

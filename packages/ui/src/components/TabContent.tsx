@@ -1,4 +1,5 @@
 import type { RecentTab } from '@bendyline/gezel';
+import { lazy } from 'react';
 import { BenchmarksView } from '../views/BenchmarksView.js';
 import { CraftbookScriptEditorView } from '../views/CraftbookScriptEditorView.js';
 import { CraftbookTabContent } from '../views/CraftbookTabContent.js';
@@ -7,7 +8,6 @@ import { DocumentDetail } from '../views/DocumentDetail.js';
 import { DocumentsView } from '../views/DocumentsView.js';
 import { GezelDetail } from '../views/GezelDetail.js';
 import { GezellenView } from '../views/GezellenView.js';
-import { HandboekView } from '../views/HandboekView.js';
 import { HistoryView } from '../views/HistoryView.js';
 import { ProjectDetailView, ProjectsView } from '../views/ProjectsView.js';
 import { ScriptEditorView } from '../views/ScriptEditorView.js';
@@ -16,6 +16,10 @@ import { SettingsView } from '../views/SettingsView.js';
 import { TaskTabContent } from '../views/TaskTabContent.js';
 import { TasksView } from '../views/TasksView.js';
 import { useDebugMode } from './useDebugMode.js';
+
+const HandboekView = lazy(() =>
+  import('../views/HandboekView.js').then(({ HandboekView }) => ({ default: HandboekView })),
+);
 
 interface TabContentProps {
   tab: RecentTab;

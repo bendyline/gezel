@@ -109,7 +109,7 @@ export function DeviceSummary() {
   return (
     <p className="muted small">
       <strong>Your device:</strong> {describe(memory)}
-      <span className="home-status-pill home-status-ok" style={{ marginLeft: '0.5rem' }}>
+      <span className="gz-status-pill gz-status-pill--ok" style={{ marginLeft: '0.5rem' }}>
         ✓ {tierLabel}
       </span>
     </p>

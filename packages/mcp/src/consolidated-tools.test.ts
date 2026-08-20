@@ -580,7 +580,7 @@ describe('consolidated MCP tools', () => {
     expect(text).toContain('[craftbook:Gilde] Vehicle physics');
     expect(text).toContain('[craftbook:local] Driving review');
     expect(text).toContain(
-      'invoke_craftbook({"craftbookId":"vehicle-physics","description":"improve the physics for how cars drive"})',
+      'call `invoke_craftbook` directly with arguments `{"craftbookId":"vehicle-physics","description":"improve the physics for how cars drive"}`',
     );
     expect(result.structuredContent).toMatchObject({
       count: 1,

@@ -452,7 +452,7 @@ export function Sidebar({
       e.preventDefault();
       dragState.current = { startX: e.clientX, startWidth: collapsed ? COLLAPSED_WIDTH : width };
       // Neutralize iframes/webviews so they don't swallow the drag (see
-      // the `body.app-resizing` rule in styles.css).
+      // the `body.app-resizing` rule in styles/01-app-shell.css).
       document.body.classList.add('app-resizing');
       document.body.style.cursor = 'col-resize';
       const widthDirection = getSidebarSide() === 'left' ? 1 : -1;

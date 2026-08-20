@@ -297,9 +297,9 @@ function ProjectControlsOverflow({
  * same actions.
  *
  * Everything that overlays out of this bar opens *upward*: the branch menu
- * and toast are hand-positioned (see styles.css), the Radix tooltip and
- * overflow popover are told `side="top"`, and the Radix selects flip on
- * their own via collision detection.
+ * and toast are hand-positioned (see styles/05-settings-and-status.css),
+ * the Radix tooltip and overflow popover are told `side="top"`, and the
+ * Radix selects flip on their own via collision detection.
  */
 export function ProjectGitStatusBar({
   projectId,

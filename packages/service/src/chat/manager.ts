@@ -368,6 +368,14 @@ const TURN_LIBRARY_RECALL_MIN_CHARS = 15;
  * the app never reads as a hang.
  */
 const BACKGROUND_DRAIN_TIMEOUT_MS = 15_000;
+const DEFAULT_INTERACTIVE_RECALL_DEADLINE_MS = 2_000;
+
+export function resolveInteractiveRecallDeadlineMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number.parseInt(env.GEZEL_AUTO_RECALL_INTERACTIVE_DEADLINE_MS ?? '', 10);
+  return Number.isFinite(raw) && raw > 0
+    ? Math.min(raw, 30_000)
+    : DEFAULT_INTERACTIVE_RECALL_DEADLINE_MS;
+}
 
 const log = createLogger('chat');
 const memLog = createLogger('memory');
@@ -769,6 +777,8 @@ interface InflightTurn {
   userText: string;
   startedAt: number;
   abort?: AbortController;
+  /** True once a provider request has actually been issued for this turn. */
+  providerStarted?: boolean;
   /** Set by `cancelInflight`; remains attached to this exact turn object. */
   cancelled?: boolean;
   /**
@@ -2739,18 +2749,12 @@ export class ChatManager {
     // effect. Providers that don't honor the signal (older
     // implementations) fall back to the `disconnect()` below.
     //
-    // `entry.abort` is set only once the turn reaches its provider phase
-    // (runSend, right before `sendAndWait`). Its presence is therefore a
-    // reliable "is there a live provider call to tear down?" signal:
-    //  - wired: abort the controller and disconnect the session below.
-    //  - not wired: the turn is still in its prologue (prompt build /
-    //    auto-recall). There's nothing to abort yet, so the cancel remains
-    //    marked on this turn object; runSend honors it the instant it wires
-    //    the controller. Do NOT disconnect the live session: setup still holds its
-    //    `state.session` reference, and racing a `disconnect()` + null
-    //    against runSend's `const session = state.session!` capture
-    //    crashed the turn with a null session.
-    const wired = entry.abort !== undefined;
+    // `entry.abort` is wired as soon as a live session exists, before optional
+    // first-turn recall, so stop can release an embedding wait too. Only
+    // disconnect the provider session after `providerStarted` flips: recall
+    // still holds `state.session`, and nulling it there races runSend's next
+    // capture. An aborted prologue exits before issuing a provider request.
+    const providerStarted = entry.providerStarted === true;
     entry.abort?.abort();
     const state = this.states.get(sessionId);
     const cancelledEvent = { type: 'cancelled' as const };
@@ -2763,7 +2767,7 @@ export class ChatManager {
       };
       this.events.publish(scope, cancelledEvent);
       this.events.publish(scope, doneEvent);
-      if (wired && state.session) {
+      if (providerStarted && state.session) {
         // Null the reference BEFORE awaiting teardown. The salvage
         // snapshot above already read everything this turn needs from
         // the live session; leaving the pointer in place while
@@ -6375,6 +6379,13 @@ export class ChatManager {
     if (!state.session) {
       fail(new Error('[chat] no live session after ensureState — this should not happen'));
     }
+    // Wire cancellation before auto-recall. The embedding worker cannot abort
+    // an ONNX call already in native code, but the interactive wait can stop
+    // immediately and the provider seam below observes the same aborted signal.
+    const turnAbort = new AbortController();
+    inflightTurn.abort = turnAbort;
+    if (inflightTurn.cancelled) turnAbort.abort();
+
     // Auto-recall: if this is the session's first USER turn and nothing
     // has been recalled yet, search memories now and rebuild the live
     // session so the injected block lands in the system prompt. Hidden
@@ -6386,10 +6397,12 @@ export class ChatManager {
     // production too. Only runs once per session and survives restarts
     // (record.recall is persisted).
     if (state.record.messages.length === 1 && !state.record.recall && !opts?.hidden) {
-      await this.tryAutoRecall(state, userText, scope);
+      this.telemetry.noteTurnPhase(sessionId, 'recall');
+      await this.tryAutoRecall(state, userText, scope, turnAbort.signal);
+      this.telemetry.noteTurnPhase(sessionId, 'preparing');
     }
     const session = state.session!;
-    // Per-turn AbortController — gives `cancelInflight` a direct
+    // The per-turn AbortController gives `cancelInflight` a direct
     // line to the provider's in-flight fetch. Without it, cancel
     // only disconnects the session (tearing down the MCP bridge
     // and SDK instance); the in-flight `sendAndWait` promise still
@@ -6397,16 +6410,12 @@ export class ChatManager {
     // on slow local models means the user hits cancel and then
     // waits another minute for the orphan turn to finish before
     // their next message can start.
-    const turnAbort = new AbortController();
-    inflightTurn.abort = turnAbort;
     if (!inflightTurn.cancelled) {
       this.inflight.set(sessionId, inflightTurn);
     }
-    // Honor a stop pressed during the async prologue above (ensureState /
-    // auto-recall), before this controller existed. The cancellation flag
-    // lives on this exact turn object; abort now so `sendAndWait` sees an already-aborted
-    // signal and unwinds before the provider call really starts, instead
-    // of running the whole turn against a cancel the user already issued.
+    // Honor a stop pressed during ensureState, before this controller existed.
+    // The cancellation flag lives on this exact turn object; abort now so
+    // auto-recall/provider work sees the parked cancellation immediately.
     if (inflightTurn.cancelled) {
       turnAbort.abort();
     }
@@ -7032,6 +7041,9 @@ export class ChatManager {
         const iterStartedAt = nowIso();
         let finalContent: string;
         try {
+          if (inflightTurn.cancelled) throw new Error('Turn cancelled by user.');
+          inflightTurn.providerStarted = true;
+          this.telemetry.noteProviderRequestStart(sessionId);
           finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
         } catch (err) {
           if (isContextOverflowError(err) && compactionsThisSend < this.maxCompactionsPerSend) {
@@ -7063,6 +7075,7 @@ export class ChatManager {
             liveSession = forced.fresh;
             liveUnsub = subscribeLive(liveSession);
             compactionsThisSend++;
+            this.telemetry.noteProviderRequestStart(sessionId);
             finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
           } else if (!isSessionGoneError(err)) throw err;
           else {
@@ -7097,6 +7110,7 @@ export class ChatManager {
             state.session = fresh;
             liveSession = fresh;
             liveUnsub = subscribeLive(liveSession);
+            this.telemetry.noteProviderRequestStart(sessionId);
             finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
           }
         }
@@ -8909,6 +8923,7 @@ export class ChatManager {
     state: LiveSessionState,
     userText: string,
     scope: PublishScope,
+    signal?: AbortSignal,
   ): Promise<void> {
     // Production uses the per-turn user-message retrieval planner. Keep this
     // frozen-system-prompt path only as compatibility for tests/embedders that
@@ -8932,8 +8947,11 @@ export class ChatManager {
         ...(gezel?.parsed.frontmatter.autoRecall !== undefined
           ? { gezelOptIn: gezel.parsed.frontmatter.autoRecall }
           : {}),
+        interactiveDeadlineMs: resolveInteractiveRecallDeadlineMs(),
+        ...(signal ? { signal } : {}),
         ...(this.debug ? { debug: this.debug } : {}),
       });
+      if (signal?.aborted) return;
       if (!hits || hits.length === 0) return;
       record.recall = {
         at: nowIso(),

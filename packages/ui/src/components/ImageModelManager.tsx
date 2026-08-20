@@ -312,7 +312,11 @@ export function ImageModelManager({ disabledReason, onModelsChanged }: Props) {
                     <td>{formatSize(m.approxSizeBytes)}</td>
                     <td className="muted small">{new Date(m.installedAt).toLocaleDateString()}</td>
                     <td>
-                      <button type="button" className="home-link" onClick={() => setToDelete(m.id)}>
+                      <button
+                        type="button"
+                        className="gz-link-button"
+                        onClick={() => setToDelete(m.id)}
+                      >
                         Delete
                       </button>
                     </td>
@@ -430,11 +434,11 @@ function ImagePullProgress({
         <code>{pull.id}</code>
         <span className="muted small">{statusLine}</span>
         {pull.error ? (
-          <button type="button" className="home-link" onClick={onRetry}>
+          <button type="button" className="gz-link-button" onClick={onRetry}>
             Retry
           </button>
         ) : (
-          <button type="button" className="home-link" onClick={onCancel}>
+          <button type="button" className="gz-link-button" onClick={onCancel}>
             Cancel
           </button>
         )}

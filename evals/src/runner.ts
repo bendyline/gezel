@@ -4,12 +4,13 @@ import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir, totalmem } from 'node:os';
 import { dirname, join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
-import type { GezelConfig } from '@bendyline/gezel';
+import type { GezelConfig, SessionTelemetryListResponse } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { startAutoAnswerer } from './auto-answer.ts';
 import { type EngineContextRecord, extractEngineContext } from './engine-context.ts';
 import {
   classifyTrial,
+  describePreProviderStall,
   readDaemonLogTailSync,
   summarizeNativeEngineIncidents,
 } from './failure-class.ts';
@@ -47,7 +48,12 @@ import {
   probeProviderAuth,
 } from './providers.ts';
 import { resolveEvalRunsDir } from './run-paths.ts';
-import { lastDeliveredSniffNudge } from './sniff-feedback.ts';
+import {
+  HARNESS_INTERVENTION_SETTLE_MS,
+  lastDeliveredHarnessIntervention,
+  lastDeliveredSniffNudge,
+  noteHarnessInterventionDelivered,
+} from './sniff-feedback.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from './spawn.ts';
 import { writeTrialFacts } from './trial-facts.ts';
 import type {
@@ -651,6 +657,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     ...(opts.disableBackgroundEnrich ? { disableBackgroundEnrich: true } : {}),
     ...(opts.enrichModelId ? { enrichModelId: opts.enrichModelId } : {}),
     ...(opts.enableModelRouting ? { enableModelRouting: true } : {}),
+    ...(scenario.requiresEmbeddings ? { enableEmbeddings: true } : {}),
   });
   // Live mock services (craftbook test.json `mocks[]`): boot BEFORE the
   // daemon so its env can carry the trial CA + credential seed file. The
@@ -816,6 +823,9 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     // tool — the two pipelines are decoupled.
     await client.updateConfig({
       ...buildProviderConfig(engine, opts.modelId),
+      // Eval prompts must be deterministic. Retrieval scenarios may enable
+      // the embedding engine above, but no trial gets unsolicited recall.
+      autoRecall: { enabled: false },
       ...(llamaEvalLaunch?.config ? llamaEvalLaunch.config : {}),
       ...(reasoningEffortConfig ? reasoningEffortConfig : {}),
       ...(evalLlamaSpecType ? { llamaCppSpecType: evalLlamaSpecType } : {}),
@@ -1184,9 +1194,12 @@ export function evalDaemonEnvForTrial(opts: {
   enableModelRouting?: boolean;
   /** Keep spawned/recovery gezels on this local provider during the trial. */
   providerLock?: ChatProvider;
+  /** Opt into embeddings only for dedicated semantic-retrieval scenarios. */
+  enableEmbeddings?: boolean;
 }): NodeJS.ProcessEnv {
   return {
     GEZEL_DISABLE_MEMORY_EXTRACTION: '1',
+    ...(opts.enableEmbeddings ? {} : { GEZEL_DISABLE_EMBEDDINGS: '1' }),
     // Capability-floor model routing is default-ON in the product but
     // MUST be off in trials: a trial home links up to three models
     // (chat + image + enrich/keurmeester), so routing would swap
@@ -2051,6 +2064,7 @@ export async function pollUntilDone(
           // HTTP failure must not silently strand the trial with a poisoned
           // session that will never be retried.
           poisonedSessionRecovery.markAttempted(poisonedTarget, latestSniff ?? undefined);
+          noteHarnessInterventionDelivered(ctx);
         } catch (err) {
           args.log(
             `[poll] poisoned-session recovery send failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
@@ -2100,6 +2114,8 @@ export async function pollUntilDone(
       }
       const hardStuckMs = Date.now() - lastHardChangeAt;
       const softStuckMs = Date.now() - lastSoftChangeAt;
+      const lastHarnessIntervention = lastDeliveredHarnessIntervention(ctx);
+      let harnessInterventionSettling = isHarnessInterventionSettling(lastHarnessIntervention);
       // An in-flight native render is legitimate non-LLM work: poking a
       // session mid-render would consume the one-shot nudges below for
       // nothing (the chat turn just queues behind the GPU lease), so
@@ -2168,6 +2184,7 @@ export async function pollUntilDone(
       if (
         !deferSoftForInflight &&
         !imageGenerationActive &&
+        !harnessInterventionSettling &&
         !reEngageNudgeAttempted &&
         softStuckMs >= reEngageThresholdMs &&
         hadAnyProgress
@@ -2209,6 +2226,8 @@ export async function pollUntilDone(
           reEngageNudgeDelivered = true;
           reEngageNudgeDeliveredAt = Date.now();
           reEngageTargetGezelId = targetId;
+          noteHarnessInterventionDelivered(ctx, reEngageNudgeDeliveredAt);
+          harnessInterventionSettling = true;
         } catch (err) {
           args.log(`[poll] re-engage nudge send failed (non-fatal): ${describeSendFailure(err)}`);
         }
@@ -2243,6 +2262,17 @@ export async function pollUntilDone(
             success: false,
             reason: `image render wedged: generate_image started but sd-server produced no output for ${stallSeconds}s (soft digest stuck at ${digest.soft})`,
             failureMode: 'engine-hung',
+            ...finalSniffOf(),
+          };
+        }
+        const telemetry = await args.client.listSessionTelemetry().catch(() => null);
+        const preProvider = describePreProviderStall(telemetry?.sessions);
+        if (preProvider) {
+          args.log(`[poll] no-progress (soft): ${preProvider}; failing trial as infra`);
+          return {
+            success: false,
+            reason: `${preProvider} for ${stallSeconds}s (soft digest stuck at ${digest.soft})`,
+            failureMode: 'chat-stalled',
             ...finalSniffOf(),
           };
         }
@@ -2341,6 +2371,7 @@ export async function pollUntilDone(
         if (
           !retryLoopNudgeAttempted &&
           !imageGenerationActive &&
+          !harnessInterventionSettling &&
           plateauMs >= RETRY_LOOP_NUDGE_WINDOW_MS &&
           toolCallsInPlateau >= RETRY_LOOP_NUDGE_TOOL_THRESHOLD
         ) {
@@ -2377,6 +2408,7 @@ export async function pollUntilDone(
               });
             }
             retryLoopNudgeDelivered = true;
+            noteHarnessInterventionDelivered(ctx);
           } catch (err) {
             args.log(
               `[poll] retry-loop nudge send failed (non-fatal): ${describeSendFailure(err)}`,
@@ -2619,6 +2651,14 @@ export async function captureFinalState(args: {
     log(`[capture] dumped ${sessions.length} session(s)`);
   } catch (err) {
     log(`[capture] listChatSessions failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  try {
+    const telemetry = await client.listSessionTelemetry();
+    await writeFile(join(runDir, 'session-telemetry.json'), JSON.stringify(telemetry, null, 2));
+    log(`[capture] snapshotted telemetry for ${telemetry.sessions.length} session(s)`);
+  } catch (err) {
+    log(`[capture] session telemetry failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // Snapshot every project's artifacts/ AND workspace/ dir, plus the
@@ -3059,6 +3099,14 @@ export function shouldDeferHardWatchdogForReEngage(args: {
   );
 }
 
+/** Do not stack a generic watchdog nudge on a just-delivered scenario repair. */
+export function isHarnessInterventionSettling(
+  lastDeliveredAt: number | null,
+  now = Date.now(),
+): boolean {
+  return lastDeliveredAt !== null && now - lastDeliveredAt < HARNESS_INTERVENTION_SETTLE_MS;
+}
+
 /**
  * Should a tripped retry-loop watchdog hold off because a turn is still
  * running?
@@ -3465,6 +3513,7 @@ async function finalize(args: {
   // rules read the daemon log; classification must never block finalize.
   let classification = classifyTrial({ success: args.success, reason: args.reason });
   let nativeIncidentLog: string | null = null;
+  let sessionTelemetry: SessionTelemetryListResponse | null = null;
   let engineContext: EngineContextRecord | null = null;
   try {
     const daemonLog = readDaemonLogTailSync(join(args.runDir, 'daemon.log'));
@@ -3472,12 +3521,23 @@ async function finalize(args: {
     nativeIncidentLog = existsSync(nativeIncidentPath)
       ? readFileSync(nativeIncidentPath, 'utf8')
       : null;
+    const sessionTelemetryPath = join(args.runDir, 'session-telemetry.json');
+    if (existsSync(sessionTelemetryPath)) {
+      try {
+        sessionTelemetry = JSON.parse(
+          readFileSync(sessionTelemetryPath, 'utf8'),
+        ) as SessionTelemetryListResponse;
+      } catch {
+        sessionTelemetry = null;
+      }
+    }
     classification = classifyTrial({
       success: args.success,
       reason: args.reason,
       failureMode: args.failureMode ?? null,
       daemonLog,
       nativeIncidentLog,
+      sessionTelemetry: sessionTelemetry?.sessions,
     });
     // Granted-context provenance (Theme E / E4): the engine's actual
     // context window per slot, plus any clamp/denial/swa-decline evidence,

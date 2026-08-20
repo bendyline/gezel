@@ -148,7 +148,7 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
 
         {!IS_APPLE_SILICON && (
           <div
-            className="home-status-pill home-status-warn"
+            className="gz-status-pill gz-status-pill--warn"
             style={{ marginTop: '0.5rem', display: 'inline-block' }}
           >
             This machine doesn't look like Apple Silicon — chat turns routed to MLX will error out
@@ -159,7 +159,7 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
         {hasExternal && (
           <div className="new-row" style={{ marginTop: '0.75rem' }}>
             <span
-              className="home-status-pill home-status-warn"
+              className="gz-status-pill gz-status-pill--warn"
               title={`External engine: ${config?.mlxBaseUrl}`}
             >
               using external engine
@@ -258,7 +258,7 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
               {resetStatus === 'resetting' ? 'Resetting…' : 'Reset gezel Python environment'}
             </button>
             {resetStatus === 'done' ? (
-              <span className="home-status-pill home-status-ok">venv was reset ✓</span>
+              <span className="gz-status-pill gz-status-pill--ok">venv was reset ✓</span>
             ) : (
               <span className="muted small">
                 Deletes the `mlx` venv; the next chat turn re-provisions it.

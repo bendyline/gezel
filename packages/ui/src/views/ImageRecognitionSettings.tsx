@@ -292,15 +292,15 @@ export function ImageRecognitionSettings() {
 
 function HealthPill({ health }: { health: RecognitionHealth }) {
   if (health.state === 'ok') {
-    return <span className="home-status-pill home-status-ok">Ready</span>;
+    return <span className="gz-status-pill gz-status-pill--ok">Ready</span>;
   }
   if (health.state === 'no-model') {
-    return <span className="home-status-pill home-status-warn">No model</span>;
+    return <span className="gz-status-pill gz-status-pill--warn">No model</span>;
   }
   if (health.state === 'error') {
-    return <span className="home-status-pill home-status-error">Error</span>;
+    return <span className="gz-status-pill gz-status-pill--error">Error</span>;
   }
-  return <span className="home-status-pill home-status-warn">Unavailable</span>;
+  return <span className="gz-status-pill gz-status-pill--warn">Unavailable</span>;
 }
 
 function HealthGuidance({ health }: { health: RecognitionHealth | null }) {

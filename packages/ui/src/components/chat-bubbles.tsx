@@ -62,8 +62,9 @@ import { formatDurationShort, toolDisplayName, toolErrorSummary } from './tool-d
 /**
  * Build the inline style for a rendered bubble body: the gezel's font
  * family plus an optional `--gezel-font-scale` CSS variable (consumed by
- * `.msg-body-rendered .squisq-linear-content` in styles.css to size the
- * font proportionally). Returns undefined when neither applies.
+ * `.msg-body-rendered .squisq-linear-content` in
+ * styles/03-shared-content.css to size the font proportionally). Returns
+ * undefined when neither applies.
  */
 function bubbleBodyStyle(fontFamily?: string, fontScale?: number): CSSProperties | undefined {
   const scaled = fontScale !== undefined && fontScale !== 1;
@@ -1526,7 +1527,7 @@ export function StreamingStatusLine({
           "queued — 3 ahead") on narrow chat panels — the live dot,
           progress bar, and token/tool counts on either side stay
           visible as the load-bearing signals. See `msg-live-status-label`
-          rule in styles.css. */}
+          rule in styles/09-chat.css. */}
       <span className="msg-live-status-label">{statusLabel}</span>
       {showProgress && (
         // Radix tooltip surfaces `thinkingDetail` (e.g. "4,096 / 7,880

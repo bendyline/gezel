@@ -1,0 +1,922 @@
+/* ── Home tab ── */
+
+.home-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem 1.25rem 0 1.25rem;
+  height: 100%;
+  overflow-y: auto;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   HOME WORKSHOP — the onboarded "front door" refresh.
+
+   All tokens + rules below are scoped under `.home-workshop` so the
+   design-handoff palette (paper / sage / terra / ink + the derived
+   --home-* family) never leaks into the rest of the app. We do NOT
+   redefine app vars (--bg / --accent / --text) here — nested chat,
+   composer, and question components keep their normal styling.
+
+   "Day" is the default; "Dusk" maps to the app's existing dark theme
+   (explicit [data-theme="dark"] OR OS dark when not pinned light).
+   ────────────────────────────────────────────────────────────────── */
+.home-workshop {
+  /* Paper & ink */
+  /* A pale mushroom beige puts a little brown warmth back into the
+     workshop without reviving the old yellow parchment cast. The
+     darker paper steps remain available for inset controls and rules. */
+  --paper: var(--home-workshop-paper);
+  --paper-2: color-mix(in srgb, var(--gezel-paper-workshop) 72%, var(--gezel-paper-inset));
+  --paper-3: color-mix(in srgb, var(--gezel-paper-workshop) 42%, var(--gezel-paper-inset));
+  --ink: var(--gezel-ink-warm);
+  --ink-2: var(--gezel-ink-warm-muted);
+  --ink-3: var(--gezel-ink-warm-quiet);
+  --rule: color-mix(in srgb, var(--gezel-paper-inset) 82%, var(--gezel-terra));
+  /* Sage (structure) */
+  --sage: var(--gezel-sage-muted);
+  --sage-deep: var(--gezel-sage-deep);
+  --sage-ink: #2f3a23;
+  --sage-soft: var(--gezel-sage-soft);
+  /* Terracotta (action / heat) */
+  --terra: var(--gezel-terra-bright);
+  --terra-deep: var(--gezel-terra-deep);
+  --terra-soft: var(--gezel-terra-soft);
+  /* Craft hues */
+  --ochre: #c89248;
+  --indigo: #4d6b9a;
+  --plum: #8a5677;
+  --moss: #6b8a5a;
+  --slate: #6b7480;
+  --live: #9ed084;
+  /* Derived home surfaces stay on the foundation paper ramp. White lifts
+     cards without adding yellow; the inset tone supplies the brown depth. */
+  --home-card: color-mix(in srgb, var(--gezel-paper-workshop) 52%, white);
+  --home-surf2: color-mix(in srgb, var(--gezel-paper-workshop) 76%, var(--gezel-paper-inset));
+  --home-border: var(--paper-3);
+  --home-hair: var(--rule);
+  --home-user: color-mix(in srgb, var(--gezel-paper-workshop) 58%, var(--gezel-paper-inset));
+  --home-amber: color-mix(in srgb, var(--gezel-terra-bright) 7%, transparent);
+  --home-amber-bd: color-mix(in srgb, var(--gezel-terra-bright) 30%, transparent);
+  /* Provenance mono — JetBrains isn't bundled; system mono is fine at 11px. */
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Break out of .app-main's 1rem 1.25rem padding for a full-bleed
+     workshop. The negative margins exactly cancel the parent padding. */
+  margin: -1rem -1.25rem;
+  height: calc(100% + 2rem);
+  display: flex;
+  flex-direction: column;
+  color: var(--ink);
+  background: radial-gradient(
+      1200px 600px at 80% -10%,
+      color-mix(in srgb, var(--gezel-sage-muted) 10%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      900px 500px at -10% 110%,
+      color-mix(in srgb, var(--gezel-terra-bright) 6%, transparent),
+      transparent 60%
+    ), var(--paper);
+  overflow: hidden;
+}
+
+[data-theme="dark"] .home-workshop {
+  --paper: var(--home-workshop-paper);
+  --paper-2: #2a2620;
+  --paper-3: #3a342b;
+  --ink: #f0e8d5;
+  --ink-2: #c8baa0;
+  --ink-3: #8b7e6b;
+  --rule: #4a4234;
+  --sage-soft: #3a4634;
+  --home-card: #28241e;
+  --home-surf2: #201d18;
+  --home-border: #3a342b;
+  --home-hair: #4a4234;
+  --home-user: #322d25;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .home-workshop {
+    --paper: var(--home-workshop-paper);
+    --paper-2: #2a2620;
+    --paper-3: #3a342b;
+    --ink: #f0e8d5;
+    --ink-2: #c8baa0;
+    --ink-3: #8b7e6b;
+    --rule: #4a4234;
+    --sage-soft: #3a4634;
+    --home-card: #28241e;
+    --home-surf2: #201d18;
+    --home-border: #3a342b;
+    --home-hair: #4a4234;
+    --home-user: #322d25;
+  }
+}
+
+/* — Shared bits — */
+.home-workshop-eyebrow {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+/* Circular collapse/expand toggle — a single symmetric chevron, no label. */
+.home-workshop-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--home-border);
+  background: var(--home-card);
+  color: var(--ink-2);
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.home-workshop-collapse-btn:hover {
+  border-color: var(--rule);
+  background: var(--home-surf2);
+  color: var(--ink);
+}
+.home-workshop-collapse-btn > svg {
+  display: block;
+}
+/* — Greeting band — */
+.home-workshop-greeting {
+  border-bottom: 1px solid var(--home-hair);
+  padding: 20px 54px 32px;
+  flex: 0 0 auto;
+}
+.home-workshop-greeting-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.home-workshop-greeting-cols {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+.home-workshop-greeting-left {
+  flex: 1 1 340px;
+  min-width: 280px;
+}
+.home-workshop-headline {
+  font-family: var(--font-display);
+  font-size: 31px;
+  line-height: 1;
+  margin: 0;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+/* Meester status headline as a CTA — the whole headline is the click
+   target, styled as text (not a button) with a hover underline so the
+   affordance is discoverable without shouting. */
+.home-workshop-headline-cta {
+  all: unset;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+.home-workshop-headline-cta:hover,
+.home-workshop-headline-cta:focus-visible {
+  text-decoration: underline;
+  text-decoration-color: var(--terra-deep);
+  text-underline-offset: 6px;
+  text-decoration-thickness: 2px;
+}
+.home-workshop-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.home-workshop-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  white-space: nowrap;
+  color: var(--ink-2);
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--home-card);
+  border: 1px solid var(--home-border);
+}
+.home-workshop-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+/* Collapsed greeting — single status row */
+.home-workshop-greeting-collapsed {
+  border-bottom: 1px solid var(--home-hair);
+  padding: 16px 54px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  flex: 0 0 auto;
+}
+.home-workshop-greeting-collapsed .home-workshop-headline {
+  font-size: 19px;
+  white-space: nowrap;
+}
+.home-workshop-vrule {
+  width: 1px;
+  height: 16px;
+  background: var(--home-hair);
+}
+
+/* Tip of the day */
+.home-workshop-tip {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  max-width: 640px;
+  margin-top: 20px;
+}
+.home-workshop-tip-sprout {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+.home-workshop-tip-label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.home-workshop-tip-label {
+  color: var(--sage-deep);
+}
+.home-workshop-tip-cycle {
+  all: unset;
+  cursor: pointer;
+  color: var(--ink-3);
+  font-size: 12px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+.home-workshop-tip-cycle:hover {
+  background: var(--home-surf2);
+}
+.home-workshop-tip-body {
+  font-family: var(--font-display);
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--ink);
+  margin-top: 2px;
+}
+.home-workshop-tip-action {
+  all: unset;
+  cursor: pointer;
+  color: var(--terra-deep);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.home-workshop-tip-action:hover {
+  text-decoration: underline;
+}
+
+/* Meester status report tab panel */
+.home-workshop-status-report {
+  max-width: 640px;
+}
+.home-workshop-status-body {
+  max-height: 260px;
+  overflow-y: auto;
+  font-size: var(--text-md);
+  line-height: 1.55;
+  color: var(--ink);
+}
+.home-workshop-status-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+.home-workshop-status-meta {
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}
+.home-workshop-tip-action:disabled {
+  cursor: default;
+  color: var(--ink-3);
+  text-decoration: none;
+}
+
+/* Right cluster — standing meester figure on a shelf + tour toggle */
+.home-workshop-greeting-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 14px;
+}
+.home-workshop-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 96px;
+}
+.home-workshop-shelf {
+  width: 84px;
+  height: 5px;
+  margin-top: -2px;
+  border-radius: 1px;
+  background: linear-gradient(180deg, #c8b189 0%, #a99068 100%);
+  border-top: 1px solid #8b7752;
+  border-bottom: 1px solid #6a5838;
+}
+.home-workshop-figure-label {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 500;
+  margin-top: 8px;
+  color: var(--ink);
+}
+.home-workshop-figure-label em {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+/* Greeting tabs — the date label and the "what is gezel" tour sit side
+   by side as tabs; the active one's content fills the left column. */
+.home-workshop-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.home-workshop-tab {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--ink-3);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.home-workshop-tab:hover {
+  color: var(--ink-2);
+  background: var(--home-card);
+}
+.home-workshop-tab.is-active {
+  color: var(--ink);
+  background: var(--home-card);
+  border-color: var(--home-border);
+  cursor: default;
+}
+
+/* Tour content rendered inline in the left column (replaces the greeting
+   + tip when the tour tab is active). */
+.home-workshop-tour-inline {
+  display: flex;
+  flex-direction: column;
+}
+
+/* — Body: full-width conversation — */
+.home-workshop-body {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  /* Stretch the single row to the body's full height so the chat column
+     reaches the bottom of the window instead of sizing to content. */
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+.home-workshop-main {
+  padding: 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.home-workshop-conversation {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Bound the reused chat surface so the timeline scrolls internally and the
+   composer stays pinned at the bottom — a long conversation never pushes the
+   compose box below the fold. The existing
+   `.chat-rail-main .chat-timeline-viewport` flex rule does the actual scroll
+   once the chain above is height-bounded. */
+.home-workshop-conversation .chat-rail-main {
+  flex: 1;
+  min-height: 0;
+  background: var(--home-card);
+  overflow: hidden;
+}
+/* The shared chat-rail grid reserves a 22rem column for the references
+   side-panel. On the workshop home there's no panel until references are
+   surfaced, so collapse to a single full-width column — the chat then fills
+   the whole workshop. The :not() guard keeps the 3-column split layout
+   intact once a side panel does open. */
+.home-workshop-conversation .chat-rail-body:not(.chat-rail-body-split) {
+  grid-template-columns: minmax(0, 1fr);
+  /* The chat-rail grid's row is auto-height by default, so the chat-rail-main
+     cell only grows to its content. Stretch the row so the timeline + composer
+     fill the full height of the conversation column down to the window bottom. */
+  grid-template-rows: minmax(0, 1fr);
+  /* The shared ChatRail always renders a *second* grid child (the
+     ChatReferences drawer/grip) after `.chat-rail-main`. With only one
+     explicit row that second child falls into an IMPLICIT auto row, which
+     measured at 18px — stealing height from the bottom of the column so the
+     chat surface stopped ~30px short of the window bottom (the visible gap
+     under the composer). Collapse any implicit row to 0 and pin both children
+     into the single explicit row so the references child overlays row 1
+     instead of adding a row. */
+  grid-auto-rows: 0;
+}
+.home-workshop-conversation .chat-rail-body:not(.chat-rail-body-split) > * {
+  grid-row: 1;
+  grid-column: 1;
+}
+.home-workshop-conversation-eyebrow {
+  margin-bottom: 2px;
+}
+
+.home-workshop-rail-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.home-workshop-rail-hint {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.home-workshop-rail-empty {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  font-family: var(--font-display);
+  font-style: italic;
+}
+
+/* Responsive spacing for narrow widths. */
+@media (max-width: 920px) {
+  .home-workshop-greeting,
+  .home-workshop-main {
+    padding-left: 28px;
+    padding-right: 28px;
+  }
+}
+
+/* Held invisible for the first moments of the boot verdict. A configured
+   install settles in well under half a second, and a spinner that appears
+   and vanishes in that window reads as a glitch — worse than an empty
+   surface. Only a genuinely slow probe ever reveals it. */
+.home-loading-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 3rem 1.25rem;
+  color: var(--text-muted, rgba(0, 0, 0, 0.55));
+  font-size: 0.95rem;
+  animation: home-loading-appear 0.25s ease 0.6s both;
+}
+
+@keyframes home-loading-appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.home-loading-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: home-loading-spin 0.8s linear infinite;
+}
+
+@keyframes home-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.home-intro {
+  background: var(--surface);
+  border: none;
+  border-radius: 0;
+  box-shadow: var(--surface-shadow);
+  padding: 1rem 1.25rem;
+}
+
+/* Intro is the "brand card" — always sage regardless of theme, with the
+   cream titlebar ink as the foreground color so it reads as the same
+   material as the window chrome. */
+.home-intro {
+  background: var(--titlebar);
+  color: var(--titlebar-ink);
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+  padding: 1.25rem 1.5rem;
+}
+
+.home-intro-body {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The intro body is the "What is gezel?" Handboek article embedded as a
+   live page: a row of controls (Open in Handboek + the Read/Watch
+   tray), then the page itself — a cream sheet resting on the sage card. */
+.home-intro-article-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.35rem 0 0.6rem;
+}
+
+.home-intro-page {
+  background: var(--surface);
+  color: var(--text);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--surface-shadow);
+  overflow: hidden;
+}
+
+.home-intro-doc {
+  max-height: 26rem;
+  overflow-y: auto;
+  padding: 0.5rem 1.5rem 1rem;
+}
+
+/* Keep the embedded page's reading measure book-like, matching
+   .handboek-doc. */
+.home-intro-doc > * {
+  max-width: 52rem;
+  margin: 0 auto;
+}
+
+/* Squisq's LinearDocView sizes its pages against a full-height viewer;
+   inside the intro card the article should flow at natural content
+   height instead (same override as `.msg-body-rendered`). */
+.home-intro-doc .squisq-linear {
+  height: auto;
+  overflow: visible;
+}
+
+.home-intro-player {
+  height: 24rem;
+  display: flex;
+  padding: 0.75rem;
+}
+
+.home-intro-player > * {
+  flex: 1;
+  min-height: 0;
+}
+
+/* The artisan-bench brand mark inside the article ships at figure resolution;
+   in document views it reads as a small editorial mark, not a hero. Width is
+   explicit rather than a max-height cap so the frame below can shrink-wrap it
+   (a height-capped `width: auto` replaced element still contributes its full
+   intrinsic width to the parent's fit-content size). */
+.home-intro-doc img[alt="gezel-mark"] {
+  width: 150px;
+  height: auto;
+  display: block;
+}
+
+/* Squisq lays the mark out as a feature-split media column, so the framed
+   plate spans half the section while the editorial-sized mark sits at its
+   left edge. The mark carries its own painted ground — fit the plate to the
+   artwork and centre it in the column instead of framing dead space. */
+.home-intro-doc .squisq-page-media-frame:has(> img[alt="gezel-mark"]) {
+  width: fit-content;
+  margin-inline: auto;
+}
+
+.home-intro h2 {
+  /* Lighten the sentence weight so the handdrawn wordmark reads as the
+     emphasis anchor instead of the heading's bold type. */
+  font-weight: 400;
+  font-size: 1.05rem;
+}
+
+.home-intro-logotype {
+  /* Sit the handdrawn wordmark inline with the heading text so it reads
+     as a natural stand-in for the word "gezel". Negative vertical-align
+     drops the glyph so its baseline lines up with the sentence baseline
+     (the PNG has descender whitespace baked in). */
+  height: 1.1em;
+  width: auto;
+  display: inline-block;
+  vertical-align: -0.3em;
+  margin-right: 0.35em;
+  user-select: none;
+  -webkit-user-drag: none;
+  pointer-events: none;
+}
+
+.home-intro header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 0.4rem;
+}
+
+.home-intro h2 {
+  margin: 0;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Scoped to the card's own prose (the setup call-to-action under the
+   embedded page) — the embedded Handboek article inside
+   .home-intro-page styles its own text via the squisq theme. */
+.home-intro-body > p {
+  margin: 0.9rem 0;
+  color: var(--titlebar-ink);
+  max-width: 800px;
+  text-align: justify;
+  hyphens: auto;
+}
+
+.home-intro-body > p strong {
+  /* Keep emphasis visible on the sage field without blaring. */
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.home-intro .gz-link-button {
+  /* The Hide link needs to ride on sage; pin it to the cream ink. */
+  color: var(--titlebar-ink);
+  opacity: 0.85;
+}
+
+.home-intro .gz-link-button:hover {
+  opacity: 1;
+}
+
+.home-intro-toggle {
+  background: transparent;
+  border: none;
+  color: var(--titlebar-ink);
+  opacity: 0.75;
+  cursor: pointer;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-size: 1rem;
+  line-height: 1;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.home-intro-toggle:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.home-intro code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  padding: 0.05rem 0.3rem;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+}
+
+.home-intro-compact {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  /* Inherit cream ink from the parent .home-intro instead of overriding
+     to --muted (a dark grey in light mode that vanishes against the sage
+     titlebar). The toggle below already keys to --titlebar-ink for the
+     same reason. */
+  color: var(--titlebar-ink);
+}
+
+/* First-run setup: the "First run setup" heading + its slightly-indented
+   body, so the setup steps (chat model, media, experience, security) read as
+   one grouped block nested under the heading. */
+.home-firstrun-heading {
+  font-size: 1.6rem;
+  margin: 1.25rem 0 0.5rem;
+}
+/* Setup now leads the first-run page, so the heading usually sits directly
+   under the view's own padding — drop the leading margin there. It keeps the
+   1.25rem only when something (the update banner) is stacked above it. */
+.home-view > .home-firstrun-heading:first-child {
+  margin-top: 0;
+}
+.home-firstrun-lede {
+  margin: 0 0 0.9rem;
+  padding-left: 1.25rem;
+  font-size: 0.9rem;
+}
+.home-firstrun-body {
+  padding-left: 1.25rem;
+}
+/* Indent the content under each first-run section's <h3>: pad the section, then
+   pull the heading back to the section's left edge — so the heading stays put
+   and its body reads as nested beneath it. Sections without a heading (e.g. the
+   "Manage Chat AI Models" link) are left flush with the headings. */
+.home-firstrun-body .setup-section:has(> h3) {
+  padding-left: 1rem;
+}
+.home-firstrun-body .setup-section:has(> h3) > h3 {
+  margin-left: -1rem;
+}
+/* Reserve height for the tallest posture description (Super Lockdown) so
+   switching security modes in first run doesn't reflow the page or shift the
+   scrollbar. Scoped to first run so the Settings security tab is untouched. */
+.home-firstrun-body .engagement-mode-description {
+  min-height: 6rem;
+}
+
+/* Line the "Manage Chat AI Models" link (and its blurb) up with the install
+   banner's text above it, which is inset by the banner's border + padding. */
+.home-firstrun-body .home-ondevice-link {
+  padding-left: 1rem;
+}
+
+/* Extra breathing room above the media section so it reads as separate from
+   the more important chat-model setup above it. */
+.home-media-section {
+  --home-media-control-width: 30rem;
+  padding-top: 10px;
+}
+
+/* First-run "on-device media" download list (RecommendedMediaDownloads).
+   Indented slightly so the per-modality picks read as children of the
+   size-aware download-plan button above them. */
+.home-media-downloads {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  padding-left: 1rem;
+  width: min(100%, calc(var(--home-media-control-width) + 1rem));
+  box-sizing: border-box;
+}
+.home-media-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  width: 100%;
+}
+.home-media-row > .home-media-btn {
+  width: 100%;
+  text-align: left;
+}
+
+/* Per-modality install progress — same green bar as the chat model banner
+   (reuses `.first-run-banner-bar*`), constrained so it doesn't span full width. */
+.home-media-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 100%;
+  max-width: var(--home-media-control-width);
+}
+.home-media-progress-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.home-media-progress-heading .gz-link-button {
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+}
+
+/* Media download buttons — "Download all" and each per-modality pick share
+   one lighter look: a soft accent tint + accent outline (overrides the
+   accent-filled base `button` rule), which reads much lighter in dark mode. */
+.home-media-btn {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+.home-media-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.home-media-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.home-media-btn-primary {
+  padding: 0.5rem 0.9rem;
+  background: var(--accent);
+  color: var(--accent-selection-ink);
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--accent-selection-ink));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 1px 2px rgba(60, 30, 10, 0.2);
+  font-weight: 600;
+}
+.home-media-btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, var(--titlebar-ink));
+}
+.home-media-plan-hint {
+  max-width: var(--home-media-control-width);
+  margin: 0.4rem 0 0;
+}
+
+.home-media-plan-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+}
+.home-media-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 1rem 0;
+  padding: 0;
+  border: 0;
+}
+.home-media-plan-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  cursor: pointer;
+}
+.home-media-plan-item:has(input:checked) {
+  border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+.home-media-plan-item input {
+  flex: 0 0 auto;
+  margin-top: 0.2rem;
+  accent-color: var(--accent);
+}
+.home-media-plan-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.home-media-plan-name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-weight: 600;
+}
+.home-media-plan-large {
+  flex: 0 0 auto;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--warning) 50%, var(--border));
+  border-radius: var(--radius-sm);
+  background: var(--warning-bg);
+  color: color-mix(in srgb, var(--warning) 55%, var(--text));
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.home-media-plan-summary {
+  display: flex;
+  min-height: 3.25rem;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}

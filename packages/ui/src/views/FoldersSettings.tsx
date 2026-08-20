@@ -214,7 +214,7 @@ export function FoldersSettings() {
       {error && (
         <p className="error small" role="alert">
           {error}{' '}
-          <button type="button" className="home-link" onClick={() => setError(null)}>
+          <button type="button" className="gz-link-button" onClick={() => setError(null)}>
             dismiss
           </button>
         </p>

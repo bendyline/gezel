@@ -116,18 +116,22 @@ export function CopilotLoginCommand({
           </button>
         )}
         {state.kind === 'streaming' && (
-          <button type="button" className="home-link" onClick={cancel}>
+          <button type="button" className="gz-link-button" onClick={cancel}>
             Cancel
           </button>
         )}
         {(state.kind === 'done' || state.kind === 'error') && (
-          <button type="button" className="home-link" onClick={() => setState({ kind: 'idle' })}>
+          <button
+            type="button"
+            className="gz-link-button"
+            onClick={() => setState({ kind: 'idle' })}
+          >
             {state.kind === 'done' && state.code === 0 ? 'Dismiss' : 'Try again'}
           </button>
         )}
         <button
           type="button"
-          className="home-link"
+          className="gz-link-button"
           onClick={() => setShowCommand((v) => !v)}
           title="Prefer to run it yourself in a separate terminal"
         >

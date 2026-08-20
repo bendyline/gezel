@@ -463,7 +463,7 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
           {roleDefault.groupIds.length > 0 && (
             <button
               type="button"
-              className="home-link"
+              className="gz-link-button"
               disabled={busy !== null}
               onClick={() => void customizeFromRoleDefault()}
             >
@@ -538,7 +538,7 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
               <Dialog.Title asChild>
                 <h3 style={{ margin: 0 }}>Add toolset</h3>
               </Dialog.Title>
-              <button type="button" className="home-link" onClick={() => setShowPicker(false)}>
+              <button type="button" className="gz-link-button" onClick={() => setShowPicker(false)}>
                 Cancel
               </button>
             </header>
@@ -613,7 +613,11 @@ export function ToolsetsEditor({ scope, subject, hint }: ToolsetsEditorProps) {
                   you trust. Environment values and HTTP headers are kept in Gezel’s secret store.
                 </p>
                 <div className="toolsets-custom-actions">
-                  <button type="button" className="home-link" onClick={() => setShowPicker(false)}>
+                  <button
+                    type="button"
+                    className="gz-link-button"
+                    onClick={() => setShowPicker(false)}
+                  >
                     Cancel
                   </button>
                   <button

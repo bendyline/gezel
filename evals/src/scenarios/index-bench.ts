@@ -224,6 +224,7 @@ async function setup(ctx: EvalContext): Promise<void> {
 
 export const indexBenchScenario: EvalScenario = {
   id: 'index-bench',
+  requiresEmbeddings: true,
   description:
     'Direct index-quality benchmark (no agent): seeds a pinned real-codebase corpus, measures golden-query retrieval before/after LLM enrichment, and reports coverage + cost. The --models sweep is the enricher A/B.',
   prompt: 'Index bench runs entirely in setup; this prompt is never sent.',

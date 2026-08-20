@@ -200,7 +200,7 @@ function VideoGeneratorInstallDialog({
             <Dialog.Title asChild>
               <h3 style={{ margin: 0 }}>Add a video-generator gezel</h3>
             </Dialog.Title>
-            <button type="button" className="home-link" onClick={onClose} disabled={busy}>
+            <button type="button" className="gz-link-button" onClick={onClose} disabled={busy}>
               Cancel
             </button>
           </header>

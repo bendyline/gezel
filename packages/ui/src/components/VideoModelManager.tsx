@@ -402,7 +402,7 @@ export function VideoModelManager({
                       ) : (
                         <button
                           type="button"
-                          className="home-link"
+                          className="gz-link-button"
                           onClick={() => setToDelete(m.id)}
                         >
                           Delete
@@ -548,11 +548,11 @@ function VideoPullProgress({
         <code>{pull.id}</code>
         <span className="muted small">{statusLine}</span>
         {pull.error ? (
-          <button type="button" className="home-link" onClick={onRetry}>
+          <button type="button" className="gz-link-button" onClick={onRetry}>
             Retry
           </button>
         ) : (
-          <button type="button" className="home-link" onClick={onCancel}>
+          <button type="button" className="gz-link-button" onClick={onCancel}>
             Cancel
           </button>
         )}

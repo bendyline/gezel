@@ -1,0 +1,576 @@
+:root {
+  color-scheme: light dark;
+
+  /* Height of the toolbar band that runs across the top of a project's
+     body: the chat's pill row and, beside it, the output pane's launch
+     toolbar. Both consume this so the two read as one continuous bar
+     across the split and can't drift apart. */
+  --chat-toolbar-band-height: 66px;
+
+  /* Typography tokens.
+     `--font-ui` (Hanken Grotesk) is the default everywhere: UI chrome,
+     form controls, buttons, descriptions, dropdowns, input text. The sans
+     keeps dense controls scanable and crisp.
+     `--font-display` (PT Serif) carries the editorial register and is
+     applied explicitly to headings, brand surfaces, and long-form prose
+     (chat messages, the Home intro card, markdown body copy).
+     'OpenMoji Color' is scoped to emoji codepoints via unicode-range in
+     fonts.css so it fills emoji glyphs in either stack without affecting
+     text. System emoji fonts stay as fallbacks if OpenMoji fails to load. */
+  --font-ui: "Hanken Grotesk", "OpenMoji Color", "Apple Color Emoji", "Segoe UI Emoji",
+    "Noto Color Emoji", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "PT Serif", "OpenMoji Color", "Apple Color Emoji", "Segoe UI Emoji",
+    "Noto Color Emoji", Georgia, "Times New Roman", serif;
+  font-family: var(--font-ui);
+
+  /* Type scale. A small, deliberate set of sizes so chrome (settings,
+     dialogs, panels) reads as one system instead of a spread of ad-hoc
+     values. Long-form/editorial surfaces (chat, Home intro) keep 1rem+
+     of their own; these tokens size the dense UI chrome. See
+     docs/ux.md → Typography. */
+  --text-2xs: 0.72rem; /* micro labels, badges, uppercase eyebrows */
+  --text-xs: 0.8rem; /* helper & caption text */
+  --text-sm: 0.85rem; /* dense controls, secondary body copy */
+  --text-md: 0.9rem; /* default UI body */
+  --text-lg: 1rem; /* emphasized body, dialog/panel sub-headings */
+  --text-xl: 1.1rem; /* panel & dialog section headings */
+
+  /* Gezel foundation palette.
+     These are the small set of authored colors for app chrome. Component
+     rules consume the semantic aliases below (--bg, --panel, --surface,
+     --text, --accent, etc.); scoped surfaces such as Home may derive nearby
+     tones from these primitives, but should not start a parallel palette. */
+  --gezel-paper-canvas: #eae5d6;
+  --gezel-paper-workshop: #efe6dc;
+  --gezel-paper-panel: #f3eddf;
+  --gezel-paper-reading: #f1e9e1;
+  --gezel-paper-reading-inset: #e8dfd7;
+  --gezel-paper-handoff: #efebe8;
+  --gezel-paper-control: #ece8e5;
+  --gezel-paper-control-deep: #e4dfdc;
+  --gezel-paper-inset: #ddd3bd;
+  --gezel-ink: #1c1c1c;
+  --gezel-ink-muted: #666;
+  --gezel-ink-warm: #2a2520;
+  --gezel-ink-warm-muted: #5a4f42;
+  --gezel-ink-warm-quiet: #8b7e6b;
+  --gezel-sage: #667f62;
+  --gezel-sage-muted: #8a9a76;
+  --gezel-sage-deep: #5c6a4a;
+  --gezel-sage-forest: #3d4d3a;
+  --gezel-sage-soft: #d6dec6;
+  --gezel-terra: #b0724c;
+  --gezel-terra-hover: #996142;
+  --gezel-terra-raised: #9c6440;
+  --gezel-terra-bright: #c97553;
+  --gezel-terra-deep: #9a4e30;
+  --gezel-terra-soft: #f0d4bf;
+  --gezel-cream-ink: #f3ede0;
+  --gezel-toolbar-ink: #5c4937;
+
+  /* Semantic palette */
+  --border: rgba(127, 127, 127, 0.25);
+  /* Warm canvas/parchment tone — sits gracefully under the sage-green
+     titlebar and the warm-brown accent. The panel stays brighter so
+     content cards read as elevated paper against the canvas, but only
+     by a small step so the chrome doesn't read as stark white sitting
+     in cream — it should feel like nested paper, not a contrast
+     boundary. */
+  --bg: var(--gezel-paper-canvas);
+  --home-workshop-paper: var(--gezel-paper-workshop);
+  --panel: var(--gezel-paper-panel);
+  /* Chat prose sits on a quiet mushroom beige in light mode. Keep this
+     matched to `GEZEL_LIGHT_SURFACE.background` in chat-theme.ts so the
+     Squisq interior and its outer bubble remain one continuous surface. */
+  --chat-bubble-bg: var(--gezel-paper-reading);
+  --chat-handoff-bg: var(--gezel-paper-handoff);
+  --chat-handoff-border: rgba(112, 98, 90, 0.32);
+  /* The recipient, thread, and action rows form one warm header band above
+     the lighter writing surface. */
+  --chat-compose-header-bg: color-mix(in srgb, var(--panel) 68%, var(--surface));
+  /* Thread selection belongs to the chat surface: keep its trigger on the
+     same warm reading paper as the conversation, with a subtly deeper menu.
+     Generic control gray reads blue beside the parchment composer. */
+  --chat-thread-bg: var(--chat-bubble-bg);
+  --chat-thread-menu-bg: color-mix(in srgb, var(--chat-bubble-bg) 82%, var(--surface));
+  /* In light mode `--surface` is a deeper, more saturated step than
+     the canvas, used for inset cards / inputs that should read as
+     pressed-into the page. Dark mode keeps the usual additive
+     elevation. */
+  --surface: var(--gezel-paper-inset);
+  --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 6px 18px rgba(0, 0, 0, 0.06);
+  /* Sandboxed previews make their scrollbar track transparent, so the iframe
+     backing becomes the visible tray. Keep it white for ordinary light web
+     pages and swap to the app canvas in dark mode. */
+  --preview-frame-bg: #fff;
+  /* Shadow the elevated main pane casts onto the recessed navigation rail
+     along their shared seam. Darker in dark mode where a faint black
+     gradient would vanish into the near-black panel. */
+  --sidebar-seam-shadow: rgba(0, 0, 0, 0.1);
+  /* The titlebar sits above the main project pane. Keep this shadow separate
+     from the sidebar seam so the top edge can carry more depth without
+     making the vertical divider feel heavy. */
+  --titlebar-pane-shadow: rgba(0, 0, 0, 0.18);
+  --accent: var(--gezel-terra);
+  --accent-hover: var(--gezel-terra-hover);
+  /* Dark ink keeps selected text legible on both themes' medium-orange
+     accent fills. */
+  --accent-selection-ink: #231207;
+  --text: var(--gezel-ink);
+  --text-muted: var(--gezel-ink-muted);
+  /* Tool icons use a warmer ink than body copy on light parchment.
+     Applied only by light-theme toolbar rules so dark-mode contrast and
+     active-state colors keep their existing treatments. */
+  --toolbar-icon-ink: var(--gezel-toolbar-ink);
+
+  /* Brand palette */
+  --titlebar: var(--gezel-sage);
+  --titlebar-ink: var(--gezel-cream-ink);
+  /* Veil alpha that mutes the wood-grain titlebar texture. The grain is
+     screened over --titlebar, then this near-opaque sage green is laid on
+     top at `normal` blend so only a whisper of grain shows through across
+     the whole bar — a quiet texture, not a feature. Raise the alpha for
+     fainter grain, lower it for stronger. */
+  --titlebar-tex-veil: rgba(102, 127, 98, 0.88);
+  /* Fill colour the home-tab gezel logotype flips to when active.
+     Light mode: dark forest green that complements the sage titlebar
+     and contrasts strongly with the cream-tan tab background. Dark
+     mode keeps cream (no flip needed — the lifted tab is dark and
+     the original cream already pops). */
+  --logo-active-fill: var(--gezel-sage-forest);
+
+  /* Semantic colors */
+  --success: #27ae60;
+  --success-bg: rgba(39, 174, 96, 0.12);
+  --warning: #e67e22;
+  --warning-bg: rgba(230, 126, 34, 0.12);
+  --danger: #c0392b;
+  --danger-bg: rgba(192, 57, 43, 0.12);
+
+  /* Unified-diff blocks (tool-call edits). Deeper ink than the semantic
+     status colors so code text stays readable on the parchment surface;
+     dark-mode overrides below swap to the pastel-on-dark palette. */
+  --diff-add: #1e7e44;
+  --diff-add-bg: rgba(39, 174, 96, 0.1);
+  --diff-rem: #b03a2e;
+  --diff-rem-bg: rgba(192, 57, 43, 0.08);
+  --diff-hunk: #3a5fbf;
+  --diff-surface: rgba(0, 0, 0, 0.04);
+  --diff-border: rgba(0, 0, 0, 0.12);
+  --diff-gutter: rgba(0, 0, 0, 0.35);
+  --diff-sep: rgba(0, 0, 0, 0.45);
+
+  /* Focus ring */
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+
+  /* Spacing scale */
+  --space-xs: 0.25rem;
+  --space-sm: 0.5rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
+
+  /* Radii. Controls are mostly-square: --radius-sm for badges/chips,
+     --radius-md for keys/buttons/inputs, --radius-lg for trays + small
+     surfaces. Fully-rounded (999px / 50%) is reserved for true circles:
+     dots, avatars, scrollbar thumbs, switch knobs. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* Keys & trays — the 3D treatment for choice controls (docs/ux.md →
+     "Controls: keys in trays"). A tray is a shallow recess routed into the
+     bench; keys are raised, mostly-square caps; the chosen key sits pressed
+     and latched. Shadows model one soft light source from above. */
+  --tray-bg: var(--gezel-paper-inset);
+  --tray-border: rgba(92, 74, 55, 0.22);
+  --tray-shadow: inset 0 1px 3px rgba(60, 45, 30, 0.16), inset 0 -1px 0 rgba(255, 255, 255, 0.35);
+  --key-bg: linear-gradient(to bottom, #f7f1e2, #ece4d0);
+  --key-bg-hover: linear-gradient(to bottom, #fbf6e9, #f0e8d5);
+  --key-border: rgba(92, 74, 55, 0.3);
+  --key-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(60, 45, 30, 0.18), 0 2px 3px
+    rgba(60, 45, 30, 0.08);
+  --key-pressed-bg: linear-gradient(to bottom, var(--gezel-terra-raised), var(--gezel-terra));
+  --key-pressed-border: #8f5a3a;
+  --key-pressed-ink: #fff6ea;
+  --key-pressed-shadow: inset 0 1px 2px rgba(60, 30, 10, 0.28);
+
+  /* Scrollbars — a quiet greige-brown over the light canvas keeps the
+     control warm without the old yellow-orange cast. Dark mode swaps
+     to a muted cream over its dark canvas below. */
+  --scrollbar-thumb: rgba(112, 98, 90, 0.42);
+  --scrollbar-thumb-hover: rgba(112, 98, 90, 0.62);
+  --scrollbar-track: rgba(112, 98, 90, 0.08);
+
+  /* Alias for the palette's muted text. Dozens of rules reference
+     `var(--muted, <fallback>)`; without this alias every one silently
+     used its fallback — including a near-invisible translucent white on
+     the Documents empty state. The indirection resolves per theme. */
+  --muted: var(--text-muted);
+
+  /* Native form controls (checkboxes, radios, ranges, progress) pick up
+     the terracotta accent instead of the UA's default blue — inherited
+     everywhere, re-resolved per theme through the variable. */
+  accent-color: var(--accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --gezel-paper-canvas: #141517;
+    --gezel-paper-workshop: #1f1c18;
+    --gezel-paper-panel: #1c1d20;
+    --gezel-paper-reading: var(--gezel-paper-panel);
+    --gezel-paper-control: var(--gezel-paper-canvas);
+    --gezel-paper-control-deep: #1f2124;
+    --gezel-paper-inset: #1f2124;
+    --gezel-ink: #f0f0f0;
+    --gezel-ink-muted: #999;
+    --gezel-terra: #c0875d;
+    --gezel-terra-hover: #d5a07a;
+    --gezel-terra-raised: #b07a50;
+    --chat-handoff-bg: rgba(176, 114, 76, 0.08);
+    --chat-handoff-border: rgba(176, 114, 76, 0.45);
+    --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+    --sidebar-seam-shadow: rgba(0, 0, 0, 0.28);
+    --titlebar-pane-shadow: rgba(0, 0, 0, 0.46);
+    --success: #6ad38f;
+    --success-bg: rgba(106, 211, 143, 0.15);
+    --warning: #f0a04b;
+    --warning-bg: rgba(240, 160, 75, 0.15);
+    --danger: #e74c3c;
+    --danger-bg: rgba(231, 76, 60, 0.15);
+    --diff-add: #6ad38f;
+    --diff-add-bg: rgba(106, 211, 143, 0.08);
+    --diff-rem: #ff9b9b;
+    --diff-rem-bg: rgba(255, 155, 155, 0.08);
+    --diff-hunk: #88aaff;
+    --diff-surface: rgba(0, 0, 0, 0.25);
+    --diff-border: rgba(255, 255, 255, 0.08);
+    --diff-gutter: rgba(255, 255, 255, 0.3);
+    --diff-sep: rgba(255, 255, 255, 0.4);
+    /* Dark mode: keep the active home-tab logo cream — there's no
+       lifted-canvas contrast problem to solve here. */
+    --logo-active-fill: var(--titlebar-ink);
+    --scrollbar-thumb: rgba(224, 184, 151, 0.28);
+    --scrollbar-thumb-hover: rgba(224, 184, 151, 0.5);
+    --scrollbar-track: rgba(255, 255, 255, 0.04);
+    --preview-frame-bg: var(--gezel-paper-canvas);
+    --tray-bg: #131416;
+    --tray-border: rgba(0, 0, 0, 0.55);
+    --tray-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+    --key-bg: linear-gradient(to bottom, #2b2d31, #222428);
+    --key-bg-hover: linear-gradient(to bottom, #323438, #26282c);
+    --key-border: rgba(255, 255, 255, 0.08);
+    --key-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 3px
+      rgba(0, 0, 0, 0.25);
+    --key-pressed-border: rgba(30, 15, 5, 0.7);
+    --key-pressed-ink: #231207;
+    --key-pressed-shadow: inset 0 1px 2px rgba(30, 15, 5, 0.38);
+  }
+}
+
+/* Manual theme override — set data-theme="dark" or "light" on <html> */
+[data-theme="light"] {
+  /* Pin native form-control rendering (selects, date pickers, scrollbars,
+     the system focus ring) to light when the user explicitly picks light.
+     Without this, an OS in dark mode keeps painting <select> with a
+     dark-grey background even though the rest of the UI is parchment. */
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --gezel-paper-canvas: #141517;
+  --gezel-paper-workshop: #1f1c18;
+  --gezel-paper-panel: #1c1d20;
+  --gezel-paper-reading: var(--gezel-paper-panel);
+  --gezel-paper-control: var(--gezel-paper-canvas);
+  --gezel-paper-control-deep: #1f2124;
+  --gezel-paper-inset: #1f2124;
+  --gezel-ink: #f0f0f0;
+  --gezel-ink-muted: #999;
+  --gezel-terra: #c0875d;
+  --gezel-terra-hover: #d5a07a;
+  --gezel-terra-raised: #b07a50;
+  --chat-handoff-bg: rgba(176, 114, 76, 0.08);
+  --chat-handoff-border: rgba(176, 114, 76, 0.45);
+  --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --sidebar-seam-shadow: rgba(0, 0, 0, 0.28);
+  --titlebar-pane-shadow: rgba(0, 0, 0, 0.46);
+  --success: #6ad38f;
+  --success-bg: rgba(106, 211, 143, 0.15);
+  --warning: #f0a04b;
+  --warning-bg: rgba(240, 160, 75, 0.15);
+  --danger: #e74c3c;
+  --danger-bg: rgba(231, 76, 60, 0.15);
+  --diff-add: #6ad38f;
+  --diff-add-bg: rgba(106, 211, 143, 0.08);
+  --diff-rem: #ff9b9b;
+  --diff-rem-bg: rgba(255, 155, 155, 0.08);
+  --diff-hunk: #88aaff;
+  --diff-surface: rgba(0, 0, 0, 0.25);
+  --diff-border: rgba(255, 255, 255, 0.08);
+  --diff-gutter: rgba(255, 255, 255, 0.3);
+  --diff-sep: rgba(255, 255, 255, 0.4);
+  --logo-active-fill: var(--titlebar-ink);
+  --scrollbar-thumb: rgba(224, 184, 151, 0.28);
+  --scrollbar-thumb-hover: rgba(224, 184, 151, 0.5);
+  --scrollbar-track: rgba(255, 255, 255, 0.04);
+  --preview-frame-bg: var(--gezel-paper-canvas);
+  --tray-bg: #131416;
+  --tray-border: rgba(0, 0, 0, 0.55);
+  --tray-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+  --key-bg: linear-gradient(to bottom, #2b2d31, #222428);
+  --key-bg-hover: linear-gradient(to bottom, #323438, #26282c);
+  --key-border: rgba(255, 255, 255, 0.08);
+  --key-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 3px
+    rgba(0, 0, 0, 0.25);
+  --key-pressed-border: rgba(30, 15, 5, 0.7);
+  --key-pressed-ink: #231207;
+  --key-pressed-shadow: inset 0 1px 2px rgba(30, 15, 5, 0.38);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Scrollbar theming. Keep vertical scrollbars narrow and quiet until their
+   scroll container is being used. The gutter remains present while its paint
+   is transparent, so revealing it does not shift nearby content.
+
+   Standards-track properties cover Firefox and modern Chromium;
+   `::-webkit-scrollbar` covers WebKit/Chromium (including Electron). Touch
+   and forced-color environments retain an always-visible native affordance. */
+* {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: thin;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 12px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  /* Cap the track top and bottom so the gutter reads as a bounded
+     channel rather than fading open-ended into the content. Applies to
+     the vertical scrollbars in Settings and everywhere else. */
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+  /* Inset border via background-clip leaves a small gutter around the
+     thumb so it reads as a pill floating in the track rather than
+     filling the gutter edge-to-edge. */
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* At 8px, native up/down buttons are cramped and keep an otherwise dormant
+   gutter visibly active. Wheel, track, drag, touch, and keyboard scrolling
+   remain available. */
+::-webkit-scrollbar-button:vertical {
+  display: none;
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  * {
+    scrollbar-color: transparent transparent;
+  }
+
+  *:hover,
+  *:focus-within {
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+
+  *::-webkit-scrollbar-track:vertical {
+    background: transparent;
+    border-color: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb:vertical {
+    background: transparent;
+  }
+
+  *:hover::-webkit-scrollbar-track:vertical,
+  *:focus-within::-webkit-scrollbar-track:vertical {
+    background: var(--scrollbar-track);
+    border-color: var(--border);
+  }
+
+  *:hover::-webkit-scrollbar-thumb:vertical,
+  *:focus-within::-webkit-scrollbar-thumb:vertical {
+    background: var(--scrollbar-thumb);
+    background-clip: padding-box;
+  }
+
+  *:hover::-webkit-scrollbar-thumb:vertical:hover,
+  *:focus-within::-webkit-scrollbar-thumb:vertical:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: padding-box;
+  }
+}
+
+@media (forced-colors: active) {
+  * {
+    scrollbar-color: auto;
+  }
+}
+
+/* Form controls don't inherit font-family by default in most browsers —
+   force them to pick up the UI font so buttons, inputs, selects, and
+   textareas all read in Hanken Grotesk. */
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
+/* Display register — headings and long-form prose carry the serif. Any
+   surface that wants sans can opt out by setting font-family explicitly.
+   Chat messages and the Home intro card opt in below. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-display);
+}
+
+/* The intro card's own prose keeps the editorial register; scoped to
+   direct children so the embedded Handboek page (.home-intro-page) keeps
+   squisq's typography. */
+.home-intro,
+.home-intro-body > p,
+.home-intro-body > p strong,
+.msg-body,
+.msg-body-rich {
+  font-family: var(--font-display);
+}
+
+/* ── Global focus-visible ring ── */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+}
+
+/* Remove the ring on elements that handle their own */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  box-shadow: none;
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Themed dropdown — light mode only. The OS-native <select> renders
+   as a foreign dark-grey block against the parchment palette; recasting
+   it in warm brown with cream text keeps the control clearly interactive
+   while sitting in the gezellig palette. Dark mode keeps native
+   rendering (the UA defaults already sit well on dark canvas).
+   Targeting: explicit `[data-theme="light"]`, plus the implicit-light
+   case (no theme attribute on a light-OS install) via `:not([data-theme="dark"])`
+   combined with the media-query opt-out below. */
+:root:not([data-theme="dark"]) select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: #8a5235;
+  color: #f3ede0;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 1.75rem 0.35rem 0.6rem;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%23f3ede0' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.55rem center;
+  background-size: 0.7rem;
+  cursor: pointer;
+}
+
+:root:not([data-theme="dark"]) select:hover {
+  background-color: #74442b;
+}
+
+:root:not([data-theme="dark"]) select:focus-visible {
+  outline-color: #f3ede0;
+}
+
+/* OS-dark fallback: when no explicit theme is pinned and the OS prefers
+   dark, opt back out of the brown styling so the native dark dropdown
+   shows. An explicit `[data-theme="light"]` still wins via specificity. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) select {
+    appearance: auto;
+    -webkit-appearance: auto;
+    background-color: revert;
+    color: revert;
+    border: revert;
+    border-radius: revert;
+    padding: revert;
+    background-image: none;
+    cursor: revert;
+  }
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+body,
+html,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/*
+ * Embedded mode (VSCode webview iframe). Hides scrollbars on the
+ * outer document and lets the chat fill the host pane edge-to-edge.
+ */
+html.embedded-chat,
+html.embedded-chat body,
+html.embedded-chat #root {
+  height: 100%;
+  overflow: hidden;
+}
+.embedded-chat-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  padding: 8px 10px 10px;
+  box-sizing: border-box;
+  gap: 8px;
+}
+.embedded-chat-status {
+  padding: 12px;
+  font-size: 0.85rem;
+  color: var(--text-muted, var(--text));
+}

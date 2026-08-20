@@ -225,15 +225,15 @@ function engineDisabled(engine: AudioEngineHealth | undefined): boolean {
 
 function EngineStatusPill({ engine }: { engine: AudioEngineHealth }) {
   if (engine.status === 'ok') {
-    return <span className="home-status-pill home-status-ok">Ready</span>;
+    return <span className="gz-status-pill gz-status-pill--ok">Ready</span>;
   }
   if (engine.status === 'no-model') {
-    return <span className="home-status-pill home-status-warn">No model</span>;
+    return <span className="gz-status-pill gz-status-pill--warn">No model</span>;
   }
   if (engine.status === 'unreachable') {
-    return <span className="home-status-pill home-status-error">Unreachable</span>;
+    return <span className="gz-status-pill gz-status-pill--error">Unreachable</span>;
   }
-  return <span className="home-status-pill home-status-warn">Not configured</span>;
+  return <span className="gz-status-pill gz-status-pill--warn">Not configured</span>;
 }
 
 function EngineGuidance({ engine }: { engine: AudioEngineHealth | undefined }) {

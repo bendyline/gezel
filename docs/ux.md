@@ -38,7 +38,8 @@ pacing of a transition. If a first-time user can't quite put a finger on
 
 ## What that translates into
 
-- **Color** lives in [packages/ui/src/styles.css](../packages/ui/src/styles.css).
+- **Color** lives in
+  [styles/00-foundation.css](../packages/ui/src/styles/00-foundation.css).
   The `--gezel-*` foundation palette is the authored source for paper, ink,
   sage, and terracotta tones; theme-resolving semantic aliases (`--bg`,
   `--surface`, `--panel`, `--border`, `--text`, `--text-muted`, `--accent`,
@@ -84,14 +85,16 @@ sits **pressed and latched**. The 3D is expressed through light and depth
 only — gradients a few percent apart, a 1px top highlight, an inset recess —
 never through textures.
 
-Implementation lives in exactly two places, both in
-[styles.css](../packages/ui/src/styles.css):
+Implementation lives in exactly two places:
 
-- **Tokens** in `:root` and the three theme-override blocks:
+- **Tokens** in
+  [styles/00-foundation.css](../packages/ui/src/styles/00-foundation.css), in
+  `:root` and the three theme-override blocks:
   `--tray-bg/-border/-shadow`, `--key-bg/-bg-hover/-border/-shadow`, and
   `--key-pressed-bg/-border/-ink/-shadow`.
-- **The "Keys in trays" block at the end of the file** — the single CSS
-  recipe. `.gz-tray` is the group; `.gz-key` is the option
+- **The "Keys in trays" block** in
+  [styles/16-controls-handbook-and-admin.css](../packages/ui/src/styles/16-controls-handbook-and-admin.css)
+  — the single CSS recipe. `.gz-tray` is the group; `.gz-key` is the option
   (`.gz-key--stacked` for label + hint); the latched state is
   `.gz-key-active` or `aria-checked="true"`.
 
@@ -183,7 +186,8 @@ Rules:
 
 The standard treatment for **continuous "how much may gezel take" ranges** —
 memory budgets, cache budgets, per-model context size. One CSS recipe
-(`.gz-budget-slider` in [styles.css](../packages/ui/src/styles.css)), one
+(`.gz-budget-slider` in
+[styles/15-village-and-overview.css](../packages/ui/src/styles/15-village-and-overview.css)), one
 interaction contract, shared by every user (`EngineMemoryBudgetPanel`,
 `CacheControlsPanel`, `ModelContextSliderPanel`). Don't restyle a slider
 per-surface; if a surface needs something the recipe lacks, extend the recipe
@@ -218,7 +222,8 @@ The contract:
 Two typefaces, both bundled as woff2 (see
 [assets/fonts/fonts.css](../packages/ui/src/assets/fonts/fonts.css)) — no
 web-font CDN, no runtime fetch. They are exposed as CSS variables in
-[styles.css](../packages/ui/src/styles.css) `:root` and you should always
+[styles/00-foundation.css](../packages/ui/src/styles/00-foundation.css) `:root`
+and you should always
 reference the variable, never the family name:
 
 | Token             | Family             | Role                                                        |
@@ -268,7 +273,8 @@ deliberate exception — they set their own comfortable reading size (1rem+)
 and don't draw from this scale.
 
 **Reference implementation:** the `.settings-panel` typography block in
-[styles.css](../packages/ui/src/styles.css) is the canonical application —
+[styles/05-settings-and-status.css](../packages/ui/src/styles/05-settings-and-status.css)
+is the canonical application —
 one scoped block that pins the panel's headings, body, controls, and links
 to the rules above so no single tab mixes a dozen font/size combos. New
 dialog and panel surfaces should follow the same shape: a small scoped
@@ -290,8 +296,8 @@ What lives where:
 
 | Layer                               | Where                                                     |
 | ----------------------------------- | --------------------------------------------------------- |
-| Design tokens (colors, space, etc.) | [styles.css](../packages/ui/src/styles.css) `:root`       |
-| Overlay, dialog, tabs, select CSS   | [styles.css](../packages/ui/src/styles.css) `gz-*` blocks |
+| Design tokens (colors, space, etc.) | [styles/00-foundation.css](../packages/ui/src/styles/00-foundation.css) `:root` |
+| Overlay, dialog, tabs, select CSS   | [`styles/` ownership map](../packages/ui/src/styles/README.md) `gz-*` blocks |
 | Headless primitives (JSX)           | [primitives/](../packages/ui/src/primitives/)             |
 | Shared behavior components          | [components/](../packages/ui/src/components/)             |
 | Top-level views                     | [views/](../packages/ui/src/views/)                       |
@@ -396,8 +402,8 @@ starting points (project types, craftbooks), use the shared gallery-dialog
 layout: header with title + search, a category rail on the left, a card
 gallery in the middle, and a right-hand pane holding the selection's hero
 + properties form + footer actions. The CSS skeleton is the `gz-npd-*`
-block in [styles.css](../packages/ui/src/styles.css) (named for the New
-Project dialog, its first tenant); New Task reuses it with a `gz-ntd`
+block in [styles/11-project-surfaces.css](../packages/ui/src/styles/11-project-surfaces.css)
+(named for the New Project dialog, its first tenant); New Task reuses it with a `gz-ntd`
 modifier for task-only pieces. New gallery surfaces should reuse the
 skeleton the same way — extend it rather than fork it. Lead the gallery
 with the curated, context-relevant subset (e.g. craftbooks recommended
@@ -407,7 +413,8 @@ for the project's type) and keep the full catalog one rail-click away.
 document — a night-shift report, a draft plan — the document is not a
 ten-line teaser stacked above the answer keys. `PendingQuestionCard` lifts
 it into its own right-hand column (`.pending-question-split*` in
-[styles.css](../packages/ui/src/styles.css)): the card and its actions on
+[styles/11-project-surfaces.css](../packages/ui/src/styles/11-project-surfaces.css)):
+the card and its actions on
 the left, the whole document as a portrait page on the right, scrolling in
 place. `.pending-question-splitwrap` is a named `question-card` query
 container, so the same card falls back to one column in a narrow chat
@@ -450,7 +457,9 @@ one must too. Cross-gezel messages are a separate case already answered by
 
 **Transformation dialog.** AI edits to user text never land silently. The
 editor toolbar's single transform button opens the transformation dialog
-(`TransformDialog`, `gz-transform-*` block in styles.css): an instruction
+(`TransformDialog`, `gz-transform-*` block in
+[styles/10-catalog-and-primitives.css](../packages/ui/src/styles/10-catalog-and-primitives.css)):
+an instruction
 field, a "Transform with {Klerk}" row that shows the Klerk's poppetje
 pulsing plus a quiet live metacommentary feed while the model works, and a
 result area toggling (bare key tray) between an editable Before/After view

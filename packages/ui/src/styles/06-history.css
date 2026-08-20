@@ -1,0 +1,318 @@
+/* ── History view ── */
+
+.history-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+  overflow: hidden;
+  height: 100%;
+}
+
+.history-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.history-header h2 {
+  margin: 0;
+}
+
+.history-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.history-filters select,
+.history-filters input {
+  padding: 0.35rem 0.5rem;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.history-split {
+  --history-list-width: 36%;
+  display: grid;
+  grid-template-columns:
+    minmax(14rem, var(--history-list-width))
+    10px
+    minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0.25rem;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Fill the 10px track rather than keeping .chat-rail-grip's fixed 14px,
+   which would overhang the detail pane and push the two indicator lines
+   off the centre of the gutter. */
+.history-split-grip {
+  width: auto;
+}
+
+.history-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-height: 0;
+  min-width: 0;
+}
+
+.history-detail {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  overflow: auto;
+  min-height: 0;
+}
+
+.history-detail .placeholder {
+  color: var(--muted, rgba(255, 255, 255, 0.55));
+  padding: 1rem;
+  font-size: 0.9rem;
+}
+
+.history-detail-document {
+  min-height: 100%;
+  padding: 1.2rem 1.35rem 1.5rem;
+  color: var(--text);
+  font-size: var(--text-md);
+}
+
+.history-detail-header {
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-detail-eyebrow {
+  margin: 0 0 0.35rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.history-detail-header h3 {
+  margin: 0;
+  font-size: var(--text-xl);
+  line-height: 1.35;
+}
+
+.history-detail-time,
+.history-detail-subtitle {
+  display: block;
+  margin: 0.45rem 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.history-detail-time span {
+  white-space: nowrap;
+}
+
+.history-detail-section {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.history-detail-section h4 {
+  margin: 0 0 0.55rem;
+  font-size: var(--text-lg);
+}
+
+.history-detail-fields {
+  margin: 0;
+}
+
+.history-detail-field {
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 0.34fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+}
+
+.history-detail-field:first-child {
+  border-top: none;
+}
+
+.history-detail-field dt {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.history-detail-field dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.history-detail-text {
+  white-space: pre-wrap;
+}
+
+.history-detail-empty {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.history-detail-code,
+.history-detail-reference code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-xs);
+}
+
+.history-detail-code {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.15rem 0.3rem;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.history-detail-nested {
+  padding-left: 0.75rem;
+  border-left: 2px solid color-mix(in srgb, var(--border) 78%, var(--accent));
+}
+
+.history-detail-nested .history-detail-field {
+  grid-template-columns: minmax(6.5rem, 0.34fr) minmax(0, 1fr);
+}
+
+.history-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.history-detail-list .history-detail-fields {
+  margin: 0.2rem 0 0.4rem;
+}
+
+.history-detail-section .thinking-tool-diff {
+  margin-left: 0;
+}
+
+.history-detail-reference {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  padding-top: 1rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+@media (max-width: 760px) {
+  .history-detail-document {
+    padding-inline: 1rem;
+  }
+
+  .history-detail-field,
+  .history-detail-nested .history-detail-field {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+}
+
+.history-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+/* Two lines: the summary (with its timestamp) on top, the kind and the
+   project / gezel chips below. A single line put the summary in a
+   flex-shrink race with the chips, and the summary always lost — at the
+   pane widths this list actually gets, rows read "W… Workspace write"
+   with the one piece of per-entry content ellipsed to a letter. */
+.history-row {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.55rem 0.8rem;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.history-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.history-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.history-row-selected,
+.history-row-selected:hover {
+  background: rgba(102, 127, 98, 0.32);
+}
+
+.history-kind {
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.history-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.history-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.history-stat {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.history-chip {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.history-time {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: right;
+}

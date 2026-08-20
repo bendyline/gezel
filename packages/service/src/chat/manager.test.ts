@@ -906,13 +906,11 @@ describe('ChatManager — send + persistence', () => {
     expect(replies[0]!.content).toBe('SECOND turn text');
   }, 20_000);
 
-  it('honors a stop pressed during setup, before the turn wires its abort signal', async () => {
+  it('honors a stop pressed during setup, before the turn can wire cancellation', async () => {
     // A user who hits stop while the prompt is still being built — the
-    // ensureState / auto-recall prologue that runs before the per-turn
-    // AbortController exists — used to have their cancel silently dropped:
-    // cancelInflight found no controller to abort, and the turn then wired
-    // a fresh one and ran to completion. cancelInflight now parks the
-    // request and runSend aborts the instant it wires the controller, so
+    // ensureState prologue that runs before a live session exists used to have
+    // their cancel silently dropped. cancelInflight now parks the request and
+    // runSend aborts as soon as it can wire the controller, so
     // the turn unwinds into a `turn-aborted` message instead of ignoring
     // the stop. Regression guard: without the parking, `scriptStreamThenHang`
     // has no abort to unwind on and this test hangs to its timeout.
@@ -944,6 +942,7 @@ describe('ChatManager — send + persistence', () => {
     const last = disk!.messages.at(-1)!;
     expect(last.role).toBe('assistant');
     expect(last.synthetic).toBe('turn-aborted');
+    expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(0);
     // No non-synthetic assistant reply was ever committed — the cancel
     // took effect instead of the turn running through to a real answer.
     expect(disk!.messages.filter((m) => m.role === 'assistant' && !m.synthetic)).toHaveLength(0);

@@ -393,6 +393,9 @@ export class NativeEngineSupervisor {
   private healthTimer?: NodeJS.Timeout;
   private currentStartedAt = 0;
   private currentPid?: number;
+  /** Sticky for the current child; remains true while an expected stop moves
+   * state to `stopped` before the OS exit event arrives. */
+  private currentReachedReady = false;
   private currentDiagnostics?: Record<string, string | number | boolean>;
   private currentOutput = '';
   private currentPanic?: {
@@ -667,6 +670,7 @@ export class NativeEngineSupervisor {
 
     this.currentStartedAt = Date.now();
     this.currentPid = typeof child.pid === 'number' ? child.pid : undefined;
+    this.currentReachedReady = false;
     this.currentDiagnostics = launch.diagnostics ? { ...launch.diagnostics } : undefined;
     this.currentOutput = '';
     this.currentPanic = undefined;
@@ -759,6 +763,7 @@ export class NativeEngineSupervisor {
 
     try {
       await readyPromise;
+      this.currentReachedReady = true;
       this.state = { kind: 'running', launch, child, healthFails: 0 };
       this.resetIdleTimer();
       this.startHealthWatch();
@@ -1095,7 +1100,7 @@ export class NativeEngineSupervisor {
       code,
       signal,
       expected,
-      reachedReady: priorState.kind === 'running',
+      reachedReady: this.currentReachedReady,
       ...(expectedReason ? { expectedReason } : {}),
       ...(panic ? { panicKind: panic.kind, panicLine: panic.line } : {}),
       outputTail: this.currentOutput,
@@ -1144,6 +1149,7 @@ export class NativeEngineSupervisor {
     this.clearHealthTimer();
     this.currentPid = undefined;
     this.currentStartedAt = 0;
+    this.currentReachedReady = false;
     this.currentDiagnostics = undefined;
     this.currentOutput = '';
     this.currentPanic = undefined;

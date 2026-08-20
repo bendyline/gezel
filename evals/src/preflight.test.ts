@@ -9,7 +9,9 @@ import {
 function evidence(overrides: Partial<PreflightEvidence>): PreflightEvidence {
   return {
     result: { success: true, reason: 'tool round-trip OK: preflight.txt written' },
-    daemonLog: 'tuning gezel=probe profile=thinking-general kind=thinking temp=0.8',
+    daemonLog:
+      '[llama-server] launch {"model":"probe"}\n' +
+      'tuning gezel=probe profile=thinking-general kind=thinking temp=0.8',
     genTokensPerSec: 25,
     manifestHasProfiles: true,
     minGenTokensPerSec: 3,
@@ -51,6 +53,15 @@ describe('buildPreflightChecks', () => {
     expect(checks.toolRoundTrip.ok).toBe(false);
   });
 
+  it('does not claim the engine spawned without a native launch record', () => {
+    const { checks, admitted } = buildPreflightChecks(
+      evidence({ daemonLog: 'daemon health ready; tuning gezel=probe profile=thinking-general' }),
+    );
+    expect(admitted).toBe(false);
+    expect(checks.spawn).toMatchObject({ ok: false });
+    expect(checks.spawn.detail).toContain('no native engine launch');
+  });
+
   it('profile fall-through fails when the manifest authors profiles', () => {
     const { checks, admitted } = buildPreflightChecks(
       evidence({
@@ -65,7 +76,9 @@ describe('buildPreflightChecks', () => {
   it('profile fall-through is non-gating when the manifest has no profiles', () => {
     const { checks, admitted } = buildPreflightChecks(
       evidence({
-        daemonLog: 'tuning gezel=probe profile=none(req=thinking-general@suggested) kind=n/a',
+        daemonLog:
+          '[llama-server] launch {"model":"probe"}\n' +
+          'tuning gezel=probe profile=none(req=thinking-general@suggested) kind=n/a',
         manifestHasProfiles: false,
       }),
     );
@@ -148,7 +161,8 @@ describe('buildPreflightChecks', () => {
 
   it('missing daemon log degrades gracefully (reason-only verdicts)', () => {
     const { checks, admitted } = buildPreflightChecks(evidence({ daemonLog: null }));
-    expect(admitted).toBe(true);
+    expect(admitted).toBe(false);
+    expect(checks.spawn.ok).toBe(false);
     expect(checks.profileResolution.detail).toContain('no tuning trace');
   });
 });

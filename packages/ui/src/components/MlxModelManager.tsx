@@ -529,7 +529,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
 
       {installMismatch && (
         <div className="ollama-section">
-          <div className="home-status-pill home-status-warn" style={{ marginBottom: '0.5rem' }}>
+          <div className="gz-status-pill gz-status-pill--warn" style={{ marginBottom: '0.5rem' }}>
             ⚠ <code>{installMismatch.catalogId}</code> is newer on Hugging Face than the version
             Gezel knows about
           </div>
@@ -543,12 +543,16 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
           <div style={{ display: 'flex', gap: '0.75rem' }}>
             <button
               type="button"
-              className="home-link"
+              className="gz-link-button"
               onClick={() => downloadAnyway(installMismatch.catalogId)}
             >
               Download anyway
             </button>
-            <button type="button" className="home-link" onClick={() => setInstallMismatch(null)}>
+            <button
+              type="button"
+              className="gz-link-button"
+              onClick={() => setInstallMismatch(null)}
+            >
               Dismiss
             </button>
           </div>
@@ -565,7 +569,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
 
       {installWarning && (
         <div className="ollama-section">
-          <div className="home-status-pill home-status-warn" style={{ marginBottom: '0.5rem' }}>
+          <div className="gz-status-pill gz-status-pill--warn" style={{ marginBottom: '0.5rem' }}>
             ⚠ {installWarning.id}: {installWarning.message}
           </div>
         </div>
@@ -629,7 +633,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                               <div className="model-name-meta">
                                 {outOfDate && (
                                   <span
-                                    className="home-status-pill home-status-warn"
+                                    className="gz-status-pill gz-status-pill--warn"
                                     title={
                                       m.updateReason ??
                                       'The catalog ships different model files than the copy on disk. Update to pick them up.'
@@ -676,13 +680,13 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                           <td className="model-fitness-table-cell">
                             <div className="model-fitness-cell">
                               <span
-                                className={`home-status-pill model-fitness-badge${
+                                className={`gz-status-pill model-fitness-badge${
                                   badge.tier === 'probing' ? ' model-fitness-badge--probing' : ''
                                 }${
                                   badge.tier === 'ok'
-                                    ? ' home-status-ok'
+                                    ? ' gz-status-pill--ok'
                                     : badge.tier === 'warn'
-                                      ? ' home-status-warn'
+                                      ? ' gz-status-pill--warn'
                                       : ''
                                 }`}
                                 title={badge.detail}
@@ -773,7 +777,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
             Some models may be too large to run on this machine.{' '}
             <button
               type="button"
-              className="home-link"
+              className="gz-link-button"
               onClick={() => setShowAll((v) => !v)}
               style={{ padding: 0 }}
             >
@@ -848,7 +852,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                     />
                     {tight && (
                       <span
-                        className="home-status-pill home-status-warn"
+                        className="gz-status-pill gz-status-pill--warn"
                         title="Larger than your estimated inference budget — may run slowly or fail."
                       >
                         may not fit
@@ -942,13 +946,13 @@ function InstallProgress({
         <code>{inst.catalogId}</code>
         <span className="muted small">{phaseLabel}</span>
         {inst.error ? (
-          <button type="button" className="home-link" onClick={onRetry}>
+          <button type="button" className="gz-link-button" onClick={onRetry}>
             Retry
           </button>
         ) : (
           /* Cancel always available: installs are server-owned background
              jobs, so this view can cancel remote-origin rows too. */
-          <button type="button" className="home-link" onClick={onCancel}>
+          <button type="button" className="gz-link-button" onClick={onCancel}>
             Cancel
           </button>
         )}
