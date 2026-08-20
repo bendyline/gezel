@@ -3228,11 +3228,36 @@ export class Store {
     );
   }
 
+  /** Per-project chains serializing {@link touchProject}'s metadata bumps. */
+  private readonly touchChains = new Map<string, Promise<void>>();
+
   async touchProject(id: string): Promise<void> {
-    const meta = await this.tryGetProjectMeta(id);
-    if (!meta) return;
-    const updated: Project = { ...meta, updatedAt: nowIso() };
-    await this.writeProjectMeta(updated);
+    // Serialized per project AND best-effort. Every workspace write ends in
+    // this updatedAt bump, so a burst of writes (an agent or the eval corpus
+    // seeder creating hundreds of files) raced read-modify-write renames of
+    // the same project.json — EPERM on Windows (rename over a path another
+    // rename holds), silently-lost bumps elsewhere. And the caller's actual
+    // write already succeeded by the time we run: a failed TIMESTAMP bump
+    // must never convert that success into a 500.
+    const prev = this.touchChains.get(id) ?? Promise.resolve();
+    const next = prev
+      .then(async () => {
+        const meta = await this.tryGetProjectMeta(id);
+        if (!meta) return;
+        const updated: Project = { ...meta, updatedAt: nowIso() };
+        await this.writeProjectMeta(updated);
+      })
+      .catch((err) => {
+        log.warn(
+          `touchProject(${id}) failed (updatedAt bump only — the triggering write succeeded):`,
+          err instanceof Error ? err.message : err,
+        );
+      });
+    this.touchChains.set(id, next);
+    void next.finally(() => {
+      if (this.touchChains.get(id) === next) this.touchChains.delete(id);
+    });
+    await next;
   }
 
   /**

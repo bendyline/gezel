@@ -26,6 +26,9 @@
 import {
   type Pair,
   distinctFactPairs,
+  dutchParaphrasePairs,
+  dutchRelevantQueryPairs,
+  dutchUnrelatedQueryPairs,
   paraphrasePairs,
   relevantQueryPairs,
   unrelatedPairs,
@@ -138,6 +141,24 @@ async function run(): Promise<void> {
       : '  (BANDS OVERLAP — inspect pairs before trusting any floor)';
   console.log(
     `  → floor gap: unrelated max=${fmt(uq.max)} … relevant min=${fmt(rq.min)}${floorNote}`,
+  );
+
+  // ── cross-lingual (Dutch↔English) — the C5 multilingual acceptance bands ──
+  const [nlParaphrase] = await Promise.all([passageScores(dutchParaphrasePairs)]);
+  const nlRelevant = await queryScores(dutchRelevantQueryPairs);
+  const nlUnrelated = await queryScores(dutchUnrelatedQueryPairs);
+  const np = stats(nlParaphrase);
+  const nr = stats(nlRelevant);
+  const nu = stats(nlUnrelated);
+  console.log('\ncross-lingual NL↔EN (C5 multilingual acceptance)');
+  console.log(row('NL query → EN memory (rel.)', nr));
+  console.log(row('NL query → EN memory (unrel.)', nu));
+  console.log(row('NL↔EN same fact (paraphrase)', np));
+  const usable = nr.min > nu.max;
+  console.log(
+    usable
+      ? `  → cross-lingual gap: unrelated max=${fmt(nu.max)} … relevant min=${fmt(nr.min)} — this embedder can serve NL users`
+      : `  → BANDS OVERLAP (unrelated max=${fmt(nu.max)} ≥ relevant min=${fmt(nr.min)}) — this embedder cannot separate Dutch queries from noise`,
   );
   console.log(
     '\nNote: floors sit inside the gap, biased toward the unrelated band ' +

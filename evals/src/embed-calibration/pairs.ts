@@ -18,6 +18,93 @@
 
 export type Pair = [a: string, b: string];
 
+/**
+ * Cross-lingual bands (Dutch↔English): the realistic non-English scenario is
+ * a Dutch-speaking user querying (or filing) memories in either language over
+ * a mostly-English corpus. An English-only embedder (bge-small-en) scores
+ * these like noise; a multilingual candidate must place them in the relevant
+ * band WITHOUT giving up the English bands above.
+ */
+
+export const dutchRelevantQueryPairs: Pair[] = [
+  ['welk thema gebruikt de gebruiker het liefst', 'The user prefers dark mode in every app.'],
+  ['waar deployen we eerst', 'Deploys go to the staging server at 10.0.0.12 first.'],
+  [
+    'wanneer moet het kwartaalrapport af zijn',
+    'The quarterly report is due on the last Friday of March.',
+  ],
+  [
+    'welke database hebben we gekozen voor bestellingen',
+    'Mike decided to use PostgreSQL for the orders service.',
+  ],
+  ['hoe vaak wil de klant updates', 'The client wants weekly status emails on Mondays.'],
+  ['waarom zijn de builds traag', 'Build times regressed after the webpack 5 upgrade.'],
+  ['wie werkt er aan de facturering', 'Sarah owns the billing integration work.'],
+  ['wat is de API-limiet', 'The API rate limit is 100 requests per minute per key.'],
+  ['waar wordt gebruikersdata opgeslagen', 'We agreed to keep all user data on the local disk.'],
+  ['waar staan de logobestanden', 'The logo files live in the shared drive under Brand/2026.'],
+  ['hoe lang duren de tests', 'The test suite takes about twelve minutes on CI.'],
+  ['wanneer draaien de back-ups', 'Backups run nightly at 3am local time.'],
+];
+
+export const dutchUnrelatedQueryPairs: Pair[] = [
+  ['welk thema gebruikt de gebruiker het liefst', 'Backups run nightly at 3am local time.'],
+  ['waar deployen we eerst', 'The user prefers dark mode in every app.'],
+  ['wanneer moet het kwartaalrapport af zijn', 'Sarah’s dog is named Biscuit.'],
+  ['welke database hebben we gekozen voor bestellingen', 'The office plants get watered on Fridays.'],
+  ['hoe vaak wil de klant updates', 'The espresso machine needs descaling.'],
+  ['waarom zijn de builds traag', 'The hiking trip is planned for Labor Day weekend.'],
+  ['wie werkt er aan de facturering', 'The novel’s third chapter needs a rewrite.'],
+  ['wat is de API-limiet', 'Grandma’s pie recipe uses tart apples.'],
+  ['waar wordt gebruikersdata opgeslagen', 'Customer demo scheduled for Thursday at 2pm.'],
+  ['waar staan de logobestanden', 'The test suite takes about twelve minutes on CI.'],
+  ['hoe lang duren de tests', 'The logo files live in the shared drive under Brand/2026.'],
+  ['wanneer draaien de back-ups', 'Mike decided to use PostgreSQL for the orders service.'],
+];
+
+/** Same fact, one side Dutch — the cross-lingual dedup/paraphrase band. */
+export const dutchParaphrasePairs: Pair[] = [
+  [
+    'De gebruiker geeft de voorkeur aan donkere modus in elke app.',
+    'The user prefers dark mode in every app.',
+  ],
+  [
+    'Deploys gaan eerst naar de staging-server op 10.0.0.12.',
+    'Deploys go to the staging server at 10.0.0.12 first.',
+  ],
+  [
+    'Het kwartaalrapport moet klaar zijn op de laatste vrijdag van maart.',
+    'The quarterly report is due on the last Friday of March.',
+  ],
+  [
+    'Mike heeft besloten PostgreSQL te gebruiken voor de bestellingenservice.',
+    'Mike decided to use PostgreSQL for the orders service.',
+  ],
+  [
+    'De klant wil elke maandag een status-e-mail.',
+    'The client wants weekly status emails on Mondays.',
+  ],
+  [
+    'De buildtijden zijn verslechterd na de webpack 5-upgrade.',
+    'Build times regressed after the webpack 5 upgrade.',
+  ],
+  ['Sarah is verantwoordelijk voor de factureringsintegratie.', 'Sarah owns the billing integration work.'],
+  [
+    'De API-limiet is 100 verzoeken per minuut per sleutel.',
+    'The API rate limit is 100 requests per minute per key.',
+  ],
+  [
+    'Alle gebruikersdata blijft op de lokale schijf.',
+    'We agreed to keep all user data on the local disk.',
+  ],
+  [
+    'De logobestanden staan op de gedeelde schijf onder Brand/2026.',
+    'The logo files live in the shared drive under Brand/2026.',
+  ],
+  ['De testsuite duurt ongeveer twaalf minuten op CI.', 'The test suite takes about twelve minutes on CI.'],
+  ['Back-ups draaien elke nacht om 3 uur lokale tijd.', 'Backups run nightly at 3am local time.'],
+];
+
 export const paraphrasePairs: Pair[] = [
   [
     'The user prefers dark mode in every app.',

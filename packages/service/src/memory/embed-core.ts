@@ -74,6 +74,23 @@ export function queryInstruction(): string {
   if (process.env.GEZEL_EMBED_NO_QUERY_INSTRUCTION === '1') return '';
   const model = embedModelId();
   if (/bge-/i.test(model)) return 'Represent this sentence for searching relevant passages: ';
+  // The e5 family (incl. multilingual-e5-*) is trained with BOTH sides
+  // prefixed — "query: " / "passage: " — and measurably underperforms
+  // without them (its model card calls unprefixed use an error).
+  if (/(^|\/|-)e5-/i.test(model) || /multilingual-e5/i.test(model)) return 'query: ';
+  return '';
+}
+
+/**
+ * Passage-side counterpart to {@link queryInstruction}. Empty for every
+ * model family except e5, whose training prefixes BOTH sides; bge prefixes
+ * only queries, and symmetric models (MiniLM, gte) prefix nothing — so the
+ * default install's behavior is unchanged by this hook existing.
+ */
+export function passageInstruction(): string {
+  if (process.env.GEZEL_EMBED_NO_QUERY_INSTRUCTION === '1') return '';
+  const model = embedModelId();
+  if (/(^|\/|-)e5-/i.test(model) || /multilingual-e5/i.test(model)) return 'passage: ';
   return '';
 }
 

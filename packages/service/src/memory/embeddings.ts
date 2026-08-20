@@ -21,7 +21,7 @@
 import { Worker } from 'node:worker_threads';
 import { createLogger } from '@bendyline/gezel';
 import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
-import { PipelineLoadError, queryInstruction, runEmbed } from './embed-core.js';
+import { PipelineLoadError, passageInstruction, queryInstruction, runEmbed } from './embed-core.js';
 
 const log = createLogger('memory');
 
@@ -286,25 +286,30 @@ function describe(err: unknown): string {
 }
 
 export async function embed(text: string): Promise<number[]> {
-  const [vector] = await embedMany([text]);
+  const [vector] = await embedMany([passageInstruction() + text]);
   return vector ?? [];
 }
 
 /**
  * Embed a SEARCH QUERY. Same pipeline as `embed`, but prepends the model's
- * query-side retrieval instruction when it has one (bge-*); for symmetric
- * models this is identical to `embed`. Indexed passages must go through
- * `embed`/`embedBatch` (no prefix) — the asymmetry is the whole point. Every
- * query-side call site (content search, memory recall, unified search) routes
- * here so the prefix stays in exactly one place.
+ * query-side retrieval instruction when it has one (bge-*: an English
+ * instruction sentence; e5-*: "query: "); for symmetric models this is
+ * identical to `embed`. Indexed passages go through `embed`/`embedBatch`,
+ * which apply the PASSAGE-side prefix where the family has one (e5 only) —
+ * the asymmetry is the whole point. Every query-side call site (content
+ * search, memory recall, unified search) routes here so the prefixes stay in
+ * exactly one place. NOTE: this must NOT delegate to `embed`, which would
+ * stack the passage prefix onto the query.
  */
 export async function embedQuery(text: string): Promise<number[]> {
-  return embed(queryInstruction() + text);
+  const [vector] = await embedMany([queryInstruction() + text]);
+  return vector ?? [];
 }
 
 export async function embedBatch(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
-  return embedMany(texts);
+  const prefix = passageInstruction();
+  return embedMany(prefix ? texts.map((text) => prefix + text) : texts);
 }
 
 /**
