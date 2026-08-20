@@ -2027,6 +2027,21 @@ export const GezelConfigSchema = z.object({
     })
     .optional(),
   /**
+   * Knowledge catalogs (.gezk) — user-global defaults. The authoritative
+   * per-catalog state (exact refs, enablement) lives in
+   * `~/.gezel/knowledge/registry.json`; this holds only the preferences the
+   * Settings page edits. Network operations honor the security policy's
+   * `allowAppNetwork` like every other registry check.
+   */
+  knowledge: z
+    .object({
+      /** Check the signed registry for catalog updates (default off). */
+      autoUpdate: z.boolean().optional(),
+      /** Override the signed Qualla registry URL (operators/tests). */
+      registryUrl: z.string().optional(),
+    })
+    .optional(),
+  /**
    * The meester's occasional status report — headline + dashboard for
    * the Home greeting band, plus follow-up draft tasks. Runs as the
    * meester gezel when the install is idle, capped per day, and only
@@ -2639,6 +2654,8 @@ export const RecentTabAreaSchema = z.enum([
   'benchmarks',
   // Built-in documentation (TOC + articles, served by /api/handboek).
   'handboek',
+  // Knowledge catalog browser (appears once the user registers ≥1 catalog).
+  'knowledge',
 ]);
 export type RecentTabArea = z.infer<typeof RecentTabAreaSchema>;
 
@@ -5002,6 +5019,9 @@ export const UNIFIED_SEARCH_RESULT_KINDS = [
   // the subject-line quick-open a body search can't provide. Hits navigate
   // as artifact files (mail syncs into the project artifacts tree).
   'mail',
+  // Knowledge catalog hits (.gezk read-only reference corpora). Carry the
+  // knowledge provenance fields below and a `knowledge://` citation URI.
+  'knowledge',
 ] as const;
 
 export const UnifiedSearchResultKindSchema = z.enum(UNIFIED_SEARCH_RESULT_KINDS);
@@ -5047,6 +5067,17 @@ export const UnifiedSearchResultSchema = z.object({
   relevance: z.number().min(0).max(1).optional(),
   /** Coarse confidence derived from `relevance` — render hints, early-stop cues. */
   tier: z.enum(['strong', 'weak']).optional(),
+  // ── knowledge provenance (kind 'knowledge' only) ────────────────────────
+  /** Catalog the hit came from, plus the exact installed version. */
+  catalogId: z.string().optional(),
+  catalogVersion: z.string().optional(),
+  documentId: z.string().optional(),
+  /** Root→leaf topic names for display ("Physics › Mechanics"). */
+  topicPath: z.array(z.string()).optional(),
+  /** Stable `knowledge://` citation URI (readable via read_document). */
+  uri: z.string().optional(),
+  sourceUrl: z.string().optional(),
+  attribution: z.string().optional(),
 });
 export type UnifiedSearchResult = z.infer<typeof UnifiedSearchResultSchema>;
 

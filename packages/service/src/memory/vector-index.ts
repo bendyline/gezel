@@ -26,7 +26,7 @@ import {
   vectorToBlob,
 } from '../index-store/sqlite-driver.js';
 import { DEFAULT_MEMORY_KIND, type MemoryKind, isMemoryKind } from './daily-markdown.js';
-import { embedModelId } from './embed-core.js';
+import { embedProfileId } from './embed-core.js';
 import { embed, embedBatch, embedQuery } from './embeddings.js';
 
 export interface MemoryEntry {
@@ -149,7 +149,7 @@ export async function addToIndex(
     // tell a model swap from genuine drift. Every write path (this + the full
     // rebuild) stamps, so a save-built index is never mistaken for stale.
     db.prepare("INSERT OR REPLACE INTO mem_meta (key, value) VALUES ('embed_model', ?)").run(
-      embedModelId(),
+      embedProfileId(),
     );
     const v = vector ?? (await embed(entry.text));
     const { lastInsertRowid } = db
@@ -231,7 +231,7 @@ export async function rebuildIndex(indexDir: string, entries: MemoryEntry[]): Pr
     // markdown source of truth with the current model, so the stamp is
     // authoritative and the health monitor won't re-trigger.
     db.prepare("INSERT OR REPLACE INTO mem_meta (key, value) VALUES ('embed_model', ?)").run(
-      embedModelId(),
+      embedProfileId(),
     );
     db.exec('DELETE FROM mem;');
     if (entries.length === 0) {

@@ -197,6 +197,23 @@ describe('runHandboekExport', () => {
     expect(page).toContain('class="hb-breadcrumb"');
   });
 
+  it('groups technical navigation into the four documented subheadings', async () => {
+    const page = await readFile(join(out, 'writing-scripts-with-gezel-sdk', 'index.html'), 'utf8');
+    for (const title of [
+      'How Gezel works',
+      'The Gezel Command Line',
+      'Developer',
+      'Models and Testing',
+    ]) {
+      expect(page).toContain(`<h3 class="hb-sidebar-subcategory-title">${title}</h3>`);
+    }
+    const developer = page.match(
+      /<h3 class="hb-sidebar-subcategory-title">Developer<\/h3>\s*<ul>([\s\S]*?)<\/ul>/,
+    )?.[1];
+    expect(developer).toContain('Writing scripts with gezel-sdk');
+    expect(developer).toContain('Building connected apps with gezel-app-sdk');
+  });
+
   it('omits the on-this-page list when an article has too few headings', async () => {
     const sparse = await readFile(join(out, 'craftbook', 'status-report', 'index.html'), 'utf8');
     expect(sparse).not.toContain('hb-onthispage');

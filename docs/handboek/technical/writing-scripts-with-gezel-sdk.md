@@ -3,6 +3,10 @@ id: writing-scripts-with-gezel-sdk
 title: Writing scripts with gezel-sdk
 order: 8
 summary: Build typed, capability-limited automations that run inside a Gezel project.
+subcategory:
+  id: developer
+  title: Developer
+  order: 3
 ---
 
 # Writing scripts with gezel-sdk

@@ -132,5 +132,10 @@ export function resultToActions(r: UnifiedSearchResult): NavAction[] {
         { kind: 'event', type: 'gezel:open-handboek-article', detail: intent },
       ];
     }
+    case 'knowledge':
+      // Placeholder until the Knowledge browser lands (knowledge-catalogs
+      // WS-I): the daemon emits no 'knowledge' results yet, and when it does
+      // this becomes an open-knowledge intent + area tab, handboek-style.
+      return [];
   }
 }

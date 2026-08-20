@@ -116,6 +116,7 @@ Persisted user state uses **gezels/**, never **agents/**. Repository-only metada
 | `packages/app` | Electron shell. Holds the supervisor (machine-service adoption on every packaged platform, per-user spawn, and embedded fallback), loads the UI, and ships platform installer/autostart scaffolding. |
 | `packages/cli` | `gezel` command-line for headless scenarios. |
 | `packages/catalog` | Catalog *loader* (sources, install pipeline, authoring/generation scripts). The content itself — gilde templates, toolsets, craftbooks, chat-/image-/video-model catalogs — lives in the external [`bendyline/gilde`](https://github.com/bendyline/gilde) repo, consumed as the exact-pinned `@bendyline/gilde` npm package. Local content dev via `pnpm link:gilde`. See "The three-repo catalog architecture" below. |
+| `packages/knowledge` | The `.gezk` knowledge-catalog toolchain: deterministic compiler, archive safety (verified ZIP inspect/extract), read-only reader with two-stage `bit384+int8` retrieval, chunking, and the frozen format constants. Depends only on `core` — never on `gezel-service`. Format spec: [docs/gezk-format-v1.md](docs/gezk-format-v1.md). |
 | `packages/plugin-sdk` | Helpers for writing gezel plugins (legacy surface, kept for compatibility). |
 | `packages/sdk` | Newer extension surface — typed entry points for external integrations and embedders. The plugin-sdk is the historical equivalent; treat `sdk` as the preferred surface for new work. |
 | `packages/vscode` | VSCode extension that surfaces gezel features inside the editor. |
@@ -123,7 +124,7 @@ Persisted user state uses **gezels/**, never **agents/**. Repository-only metada
 
 **Eleven of these are published to npm** as public API under semver: `core`, `client`, `sdk`, `app-sdk`, `plugin-sdk`, `catalog`, `connectors-spectral`, `script-stdlib`, `mcp`, `service`, `cli`. `app` and `vscode` are versioned and tagged by the release tooling but stay `private: true` — that flag is the only thing keeping them off npm. `ui`, `eval-viewer` and `evals` are excluded entirely; the UI ships *inside* the service tarball (`packages/service/tsup.config.ts` stages `packages/ui/dist` into `dist/ui/`). See [docs/npm-release.md](docs/npm-release.md).
 
-Build order (enforced in root `package.json` script): `core` → `client` / `plugin-sdk` / `sdk` / `catalog` (parallel) → `mcp` → `service` → `ui` → `cli` / `app` / `vscode` (parallel). The MCP depends on `client`; the service depends on all of them and resolves `@bendyline/gezel-mcp/dist/server.js` at runtime — this subpath is **explicitly exported** from the mcp package's `package.json` for a reason (see "Gotchas" below).
+Build order (enforced in root `package.json` script): `core` → `client` / `plugin-sdk` / `sdk` / `catalog` / `knowledge` (parallel) → `mcp` → `service` → `ui` → `cli` / `app` / `vscode` (parallel). The MCP depends on `client`; the service depends on all of them and resolves `@bendyline/gezel-mcp/dist/server.js` at runtime — this subpath is **explicitly exported** from the mcp package's `package.json` for a reason (see "Gotchas" below).
 
 ## The three-repo catalog architecture
 

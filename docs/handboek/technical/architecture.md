@@ -3,6 +3,10 @@ id: architecture
 title: "How gezel runs: app, daemon, and tools"
 order: 1
 summary: The desktop app, the background service, and how a gezel acts.
+subcategory:
+  id: how-gezel-works
+  title: How Gezel works
+  order: 1
 ---
 # How gezel runs
 

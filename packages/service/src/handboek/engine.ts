@@ -101,6 +101,7 @@ export function createHandboekEngine(opts: HandboekEngineOptions): HandboekEngin
               summary: a.summary,
               generated: false,
               siteVisible: a.siteVisible,
+              subcategory: a.subcategory,
             })),
           ...generated
             .filter((g) => g.area === area && !curatedIds.has(g.id))

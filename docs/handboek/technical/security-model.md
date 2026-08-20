@@ -3,6 +3,10 @@ id: security-model
 title: "The security model: tokens, sandboxing, and consent"
 order: 5
 summary: The guardrails between your crew and your computer.
+subcategory:
+  id: how-gezel-works
+  title: How Gezel works
+  order: 1
 ---
 # The security model
 

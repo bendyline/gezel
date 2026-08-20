@@ -21,6 +21,10 @@ describe('parseCuratedArticle', () => {
       'order: 1',
       'summary: The guildmaster.',
       'defaultDuration: 7',
+      'subcategory:',
+      '  id: crew-leads',
+      '  title: Crew leads',
+      '  order: 2',
       '---',
       '',
       '# The Meester',
@@ -35,6 +39,7 @@ describe('parseCuratedArticle', () => {
       order: 1,
       summary: 'The guildmaster.',
       defaultDuration: 7,
+      subcategory: { id: 'crew-leads', title: 'Crew leads', order: 2 },
       siteVisible: true,
     });
     expect(article?.body).toContain('# The Meester');

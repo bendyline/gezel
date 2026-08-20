@@ -171,6 +171,9 @@ const AREA_LINK_LABELS: Record<RecentTabArea, string> = {
   scripts: 'Scripts',
   history: 'History',
   handboek: 'Handboek',
+  // Rendered only once the user registers ≥1 knowledge catalog (WS-I); the
+  // label exists now because the Record is typed against every area.
+  knowledge: 'Knowledge',
   benchmarks: 'Benchmarks',
   settings: 'Settings',
 };

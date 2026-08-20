@@ -1,0 +1,60 @@
+{
+  "name": "@bendyline/gezel-knowledge",
+  "version": "1.0.6",
+  "description": "Gezel knowledge catalogs: the .gezk compiler, archive safety, read-only reader, routing, and signatures.",
+  "license": "MIT",
+  "keywords": ["gezel", "ai", "agents", "local-first", "knowledge", "rag", "sqlite-vec"],
+  "homepage": "https://github.com/bendyline/gezel",
+  "bugs": {
+    "url": "https://github.com/bendyline/gezel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bendyline/gezel.git",
+    "directory": "packages/knowledge"
+  },
+  "author": {
+    "name": "Bendyline",
+    "email": "support@bendyline.com"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "!dist/**/*.map"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@bendyline/gezel": "workspace:*",
+    "sqlite-vec": "^0.1.9",
+    "yauzl": "^3.4.0",
+    "yazl": "^3.3.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/yauzl": "^2.10.3",
+    "@types/yazl": "^2.4.6",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

@@ -112,6 +112,11 @@ export const MERGE_WEIGHTS: Record<UnifiedSearchResultKind, number> = {
   // Manual articles orient, they don't answer about the user's own work —
   // below every user-content corpus, above nothing.
   handboek: 380,
+  // Knowledge catalogs are generic reference material: below every corpus
+  // about the user's own work AND below the handboek (which at least is
+  // about this product), above only memory's ambient recall. The audit's
+  // "~380" slot collided with handboek — 370 keeps a strict ordering.
+  knowledge: 370,
   memory: 360,
 };
 

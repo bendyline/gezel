@@ -3,6 +3,7 @@ import { ProjectIconIdSchema } from '../project-icons.js';
 import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeSchema } from './codex.js';
 import { EntityIdSchema } from './entity-id.js';
+import { ProjectKnowledgeCatalogsSchema } from './knowledge.js';
 
 /** A credential destination is an exact HTTPS origin, never a URL path. */
 export const HttpsOriginSchema = z
@@ -282,6 +283,13 @@ export const ProjectSchema = z.object({
    * the user can override it later in Project Settings.
    */
   indexingEnabled: z.boolean().optional(),
+  /**
+   * Which knowledge catalogs are in scope for sessions here. Absent =
+   * inherit the user's global enabled set. Unresolvable refs under
+   * 'selected' are retained so a restored project regains its selection
+   * when the catalog is reinstalled.
+   */
+  knowledgeCatalogs: ProjectKnowledgeCatalogsSchema.optional(),
   github: ProjectGitHubSchema.optional(),
   connectors: z.array(ProjectConnectorBindingSchema).optional(),
   nudgeConfig: ProjectNudgeConfigSchema.optional(),

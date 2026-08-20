@@ -1,0 +1,370 @@
+import { z } from 'zod';
+
+/**
+ * Knowledge catalogs — the wire/disk contracts for `.gezk` archives, the
+ * per-user registry, the machine inventory, and the retrieval provenance
+ * shapes. The format itself (DDL, sharding, routing, quantization,
+ * determinism) is frozen in docs/gezk-format-v1.md; these schemas are its
+ * type-level expression and are shared by the compiler
+ * (@bendyline/gezel-knowledge), the daemon, the broker, the CLI, and the UI.
+ *
+ * Version discipline: `formatVersion` governs the container layout,
+ * `indexSchemaVersion` the SQLite DDL. Readers never migrate a catalog —
+ * incompatibility is a typed disabled-with-reason state, and a publisher's
+ * signed artifact is never rewritten.
+ */
+
+// ── id grammars (frozen in gezk-format-v1.md §7) ────────────────────────────
+
+/** DNS-label style: publishers, catalogs, topics. */
+export const KNOWLEDGE_ID_PATTERN = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
+
+export const KnowledgeIdSchema = z.string().regex(KNOWLEDGE_ID_PATTERN);
+
+/** 1–256 Unicode scalars, NFC, no controls, trimmed. Wikipedia = decimal curid. */
+export const KnowledgeDocumentIdSchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine((s) => s === s.normalize('NFC'), 'document id must be NFC-normalized')
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: the control-character ban is the point
+  .refine((s) => !/[\u0000-\u001f\u007f-\u009f]/u.test(s), 'document id must not contain controls')
+  .refine((s) => s === s.trim(), 'document id must not have leading/trailing whitespace');
+
+/** Exactly 32 lowercase hex chars (first 16 bytes of the chunk-uid hash). */
+export const KnowledgeChunkUidSchema = z.string().regex(/^[0-9a-f]{32}$/);
+
+const Sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/);
+
+// ── embedding + chunking profiles ───────────────────────────────────────────
+
+export const KnowledgeVectorEncodingSchema = z.enum(['bit384+int8']);
+
+/**
+ * The FULL vector-space identity of a catalog's embeddings. Matching only a
+ * model name or a dimension is unsafe — two 384-dim models do not share a
+ * space, and an instruction-prefix change silently changes vectors. Readers
+ * compare the entire object (by `id`, with the rest as the id's definition).
+ */
+export const KnowledgeEmbeddingProfileSchema = z.object({
+  /** e.g. `gezel-multilingual-e5-small@1`. New encoding/model = new id. */
+  id: z.string().min(1),
+  model: z.object({
+    repo: z.string().min(1),
+    revision: z.string().min(1),
+    onnxDigest: z.string().optional(),
+  }),
+  tokenizer: z.object({
+    kind: z.string().min(1),
+    digest: z.string().optional(),
+  }),
+  pooling: z.literal('mean'),
+  normalized: z.literal(true),
+  dimensions: z.number().int().positive(),
+  maxTokens: z.number().int().positive(),
+  queryInstruction: z.string(),
+  passageInstruction: z.string(),
+  vectorEncoding: KnowledgeVectorEncodingSchema,
+  distance: z.object({
+    stage1: z.literal('hamming'),
+    stage2: z.literal('cosine'),
+  }),
+  quantization: z.object({
+    int8: z.object({
+      method: z.literal('symmetric-linear'),
+      scale: z.literal(127),
+    }),
+    binary: z.object({
+      method: z.literal('sign'),
+      threshold: z.literal(0),
+      packing: z.literal('lsb-first'),
+    }),
+  }),
+});
+export type KnowledgeEmbeddingProfile = z.infer<typeof KnowledgeEmbeddingProfileSchema>;
+
+export const KnowledgeChunkingProfileSchema = z.object({
+  /** `gezel-markdown-chunks@2` for knowledge; `@1` names the project chunker. */
+  id: z.string().min(1),
+  unit: z.literal('tokens'),
+  tokenizer: z.literal('profile'),
+  targetTokens: z.number().int().positive(),
+  overlapTokens: z.number().int().nonnegative(),
+  contextHeader: z.object({ maxTokens: z.number().int().nonnegative() }),
+});
+export type KnowledgeChunkingProfile = z.infer<typeof KnowledgeChunkingProfileSchema>;
+
+// ── manifest ────────────────────────────────────────────────────────────────
+
+export const KnowledgeManifestFileSchema = z.object({
+  path: z.string().min(1),
+  sizeBytes: z.number().int().nonnegative(),
+  sha256: Sha256HexSchema,
+});
+
+export const KnowledgeCatalogManifestSchema = z.object({
+  kind: z.literal('gezel-knowledge-catalog'),
+  formatVersion: z.literal(1),
+  indexSchemaVersion: z.literal(1),
+  id: KnowledgeIdSchema,
+  version: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  language: z.string().min(2),
+  publisher: z.object({
+    id: KnowledgeIdSchema,
+    name: z.string().min(1),
+    url: z.string().optional(),
+  }),
+  createdAt: z.string(),
+  sourceSnapshot: z
+    .object({
+      name: z.string(),
+      date: z.string(),
+      taxonomyVersion: z.string().optional(),
+    })
+    .optional(),
+  license: z.object({
+    name: z.string().min(1),
+    noticePath: z.string().optional(),
+    attributionRequired: z.boolean(),
+  }),
+  embedding: KnowledgeEmbeddingProfileSchema,
+  chunking: KnowledgeChunkingProfileSchema,
+  topics: z
+    .array(z.object({ id: KnowledgeIdSchema, name: z.string().min(1) }))
+    .min(1, 'a catalog must ship a table of contents (at least one topic)'),
+  router: z.object({
+    shardTargetChunks: z.number().int().positive(),
+    shards: z.array(
+      z.object({
+        id: z.number().int().nonnegative(),
+        path: z.string().min(1),
+        chunks: z.number().int().nonnegative(),
+        documents: z.number().int().nonnegative(),
+        centroids: z.number().int().nonnegative(),
+        sha256: Sha256HexSchema,
+      }),
+    ),
+    totalCentroids: z.number().int().nonnegative(),
+  }),
+  counts: z.object({
+    documents: z.number().int().nonnegative(),
+    chunks: z.number().int().nonnegative(),
+    shards: z.number().int().positive(),
+  }),
+  files: z.array(KnowledgeManifestFileSchema).min(1),
+  compatibility: z.object({
+    minimumGezelVersion: z.string().optional(),
+    maximumIndexSchemaVersion: z.number().int().positive(),
+  }),
+  smokeQueries: z
+    .array(
+      z.object({
+        query: z.string().min(1),
+        expectedDocumentIds: z.array(KnowledgeDocumentIdSchema).min(1),
+      }),
+    )
+    .optional(),
+  toolchain: z
+    .object({
+      compiler: z.string(),
+      node: z.string(),
+      sqlite: z.string().optional(),
+      sqliteVec: z.string().optional(),
+      onnxruntime: z.string().optional(),
+      platform: z.string(),
+      modelDigest: z.string().optional(),
+      tokenizerDigest: z.string().optional(),
+    })
+    .optional(),
+  signature: z
+    .object({
+      algorithm: z.literal('ed25519'),
+      keyId: z.string().min(1),
+      canonicalization: z.literal('rfc8785'),
+      value: z.string().min(1),
+    })
+    .optional(),
+});
+export type KnowledgeCatalogManifest = z.infer<typeof KnowledgeCatalogManifestSchema>;
+
+// ── compiler input ──────────────────────────────────────────────────────────
+
+/** One normalized document streamed into the compiler. */
+export const CatalogDocumentSchema = z.object({
+  id: KnowledgeDocumentIdSchema,
+  title: z.string().min(1),
+  slug: z.string().min(1),
+  summary: z.string().optional(),
+  language: z.string().min(2),
+  /** Root→leaf topic id path; the first segment must exist in the manifest. */
+  topicPath: z.array(KnowledgeIdSchema).min(1),
+  markdown: z.string(),
+  sourceUrl: z.string().optional(),
+  sourceRevision: z.string().optional(),
+  sourceUpdatedAt: z.string().optional(),
+  attribution: z.record(z.string(), z.string()).optional(),
+  aliases: z.array(z.string()).optional(),
+});
+export type CatalogDocument = z.infer<typeof CatalogDocumentSchema>;
+
+// ── the immutable catalog reference + user registry ─────────────────────────
+
+export const KnowledgeStorageScopeSchema = z.enum(['machine-shared', 'user']);
+export type KnowledgeStorageScope = z.infer<typeof KnowledgeStorageScopeSchema>;
+
+/** The full immutable identity a user registry entry pins. */
+export const KnowledgeCatalogRefSchema = z.object({
+  publisherId: KnowledgeIdSchema,
+  catalogId: KnowledgeIdSchema,
+  version: z.string().min(1),
+  contentDigest: Sha256HexSchema,
+  storageScope: KnowledgeStorageScopeSchema,
+});
+export type KnowledgeCatalogRef = z.infer<typeof KnowledgeCatalogRefSchema>;
+
+/**
+ * `~/.gezel/knowledge/registry.json` — the authoritative record of what THIS
+ * user installed/enabled. The manager never scans storage trees and applies
+ * an implicit precedence rule; the registry is the truth (a deliberate
+ * divergence from the definition-file-presence pattern used by gezel/project
+ * storage scopes — recorded in docs/knowledge-catalogs.md).
+ */
+export const KnowledgeUserRegistrySchema = z.object({
+  version: z.literal(1),
+  catalogs: z.array(
+    z.object({
+      ref: KnowledgeCatalogRefSchema,
+      enabled: z.boolean(),
+      addedAt: z.string(),
+      autoUpdate: z.boolean().optional(),
+      /** Set when the manager quarantined this catalog (with the reason). */
+      disabledReason: z.string().optional(),
+    }),
+  ),
+});
+export type KnowledgeUserRegistry = z.infer<typeof KnowledgeUserRegistrySchema>;
+
+/** `assets/knowledge/inventory.json` — which public immutable bytes exist. */
+export const KnowledgeMachineInventorySchema = z.object({
+  version: z.literal(1),
+  catalogs: z.array(
+    z.object({
+      publisherId: KnowledgeIdSchema,
+      catalogId: KnowledgeIdSchema,
+      version: z.string().min(1),
+      contentDigest: Sha256HexSchema,
+      publishedAt: z.string(),
+      bytes: z.number().int().nonnegative(),
+    }),
+  ),
+});
+export type KnowledgeMachineInventory = z.infer<typeof KnowledgeMachineInventorySchema>;
+
+/** What the user daemon may send the broker: a signed coordinate, nothing else. */
+export const TrustedKnowledgeCoordinateSchema = z.object({
+  publisherId: KnowledgeIdSchema,
+  catalogId: KnowledgeIdSchema,
+  version: z.string().min(1),
+  expectedDigest: Sha256HexSchema,
+});
+export type TrustedKnowledgeCoordinate = z.infer<typeof TrustedKnowledgeCoordinateSchema>;
+
+// ── project scope ───────────────────────────────────────────────────────────
+
+export const ProjectKnowledgeCatalogsSchema = z.object({
+  mode: z.enum(['inherit', 'selected', 'off']),
+  /**
+   * Only for mode 'selected'. Unresolvable refs are RETAINED (not stripped)
+   * so a restored project regains its selection when the catalog returns.
+   */
+  refs: z
+    .array(z.object({ publisherId: KnowledgeIdSchema, catalogId: KnowledgeIdSchema }))
+    .optional(),
+});
+export type ProjectKnowledgeCatalogs = z.infer<typeof ProjectKnowledgeCatalogsSchema>;
+
+// ── knowledge:// URI ────────────────────────────────────────────────────────
+
+export interface KnowledgeUri {
+  catalogId: string;
+  documentId: string;
+  fragment?: { chunk: string } | { lineStart: number; lineEnd?: number };
+}
+
+const KNOWLEDGE_URI_PREFIX = 'knowledge://';
+
+/** Format per the frozen ABNF in gezk-format-v1.md §8. */
+export function formatKnowledgeUri(uri: KnowledgeUri): string {
+  const encodedDoc = uri.documentId
+    .split('/')
+    .map((seg) => encodeURIComponent(seg))
+    .join('/');
+  let out = `${KNOWLEDGE_URI_PREFIX}${uri.catalogId}/${encodedDoc}`;
+  if (uri.fragment) {
+    out +=
+      'chunk' in uri.fragment
+        ? `#chunk=${uri.fragment.chunk}`
+        : `#line=${uri.fragment.lineStart}${uri.fragment.lineEnd !== undefined ? `-${uri.fragment.lineEnd}` : ''}`;
+  }
+  return out;
+}
+
+/** Strict parse; null for anything that is not a well-formed knowledge URI. */
+export function parseKnowledgeUri(raw: string): KnowledgeUri | null {
+  if (!raw.startsWith(KNOWLEDGE_URI_PREFIX)) return null;
+  const rest = raw.slice(KNOWLEDGE_URI_PREFIX.length);
+  const hashAt = rest.indexOf('#');
+  const body = hashAt === -1 ? rest : rest.slice(0, hashAt);
+  const fragmentRaw = hashAt === -1 ? null : rest.slice(hashAt + 1);
+
+  const slashAt = body.indexOf('/');
+  if (slashAt <= 0) return null;
+  const catalogId = body.slice(0, slashAt);
+  const encodedDoc = body.slice(slashAt + 1);
+  if (!KNOWLEDGE_ID_PATTERN.test(catalogId)) return null;
+  if (!encodedDoc || encodedDoc.length > 512) return null;
+
+  let documentId: string;
+  try {
+    documentId = encodedDoc
+      .split('/')
+      .map((seg) => {
+        if (!seg) throw new Error('empty segment');
+        return decodeURIComponent(seg);
+      })
+      .join('/');
+  } catch {
+    return null;
+  }
+  if (!KnowledgeDocumentIdSchema.safeParse(documentId).success) return null;
+
+  if (fragmentRaw === null) return { catalogId, documentId };
+  const chunkMatch = /^chunk=([0-9a-f]{32})$/.exec(fragmentRaw);
+  if (chunkMatch) return { catalogId, documentId, fragment: { chunk: chunkMatch[1] as string } };
+  const lineMatch = /^line=(\d+)(?:-(\d+))?$/.exec(fragmentRaw);
+  if (lineMatch) {
+    return {
+      catalogId,
+      documentId,
+      fragment: {
+        lineStart: Number.parseInt(lineMatch[1] as string, 10),
+        ...(lineMatch[2] !== undefined ? { lineEnd: Number.parseInt(lineMatch[2], 10) } : {}),
+      },
+    };
+  }
+  return null;
+}
+
+// ── history events ──────────────────────────────────────────────────────────
+
+export const KNOWLEDGE_HISTORY_KINDS = [
+  'knowledge.catalog.installed',
+  'knowledge.catalog.updated',
+  'knowledge.catalog.enabled',
+  'knowledge.catalog.disabled',
+  'knowledge.catalog.removed',
+  'knowledge.catalog.install_failed',
+] as const;
+export type KnowledgeHistoryKind = (typeof KNOWLEDGE_HISTORY_KINDS)[number];

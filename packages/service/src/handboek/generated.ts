@@ -117,6 +117,8 @@ export async function buildGeneratedBody(
       '',
       'Craftbooks are step-by-step procedures your crew can follow to produce a real deliverable — each one names its steps, who runs them, and the checks a result must pass.',
       '',
+      'For a public catalog grouped by kind of work, browse [Craftbooks in the Gezel Gilde](https://gezelgilde.com/craftbooks/).',
+      '',
       '::handboek-craftbook-list',
     ].join('\n');
   }
@@ -144,6 +146,8 @@ export async function buildGeneratedBody(
       '# Every project type',
       '',
       'A project type outfits a whole project for one kind of work: the right crew, craftbooks, toolsets, and schedules, composed into a single installable setup.',
+      '',
+      'Browse [Project types in the Gezel Gilde](https://gezelgilde.com/toolsets/#project-types) for the public catalog view.',
     ];
     if (items.length > 0) {
       lines.push('', '| Project type | What it sets up |', '| --- | --- |');

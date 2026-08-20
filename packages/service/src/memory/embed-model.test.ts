@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   PipelineLoadError,
   embedModelId,
+  embedProfileId,
   isRetryablePipelineLoadFailure,
   queryInstruction,
 } from './embed-core.js';
@@ -43,6 +44,31 @@ describe('queryInstruction', () => {
     process.env.GEZEL_EMBED_MODEL = 'Xenova/bge-small-en-v1.5';
     process.env.GEZEL_EMBED_NO_QUERY_INSTRUCTION = '1';
     expect(queryInstruction()).toBe('');
+  });
+});
+
+describe('embedProfileId (C5: the full vector-space identity)', () => {
+  it('changes when the model, the instructions, or the dim change', () => {
+    delete process.env.GEZEL_EMBED_NO_QUERY_INSTRUCTION;
+    process.env.GEZEL_EMBED_MODEL = 'Xenova/bge-small-en-v1.5';
+    const bge = embedProfileId();
+    expect(bge).toMatch(
+      /^Xenova\/bge-small-en-v1\.5\|d384\|mean\|norm\|q:[0-9a-f]{8}\|p:[0-9a-f]{8}$/,
+    );
+
+    // Instruction kill-switch changes vectors → must change the profile,
+    // which the bare model-id stamp never caught.
+    process.env.GEZEL_EMBED_NO_QUERY_INSTRUCTION = '1';
+    expect(embedProfileId()).not.toBe(bge);
+    delete process.env.GEZEL_EMBED_NO_QUERY_INSTRUCTION;
+
+    // e5 prefixes BOTH sides — different profile despite same dim/pooling.
+    process.env.GEZEL_EMBED_MODEL = 'Xenova/multilingual-e5-small';
+    expect(embedProfileId()).not.toBe(bge);
+
+    // The empty passage instruction hashes to the well-known empty-string
+    // sha prefix — pins that bge's passage side really is unprefixed.
+    expect(bge.endsWith('|p:e3b0c442')).toBe(true);
   });
 });
 

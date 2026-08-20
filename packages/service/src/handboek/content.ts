@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { HandboekArea } from '@bendyline/gezel';
-import { HandboekAreaSchema, createLogger } from '@bendyline/gezel';
+import type { HandboekArea, HandboekTocSubcategory } from '@bendyline/gezel';
+import { HandboekAreaSchema, HandboekTocSubcategorySchema, createLogger } from '@bendyline/gezel';
 import { parseFrontmatter, splitFrontmatterBlock } from '@bendyline/squisq/markdown';
 
 const log = createLogger('handboek');
@@ -48,6 +48,8 @@ export interface CuratedArticle {
   title: string;
   order: number;
   summary?: string;
+  /** Optional collapsible shelf within the article's broader area. */
+  subcategory?: HandboekTocSubcategory;
   /** Article body — squisq-flavored markdown, macros not yet expanded. */
   body: string;
   /** Per-block seconds override for video playback. */
@@ -149,10 +151,22 @@ export function parseCuratedArticle(
     typeof fm.defaultDuration === 'number' && fm.defaultDuration > 0
       ? fm.defaultDuration
       : undefined;
+  const parsedSubcategory = HandboekTocSubcategorySchema.safeParse(fm.subcategory);
+  const subcategory = parsedSubcategory.success ? parsedSubcategory.data : undefined;
   const siteVisible = fm.siteVisible !== false;
   const trimmed = body.trim();
   if (!trimmed) return null;
-  return { id, area, title, order, summary, body: trimmed, defaultDuration, siteVisible };
+  return {
+    id,
+    area,
+    title,
+    order,
+    summary,
+    subcategory,
+    body: trimmed,
+    defaultDuration,
+    siteVisible,
+  };
 }
 
 function titleFromBody(body: string, fallback: string): string {

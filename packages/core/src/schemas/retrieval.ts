@@ -18,6 +18,9 @@ export const RETRIEVAL_SOURCES = [
   'project-memory',
   'gezel-memory',
   'shared',
+  // Installed knowledge catalogs (read-only reference corpora — .gezk).
+  // Scoped by the user's registry + the project's knowledgeCatalogs policy.
+  'knowledge',
 ] as const;
 export const RetrievalSourceSchema = z.enum(RETRIEVAL_SOURCES);
 export type RetrievalSource = z.infer<typeof RetrievalSourceSchema>;

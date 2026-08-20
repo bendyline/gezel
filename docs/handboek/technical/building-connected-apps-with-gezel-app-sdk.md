@@ -3,6 +3,10 @@ id: building-connected-apps-with-gezel-app-sdk
 title: Building connected apps with gezel-app-sdk
 order: 9
 summary: Discover Gezel, ask for user consent, and use local models or product APIs from another app.
+subcategory:
+  id: developer
+  title: Developer
+  order: 3
 ---
 
 # Building connected apps with gezel-app-sdk

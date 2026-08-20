@@ -22,6 +22,7 @@ export * from './session-telemetry.js';
 export * from './terminal.js';
 export * from './history.js';
 export * from './gilde-updates.js';
+export * from './knowledge.js';
 export * from './keurmeester.js';
 export * from './meester-status.js';
 export * from './ambient-dashboard.js';

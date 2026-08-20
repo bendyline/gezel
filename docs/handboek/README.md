@@ -66,6 +66,19 @@ Body prose…
 
   `packages/service/src/handboek/engine.test.ts`).
 
+- `subcategory` — optional nested shelf within the article's area. Give every
+
+  article on the same shelf the same `id`, `title`, and `order`; the article's
+
+  own `order` sorts it inside that shelf. For example:
+
+  ```yaml
+  subcategory:
+    id: developer
+    title: Developer
+    order: 3
+  ```
+
 - `defaultDuration` — optional seconds-per-block override for the video
 
   playback mode's timing.

@@ -13,6 +13,7 @@
  * batch bounds peak allocation regardless of how many texts a caller passes.
  */
 
+import { createHash } from 'node:crypto';
 import { createLogger } from '@bendyline/gezel';
 import {
   HF_CACHE_DIR_ENV,
@@ -92,6 +93,27 @@ export function passageInstruction(): string {
   const model = embedModelId();
   if (/(^|\/|-)e5-/i.test(model) || /multilingual-e5/i.test(model)) return 'passage: ';
   return '';
+}
+
+/**
+ * The full embedding-profile identity — everything that determines whether
+ * two stored vectors live in the same space: model id, dimension, pooling,
+ * normalization, and BOTH instruction prefixes (hashed — an instruction
+ * change silently changes vectors, which the bare model-id stamp never
+ * caught; audit finding C5). This string is what the reconcile-on-mismatch
+ * stamps compare (content index `meta.embed_model`, memory `mem_meta`), so
+ * a dim/pooling/prefix change now correctly invalidates vectors the same
+ * way a model swap always has. Old bare-model-id stamps mismatch once and
+ * trigger the already-supported drop-and-re-embed.
+ *
+ * Pooling and normalization are compile-time constants of this pipeline
+ * (`runEmbed` always uses mean+normalize) — encoded literally so a future
+ * change to that call site is forced to bump the profile.
+ */
+export function embedProfileId(): string {
+  const sha8 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex').slice(0, 8);
+  const dim = Number(process.env.GEZEL_EMBED_DIM) || 384;
+  return `${embedModelId()}|d${dim}|mean|norm|q:${sha8(queryInstruction())}|p:${sha8(passageInstruction())}`;
 }
 
 type Pipeline = (

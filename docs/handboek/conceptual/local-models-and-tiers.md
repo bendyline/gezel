@@ -34,3 +34,5 @@ Every role declares a **model floor** — the minimum tier it needs to work unsu
 ## Choosing
 
 You don't have to get this right up front. Set a default provider in Settings, and override it per gezel only when a companion needs something different — a big cloud model for your reviewer, a fast local one for day-to-day chat. Gezel checks each new model's fitness on your hardware before recommending it.
+
+The public [Gezel Gilde model catalog](https://gezelgilde.com/models/) lists the local chat, image, and video models Gezel knows about, including their download size, context, license, supported engines, and hardware tier.

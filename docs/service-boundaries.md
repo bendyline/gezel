@@ -14,6 +14,8 @@ Gezel uses two local service roles in packaged installs:
 | Electron UI/API | Serves | Not mounted |
 | Ambient dashboard PNGs (`~/.gezel/ambient/`) | Owns (generator; never starts in machine-engine role) | None |
 | Wallpaper / lock-screen apply | Never — user-session APIs only; the Electron main process applies (see ADR 0007) | Never |
+| Knowledge catalog search, browsing, RAG, activation, project scope | Owns | Never — no query, chunk, or reader surface exists on the broker |
+| Shared knowledge catalog bytes (`assets/knowledge/`) | Mounts read-only; re-verifies before first use | Owns download/verify/publish/inventory/reclaim of **signed registry coordinates only** |
 
 The roles use the same service package so engine/provider implementations stay shared, but
 `serviceRole` changes the startup work, credential scopes, and—most importantly—the HTTP route
@@ -132,3 +134,54 @@ The current migration grants the machine's ordinary interactive accounts access 
 matching the old full-product daemon's machine-wide visibility. Narrower membership remains an
 installer/administrator policy decision. The broker runtime credential is adequate for shared
 compute but is not an authorization model for shared project data.
+
+## Knowledge catalog assets (`machine-knowledge-assets`)
+
+Knowledge catalogs ([knowledge-catalogs.md](knowledge-catalogs.md), format in
+[gezk-format-v1.md](gezk-format-v1.md)) extend the broker with exactly one new
+responsibility: acting as the **narrow installer-owned publisher of trusted
+immutable knowledge bytes** into `<sharedAssets>/knowledge/`, beside the
+existing shared model-asset tree. The boundary rules:
+
+- **Inputs are allowlisted signed registry coordinates only** — a
+  `(publisherId, catalogId, version, sha256)` tuple. The broker independently
+  resolves the signed Qualla registry, verifies the Ed25519 registry signature
+  against shipped trust anchors, downloads, verifies the archive digest,
+  stages, validates (per-file hashes, manifest signature, schema/profile
+  compatibility, `quick_check`, embedder-free smoke), and atomically publishes
+  `catalogs/<publisher>/<id>/versions/<version>/<sha256>/`. Arbitrary URLs and
+  local paths are rejected at the route boundary.
+- **The broker never receives** a search query, prompt, chunk request,
+  project/session/gezel id, enabled-catalog list, or user path — and no route
+  exists that could return catalog content. Its surface is content-addressed
+  `ensure`, `status`, `inventory`, and deliberately machine-wide `reclaim`.
+- **Scope**: the routes mount under `/v1/remote/manage/knowledge/*` behind a
+  dedicated `machine-knowledge-assets` scope, a sibling of `machine-models`.
+  Paired-LAN `remote-inference` grants cannot call it (the manage surface is
+  never mounted on the LAN app). The user daemon proxies install/reclaim UI
+  through its own product routes with its own authorization.
+- **Shared storage is not shared usage.** The machine inventory records which
+  public immutable bytes exist. Activation, per-project scope, routing,
+  browsing, search, and RAG live exclusively in each user daemon's private
+  `~/.gezel/knowledge/registry.json`; a catalog downloaded by one account is
+  merely "already on this device" to another until that account adds it. The
+  user daemon re-verifies a shared catalog (per-file hashes, identity cache)
+  before first mount and opens every database read-only/immutable.
+- **ACL publication** follows the shared-model pattern (world-readable files,
+  installer-managed root ACE, `icacls /reset` re-inheritance on Windows) and
+  inherits its hard-won failure posture: an ACL repair failure degrades the
+  single catalog, never the service (the SCM-1066 crash-loop lesson from the
+  shared model store applies verbatim).
+- **Reclamation** is a separate, explicitly machine-wide storage action with a
+  cross-account warning. The broker cannot see private registries and must
+  never infer per-user "safe to delete" from them; v1 performs no automatic
+  shared eviction.
+- In development, portable installs, or a degraded packaged install with no
+  writable machine asset service, Qualla installs fall back to the user tier
+  (`~/.gezel/knowledge/`) and record that actual scope; search remains fully
+  functional.
+
+This is not permission to widen the broker into a product daemon: the roles
+table above still governs, and any future knowledge-related route on the
+broker beyond ensure/status/inventory/reclaim requires revisiting this
+section.

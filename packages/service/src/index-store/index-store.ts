@@ -4,7 +4,7 @@ import {
   type HistoryFilter,
   nowIso,
 } from '@bendyline/gezel';
-import { embedModelId } from '../memory/embed-core.js';
+import { embedProfileId } from '../memory/embed-core.js';
 import { imageEmbedModelId } from '../memory/image-embed-core.js';
 import { TEXT_EMBED_DIM, applySchema } from './schema.js';
 import {
@@ -344,7 +344,10 @@ export const MAX_ENRICH_ATTEMPTS = 3;
  * read-open path).
  */
 function reconcileEmbedModel(db: SqliteDriver, vecAvailable: boolean): void {
-  const current = embedModelId();
+  // The stamp is the FULL profile identity (model|dim|pooling|norm|prefix
+  // hashes), not the bare model id — so a dim or instruction change also
+  // invalidates vectors. Pre-profile stamps mismatch once and re-embed.
+  const current = embedProfileId();
   const stored = db
     .prepare("SELECT value FROM meta WHERE key = 'embed_model'")
     .get<{ value: string }>()?.value;

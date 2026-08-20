@@ -1,12 +1,21 @@
 # Knowledge catalogs
 
-Status: Proposed architecture (2026-08)
+Status: Accepted architecture (2026-08). The container format, index schema,
+embedding/chunking profiles, and scale design (sharding, routing, vector
+encoding, latency budgets) are **frozen separately** in
+[gezk-format-v1.md](gezk-format-v1.md), which supersedes this document's
+embedding/schema sketches where they differ — notably: the extension is
+`.gezk` (sibling of `.gezmodel`); the public profile is
+`gezel-multilingual-e5-small@1` with a `bit384+int8` two-stage encoding (not
+MiniLM/float32); the chunking profile is `gezel-markdown-chunks@2`; the
+knowledge merge weight is 370; and every catalog must ship a topics table of
+contents.
 
 ## Executive decision
 
 A **knowledge catalog** is a versioned, read-only body of reference material that
 Gezel can search, cite, browse, and use as one bounded source in proactive indexed
-context. It is distributed as a standard ZIP with the `.gzk` extension and
+context. It is distributed as a standard ZIP with the `.gezk` extension and
 installed into either Gezel's shared machine asset store or the current user's
 private Gezel home.
 
@@ -71,7 +80,7 @@ Markdown folder                     Wikipedia + Wikidata dumps
         normalize -> chunk -> embed -> FTS/vec
                          |
                          v
-                 reproducible .gzk ZIP
+                 reproducible .gezk ZIP
                          |
              +-----------+-------------+
              |                         |
@@ -96,13 +105,13 @@ Markdown folder                     Wikipedia + Wikidata dumps
           omni search + proactive indexed context
 ```
 
-## Container format: `.gzk`
+## Container format: `.gezk`
 
-`.gzk` means **Gezel Knowledge**. It is a renamed ZIP so normal archival tools can
+`.gezk` means **Gezel Knowledge**. It is a renamed ZIP so normal archival tools can
 inspect it. Format version 1 uses this layout:
 
 ```text
-physics-en-2026.08.gzk
+physics-en-2026.08.gezk
 ├── manifest.json
 ├── README.md                       human-facing scope and provenance
 ├── LICENSES/
@@ -135,7 +144,7 @@ already required by FTS. The canonical runtime representation is:
 
 JSONL is the compiler's streaming interchange format, not the installed query
 format. Qualla may spool normalized `CatalogDocument` records as NDJSON while a
-build runs, but those spools do not need to ship in the `.gzk`.
+build runs, but those spools do not need to ship in the `.gezk`.
 
 This gives the browser a full Markdown document without reconstructing overlapping
 chunks, keeps search random-access, and keeps the installed catalog to a small
@@ -290,7 +299,7 @@ Linux:   /var/lib/gezel/assets/knowledge/
 assets/knowledge/
 ├── inventory.json                   published versions/digests, written atomically
 ├── downloads/
-│   └── <publisher>-<id>-<version>.gzk.partial
+│   └── <publisher>-<id>-<version>.gezk.partial
 └── catalogs/
     └── <publisher>/
         └── <id>/
@@ -311,7 +320,7 @@ project policy and also stores local/private catalogs:
 ├── registry.json                    exact catalog refs, enablement, updates, policy
 ├── router.db                        effective per-user catalog router, rebuildable
 ├── downloads/
-│   └── <publisher>-<id>-<version>.gzk.partial
+│   └── <publisher>-<id>-<version>.gezk.partial
 └── catalogs/
     └── <publisher>/
         └── <id>/
@@ -570,7 +579,7 @@ likewise it must resolve catalog ids against the session project's effective
 policy rather than trusting request input.
 
 Manual network downloads and automatic update checks both honor the app-network
-security policy. Local `.gzk` import remains available offline. Search and
+security policy. Local `.gezk` import remains available offline. Search and
 browsing of installed data never use the network. The shared install path uses a
 separate user-daemon-to-broker client and allowlisted machine route, not these
 renderer-facing product routes. A future machine-wide reclaim endpoint should live
@@ -600,10 +609,10 @@ Proposed commands:
 
 ```text
 gezel knowledge init <folder>
-gezel knowledge build <folder> --out <catalog.gzk> [--install]
-gezel knowledge validate <catalog.gzk> [--deep]
-gezel knowledge inspect <catalog.gzk>
-gezel knowledge install <catalog.gzk|url|registry-id> [--user]
+gezel knowledge build <folder> --out <catalog.gezk> [--install]
+gezel knowledge validate <catalog.gezk> [--deep]
+gezel knowledge inspect <catalog.gezk>
+gezel knowledge install <catalog.gezk|url|registry-id> [--user]
 gezel knowledge list [--scope user|machine|all]
 gezel knowledge search <query> [--catalog <id>]
 gezel knowledge remove <id>
@@ -648,7 +657,7 @@ Knowledge is a first-level Settings section rather than an AI engine. It shows:
 - **Available from Qualla**: domain cards with description, topics, download and
   expanded sizes, publisher, snapshot date, and Download. A catalog already in the
   shared store says `On this device` and can be added without downloading;
-- **Import catalog**: choose a local `.gzk`, review identity/provenance/signature,
+- **Import catalog**: choose a local `.gezk`, review identity/provenance/signature,
   and confirm; and
 - live resumable download/install progress using the same visual language as model
   downloads.
@@ -773,7 +782,7 @@ Wikipedia dump + Wikidata indices
   -> spool bounded NDJSON partitions (restartable)
   -> shared Gezel compiler: chunk + batch embed + write shards
   -> SQLite quick/integrity checks + smoke-query evals
-  -> reproducible .gzk + manifest signatures + checksums
+  -> reproducible .gezk + manifest signatures + checksums
   -> publish immutable artifacts
   -> publish signed registry last
 ```
@@ -791,7 +800,7 @@ Suggested public layout:
 ```text
 https://qualla.com/cdn/gezel/knowledge/v1/index.json
 https://qualla.com/cdn/gezel/knowledge/v1/index.json.sig
-https://qualla.com/cdn/gezel/knowledge/v1/<id>/<version>/<sha256>.gzk
+https://qualla.com/cdn/gezel/knowledge/v1/<id>/<version>/<sha256>.gezk
 ```
 
 Immutable archives get long-lived immutable cache headers. The signed registry
@@ -890,7 +899,7 @@ published version; it must not copy Gezel's SQLite DDL or chunker.
 
 ### Phase 0 - contracts and spike
 
-- Freeze `.gzk` v1 schemas, embedding profile, stable document ids, and knowledge
+- Freeze `.gezk` v1 schemas, embedding profile, stable document ids, and knowledge
   URI grammar.
 - Record the narrow shared-asset boundary in `docs/service-boundaries.md` or an
   ADR: OS paths/ACLs, trust allowlist, broker credential scope, remote-host
@@ -908,7 +917,7 @@ in two consecutive builds.
 - Ship `init`, `build`, `validate`, `inspect`, and local `search`.
 - Add archive safety, reproducibility, manifests, and local signatures/hashes.
 
-Exit: a user can compile Markdown into a finished `.gzk`, validate it, and search
+Exit: a user can compile Markdown into a finished `.gezk`, validate it, and search
 it without a daemon.
 
 ### Phase 2 - private/shared install and service search
@@ -983,7 +992,7 @@ installed catalogs or requiring a Gezel release.
 
 ## Recommended v1 defaults
 
-- Extension: `.gzk`, standard ZIP/ZIP64.
+- Extension: `.gezk`, standard ZIP/ZIP64.
 - Storage: signed public Qualla bytes shared once per device by default; local,
   private, arbitrary-URL, and unsigned bytes stored per user.
 - Scope: exact catalog references and enablement remain per user, enabled on that
