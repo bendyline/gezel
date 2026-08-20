@@ -38,7 +38,18 @@ export default defineConfig({
     handboek: 'src/handboek/engine.ts',
   },
   format: ['esm'],
-  dts: true,
+  // Only the package's two public import surfaces need bundled declarations.
+  // Passing every executable entry to rollup-plugin-dts also makes its worker
+  // typecheck the daemon and all six internal workers as independent roots.
+  // Those 13-byte `export {}` worker declarations are not published APIs and
+  // can push Node's isolated worker heap over its limit on memory-constrained
+  // builds.
+  dts: {
+    entry: {
+      index: 'src/index.ts',
+      handboek: 'src/handboek/engine.ts',
+    },
+  },
   sourcemap: true,
   clean: true,
   target: 'es2022',
