@@ -23,10 +23,22 @@ export interface RecallHit {
 }
 
 const DEFAULT_TOP_K = 4;
-const DEFAULT_MIN_SCORE = 0.35;
+/**
+ * Raw cosine floor on memory vector hits (query→passage). Calibrated for
+ * bge-small-en-v1.5 with `evals/src/bin/embed-calibration.ts` (2026-08-19):
+ * unrelated pairs top out at 0.429, relevant ones start at 0.561. Re-measure
+ * on any embedder change — this scale is model-specific.
+ */
+const DEFAULT_MIN_SCORE = 0.45;
 /** Tighter budget for ollama — their default num_ctx is small. */
 const OLLAMA_TOP_K = 3;
-/** Cap + floor for index-derived code hits appended after the memory hits. */
+/**
+ * Cap + floor for index-derived code hits appended after the memory hits.
+ * NOTE: this floor (and LIBRARY_MIN_SCORE below) filters the hybrid
+ * rank-fusion score from searchCode/searchLibrary — rank-based and therefore
+ * embedder-independent, unlike the raw-cosine DEFAULT_MIN_SCORE above. It
+ * does not move when the embedding model changes.
+ */
 const CODE_TOP_K = 3;
 const CODE_MIN_SCORE = 0.45;
 /**

@@ -58,7 +58,7 @@ export function ProjectTimeline({
     input: string;
   };
   terminalFocusRequest?: { threadId: string; requestKey: number };
-  sessionFocusRequest?: { sessionId: string; requestKey: number };
+  sessionFocusRequest?: { sessionId: string; requestKey: number; messageIndex?: number };
 }) {
   const loadTimeline = useCallback(
     (opts: { limit: number; before?: string }) =>

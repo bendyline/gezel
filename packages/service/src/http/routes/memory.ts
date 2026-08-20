@@ -1,3 +1,4 @@
+import { MemorySearchRequestSchema } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { type MemoryKind, isMemoryKind } from '../../memory/daily-markdown.js';
 import type { ServiceContext } from '../context.js';
@@ -9,12 +10,7 @@ export function memoryRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
   app.post('/search', async (c) => {
-    const body = (await c.req.json()) as {
-      gezelId: string;
-      projectId: string;
-      query: string;
-      topK?: number;
-    };
+    const body = MemorySearchRequestSchema.parse(await c.req.json());
     const outcome = await ctx.memory.searchAllDetailed(
       body.gezelId,
       body.projectId,

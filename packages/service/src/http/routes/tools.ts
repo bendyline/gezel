@@ -613,6 +613,8 @@ export function toolRoutes(ctx: ServiceContext): Hono {
         includeShared: body.includeShared !== false,
         ...(body.sources ? { sources: body.sources } : {}),
         ...(body.maxResults ? { maxResults: body.maxResults } : {}),
+        ...(body.offset ? { offset: body.offset } : {}),
+        ...(body.pathPrefix ? { pathPrefix: body.pathPrefix } : {}),
       }),
       // Craftbooks are an optional execution hint, never a reason for indexed
       // knowledge search to fail. Project-local, user-local, and Gilde books

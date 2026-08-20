@@ -188,6 +188,14 @@ export interface VectorHit {
   lineStart: number;
   lineEnd: number;
   text: string;
+  /**
+   * Raw sqlite-vec distance — RANK ORDER ONLY. Never convert this to a
+   * similarity: fresh vec_text tables declare cosine, but tables created
+   * before the declaration report L2 until a re-embed migration recreates
+   * them, so the scale is not uniform across installs. (Rank order is
+   * identical either way on L2-normalized vectors, which is why the hybrid
+   * ranker consumes rank position and ignores this value.)
+   */
   distance: number;
 }
 
@@ -230,6 +238,13 @@ export interface OpenOptions {
   kind: CollectionKind;
   rootPath: string;
   label?: string;
+  /**
+   * Skip vector-table creation AND the embed-model reconcile. For stores
+   * that never hold embeddings (the global FTS mirror) — without this, every
+   * embed-model swap ran a pointless vec_text DROP/CREATE + enrichments
+   * clear against a vectorless database.
+   */
+  vectorless?: boolean;
 }
 
 interface FileRow {
@@ -335,11 +350,21 @@ function reconcileEmbedModel(db: SqliteDriver, vecAvailable: boolean): void {
   if (stored) {
     if (vecAvailable) {
       db.exec('DROP TABLE IF EXISTS vec_text');
-      db.exec(
-        `CREATE VIRTUAL TABLE IF NOT EXISTS vec_text USING vec0(embedding float[${TEXT_EMBED_DIM}]);`,
-      );
+      // Same metric + fallback discipline as applySchema — the re-embed
+      // migration is also how pre-cosine tables pick up the declaration.
+      try {
+        db.exec(
+          `CREATE VIRTUAL TABLE IF NOT EXISTS vec_text USING vec0(embedding float[${TEXT_EMBED_DIM}] distance_metric=cosine);`,
+        );
+      } catch {
+        db.exec(
+          `CREATE VIRTUAL TABLE IF NOT EXISTS vec_text USING vec0(embedding float[${TEXT_EMBED_DIM}]);`,
+        );
+      }
     }
     db.exec('DELETE FROM enrichments');
+    // The embed-only gate holds the same invalidated vectors' bookkeeping.
+    db.exec('DELETE FROM embed_state');
   }
   db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('embed_model', ?)").run(current);
 }
@@ -355,8 +380,8 @@ export class IndexStore {
     const db = await openIndexDatabase(dbPath);
     if (!db) return null;
     try {
-      const caps = applySchema(db);
-      reconcileEmbedModel(db, caps.vec);
+      const caps = applySchema(db, { vectors: !opts.vectorless });
+      if (!opts.vectorless) reconcileEmbedModel(db, caps.vec);
       db.prepare(
         'INSERT OR REPLACE INTO collections (id, kind, root_path, label, created_at) VALUES (?, ?, ?, ?, ?)',
       ).run(opts.collectionId, opts.kind, opts.rootPath, opts.label ?? null, nowIso());
@@ -747,6 +772,102 @@ export class IndexStore {
   }
 
   /**
+   * Files whose chunks can be embedded WITHOUT a summarizer and haven't been —
+   * the always-on embed-only work-list (semantic search before any Boekwachter
+   * joins the roster). Eligibility mirrors {@link filesNeedingEnrichment}
+   * exactly (same modality + shadow-ok predicate) so the two tiers never
+   * disagree about what is embeddable. A hash the FULL pass already embedded
+   * (enrichments.embedded_at set) is excluded — embed-only never re-does work
+   * the richer pass finished — and its own gate is a separate table so it can
+   * never consume the summary gate.
+   */
+  filesNeedingEmbedOnly(limit = 10): FileRecord[] {
+    return this.db
+      .prepare(
+        `SELECT f.* FROM files f
+         LEFT JOIN embed_state es ON es.content_hash = f.hash
+         LEFT JOIN enrichments e ON e.content_hash = f.hash
+         WHERE f.collection_id = ? AND f.trivial = 0 AND f.hash IS NOT NULL
+           AND (f.modality IN ('code','text','doc')
+                OR EXISTS (SELECT 1 FROM shadow_state s
+                           WHERE s.content_hash = f.hash AND s.state = 'ok'))
+           AND (e.content_hash IS NULL OR e.embedded_at IS NULL)
+           AND (es.content_hash IS NULL
+                OR (es.embedded_at IS NULL AND COALESCE(es.attempts, 0) < ${MAX_ENRICH_ATTEMPTS}))
+         ORDER BY f.path LIMIT ?`,
+      )
+      .all<FileRow>(this.collectionId, limit)
+      .map(rowToFile);
+  }
+
+  /** COUNT companion to {@link filesNeedingEmbedOnly}. */
+  countNeedingEmbedOnly(): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM files f
+         LEFT JOIN embed_state es ON es.content_hash = f.hash
+         LEFT JOIN enrichments e ON e.content_hash = f.hash
+         WHERE f.collection_id = ? AND f.trivial = 0 AND f.hash IS NOT NULL
+           AND (f.modality IN ('code','text','doc')
+                OR EXISTS (SELECT 1 FROM shadow_state s
+                           WHERE s.content_hash = f.hash AND s.state = 'ok'))
+           AND (e.content_hash IS NULL OR e.embedded_at IS NULL)
+           AND (es.content_hash IS NULL
+                OR (es.embedded_at IS NULL AND COALESCE(es.attempts, 0) < ${MAX_ENRICH_ATTEMPTS}))`,
+      )
+      .get<{ n: number }>(this.collectionId);
+    return row?.n ?? 0;
+  }
+
+  /** Failed symbol-summary attempts for a hash (parse/engine failures). */
+  symbolSummaryAttempts(contentHash: string): number {
+    return Number(
+      this.db
+        .prepare('SELECT attempts FROM symbol_summary_state WHERE content_hash = ?')
+        .get<{ attempts: number }>(contentHash)?.attempts ?? 0,
+    );
+  }
+
+  /** Record a failed symbol-summary attempt; capped like every other gate. */
+  markSymbolSummaryAttempt(contentHash: string): number {
+    this.db
+      .prepare(
+        `INSERT INTO symbol_summary_state (content_hash, attempts) VALUES (?, 1)
+         ON CONFLICT(content_hash) DO UPDATE SET
+           attempts = COALESCE(symbol_summary_state.attempts, 0) + 1`,
+      )
+      .run(contentHash);
+    return this.symbolSummaryAttempts(contentHash);
+  }
+
+  /** Mark a hash's chunks as embedded by the embed-only tier. */
+  markEmbedOnly(contentHash: string, filePath: string): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO embed_state (content_hash, collection_id, file_path, embedded_at, attempts)
+         VALUES (?, ?, ?, ?, 0)`,
+      )
+      .run(contentHash, this.collectionId, filePath, nowIso());
+  }
+
+  /** Record a failed embed-only attempt; capped like every other gate. */
+  markEmbedOnlyAttempt(contentHash: string, filePath: string): number {
+    this.db
+      .prepare(
+        `INSERT INTO embed_state (content_hash, collection_id, file_path, embedded_at, attempts)
+         VALUES (?, ?, ?, NULL, 1)
+         ON CONFLICT(content_hash) DO UPDATE SET
+           attempts = COALESCE(embed_state.attempts, 0) + 1`,
+      )
+      .run(contentHash, this.collectionId, filePath);
+    return Number(
+      this.db
+        .prepare('SELECT attempts FROM embed_state WHERE content_hash = ?')
+        .get<{ attempts: number }>(contentHash)?.attempts ?? 1,
+    );
+  }
+
+  /**
    * Enrichment coverage counts. `summarized` counts real summaries (join on
    * the summaries table), deliberately NOT the enrichments gate — the gate also
    * carries failed-attempt rows (embedded_at NULL), and historically a failed
@@ -759,10 +880,18 @@ export class IndexStore {
     pending: number;
     skipped: number;
     shadowsPending: number;
+    /** Files awaiting the always-on embed-only tier (semantic-search readiness). */
+    embedOnlyPending: number;
     embedModel?: string;
   } {
+    // Mirrors filesNeedingEnrichment's eligibility EXACTLY, shadow-ok media
+    // included: described images / transcribed audio DO get summarized and
+    // embedded, and excluding them here made the media tier's work invisible
+    // in every denominator the status UI shows.
     const ELIGIBLE = `f.collection_id = ? AND f.trivial = 0 AND f.hash IS NOT NULL
-           AND f.modality IN ('code','text','doc')`;
+           AND (f.modality IN ('code','text','doc')
+                OR EXISTS (SELECT 1 FROM shadow_state s
+                           WHERE s.content_hash = f.hash AND s.state = 'ok'))`;
     const count = (sql: string): number =>
       Number(this.db.prepare(sql).get<{ n: number }>(this.collectionId)?.n ?? 0);
     const eligible = count(`SELECT COUNT(*) AS n FROM files f WHERE ${ELIGIBLE}`);
@@ -789,6 +918,7 @@ export class IndexStore {
       pending: this.countNeedingEnrichment(),
       skipped,
       shadowsPending: this.countNeedingAiShadow(),
+      embedOnlyPending: this.countNeedingEmbedOnly(),
       ...(embedModel ? { embedModel } : {}),
     };
   }
@@ -1039,16 +1169,22 @@ export class IndexStore {
   /** All chunks for a file (for embedding during enrichment). */
   chunksForFile(
     filePath: string,
-  ): Array<{ id: number; lineStart: number; lineEnd: number; text: string }> {
+  ): Array<{ id: number; kind: string; lineStart: number; lineEnd: number; text: string }> {
     return this.db
       .prepare(
-        'SELECT id, line_start, line_end, text FROM chunks WHERE collection_id = ? AND file_path = ? ORDER BY id',
+        'SELECT id, kind, line_start, line_end, text FROM chunks WHERE collection_id = ? AND file_path = ? ORDER BY id',
       )
-      .all<{ id: number; line_start: number; line_end: number; text: string }>(
+      .all<{ id: number; kind: string; line_start: number; line_end: number; text: string }>(
         this.collectionId,
         filePath,
       )
-      .map((r) => ({ id: r.id, lineStart: r.line_start, lineEnd: r.line_end, text: r.text }));
+      .map((r) => ({
+        id: r.id,
+        kind: r.kind,
+        lineStart: r.line_start,
+        lineEnd: r.line_end,
+        text: r.text,
+      }));
   }
 
   /** Keyword search over converted-document / chunk text. */

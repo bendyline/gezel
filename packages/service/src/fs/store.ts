@@ -5575,6 +5575,7 @@ export class Store {
             ? { origin: 'system' as const }
             : {}),
           ...(refs && refs.length > 0 ? { referencedFiles: refs } : {}),
+          ...(m.retrieval && m.retrieval.hits.length > 0 ? { retrieval: m.retrieval } : {}),
           ...(legacyArtifactRefs.length > 0 ? { referencedArtifacts: legacyArtifactRefs } : {}),
           ...(tRefs && tRefs.length > 0 ? { referencedTasks: tRefs } : {}),
           ...(m.toolCalls && m.toolCalls.length > 0 ? { toolCalls: m.toolCalls } : {}),

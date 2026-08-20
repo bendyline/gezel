@@ -40,6 +40,7 @@ import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
 import { AudioPlayer } from './AudioPlayer.js';
 import { DraftPlanCard } from './DraftPlanCard.js';
+import { openTabAction, runNavActions } from './nav-actions.js';
 import { GezelIcon } from './GezelIcon.js';
 import { ImagePreview } from './ImagePreview.js';
 import { PendingQuestionCard } from './PendingQuestionCard.js';
@@ -231,6 +232,23 @@ export interface MessageBubbleProps {
    */
   referencedTasks?: string[];
   /**
+   * Indexed-context sources this USER turn consulted (proactive retrieval) —
+   * citations only, never the retrieved text. Renders as a collapsed
+   * "Consulted N sources" row so the RAG pipeline reads as visible diligence
+   * rather than invisible machinery. Rows with a path deep-link through the
+   * same nav actions as search results (line-anchored).
+   */
+  retrieval?: {
+    hits: ReadonlyArray<{
+      source: string;
+      projectId?: string;
+      path?: string;
+      line?: number;
+      lineEnd?: number;
+      score: number;
+    }>;
+  };
+  /**
    * Called when a chip or an inline code-span link is activated. The
    * timeline wraps this to include the originating message's
    * `projectId`, so cross-project surfaces like the Meester's global
@@ -408,6 +426,7 @@ export function MessageBubble({
   mediaProvider,
   referencedFiles,
   referencedTasks,
+  retrieval,
   onFileReference,
   onTaskReference,
   toolCalls,
@@ -537,6 +556,63 @@ export function MessageBubble({
           </>
         )}
       </div>
+    ) : null;
+
+  // The indexed-context sources this turn consulted — collapsed by default,
+  // one row per citation, path rows deep-linking through the same
+  // queue-then-dispatch nav actions as titlebar search results (E1-anchored).
+  const retrievalHits = retrieval?.hits ?? [];
+  const consultedSources =
+    retrievalHits.length > 0 ? (
+      <details className="msg-retrieval">
+        <summary className="msg-retrieval-summary">
+          Consulted {retrievalHits.length} indexed source{retrievalHits.length === 1 ? '' : 's'}
+        </summary>
+        <ul className="msg-retrieval-list">
+          {retrievalHits.map((hit, i) => {
+            const label = hit.path
+              ? `${hit.path}${hit.line ? `:${hit.line}` : ''}`
+              : 'remembered note';
+            const key = `${hit.source}:${hit.path ?? 'memory'}:${hit.line ?? i}`;
+            if (!hit.path) {
+              return (
+                <li key={key} className="msg-retrieval-item">
+                  [{hit.source}] {label}
+                </li>
+              );
+            }
+            const open = () => {
+              if (hit.source === 'shared') {
+                runNavActions([openTabAction({ kind: 'document', path: hit.path! })]);
+                return;
+              }
+              const targetProject = hit.projectId ?? projectId;
+              if (!targetProject) return;
+              const intent = {
+                projectId: targetProject,
+                path: hit.path!,
+                source: (hit.source === 'artifacts' ? 'artifacts' : 'workspace') as
+                  | 'artifacts'
+                  | 'workspace',
+                ...(hit.line ? { line: hit.line } : {}),
+                ...(hit.lineEnd ? { lineEnd: hit.lineEnd } : {}),
+              };
+              runNavActions([
+                { kind: 'open-file', intent },
+                openTabAction({ kind: 'project', id: targetProject }),
+                { kind: 'event', type: 'gezel:open-file', detail: intent },
+              ]);
+            };
+            return (
+              <li key={key} className="msg-retrieval-item">
+                <button type="button" className="msg-ref-chip" onClick={open} title={hit.path}>
+                  [{hit.source}] {label}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </details>
     ) : null;
 
   // A referenced task that is a DRAFT renders as an inline plan card (the
@@ -694,6 +770,7 @@ export function MessageBubble({
         <PendingQuestionCard question={question} onAnswered={onQuestionAnswered} />
       )}
       {chips}
+      {isUser && consultedSources}
       {planCards}
       <MessageActions
         markdown={content}

@@ -48,6 +48,9 @@ export async function openGlobalCollection(
       collectionId: collection,
       kind: collection as CollectionKind,
       rootPath: home,
+      // Pure FTS mirror — no embeddings live here, so skip the vector table
+      // and the embed-model reconcile it would otherwise churn on every swap.
+      vectorless: true,
     });
   } catch (error) {
     // The global db has one fixed home — a transient lock just means "no

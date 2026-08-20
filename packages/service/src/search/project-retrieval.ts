@@ -7,10 +7,12 @@ import {
   type RetrievalPolicy,
   type RetrievalSource,
   type UnifiedSearchResult,
+  contextBudgetCeiling,
+  estimateTokens,
   parseTaskRef,
 } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
-import type { SearchService } from './search-service.js';
+import { MERGE_WEIGHTS, type SearchService } from './search-service.js';
 
 const MODE_BUDGET: Record<RetrievalMode, number> = {
   off: 0,
@@ -48,6 +50,9 @@ export interface ProjectRetrievalHit {
   line?: number;
   lineEnd?: number;
   score: number;
+  /** Calibrated 0–1 within-corpus relevance, when the search layer provides it. */
+  relevance?: number;
+  tier?: 'strong' | 'weak';
   excerpt: string;
 }
 
@@ -104,14 +109,30 @@ export function resolveRetrievalPolicy(args: {
   };
 }
 
-/** Leave output/tool/history space on small context windows automatically. */
-function contextBudgetCeiling(contextWindow: number | undefined): number {
-  if (!contextWindow) return Number.POSITIVE_INFINITY;
-  if (contextWindow <= 4_096) return 160;
-  if (contextWindow <= 8_192) return 320;
-  if (contextWindow <= 16_384) return 700;
-  if (contextWindow <= 32_768) return 1_400;
-  return 4_000;
+/**
+ * Per-kind relevance floors for proactive injection, written as the exact
+ * quotients of the historical absolute floor (`score >= 120` on the weighted
+ * 0–1000 scale) over each kind's merge weight — behavior-preserving while
+ * moving floors into calibrated relevance space, where they are uniform and
+ * tunable per corpus. Memory's quotient is effectively dead code (the raw
+ * 0.45 cosine floor at the source dominates it) but kept for the record.
+ * `default` covers future kinds (e.g. `knowledge`) until deliberately tuned.
+ */
+const INJECTION_MIN_RELEVANCE: Partial<Record<UnifiedSearchResult['kind'], number>> = {
+  content: 120 / 420,
+  symbol: 120 / 520,
+  document: 120 / 680,
+  memory: 120 / 360,
+  session: 120 / 400,
+};
+const INJECTION_MIN_RELEVANCE_DEFAULT = 0.25;
+
+function clearsInjectionFloor(result: UnifiedSearchResult): boolean {
+  const floor = INJECTION_MIN_RELEVANCE[result.kind] ?? INJECTION_MIN_RELEVANCE_DEFAULT;
+  // Results from older callers/stubs may lack `relevance`; derive it from the
+  // weighted score so the check stays exactly equivalent to the old floor.
+  const relevance = result.relevance ?? result.score / (MERGE_WEIGHTS[result.kind] || 1);
+  return relevance >= floor;
 }
 
 export async function retrieveProjectContext(args: {
@@ -125,6 +146,19 @@ export async function retrieveProjectContext(args: {
   contextWindow?: number;
   /** Active project followed by its directly linked, authorized projects. */
   projectIds?: readonly string[];
+  /**
+   * Fired as soon as the scoped search returns — BEFORE the relevance floor
+   * and hydration can turn the whole call into `null`. This is the telemetry
+   * seam: without it, "every arm scored under the floor" and "retrieval never
+   * ran" are indistinguishable in the audit log. Non-content only.
+   */
+  onSearchProbe?: (probe: {
+    query: string;
+    queryHash: string;
+    policy: ResolvedRetrievalPolicy;
+    rawResults: number;
+    arms?: import('./search-service.js').RetrievalArmTiming[];
+  }) => void;
 }): Promise<ProjectRetrievalResult | null> {
   const taskContext = await resolveTaskContext(args.store, args.record);
   const policy = resolveRetrievalPolicy({
@@ -145,8 +179,15 @@ export async function retrieveProjectContext(args: {
     sources: policy.sources,
     maxResults: MODE_RESULTS[policy.mode],
   });
+  args.onSearchProbe?.({
+    query,
+    queryHash,
+    policy,
+    rawResults: found.results.length,
+    ...(found.arms ? { arms: found.arms } : {}),
+  });
 
-  const diverse = diversify(found.results).filter((result) => result.score >= 120);
+  const diverse = diversify(found.results).filter(clearsInjectionFloor);
   if (diverse.length === 0) return null;
   const maxExcerptChars = policy.mode === 'lean' ? 180 : policy.mode === 'balanced' ? 700 : 1_300;
   const hits: ProjectRetrievalHit[] = [];
@@ -165,6 +206,8 @@ export async function retrieveProjectContext(args: {
       ...(result.line ? { line: result.line } : {}),
       ...(result.lineEnd ? { lineEnd: result.lineEnd } : {}),
       score: result.score,
+      ...(result.relevance !== undefined ? { relevance: result.relevance } : {}),
+      ...(result.tier ? { tier: result.tier } : {}),
       excerpt,
     });
   }
@@ -324,8 +367,4 @@ function tidy(text: string, maxChars: number): string {
   const value = text.replace(/\0/g, '').trim();
   if (value.length <= maxChars) return value;
   return `${value.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
-}
-
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
 }

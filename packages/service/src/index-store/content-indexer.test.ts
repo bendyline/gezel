@@ -279,3 +279,65 @@ describe('shadow tree GC', () => {
     expect(existsSync(join(dir, '.gezel', 'files'))).toBe(false);
   });
 });
+
+describe('unconvertible doc formats', () => {
+  it('a doc format with no importer indexes a name stub instead of vanishing', async () => {
+    await writeFile(join(dir, 'meeting-notes.odt'), 'odf-bytes');
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    const store = (await IndexStore.open(join(dir, '.gezel', 'index', 'index.db'), {
+      collectionId: 'c',
+      kind: 'workspace',
+      rootPath: dir,
+    }))!;
+    expect(store.getMetadata('meeting-notes.odt')['doc:convert']).toBe('unsupported');
+    // Findable by filename words — previously these files had zero chunks,
+    // making them the only workspace content invisible to search entirely.
+    const hits = store.searchDocs('meeting notes', 5);
+    expect(hits.some((h) => h.filePath === 'meeting-notes.odt')).toBe(true);
+    store.close();
+  });
+});
+
+describe('capped walk', () => {
+  it('a capped walk indexes what it saw but never prunes rows or sweeps shadows', async () => {
+    // Full pass first: three sources, one with a shadow companion, plus a
+    // genuine orphan companion the sweep would normally remove.
+    await writeFile(join(dir, 'a.ts'), 'export const a = 1;\n');
+    await writeFile(join(dir, 'b.ts'), 'export const b = 2;\n');
+    await writeFile(join(dir, 'spec.docx'), 'bytes');
+    const companion = join(artifacts, 'shadow', 'spec.docx_files');
+    await mkdir(companion, { recursive: true });
+    await writeFile(join(companion, 'spec.md'), 'converted');
+    const orphan = join(artifacts, 'shadow', 'gone.docx_files');
+    await mkdir(orphan, { recursive: true });
+    await writeFile(join(orphan, 'gone.md'), 'orphan');
+    const full = await runWorkspaceContentIndex(dir, 'c', artifacts);
+    expect(full!.scanned).toBe(3);
+    // The full pass swept the orphan; reseed it to prove the capped pass
+    // skips the sweep entirely rather than sparing live dirs by luck.
+    await mkdir(orphan, { recursive: true });
+    await writeFile(join(orphan, 'gone.md'), 'orphan');
+
+    // Capped pass: only 2 of 3 files are walked. Whichever fell past the cap
+    // must keep its DB row, its shadow companion must survive, and the orphan
+    // sweep must not run at all.
+    const capped = await runWorkspaceContentIndex(dir, 'c', artifacts, { maxFiles: 2 });
+    expect(capped!.scanned).toBe(2);
+    expect(capped!.removed).toBe(0);
+    const store = (await IndexStore.open(join(dir, '.gezel', 'index', 'index.db'), {
+      collectionId: 'c',
+      kind: 'workspace',
+      rootPath: dir,
+    }))!;
+    expect(store.allFiles()).toHaveLength(3);
+    store.close();
+    expect(existsSync(companion)).toBe(true);
+    expect(existsSync(orphan)).toBe(true);
+
+    // A later uncapped pass reconciles normally: the orphan goes, live stays.
+    const settled = await runWorkspaceContentIndex(dir, 'c', artifacts);
+    expect(settled!.removed).toBe(0);
+    expect(existsSync(companion)).toBe(true);
+    expect(existsSync(orphan)).toBe(false);
+  });
+});

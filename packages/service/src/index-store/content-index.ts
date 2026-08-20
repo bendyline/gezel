@@ -68,7 +68,7 @@ import {
 import { classifyFile } from './classify.js';
 import type { ContentIndexStats } from './content-indexer.js';
 import { ensureShadowDocSidecar, isConvertibleDoc, shadowDocFilesPaths } from './docs.js';
-import { type EnrichDeps, enrichFile } from './enrich.js';
+import { type EnrichDeps, embedOnlyFile, enrichFile } from './enrich.js';
 import { buildEntitiesFromMetadata } from './entities.js';
 import { refreshGitStats } from './git-stats.js';
 import { ensureIndexGitignore } from './gitignore.js';
@@ -1153,6 +1153,7 @@ export class ContentIndex {
     pending: number;
     skipped: number;
     shadowsPending: number;
+    embedOnlyPending: number;
     embedModel?: string;
   } | null> {
     const opened = await this.open(projectId);
@@ -1209,6 +1210,38 @@ export class ContentIndex {
         embedded += r.embedded;
       });
       return { files, summarized, embedded };
+    } finally {
+      index.close();
+    }
+  }
+
+  /**
+   * Run one batch of the always-on embed-only tier: give chunks vectors with
+   * no LLM involved, so semantic search works before any Boekwachter joins
+   * the roster. Deliberately serial and modest — the shared embeddings worker
+   * does the work, and this runs ahead of (not instead of) the roster-gated
+   * enrichment tiers. Stops the batch early when embeddings are unavailable
+   * so one outage can't burn every file's attempt budget.
+   */
+  async embedOnly(
+    projectId: string,
+    limit = 10,
+  ): Promise<{ files: number; embedded: number } | null> {
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    const { index, workspaceDir, artifactsDir } = opened;
+    try {
+      if (!index.vecAvailable) return { files: 0, embedded: 0 };
+      const { embedBatch } = await import('../memory/embeddings.js');
+      let files = 0;
+      let embedded = 0;
+      for (const file of index.filesNeedingEmbedOnly(limit)) {
+        const outcome = await embedOnlyFile(index, workspaceDir, artifactsDir, file, embedBatch);
+        files++;
+        if (outcome === 'embedded') embedded++;
+        if (outcome === 'unavailable') break;
+      }
+      return { files, embedded };
     } finally {
       index.close();
     }

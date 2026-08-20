@@ -640,6 +640,13 @@ interface LiveSessionState {
   libraryRecallPaths?: Set<string>;
   /** Query fingerprints already injected through per-turn project retrieval. */
   retrievalQueryHashes?: Set<string>;
+  /**
+   * Query fingerprints whose zero-injection probe has already been logged.
+   * Separate from retrievalQueryHashes on purpose: a query that found nothing
+   * today must stay eligible for injection later (the index may catch up),
+   * while its "found nothing" telemetry should not repeat every turn.
+   */
+  retrievalProbeHashes?: Set<string>;
   /** Live LLM session. May be rebuilt on provider reset or resume failure. */
   session: LLMSession | null;
   /** Model shared by provider binding, prompt construction, and live telemetry. */
@@ -6735,6 +6742,20 @@ export class ChatManager {
       }
       if (projectRetrieval) {
         promptForTurn = `${projectRetrieval.prompt}\n\n${promptForTurn}`;
+        // Stamp the consulted sources on the stored user message — citations
+        // only (source/path/line/score), never the retrieved text — so the
+        // UI can show what this turn consulted instead of the retrieval
+        // being invisible machinery.
+        userMessage.retrieval = {
+          hits: projectRetrieval.hits.map((hit) => ({
+            source: hit.source,
+            ...(hit.projectId ? { projectId: hit.projectId } : {}),
+            ...(hit.path ? { path: hit.path } : {}),
+            ...(hit.line ? { line: hit.line } : {}),
+            ...(hit.lineEnd ? { lineEnd: hit.lineEnd } : {}),
+            score: hit.score,
+          })),
+        };
         log.info(
           `session ${sessionId}: indexed context injected (${projectRetrieval.policy.mode}, ${projectRetrieval.estimatedTokens} est. tokens, ${projectRetrieval.hits.length} hits)`,
         );
@@ -12899,6 +12920,16 @@ export class ChatManager {
         state.session?.numCtx ??
         this.providers.get(state.record.providerName)?.getContextWindow?.();
       const linkedProjectIds = await this.store.linkedProjectIds(state.record.projectId);
+      // Captured by the probe callback so telemetry exists even when the
+      // floor/hydration turn the whole retrieval into null — the exact blind
+      // spot where "arms all scored low" used to leave no audit trace at all.
+      let probe: {
+        query: string;
+        queryHash: string;
+        policy: { mode: string; inheritedFrom: string; maxTokens: number };
+        rawResults: number;
+        arms?: unknown[];
+      } | null = null;
       const result = await retrieveProjectContext({
         store: this.store,
         search,
@@ -12909,12 +12940,53 @@ export class ChatManager {
         messageOrigin,
         projectIds: [state.record.projectId, ...linkedProjectIds],
         ...(contextWindow ? { contextWindow } : {}),
+        onSearchProbe: (p) => {
+          probe = p;
+        },
       });
-      if (!result) return null;
+      if (!result) {
+        // Zero-injection telemetry (per query hash, once per session): the
+        // arms ran; nothing cleared the floor or survived hydration.
+        const zero = probe as {
+          queryHash: string;
+          policy: { mode: string; inheritedFrom: string; maxTokens: number };
+          rawResults: number;
+          arms?: unknown[];
+        } | null;
+        if (zero) {
+          const probed = state.retrievalProbeHashes ?? new Set<string>();
+          if (!probed.has(zero.queryHash)) {
+            probed.add(zero.queryHash);
+            state.retrievalProbeHashes = probed;
+            await this.historyManager
+              ?.log({
+                kind: 'retrieval.context-injected',
+                projectId: state.record.projectId,
+                gezelId: state.record.gezelId,
+                summary: `Indexed context retrieval found nothing above the floor (${zero.policy.mode})`,
+                details: {
+                  sessionId: state.record.id,
+                  queryHash: zero.queryHash,
+                  mode: zero.policy.mode,
+                  inheritedFrom: zero.policy.inheritedFrom,
+                  estimatedTokens: 0,
+                  maxTokens: zero.policy.maxTokens,
+                  truncated: false,
+                  rawResults: zero.rawResults,
+                  hits: [],
+                  ...(zero.arms ? { arms: zero.arms } : {}),
+                },
+              })
+              .catch(() => {});
+          }
+        }
+        return null;
+      }
       const already = state.retrievalQueryHashes ?? new Set<string>();
       if (already.has(result.queryHash)) return null;
       already.add(result.queryHash);
       state.retrievalQueryHashes = already;
+      const probeArms = (probe as { arms?: unknown[] } | null)?.arms;
       await this.historyManager
         ?.log({
           kind: 'retrieval.context-injected',
@@ -12937,6 +13009,8 @@ export class ChatManager {
               lineEnd: hit.lineEnd,
               score: hit.score,
             })),
+            // Per-arm timing/outcome telemetry (non-content — never snippets).
+            ...(probeArms ? { arms: probeArms } : {}),
           },
         })
         .catch(() => {});
@@ -15075,6 +15149,15 @@ export class ChatManager {
         GEZEL_SESSION_ID: record.id,
         GEZEL_HOME: this.home,
         GEZEL_EXECUTION_DENSITY: executionDensity,
+        // The session model's context window, so the mcp child can budget its
+        // own tool output (the `search` renderer) — the subprocess otherwise
+        // knows nothing about the model it serves. Runtime (post-admission)
+        // wins over the catalog figure when the engine clamped it.
+        ...((runtime?.effectiveContextWindow ?? modelContextWindow)
+          ? {
+              GEZEL_CONTEXT_WINDOW: String(runtime?.effectiveContextWindow ?? modelContextWindow),
+            }
+          : {}),
         GEZEL_ROLE_BASED_NAME_ONLY_MODE:
           (record.roleBasedNameOnlyMode ?? globalConfig.roleBasedNameOnlyMode ?? false) ? '1' : '0',
         ...(record.expectedDeliverable

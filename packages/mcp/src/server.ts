@@ -50,8 +50,10 @@ import {
   applyStepPatch,
   assertCraftbookGraph,
   coerceDeliverableKind,
+  contextBudgetCeiling,
   craftbookDocFormatFromEnv,
   deliverableStep,
+  estimateTokens,
   expandStepDeliverable,
   formatReviewProvenance,
   inferDeliverableKind,
@@ -185,6 +187,14 @@ const sessionTaskRef = process.env.GEZEL_TASK_REF ?? '';
 // session. Lets the unified craftbook_* tools default their target to the
 // book being edited. Empty for task/project sessions.
 const sessionCraftbookId = process.env.GEZEL_CRAFTBOOK_ID ?? '';
+// The session model's context window (post-admission when the engine clamped
+// it), forwarded by ChatManager so tool renderers can budget their text
+// output. Absent for providers that don't report one.
+const rawSessionContextWindow = Number(process.env.GEZEL_CONTEXT_WINDOW ?? '');
+const sessionContextWindow =
+  Number.isFinite(rawSessionContextWindow) && rawSessionContextWindow > 0
+    ? rawSessionContextWindow
+    : undefined;
 
 // Trust anchor for the daemon's loopback HTTPS. When `GEZEL_CERT_PATH`
 // is set (the production case post-step-5), build a fetch that pins
@@ -517,8 +527,17 @@ function isZodRawShape(value: unknown): value is Record<string, z.ZodType> {
 server.tool(
   'search_memory',
   'Search agent and project memories using semantic similarity. Returns the most relevant remembered facts, decisions, and context.',
-  { query: z.string().describe('What to search for in memory') },
-  async ({ query }) => {
+  {
+    query: z.string().describe('What to search for in memory'),
+    topK: z
+      .number()
+      .int()
+      .positive()
+      .max(50)
+      .optional()
+      .describe('Max memories to return (default 10).'),
+  },
+  async ({ query, topK }) => {
     try {
       const res = await fetchImpl(`${baseUrl}/api/memory/search`, {
         method: 'POST',
@@ -526,7 +545,7 @@ server.tool(
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ gezelId, projectId, query }),
+        body: JSON.stringify({ gezelId, projectId, query, ...(topK ? { topK } : {}) }),
       });
       if (!res.ok) {
         return errorResult(`search_memory failed: ${await responseErrorMessage(res)}`);
@@ -9232,34 +9251,47 @@ server.tool(
     limit: z.number().optional().describe('Max entries (default 20)'),
   },
   async ({ project, gezel, kind, from, to, q, limit }) => {
-    const projectId = project ? await resolveProjectId(project) : undefined;
-    const res = await api.listHistory({
-      ...(projectId ? { projectId } : {}),
-      ...(gezel ? { gezelId: gezel } : {}),
-      ...(kind ? { kind } : {}),
-      ...(from ? { from } : {}),
-      ...(to ? { to } : {}),
-      ...(q ? { q } : {}),
-      limit: limit ?? 20,
-    });
-    if (!res.entries.length) {
-      return { content: [{ type: 'text' as const, text: 'No history entries match.' }] };
+    try {
+      const resolvedProject = project ? await resolveProjectId(project) : undefined;
+      const res = await api.listHistory({
+        ...(resolvedProject ? { projectId: resolvedProject } : {}),
+        ...(gezel ? { gezelId: gezel } : {}),
+        ...(kind ? { kind } : {}),
+        ...(from ? { from } : {}),
+        ...(to ? { to } : {}),
+        ...(q ? { q } : {}),
+        limit: limit ?? 20,
+      });
+      const lines = res.entries.map((e) => {
+        if (e.entryType === 'session') {
+          const mins = Math.round(e.durationMs / 60_000);
+          const activity = mins === 0 ? '<1m' : `${mins}m`;
+          return `${e.lastActivityAt} · 💬 session · ${e.gezelId} in ${e.projectId} — ${e.title} (${e.messageCount} msgs, ${activity})`;
+        }
+        const scope = [
+          e.projectId ? `project:${e.projectId}` : null,
+          e.gezelId ? `gezel:${e.gezelId}` : null,
+        ]
+          .filter(Boolean)
+          .join(' ');
+        return `${e.at} · 📜 ${e.kind}${scope ? ` · ${scope}` : ''} — ${e.summary}`;
+      });
+      const summary = res.entries.length
+        ? `Found ${res.entries.length} history entr${res.entries.length === 1 ? 'y' : 'ies'}.`
+        : 'No history entries match.';
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary,
+          ...(q ? { query: q } : {}),
+          matches: res.entries,
+          count: res.entries.length,
+        },
+        { text: lines.length ? `${summary}\n${lines.join('\n')}` : summary },
+      );
+    } catch (err) {
+      return errorResult(`search_history failed: ${unwrapApiError(err)}`);
     }
-    const lines = res.entries.map((e) => {
-      if (e.entryType === 'session') {
-        const mins = Math.round(e.durationMs / 60_000);
-        const activity = mins === 0 ? '<1m' : `${mins}m`;
-        return `${e.lastActivityAt} · 💬 session · ${e.gezelId} in ${e.projectId} — ${e.title} (${e.messageCount} msgs, ${activity})`;
-      }
-      const scope = [
-        e.projectId ? `project:${e.projectId}` : null,
-        e.gezelId ? `gezel:${e.gezelId}` : null,
-      ]
-        .filter(Boolean)
-        .join(' ');
-      return `${e.at} · 📜 ${e.kind}${scope ? ` · ${scope}` : ''} — ${e.summary}`;
-    });
-    return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
   },
 );
 
@@ -9294,35 +9326,58 @@ server.tool(
 
 server.tool(
   'search_sessions',
-  'Search past chat-session transcripts across all gezels — what was actually said, not just session titles. Use to recall prior decisions, instructions, or conversations ("where did we discuss X?").',
+  'Search your own past chat-session transcripts in this project — what was actually said, not just session titles. Use to recall prior decisions, instructions, or conversations ("where did we discuss X?"). Team-scope sessions may pass explicit gezel/project filters to search other transcripts.',
   {
     q: z.string().min(1).describe('Full-text query against transcript content'),
-    gezel: z.string().optional().describe('Filter by gezel id'),
-    project: z.string().optional().describe('Filter by project id'),
+    gezel: z
+      .string()
+      .optional()
+      .describe('Search a different gezel’s transcripts (team scope only; defaults to you)'),
+    project: z
+      .string()
+      .optional()
+      .describe('Search a different project (team scope only; defaults to the active project)'),
     limit: z.number().optional().describe('Max sessions (default 10)'),
   },
   async ({ q, gezel, project, limit }) => {
-    const projectId = project ? await resolveProjectId(project) : undefined;
-    const res = await api.searchSessions({
-      q,
-      ...(gezel ? { gezel } : {}),
-      ...(projectId ? { project: projectId } : {}),
-      maxResults: limit ?? 10,
-    });
-    if (res.engine === 'unavailable') {
-      return errorResult('Transcript search is unavailable on this install.', {
-        code: 'search_unavailable',
-        retryable: false,
+    try {
+      const resolvedProject = project ? await resolveProjectId(project) : undefined;
+      // Default both filters to THIS session's scope. Worker sessions are only
+      // authorized for their own gezel + project (omitting the filters was a
+      // guaranteed 403); team-scope tokens may widen explicitly.
+      const res = await api.searchSessions({
+        q,
+        gezel: gezel ?? (gezelId || undefined),
+        project: resolvedProject ?? projectId,
+        maxResults: limit ?? 10,
       });
+      if (res.engine === 'unavailable') {
+        return errorResult('Transcript search is unavailable on this install.', {
+          code: 'search_unavailable',
+          retryable: false,
+        });
+      }
+      const lines = res.results.map(
+        (r) =>
+          `${r.lastActivityAt} · ${r.gezelId} in ${r.projectId} — ${r.title}${r.archived ? ' (archived)' : ''} [msg #${r.messageStart}]: ${r.snippet}`,
+      );
+      const summary = res.results.length
+        ? `Found ${res.results.length} matching session transcript${res.results.length === 1 ? '' : 's'}.`
+        : 'No session transcripts match.';
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary,
+          query: q,
+          matches: res.results,
+          count: res.results.length,
+          engine: res.engine,
+        },
+        { text: lines.length ? `${summary}\n${lines.join('\n')}` : summary },
+      );
+    } catch (err) {
+      return errorResult(`search_sessions failed: ${unwrapApiError(err)}`);
     }
-    if (!res.results.length) {
-      return { content: [{ type: 'text' as const, text: 'No session transcripts match.' }] };
-    }
-    const lines = res.results.map(
-      (r) =>
-        `${r.lastActivityAt} · ${r.gezelId} in ${r.projectId} — ${r.title}${r.archived ? ' (archived)' : ''} [msg #${r.messageStart}]: ${r.snippet}`,
-    );
-    return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
   },
 );
 
@@ -10439,18 +10494,61 @@ server.tool(
   },
 );
 
+/** Per-hit snippet cap in the rendered `search` text (structuredContent keeps the full snippet). */
+const SEARCH_SNIPPET_MAX_CHARS = 200;
+
+function clampSearchSnippet(snippet: string): string {
+  const collapsed = snippet.replace(/\s+/g, ' ').trim();
+  if (collapsed.length <= SEARCH_SNIPPET_MAX_CHARS) return collapsed;
+  return `${collapsed.slice(0, SEARCH_SNIPPET_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+/**
+ * Token budget for the rendered `search` text. The model explicitly asked for
+ * results, so it gets 2× the per-turn indexed-context ceiling for its window;
+ * when the window is unknown (env var absent), a fixed budget that keeps the
+ * worst case around ~8KB instead of the ~24KB an unbudgeted 30×800-char
+ * response could reach.
+ */
+function searchTextBudgetTokens(): number {
+  const ceiling = contextBudgetCeiling(sessionContextWindow);
+  return Number.isFinite(ceiling) ? ceiling * 2 : 2_000;
+}
+
 server.tool(
   'search',
-  "Search indexed knowledge by meaning and keywords through one simple surface. By default this covers the active project plus every directly linked project's workspace, artifacts, and project memory; this gezel's memory; and the shared document library. Every result includes project/corpus provenance and an exact path/line when available. Linked workspace hits use `../<project-id>/...` and can be opened with `read_file`; active-project artifacts use `read_artifact`, and shared hits use `read_document`. Strongly relevant Gilde, user-local, or active-project-local craftbooks may also be suggested with a direct invocation recipe; `suggest_craftbook` remains available for explicit procedure-only discovery. This is the preferred discovery tool; `grep_files` remains best for exact strings and regular expressions.",
+  "Search indexed knowledge by meaning and keywords through one simple surface. Covers the active and linked projects' workspaces, artifacts, and memories, plus the shared document library. Every result carries provenance and an exact path/line when available — open hits with `read_file` (workspace, including `../<project-id>/...` linked paths), `read_artifact` (artifacts), or `read_document` (shared). This is the preferred discovery tool; `grep_files` remains best for exact strings and regular expressions.",
   {
     query: z.string().min(1).describe('Natural-language description or keywords.'),
     sources: z
       .array(z.enum(['workspace', 'artifacts', 'project-memory', 'gezel-memory', 'shared']))
       .optional()
       .describe('Optional corpus filter. Omit to search all knowledge available to this project.'),
-    maxResults: z.number().int().positive().max(100).optional(),
+    maxResults: z
+      .number()
+      .int()
+      .positive()
+      .max(100)
+      .optional()
+      .describe(
+        'Maximum results to request (default 30). The rendered text may show fewer when output is budgeted to the context window.',
+      ),
+    cursor: z
+      .number()
+      .int()
+      .min(0)
+      .max(10_000)
+      .optional()
+      .describe('Continuation cursor from a prior truncated search response.'),
+    pathPrefix: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'Only results under this path prefix (e.g. "src/engine/" or "../<project-id>/docs/"). Narrowing only.',
+      ),
   },
-  async ({ query, sources, maxResults }) => {
+  async ({ query, sources, maxResults, cursor, pathPrefix }) => {
     try {
       const res = await api.toolSearch(projectId, {
         query,
@@ -10458,6 +10556,8 @@ server.tool(
         includeShared: true,
         ...(sources ? { sources } : {}),
         ...(maxResults ? { maxResults } : {}),
+        ...(cursor ? { offset: cursor } : {}),
+        ...(pathPrefix ? { pathPrefix } : {}),
       });
       const modelResults = res.results.map((result) => {
         if (
@@ -10474,12 +10574,15 @@ server.tool(
         const provenance = r.retrievalSource ?? r.source ?? r.kind;
         const projectScope =
           r.projectId && r.projectId !== projectId ? ` project=${r.projectId}` : '';
+        // Mark only high-confidence hits; unmarked rows are the weak tier —
+        // a marker on every row would just spend tokens saying nothing.
+        const confidence = r.tier === 'strong' ? ' strong' : '';
         const lineSpan = r.line
           ? `:${r.line}${r.lineEnd && r.lineEnd !== r.line ? `-${r.lineEnd}` : ''}`
           : '';
         const where = r.path ? `${r.path}${lineSpan}` : r.title;
-        const preview = r.snippet ? ` — ${r.snippet.replace(/\s+/g, ' ').trim()}` : '';
-        return `[${provenance}${projectScope}] ${where}${preview}`;
+        const preview = r.snippet ? ` — ${clampSearchSnippet(r.snippet)}` : '';
+        return `[${provenance}${projectScope}${confidence}] ${where}${preview}`;
       });
       const craftbookLines = res.craftbooks.map((craftbook) => {
         const source =
@@ -10498,9 +10601,36 @@ server.tool(
       const summary = res.craftbooks.length
         ? `${resultSummary}; suggested ${res.craftbooks.length} relevant craftbook${res.craftbooks.length === 1 ? '' : 's'}.`
         : `${resultSummary}.`;
+      // Budget the rendered text to the session model's context window.
+      // Summary and craftbook recipes are small and load-bearing, so they are
+      // reserved first; result rows then fill the remainder (always at least
+      // one, so a tight window still gets the best hit).
+      const craftbookSection = craftbookLines.length
+        ? `Craftbook options:\n${craftbookLines.join('\n')}`
+        : null;
+      const budget = searchTextBudgetTokens();
+      let usedTokens = estimateTokens(summary) + (craftbookSection ? estimateTokens(craftbookSection) : 0);
+      const shownLines: string[] = [];
+      for (const line of lines) {
+        const cost = estimateTokens(line);
+        if (shownLines.length > 0 && usedTokens + cost > budget) break;
+        shownLines.push(line);
+        usedTokens += cost;
+      }
+      const hidden = lines.length - shownLines.length;
+      const moreExists = res.truncated || hidden > 0;
+      const nextCursor =
+        moreExists && shownLines.length > 0 ? (cursor ?? 0) + shownLines.length : undefined;
+      // Prescriptive recovery, grep_files-style: a truncated response tells
+      // the model exactly how to get the rest instead of dead-ending.
+      const truncationFooter =
+        moreExists && nextCursor !== undefined
+          ? `Results truncated${hidden > 0 ? ` (${hidden} retrieved but not shown — output budgeted to the context window)` : ''}. Continue with cursor=${nextCursor}, or narrow with pathPrefix/sources.`
+          : null;
       const sections = [
-        ...(lines.length ? [lines.join('\n')] : []),
-        ...(craftbookLines.length ? [`Craftbook options:\n${craftbookLines.join('\n')}`] : []),
+        ...(shownLines.length ? [shownLines.join('\n')] : []),
+        ...(truncationFooter ? [truncationFooter] : []),
+        ...(craftbookSection ? [craftbookSection] : []),
       ];
       return okResult(
         SearchToolOutputSchema,
@@ -10509,7 +10639,13 @@ server.tool(
           query,
           matches: modelResults,
           count: modelResults.length,
-          truncated: res.truncated,
+          truncated: moreExists,
+          ...(nextCursor !== undefined ? { nextCursor } : {}),
+          ...(hidden > 0
+            ? { truncationReason: 'output' as const }
+            : res.truncated
+              ? { truncationReason: 'limit' as const }
+              : {}),
           engine: 'scoped-index',
           craftbooks: res.craftbooks,
         },
@@ -10870,16 +11006,21 @@ server.tool(
         (r) =>
           `${r.path}${r.width ? ` (${r.width}x${r.height} ${r.format ?? ''})` : ''}${r.caption ? ` — ${r.caption}` : ''}`,
       );
-      const head = `${res.results.length} image${res.results.length === 1 ? '' : 's'} (engine=${res.engine}${res.truncated ? ', truncated' : ''})`;
-      return {
-        content: [{ type: 'text' as const, text: `${head}\n${lines.join('\n') || '(none)'}` }],
-      };
+      const summary = `${res.results.length} image${res.results.length === 1 ? '' : 's'} (engine=${res.engine}${res.truncated ? ', truncated' : ''})`;
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary,
+          query: args.query,
+          matches: res.results,
+          count: res.results.length,
+          truncated: res.truncated,
+          engine: res.engine,
+        },
+        { text: `${summary}\n${lines.join('\n') || '(none)'}` },
+      );
     } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `search_images failed: ${msg}` }],
-        isError: true,
-      };
+      return errorResult(`search_images failed: ${unwrapApiError(err)}`);
     }
   },
 );
@@ -10965,20 +11106,22 @@ server.tool(
     try {
       const res = await api.toolFindEntity(projectId, args);
       const lines = res.entities.map((e) => `${e.kind}: ${e.label}  (${e.mentions} mentions)`);
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `${res.entities.length} entities (engine=${res.engine})\n${lines.join('\n') || '(none — index may have no structured metadata yet)'}`,
-          },
-        ],
-      };
+      const summary = `${res.entities.length} entit${res.entities.length === 1 ? 'y' : 'ies'} (engine=${res.engine})`;
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary,
+          ...(args.query ? { query: args.query } : {}),
+          matches: res.entities,
+          count: res.entities.length,
+          engine: res.engine,
+        },
+        {
+          text: `${summary}\n${lines.join('\n') || '(none — index may have no structured metadata yet)'}`,
+        },
+      );
     } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `find_entity failed: ${msg}` }],
-        isError: true,
-      };
+      return errorResult(`find_entity failed: ${unwrapApiError(err)}`);
     }
   },
 );
@@ -11026,19 +11169,22 @@ server.tool(
   async (args) => {
     try {
       const res = await api.toolSearchDocs(projectId, args);
-      const head = `${res.results.length} doc match${res.results.length === 1 ? '' : 'es'} (engine=${res.engine}${res.truncated ? ', truncated' : ''})`;
+      const summary = `${res.results.length} doc match${res.results.length === 1 ? '' : 'es'} (engine=${res.engine}${res.truncated ? ', truncated' : ''})`;
       const lines = res.results.map((r) => `${r.sourcePath}:${r.lineStart}: ${r.snippet}`);
-      return {
-        content: [
-          { type: 'text' as const, text: `${head}\n${lines.join('\n') || '(no matches)'}` },
-        ],
-      };
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary,
+          query: args.query,
+          matches: res.results,
+          count: res.results.length,
+          truncated: res.truncated,
+          engine: res.engine,
+        },
+        { text: `${summary}\n${lines.join('\n') || '(no matches)'}` },
+      );
     } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `search_docs failed: ${msg}` }],
-        isError: true,
-      };
+      return errorResult(`search_docs failed: ${unwrapApiError(err)}`);
     }
   },
 );

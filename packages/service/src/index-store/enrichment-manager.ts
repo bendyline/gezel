@@ -8,6 +8,7 @@ import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
+import { embeddingsDisabledReason } from '../memory/embeddings.js';
 import type { SystemIdleState } from '../system/idle-state.js';
 import type { AiShadowProducers } from './ai-shadow.js';
 import type { ContentIndex } from './content-index.js';
@@ -37,6 +38,10 @@ const BATCH = 5;
 // re-fires, so the shift sustains ~BUDGET/INTERVAL duty cycle all night).
 const NIGHT_BATCH = 25;
 const NIGHT_TICK_BUDGET_MS = 90_000;
+// Embed-only tier batch (day). Larger than BATCH because it makes no LLM
+// calls — the local embeddings worker is the only cost — but still bounded so
+// a tick stays polite on shared hardware.
+const EMBED_ONLY_BATCH = 10;
 
 export interface IndexEnrichmentActivity {
   id: 'index-enrichment';
@@ -304,6 +309,24 @@ export class IndexEnrichmentManager {
       if (this.refreshStatic) await this.refreshStatic(projectId).catch(() => {});
       else await this.contentIndex.refresh(projectId).catch(() => {});
 
+      // (b) always-on embed-only tier, drained BEFORE the roster gate: the
+      // embedder is local and LLM-free, so semantic search needs no
+      // Boekwachter — a drive on an unstaffed project still delivers it.
+      // The full enrichment below supersedes this work where a roster exists.
+      if (!embeddingsDisabledReason()) {
+        for (;;) {
+          if (await this.isPaused()) return;
+          const r = await this.contentIndex
+            .embedOnly(projectId, full ? NIGHT_BATCH : EMBED_ONLY_BATCH)
+            .catch(() => null);
+          if (!r || r.files === 0) break;
+          if (r.embedded > 0) {
+            log.info(`[enrich] ${projectId}: ${r.embedded} files embed-only (semantic search)`);
+          }
+          if (r.embedded === 0) break; // embeddings unavailable — don't spin
+        }
+      }
+
       const boekwachter = await this.resolveBoekwachter(projectId);
       if (!boekwachter) return; // static is current; AI needs the roster opt-in
       const deps = await buildEnrichDeps(this.store, this.chat, {
@@ -439,11 +462,32 @@ export class IndexEnrichmentManager {
         // merely a request to skip the cheap structural pass. Do not consume
         // an older on-disk index if the project was disabled after a scan.
         if (p.indexingEnabled === false) continue;
-        // Roster presence is the explicit opt-in for AI indexing. The cheap
-        // WorkspaceIndexManager scan runs independently for every project.
+        if (this.chat.isProjectActive(p.id)) continue;
+        // Always-on embed-only tier, ahead of the roster gate: the embedder
+        // is local and LLM-free, so every indexing-enabled project gets
+        // semantic search — recruiting a Boekwachter upgrades it with
+        // summaries/reviews/media rather than gating it.
+        if (!embeddingsDisabledReason()) {
+          const embedded = await this.contentIndex
+            .embedOnly(p.id, night ? NIGHT_BATCH : EMBED_ONLY_BATCH)
+            .catch(() => null);
+          if (embedded && embedded.embedded > 0) {
+            didWork = true;
+            log.info(`[enrich] ${p.id}: ${embedded.embedded} files embed-only (semantic search)`);
+            this.events?.publishGlobalEvent({
+              type: 'index_progress',
+              phase: 'enrich',
+              state: 'progress',
+              projectId: p.id,
+              detail: `${embedded.embedded} files embedded for search`,
+            });
+          }
+        }
+        // Roster presence is the explicit opt-in for AI indexing (summaries,
+        // reviews, media). The cheap WorkspaceIndexManager scan and the
+        // embed-only tier above run independently for every project.
         const boekwachter = await this.resolveBoekwachter(p.id);
         if (!boekwachter) continue;
-        if (this.chat.isProjectActive(p.id)) continue;
         this.activity = {
           id: 'index-enrichment',
           title: 'Workspace indexing',

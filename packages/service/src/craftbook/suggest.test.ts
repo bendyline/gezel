@@ -146,8 +146,9 @@ describe('usefulCraftbooksForSearch', () => {
     const ranked = [
       {
         ...cand('semantic', 'Physics workflow', 'Improve vehicle dynamics'),
-        score: 0.31,
-        semantic: 0.42,
+        // Above SEARCH_MIN_BLEND_SCORE (0.32, bge-calibrated) — qualifies.
+        score: 0.36,
+        semantic: 0.48,
         lexical: 0.02,
       },
       {

@@ -509,7 +509,17 @@ export interface ChatTimelineViewProps {
    * click already lands the user on the rows they clicked, and scrolling
    * then would be a jump they didn't ask for.
    */
-  sessionFocusRequest?: { sessionId: string; requestKey: number };
+  sessionFocusRequest?: {
+    sessionId: string;
+    requestKey: number;
+    /**
+     * 1-based index into the session's messages — a transcript-search hit's
+     * location. When set the viewport lands on that message instead of the
+     * session's last bubble (clamped; approximate when the timeline elides
+     * empty messages, which is close enough for the flash to orient).
+     */
+    messageIndex?: number;
+  };
   /**
    * Fired when the terminal SSE channel reports a `workingDirChanged`
    * event — i.e. the shell behind a thread cd'd to a new path. The
@@ -2485,13 +2495,27 @@ export function ChatTimelineView({
    * null task scope one tick after a task chip set it.
    */
   const focusSession = useCallback(
-    (sessionId: string, opts?: { notifyParent?: boolean }): boolean => {
+    (sessionId: string, opts?: { notifyParent?: boolean; messageIndex?: number }): boolean => {
       const el = scrollRef.current;
       if (!el) return false;
       const escaped = cssAttrValue(sessionId);
       const banner = el.querySelector<HTMLElement>(`[data-session-error="${escaped}"]`);
       const bubbles = el.querySelectorAll<HTMLElement>(`[data-session-id="${escaped}"]`);
-      const target = banner ?? bubbles[bubbles.length - 1] ?? null;
+      // A transcript-search hit carries the matched message's 1-based index:
+      // land there instead of the session's last bubble. Resolved against the
+      // loaded rows for this session (clamped), addressed by the same
+      // data-msg-id the renderer stamps.
+      let messageTarget: HTMLElement | null = null;
+      if (opts?.messageIndex !== undefined) {
+        const rows = messagesRef.current.filter((m) => m.sessionId === sessionId);
+        const row = rows[Math.max(0, Math.min(opts.messageIndex - 1, rows.length - 1))];
+        if (row) {
+          messageTarget = el.querySelector<HTMLElement>(
+            `[data-msg-id="${cssAttrValue(`msg:${row.sessionId}:${row.at}:${row.role}`)}"]`,
+          );
+        }
+      }
+      const target = messageTarget ?? banner ?? bubbles[bubbles.length - 1] ?? null;
       if (!target) return false;
       setPinnedToBottom(false);
       // jsdom (and some webviews) don't implement scrollIntoView — the
@@ -2519,13 +2543,15 @@ export function ChatTimelineView({
   const focusRequestRef = useRef<{
     sessionId: string;
     notifyParent: boolean;
+    messageIndex?: number;
   } | null>(null);
   const [focusNonce, setFocusNonce] = useState(0);
   const requestFocusSession = useCallback(
-    (sessionId: string, opts?: { notifyParent?: boolean }) => {
+    (sessionId: string, opts?: { notifyParent?: boolean; messageIndex?: number }) => {
       focusRequestRef.current = {
         sessionId,
         notifyParent: opts?.notifyParent !== false,
+        ...(opts?.messageIndex !== undefined ? { messageIndex: opts.messageIndex } : {}),
       };
       setFocusNonce((n) => n + 1);
     },
@@ -2536,7 +2562,12 @@ export function ChatTimelineView({
   useEffect(() => {
     const req = focusRequestRef.current;
     if (!req) return;
-    if (focusSession(req.sessionId, { notifyParent: req.notifyParent })) {
+    if (
+      focusSession(req.sessionId, {
+        notifyParent: req.notifyParent,
+        ...(req.messageIndex !== undefined ? { messageIndex: req.messageIndex } : {}),
+      })
+    ) {
       focusRequestRef.current = null;
       return;
     }
@@ -2625,7 +2656,12 @@ export function ChatTimelineView({
     if (!sessionFocusRequest) return;
     if (consumedSessionFocusKeyRef.current === sessionFocusRequest.requestKey) return;
     consumedSessionFocusKeyRef.current = sessionFocusRequest.requestKey;
-    requestFocusSession(sessionFocusRequest.sessionId, { notifyParent: false });
+    requestFocusSession(sessionFocusRequest.sessionId, {
+      notifyParent: false,
+      ...(sessionFocusRequest.messageIndex !== undefined
+        ? { messageIndex: sessionFocusRequest.messageIndex }
+        : {}),
+    });
   }, [sessionFocusRequest, requestFocusSession]);
 
   /**
@@ -3132,6 +3168,7 @@ export function ChatTimelineView({
         extraClass={fade ? 'timeline-msg-faded' : undefined}
         mediaProvider={getReadonlyGezelMediaProvider(m.projectId, m.sessionId)}
         {...(files.length > 0 ? { referencedFiles: files } : {})}
+        {...(m.retrieval && m.retrieval.hits.length > 0 ? { retrieval: m.retrieval } : {})}
         {...(m.referencedTasks ? { referencedTasks: m.referencedTasks } : {})}
         {...(m.toolCalls && m.toolCalls.length > 0
           ? { toolCalls: m.toolCalls, projectId: m.projectId }

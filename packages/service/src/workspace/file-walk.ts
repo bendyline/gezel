@@ -28,6 +28,17 @@ export interface DiscoveredWorkspaceFile {
   mtimeMs: number;
 }
 
+export interface DiscoveredWorkspaceFiles {
+  files: DiscoveredWorkspaceFile[];
+  /**
+   * True when discovery stopped at `maxFiles`. A capped listing
+   * under-represents the tree, so callers that reconcile against it (pruning
+   * rows or sweeping derived files for "vanished" sources) must skip that
+   * pass — the missing entries are live files past the cap, not deletions.
+   */
+  capped: boolean;
+}
+
 export interface DiscoverWorkspaceFilesOptions {
   maxFiles: number;
   /**
@@ -60,30 +71,36 @@ export interface DiscoverWorkspaceFilesOptions {
 export async function discoverWorkspaceFiles(
   workspaceDir: string,
   opts: DiscoverWorkspaceFilesOptions,
-): Promise<DiscoveredWorkspaceFile[]> {
-  const gitPaths = await listGitVisiblePaths(
+): Promise<DiscoveredWorkspaceFiles> {
+  const gitListing = await listGitVisiblePaths(
     workspaceDir,
     opts.maxFiles,
     opts.gitTimeoutMs,
     opts.ignorePath,
   );
-  if (gitPaths) return statListedFiles(workspaceDir, gitPaths, opts.maxFiles);
+  if (gitListing) {
+    // `capped` comes from the listing, not the stat result — stat can shrink
+    // the batch below maxFiles (raced deletions, non-files) without meaning
+    // the tree was fully enumerated.
+    const files = await statListedFiles(workspaceDir, gitListing.paths, opts.maxFiles);
+    return { files, capped: gitListing.capped };
+  }
 
   const out: DiscoveredWorkspaceFile[] = [];
   await walkFilesystem(workspaceDir, workspaceDir, out, opts.maxFiles, opts.ignorePath);
-  return out;
+  return { files: out, capped: out.length >= opts.maxFiles };
 }
 
 /**
  * Return null when the folder is not a Git worktree (or Git is unavailable),
- * versus [] for a valid empty repository.
+ * versus an empty listing for a valid empty repository.
  */
 async function listGitVisiblePaths(
   workspaceDir: string,
   maxFiles: number,
   timeoutMs = 30_000,
   ignorePath?: (relPath: string) => boolean,
-): Promise<string[] | null> {
+): Promise<{ paths: string[]; capped: boolean } | null> {
   try {
     const { stdout } = await runGit(
       [
@@ -110,7 +127,7 @@ async function listGitVisiblePaths(
       paths.push(path);
       if (paths.length >= maxFiles) break;
     }
-    return paths;
+    return { paths, capped: paths.length >= maxFiles };
   } catch {
     return null;
   }

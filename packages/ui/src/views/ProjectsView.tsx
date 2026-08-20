@@ -1205,21 +1205,33 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // projectId rather than relying on `selected` so it works right after an
   // `openProject` whose `setSelected` hasn't flushed yet (the search quick-open
   // path). Switches to the right file panel, then loads the file.
-  const focusFile = useCallback(async (projectId: string, path: string, source: FileTab) => {
-    setTab(source);
-    const name = path.slice(path.lastIndexOf('/') + 1);
-    const media = mediaSentinel(name);
-    if (media) {
-      setOpenFile({ path, content: media, source });
-      return;
-    }
-    const res =
-      source === 'workspace'
-        ? await api.readProjectWorkspaceFile(projectId, path)
-        : await api.readProjectArtifact(projectId, path);
-    const content = looksBinary(res.content) ? BINARY_FILE : res.content;
-    setOpenFile({ ...res, content, source });
-  }, []);
+  const focusFile = useCallback(
+    async (projectId: string, path: string, source: FileTab, line?: number) => {
+      setTab(source);
+      const name = path.slice(path.lastIndexOf('/') + 1);
+      const media = mediaSentinel(name);
+      if (media) {
+        setOpenFile({ path, content: media, source });
+        return;
+      }
+      const res =
+        source === 'workspace'
+          ? await api.readProjectWorkspaceFile(projectId, path)
+          : await api.readProjectArtifact(projectId, path);
+      const content = looksBinary(res.content) ? BINARY_FILE : res.content;
+      setOpenFile({ ...res, content, source });
+      // Land on the match, not the top of the file: a search hit carries its
+      // line, and the editor-side reveal bridge centers it once mounted.
+      if (line) {
+        setWorkspaceSourceReveal((current) => ({
+          path,
+          line,
+          requestId: (current?.requestId ?? 0) + 1,
+        }));
+      }
+    },
+    [],
+  );
 
   // Respond to nav-shortcut clicks from the top-bar MRU chips in App.tsx:
   // the shortcut dispatches `gezel:open-project` with the id, and we open
@@ -1233,17 +1245,31 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     return () => window.removeEventListener('gezel:open-project', onOpen);
   }, [openProject]);
 
+  // "Turn it on in Project Settings" affordances (overview prose, status-bar
+  // note) land the user THERE instead of telling them where to go.
+  useEffect(() => {
+    const onOpenSettings = (e: Event) => {
+      const detail = (e as CustomEvent<{ projectId?: string }>).detail;
+      if (detail?.projectId && selected && detail.projectId !== selected.id) return;
+      setTab('settings');
+    };
+    window.addEventListener('gezel:open-project-settings', onOpenSettings);
+    return () => window.removeEventListener('gezel:open-project-settings', onOpenSettings);
+  }, [selected]);
+
   // Open a file in the currently-selected project (the already-open case — no
   // remount). The cross-project remount case is handled by the mailbox consume
   // in the forceProjectId effect below; draining it here keeps a queued intent
   // from firing later on a manual navigation.
   useEffect(() => {
     const onOpenFile = (e: Event) => {
-      const d = (e as CustomEvent<{ projectId?: string; path?: string; source?: FileTab }>).detail;
+      const d = (
+        e as CustomEvent<{ projectId?: string; path?: string; source?: FileTab; line?: number }>
+      ).detail;
       if (!d?.path || !d.source) return;
       if (selected && (!d.projectId || d.projectId === selected.id)) {
         consumeOpenFile(selected.id);
-        void focusFile(selected.id, d.path, d.source);
+        void focusFile(selected.id, d.path, d.source, d.line);
       }
     };
     window.addEventListener('gezel:open-file', onOpenFile);
@@ -1256,7 +1282,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     if (!forceProjectId) return;
     void openProject(forceProjectId).then(() => {
       const intent = consumeOpenFile(forceProjectId);
-      if (intent) void focusFile(forceProjectId, intent.path, intent.source);
+      if (intent) void focusFile(forceProjectId, intent.path, intent.source, intent.line);
     });
   }, [forceProjectId, openProject, focusFile]);
 
@@ -1904,18 +1930,23 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         workspaceIssues,
       )
     : 0;
+  // The reveal bridge anchors to whatever file is open in an editor — search
+  // hits carry a line for artifacts too, not only workspace-tab review files.
+  // The index toggle itself stays workspace-only (reviews are workspace-scoped).
   const activeWorkspaceSourceReveal =
-    workspaceSourceReveal?.path === workspaceReviewPath ? workspaceSourceReveal : null;
-  const workspaceIndexToggle: ReactNode = workspaceReviewPath ? (
+    workspaceSourceReveal?.path === openFile?.path ? workspaceSourceReveal : null;
+  const workspaceIndexToggle: ReactNode = (
     <>
       <WorkspaceSourceLineReveal request={activeWorkspaceSourceReveal} />
-      <WorkspaceIndexToggle
-        open={workspaceIndexPaneOpen}
-        issueCount={selectedWorkspaceIssueCount}
-        onToggle={() => setWorkspaceIndexPaneOpen((open) => !open)}
-      />
+      {workspaceReviewPath ? (
+        <WorkspaceIndexToggle
+          open={workspaceIndexPaneOpen}
+          issueCount={selectedWorkspaceIssueCount}
+          onToggle={() => setWorkspaceIndexPaneOpen((open) => !open)}
+        />
+      ) : null}
     </>
-  ) : null;
+  );
 
   // Output pane: the set of previewable workspace HTML files, whether a
   // previewable index.html exists (drives the auto-on default), and the

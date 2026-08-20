@@ -7617,6 +7617,37 @@ button.danger {
   font-size: 0.82rem;
 }
 
+/* "Consulted N indexed sources" — collapsed provenance row under a user
+   turn that received proactive indexed context. Reads as quiet diligence:
+   muted summary line, chip rows only when expanded. */
+.msg-retrieval {
+  margin: 0.3rem 0 0.1rem;
+  font-size: 0.78rem;
+}
+
+.msg-retrieval-summary {
+  color: var(--muted, #888);
+  cursor: pointer;
+  user-select: none;
+}
+
+.msg-retrieval-summary:hover {
+  color: inherit;
+}
+
+.msg-retrieval-list {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.msg-retrieval-item {
+  color: var(--muted, #888);
+}
+
 .msg-refs-label {
   color: var(--muted, #888);
   font-size: 0.75rem;
@@ -10783,7 +10814,8 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   font-size: var(--text-xs);
 }
 
-.project-index-panel-error-link {
+.project-index-panel-error-link,
+.project-index-panel-link {
   padding: 0;
   border: 0;
   background: transparent;
@@ -10793,11 +10825,13 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   cursor: pointer;
 }
 
-.project-index-panel-error-link:hover:not(:disabled) {
+.project-index-panel-error-link:hover:not(:disabled),
+.project-index-panel-link:hover:not(:disabled) {
   text-decoration: none;
 }
 
-.project-index-panel-error-link:disabled {
+.project-index-panel-error-link:disabled,
+.project-index-panel-link:disabled {
   cursor: wait;
   opacity: 0.7;
 }
@@ -27874,6 +27908,17 @@ button.boekwachter-pill:focus-visible {
   font-size: 1rem;
   color: var(--text);
   padding: 0.15rem 0.35rem 0.75rem;
+}
+
+.handboek-toc-filter {
+  width: 100%;
+  margin: 0 0 0.6rem;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.85rem;
+  border: 1px solid var(--border, #4443);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
 }
 
 .handboek-toc-loading,

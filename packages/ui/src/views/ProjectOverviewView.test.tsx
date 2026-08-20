@@ -67,7 +67,8 @@ describe('ProjectOverviewView', () => {
     expect(screen.getByText('typescript · 12')).toBeInTheDocument();
     expect(screen.getByText('src/main.ts')).toBeInTheDocument();
     expect(screen.getByText(/Tweaked the mission/)).toBeInTheDocument();
-    expect(screen.getByText('AI study in progress…')).toBeInTheDocument();
+    // Unified index-status vocabulary — same label the status bar's chip uses.
+    expect(screen.getByText('AI index in progress')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('digest-md')).toHaveTextContent('Week 27'));
   });
 

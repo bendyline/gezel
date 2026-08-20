@@ -18,6 +18,7 @@
     "ab-reasoning-effort": "tsx src/bin/ab-reasoning-effort.ts",
     "ab-index": "tsx src/bin/ab-index.ts",
     "index-bench": "tsx src/bin/index-bench.ts",
+    "embed-calibration": "tsx src/bin/embed-calibration.ts",
     "preflight": "tsx src/bin/preflight.ts",
     "all": "tsx src/bin/all.ts",
     "postmortems": "tsx src/bin/render-postmortems.ts",

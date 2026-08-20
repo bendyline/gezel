@@ -309,6 +309,31 @@ CREATE TABLE IF NOT EXISTS shadow_state (
   updated_at TEXT
 );
 
+-- Embed-only gate (v11): chunks embedded WITHOUT a summarizer, so semantic
+-- search works before any Boekwachter joins the roster. Deliberately a
+-- separate table from enrichments — the full-enrichment pass writes that
+-- gate on success, and reusing it here would consume the summary gate and
+-- permanently block later summarization (a naive embed-only pass poisoned it
+-- exactly that way in design review). Same content-addressed discipline as
+-- shadow_state; a full enrichment supersedes rows here (the work-list also
+-- checks enrichments.embedded_at).
+CREATE TABLE IF NOT EXISTS embed_state (
+  content_hash TEXT PRIMARY KEY,
+  collection_id TEXT,
+  file_path TEXT,
+  embedded_at TEXT,
+  attempts INTEGER DEFAULT 0
+);
+
+-- Symbol-summary retry ledger (v11): a parse or engine failure previously
+-- left nothing behind, silently costing a file its per-symbol one-liners
+-- until its content changed. Capped retries like every other gate; success
+-- needs no row (stored symbol_summaries are the success signal).
+CREATE TABLE IF NOT EXISTS symbol_summary_state (
+  content_hash TEXT PRIMARY KEY,
+  attempts INTEGER DEFAULT 0
+);
+
 -- Mirror of the append-only history JSONL (the audit log). kind/project/gezel/at
 -- are real columns so HistoryFilter fields stay SQL-filterable; only the q text
 -- goes through fts_history. INSERT OR IGNORE on the event id makes JSONL
@@ -339,7 +364,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts_history
   USING fts5(body, event_id UNINDEXED, collection_id UNINDEXED);
 `;
 
-const SCHEMA_VERSION = 10;
+// v11: embed_state table (embed-only gate — additive CREATE, no backfill).
+const SCHEMA_VERSION = 11;
 
 /**
  * Add a column to an existing table if it isn't already present. SQLite has no
@@ -362,8 +388,16 @@ function addColumnIfMissing(db: SqliteDriver, table: string, column: string, dec
  * Create all tables idempotently. Vector tables are created only when the
  * sqlite-vec extension loaded. Returns whether FTS is available (it always is
  * with a normal sqlite build, but we probe to stay honest).
+ *
+ * `vectors: false` skips vector-table creation entirely — the global FTS
+ * mirror (`global.db`) never stores embeddings, and giving it a `vec_text`
+ * anyway meant every embed-model swap ran a pointless DROP/CREATE + gate
+ * clear against a database with no vectors in it.
  */
-export function applySchema(db: SqliteDriver): { fts: boolean; vec: boolean } {
+export function applySchema(
+  db: SqliteDriver,
+  opts: { vectors?: boolean } = {},
+): { fts: boolean; vec: boolean } {
   db.exec(BASE_DDL);
 
   // Additive migrations for DBs created before these columns existed (v2 → v3).
@@ -406,14 +440,29 @@ export function applySchema(db: SqliteDriver): { fts: boolean; vec: boolean } {
   }
 
   let vec = false;
-  if (db.vecAvailable) {
+  if (db.vecAvailable && opts.vectors !== false) {
+    // `distance_metric=cosine` matches vec_mem: vectors are L2-normalized so
+    // the RANKING is identical to the L2 default, but the reported distance
+    // scale is not — declaring it keeps any future distance→similarity
+    // conversion from being quietly wrong. `IF NOT EXISTS` means pre-existing
+    // tables keep their original metric until the next re-embed migration
+    // recreates them; fine, because nothing converts vec_text distances.
     try {
       db.exec(
-        `CREATE VIRTUAL TABLE IF NOT EXISTS vec_text USING vec0(embedding float[${TEXT_EMBED_DIM}]);`,
+        `CREATE VIRTUAL TABLE IF NOT EXISTS vec_text USING vec0(embedding float[${TEXT_EMBED_DIM}] distance_metric=cosine);`,
       );
       vec = true;
     } catch {
-      vec = false;
+      // Older sqlite-vec builds reject distance_metric — fall back to the
+      // default (L2), which ranks identically on normalized vectors.
+      try {
+        db.exec(
+          `CREATE VIRTUAL TABLE IF NOT EXISTS vec_text USING vec0(embedding float[${TEXT_EMBED_DIM}]);`,
+        );
+        vec = true;
+      } catch {
+        vec = false;
+      }
     }
   }
 

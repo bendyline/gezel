@@ -136,7 +136,7 @@ describe('v7 → v8 schema migration (file_reviews)', () => {
     const version = raw
       .prepare("SELECT value FROM meta WHERE key = 'schema_version'")
       .get<{ value: string }>();
-    expect(version?.value).toBe('10');
+    expect(version?.value).toBe('11');
     raw.close();
 
     const reopened = (await open())!;

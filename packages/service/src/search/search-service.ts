@@ -1,5 +1,9 @@
 import { createLogger, isSharedLibraryProject } from '@bendyline/gezel';
-import type { RetrievalSource, UnifiedSearchResult } from '@bendyline/gezel';
+import type {
+  RetrievalSource,
+  UnifiedSearchResult,
+  UnifiedSearchResultKind,
+} from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import { isLibraryInternalPath } from '../fs/sync-junk.js';
 import type { ContentIndex } from '../index-store/content-index.js';
@@ -51,12 +55,16 @@ const PER_MEMORY_RESULTS = 3;
  * was unreachable once an install had memories — the user got debris instead
  * of an honest answer.
  *
- * Measured against the shipped embedder (Xenova/all-MiniLM-L6-v2, 384d) on
- * representative rows: genuine paraphrase matches scored 0.83-0.86, while the
- * worst unrelated pair reached only 0.33. 0.35 sits in that gap. Raising it
- * costs recall on loosely-worded matches; lowering it lets noise back in.
+ * Measured against the shipped embedder (Xenova/bge-small-en-v1.5, 384d,
+ * query-instruction prefix) with `evals/src/bin/embed-calibration.ts`
+ * (query→passage mode, 2026-08-19): relevant query→memory pairs scored
+ * 0.561-0.787 while the worst unrelated pair reached 0.429 (median 0.323 —
+ * the old MiniLM-era 0.35 floor admitted half the noise band). 0.45 sits in
+ * that gap, biased toward the noise side: recall losses are visible and
+ * recoverable, noise admissions are silent. Re-run the harness and re-pick
+ * whenever the embedder changes.
  */
-const MEMORY_MIN_SIMILARITY = 0.35;
+const MEMORY_MIN_SIMILARITY = 0.45;
 /** Default merged result cap returned to the caller. */
 const DEFAULT_MAX_RESULTS = 30;
 
@@ -78,22 +86,98 @@ export const CATALOG_RELEVANT_HISTORY_KINDS: ReadonlySet<string> = new Set([
   'document.deleted',
 ]);
 
-// Kind weights — bias name/quick-open matches above content so a typed project
-// name out-ranks a fuzzy file hit, while a strong content match can still
-// surface. Multiplied by a 0..1 relevance to produce the merged `score`.
-const WEIGHT = {
+// Per-kind merge weights — corpus PRIORITY, kept strictly separate from
+// within-corpus relevance. Bias name/quick-open matches above content so a
+// typed project name out-ranks a fuzzy file hit, while a strong content match
+// can still surface. Multiplied by a calibrated 0..1 relevance in
+// `scoreResult` to produce the merged ordering key. Typed against the full
+// kind enum so a future kind (e.g. `knowledge`, planned weight ~380 — below
+// project content, above memory) is a compile error here until weighted.
+export const MERGE_WEIGHTS: Record<UnifiedSearchResultKind, number> = {
   project: 1000,
   gezel: 950,
   file: 700,
   document: 680,
+  // A named task beats fuzzy content — the user typed something close to its
+  // title — but never a project/gezel/file name match.
+  task: 640,
   symbol: 520,
+  craftbook: 500,
   content: 420,
   session: 400,
+  // Manual articles orient, they don't answer about the user's own work —
+  // below every user-content corpus, above nothing.
+  handboek: 380,
   memory: 360,
-} as const;
+};
+
+/**
+ * Relevance estimate for an FTS-only corpus that reports rank order but no
+ * usable score. RRF-shaped (k=10) and anchored so rank 0 = 0.6 — the fixed
+ * pseudo-relevance these corpora carried historically — so the top hit's
+ * merged score is bit-identical to the pre-calibration behavior and later
+ * ranks decay instead of tying.
+ */
+function ftsRankRelevance(rank: number): number {
+  return 0.6 * (11 / (11 + rank));
+}
+
+/** Documented explicit pseudo-relevance for a symbol the query didn't fuzzy-match. */
+const SYMBOL_FALLBACK_RELEVANCE = 0.4;
+
+/** Relevance at or above which a hit renders as high-confidence. */
+const STRONG_TIER_MIN_RELEVANCE = 0.6;
+
+/**
+ * One retrieval arm's observed timing — non-content telemetry. Rides the
+ * `retrieval.context-injected` history event so a slow, failing, or
+ * timed-out arm is visible instead of being indistinguishable from "found
+ * nothing" (every arm is otherwise caught-to-null in the fan-out).
+ */
+export interface RetrievalArmTiming {
+  /** Arm discriminant, e.g. 'workspace:code', 'gezel-memory', 'shared'. */
+  arm: string;
+  /** Scope id (project/gezel) when the arm is per-scope. */
+  scope?: string;
+  ms: number;
+  hits: number;
+  timedOut: boolean;
+  failed: boolean;
+}
+
+/**
+ * The single scoring seam: every result construction site routes through
+ * this, so relevance stays a calibrated 0–1, tiers derive from one constant,
+ * and `score` remains purely relevance × corpus priority.
+ */
+function scoreResult(
+  kind: UnifiedSearchResultKind,
+  relevance: number,
+): { relevance: number; tier: 'strong' | 'weak'; score: number } {
+  const clamped = clamp01(relevance);
+  return {
+    relevance: clamped,
+    tier: clamped >= STRONG_TIER_MIN_RELEVANCE ? 'strong' : 'weak',
+    score: clamped * MERGE_WEIGHTS[kind],
+  };
+}
+
+/**
+ * Extra name-catalog providers wired in AFTER construction (they depend on
+ * subsystems built later in service boot). Titlebar quick-open only — the
+ * model-scoped project search never consumes the name catalog.
+ */
+export interface ExtraSearchCatalogs {
+  /** Handboek TOC entries (id + title + optional keywords). */
+  handboekEntries?: () => Promise<Array<{ id: string; title: string; keywords?: string[] }>>;
+  /** Craftbooks reachable from anywhere (bundled + user-local). */
+  craftbookEntries?: () => Promise<
+    Array<{ id: string; name: string; source: 'bundled' | 'local' | 'project' }>
+  >;
+}
 
 interface CatalogEntry {
-  kind: 'project' | 'gezel' | 'file' | 'document';
+  kind: 'project' | 'gezel' | 'file' | 'document' | 'task' | 'craftbook' | 'handboek';
   id: string;
   /** The primary string we fuzzy-match (name or basename). */
   title: string;
@@ -118,6 +202,8 @@ export class SearchService {
   private catalogBuiltAt = 0;
   private catalogBuilding: Promise<CatalogEntry[]> | null = null;
 
+  private extraCatalogs: ExtraSearchCatalogs = {};
+
   constructor(
     private readonly store: Store,
     private readonly contentIndex: ContentIndex,
@@ -125,6 +211,12 @@ export class SearchService {
     private readonly indexManager: WorkspaceIndexManager,
     private readonly globalIndex?: GlobalIndex,
   ) {}
+
+  /** Wire the late-boot name-catalog providers (handboek, craftbooks). */
+  setExtraCatalogs(extra: ExtraSearchCatalogs): void {
+    this.extraCatalogs = extra;
+    this.invalidateCatalog();
+  }
 
   /** Drop the cached catalog — called when projects/gezels/documents change. */
   invalidateCatalog(): void {
@@ -146,7 +238,7 @@ export class SearchService {
   async search(
     query: string,
     opts: { mode?: 'names' | 'full'; maxResults?: number } = {},
-  ): Promise<{ results: UnifiedSearchResult[]; truncated: boolean }> {
+  ): Promise<{ results: UnifiedSearchResult[]; truncated: boolean; sourcesIncomplete?: boolean }> {
     const q = query.trim();
     if (!q) return { results: [], truncated: false };
     const maxResults = opts.maxResults ?? DEFAULT_MAX_RESULTS;
@@ -157,12 +249,13 @@ export class SearchService {
       return { results: nameResults.slice(0, maxResults), truncated: false };
     }
 
-    const { results: contentResults, truncated } = await this.contentFanOut(q, maxResults);
+    const { results: contentResults, sourcesIncomplete } = await this.contentFanOut(q, maxResults);
 
     const merged = this.merge([...nameResults, ...contentResults], maxResults);
     return {
       results: merged,
-      truncated: truncated || merged.length < nameResults.length + contentResults.length,
+      truncated: sourcesIncomplete || merged.length < nameResults.length + contentResults.length,
+      sourcesIncomplete,
     };
   }
 
@@ -181,21 +274,49 @@ export class SearchService {
       includeShared?: boolean;
       sources?: readonly RetrievalSource[];
       maxResults?: number;
+      /** Skip this many merged results — the tool cursor. */
+      offset?: number;
+      /** Keep only results under this forward-slashed path prefix. */
+      pathPrefix?: string;
     },
-  ): Promise<{ results: UnifiedSearchResult[]; truncated: boolean }> {
+  ): Promise<{
+    results: UnifiedSearchResult[];
+    truncated: boolean;
+    sourcesIncomplete?: boolean;
+    /** Per-arm timing/outcome telemetry from the fan-out (non-content). */
+    arms?: RetrievalArmTiming[];
+  }> {
     const q = query.trim();
     if (!q || opts.projectIds.length === 0) return { results: [], truncated: false };
     const maxResults = opts.maxResults ?? DEFAULT_MAX_RESULTS;
-    const found = await this.contentFanOut(q, maxResults, {
+    const offset = opts.offset ?? 0;
+    const fetchDepth = offset + maxResults;
+    const found = await this.contentFanOut(q, fetchDepth, {
       projectIds: new Set(opts.projectIds),
       ...(opts.gezelId ? { gezelId: opts.gezelId } : {}),
       includeShared: opts.includeShared !== false,
       ...(opts.sources ? { sources: new Set(opts.sources) } : {}),
+      // Scale per-source fetch with paging depth so page 2 has material to
+      // page into; identical to PER_SOURCE_RESULTS at offset 0.
+      perSourceResults: Math.min(25, Math.max(PER_SOURCE_RESULTS, Math.ceil(fetchDepth / 6))),
     });
-    const results = this.merge(found.results, maxResults);
+    const prefix = normalizePathPrefix(opts.pathPrefix);
+    const pool = prefix
+      ? found.results.filter((r) => {
+          if (!r.path) return false; // a path filter asks for files
+          if (r.path.startsWith(prefix)) return true;
+          // Models see linked-project paths as ../<project-id>/<path>.
+          return Boolean(r.projectId && `../${r.projectId}/${r.path}`.startsWith(prefix));
+        })
+      : found.results;
+    // Merge one past the page boundary so "more exists" is a fact, not a guess.
+    const merged = this.merge(pool, fetchDepth + 1);
+    const results = merged.slice(offset, fetchDepth);
     return {
       results,
-      truncated: found.truncated || results.length < found.results.length,
+      truncated: found.sourcesIncomplete || merged.length > fetchDepth,
+      sourcesIncomplete: found.sourcesIncomplete,
+      arms: found.arms,
     };
   }
 
@@ -219,11 +340,47 @@ export class SearchService {
 
   private async buildCatalog(): Promise<CatalogEntry[]> {
     const entries: CatalogEntry[] = [];
-    const [projects, gezels, documents] = await Promise.all([
+    const [projects, gezels, documents, tasks, craftbooks, handboek] = await Promise.all([
       this.store.listProjects().catch(() => []),
       this.store.listGezels().catch(() => []),
       this.store.listDocumentsRecursive().catch(() => []),
+      Promise.resolve()
+        .then(() => this.store.listAllTasks())
+        .catch(() => []),
+      this.extraCatalogs.craftbookEntries?.().catch(() => []) ?? Promise.resolve([]),
+      this.extraCatalogs.handboekEntries?.().catch(() => []) ?? Promise.resolve([]),
     ]);
+    const projectNameById = new Map(projects.map((p) => [p.id, p.name]));
+
+    for (const t of tasks) {
+      entries.push({
+        kind: 'task',
+        id: `task:${t.projectId}/${t.num}`,
+        title: t.title,
+        subtitle: `Task · ${projectNameById.get(t.projectId) ?? t.projectId} · ${t.status}`,
+        projectId: t.projectId,
+        ...(projectNameById.has(t.projectId)
+          ? { projectName: projectNameById.get(t.projectId)! }
+          : {}),
+      });
+    }
+    for (const c of craftbooks) {
+      entries.push({
+        kind: 'craftbook',
+        id: `craftbook:${c.source}:${c.id}`,
+        title: c.name,
+        subtitle: `Craftbook · ${c.source === 'bundled' ? 'Gilde' : c.source}`,
+      });
+    }
+    for (const h of handboek) {
+      entries.push({
+        kind: 'handboek',
+        id: `handboek:${h.id}`,
+        title: h.title,
+        subtitle: 'Handboek',
+        ...(h.keywords && h.keywords.length > 0 ? { keywords: h.keywords } : {}),
+      });
+    }
 
     for (const p of projects) {
       entries.push({ kind: 'project', id: `project:${p.id}`, title: p.name, projectId: p.id });
@@ -333,7 +490,7 @@ export class SearchService {
         ...(e.projectName ? { projectName: e.projectName } : {}),
         ...(e.path ? { path: e.path } : {}),
         ...(e.source ? { source: e.source } : {}),
-        score: rel * WEIGHT[e.kind],
+        ...scoreResult(e.kind, rel),
       });
     }
     scored.sort((a, b) => b.score - a.score);
@@ -350,8 +507,14 @@ export class SearchService {
       gezelId?: string;
       includeShared: boolean;
       sources?: ReadonlySet<RetrievalSource>;
+      /** Per-source fetch cap override — paging scales it with depth. */
+      perSourceResults?: number;
     },
-  ): Promise<{ results: UnifiedSearchResult[]; truncated: boolean }> {
+  ): Promise<{
+    results: UnifiedSearchResult[];
+    sourcesIncomplete: boolean;
+    arms: RetrievalArmTiming[];
+  }> {
     const [allProjects, allGezels] = await Promise.all([
       this.store.listProjects().catch(() => []),
       this.store.listGezels().catch(() => []),
@@ -360,6 +523,7 @@ export class SearchService {
     const gezels = scope ? allGezels.filter((g) => g.id === scope.gezelId) : allGezels;
     const wants = (source: RetrievalSource): boolean =>
       !scope?.sources || scope.sources.has(source);
+    const perSource = scope?.perSourceResults ?? PER_SOURCE_RESULTS;
 
     // Embed the query once; thread the vector into every per-project call.
     let vector: number[] | null = null;
@@ -369,10 +533,47 @@ export class SearchService {
       vector = null; // embeddings disabled → keyword/FTS only, no memory hits
     }
 
-    let truncated = false;
+    // A scope that blows its per-scope budget means the results genuinely
+    // under-represent the corpus — distinct from caps/dedupe truncation.
+    let sourcesIncomplete = false;
+
+    // Per-arm timing/outcome telemetry. Every arm is caught-to-null below,
+    // so without this a failing arm is indistinguishable from an empty one.
+    const armTimings: RetrievalArmTiming[] = [];
+    const timed = async <T>(
+      arm: string,
+      scopeId: string | undefined,
+      count: (r: T) => number,
+      run: () => Promise<T>,
+    ): Promise<T | null> => {
+      const started = performance.now();
+      const base = { arm, ...(scopeId ? { scope: scopeId } : {}) };
+      try {
+        const r = await run();
+        armTimings.push({
+          ...base,
+          ms: Math.round(performance.now() - started),
+          hits: count(r),
+          timedOut: false,
+          failed: false,
+        });
+        return r;
+      } catch {
+        armTimings.push({
+          ...base,
+          ms: Math.round(performance.now() - started),
+          hits: 0,
+          timedOut: false,
+          failed: true,
+        });
+        return null;
+      }
+    };
 
     // One pool unit per project: code + docs + symbols + project memory.
-    const perProject = projects.map((p) => async () => {
+    const perProject = projects.map((p) => ({
+      label: `project:${p.id}`,
+      run: async () => {
       const out: UnifiedSearchResult[] = [];
       // The shared library has its own arm below, emitting `document` rows.
       // Running it here too would list every document a second time as
@@ -380,29 +581,39 @@ export class SearchService {
       if (isSharedLibraryProject(p)) return out;
       const workspaceIndexing = p.indexingEnabled !== false;
       const codeOpts = vector
-        ? { queryVector: vector, maxResults: PER_SOURCE_RESULTS }
-        : { mode: 'keyword' as const, maxResults: PER_SOURCE_RESULTS };
+        ? { queryVector: vector, maxResults: perSource }
+        : { mode: 'keyword' as const, maxResults: perSource };
       const [code, docs, artifacts, symbols, areas, mem] = await Promise.all([
         workspaceIndexing && wants('workspace')
-          ? this.contentIndex.searchCode(p.id, query, codeOpts).catch(() => null)
+          ? timed('workspace:code', p.id, (r) => r?.results.length ?? 0, () =>
+              this.contentIndex.searchCode(p.id, query, codeOpts),
+            )
           : Promise.resolve(null),
         workspaceIndexing && wants('workspace')
-          ? this.contentIndex.searchDocs(p.id, query, PER_SOURCE_RESULTS).catch(() => null)
+          ? timed('workspace:docs', p.id, (r) => r?.results.length ?? 0, () =>
+              this.contentIndex.searchDocs(p.id, query, perSource),
+            )
           : Promise.resolve(null),
         workspaceIndexing && wants('artifacts')
-          ? this.contentIndex.searchArtifacts(p.id, query, PER_SOURCE_RESULTS).catch(() => null)
+          ? timed('artifacts', p.id, (r) => r?.results.length ?? 0, () =>
+              this.contentIndex.searchArtifacts(p.id, query, perSource),
+            )
           : Promise.resolve(null),
         workspaceIndexing && wants('workspace')
-          ? this.contentIndex
-              .findSymbol(p.id, query, { maxResults: PER_SOURCE_RESULTS })
-              .catch(() => null)
+          ? timed('workspace:symbols', p.id, (r) => r?.matches.length ?? 0, () =>
+              this.contentIndex.findSymbol(p.id, query, { maxResults: perSource }),
+            )
           : Promise.resolve(null),
         workspaceIndexing && wants('workspace')
-          ? this.contentIndex.searchAreaSummaries(p.id, query, PER_SOURCE_RESULTS).catch(() => [])
-          : Promise.resolve([]),
+          ? timed('workspace:areas', p.id, (r) => r?.length ?? 0, () =>
+              this.contentIndex.searchAreaSummaries(p.id, query, perSource),
+            )
+          : Promise.resolve(null),
         vector && wants('project-memory')
-          ? this.memory.searchVector('project', p.id, vector, PER_MEMORY_RESULTS).catch(() => [])
-          : Promise.resolve([]),
+          ? timed('project-memory', p.id, (r) => r?.length ?? 0, () =>
+              this.memory.searchVector('project', p.id, vector as number[], PER_MEMORY_RESULTS),
+            )
+          : Promise.resolve(null),
       ]);
       for (const r of code?.results ?? []) {
         out.push({
@@ -418,10 +629,10 @@ export class SearchService {
           retrievalSource: 'workspace',
           line: r.lineStart,
           lineEnd: r.lineEnd,
-          score: clamp01(r.score) * WEIGHT.content,
+          ...scoreResult('content', r.score),
         });
       }
-      for (const r of docs?.results ?? []) {
+      for (const [rank, r] of (docs?.results ?? []).entries()) {
         out.push({
           kind: 'content',
           id: `content:${p.id}:${r.sourcePath}:${r.lineStart}`,
@@ -435,10 +646,10 @@ export class SearchService {
           retrievalSource: 'workspace',
           line: r.lineStart,
           lineEnd: r.lineEnd,
-          score: 0.6 * WEIGHT.content,
+          ...scoreResult('content', ftsRankRelevance(rank)),
         });
       }
-      for (const r of artifacts?.results ?? []) {
+      for (const [rank, r] of (artifacts?.results ?? []).entries()) {
         out.push({
           kind: 'content',
           id: `content:${p.id}:artifacts:${r.path}:${r.lineStart}`,
@@ -452,11 +663,11 @@ export class SearchService {
           retrievalSource: 'artifacts',
           line: r.lineStart,
           lineEnd: r.lineEnd,
-          score: 0.6 * WEIGHT.content,
+          ...scoreResult('content', ftsRankRelevance(rank)),
         });
       }
       for (const m of symbols?.matches ?? []) {
-        const rel = fuzzyScore(query, m.name) ?? 0.4;
+        const rel = fuzzyScore(query, m.name) ?? SYMBOL_FALLBACK_RELEVANCE;
         out.push({
           kind: 'symbol',
           id: `symbol:${p.id}:${m.path}:${m.name}`,
@@ -468,10 +679,10 @@ export class SearchService {
           source: 'workspace',
           retrievalSource: 'workspace',
           line: m.lineStart,
-          score: rel * WEIGHT.symbol,
+          ...scoreResult('symbol', rel),
         });
       }
-      for (const area of areas) {
+      for (const area of areas ?? []) {
         const projectOverview = area.areaPath === '::project';
         out.push({
           kind: 'content',
@@ -482,10 +693,10 @@ export class SearchService {
           projectId: p.id,
           projectName: p.name,
           retrievalSource: 'workspace',
-          score: clamp01(area.score) * WEIGHT.content,
+          ...scoreResult('content', area.score),
         });
       }
-      for (const r of mem) {
+      for (const r of mem ?? []) {
         if (r.score < MEMORY_MIN_SIMILARITY) continue;
         out.push({
           kind: 'memory',
@@ -496,46 +707,54 @@ export class SearchService {
           projectId: p.id,
           projectName: p.name,
           retrievalSource: 'project-memory',
-          score: clamp01(r.score) * WEIGHT.memory,
+          ...scoreResult('memory', r.score),
         });
       }
       return out;
-    });
+      },
+    }));
 
     // One pool unit per gezel: gezel memory (vector-only).
     const perGezel =
       vector && wants('gezel-memory')
-        ? gezels.map((g) => async () => {
-            const mem = await this.memory
-              .searchVector('gezel', g.id, vector as number[], PER_MEMORY_RESULTS)
-              .catch(() => []);
-            return mem
-              .filter((r) => r.score >= MEMORY_MIN_SIMILARITY)
-              .map((r) => ({
-                kind: 'memory' as const,
-                id: `memory:gezel:${g.id}:${r.day}:${hashText(r.text)}`,
-                title: r.text.slice(0, 80),
-                subtitle: `Memory · ${g.name}`,
-                snippet: r.text,
-                retrievalSource: 'gezel-memory' as const,
-                score: clamp01(r.score) * WEIGHT.memory,
-              }));
-          })
+        ? gezels.map((g) => ({
+            label: `gezel:${g.id}`,
+            run: async () => {
+              const mem =
+                (await timed('gezel-memory', g.id, (r) => r?.length ?? 0, () =>
+                  this.memory.searchVector('gezel', g.id, vector as number[], PER_MEMORY_RESULTS),
+                )) ?? [];
+              return mem
+                .filter((r) => r.score >= MEMORY_MIN_SIMILARITY)
+                .map((r) => ({
+                  kind: 'memory' as const,
+                  id: `memory:gezel:${g.id}:${r.day}:${hashText(r.text)}`,
+                  title: r.text.slice(0, 80),
+                  subtitle: `Memory · ${g.name}`,
+                  snippet: r.text,
+                  retrievalSource: 'gezel-memory' as const,
+                  ...scoreResult('memory', r.score),
+                }));
+            },
+          }))
         : [];
 
     // Global collections (session transcripts + documents content) — one task
     // each, not per-project: the global index answers across all scopes in a
     // single FTS query.
-    const globalTasks: Array<() => Promise<UnifiedSearchResult[]>> = [];
+    const globalTasks: Array<{ label: string; run: () => Promise<UnifiedSearchResult[]> }> = [];
     const globalIndex = this.globalIndex;
     if (globalIndex && !scope) {
       const projectNames = new Map(projects.map((p) => [p.id, p.name]));
       const gezelNames = new Map(gezels.map((g) => [g.id, g.name]));
-      globalTasks.push(async () => {
-        const hits = await globalIndex
-          .searchSessions(query, { maxResults: PER_SOURCE_RESULTS })
-          .catch(() => []);
-        return hits.map((h) => {
+      globalTasks.push({
+        label: 'sessions',
+        run: async () => {
+        const hits =
+          (await timed('sessions', undefined, (r) => r?.length ?? 0, () =>
+            globalIndex.searchSessions(query, { maxResults: perSource }),
+          )) ?? [];
+        return hits.map((h, rank) => {
           const projectName = projectNames.get(h.projectId);
           const gezelName = gezelNames.get(h.gezelId) ?? h.gezelId;
           return {
@@ -547,25 +766,31 @@ export class SearchService {
             ...(h.projectId ? { projectId: h.projectId } : {}),
             ...(projectName ? { projectName } : {}),
             gezelId: h.gezelId,
-            score: 0.6 * WEIGHT.session,
+            // 1-based index of the matched message in the session — the
+            // deep-link coordinate (global-index chunk lineStart semantics).
+            ...(h.messageStart ? { line: h.messageStart } : {}),
+            ...scoreResult('session', ftsRankRelevance(rank)),
           };
         });
+        },
       });
     }
     if ((!scope || scope.includeShared) && wants('shared')) {
-      globalTasks.push(async () => {
+      globalTasks.push({
+        label: 'shared',
+        run: async () => {
         // The library is a project now, so its content search is the ranked
         // hybrid one. It is emitted as `document` rather than `content` so a
         // library hit keeps its global provenance wherever it surfaces.
         const libraryId = await this.store.sharedProjectId().catch(() => null);
         if (!libraryId) return [];
-        const found = await this.contentIndex
-          .searchLibrary(libraryId, query, {
-            maxResults: PER_SOURCE_RESULTS,
+        const found = await timed('shared', undefined, (r) => r?.results.length ?? 0, () =>
+          this.contentIndex.searchLibrary(libraryId, query, {
+            maxResults: perSource,
             ...(vector ? { queryVector: vector } : {}),
-          })
-          .catch(() => null);
-        return (found?.results ?? []).map((h) => ({
+          }),
+        );
+        return (found?.results ?? []).map((h, rank) => ({
           kind: 'document' as const,
           id: `document:${h.path}`,
           title: basename(h.path),
@@ -575,19 +800,32 @@ export class SearchService {
           retrievalSource: 'shared' as const,
           line: h.lineStart,
           lineEnd: h.lineEnd,
-          score: clamp01(h.score ?? 0.6) * WEIGHT.document,
+          // Hybrid score when the library index reports one; rank-based
+          // pseudo-relevance for keyword-only rows.
+          ...scoreResult('document', h.score ?? ftsRankRelevance(rank)),
         }));
+        },
       });
     }
 
     const tasks = [...perProject, ...perGezel, ...globalTasks];
     const settled = await mapPool(tasks, FANOUT_CONCURRENCY, async (task) => {
-      const res = await withTimeout(task(), PER_SCOPE_TIMEOUT_MS, null);
-      if (res === null) truncated = true;
+      const res = await withTimeout(task.run(), PER_SCOPE_TIMEOUT_MS, null);
+      if (res === null) {
+        sourcesIncomplete = true;
+        armTimings.push({
+          arm: 'scope-timeout',
+          scope: task.label,
+          ms: PER_SCOPE_TIMEOUT_MS,
+          hits: 0,
+          timedOut: true,
+          failed: false,
+        });
+      }
       return res ?? [];
     });
 
-    return { results: settled.flat(), truncated };
+    return { results: settled.flat(), sourcesIncomplete, arms: armTimings };
   }
 
   // ── merge ────────────────────────────────────────────────────────────────
@@ -624,6 +862,13 @@ export class SearchService {
 function basename(path: string): string {
   const i = path.lastIndexOf('/');
   return i < 0 ? path : path.slice(i + 1);
+}
+
+/** Forward-slash and strip a leading ./ so model-supplied prefixes match index paths. */
+function normalizePathPrefix(prefix: string | undefined): string | null {
+  if (!prefix) return null;
+  const p = prefix.replaceAll('\\', '/').replace(/^\.\//, '');
+  return p.length > 0 ? p : null;
 }
 
 function clamp01(n: number): number {

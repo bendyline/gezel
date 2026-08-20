@@ -17,12 +17,17 @@ const log = createLogger('memory');
 
 /**
  * Cosine-similarity floor above which a new memory is considered a duplicate
- * of an existing one and skipped. With all-MiniLM-L6-v2, near-identical
- * paraphrases of the same fact land ~0.90–1.0 while distinct facts about the
- * same topic typically score <0.80 (auto-recall's topical-relevance floor is
- * 0.35). 0.90 is deliberately conservative — only true restatements drop.
+ * of an existing one and skipped. Measured against the shipped embedder
+ * (Xenova/bge-small-en-v1.5, passage↔passage — no query prefix on either
+ * side) with `evals/src/bin/embed-calibration.ts` (2026-08-19): genuine
+ * restatements of the same fact scored 0.802-0.963 (p25 0.906, so the old
+ * MiniLM-era 0.90 let a quarter of true duplicates through), while distinct
+ * facts about the same topic topped out at 0.774. 0.85 sits in that gap,
+ * biased toward the keep side — a dropped distinct memory is silent data
+ * loss; a kept restatement is only clutter. Re-run the harness and re-pick
+ * whenever the embedder changes.
  */
-export const MEMORY_DEDUP_THRESHOLD = 0.9;
+export const MEMORY_DEDUP_THRESHOLD = 0.85;
 
 export interface SaveOutcome {
   status: 'saved' | 'duplicate';

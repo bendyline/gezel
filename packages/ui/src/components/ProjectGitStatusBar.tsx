@@ -384,6 +384,32 @@ export function ProjectGitStatusBar({
     return () => window.removeEventListener(GIT_CHANGED_EVENT, onChanged);
   }, [projectId, refresh]);
 
+  // Drain-pace estimate across the 30s polls. Day-idle enrichment is
+  // deliberately slow (~150 files/hour when the machine is idle at all), so a
+  // large project can honestly read "continues while the app is idle" for
+  // days — the footer should pitch Night Shift / a full scan instead of
+  // letting that state look like progress. Observed rate wins; when nothing
+  // drained between polls, the theoretical idle pace is the optimistic floor.
+  const drainPaceRef = useRef<{ pending: number; at: number } | null>(null);
+  const [slowDrain, setSlowDrain] = useState(false);
+  useEffect(() => {
+    const pending = indexStatus?.enrichment?.pending;
+    if (pending === undefined || pending <= 0 || indexStatus?.aiDrive) {
+      drainPaceRef.current = null;
+      setSlowDrain(false);
+      return;
+    }
+    const prev = drainPaceRef.current;
+    drainPaceRef.current = { pending, at: Date.now() };
+    if (!prev) return;
+    const elapsedMs = Date.now() - prev.at;
+    if (elapsedMs < 20_000) return; // same poll burst — no signal
+    const drained = prev.pending - pending;
+    const idleFloorRatePerMs = 5 / 120_000; // day-idle batch cadence
+    const ratePerMs = drained > 0 ? drained / elapsedMs : idleFloorRatePerMs;
+    setSlowDrain(pending / ratePerMs > 24 * 60 * 60 * 1000);
+  }, [indexStatus]);
+
   const onUpdateIndex = useCallback(async () => {
     if (
       indexRefreshBusy ||
@@ -907,17 +933,49 @@ export function ProjectGitStatusBar({
 
               <div className="project-index-panel-footer">
                 <span className="project-index-panel-note">
-                  {indexState === 'disabled'
-                    ? 'Workspace indexing is off. Turn it on in Project Settings.'
-                    : serverDrive === 'full'
-                      ? 'Full scan in progress — it shares the model with chat, so counts move as calls finish.'
-                      : serverDrive === 'background'
-                        ? 'Background scan in progress — it politely waits while you chat.'
-                        : indexState === 'indexing'
-                          ? 'The status updates automatically while the scan runs.'
-                          : aiScanPending
-                            ? 'AI indexing continues while the app is idle.'
-                            : 'Refresh the index whenever you need the latest workspace state.'}
+                  {indexState === 'disabled' ? (
+                    <>
+                      Workspace indexing is off.{' '}
+                      <button
+                        type="button"
+                        className="project-index-panel-link"
+                        onClick={() =>
+                          window.dispatchEvent(
+                            new CustomEvent('gezel:open-project-settings', {
+                              detail: { projectId },
+                            }),
+                          )
+                        }
+                      >
+                        Turn it on in Project Settings
+                      </button>
+                      .
+                    </>
+                  ) : serverDrive === 'full' ? (
+                    'Full scan in progress — it shares the model with chat, so counts move as calls finish.'
+                  ) : serverDrive === 'background' ? (
+                    'Background scan in progress — it politely waits while you chat.'
+                  ) : indexState === 'indexing' ? (
+                    'The status updates automatically while the scan runs.'
+                  ) : aiScanPending && slowDrain ? (
+                    <>
+                      At the idle pace this will take more than a day.{' '}
+                      <button
+                        type="button"
+                        className="project-index-panel-link"
+                        onClick={() =>
+                          window.dispatchEvent(new CustomEvent('gezel:open-night-shift'))
+                        }
+                      >
+                        Set up Night Shift
+                      </button>{' '}
+                      or use “Full AI scan now” to finish sooner.
+                    </>
+                  ) : aiScanPending ? (
+                    'AI indexing continues while the app is idle.'
+                  ) : (
+                    'Refresh the index whenever you need the latest workspace state.'
+                  )}
                 </span>
                 <div className="project-index-panel-actions">
                   <button

@@ -250,7 +250,7 @@ export interface WorkspaceFile {
 }
 
 export async function discoverFiles(workspaceDir: string): Promise<WorkspaceFile[]> {
-  const files = await discoverWorkspaceFiles(workspaceDir, { maxFiles: MAX_FILES });
+  const { files } = await discoverWorkspaceFiles(workspaceDir, { maxFiles: MAX_FILES });
   return files.map(({ path, size, mtimeMs }) => ({ path, size, mtimeMs }));
 }
 

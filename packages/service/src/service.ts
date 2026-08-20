@@ -47,7 +47,10 @@ import { ConnectorSyncManager } from './connectors/sync-manager.js';
 import { runConnectorTaskPrep } from './connectors/task-prep.js';
 import { listApplicableCraftbooks, projectCraftbookSummaries } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
-import { clearCraftbookSuggestVectorCache } from './craftbook/suggest.js';
+import {
+  clearCraftbookSuggestVectorCache,
+  listGlobalCraftbookCandidates,
+} from './craftbook/suggest.js';
 import { DebugFlag } from './debug/flag.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { reuseVerifiedElectronNativeBinaries } from './engines/electron-native-reuse.js';
@@ -1977,7 +1980,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
             result.ocrText ? `Text in the image:\n\n${result.ocrText}` : null,
           ].filter((s): s is string => Boolean(s?.trim()));
           if (parts.length === 0) return null;
-          return { body: parts.join('\n\n'), model: result.modelId };
+          // The recognition stack is llama.cpp mtmd in every non-test
+          // configuration (local supervised or a pointed-at server).
+          return { body: parts.join('\n\n'), model: result.modelId, provider: 'llama-cpp' };
         } catch {
           return null;
         }
@@ -1991,7 +1996,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
             audio: { data: bytes, mimeType: mimeTypeForFilename(absPath) },
           });
           const text = out.text.trim();
-          return text ? { body: text } : null;
+          return text
+            ? {
+                body: text,
+                ...(out.model ? { model: out.model } : {}),
+                provider: 'whisper-cpp',
+              }
+            : null;
         } catch {
           return null;
         }
@@ -2333,6 +2344,27 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   const handboek = createHandboekEngine({
     catalog,
     device: createDaemonDeviceInfo({ store, chat }),
+  });
+  // Late-boot name-catalog arms for the titlebar search: Handboek articles
+  // (previously the least findable content in the app) plus globally
+  // invokable craftbooks. Tasks ride the Store directly inside SearchService.
+  search.setExtraCatalogs({
+    handboekEntries: async () => {
+      const toc = await handboek.toc();
+      return toc.areas.flatMap((area) =>
+        area.entries.map((entry) => ({
+          id: entry.id,
+          title: entry.title,
+          keywords: [area.title, ...(entry.summary ? [entry.summary] : [])],
+        })),
+      );
+    },
+    craftbookEntries: async () =>
+      (await listGlobalCraftbookCandidates({ catalog, store, git })).map((c) => ({
+        id: c.id,
+        name: c.name,
+        source: c.source,
+      })),
   });
 
   // Ask once, at boot, whether this process may create children at all —

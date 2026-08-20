@@ -16,6 +16,9 @@ export interface OpenFileIntent {
   projectId: string;
   path: string;
   source: 'workspace' | 'artifacts';
+  /** 1-based line to reveal after opening — a search hit's match location. */
+  line?: number;
+  lineEnd?: number;
 }
 
 interface StoredIntent extends OpenFileIntent {

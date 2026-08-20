@@ -30,7 +30,11 @@ const log = createLogger('enrich');
  * Raster formats the vision stack can actually decode (llama.cpp's mtmd uses
  * stb_image). SVG is a vector format and ICO a multi-frame container — both
  * failed 3-for-3 deterministically in the wild (400 "Failed to load image"),
- * burning engine calls and log noise on every fresh content hash.
+ * burning engine calls and log noise on every fresh content hash. TIFF is
+ * excluded for the same decoder reason (stb_image has no TIFF support) — a
+ * deliberate gap, not an oversight: TIFFs stay findable by their filename
+ * chunk from the static pass, and routing them through a raster conversion
+ * is the follow-up if demand appears.
  */
 const VISION_RASTER_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp']);
 
@@ -42,9 +46,13 @@ function fileExtension(path: string): string {
 
 export interface AiShadowProducers {
   /** Absolute image path → markdown body (description + OCR), null when unavailable. */
-  describeImage?: (absPath: string) => Promise<{ body: string; model?: string } | null>;
+  describeImage?: (
+    absPath: string,
+  ) => Promise<{ body: string; model?: string; provider?: string } | null>;
   /** Absolute audio path → markdown transcript body, null when unavailable. */
-  transcribeAudio?: (absPath: string) => Promise<{ body: string; model?: string } | null>;
+  transcribeAudio?: (
+    absPath: string,
+  ) => Promise<{ body: string; model?: string; provider?: string } | null>;
 }
 
 export interface AiShadowDeps extends AiShadowProducers {
@@ -104,7 +112,7 @@ export async function aiShadowFile(
     store.markAiShadowAttempt(file.hash, file.path);
     return { produced: false, skipped: false, called: false };
   }
-  let result: { body: string; model?: string } | null = null;
+  let result: { body: string; model?: string; provider?: string } | null = null;
   try {
     result = await producer(abs);
   } catch {
@@ -128,6 +136,10 @@ export async function aiShadowFile(
       source_hash: file.hash,
       producer: file.modality === 'image' ? 'image-describe' : 'audio-transcribe',
       ...(result.model ? { model: result.model } : {}),
+      // The vision/STT ENGINE that produced this body — from the producer
+      // itself, never deps.provenance, whose provider names the SUMMARIZER
+      // target and would misattribute media work to the wrong stack.
+      ...(result.provider ? { provider: result.provider } : {}),
       ...(p?.gezelId ? { gezel_id: p.gezelId } : {}),
       ...(p?.gezelName ? { gezel: p.gezelName } : {}),
       ...(p?.appVersion ? { app_version: p.appVersion } : {}),

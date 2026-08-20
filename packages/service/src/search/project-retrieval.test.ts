@@ -119,6 +119,56 @@ describe('retrieveProjectContext', () => {
     expect(readWorkspace).toHaveBeenCalledWith('p1', 'src/car.ts');
   });
 
+  it('applies per-corpus relevance floors: one relevance drops as content, survives as document', async () => {
+    // The injection floors are the historical `score >= 120` translated into
+    // relevance space per kind: content 120/420 ≈ 0.286, document 120/680 ≈
+    // 0.176. Relevance 0.2 sits between them — dropped as content, kept as a
+    // shared document — matching the old weighted behavior (84 vs 136).
+    const search = {
+      searchProject: vi.fn(async () => ({
+        results: [
+          {
+            kind: 'content' as const,
+            id: 'content:p1:src/weak.ts:1',
+            title: 'weak.ts',
+            snippet: 'weak content match',
+            projectId: 'p1',
+            path: 'src/weak.ts',
+            retrievalSource: 'workspace' as const,
+            line: 1,
+            score: 0.2 * 420,
+            relevance: 0.2,
+          },
+          {
+            kind: 'document' as const,
+            id: 'document:guides/policy.md',
+            title: 'policy.md',
+            snippet: 'refund policy details',
+            path: 'guides/policy.md',
+            retrievalSource: 'shared' as const,
+            line: 1,
+            score: 0.2 * 680,
+            relevance: 0.2,
+          },
+        ],
+        truncated: false,
+      })),
+    } as unknown as SearchService;
+
+    const result = await retrieveProjectContext({
+      store: {} as unknown as Store,
+      search,
+      record: record(),
+      gezel: gezel(),
+      config: { retrieval: { mode: 'lean' } } as GezelConfig,
+      userText: 'Where is the refund policy documented for customers?',
+      messageOrigin: 'direct-user',
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.hits.map((hit) => hit.source)).toEqual(['shared']);
+  });
+
   it('builds background craftbook retrieval from the task and phase, not handoff boilerplate', async () => {
     let searchedQuery = '';
     const searchProject = vi.fn(async (query: string) => {

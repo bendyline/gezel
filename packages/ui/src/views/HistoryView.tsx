@@ -1,4 +1,4 @@
-import type { GezelSummary, HistoryEntry, Project } from '@bendyline/gezel';
+import type { GezelSummary, HistoryEntry, Project, SessionSearchResult } from '@bendyline/gezel';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { api } from '../api.js';
 import { ToolDiffBlock } from '../components/ToolDiffBlock.js';
+import { openTabAction, runNavActions } from '../components/nav-actions.js';
 import { Select } from '../primitives/index.js';
 
 const KINDS: Array<{ value: string; label: string }> = [
@@ -86,6 +87,9 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
   const [kindFilter, setKindFilter] = useState('');
   const [q, setQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Transcript FTS hits for the same query — what was actually SAID, not just
+  // session titles (which is all the history filter itself can match).
+  const [transcriptHits, setTranscriptHits] = useState<SessionSearchResult[]>([]);
 
   const gezelLabel = useMemo(() => {
     const m = new Map<string, string>();
@@ -114,7 +118,22 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
       if (gezelFilter) filter.gezelId = gezelFilter;
       if (kindFilter && kindFilter !== 'session') filter.kind = kindFilter;
       if (q.trim()) filter.q = q.trim();
+      // In parallel: full-text transcript search over what was actually said.
+      // Best-effort — the history list must not fail because the transcript
+      // index is unavailable on this install.
+      const transcriptPromise = q.trim()
+        ? api
+            .searchSessions({
+              q: q.trim(),
+              ...(projectFilter ? { project: projectFilter } : {}),
+              ...(gezelFilter ? { gezel: gezelFilter } : {}),
+              maxResults: 10,
+            })
+            .then((r) => (r?.engine !== 'unavailable' && Array.isArray(r?.results) ? r.results : []))
+            .catch(() => [])
+        : Promise.resolve([]);
       const res = await api.listHistory(filter);
+      setTranscriptHits(await transcriptPromise);
       // If 'session' is the kind filter, keep only session entries client-side.
       const filtered =
         kindFilter === 'session'
@@ -295,6 +314,48 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
         style={{ ['--history-list-width' as string]: `${(listFraction * 100).toFixed(2)}%` }}
       >
         <ul className="history-list">
+          {transcriptHits.length > 0 && (
+            <li className="history-item">
+              <span className="history-transcript-header muted">Said in chats</span>
+            </li>
+          )}
+          {transcriptHits.map((hit) => (
+            <li key={`transcript:${hit.sessionId}:${hit.messageStart}`} className="history-item">
+              <button
+                type="button"
+                className="history-row"
+                onClick={() => {
+                  // Deep-link into the conversation at the matched message —
+                  // queue-then-dispatch, same contract as the titlebar search.
+                  const intent = {
+                    gezelId: hit.gezelId,
+                    sessionId: hit.sessionId,
+                    ...(hit.projectId ? { projectId: hit.projectId } : {}),
+                    messageIndex: hit.messageStart,
+                  };
+                  runNavActions([
+                    { kind: 'open-session', intent },
+                    openTabAction({ kind: 'gezel', id: hit.gezelId }),
+                    { kind: 'event', type: 'gezel:open-session', detail: intent },
+                  ]);
+                }}
+              >
+                <span className="history-line">
+                  <span className="history-summary">
+                    {gezelLabel(hit.gezelId) || hit.gezelId} · {hit.title || 'Untitled session'}
+                  </span>
+                  <time className="history-time">{formatRelative(hit.lastActivityAt)}</time>
+                </span>
+                <span className="history-meta">
+                  <span className="history-kind">Transcript</span>
+                  {projectLabel(hit.projectId) && (
+                    <span className="history-chip">{projectLabel(hit.projectId)}</span>
+                  )}
+                  <span className="history-stat">{hit.snippet}</span>
+                </span>
+              </button>
+            </li>
+          ))}
           {entries.map((e) => {
             const entryId = e.entryType === 'event' ? e.id : `session:${e.id}`;
             const isSelected = selectedId === entryId;

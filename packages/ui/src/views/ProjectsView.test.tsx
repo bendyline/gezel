@@ -954,6 +954,8 @@ describe('ProjectsView', () => {
     const project = {
       id: 'pj-alpha',
       name: 'Racing game',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
       packages: [],
       managedWorkspaceWritePolicy: 'allow' as const,
       linkedProjectIds: [],

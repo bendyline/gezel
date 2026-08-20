@@ -34,6 +34,7 @@ function agedIdleState(): SystemIdleState {
 
 function make(opts: { active: boolean; indexingEnabled?: boolean; freshBoot?: boolean }) {
   const enrich = vi.fn().mockResolvedValue({ files: 1, summarized: 1, embedded: 1 });
+  const embedOnly = vi.fn().mockResolvedValue({ files: 0, embedded: 0 });
   const chat = {
     isAnyActive: () => opts.active,
     isProjectActive: () => false,
@@ -47,7 +48,7 @@ function make(opts: { active: boolean; indexingEnabled?: boolean; freshBoot?: bo
     ],
     readConfig: async () => ({}),
   } as unknown as Store;
-  const contentIndex = { enrich } as unknown as ContentIndex;
+  const contentIndex = { enrich, embedOnly } as unknown as ContentIndex;
   const idle = opts.freshBoot ? new SystemIdleState() : agedIdleState();
   const mgr = new IndexEnrichmentManager({
     store,
@@ -56,7 +57,7 @@ function make(opts: { active: boolean; indexingEnabled?: boolean; freshBoot?: bo
     idle,
     resolveBoekwachter: async () => BOOK,
   });
-  return { mgr, enrich, idle };
+  return { mgr, enrich, embedOnly, idle };
 }
 
 describe('IndexEnrichmentManager idle gating', () => {
@@ -95,6 +96,24 @@ describe('IndexEnrichmentManager idle gating', () => {
     withoutRole.resolveBoekwachter = async () => null;
     await mgr.tick();
     expect(enrich).not.toHaveBeenCalled();
+  });
+
+  it('the embed-only tier runs ahead of the roster gate — no Boekwachter required', async () => {
+    const { mgr, enrich, embedOnly } = make({ active: false });
+    const withoutRole = mgr as unknown as {
+      resolveBoekwachter: (projectId: string) => Promise<GezelDetail | null>;
+    };
+    withoutRole.resolveBoekwachter = async () => null;
+    await mgr.tick();
+    // Semantic-search embeddings need no roster opt-in; the LLM tiers do.
+    expect(embedOnly).toHaveBeenCalledWith('p1', expect.any(Number));
+    expect(enrich).not.toHaveBeenCalled();
+  });
+
+  it('the embed-only tier still honors the indexing opt-out', async () => {
+    const { mgr, embedOnly } = make({ active: false, indexingEnabled: false });
+    await mgr.tick();
+    expect(embedOnly).not.toHaveBeenCalled();
   });
 
   it('skips AI indexing when workspace indexing is disabled', async () => {
@@ -163,7 +182,12 @@ describe('review tier scheduling', () => {
       readConfig: async () => ({ defaultModel: { mlx: 'enricher' } }),
       listIndexRubrics: async () => ({}),
     } as unknown as Store;
-    const contentIndex = { enrich, enrichAreas, review } as unknown as ContentIndex;
+    const contentIndex = {
+      enrich,
+      enrichAreas,
+      review,
+      embedOnly: vi.fn().mockResolvedValue({ files: 0, embedded: 0 }),
+    } as unknown as ContentIndex;
     const idle = agedIdleState();
     const mgr = new IndexEnrichmentManager({
       store,
@@ -263,6 +287,7 @@ describe('AI-shadow tier + review drain event', () => {
       aiShadows,
       reviewCounts,
       listFileIssues,
+      embedOnly: vi.fn().mockResolvedValue({ files: 0, embedded: 0 }),
     } as unknown as ContentIndex;
     const mgr = new IndexEnrichmentManager({
       store,
@@ -386,6 +411,7 @@ describe('on-demand drives + night catch-up', () => {
       aiShadows,
       reviewCounts,
       listFileIssues,
+      embedOnly: vi.fn().mockResolvedValue({ files: 0, embedded: 0 }),
     } as unknown as ContentIndex;
     const mgr = new IndexEnrichmentManager({
       store,

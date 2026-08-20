@@ -29,6 +29,7 @@ export function TitlebarSearch() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [sourcesIncomplete, setSourcesIncomplete] = useState(false);
   const [results, setResults] = useState<UnifiedSearchResult[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -52,6 +53,7 @@ export function TitlebarSearch() {
       setOpen(false);
       setLoading(false);
       setFailed(false);
+      setSourcesIncomplete(false);
       return;
     }
     const ctrl = new AbortController();
@@ -62,6 +64,7 @@ export function TitlebarSearch() {
       // user for as long as the request took.
       setLoading(true);
       setFailed(false);
+      setSourcesIncomplete(false);
       setOpen(true);
       let namesShown = false;
       try {
@@ -74,6 +77,7 @@ export function TitlebarSearch() {
         const full = await api.search(q, { mode: 'full', signal: ctrl.signal });
         if (ctrl.signal.aborted) return;
         setResults(full.results);
+        setSourcesIncomplete(full.sourcesIncomplete === true);
         setActiveIndex(0);
       } catch {
         // An abort is the ordinary keystroke path, not a failure. A genuine
@@ -196,6 +200,7 @@ export function TitlebarSearch() {
             activeIndex={activeIndex}
             loading={loading}
             failed={failed}
+            sourcesIncomplete={sourcesIncomplete}
             onPick={pick}
             onHover={setActiveIndex}
           />

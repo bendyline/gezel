@@ -1,6 +1,9 @@
+import { isSharedLibraryProject } from '@bendyline/gezel';
 import { FolderView } from '@bendyline/squisq-editor-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { api } from '../api.js';
 import type { FileEntry } from '../components/FileTree.js';
+import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
 import { isOutsideInInternalPath } from '../components/SquisqIntegration/index.js';
 import { documentLabel } from '../components/document-label.js';
 import {
@@ -84,6 +87,25 @@ export function DocumentsView() {
   // selection survives switching to another tab and back (TabContent
   // remounts on key change) and across app restarts.
   const [selectedPath, setSelectedPathState] = useState<string | null>(() => loadSelectedPath());
+  // The library IS a project (its workspace is the documents root), so its
+  // index status/controls come from the same status bar every project gets.
+  // Resolved by the marker property, never by id — a user project can own
+  // the `shared` id first (see core/shared-project.ts).
+  const [libraryProjectId, setLibraryProjectId] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listProjects()
+      .then((res) => {
+        if (cancelled) return;
+        const library = res.projects.find((p) => isSharedLibraryProject(p));
+        setLibraryProjectId(library?.id ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const setSelectedPath = useCallback((path: string | null) => {
     setSelectedPathState(path);
@@ -251,6 +273,11 @@ export function DocumentsView() {
         viewer={viewer}
       />
       {error && <p className="error">{error}</p>}
+      {/* Same ambient status bar every project gets — the library was the one
+          project locked out of the index status/controls (it is hidden from
+          the sidebar, so no project tab could ever host this for it). Git
+          chrome self-hides; what remains is the index pill + scan controls. */}
+      {libraryProjectId ? <ProjectGitStatusBar projectId={libraryProjectId} /> : null}
     </div>
   );
 }

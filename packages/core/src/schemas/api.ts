@@ -4962,6 +4962,13 @@ export const UNIFIED_SEARCH_RESULT_KINDS = [
   'symbol',
   'memory',
   'session',
+  // Product objects reachable by name from the titlebar (name catalog only —
+  // the model-scoped project search never emits these kinds):
+  'task',
+  'craftbook',
+  // Built-in documentation articles — previously the least findable content
+  // in the app (no result kind, no search box in the Handboek view).
+  'handboek',
 ] as const;
 
 export const UnifiedSearchResultKindSchema = z.enum(UNIFIED_SEARCH_RESULT_KINDS);
@@ -4993,8 +5000,20 @@ export const UnifiedSearchResultSchema = z.object({
   lineEnd: z.number().int().positive().optional(),
   /** Owning gezel for session hits — lets the palette navigate without parsing ids. */
   gezelId: z.string().optional(),
-  /** Merged relevance score (higher = better). */
+  /**
+   * Merged ordering key: 0–1 relevance × per-kind merge weight (0–1000 scale).
+   * Comparable across kinds for RANKING only — it is not a calibrated
+   * confidence; use `relevance`/`tier` for that.
+   */
   score: z.number(),
+  /**
+   * Calibrated 0–1 within-corpus relevance, before the kind weight. Uniform
+   * scale across corpora: floors and confidence tiers are defined on this,
+   * never on `score`.
+   */
+  relevance: z.number().min(0).max(1).optional(),
+  /** Coarse confidence derived from `relevance` — render hints, early-stop cues. */
+  tier: z.enum(['strong', 'weak']).optional(),
 });
 export type UnifiedSearchResult = z.infer<typeof UnifiedSearchResultSchema>;
 
@@ -5010,13 +5029,40 @@ export const UnifiedSearchResponseSchema = z.object({
   results: z.array(UnifiedSearchResultSchema),
   /** True when the content fan-out hit its cap or a source errored/timed out. */
   truncated: z.boolean(),
+  /**
+   * True only when a source scope blew its per-scope budget (timed out), so
+   * the results genuinely under-represent what exists. Distinct from
+   * `truncated`, which also fires on ordinary caps/dedupe — the UI shows a
+   * "results may be partial" note for this flag, never for plain caps.
+   */
+  sourcesIncomplete: z.boolean().optional(),
 });
 export type UnifiedSearchResponse = z.infer<typeof UnifiedSearchResponseSchema>;
+
+/** Body of POST /api/memory/search — previously an untyped cast in the route. */
+export const MemorySearchRequestSchema = z.object({
+  gezelId: z.string().min(1),
+  projectId: z.string().min(1),
+  query: z.string().min(1).max(400),
+  topK: z.number().int().positive().max(50).optional(),
+});
+export type MemorySearchRequest = z.infer<typeof MemorySearchRequestSchema>;
 
 /** Project-bound form used by the model-facing generic `search` tool. */
 export const ProjectSearchRequestSchema = z.object({
   query: z.string().min(1).max(400),
   maxResults: z.number().int().positive().max(100).optional(),
+  /**
+   * Skip this many merged results before returning `maxResults` — the tool
+   * cursor. Narrowing only; the project scope stays server-derived.
+   */
+  offset: z.number().int().nonnegative().max(10_000).optional(),
+  /**
+   * Keep only results whose path starts with this prefix (forward-slashed,
+   * relative). Pathless results (memories, area overviews) are excluded when
+   * set — a path filter asks for files. Narrowing only.
+   */
+  pathPrefix: z.string().min(1).max(500).optional(),
   /** Current gezel id enables its private-memory arm. */
   gezelId: z.string().min(1).optional(),
   /** Shared documents are included by default. */
@@ -5597,6 +5643,13 @@ export const WorkspaceIndexStatusSchema = z.object({
        * while `summarized` sits still — surface it, or the scan looks stuck.
        */
       shadowsPending: z.number().int().nonnegative().optional(),
+      /**
+       * Files awaiting the always-on embed-only tier (vectors without any
+       * LLM). Zero means semantic search is ready even with no Boekwachter
+       * on the roster; the summarize/review counters above track the
+       * roster-gated tiers separately.
+       */
+      embedOnlyPending: z.number().int().nonnegative().optional(),
       /** The embedding model that built these vectors (index `meta` stamp). */
       embedModel: z.string().optional(),
       /**

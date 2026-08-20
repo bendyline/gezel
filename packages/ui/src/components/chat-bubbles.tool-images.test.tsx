@@ -61,9 +61,6 @@ describe('tool image preview', () => {
 
     expect(apiMocks.fetchProjectArtifactBlob).toHaveBeenCalledTimes(2);
     expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(previewSrc);
-    expect(screen.getByRole('img', { name: 'Tool screenshot' })).toHaveAttribute(
-      'src',
-      previewSrc,
-    );
+    expect(screen.getByRole('img', { name: 'Tool screenshot' })).toHaveAttribute('src', previewSrc);
   });
 });

@@ -186,6 +186,20 @@ Harness lessons wild-caught this round (all fixed):
   per-question stall deadline. Each question is now a clean one-turn probe,
   which also matches real usage. Dropped worst-question latency 28min→~3min.
 
+### similarity-threshold recalibration for bge (2026-08-19)
+The bge promotion shipped the vectors but not the floors: every similarity
+threshold was still MiniLM-calibrated. New reproducible harness
+`evals/src/bin/embed-calibration.ts` (memory-shaped fixture pairs, both
+comparison modes — passage↔passage for dedup, query→passage for search
+floors). Results + verdicts: `evals/runs/EMBED-CALIBRATION-2026-08-19.md`.
+Headlines: dedup 0.90→0.85 (was under-deduping — paraphrase p25 = 0.906),
+memory search floor 0.35→0.45 (old floor sat below the bge unrelated-band
+median), recall DEFAULT_MIN_SCORE 0.35→0.45, craftbook blend floors
+0.15→0.25 / 0.28→0.32. CODE_MIN_SCORE/LIBRARY_MIN_SCORE unchanged — they
+filter rank-fusion scores, which are embedder-independent. No Phase-A run:
+none of the changed floors are on the bench's measured path. **Re-run the
+harness on every embedder change.**
+
 ### windowing PROMOTED to default
 `GEZEL_INDEX_WINDOW` now defaults ON; opt out with `=0` (the index-bench control
 arm, `--no-window`). Rationale: deterministic retrieval win + agent-outcome

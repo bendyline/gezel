@@ -7,7 +7,7 @@ import { GezelGrowthSummarySchema } from './growth.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { QuestionSchema } from './question.js';
 import { MessageImageDigestSchema } from './recognition.js';
-import { RetrievalPolicySchema } from './retrieval.js';
+import { RetrievalPolicySchema, RetrievalSourceSchema } from './retrieval.js';
 import { SessionGpuTaskSchema } from './session-telemetry.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
 
@@ -592,6 +592,27 @@ export const ChatMessageSchema = z.object({
    * scrolling the body for the ref.
    */
   referencedTasks: z.array(z.string()).optional(),
+  /**
+   * Indexed-context sources consulted for THIS user turn (proactive
+   * retrieval). Citations only — source/path/line/score, never the retrieved
+   * text (which lives solely in the provider prompt). Lets the UI render a
+   * "consulted N sources" row so proactive RAG is visible diligence instead
+   * of invisible machinery.
+   */
+  retrieval: z
+    .object({
+      hits: z.array(
+        z.object({
+          source: RetrievalSourceSchema,
+          projectId: z.string().optional(),
+          path: z.string().optional(),
+          line: z.number().int().positive().optional(),
+          lineEnd: z.number().int().positive().optional(),
+          score: z.number(),
+        }),
+      ),
+    })
+    .optional(),
   /**
    * Tool calls the assistant fired during this turn. Populated on the
    * final assistant message; the UI renders them as a collapsible
