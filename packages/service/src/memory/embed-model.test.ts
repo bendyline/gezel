@@ -69,9 +69,25 @@ describe('embedding model-load failure classification', () => {
     ).toBe(true);
   });
 
+  it('retries undici mid-stream aborts (the killed-download family)', () => {
+    // Wild-caught: a model download killed at ~103s surfaced as a bare
+    // TypeError('terminated'), classified fatal, and stickily disabled
+    // semantic search for the daemon's lifetime with no visible error.
+    expect(isRetryablePipelineLoadFailure(new TypeError('terminated'))).toBe(true);
+    expect(isRetryablePipelineLoadFailure(new Error('other side closed'))).toBe(true);
+    expect(isRetryablePipelineLoadFailure(new Error('premature close'))).toBe(true);
+    expect(
+      isRetryablePipelineLoadFailure(
+        Object.assign(new Error('stream ended'), { code: 'ERR_STREAM_PREMATURE_CLOSE' }),
+      ),
+    ).toBe(true);
+    expect(isRetryablePipelineLoadFailure(new Error('The operation was aborted'))).toBe(true);
+  });
+
   it('keeps configuration and runtime failures non-retryable', () => {
     expect(isRetryablePipelineLoadFailure(new Error('Unknown model id'))).toBe(false);
     expect(isRetryablePipelineLoadFailure(new Error('ERR_DLOPEN_FAILED'))).toBe(false);
+    expect(isRetryablePipelineLoadFailure(new Error('Cannot find module sharp'))).toBe(false);
     expect(new PipelineLoadError('invalid model').retryable).toBe(false);
   });
 });

@@ -85,6 +85,16 @@ export function embeddingPipelineStatus(): EmbeddingPipelineStatus {
   return pipelineStatus;
 }
 
+/**
+ * The status + reason pair as one wire-ready object — what `/api/health` and
+ * every project's `/index/status` surface so a dead embedder is
+ * distinguishable from an index that is merely still building.
+ */
+export function embeddingsHealth(): { status: EmbeddingPipelineStatus; reason?: string } {
+  const reason = embeddingsDisabledReason();
+  return { status: embeddingPipelineStatus(), ...(reason ? { reason } : {}) };
+}
+
 // ── worker plumbing ───────────────────────────────────────────────────────
 
 interface Pending {

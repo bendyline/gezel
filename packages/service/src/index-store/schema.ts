@@ -11,7 +11,8 @@ import type { SqliteDriver } from './sqlite-driver.js';
  * duplicated text is cheap relative to the vectors.
  *
  * The vector default dim is 384 (all-MiniLM-L6-v2, the existing embeddings
- * model). `vec_image` (a different model/dim) is created in Phase 5.
+ * model). Image vectors live in the plain-BLOB `image_vectors` table (v12),
+ * not a vec0 table — dimension-agnostic and independent of sqlite-vec.
  *
  * `GEZEL_EMBED_DIM` overrides the text-vector dim to match a non-384
  * `GEZEL_EMBED_MODEL` (the index-bench embedding A/B). It must be set BEFORE
@@ -148,13 +149,79 @@ CREATE TABLE IF NOT EXISTS enrichments (
   attempts INTEGER DEFAULT 0
 );
 
+-- CLIP-style whole-image embeddings (v12). Keyed by content hash, NOT chunk
+-- id: putChunks is delete-then-insert and the AI-shadow tier re-chunks every
+-- image it captions, so a chunk-keyed vector orphans on the first re-chunk
+-- (the original v1 shape had exactly that latent bug — it shipped with zero
+-- writers, so re-keying cost nothing). A plain BLOB, deliberately not vec0:
+-- dimension-agnostic, brute-force cosine is fine at this scale, and image
+-- vectors must work even where sqlite-vec didn't load.
 CREATE TABLE IF NOT EXISTS image_vectors (
-  chunk_id INTEGER PRIMARY KEY,
+  content_hash TEXT PRIMARY KEY,
   collection_id TEXT NOT NULL,
   file_path TEXT NOT NULL,
-  vec BLOB
+  model TEXT,
+  dim INTEGER,
+  vec BLOB,
+  created_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_image_vectors_col ON image_vectors (collection_id);
+
+-- Image-embed gate (v12): same content-addressed discipline as shadow_state.
+-- state 'ok'/'unsupported' consume the gate; 'failed' rows retry while
+-- attempts < the cap. Separate from embed_state (text) so the two tiers'
+-- failure accounting never mixes.
+CREATE TABLE IF NOT EXISTS image_embed_state (
+  content_hash TEXT PRIMARY KEY,
+  collection_id TEXT,
+  file_path TEXT,
+  state TEXT,
+  attempts INTEGER DEFAULT 0,
+  updated_at TEXT
+);
+
+-- Face lane (v12, biometric opt-in). One row per detected face; region is
+-- JSON {x,y,w,h} in source pixels; cluster_id NULL = below the quality gate
+-- or not yet clustered. Vectors are ArcFace-space unit vectors (512-d).
+CREATE TABLE IF NOT EXISTS face_vectors (
+  content_hash TEXT NOT NULL,
+  face_index INTEGER NOT NULL,
+  collection_id TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  region TEXT,
+  quality REAL,
+  cluster_id TEXT,
+  vec BLOB,
+  created_at TEXT,
+  PRIMARY KEY (content_hash, face_index)
+);
+CREATE INDEX IF NOT EXISTS idx_face_vectors_cluster ON face_vectors (cluster_id);
+
+-- Person clusters. centroid = running mean of member vectors, re-normalized.
+-- state 'forgotten' tombstones a user-forgotten person: the centroid is kept
+-- so new photos of them are silently absorbed instead of resurrecting as a
+-- fresh "Person N" (data erasure is the separate wipe path).
+CREATE TABLE IF NOT EXISTS face_clusters (
+  id TEXT PRIMARY KEY,
+  collection_id TEXT NOT NULL,
+  centroid BLOB,
+  size INTEGER DEFAULT 0,
+  exemplar_hash TEXT,
+  exemplar_face INTEGER,
+  state TEXT,
+  updated_at TEXT
+);
+
+-- Face-detection gate, per image hash. faces = count found (0 is a valid 'ok').
+CREATE TABLE IF NOT EXISTS face_state (
+  content_hash TEXT PRIMARY KEY,
+  collection_id TEXT,
+  file_path TEXT,
+  state TEXT,
+  faces INTEGER,
+  attempts INTEGER DEFAULT 0,
+  updated_at TEXT
+);
 
 CREATE TABLE IF NOT EXISTS entities (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -365,7 +432,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts_history
 `;
 
 // v11: embed_state table (embed-only gate — additive CREATE, no backfill).
-const SCHEMA_VERSION = 11;
+// v12: image_vectors re-keyed by content_hash (old chunk_id table had zero
+// writers — dropped in place), plus image_embed_state and the face-lane
+// tables (face_vectors/face_clusters/face_state). Additive otherwise.
+const SCHEMA_VERSION = 12;
 
 /**
  * Add a column to an existing table if it isn't already present. SQLite has no
@@ -398,6 +468,16 @@ export function applySchema(
   db: SqliteDriver,
   opts: { vectors?: boolean } = {},
 ): { fts: boolean; vec: boolean } {
+  // v11 → v12: the original image_vectors was keyed by chunk_id — an unstable
+  // key (putChunks delete-then-inserts) that shipped with zero writers, so no
+  // install has rows in it. Drop the old shape so BASE_DDL's CREATE IF NOT
+  // EXISTS lays down the content_hash-keyed table.
+  try {
+    const cols = db.prepare('PRAGMA table_info(image_vectors)').all<{ name: string }>();
+    if (cols.some((c) => c.name === 'chunk_id')) db.exec('DROP TABLE image_vectors');
+  } catch {
+    /* introspection failed — BASE_DDL below will surface any real problem */
+  }
   db.exec(BASE_DDL);
 
   // Additive migrations for DBs created before these columns existed (v2 → v3).

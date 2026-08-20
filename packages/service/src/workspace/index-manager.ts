@@ -22,6 +22,7 @@ import { writeFileAtomic } from '../fs/atomic.js';
 import type { Store } from '../fs/store.js';
 import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
 import type { ContentIndex } from '../index-store/content-index.js';
+import { embeddingsHealth } from '../memory/embeddings.js';
 import { detectAndPersistProjectType } from '../project-type/detect.js';
 import {
   type EnsureProjectLeadResult,
@@ -104,6 +105,13 @@ export interface WorkspaceIndexManagerOptions {
   intervalMs?: number;
   /** Override the startup delay (tests). */
   startupDelayMs?: number;
+  /**
+   * Fired after a scan completes and the content index has enrolled the
+   * files. Wired to the enrichment manager's immediate embed drain so a
+   * fresh project gets semantic search minutes after being pointed at a
+   * folder, instead of waiting for the 3-minute OS-idle background tick.
+   */
+  onScanComplete?: (projectId: string) => void;
 }
 
 export class WorkspaceIndexManager {
@@ -115,6 +123,7 @@ export class WorkspaceIndexManager {
   private readonly events: Pick<ChatEventBus, 'publishGlobalEvent'> | undefined;
   private readonly intervalMs: number;
   private readonly startupDelayMs: number;
+  private onScanComplete: ((projectId: string) => void) | undefined;
   private readonly state = new Map<string, ProjectIndexState>();
   /** Per-project promise chain so two concurrent scans on the same
    *  project serialize rather than racing on the disk. */
@@ -144,6 +153,16 @@ export class WorkspaceIndexManager {
     this.events = opts.events;
     this.intervalMs = opts.intervalMs ?? TICK_INTERVAL_MS;
     this.startupDelayMs = opts.startupDelayMs ?? STARTUP_DELAY_MS;
+    this.onScanComplete = opts.onScanComplete;
+  }
+
+  /**
+   * Late-bind the scan-complete hook — the enrichment manager is constructed
+   * after this manager in service boot, so the wiring happens in a second
+   * step rather than through the constructor options.
+   */
+  setOnScanComplete(hook: (projectId: string) => void): void {
+    this.onScanComplete = hook;
   }
 
   start(): void {
@@ -217,18 +236,22 @@ export class WorkspaceIndexManager {
    */
   async statusForUi(projectId: string): Promise<WorkspaceIndexStatus> {
     const base = await this.status(projectId);
+    // Semantic-search health is attached in EVERY state — a dead embedder
+    // must be distinguishable from an index that hasn't finished building,
+    // and it's process-local (no sqlite open, unlike enrichment below).
+    const withEmbeddings: WorkspaceIndexStatus = { ...base, embeddings: embeddingsHealth() };
     // The AI-scan flag only colours the pill once the structural index is
     // fresh: a missing/stale index already reads as "out of date" and
     // `indexing` has its own state, so skip the sqlite open in those cases.
-    if (base.state !== 'fresh' || !this.contentIndex) return base;
+    if (base.state !== 'fresh' || !this.contentIndex) return withEmbeddings;
     const enrichment = await this.contentIndex.enrichmentCounts(projectId).catch(() => null);
-    if (!enrichment) return base;
+    if (!enrichment) return withEmbeddings;
     // Review coverage rides along but deliberately does NOT colour
     // aiScanPending — the amber pill means "search not ready", and the review
     // tier lags summaries by design.
     const reviews = await this.contentIndex.reviewCounts(projectId).catch(() => null);
     return {
-      ...base,
+      ...withEmbeddings,
       aiScanPending: enrichment.pending > 0,
       enrichment: { ...enrichment, ...(reviews ? { reviews } : {}) },
     };
@@ -512,6 +535,9 @@ export class WorkspaceIndexManager {
             `[index] content: ${stats.changed} changed, ${stats.symbols} symbols, ${stats.removed} removed (${projectId})`,
           );
         }
+        // Files are enrolled — kick the immediate embed drain (fire-and-
+        // forget; the receiver is single-flight and yields to live chat).
+        this.onScanComplete?.(projectId);
       } catch (err) {
         log.warn(`[index] content-index refresh failed for ${projectId}: ${describe(err)}`);
       }

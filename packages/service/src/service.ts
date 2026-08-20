@@ -34,7 +34,7 @@ import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
 import { createCodexSetupManager } from './codex-setup/manager.js';
 import { ConnectorActionManager } from './connectors/actions.js';
 import { ProjectLocks } from './connectors/lock.js';
-import { ConnectorManager } from './connectors/manager.js';
+import { ConnectorManager, corpusDirFor } from './connectors/manager.js';
 import { registerBlueskyAdapters } from './connectors/natives/bluesky-posts.js';
 import { registerCalendarAdapters } from './connectors/natives/calendar-google.js';
 import { registerGitHubPullsAdapters } from './connectors/natives/github-pulls.js';
@@ -107,6 +107,7 @@ import { KeurmeesterManager } from './keurmeester/manager.js';
 import { createLocalHarnessModelSource } from './local-harness/model-source.js';
 import { startMachineEngineBridge } from './machine-engine/bridge.js';
 import { registerMailAdapters } from './mail/registry.js';
+import { mailCatalogEntries } from './mail/search-catalog.js';
 import { ensureNightShiftOversightTask } from './meester/night-shift-oversight.js';
 import { MeesterStatusGenerator } from './meester/status-generator.js';
 import { MemoryCompactor } from './memory/compaction.js';
@@ -149,7 +150,11 @@ import { ImageRenderer } from './rendering/image-renderer.js';
 import { ReportActionManager } from './report-actions/report-action-manager.js';
 import { type RuntimeLock, acquireSingleInstanceLock } from './runtime-lock.js';
 import { ScriptRunner } from './scripts/runner.js';
-import { CATALOG_RELEVANT_HISTORY_KINDS, SearchService } from './search/search-service.js';
+import {
+  CATALOG_RELEVANT_HISTORY_KINDS,
+  type ExtraSearchCatalogs,
+  SearchService,
+} from './search/search-service.js';
 import { openSecretStore } from './secrets/index.js';
 import { seedSecretsFromEnvFile } from './secrets/seed.js';
 import { runSystemBootstrap } from './system-toolsets/bootstrap.js';
@@ -2010,6 +2015,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     },
   });
   indexEnrichmentRef = indexEnrichment;
+  // Scan-complete → immediate embed drain: the moment a workspace scan
+  // enrolls files, the always-on local embed tiers start filling vectors —
+  // no 3-minute OS-idle wait, no Boekwachter. This is what makes semantic
+  // search real minutes after a fresh install points gezel at a folder.
+  workspaceIndex.setOnScanComplete((projectId) => {
+    indexEnrichment.drainEmbedOnly(projectId);
+  });
   // FS watcher for the MRU-top workspaces — turns an on-disk change into a
   // near-immediate refresh instead of waiting for the polling tick.
   const workspaceWatch = new WorkspaceWatchManager({
@@ -2365,6 +2377,25 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         name: c.name,
         source: c.source,
       })),
+    // Mail messages by subject/sender: derived entirely from the connector
+    // corpus paths in the artifacts index — zero file reads. Bodies are
+    // already searchable through the artifacts content arm; this is the
+    // mail-shaped quick-open layer on top.
+    mailEntries: async () => {
+      const projects = await store.listProjects().catch(() => []);
+      const all: Awaited<ReturnType<NonNullable<ExtraSearchCatalogs['mailEntries']>>> = [];
+      for (const summary of projects) {
+        const project = await store.getProject(summary.id).catch(() => null);
+        const bindings = project?.connectors ?? [];
+        const corpusDirs = bindings
+          .filter((b) => b.type.startsWith('mail-'))
+          .map((b) => corpusDirFor(bindings, b));
+        if (corpusDirs.length === 0) continue;
+        const paths = await contentIndex.listArtifactIndexFiles(summary.id).catch(() => []);
+        all.push(...mailCatalogEntries(summary.id, corpusDirs, paths));
+      }
+      return all;
+    },
   });
 
   // Ask once, at boot, whether this process may create children at all —

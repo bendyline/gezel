@@ -35,6 +35,7 @@ function agedIdleState(): SystemIdleState {
 function make(opts: { active: boolean; indexingEnabled?: boolean; freshBoot?: boolean }) {
   const enrich = vi.fn().mockResolvedValue({ files: 1, summarized: 1, embedded: 1 });
   const embedOnly = vi.fn().mockResolvedValue({ files: 0, embedded: 0 });
+  const embedImages = vi.fn().mockResolvedValue({ files: 0, embedded: 0, unavailable: false });
   const chat = {
     isAnyActive: () => opts.active,
     isProjectActive: () => false,
@@ -48,7 +49,7 @@ function make(opts: { active: boolean; indexingEnabled?: boolean; freshBoot?: bo
     ],
     readConfig: async () => ({}),
   } as unknown as Store;
-  const contentIndex = { enrich, embedOnly } as unknown as ContentIndex;
+  const contentIndex = { enrich, embedOnly, embedImages } as unknown as ContentIndex;
   const idle = opts.freshBoot ? new SystemIdleState() : agedIdleState();
   const mgr = new IndexEnrichmentManager({
     store,
@@ -57,7 +58,7 @@ function make(opts: { active: boolean; indexingEnabled?: boolean; freshBoot?: bo
     idle,
     resolveBoekwachter: async () => BOOK,
   });
-  return { mgr, enrich, embedOnly, idle };
+  return { mgr, enrich, embedOnly, embedImages, idle };
 }
 
 describe('IndexEnrichmentManager idle gating', () => {
@@ -114,6 +115,70 @@ describe('IndexEnrichmentManager idle gating', () => {
     const { mgr, embedOnly } = make({ active: false, indexingEnabled: false });
     await mgr.tick();
     expect(embedOnly).not.toHaveBeenCalled();
+  });
+
+  it('the image-embed tier runs ahead of the roster gate too', async () => {
+    const { mgr, embedImages, enrich } = make({ active: false });
+    const withoutRole = mgr as unknown as {
+      resolveBoekwachter: (projectId: string) => Promise<GezelDetail | null>;
+    };
+    withoutRole.resolveBoekwachter = async () => null;
+    await mgr.tick();
+    expect(embedImages).toHaveBeenCalledWith('p1', expect.any(Number));
+    expect(enrich).not.toHaveBeenCalled();
+  });
+
+  it('drainEmbedOnly runs immediately — no OS idle, no boot grace, no roster', async () => {
+    // freshBoot: the background tick is blocked by the unreported-boot grace,
+    // which is exactly the state a user creating their first project is in.
+    const { mgr, embedOnly, embedImages, enrich } = make({ active: false, freshBoot: true });
+    const withoutRole = mgr as unknown as {
+      resolveBoekwachter: (projectId: string) => Promise<GezelDetail | null>;
+    };
+    withoutRole.resolveBoekwachter = async () => null;
+
+    const { started } = mgr.drainEmbedOnly('p1');
+    expect(started).toBe(true);
+    await vi.waitFor(() => expect(embedOnly).toHaveBeenCalledWith('p1', expect.any(Number)));
+    await vi.waitFor(() => expect(embedImages).toHaveBeenCalled());
+    expect(enrich).not.toHaveBeenCalled();
+  });
+
+  it('drainEmbedOnly yields to a live chat turn instead of competing with it', async () => {
+    const { mgr, embedOnly } = make({ active: true });
+    const { started } = mgr.drainEmbedOnly('p1');
+    expect(started).toBe(true);
+    // The drain checks chat before the first batch — nothing runs mid-turn.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(embedOnly).not.toHaveBeenCalled();
+  });
+
+  it('drainEmbedOnly is single-flight and defers to a running drive', async () => {
+    const { mgr, embedOnly } = make({ active: false });
+    let release: () => void = () => {};
+    embedOnly.mockImplementationOnce(
+      () =>
+        new Promise((r) => {
+          release = () => r({ files: 0, embedded: 0 });
+        }),
+    );
+    const first = mgr.drainEmbedOnly('p1');
+    expect(first.started).toBe(true);
+    const second = mgr.drainEmbedOnly('p1');
+    expect(second).toMatchObject({ started: false, alreadyRunning: true });
+    release();
+  });
+
+  it('GEZEL_DISABLE_IMAGE_EMBEDDINGS skips the image-embed tier without touching text', async () => {
+    process.env.GEZEL_DISABLE_IMAGE_EMBEDDINGS = '1';
+    try {
+      const { mgr, embedOnly, embedImages } = make({ active: false });
+      await mgr.tick();
+      expect(embedImages).not.toHaveBeenCalled();
+      expect(embedOnly).toHaveBeenCalled();
+    } finally {
+      delete process.env.GEZEL_DISABLE_IMAGE_EMBEDDINGS;
+    }
   });
 
   it('skips AI indexing when workspace indexing is disabled', async () => {
@@ -187,6 +252,7 @@ describe('review tier scheduling', () => {
       enrichAreas,
       review,
       embedOnly: vi.fn().mockResolvedValue({ files: 0, embedded: 0 }),
+      embedImages: vi.fn().mockResolvedValue({ files: 0, embedded: 0, unavailable: false }),
     } as unknown as ContentIndex;
     const idle = agedIdleState();
     const mgr = new IndexEnrichmentManager({
@@ -288,6 +354,7 @@ describe('AI-shadow tier + review drain event', () => {
       reviewCounts,
       listFileIssues,
       embedOnly: vi.fn().mockResolvedValue({ files: 0, embedded: 0 }),
+      embedImages: vi.fn().mockResolvedValue({ files: 0, embedded: 0, unavailable: false }),
     } as unknown as ContentIndex;
     const mgr = new IndexEnrichmentManager({
       store,
@@ -412,6 +479,7 @@ describe('on-demand drives + night catch-up', () => {
       reviewCounts,
       listFileIssues,
       embedOnly: vi.fn().mockResolvedValue({ files: 0, embedded: 0 }),
+      embedImages: vi.fn().mockResolvedValue({ files: 0, embedded: 0, unavailable: false }),
     } as unknown as ContentIndex;
     const mgr = new IndexEnrichmentManager({
       store,

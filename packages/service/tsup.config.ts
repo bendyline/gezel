@@ -16,6 +16,10 @@ export default defineConfig({
     // inference runs off the Electron main thread; must exist as its own file
     // for `new Worker(...)` to resolve at runtime.
     'memory/embed-worker': 'src/memory/embed-worker.ts',
+    // Sibling worker for CLIP image embeddings (+ the face lane's ONNX
+    // sessions). Separate from embed-worker so the two modalities' models,
+    // memory budgets, and crash accounting stay independent.
+    'memory/image-embed-worker': 'src/memory/image-embed-worker.ts',
     // Deterministic workspace file/classification/symbol/SQLite indexing is
     // CPU-heavy on large repositories. Keep it off the daemon event loop (and
     // therefore off Electron's main thread in embedded dev mode).

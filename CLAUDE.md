@@ -394,6 +394,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/projects/{id}/code-reviews.json` — durable code-review records (kickoff → task ref → settled outcome), owned by [git/reviews.ts](packages/service/src/git/reviews.ts)'s `CodeReviewManager`; the snapshot inputs and reports live in the project artifacts drawer under `reviews/<reviewId>/`
   - `~/.gezel/sandbox/` — sandboxed script runs, owned by [sandbox/runner.ts](packages/service/src/sandbox/runner.ts)
   - `~/.gezel/python/` — uv runtime, owned by [python/uv-runtime.ts](packages/service/src/python/uv-runtime.ts)
+  - `~/.gezel/engines/face-models/` — sha256-pinned ONNX face models (YuNet detection + AuraFace embeddings), downloaded on the face-recognition opt-in and owned by [index-store/face/catalog.ts](packages/service/src/index-store/face/catalog.ts); safe to delete, re-downloaded on the next face-tier run
   - Native binary trees (`~/.gezel/bin/llama-cpp/`, `sd-cpp/`, `uv/`) — owned by the matching provider; see [native/README.md](native/README.md) for the upstream fetch + bundle pipeline.
 
   If you're writing code that touches state outside this list, it goes through `Store`.

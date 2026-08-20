@@ -51,7 +51,10 @@ export const dutchUnrelatedQueryPairs: Pair[] = [
   ['welk thema gebruikt de gebruiker het liefst', 'Backups run nightly at 3am local time.'],
   ['waar deployen we eerst', 'The user prefers dark mode in every app.'],
   ['wanneer moet het kwartaalrapport af zijn', 'Sarah’s dog is named Biscuit.'],
-  ['welke database hebben we gekozen voor bestellingen', 'The office plants get watered on Fridays.'],
+  [
+    'welke database hebben we gekozen voor bestellingen',
+    'The office plants get watered on Fridays.',
+  ],
   ['hoe vaak wil de klant updates', 'The espresso machine needs descaling.'],
   ['waarom zijn de builds traag', 'The hiking trip is planned for Labor Day weekend.'],
   ['wie werkt er aan de facturering', 'The novel’s third chapter needs a rewrite.'],
@@ -88,7 +91,10 @@ export const dutchParaphrasePairs: Pair[] = [
     'De buildtijden zijn verslechterd na de webpack 5-upgrade.',
     'Build times regressed after the webpack 5 upgrade.',
   ],
-  ['Sarah is verantwoordelijk voor de factureringsintegratie.', 'Sarah owns the billing integration work.'],
+  [
+    'Sarah is verantwoordelijk voor de factureringsintegratie.',
+    'Sarah owns the billing integration work.',
+  ],
   [
     'De API-limiet is 100 verzoeken per minuut per sleutel.',
     'The API rate limit is 100 requests per minute per key.',
@@ -101,7 +107,10 @@ export const dutchParaphrasePairs: Pair[] = [
     'De logobestanden staan op de gedeelde schijf onder Brand/2026.',
     'The logo files live in the shared drive under Brand/2026.',
   ],
-  ['De testsuite duurt ongeveer twaalf minuten op CI.', 'The test suite takes about twelve minutes on CI.'],
+  [
+    'De testsuite duurt ongeveer twaalf minuten op CI.',
+    'The test suite takes about twelve minutes on CI.',
+  ],
   ['Back-ups draaien elke nacht om 3 uur lokale tijd.', 'Backups run nightly at 3am local time.'],
 ];
 

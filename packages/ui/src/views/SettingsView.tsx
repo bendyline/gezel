@@ -21,6 +21,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ConnectedAppsPanel } from '../components/ConnectedAppsPanel.js';
 import { CopilotInstallCard } from '../components/CopilotInstallCard.js';
 import { CopilotLoginCommand } from '../components/CopilotLoginCommand.js';
+import { FaceRecognitionCard } from '../components/FaceRecognitionCard.js';
 import { GezelIcon } from '../components/GezelIcon.js';
 import { GildeUpdatesCard } from '../components/GildeUpdatesCard.js';
 import { HealthStrip } from '../components/HealthStrip.js';
@@ -3389,9 +3390,12 @@ export function SettingsView() {
         )}
 
         {section === 'imageRecognition' && (
-          <section>
-            <ImageRecognitionSettings />
-          </section>
+          <>
+            <section>
+              <ImageRecognitionSettings />
+            </section>
+            <FaceRecognitionCard />
+          </>
         )}
 
         {section === 'audio' && (

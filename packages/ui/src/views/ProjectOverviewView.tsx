@@ -8,6 +8,7 @@ import { getProjectType, resolveProjectTypeId } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { MarkdownField } from '../components/MarkdownField.js';
+import { PeoplePanel } from '../components/PeoplePanel.js';
 import { ProjectIcon } from '../components/ProjectIcon.js';
 import { workspaceIndexLabel } from '../components/WorkspaceIndexPane.js';
 import { RailSection } from './home/RailSection.js';
@@ -240,6 +241,8 @@ export function ProjectOverviewView({
           )}
         </RailSection>
       )}
+
+      <PeoplePanel projectId={projectId} />
 
       {recent.length > 0 && (
         <RailSection label="Recent activity" testId="overview-activity">

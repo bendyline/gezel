@@ -9,6 +9,7 @@ import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
 import { embeddingsDisabledReason } from '../memory/embeddings.js';
+import { faceEmbedAvailability, imageEmbedAvailability } from '../memory/image-embeddings.js';
 import type { SystemIdleState } from '../system/idle-state.js';
 import type { AiShadowProducers } from './ai-shadow.js';
 import type { ContentIndex } from './content-index.js';
@@ -42,6 +43,13 @@ const NIGHT_TICK_BUDGET_MS = 90_000;
 // calls — the local embeddings worker is the only cost — but still bounded so
 // a tick stays polite on shared hardware.
 const EMBED_ONLY_BATCH = 10;
+// Image-embed tier batches (lane A). Smaller than the text tier: each image
+// costs a decode (100+ ms on a big photo) plus a vision-tower forward.
+const IMAGE_EMBED_BATCH = 5;
+const IMAGE_EMBED_NIGHT_BATCH = 20;
+// Face tier batch (lane B): a detector pass plus one ArcFace forward per
+// detected face — the heaviest of the local image tiers.
+const FACE_BATCH = 5;
 
 export interface IndexEnrichmentActivity {
   id: 'index-enrichment';
@@ -127,6 +135,8 @@ export class IndexEnrichmentManager {
   private readonly refreshStatic: ((projectId: string) => Promise<unknown>) | undefined;
   /** In-flight on-demand drives, one per project (joiners get the same run). */
   private readonly drives = new Map<string, { mode: DriveIntensity; run: Promise<void> }>();
+  /** In-flight immediate embed drains (drainEmbedOnly), one per project. */
+  private readonly embedDrains = new Map<string, Promise<void>>();
   /** Nonzero while a night-shift catch-up sweep is holding task dispatch. */
   private catchUpRuns = 0;
   private readonly catchUps = new Set<Promise<void>>();
@@ -295,6 +305,82 @@ export class IndexEnrichmentManager {
     }
   }
 
+  /**
+   * Kick the always-on local embed tiers (text + lane-A images) for one
+   * project RIGHT NOW — no idle wait, no roster gate. This is what makes
+   * "semantic search minutes after pointing gezel at a folder" true: the
+   * background tick requires ~3 min of OS idle, which is exactly the state
+   * a user who just created a project is never in. Politeness comes from
+   * yielding to live chat between batches instead — a turn starting mid-
+   * drain stops it, and the next tick or scan resumes the remainder.
+   * Fired by the workspace scan-complete hook and the roster-less fallback
+   * of `POST /index/enrich`.
+   */
+  drainEmbedOnly(projectId: string): { started: boolean; alreadyRunning: boolean } {
+    // A full drive already covers this work; don't double-open the index.
+    if (this.drives.has(projectId) || this.embedDrains.has(projectId)) {
+      return { started: false, alreadyRunning: true };
+    }
+    const run = (async () => {
+      if (await this.isPaused()) return;
+      // Guarded like isSharedLibrary: narrow test doubles may not carry it.
+      const indexingEnabled =
+        typeof this.store.projectIndexingEnabled === 'function'
+          ? await this.store.projectIndexingEnabled(projectId).catch(() => true)
+          : true;
+      if (!indexingEnabled) return;
+      await this.drainLocalEmbedTiers(projectId, { night: true, yieldToChat: true });
+    })()
+      .catch((err) => log.warn(`[enrich] embed drain ${projectId} failed: ${describe(err)}`))
+      .finally(() => this.embedDrains.delete(projectId));
+    this.embedDrains.set(projectId, run);
+    return { started: true, alreadyRunning: false };
+  }
+
+  /**
+   * Drain the text embed-only tier, then the image-embed tier. Shared by
+   * the drive path (pause-sensitive, chat-blind — a drive is explicit user
+   * intent) and the immediate kick above (also yields to live chat).
+   */
+  private async drainLocalEmbedTiers(
+    projectId: string,
+    opts: { night: boolean; yieldToChat?: boolean },
+  ): Promise<'done' | 'paused' | 'yielded'> {
+    const textBatch = opts.night ? NIGHT_BATCH : EMBED_ONLY_BATCH;
+    const imageBatch = opts.night ? IMAGE_EMBED_NIGHT_BATCH : IMAGE_EMBED_BATCH;
+    if (!embeddingsDisabledReason()) {
+      for (;;) {
+        if (await this.isPaused()) return 'paused';
+        if (opts.yieldToChat && this.chat.isAnyActive()) return 'yielded';
+        const r = await this.contentIndex.embedOnly(projectId, textBatch).catch(() => null);
+        if (!r || r.files === 0) break;
+        if (r.embedded > 0) {
+          log.info(`[enrich] ${projectId}: ${r.embedded} files embed-only (semantic search)`);
+        }
+        if (r.embedded === 0) break; // embeddings unavailable — don't spin
+      }
+    }
+    if (imageEmbedAvailability().ok) {
+      for (;;) {
+        if (await this.isPaused()) return 'paused';
+        if (opts.yieldToChat && this.chat.isAnyActive()) return 'yielded';
+        const r = await this.contentIndex.embedImages(projectId, imageBatch).catch(() => null);
+        if (!r || r.files === 0 || r.unavailable) break;
+        if (r.embedded > 0) {
+          log.info(`[enrich] ${projectId}: ${r.embedded} images embedded (visual similarity)`);
+        }
+      }
+    }
+    return 'done';
+  }
+
+  /** Face tier gate: the explicit biometric opt-in AND a healthy face stack. */
+  private async faceRecognitionEnabled(): Promise<boolean> {
+    if (!faceEmbedAvailability().ok) return false;
+    const config = await this.store.readConfig().catch(() => null);
+    return config?.faceRecognition?.enabled === true;
+  }
+
   private async isSharedLibrary(projectId: string): Promise<boolean> {
     // Guarded rather than optional-chained on the call alone: a store that
     // does not expose `getProject` (narrow test doubles) would otherwise
@@ -332,21 +418,29 @@ export class IndexEnrichmentManager {
       if (this.refreshStatic) await this.refreshStatic(projectId).catch(() => {});
       else await this.contentIndex.refresh(projectId).catch(() => {});
 
-      // (b) always-on embed-only tier, drained BEFORE the roster gate: the
-      // embedder is local and LLM-free, so semantic search needs no
-      // Boekwachter — a drive on an unstaffed project still delivers it.
-      // The full enrichment below supersedes this work where a roster exists.
-      if (!embeddingsDisabledReason()) {
+      // (b)+(b2) always-on local embed tiers (text + lane-A images), drained
+      // BEFORE the roster gate: the embedders are local and LLM-free, so
+      // semantic search needs no Boekwachter — a drive on an unstaffed
+      // project still delivers it. This placement is also the image lane's
+      // governance containment — upstream of buildEnrichDeps, so no Night
+      // Shift override or Boekwachter model pin can route image bytes
+      // anywhere but the local worker.
+      if ((await this.drainLocalEmbedTiers(projectId, { night: full })) === 'paused') return;
+
+      // (b3) face tier (lane B) — explicit biometric opt-in, same local-only
+      // slot and containment as (b2). The one-time model download happens
+      // here (the disclosed cost of the opt-in), never inside faceIndex.
+      if (
+        (await this.faceRecognitionEnabled()) &&
+        (await this.contentIndex.ensureFaceModelsInstalled().catch(() => false))
+      ) {
         for (;;) {
           if (await this.isPaused()) return;
-          const r = await this.contentIndex
-            .embedOnly(projectId, full ? NIGHT_BATCH : EMBED_ONLY_BATCH)
-            .catch(() => null);
-          if (!r || r.files === 0) break;
-          if (r.embedded > 0) {
-            log.info(`[enrich] ${projectId}: ${r.embedded} files embed-only (semantic search)`);
+          const r = await this.contentIndex.faceIndex(projectId, FACE_BATCH).catch(() => null);
+          if (!r || r.files === 0 || r.unavailable) break;
+          if (r.faces > 0) {
+            log.info(`[enrich] ${projectId}: ${r.faces} faces indexed in ${r.files} images`);
           }
-          if (r.embedded === 0) break; // embeddings unavailable — don't spin
         }
       }
 
@@ -503,6 +597,43 @@ export class IndexEnrichmentManager {
               state: 'progress',
               projectId: p.id,
               detail: `${embedded.embedded} files embedded for search`,
+            });
+          }
+        }
+        // Always-on image-embed tier (lane A), same pre-roster slot and the
+        // same governance containment as the drive path: local worker only,
+        // upstream of every model-routing seam.
+        if (imageEmbedAvailability().ok) {
+          const imgs = await this.contentIndex
+            .embedImages(p.id, night ? IMAGE_EMBED_NIGHT_BATCH : IMAGE_EMBED_BATCH)
+            .catch(() => null);
+          if (imgs && imgs.embedded > 0) {
+            didWork = true;
+            log.info(`[enrich] ${p.id}: ${imgs.embedded} images embedded (visual similarity)`);
+            this.events?.publishGlobalEvent({
+              type: 'index_progress',
+              phase: 'enrich',
+              state: 'progress',
+              projectId: p.id,
+              detail: `${imgs.embedded} images embedded for visual similarity`,
+            });
+          }
+        }
+        // Face tier (lane B) — biometric opt-in, same local-only slot.
+        if (
+          (await this.faceRecognitionEnabled()) &&
+          (await this.contentIndex.ensureFaceModelsInstalled().catch(() => false))
+        ) {
+          const fr = await this.contentIndex.faceIndex(p.id, FACE_BATCH).catch(() => null);
+          if (fr && fr.faces > 0) {
+            didWork = true;
+            log.info(`[enrich] ${p.id}: ${fr.faces} faces indexed in ${fr.files} images`);
+            this.events?.publishGlobalEvent({
+              type: 'index_progress',
+              phase: 'enrich',
+              state: 'progress',
+              projectId: p.id,
+              detail: `${fr.files} images checked for people`,
             });
           }
         }

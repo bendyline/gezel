@@ -456,7 +456,17 @@ export function ProjectGitStatusBar({
     setFullScanError(null);
     fullScanBaseline.current = indexStatus;
     try {
-      await api.driveIndexEnrichment(projectId, { intensity: 'full' });
+      const res = await api.driveIndexEnrichment(projectId, { intensity: 'full' });
+      if (res.mode === 'embed-only') {
+        // No Boekwachter: the server still refreshed the semantic-search
+        // embeddings, but the LLM tiers need the roster — surface the same
+        // add-Boekwachter affordance the old 409 drove, as guidance rather
+        // than a failed scan.
+        setFullScanError({ code: 'boekwachter-required', message: res.hint ?? '' });
+        setFullScanState('idle');
+        window.setTimeout(() => void refreshIndex(), 800);
+        return;
+      }
       setFullScanState('running');
       window.setTimeout(() => void refreshIndex(), 800);
     } catch (err) {
@@ -595,9 +605,25 @@ export function ProjectGitStatusBar({
   const lastSynced = status?.github?.lastSyncedAt;
   const indexState = indexStatus?.state ?? 'never';
   const aiScanPending = indexStatus?.aiScanPending === true;
+  // Semantic search can be down process-wide (embedder disabled/unavailable)
+  // or per-index (sqlite-vec failed to load). Either way, results are
+  // silently keyword-only — say so instead of letting it read as a scan
+  // that never finishes.
+  const embeddingsState = indexStatus?.embeddings?.status;
+  const semanticSearchDown =
+    embeddingsState === 'disabled' ||
+    embeddingsState === 'unavailable' ||
+    indexStatus?.enrichment?.vectorsAvailable === false;
+  const semanticSearchReason =
+    indexStatus?.embeddings?.reason ??
+    (indexStatus?.enrichment?.vectorsAvailable === false
+      ? 'the vector extension failed to load'
+      : 'the embedding model could not be loaded');
   // Steady-state pill colour (the dot):
   //   fresh + scan done → green ('fresh')   — all up to date
   //   fresh + scan todo → amber ('scan')    — index fresh, AI scan still pending
+  //                        (semantic search down also lands here: the amber
+  //                        pill means "search not ready", which it is)
   //   stale / never     → red   ('stale')   — index out of date
   //   indexing          → blue pulse ('indexing', transient)
   //   disabled          → neutral ('disabled')
@@ -607,12 +633,17 @@ export function ProjectGitStatusBar({
       : indexState === 'indexing'
         ? 'indexing'
         : indexState === 'fresh'
-          ? aiScanPending
+          ? aiScanPending || semanticSearchDown
             ? 'scan'
             : 'fresh'
           : 'stale';
   const enrichment = indexStatus?.enrichment;
-  const aiCoverage = enrichment ? coveragePercent(enrichment.embedded, enrichment.eligible) : null;
+  // "Searchable" counts vectors from EITHER embed gate (the always-on
+  // embed-only tier or the full enrichment pass) — `embedded` alone reads
+  // "0 of N searchable" on an unstaffed project whose search works fine.
+  // Fallback for older daemons that don't send the combined counter.
+  const searchReady = enrichment?.searchReady ?? enrichment?.embedded ?? 0;
+  const aiCoverage = enrichment ? coveragePercent(searchReady, enrichment.eligible) : null;
   // The bar aggregates the totality of indexing (summaries + embeddings +
   // quality review); `aiCoverage` keeps feeding the caption's search-ready
   // count, which is a narrower question than "is all the work done".
@@ -841,6 +872,13 @@ export function ProjectGitStatusBar({
                 <strong>{indexHeadline}</strong>
               </div>
 
+              {semanticSearchDown && (
+                <p className="project-index-panel-warning">
+                  Semantic search is off — {semanticSearchReason}. Results are keyword-only
+                  {embeddingsState === 'unavailable' ? '; retrying automatically' : ''}.
+                </p>
+              )}
+
               {enrichment && enrichment.eligible > 0 && overallProgress !== null && (
                 <div className="project-index-panel-progress">
                   <div className="project-index-panel-progress-label">
@@ -859,7 +897,7 @@ export function ProjectGitStatusBar({
                     <span style={{ width: `${overallProgress}%` }} />
                   </div>
                   <span className="project-index-panel-caption">
-                    {enrichment.embedded} of {enrichment.eligible} files searchable
+                    {searchReady} of {enrichment.eligible} files searchable
                     {enrichment.pending > 0 ? ` · ${enrichment.pending} waiting` : ''}
                   </span>
                 </div>

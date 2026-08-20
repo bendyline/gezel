@@ -155,9 +155,24 @@ export * from './api/git.js';
 export const ServiceRoleSchema = z.enum(['user', 'machine-engine', 'legacy-full']);
 export type ServiceRole = z.infer<typeof ServiceRoleSchema>;
 
+/**
+ * Process-wide semantic-search (embedding pipeline) health. `disabled` is
+ * sticky for the daemon's lifetime (model unloadable, kill switch);
+ * `unavailable` is a transient load failure behind a retry cooldown —
+ * "retrying automatically" is honest copy for it. Returned by `/api/health`
+ * and attached to every project's `/index/status`.
+ */
+export const EmbeddingsHealthSchema = z.object({
+  status: z.enum(['cold', 'warming', 'ready', 'disabled', 'unavailable']),
+  reason: z.string().optional(),
+});
+export type EmbeddingsHealth = z.infer<typeof EmbeddingsHealthSchema>;
+
 export const HealthResponseSchema = z.object({
   ok: z.literal(true),
   version: z.string(),
+  /** Semantic-search pipeline health for this daemon process. */
+  embeddings: EmbeddingsHealthSchema.optional(),
   serviceRole: ServiceRoleSchema.optional(),
   /** Present on user daemons that can route native work to the shared broker. */
   machineEngineConnected: z.boolean().optional(),
@@ -1994,6 +2009,19 @@ export const GezelConfigSchema = z.object({
    * and prunes the cache.
    */
   gildeUpdates: z
+    .object({
+      enabled: z.boolean().optional(),
+    })
+    .optional(),
+  /**
+   * Face recognition (person correlation across photos) — an explicit
+   * biometric opt-in, default OFF. Enabling downloads the pinned local face
+   * models (~261 MB) and lets the indexer cluster faces into anonymous
+   * "Person N" entities the user can name. All processing is on-device; the
+   * wipe endpoint (`POST /api/people/wipe`) is the data-erasure path and
+   * flips this back off.
+   */
+  faceRecognition: z
     .object({
       enabled: z.boolean().optional(),
     })
@@ -4969,6 +4997,11 @@ export const UNIFIED_SEARCH_RESULT_KINDS = [
   // Built-in documentation articles — previously the least findable content
   // in the app (no result kind, no search box in the Handboek view).
   'handboek',
+  // Mail messages by subject/sender (name catalog only) — the message BODY
+  // is already reachable through the artifacts content arm; this kind is
+  // the subject-line quick-open a body search can't provide. Hits navigate
+  // as artifact files (mail syncs into the project artifacts tree).
+  'mail',
 ] as const;
 
 export const UnifiedSearchResultKindSchema = z.enum(UNIFIED_SEARCH_RESULT_KINDS);
@@ -5245,14 +5278,66 @@ export const ListEntityMentionsRequestSchema = z.object({
 });
 export type ListEntityMentionsRequest = z.infer<typeof ListEntityMentionsRequestSchema>;
 
+/** Pixel-space rectangle within a source image (face regions, crops). */
+export const ImageRegionSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  w: z.number(),
+  h: z.number(),
+});
+export type ImageRegion = z.infer<typeof ImageRegionSchema>;
+
 export const ListEntityMentionsResponseSchema = z.object({
   found: z.boolean(),
   entity: z.object({ kind: z.string(), label: z.string() }).optional(),
   mentions: z.array(
-    z.object({ path: z.string(), line: z.number().int().optional(), date: z.string().optional() }),
+    z.object({
+      path: z.string(),
+      line: z.number().int().optional(),
+      date: z.string().optional(),
+      /** Face-lane mentions carry the region within the image. */
+      region: ImageRegionSchema.optional(),
+      confidence: z.number().optional(),
+    }),
   ),
 });
 export type ListEntityMentionsResponse = z.infer<typeof ListEntityMentionsResponseSchema>;
+
+// ── People (face lane, biometric opt-in) ────────────────────────────────────
+
+export const PersonSampleSchema = z.object({
+  path: z.string(),
+  region: ImageRegionSchema.optional(),
+});
+export type PersonSample = z.infer<typeof PersonSampleSchema>;
+
+export const PersonSummarySchema = z.object({
+  entityId: z.number().int(),
+  label: z.string(),
+  clusterId: z.string(),
+  count: z.number().int(),
+  exemplar: PersonSampleSchema.optional(),
+  samples: z.array(PersonSampleSchema),
+});
+export type PersonSummary = z.infer<typeof PersonSummarySchema>;
+
+export const ListPeopleResponseSchema = z.object({
+  people: z.array(PersonSummarySchema),
+  /** False when face recognition is disabled or the index is unavailable. */
+  available: z.boolean(),
+});
+export type ListPeopleResponse = z.infer<typeof ListPeopleResponseSchema>;
+
+export const RenamePersonRequestSchema = z.object({
+  label: z.string().min(1).max(120),
+});
+export type RenamePersonRequest = z.infer<typeof RenamePersonRequestSchema>;
+
+export const WipeFaceDataResponseSchema = z.object({
+  projects: z.number().int(),
+  disabled: z.boolean(),
+});
+export type WipeFaceDataResponse = z.infer<typeof WipeFaceDataResponseSchema>;
 
 export const DiffFilesRequestSchema = z
   .object({
@@ -5603,6 +5688,12 @@ export const WorkspaceIndexStatusSchema = z.object({
    *   - `disabled` — this project explicitly opted out of workspace indexing
    */
   state: z.enum(['fresh', 'stale', 'indexing', 'never', 'disabled']),
+  /**
+   * Semantic-search health, attached in EVERY state (unlike `enrichment`,
+   * which needs a fresh index) — a dead embedder must be distinguishable
+   * from an index that simply hasn't finished building.
+   */
+  embeddings: EmbeddingsHealthSchema.optional(),
   meta: WorkspaceIndexMetaSchema.optional(),
   /**
    * True when the structural index is fresh but the background AI scan
@@ -5629,6 +5720,13 @@ export const WorkspaceIndexStatusSchema = z.object({
       eligible: z.number().int().nonnegative(),
       summarized: z.number().int().nonnegative(),
       embedded: z.number().int().nonnegative(),
+      /**
+       * Files reachable by semantic search through EITHER the full
+       * enrichment pass or the always-on embed-only tier. The honest
+       * numerator for "N of M files searchable" — `embedded` alone counts
+       * only the roster-gated pass and under-reports unstaffed projects.
+       */
+      searchReady: z.number().int().nonnegative().optional(),
       pending: z.number().int().nonnegative(),
       /**
        * Files whose summarize failed MAX_ENRICH_ATTEMPTS times for the
@@ -5652,6 +5750,12 @@ export const WorkspaceIndexStatusSchema = z.object({
       embedOnlyPending: z.number().int().nonnegative().optional(),
       /** The embedding model that built these vectors (index `meta` stamp). */
       embedModel: z.string().optional(),
+      /**
+       * False when the sqlite-vec extension failed to load for this index —
+       * vectors can't be stored and hybrid search silently runs keyword-only.
+       * Distinct from the process-wide `embeddings` health below.
+       */
+      vectorsAvailable: z.boolean().optional(),
       /**
        * Review-pass coverage. Deliberately NOT folded into `aiScanPending`:
        * the amber pill means "search not ready", and reviews lag summaries by
@@ -5744,7 +5848,14 @@ export const DriveIndexEnrichmentResponseSchema = z.object({
   /** Job mode only: a drive was started (or was already running). */
   started: z.boolean().optional(),
   alreadyRunning: z.boolean().optional(),
-  mode: z.enum(['background', 'full']).optional(),
+  /**
+   * `embed-only`: no Boekwachter on the crew, so only the always-on local
+   * embed tiers ran (semantic search still gets refreshed) — the LLM tiers
+   * need the roster opt-in. Callers surface `hint` and the add-Boekwachter
+   * affordance instead of treating this as a failure.
+   */
+  mode: z.enum(['background', 'full', 'embed-only']).optional(),
+  hint: z.string().optional(),
 });
 export type DriveIndexEnrichmentResponse = z.infer<typeof DriveIndexEnrichmentResponseSchema>;
 

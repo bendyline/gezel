@@ -9,6 +9,7 @@ const GROUP_ORDER: Array<{ kind: UnifiedSearchResultKind; label: string }> = [
   { kind: 'project', label: 'Projects' },
   { kind: 'gezel', label: 'Gezellen' },
   { kind: 'task', label: 'Tasks' },
+  { kind: 'mail', label: 'Mail' },
   { kind: 'file', label: 'Files' },
   { kind: 'document', label: 'Documents' },
   { kind: 'content', label: 'Content' },
@@ -57,6 +58,9 @@ export function resultToActions(r: UnifiedSearchResult): NavAction[] {
     case 'file':
     case 'content':
     case 'symbol':
+    // A mail hit is an artifact file (mail syncs into the project artifacts
+    // tree as frontmattered markdown) — same open path as any file hit.
+    case 'mail':
       if (r.projectId && r.path && r.source) {
         const intent: OpenFileIntent = {
           projectId: r.projectId,

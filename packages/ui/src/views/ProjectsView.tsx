@@ -39,6 +39,7 @@ import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { FileFlatList } from '../components/FileFlatList.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
 import { FileHiddenKey, FileViewModeKeys } from '../components/FileViewModeKeys.js';
+import { FindSimilarImages } from '../components/FindSimilarImages.js';
 import { GezelPicker } from '../components/GezelPicker.js';
 import { HtmlPreviewFrame, type HtmlPreviewLogEntry } from '../components/HtmlPreviewFrame.js';
 import { ProjectMemoriesEditor } from '../components/MemoriesTree.js';
@@ -80,6 +81,7 @@ import {
   BINARY_FILE,
   type FileBrowserCustomList,
   FileBrowserPane,
+  MEDIA_IMAGE,
   NON_TEXT_CONTENT,
   NonTextFilePreview,
   looksBinary,
@@ -3310,12 +3312,26 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               toolbarIndexToggle={workspaceIndexToggle}
                             />
                           ) : NON_TEXT_CONTENT.has(openFile.content) ? (
-                            <NonTextFilePreview
-                              content={openFile.content}
-                              path={openFile.path}
-                              fetchBlob={fileSource.fetchBlob}
-                              {...(openFile.size === undefined ? {} : { sizeBytes: openFile.size })}
-                            />
+                            <>
+                              <NonTextFilePreview
+                                content={openFile.content}
+                                path={openFile.path}
+                                fetchBlob={fileSource.fetchBlob}
+                                {...(openFile.size === undefined
+                                  ? {}
+                                  : { sizeBytes: openFile.size })}
+                              />
+                              {openFile.content === MEDIA_IMAGE &&
+                                openFile.source === 'workspace' && (
+                                  <FindSimilarImages
+                                    key={openFile.path}
+                                    projectId={selected.id}
+                                    path={openFile.path}
+                                    fetchBlob={fileSource.fetchBlob}
+                                    onOpen={(p) => void focusFile(selected.id, p, 'workspace')}
+                                  />
+                                )}
+                            </>
                           ) : isHtml(openFile.path) ? (
                             <HtmlFileViewer
                               projectId={selected.id}

@@ -5,10 +5,12 @@ import {
   nowIso,
 } from '@bendyline/gezel';
 import { embedModelId } from '../memory/embed-core.js';
+import { imageEmbedModelId } from '../memory/image-embed-core.js';
 import { TEXT_EMBED_DIM, applySchema } from './schema.js';
 import {
   type SqlValue,
   type SqliteDriver,
+  blobToFloat32,
   isUnavailableIndexError,
   openIndexDatabase,
   vectorToBlob,
@@ -369,6 +371,28 @@ function reconcileEmbedModel(db: SqliteDriver, vecAvailable: boolean): void {
   db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('embed_model', ?)").run(current);
 }
 
+/**
+ * Same contract as {@link reconcileEmbedModel} for the image embedder: vectors
+ * from a different CLIP-class model are not comparable, so a model swap wipes
+ * image_vectors and the image_embed_state gate (the tier re-embeds lazily).
+ * Face vectors are NOT touched — the face embedder is a separate pinned model
+ * with its own catalog, not governed by GEZEL_IMAGE_EMBED_MODEL.
+ */
+function reconcileImageEmbedModel(db: SqliteDriver): void {
+  const current = imageEmbedModelId();
+  const stored = db
+    .prepare("SELECT value FROM meta WHERE key = 'image_embed_model'")
+    .get<{ value: string }>()?.value;
+  if (stored === current) return;
+  if (stored) {
+    db.exec('DELETE FROM image_vectors');
+    db.exec('DELETE FROM image_embed_state');
+  }
+  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('image_embed_model', ?)").run(
+    current,
+  );
+}
+
 export class IndexStore {
   private constructor(
     private readonly db: SqliteDriver,
@@ -381,7 +405,10 @@ export class IndexStore {
     if (!db) return null;
     try {
       const caps = applySchema(db, { vectors: !opts.vectorless });
-      if (!opts.vectorless) reconcileEmbedModel(db, caps.vec);
+      if (!opts.vectorless) {
+        reconcileEmbedModel(db, caps.vec);
+        reconcileImageEmbedModel(db);
+      }
       db.prepare(
         'INSERT OR REPLACE INTO collections (id, kind, root_path, label, created_at) VALUES (?, ?, ?, ?, ?)',
       ).run(opts.collectionId, opts.kind, opts.rootPath, opts.label ?? null, nowIso());
@@ -877,6 +904,13 @@ export class IndexStore {
     eligible: number;
     summarized: number;
     embedded: number;
+    /**
+     * Files reachable by semantic search through EITHER gate — the full
+     * enrichment pass or the always-on embed-only tier. `embedded` alone
+     * counts only the roster-gated pass, which reads "0 of N searchable"
+     * on an unstaffed project whose search actually works.
+     */
+    searchReady: number;
     pending: number;
     skipped: number;
     shadowsPending: number;
@@ -902,6 +936,12 @@ export class IndexStore {
       `SELECT COUNT(*) AS n FROM files f JOIN enrichments e ON e.content_hash = f.hash
        WHERE e.embedded_at IS NOT NULL AND ${ELIGIBLE}`,
     );
+    const searchReady = count(
+      `SELECT COUNT(*) AS n FROM files f
+       LEFT JOIN enrichments e ON e.content_hash = f.hash
+       LEFT JOIN embed_state es ON es.content_hash = f.hash
+       WHERE (e.embedded_at IS NOT NULL OR es.embedded_at IS NOT NULL) AND ${ELIGIBLE}`,
+    );
     // Attempt-capped files: dropped from the work list but never summarized,
     // so `summarized` can never reach `eligible` while these exist. Counted
     // separately or the status reads as forever-pending with no explanation.
@@ -915,6 +955,7 @@ export class IndexStore {
       eligible,
       summarized,
       embedded,
+      searchReady,
       pending: this.countNeedingEnrichment(),
       skipped,
       shadowsPending: this.countNeedingAiShadow(),
@@ -1975,31 +2016,397 @@ export class IndexStore {
       .map(rowToFile);
   }
 
-  /** Store a CLIP-style image embedding (boekwachter, when a vision model runs). */
-  addImageVector(chunkId: number, filePath: string, vec: number[] | Float32Array): void {
+  /**
+   * Store a whole-image embedding, keyed by the image's content hash (survives
+   * renames and the AI-shadow tier's re-chunking, unlike the original
+   * chunk_id key). Vectors are unit-norm; the stored model/dim let a query
+   * detect incomparable leftovers instead of computing garbage cosine.
+   */
+  putImageVector(contentHash: string, filePath: string, vec: number[] | Float32Array): void {
     this.db
       .prepare(
-        'INSERT OR REPLACE INTO image_vectors (chunk_id, collection_id, file_path, vec) VALUES (?, ?, ?, ?)',
+        `INSERT OR REPLACE INTO image_vectors (content_hash, collection_id, file_path, model, dim, vec, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(BigInt(Math.trunc(chunkId)), this.collectionId, filePath, vectorToBlob(vec));
+      .run(
+        contentHash,
+        this.collectionId,
+        filePath,
+        imageEmbedModelId(),
+        vec.length,
+        vectorToBlob(vec),
+        nowIso(),
+      );
   }
 
-  /** All stored image vectors for this collection (brute-force similarity). */
-  allImageVectors(): Array<{ chunkId: number; filePath: string; vec: Float32Array }> {
+  /** The stored vector for one image hash, or null. */
+  imageVectorByHash(contentHash: string): { filePath: string; vec: Float32Array } | null {
+    const r = this.db
+      .prepare(
+        'SELECT file_path, vec FROM image_vectors WHERE content_hash = ? AND collection_id = ?',
+      )
+      .get<{ file_path: string; vec: Uint8Array }>(contentHash, this.collectionId);
+    if (!r?.vec) return null;
+    return { filePath: r.file_path, vec: blobToFloat32(r.vec) };
+  }
+
+  /**
+   * All stored image vectors for this collection (brute-force similarity).
+   * Joined to `files` so vectors whose image was deleted never surface; the
+   * rows themselves are content-addressed cache and get wiped by
+   * reconcileImageEmbedModel. Dim consistency is the CALLER's check (compare
+   * against the query vector's length) — model swaps already wipe, so a
+   * mismatch here only means a mid-migration remnant.
+   */
+  allImageVectors(): Array<{ contentHash: string; filePath: string; vec: Float32Array }> {
     return this.db
-      .prepare('SELECT chunk_id, file_path, vec FROM image_vectors WHERE collection_id = ?')
-      .all<{ chunk_id: number; file_path: string; vec: Uint8Array }>(this.collectionId)
+      .prepare(
+        `SELECT v.content_hash, f.path AS file_path, v.vec FROM image_vectors v
+         JOIN files f ON f.hash = v.content_hash AND f.collection_id = v.collection_id
+         WHERE v.collection_id = ?`,
+      )
+      .all<{ content_hash: string; file_path: string; vec: Uint8Array }>(this.collectionId)
       .map((r) => ({
-        chunkId: Number(r.chunk_id),
+        contentHash: r.content_hash,
         filePath: r.file_path,
-        vec: new Float32Array(r.vec.buffer, r.vec.byteOffset, Math.floor(r.vec.byteLength / 4)),
+        vec: blobToFloat32(r.vec),
       }));
   }
 
-  /** The id of an image file's single indexed chunk (vec rowid key). */
-  imageChunkId(filePath: string): number | null {
-    const c = this.chunksForFile(filePath)[0];
-    return c ? c.id : null;
+  /**
+   * Image files the embed tier still owes a vector — same capped-retry gate
+   * discipline as filesNeedingEmbedOnly. Unsupported formats are gated out by
+   * the runner via markImageEmbedUnsupported (the work-list is gate-driven,
+   * not extension-driven, so a future decoder re-admits nothing stale).
+   */
+  filesNeedingImageEmbed(limit = 10): FileRecord[] {
+    return this.db
+      .prepare(
+        `SELECT f.* FROM files f
+         LEFT JOIN image_embed_state s ON s.content_hash = f.hash
+         WHERE f.collection_id = ? AND f.modality = 'image' AND f.hash IS NOT NULL
+           AND (s.content_hash IS NULL
+                OR (s.state = 'failed' AND COALESCE(s.attempts, 0) < ${MAX_ENRICH_ATTEMPTS}))
+         ORDER BY f.path LIMIT ?`,
+      )
+      .all<FileRow>(this.collectionId, limit)
+      .map(rowToFile);
+  }
+
+  /** COUNT companion to {@link filesNeedingImageEmbed}. */
+  countNeedingImageEmbed(): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM files f
+         LEFT JOIN image_embed_state s ON s.content_hash = f.hash
+         WHERE f.collection_id = ? AND f.modality = 'image' AND f.hash IS NOT NULL
+           AND (s.content_hash IS NULL
+                OR (s.state = 'failed' AND COALESCE(s.attempts, 0) < ${MAX_ENRICH_ATTEMPTS}))`,
+      )
+      .get<{ n: number }>(this.collectionId);
+    return row?.n ?? 0;
+  }
+
+  /** Consume the image-embed gate for a hash (vector stored). */
+  markImageEmbedOk(contentHash: string, filePath: string): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO image_embed_state (content_hash, collection_id, file_path, state, attempts, updated_at)
+         VALUES (?, ?, ?, 'ok', 0, ?)`,
+      )
+      .run(contentHash, this.collectionId, filePath, nowIso());
+  }
+
+  /** Record a failed image-embed attempt; capped like every other gate. */
+  markImageEmbedAttempt(contentHash: string, filePath: string): number {
+    this.db
+      .prepare(
+        `INSERT INTO image_embed_state (content_hash, collection_id, file_path, state, attempts, updated_at)
+         VALUES (?, ?, ?, 'failed', 1, ?)
+         ON CONFLICT(content_hash) DO UPDATE SET
+           state='failed', attempts=COALESCE(image_embed_state.attempts, 0) + 1,
+           updated_at=excluded.updated_at`,
+      )
+      .run(contentHash, this.collectionId, filePath, nowIso());
+    return Number(
+      this.db
+        .prepare('SELECT attempts FROM image_embed_state WHERE content_hash = ?')
+        .get<{ attempts: number }>(contentHash)?.attempts ?? 1,
+    );
+  }
+
+  /**
+   * Terminally skip an image the embedder can never process (no pure-JS
+   * decoder for the format, decode-bomb dimensions, corrupt bytes). Same
+   * "wrong tool, not a flake" semantics as markAiShadowUnsupported.
+   */
+  markImageEmbedUnsupported(contentHash: string, filePath: string): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO image_embed_state (content_hash, collection_id, file_path, state, attempts, updated_at)
+         VALUES (?, ?, ?, 'unsupported', ${MAX_ENRICH_ATTEMPTS}, ?)`,
+      )
+      .run(contentHash, this.collectionId, filePath, nowIso());
+  }
+
+  // ── faces (lane B, biometric opt-in) ─────────────────────────────────────
+
+  /** Image files the face tier still owes a pass — face_state gate. */
+  filesNeedingFaceIndex(limit = 5): FileRecord[] {
+    return this.db
+      .prepare(
+        `SELECT f.* FROM files f
+         LEFT JOIN face_state s ON s.content_hash = f.hash
+         WHERE f.collection_id = ? AND f.modality = 'image' AND f.hash IS NOT NULL
+           AND (s.content_hash IS NULL
+                OR (s.state = 'failed' AND COALESCE(s.attempts, 0) < ${MAX_ENRICH_ATTEMPTS}))
+         ORDER BY f.path LIMIT ?`,
+      )
+      .all<FileRow>(this.collectionId, limit)
+      .map(rowToFile);
+  }
+
+  markFaceOk(contentHash: string, filePath: string, faces: number): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO face_state (content_hash, collection_id, file_path, state, faces, attempts, updated_at)
+         VALUES (?, ?, ?, 'ok', ?, 0, ?)`,
+      )
+      .run(contentHash, this.collectionId, filePath, faces, nowIso());
+  }
+
+  markFaceAttempt(contentHash: string, filePath: string): number {
+    this.db
+      .prepare(
+        `INSERT INTO face_state (content_hash, collection_id, file_path, state, attempts, updated_at)
+         VALUES (?, ?, ?, 'failed', 1, ?)
+         ON CONFLICT(content_hash) DO UPDATE SET
+           state='failed', attempts=COALESCE(face_state.attempts, 0) + 1,
+           updated_at=excluded.updated_at`,
+      )
+      .run(contentHash, this.collectionId, filePath, nowIso());
+    return Number(
+      this.db
+        .prepare('SELECT attempts FROM face_state WHERE content_hash = ?')
+        .get<{ attempts: number }>(contentHash)?.attempts ?? 1,
+    );
+  }
+
+  markFaceUnsupported(contentHash: string, filePath: string): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO face_state (content_hash, collection_id, file_path, state, attempts, updated_at)
+         VALUES (?, ?, ?, 'unsupported', ${MAX_ENRICH_ATTEMPTS}, ?)`,
+      )
+      .run(contentHash, this.collectionId, filePath, nowIso());
+  }
+
+  putFaceVector(rec: {
+    contentHash: string;
+    faceIndex: number;
+    filePath: string;
+    region: string;
+    quality: number;
+    clusterId: string | null;
+    vec: number[] | Float32Array;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO face_vectors
+         (content_hash, face_index, collection_id, file_path, region, quality, cluster_id, vec, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        rec.contentHash,
+        BigInt(rec.faceIndex),
+        this.collectionId,
+        rec.filePath,
+        rec.region,
+        rec.quality,
+        rec.clusterId,
+        vectorToBlob(rec.vec),
+        nowIso(),
+      );
+  }
+
+  /** Members of one cluster (or every clustered face when clusterId omitted). */
+  faceVectors(clusterId?: string): Array<{
+    contentHash: string;
+    faceIndex: number;
+    filePath: string;
+    region: string | null;
+    quality: number;
+    clusterId: string | null;
+    vec: Float32Array;
+  }> {
+    const clause = clusterId ? 'AND v.cluster_id = ?' : 'AND v.cluster_id IS NOT NULL';
+    const params: string[] = [this.collectionId];
+    if (clusterId) params.push(clusterId);
+    return this.db
+      .prepare(
+        `SELECT v.content_hash, v.face_index, f.path AS file_path, v.region, v.quality, v.cluster_id, v.vec
+         FROM face_vectors v
+         JOIN files f ON f.hash = v.content_hash AND f.collection_id = v.collection_id
+         WHERE v.collection_id = ? ${clause}`,
+      )
+      .all<{
+        content_hash: string;
+        face_index: number | bigint;
+        file_path: string;
+        region: string | null;
+        quality: number;
+        cluster_id: string | null;
+        vec: Uint8Array;
+      }>(...params)
+      .map((r) => ({
+        contentHash: r.content_hash,
+        faceIndex: Number(r.face_index),
+        filePath: r.file_path,
+        region: r.region,
+        quality: Number(r.quality),
+        clusterId: r.cluster_id,
+        vec: blobToFloat32(r.vec),
+      }));
+  }
+
+  faceClusters(): Array<{
+    id: string;
+    centroid: Float32Array | null;
+    size: number;
+    exemplarHash: string | null;
+    exemplarFace: number | null;
+    state: string | null;
+  }> {
+    return this.db
+      .prepare(
+        'SELECT id, centroid, size, exemplar_hash, exemplar_face, state FROM face_clusters WHERE collection_id = ?',
+      )
+      .all<{
+        id: string;
+        centroid: Uint8Array | null;
+        size: number;
+        exemplar_hash: string | null;
+        exemplar_face: number | bigint | null;
+        state: string | null;
+      }>(this.collectionId)
+      .map((r) => ({
+        id: r.id,
+        centroid: r.centroid ? blobToFloat32(r.centroid) : null,
+        size: Number(r.size),
+        exemplarHash: r.exemplar_hash,
+        exemplarFace: r.exemplar_face == null ? null : Number(r.exemplar_face),
+        state: r.state,
+      }));
+  }
+
+  upsertFaceCluster(rec: {
+    id: string;
+    centroid: number[] | Float32Array;
+    size: number;
+    exemplarHash?: string | null;
+    exemplarFace?: number | null;
+    state?: string | null;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO face_clusters (id, collection_id, centroid, size, exemplar_hash, exemplar_face, state, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        rec.id,
+        this.collectionId,
+        vectorToBlob(rec.centroid),
+        rec.size,
+        rec.exemplarHash ?? null,
+        rec.exemplarFace == null ? null : BigInt(rec.exemplarFace),
+        rec.state ?? null,
+        nowIso(),
+      );
+  }
+
+  reassignFaceCluster(fromClusterId: string, toClusterId: string): void {
+    this.db
+      .prepare('UPDATE face_vectors SET cluster_id = ? WHERE cluster_id = ? AND collection_id = ?')
+      .run(toClusterId, fromClusterId, this.collectionId);
+  }
+
+  deleteFaceCluster(id: string): void {
+    this.db
+      .prepare('DELETE FROM face_clusters WHERE id = ? AND collection_id = ?')
+      .run(id, this.collectionId);
+  }
+
+  /** Tombstone: keep the centroid so new photos are absorbed silently. */
+  markFaceClusterForgotten(id: string): void {
+    this.db
+      .prepare("UPDATE face_clusters SET state = 'forgotten', updated_at = ? WHERE id = ?")
+      .run(nowIso(), id);
+  }
+
+  /** Monotonic per-collection "Person N" counter — never reused. */
+  nextFacePersonSeq(): number {
+    const row = this.db
+      .prepare("SELECT value FROM meta WHERE key = 'face_person_seq'")
+      .get<{ value: string }>();
+    const next = (Number(row?.value) || 0) + 1;
+    this.db
+      .prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('face_person_seq', ?)")
+      .run(String(next));
+    return next;
+  }
+
+  /** The data-erasure path: every face row and person entity in this index. */
+  wipeFaceData(): void {
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM face_vectors WHERE collection_id = ?').run(this.collectionId);
+      this.db.prepare('DELETE FROM face_clusters WHERE collection_id = ?').run(this.collectionId);
+      this.db.prepare('DELETE FROM face_state WHERE collection_id = ?').run(this.collectionId);
+      this.deleteEntitiesOfKind('person');
+    });
+  }
+
+  /** Delete every entity of a kind plus its mentions. */
+  deleteEntitiesOfKind(kind: string): void {
+    this.db
+      .prepare(
+        'DELETE FROM entity_mentions WHERE entity_id IN (SELECT id FROM entities WHERE kind = ?)',
+      )
+      .run(kind);
+    this.db.prepare('DELETE FROM entities WHERE kind = ?').run(kind);
+  }
+
+  entityById(
+    id: number,
+  ): { id: number; kind: string; label: string; canonical: string } | undefined {
+    const r = this.db
+      .prepare('SELECT id, kind, label, canonical FROM entities WHERE id = ?')
+      .get<{ id: number; kind: string; label: string; canonical: string }>(BigInt(id));
+    return r ? { ...r, id: Number(r.id) } : undefined;
+  }
+
+  updateEntityLabel(id: number, label: string): void {
+    this.db.prepare('UPDATE entities SET label = ? WHERE id = ?').run(label, BigInt(id));
+  }
+
+  deleteEntity(id: number): void {
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM entity_mentions WHERE entity_id = ?').run(BigInt(id));
+      this.db.prepare('DELETE FROM entities WHERE id = ?').run(BigInt(id));
+    });
+  }
+
+  deleteEntityMentions(entityId: number): void {
+    this.db.prepare('DELETE FROM entity_mentions WHERE entity_id = ?').run(BigInt(entityId));
+  }
+
+  entityByCanonical(
+    kind: string,
+    canonical: string,
+  ): { id: number; kind: string; label: string; canonical: string } | undefined {
+    const r = this.db
+      .prepare('SELECT id, kind, label, canonical FROM entities WHERE kind = ? AND canonical = ?')
+      .get<{ id: number; kind: string; label: string; canonical: string }>(kind, canonical);
+    return r ? { ...r, id: Number(r.id) } : undefined;
   }
 
   // ── entities (meta-boekwachter) ────────────────────────────────────────────
@@ -2019,17 +2426,18 @@ export class IndexStore {
   addEntityMention(
     entityId: number,
     filePath: string,
-    opts: { line?: number; confidence?: number } = {},
+    opts: { line?: number; confidence?: number; region?: string } = {},
   ): void {
     this.db
       .prepare(
-        'INSERT INTO entity_mentions (entity_id, collection_id, file_path, line, confidence) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO entity_mentions (entity_id, collection_id, file_path, line, region, confidence) VALUES (?, ?, ?, ?, ?, ?)',
       )
       .run(
         BigInt(Math.trunc(entityId)),
         this.collectionId,
         filePath,
         opts.line ?? null,
+        opts.region ?? null,
         opts.confidence ?? null,
       );
   }
@@ -2077,17 +2485,31 @@ export class IndexStore {
       .map((r) => ({ ...r, id: Number(r.id), mentions: Number(r.mentions) }));
   }
 
-  entityMentions(entityId: number, limit = 100): Array<{ filePath: string; line: number | null }> {
+  entityMentions(
+    entityId: number,
+    limit = 100,
+  ): Array<{
+    filePath: string;
+    line: number | null;
+    region: string | null;
+    confidence: number | null;
+  }> {
     return this.db
       .prepare(
-        'SELECT file_path, line FROM entity_mentions WHERE entity_id = ? AND collection_id = ? LIMIT ?',
+        'SELECT file_path, line, region, confidence FROM entity_mentions WHERE entity_id = ? AND collection_id = ? LIMIT ?',
       )
-      .all<{ file_path: string; line: number | null }>(
-        BigInt(Math.trunc(entityId)),
-        this.collectionId,
-        limit,
-      )
-      .map((r) => ({ filePath: r.file_path, line: r.line }));
+      .all<{
+        file_path: string;
+        line: number | null;
+        region: string | null;
+        confidence: number | null;
+      }>(BigInt(Math.trunc(entityId)), this.collectionId, limit)
+      .map((r) => ({
+        filePath: r.file_path,
+        line: r.line,
+        region: r.region,
+        confidence: r.confidence == null ? null : Number(r.confidence),
+      }));
   }
 
   // ── text vectors ───────────────────────────────────────────────────────

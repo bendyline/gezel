@@ -240,3 +240,8 @@ export function vectorToBlob(vector: number[] | Float32Array): Uint8Array {
   const f32 = vector instanceof Float32Array ? vector : Float32Array.from(vector);
   return new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength);
 }
+
+/** Inverse of {@link vectorToBlob} — a Float32 view over a stored BLOB. */
+export function blobToFloat32(blob: Uint8Array): Float32Array {
+  return new Float32Array(blob.buffer, blob.byteOffset, Math.floor(blob.byteLength / 4));
+}

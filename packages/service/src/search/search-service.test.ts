@@ -179,6 +179,39 @@ describe('SearchService.quickOpen', () => {
     expect(results.map((r) => r.title)).toEqual(['Klerk', 'Bram']);
   });
 
+  it('finds mail by subject and by sender, opening as an artifact file', async () => {
+    const svc = makeService({ projects: [{ id: 'p1', name: 'Inbox Project' }] });
+    svc.setExtraCatalogs({
+      mailEntries: async () => [
+        {
+          projectId: 'p1',
+          path: 'data/work-mail/inbox/2026-08-19--quarterly-report--abcd1234/001--2026-08-19T14-32--from-alice--deadbeef.md',
+          subject: 'quarterly report',
+          from: 'alice',
+          date: '2026-08-19 14:32',
+        },
+      ],
+    });
+
+    const bySubject = await svc.quickOpen('quarterly report');
+    expect(bySubject[0]).toMatchObject({
+      kind: 'mail',
+      title: 'quarterly report',
+      subtitle: 'alice · 2026-08-19 14:32',
+      projectId: 'p1',
+      source: 'artifacts',
+    });
+    expect(bySubject[0]?.path).toContain('quarterly-report');
+
+    // Sender reachable via keywords (at the usual keyword discount).
+    const bySender = await svc.quickOpen('alice');
+    expect(bySender.some((r) => r.kind === 'mail')).toBe(true);
+
+    // Personal mail outranks catalog kinds but never a typed task title.
+    expect(MERGE_WEIGHTS.mail).toBeGreaterThan(MERGE_WEIGHTS.craftbook);
+    expect(MERGE_WEIGHTS.mail).toBeLessThan(MERGE_WEIGHTS.task);
+  });
+
   it('invalidateCatalog forces a rebuild so new entities are found immediately', async () => {
     const projects = [{ id: 'p1', name: 'Space Shooter' }];
     const store = {

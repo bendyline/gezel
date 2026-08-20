@@ -706,14 +706,26 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     }
     const boekwachter = await resolveProjectBoekwachter(ctx.store, id);
     if (!boekwachter) {
-      return c.json(
-        {
-          error: 'boekwachter-required',
-          message:
-            'Add a Boekwachter to this project crew to enable AI summaries, reviews, and semantic enrichment.',
-        },
-        409,
-      );
+      // The LLM tiers (summaries, reviews, media) genuinely need the roster
+      // opt-in — but the always-on local embed tiers do not, and "update the
+      // index" from an unstaffed project should still deliver what it can.
+      // Run the embed drain and answer honestly instead of a bare 409.
+      if (!(await ctx.indexingJob.isPaused())) {
+        ctx.indexEnrichment.drainEmbedOnly(id);
+      }
+      const pending = await ctx.contentIndex.countNeedingEnrichment(id);
+      return c.json({
+        paused: false,
+        mode: 'embed-only' as const,
+        files: 0,
+        summarized: 0,
+        embedded: 0,
+        pending,
+        areasUpdated: 0,
+        architectureUpdated: false,
+        drained: false,
+        hint: 'No Boekwachter on this crew — semantic-search embeddings are being refreshed; add a Boekwachter to unlock AI summaries and reviews.',
+      });
     }
     if (await ctx.indexingJob.isPaused()) {
       const pending = await ctx.contentIndex.countNeedingEnrichment(id);

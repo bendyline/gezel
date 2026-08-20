@@ -23,6 +23,8 @@ vi.mock('./memory/embeddings.js', () => {
   return {
     EmbeddingsDisabledError,
     embeddingsDisabledReason: () => null,
+    embeddingPipelineStatus: () => 'ready' as const,
+    embeddingsHealth: () => ({ status: 'ready' as const }),
     embed: async (text: string) => vectorFor(text),
     embedQuery: async (text: string) => vectorFor(text),
     embedBatch: async (texts: string[]) => texts.map(vectorFor),
@@ -75,6 +77,8 @@ describe('health', () => {
     const res = await httpFetch(`${baseUrl}/api/health`);
     const data = (await res.json()) as Record<string, unknown>;
     expect(data.ok).toBe(true);
+    // Semantic-search health rides the daemon health check (F1 surfacing).
+    expect((data.embeddings as { status?: string })?.status).toBeDefined();
     expect(data.version).toBeDefined();
     expect(res.headers.get('cross-origin-opener-policy')).toBeNull();
     expect(res.headers.get('cross-origin-embedder-policy')).toBeNull();

@@ -130,11 +130,18 @@ export class PipelineLoadError extends Error {
  * Keep the retry classification deliberately narrow. Bad model ids, missing
  * native libraries, and incompatible runtimes need operator action; transport
  * failures and registry throttling commonly recover on their own.
+ *
+ * The undici mid-stream abort family (`terminated`, `other side closed`,
+ * `premature close`, `aborted`) is here because its absence was a wild-caught
+ * product bug: a model download killed at ~103s surfaced as a bare
+ * `TypeError: terminated`, classified FATAL, and stickily disabled semantic
+ * search for the daemon's lifetime — silently, since search degrades to
+ * keyword instead of erroring (evals/runs/EMBED-CALIBRATION-2026-08-19.md).
  */
 export function isRetryablePipelineLoadFailure(error: unknown): boolean {
   const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   const code = (error as NodeJS.ErrnoException | null | undefined)?.code ?? '';
-  return /(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|UND_ERR_|fetch failed|network(?: request)? failed|socket hang up|timed?\s*out|HTTP\s+(?:408|425|429|5\d\d)|TLS|SSL|certificate)/i.test(
+  return /(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|UND_ERR_|ERR_STREAM_PREMATURE_CLOSE|fetch failed|network(?: request)? failed|socket hang up|timed?\s*out|terminated|other side closed|premature close|aborted|HTTP\s+(?:408|425|429|5\d\d)|TLS|SSL|certificate)/i.test(
     `${code} ${message}`,
   );
 }

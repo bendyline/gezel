@@ -5,6 +5,7 @@ import { GEZEL_VERSION, createLogger, isSafeEntityId } from '@bendyline/gezel';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { ZodError } from 'zod';
 import { safeJoin } from '../fs/safe-paths.js';
+import { embeddingsHealth } from '../memory/embeddings.js';
 import {
   bearerAuth,
   denyRemoteInferenceScope,
@@ -66,6 +67,7 @@ import { opencodeSetupRoutes } from './routes/opencode-setup.js';
 import { pageCheckRoutes } from './routes/page-check.js';
 import { pageInvokeRoutes } from './routes/page-invoke.js';
 import { pageReadRoutes } from './routes/page-read.js';
+import { peopleWipeRoutes, projectPeopleRoutes } from './routes/people.js';
 import { permissionRoutes } from './routes/permissions.js';
 import { piSetupRoutes } from './routes/pi-setup.js';
 import { previewCapabilityRoutes } from './routes/preview-capabilities.js';
@@ -484,6 +486,11 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
       // this env var only when the binary is on disk, so its presence is the
       // same fact the provider itself launches from.
       ds4ServerBundled: Boolean(process.env.GEZEL_DS4_SERVER_BIN),
+      // Process-wide semantic-search health. Sent unconditionally: 'cold'
+      // is itself information (nothing has needed the embedder yet), and a
+      // sticky 'disabled' here is the only place the failure is visible at
+      // the daemon level.
+      embeddings: embeddingsHealth(),
       // Boot probe rather than an env var: this one is a property of the
       // running process's own token, not something a supervisor could have
       // told us. `null` (non-Windows) is omitted, not sent as a value —
@@ -595,6 +602,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/projects', toolRoutes(ctx));
   // Per-project terminal threads live at /api/projects/:id/terminals/*
   app.route('/api/projects', terminalRoutes(ctx));
+  // People (face lane): /api/projects/:id/people[...] + the global
+  // disable-and-erase endpoint at /api/people/wipe.
+  app.route('/api/projects', projectPeopleRoutes(ctx));
+  app.route('/api/people', peopleWipeRoutes(ctx));
   app.route('/api/tasks', globalTaskRoutes(ctx));
   app.route('/api/craftbooks', craftbookRoutes(ctx));
   app.route('/api/usage', usageRoutes(ctx));

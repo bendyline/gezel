@@ -199,6 +199,7 @@ import type {
   ListHistoryResponse,
   ListMentionCandidatesResponse,
   ListModelsResponse,
+  ListPeopleResponse,
   ListProjectsForGezelResponse,
   ListProjectsResponse,
   ListQuestionsResponse,
@@ -365,6 +366,7 @@ import type {
   WebSearchRequest,
   WebSearchResponse,
   WikipediaSearchRequest,
+  WipeFaceDataResponse,
   WorkspaceCommandIndex,
   WorkspaceEditResponse,
   WorkspaceIndexFilesDetailResponse,
@@ -1454,6 +1456,13 @@ export interface ConfigResponse {
    * See `GezelConfig.gildeUpdates` in core schemas.
    */
   gildeUpdates?: {
+    enabled?: boolean;
+  };
+  /**
+   * Face recognition biometric opt-in (Settings → Image recognition).
+   * Default off. See `GezelConfig.faceRecognition` in core schemas.
+   */
+  faceRecognition?: {
     enabled?: boolean;
   };
   /**
@@ -6004,6 +6013,30 @@ export class GezelClient {
       `/api/projects/${encodeURIComponent(id)}/tools/list-entity-mentions`,
       body,
     );
+  }
+
+  // ── people (face lane, biometric opt-in) ─────────────────────────────────
+
+  listPeople(id: string): Promise<ListPeopleResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/people`);
+  }
+
+  renamePerson(id: string, entityId: number, label: string): Promise<{ ok: boolean }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/people/${entityId}/rename`,
+      { label },
+    );
+  }
+
+  /** Forget = stop showing this person (tombstone); wipe is the erasure path. */
+  forgetPerson(id: string, entityId: number): Promise<{ ok: boolean }> {
+    return this.request('DELETE', `/api/projects/${encodeURIComponent(id)}/people/${entityId}`);
+  }
+
+  /** Disable face recognition and erase all face data everywhere. */
+  wipeFaceData(): Promise<WipeFaceDataResponse> {
+    return this.request('POST', '/api/people/wipe');
   }
 
   /** OS-idle heartbeat from the Electron shell (gates background enrichment). */

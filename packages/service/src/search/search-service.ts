@@ -101,6 +101,10 @@ export const MERGE_WEIGHTS: Record<UnifiedSearchResultKind, number> = {
   // A named task beats fuzzy content — the user typed something close to its
   // title — but never a project/gezel/file name match.
   task: 640,
+  // A subject-line match on the user's own mail is personal content — above
+  // catalogs and symbols, below tasks (a typed task title is more deliberate
+  // than a remembered subject fragment).
+  mail: 620,
   symbol: 520,
   craftbook: 500,
   content: 420,
@@ -174,10 +178,17 @@ export interface ExtraSearchCatalogs {
   craftbookEntries?: () => Promise<
     Array<{ id: string; name: string; source: 'bundled' | 'local' | 'project' }>
   >;
+  /**
+   * Mail messages by subject/sender, derived from the connector corpus paths
+   * (no file reads). Bodies are already covered by the artifacts content arm.
+   */
+  mailEntries?: () => Promise<
+    Array<{ projectId: string; path: string; subject: string; from: string; date: string }>
+  >;
 }
 
 interface CatalogEntry {
-  kind: 'project' | 'gezel' | 'file' | 'document' | 'task' | 'craftbook' | 'handboek';
+  kind: 'project' | 'gezel' | 'file' | 'document' | 'task' | 'craftbook' | 'handboek' | 'mail';
   id: string;
   /** The primary string we fuzzy-match (name or basename). */
   title: string;
@@ -340,7 +351,7 @@ export class SearchService {
 
   private async buildCatalog(): Promise<CatalogEntry[]> {
     const entries: CatalogEntry[] = [];
-    const [projects, gezels, documents, tasks, craftbooks, handboek] = await Promise.all([
+    const [projects, gezels, documents, tasks, craftbooks, handboek, mail] = await Promise.all([
       this.store.listProjects().catch(() => []),
       this.store.listGezels().catch(() => []),
       this.store.listDocumentsRecursive().catch(() => []),
@@ -349,6 +360,7 @@ export class SearchService {
         .catch(() => []),
       this.extraCatalogs.craftbookEntries?.().catch(() => []) ?? Promise.resolve([]),
       this.extraCatalogs.handboekEntries?.().catch(() => []) ?? Promise.resolve([]),
+      this.extraCatalogs.mailEntries?.().catch(() => []) ?? Promise.resolve([]),
     ]);
     const projectNameById = new Map(projects.map((p) => [p.id, p.name]));
 
@@ -379,6 +391,22 @@ export class SearchService {
         title: h.title,
         subtitle: 'Handboek',
         ...(h.keywords && h.keywords.length > 0 ? { keywords: h.keywords } : {}),
+      });
+    }
+    for (const m of mail) {
+      entries.push({
+        kind: 'mail',
+        id: `mail:${m.projectId}:${m.path}`,
+        title: m.subject,
+        subtitle: `${m.from} · ${m.date}`,
+        // Sender reachable even when the subject doesn't match the query.
+        keywords: [m.from],
+        path: m.path,
+        projectId: m.projectId,
+        ...(projectNameById.has(m.projectId)
+          ? { projectName: projectNameById.get(m.projectId)! }
+          : {}),
+        source: 'artifacts',
       });
     }
 

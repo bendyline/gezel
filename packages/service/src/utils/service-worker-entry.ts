@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
  */
 export const SERVICE_WORKER_ENTRIES = {
   embeddings: { built: 'memory/embed-worker.js' },
+  'image-embeddings': { built: 'memory/image-embed-worker.js' },
   'static-index': { built: 'index-store/static-index-worker.js' },
   'document-convert': {
     built: 'index-store/convert-worker.js',

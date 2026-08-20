@@ -11028,7 +11028,7 @@ server.tool(
 
 server.tool(
   'find_similar_images',
-  'Find images visually similar to a given image (by CLIP-style embedding). Requires the boekwachter to have captioned/embedded images first; returns engine=unavailable until then.',
+  'Find images visually similar to a given image (by CLIP embedding). The visual index fills in the background as images are indexed; returns engine=unavailable until this image has been embedded.',
   {
     path: z.string().min(1).describe('Workspace-relative path of the reference image.'),
     maxResults: z.number().int().positive().max(100).optional(),
@@ -11041,7 +11041,7 @@ server.tool(
           content: [
             {
               type: 'text' as const,
-              text: 'find_similar_images: no image embeddings yet (boekwachter has not processed images).',
+              text: 'find_similar_images: no visual embedding for this image yet — the index fills in the background; try again later.',
             },
           ],
         };
