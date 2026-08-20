@@ -16,7 +16,13 @@ export default defineConfig({
   format: ['esm'],
   dts: false,
   sourcemap: true,
-  clean: true,
+  // The native runtimes are staged into dist after compilation and contain
+  // large third-party trees. On Windows, antivirus/indexing can briefly hold
+  // one of those files open; tsup's cleaner uses a single synchronous unlink
+  // with no retry, which turns that transient EBUSY into a failed build.
+  // Their staging scripts own replacement/cleanup (with Windows-aware retry),
+  // so keep tsup focused on the app/UI/service outputs it actually emits.
+  clean: ['!pnpm-bundle/**', '!node-bundle/**'],
   target: 'node20',
   splitting: false,
   platform: 'node',

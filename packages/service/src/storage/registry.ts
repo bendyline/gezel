@@ -6,6 +6,7 @@ import {
 } from '@bendyline/gezel';
 import {
   type ExternalFolders,
+  aiAppsRoot,
   backupsDir,
   binRuntimeRoot,
   channelsDir,
@@ -427,6 +428,7 @@ export const STORAGE_CATEGORIES: StorageCategoryDef[] = [
         userScriptsDir(home),
         craftbookTemplatesRoot(home),
         projectTypesRoot(home),
+        aiAppsRoot(home),
         meesterStatusDir(home),
         channelsDir(home),
         toolsetConfigsDir(home),
@@ -544,6 +546,7 @@ export function classifiedTopLevelNames(): string[] {
     'scripts',
     'craftbook-templates',
     'project-types',
+    'ai-apps',
     'meester-status',
     'channels',
     'toolset-configs',

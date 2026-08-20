@@ -36,6 +36,18 @@ setDefaultAutoSelectFamilyAttemptTimeout(5000);
 const here = dirname(fileURLToPath(import.meta.url));
 const appRoot = resolve(here, '..');
 
+async function removeTree(path) {
+  // Windows scanners can briefly retain handles while inspecting the staged
+  // package. fs.rm's recursive retry path handles EBUSY/EPERM/ENOTEMPTY;
+  // unlike tsup's synchronous cleaner, it gives those handles time to close.
+  await rm(path, {
+    recursive: true,
+    force: true,
+    maxRetries: process.platform === 'win32' ? 20 : 2,
+    retryDelay: 100,
+  });
+}
+
 async function importPinned() {
   // Read the pins directly so we do not need a compile step first.
   const src = await readFile(join(appRoot, 'src', 'pnpm-version.ts'), 'utf8');
@@ -69,7 +81,9 @@ async function isFile(path) {
 }
 
 async function main() {
+  const distDir = resolve(appRoot, 'dist', 'pnpm-bundle');
   if (process.env.GEZEL_PNPM_SKIP === '1') {
+    await removeTree(distDir);
     console.log('[fetch-pnpm] GEZEL_PNPM_SKIP=1 — skipping bundle.');
     return;
   }
@@ -87,8 +101,6 @@ async function main() {
   const cacheVersion = join(cacheDir, 'version.txt');
   const cachePackageSha = join(cacheDir, 'package.sha256');
   const cacheLicense = join(cacheDir, 'LICENSE.txt');
-  const distDir = resolve(appRoot, 'dist', 'pnpm-bundle');
-
   let cacheValid = false;
   try {
     cacheValid =
@@ -116,7 +128,7 @@ async function main() {
       );
     }
 
-    await rm(cacheDir, { recursive: true, force: true });
+    await removeTree(cacheDir);
     await mkdir(cacheDir, { recursive: true });
     const archivePath = join(cacheDir, 'package.tgz');
     await writeFile(archivePath, archive);
@@ -147,7 +159,7 @@ async function main() {
 
     // The ordinary package includes standalone-executable build artifacts
     // that are not used by the JavaScript CLI and would duplicate ~18 MB.
-    await rm(join(cacheDir, 'artifacts'), { recursive: true, force: true });
+    await removeTree(join(cacheDir, 'artifacts'));
     await cp(embeddedLicense, cacheLicense);
     await writeFile(cacheVersion, `${version}\n`, 'utf8');
     await writeFile(cachePackageSha, `${packageSha}\n`, 'utf8');
@@ -156,7 +168,7 @@ async function main() {
   }
 
   // Stage cache → dist on every build.
-  await rm(distDir, { recursive: true, force: true });
+  await removeTree(distDir);
   await cp(cacheDir, distDir, { recursive: true });
   await pruneForeignBinariesWithReport(distDir);
   const reflinkRemoval = await removePnpmReflinkDependency(distDir);

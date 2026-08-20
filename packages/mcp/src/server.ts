@@ -4513,38 +4513,41 @@ server.tool(
 );
 
 server.tool(
-  'export_project_type',
-  "Package a project type (and the gezel role it ships with) into a shareable `.gzl` file, saved into the project's artifacts. Hand that file to someone else and they import it with import_project_type. Defaults to the current project's applied type.",
+  'export_ai_app',
+  "Package an AI App (entry project type, exact role/craftbook versions, pages, scripts, and seed data) into a shareable `.gezapp` file in the project's artifacts. Defaults to the current project's applied type.",
   {
     typeId: z
       .string()
       .optional()
       .describe("Project type id to export. Omit to export the current project's applied type."),
     project: z.string().optional().describe('Project id or name. Defaults to the current project.'),
-    name: z.string().optional().describe('Override the bundle name.'),
-    creator: z.string().optional().describe('Your name / handle, recorded in the bundle.'),
+    version: z
+      .string()
+      .optional()
+      .describe('Exact project-type version. Defaults to resolved latest.'),
+    publisherName: z.string().optional().describe('Publisher name recorded in the package.'),
+    publisherUrl: z.string().optional().describe('Optional publisher URL.'),
   },
-  async ({ typeId, project, name, creator }) => {
+  async ({ typeId, project, version, publisherName, publisherUrl }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.exportProjectType(resolvedProject, {
+      const res = await api.exportAiApp(resolvedProject, {
         ...(typeId ? { typeId } : {}),
-        ...(name ? { name } : {}),
-        ...(creator ? { creator } : {}),
+        ...(version ? { version } : {}),
+        ...(publisherName ? { publisherName } : {}),
+        ...(publisherUrl ? { publisherUrl } : {}),
       });
       return {
         content: [
           {
             type: 'text' as const,
-            text: `Packaged "${res.manifest.name}" into artifacts/${res.artifactPath} (${res.bytes} bytes, ${res.manifest.items.length} item(s)). Share that .gzl file — the recipient imports it with import_project_type.`,
+            text: `Packaged "${res.manifest.name}" into artifacts/${res.artifactPath} (${res.bytes} bytes, ${res.manifest.items.length} embedded item(s), ${res.manifest.dependencies.length} external dependency lock(s)). Share the .gezapp file; the recipient previews it with import_ai_app.`,
           },
         ],
       };
     } catch (err) {
       return {
-        content: [
-          { type: 'text' as const, text: `export_project_type failed: ${unwrapApiError(err)}` },
-        ],
+        content: [{ type: 'text' as const, text: `export_ai_app failed: ${unwrapApiError(err)}` }],
         isError: true,
       };
     }
@@ -4552,12 +4555,14 @@ server.tool(
 );
 
 server.tool(
-  'import_project_type',
-  "Import a shared `.gzl` project-type bundle from a file in the project's artifacts. Call it first with confirm omitted to PREVIEW what the bundle installs (types + gezel roles); call again with confirm:true to install. Nothing runs on import — items just become available when starting a new project.",
+  'import_ai_app',
+  'Preview or install a shared `.gezapp` from project artifacts. Call it first without confirm to verify schemas, hashes, compatibility, embedded items, and dependencies; call again with confirm:true to atomically install it. Nothing executes on import.',
   {
     path: z
       .string()
-      .describe('Artifact-relative path to the .gzl file, e.g. "shared/language-trainer.gzl".'),
+      .describe(
+        'Artifact-relative path to the .gezapp file, e.g. "shared/language-trainer.gezapp".',
+      ),
     project: z.string().optional().describe('Project id or name. Defaults to the current project.'),
     confirm: z
       .boolean()
@@ -4567,20 +4572,21 @@ server.tool(
   async ({ path, project, confirm }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.importProjectType(resolvedProject, {
+      const res = await api.importAiApp(resolvedProject, {
         path,
         ...(confirm !== undefined ? { confirm } : {}),
       });
       const list = res.items.map((i) => `${i.kind} "${i.id}" v${i.version}`).join(', ');
+      const missing = res.missingDependencies.length
+        ? ` Missing dependencies: ${res.missingDependencies.map((d) => `${d.kind}:${d.id}@${d.version}${d.required ? ' (required)' : ' (optional)'}`).join(', ')}.`
+        : '';
       const text = res.installed
-        ? `Installed from "${res.manifest.name}": ${list}. Start a new project to use it.`
-        : `Bundle "${res.manifest.name}" contains: ${list}. It passed verification. Call import_project_type again with confirm:true to install.`;
+        ? `Installed AI App "${res.manifest.name}" v${res.installed.version}: ${list}.${missing} Start a new project to use it.`
+        : `AI App "${res.manifest.name}" contains: ${list}. It passed package verification.${missing} Call import_ai_app again with confirm:true to install.`;
       return { content: [{ type: 'text' as const, text }] };
     } catch (err) {
       return {
-        content: [
-          { type: 'text' as const, text: `import_project_type failed: ${unwrapApiError(err)}` },
-        ],
+        content: [{ type: 'text' as const, text: `import_ai_app failed: ${unwrapApiError(err)}` }],
         isError: true,
       };
     }

@@ -128,6 +128,9 @@ import type {
   GetBoekwachterIssueRequest,
   GetBoekwachterIssueResponse,
   GetScriptSourceResponse,
+  GezappDependency,
+  GezappEmbeddedKind,
+  GezappManifest,
   GezelGender,
   GezelGrowthResponse,
   GezelIconHistoryResponse,
@@ -168,7 +171,6 @@ import type {
   GitSyncResponse,
   GrepArtifactRequest,
   GrepArtifactResponse,
-  GzelBundleManifest,
   HandboekArticle,
   HandboekHowDoIResponse,
   HandboekNarrationResponse,
@@ -5203,38 +5205,37 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/apply-project-type`, body);
   }
 
-  /**
-   * Package a project type (+ referenced gezel templates) into a `.gzl` share
-   * bundle written into the project's artifacts. See docs/project-types.md.
-   */
-  exportProjectType(
+  /** Package an exact-version AI App into a `.gezapp` artifact. */
+  exportAiApp(
     id: string,
-    body: { typeId?: string; name?: string; description?: string; creator?: string },
-  ): Promise<{ path: string; artifactPath: string; manifest: GzelBundleManifest; bytes: number }> {
-    return this.request(
-      'POST',
-      `/api/projects/${encodeURIComponent(id)}/project-types/export`,
-      body,
-    );
+    body: {
+      typeId?: string;
+      version?: string;
+      publisherName?: string;
+      publisherUrl?: string;
+    },
+  ): Promise<{ path: string; artifactPath: string; manifest: GezappManifest; bytes: number }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/ai-apps/export`, body);
   }
 
-  /**
-   * Import a `.gzl` bundle from a file in the project's artifacts. Without
-   * `confirm` returns the review; with `confirm: true` installs the items.
-   */
-  importProjectType(
+  /** Preview or install a `.gezapp` artifact. */
+  importAiApp(
     id: string,
     body: { path: string; confirm?: boolean },
   ): Promise<{
-    manifest: GzelBundleManifest;
-    items: Array<{ kind: string; id: string; version: string }>;
-    installed?: Array<{ kind: string; id: string; version: string }>;
+    manifest: GezappManifest;
+    items: Array<{ kind: GezappEmbeddedKind; id: string; version: string }>;
+    dependencies: GezappDependency[];
+    missingDependencies: GezappDependency[];
+    packageSha256: string;
+    installed?: {
+      appId: string;
+      version: string;
+      receiptPath: string;
+      alreadyPresent: boolean;
+    };
   }> {
-    return this.request(
-      'POST',
-      `/api/projects/${encodeURIComponent(id)}/project-types/import`,
-      body,
-    );
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/ai-apps/import`, body);
   }
 
   // ── Connectors (external-data sources) ────────────────────────────────────

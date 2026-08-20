@@ -10,16 +10,16 @@ type; the type is the reusable kit, the project is the user's instance of it.
 engine — not a plugin platform.** Every capability it composes already exists as a
 proven primitive (catalog items, craftbooks, SDK scripts, the preview host, cron tasks).
 Three new primitives are introduced (script-backed tools, a project toolset scope,
-pinned Output pages) and one container format (`.gzl`). No new code-execution surface
+pinned Output pages) and one package format (`.gezapp`). No new code-execution surface
 is added beyond what already exists.
 
-Vocabulary: the term is **"project type"**, or **"custom project type"** when
-distinguishing user-installed/shared types from builtins. The word "app" is reserved
-for the existing external-app surface (`/v1/apps`, `@bendyline/gezel-app-sdk`) and must
-not be used for this feature.
+Vocabulary: **project type** names the composition and instantiation primitive. **AI
+App** names the complete customer-facing experience and its `.gezapp` package. A
+**connected app** remains the separate external-process surface (`/v1/apps`,
+`@bendyline/gezel-app-sdk`).
 
 This document is the spec. It records the manifest shape, instantiation semantics, the
-copy-vs-reference rule, the security posture for sharing, and the `.gzl` container
+copy-vs-reference rule, the security posture for sharing, and the `.gezapp` package
 format. Implementation lands in phases (see the end of this doc).
 
 ## Relationship to what exists today
@@ -363,10 +363,10 @@ explicit adoption**. A detector match must never install or execute anything.
 
 Importing a shared type is arbitrary-code-adjacent. The defenses reuse what exists:
 
-- **Import review gate.** Every import runs through a review screen (the
-  `.gezel/pending-imports.json` pattern from
-  [packages/service/src/workspace/import-sync.ts](../packages/service/src/workspace/import-sync.ts))
-  enumerating every gezel, tool, capability, schedule, and toolset the bundle wants.
+- **Import review gate.** The first import call is a non-mutating preview that reports
+  the publisher, entry project type, embedded items, external dependencies,
+  compatibility, conflicts, and missing dependencies. Installation requires a second,
+  explicitly confirmed call.
 - **No embedded executables.** Toolsets install only by catalog reference with sha-256
   pinning — no embedded npm/MCP code in a bundle. Sandboxed SDK scripts are the only
   code a bundle may carry, and their declared capabilities are shown at review.
@@ -376,28 +376,34 @@ Importing a shared type is arbitrary-code-adjacent. The defenses reuse what exis
 - Caveat to keep in mind when reviewing script capabilities: the sandbox is weakest on
   Windows/Linux (no OS-level wrapper; `node --permission` plus the JS net neutralizer).
 
-## The `.gzl` container
+## The `.gezapp` package
 
-A `.gzl` file is a **renamed zip with a root `manifest.json`** — a generic container
-for any mix of catalog items (one or more project types, gezel roles, craftbook packs),
-with project-type as the flagship kind. One importer serves all kinds.
+A `.gezapp` file is a **renamed zip with a root `manifest.json`**. It represents one
+AI App rather than an arbitrary collection: exactly one entry project type at an exact
+version, plus its referenced role and standalone craftbook templates.
 
 ```
-my-bundle.gzl  (zip, renamed)
-├── manifest.json          schemaVersion, name, description, creator?, createdAt,
-│                          minSupportedVersion?, items[]: {kind, id, version, path, sha256},
-│                          provenance {source?, exportedFromProject?}
-└── items/                 each item in the EXACT catalog on-disk layout
-    ├── project-types/{id}/manifest.json + versions/{v}/… + pages/ + scripts/
-    ├── gezel-templates/{id}/…
-    └── craftbook-templates/{id}/…
+my-app.gezapp  (zip, renamed)
+├── manifest.json          app identity, publisher, entry, minimum Gezel version,
+│                          signature status, embedded item hashes, exact dependencies
+└── items/                 selected versions in the catalog on-disk layout
+    ├── project-types/{id}/manifest.json + versions/{v}/…
+    ├── gezel-templates/{id}/manifest.json + versions/{v}/…
+    └── craftbook-templates/{id}/manifest.json + versions/{v}/…
 ```
 
-Items reuse the catalog layout verbatim, so import is: unzip → validate schemas +
-per-item sha256 → review screen → copy each item into its matching local source
-(`~/.gezel/project-types/`, `~/.gezel/craftbook-templates/`, local gezel templates).
-Cross-references inside a bundle (a project type pointing at a gezel template it ships
-with) resolve bundle-first, then against the installed catalog.
+Items reuse the catalog layout, but only the selected version travels. Import is:
+bound and inspect the ZIP → validate schemas, paths, hashes, identities, reference
+closure, compatibility, dependencies, and conflicts → preview → confirmed atomic mount
+under `~/.gezel/ai-apps/{appId}/{version}/`. A receipt and active-app registry keep the
+items attached to the package that supplied them. Catalog reads mount active AI Apps as
+one dynamic source.
+
+Toolsets, connectors, models, executables, and arbitrary npm code are not embedded.
+The manifest locks referenced external dependencies to exact versions and a confirmed
+install fails while a required dependency is unavailable. Import does not execute app
+content. Version 1 packages explicitly declare `signature.status: "unsigned"`; their
+hashes provide integrity, not publisher authenticity.
 
 The companion feature is the **exporter**: "package this project as a custom project
 type" — a Meester-assisted lift of a project's accumulated craftbooks, scripts, pages,
@@ -433,10 +439,11 @@ and gezel into a multi-item bundle. Users grow a project organically, then share
 5. **Exemplars** ✅ — Language Trainer (workspace-oriented) and Design Scheme
    (artifacts-oriented, via `artifactsSeed`), both as shipped bundled entries with tests. The
    Language Trainer flow is verified end-to-end in the Electron app.
-6. **Sharing** ✅ — `.gzl` container ([gzl.ts](../packages/service/src/project-type/gzl.ts)):
-   pack/unpack (adm-zip), per-item sha256 verification, a review-then-confirm importer that
-   installs into the local catalog home, and `export_project_type` / `import_project_type` MCP
-   tools + HTTP endpoints.
+6. **Sharing** ✅ — `.gezapp` package
+   ([gezapp.ts](../packages/service/src/project-type/gezapp.ts)): exact-version packing,
+   per-item SHA-256 verification, dependency locking, reference-closure and conflict
+   validation, a review-then-confirm atomic installer with receipts, and
+   `export_ai_app` / `import_ai_app` MCP tools + HTTP endpoints.
 7. **Craftbook install + schedules** ✅ — adoption copy-installs `craftbooks[]` into the
    project (embedded `craftbooks/<id>.json` docs first, catalog `craftbook-template` ids as
    fallback) with a provenance sidecar so re-apply skips unchanged copies and never clobbers
@@ -451,7 +458,7 @@ and gezel into a multi-item bundle. Users grow a project organically, then share
    above. Exemplars: Checkers (`game` rail — the board IS the dashboard) and
    Flashcards (`growth` — review page + coaching reaction).
 9. **Later** (not yet built) — upgrade/drift UI, community submissions, a UI
-   download/upload affordance for `.gzl` files (the flow is fully available to the
+   download/upload affordance for `.gezapp` files (the flow is fully available to the
    Meester via MCP today), and a Windows denyNet boundary so scripts (and therefore
    interactive pages) run there.
 

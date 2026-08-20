@@ -81,7 +81,7 @@ export interface CatalogSource {
   ): Promise<Buffer | null>;
   /**
    * Optional: every file under an item's folder as item-relative paths. Only
-   * on-disk sources implement it (used by the `.gzl` exporter); synthetic
+   * on-disk sources implement it (used by the `.gezapp` exporter); synthetic
    * sources (builtin toolsets) omit it.
    */
   listItemFiles?(kind: CatalogKind, id: string): Promise<string[]>;
@@ -423,7 +423,7 @@ export class BundledSource implements CatalogSource {
   /**
    * Every file under an item's folder, as item-relative paths (e.g.
    * `manifest.json`, `versions/1.0.0/pages/gallery/index.html`), sorted. Used
-   * by the `.gzl` exporter to pack an item verbatim — pages, seeds, and all
+   * by the `.gezapp` exporter to pack an item verbatim — pages, seeds, and all
    * assets, not just the ones the manifest names. Read each back with
    * `readItemFile(kind, id, relPath)` (no version → item-relative). Empty when
    * the item folder is missing.

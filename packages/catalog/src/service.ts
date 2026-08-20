@@ -8,6 +8,7 @@ import type {
 } from '@bendyline/gezel';
 import { BuiltinToolsetsSource } from './builtin-toolsets.js';
 import { CommunitySource } from './community-source.js';
+import { InstalledAiAppsSource } from './installed-ai-apps-source.js';
 import { LocalCatalogSource } from './local-source.js';
 import { BundledSource, type CatalogSource } from './source.js';
 
@@ -17,9 +18,11 @@ import { BundledSource, type CatalogSource } from './source.js';
  *
  *   1. BuiltinToolsetsSource — synthetic groups for our in-process MCP
  *      server. Tools we ship and own.
- *   2. BundledSource — pre-reviewed third-party catalog shipped with
+ *   2. InstalledAiAppsSource — active `.gezapp` packages mounted as units.
+ *   3. LocalCatalogSource — manually authored/imported user content.
+ *   4. BundledSource — pre-reviewed third-party catalog shipped with
  *      the app (`data/`). Hand-curated.
- *   3. CommunitySource — auto-imported entries from the upstream MCP
+ *   5. CommunitySource — auto-imported entries from the upstream MCP
  *      registry (`data/community/`). Permissively-licensed only;
  *      treated as a second tier that the UI can label distinctly.
  *
@@ -31,9 +34,9 @@ export class CatalogService {
 
   /**
    * @param sources explicit source list (replaces the defaults entirely).
-   * @param opts.localRoot a GEZEL_HOME to read user-installed / `.gzl`-imported
-   *   catalog items from (project types + gezel roles). Appended just ahead of
-   *   the bundled tier so a user's imported item shadows a same-id bundled one.
+   * @param opts.localRoot a GEZEL_HOME to read user-installed catalog items and
+   *   mounted `.gezapp` packages from. Both sit ahead of the bundled tier so a
+   *   user's installed item shadows a same-id bundled one.
    * @param opts.contentRoot dynamic gilde content root for the default
    *   bundled + community tiers, re-read on every disk access. The live
    *   gilde update mechanism flips it without reconstructing this service
@@ -57,8 +60,10 @@ export class CatalogService {
     const contentRoot = opts?.contentRoot;
     const gezelVersion = opts?.gezelVersion;
     const local = opts?.localRoot ? [new LocalCatalogSource(opts.localRoot, gezelVersion)] : [];
+    const aiApps = opts?.localRoot ? [new InstalledAiAppsSource(opts.localRoot, gezelVersion)] : [];
     this.sources = [
       new BuiltinToolsetsSource(),
+      ...aiApps,
       ...local,
       new BundledSource({
         ...(contentRoot ? { dataDir: contentRoot } : {}),
@@ -87,7 +92,7 @@ export class CatalogService {
   }
 
   /**
-   * Merged listing across sources. Items from earlier sources (bundled)
+   * Merged listing across sources. Items from earlier sources
    * shadow later sources (remote) on id collision.
    */
   async list(kind: CatalogKind): Promise<CatalogItemSummary[]> {

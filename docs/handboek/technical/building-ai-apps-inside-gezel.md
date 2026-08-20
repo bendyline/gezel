@@ -13,7 +13,7 @@ subcategory:
 
 An AI App is a reusable experience that runs *inside* Gezel: a tailored project, a purpose-built crew, repeatable craftbooks, scripts, data, and an optional interactive dashboard. A language trainer, research room, board game, or client-service workspace can all use the same underlying pieces while feeling like a distinct application.
 
-This is a useful product name for the composition, but it is not a separate catalog kind today. The project type is the composition root and installer. Public project types normally arrive through the [Gezel Gilde project-type collection](https://gezelgilde.com/toolsets/#project-types); private or experimental types can be shared in the current `.gzl` bundle format.
+The project type is the composition root and installer. Public AI Apps normally arrive through the [Gezel Gilde project-type collection](https://gezelgilde.com/toolsets/#project-types); private or experimental apps can be shared as `.gezapp` packages.
 
 An AI App is different from a connected app. A connected app runs in its own process and interface and reaches Gezel through `@bendyline/gezel-app-sdk`. See [Building connected apps with gezel-app-sdk](building-connected-apps-with-gezel-app-sdk.md) when that is what you are building.
 
@@ -33,7 +33,7 @@ An AI App is different from a connected app. A connected app runs in its own pro
 The result is composition rather than a general plug-in runtime:
 
 ```text
-Gilde project type or local .gzl
+Gilde project type or .gezapp package
                  ↓ explicit adoption
 project + crew + craftbooks + scripts + data + Output page
                  ↓ ordinary use
@@ -52,7 +52,7 @@ There is no AI App builder or `gezel app new` command yet. The supported public 
 4. Put SDK script source in the version manifest's `scripts` map, expose only the narrow tools the gezels or page need, and declare every capability and input schema.
 5. Build the Output page against `window.gezel`, declare its readable paths and callable tools, and test both light and dark themes.
 6. From the Gilde checkout, run `npm run fix` and `npm run check`. When developing Gilde and Gezel side by side, run `pnpm link:gilde` from the Gezel checkout so the local daemon and tests see the edited catalog content.
-7. Contribute the type to Gilde for normal distribution. After a type is already resolvable by a Gezel installation, use `.gzl` export for controlled private sharing.
+7. Contribute the type to Gilde for normal distribution. After a type is resolvable by a Gezel installation, export a `.gezapp` for controlled private sharing.
 
 This workflow is deliberately candid: the catalog files are the authoring surface today. The desktop app can use and share a finished type, but it cannot yet assemble those files from a prototype for you.
 
@@ -192,30 +192,26 @@ One project type currently pins one Output entry page. That page may contain sev
 
 Public, broadly useful AI Apps should be contributed to Gilde. The released project type, its roles, craftbooks, and assets then travel in the exact-pinned `@bendyline/gilde` catalog used by Gezel. Models remain separate catalog choices—browse the [Gilde model collection](https://gezelgilde.com/models/)—and are not bundled into an AI App.
 
-For private sharing, Gezel already has `.gzl`. It is a renamed zip with a root `manifest.json`, an `items/` tree, and a SHA-256 digest for every item. Version 1 packages:
+For private sharing, Gezel uses `.gezapp`. It is a renamed zip with a root `manifest.json`, an `items/` tree, and a SHA-256 digest for every embedded catalog item. Version 1 packages contain:
 
-- One existing catalog project type, including every file in its item folder: version manifests, pages, seeds, assets, and embedded craftbooks.
-- Every gezel role template referenced by that project type.
+- Exactly one entry project type at an exact version, including its pages, seeds, assets, scripts, and private embedded craftbooks.
+- Every gezel role template and standalone craftbook template referenced by that version.
+- An exact dependency lock for referenced toolsets, connectors, and models. These dependencies remain external to the archive and must be available before installation.
+- A minimum Gezel version, publisher details, an explicit signature status, and content hashes.
 
-It does not embed toolsets, models, executables, or arbitrary npm code. It also does not include standalone craftbook-template items; a private craftbook travels only when it is embedded in the project type's version folder.
+Only the selected version of each item is included. A `.gezapp` does not embed toolsets, models, connector executables, or arbitrary npm code.
 
-Ask a gezel with the project-management tools to export the type applied to the current project. Gezel writes the `.gzl` into project artifacts. On another installation, place that file in a project's artifacts and ask a gezel to import it. The first import call previews and verifies every item without writing anything; a second, confirmed call installs the items into the local catalog. Import never executes the contents.
+Ask a gezel with the project-management tools to export the type applied to the current project. Gezel writes the `.gezapp` into project artifacts. On another installation, place that file in a project's artifacts and ask a gezel to import it. The first import call previews the publisher, contents, compatibility, hashes, conflicts, and missing dependencies without writing anything. A second, confirmed call installs the package atomically under `~/.gezel/ai-apps/`, records an installation receipt, and mounts it as one catalog source. Import never executes the contents.
+
+The v1 signature status is `unsigned`. Hashes detect corruption and tampering after packaging, but they do not establish who published the app. Only install packages from a source you trust.
 
 The current exporter packages the catalog definition, not the organic state of the current project. Changes made after adoption—edited scripts, a newly written craftbook, accumulated data, or a redesigned dashboard—are not automatically turned back into a new project-type version.
 
-## Should this become `.gezapp`?
+## The `.gezapp` contract
 
-`.gezapp` would be a clearer customer-facing name for the complete composition, but it is a proposal, not a format Gezel recognizes today. The least surprising path would be a documented application profile or future alias of the existing verified bundle rather than a second unrelated archive format.
+`.gezapp` is the customer-facing package for one AI App, not a generic bag of unrelated catalog content. Its entry project type defines the experience; referenced roles and craftbooks travel with it; external executable and model dependencies stay locked by identity and exact version. Gezel validates the archive's paths, size limits, schemas, reference closure, hashes, compatibility, dependencies, and conflicts before it mounts the package.
 
-A useful `.gezapp` profile would add the missing product contract around the current pieces:
-
-- Exactly one entry project type and all referenced role templates.
-- Embedded private craftbooks plus optional standalone craftbook-template items.
-- A dependency lock for referenced toolsets, connectors, and minimum Gezel or SDK versions, while continuing to keep executable dependencies and models outside the archive.
-- App-level identity, artwork, release notes, license, data-schema version, and migration declarations.
-- The same preview, digest verification, consent gates, and no-execution-on-import behavior as `.gzl`.
-
-Changing only the extension would not solve authoring or upgrades, so those contracts should be designed with the name.
+The mounted-unit design preserves the relationship between the installed items and the app that supplied them. That makes receipts, inspection, disabling, replacement, and a future uninstall flow possible without scattering copied files through several local catalog directories.
 
 ## What still needs improvement
 
@@ -225,7 +221,6 @@ The runtime pieces are farther along than the authoring experience. These are th
 | --- | --- |
 | App builder | A guided UI or CLI that scaffolds the type, role, page, craftbook, script, and seed files and validates them together |
 | Project-to-app export | A deliberate diff and review flow that converts an organic project into a new project-type version instead of exporting only its original catalog item |
-| Private bundle breadth | Support for standalone craftbook templates and an explicit, locked dependency graph without embedding toolset or model code |
 | Import interface | File picking, bundle review, conflict handling, and export/download controls in the desktop app rather than a project-artifact and gezel-tool flow |
 | Updates and drift | A three-way reconcile view for a new type version versus the installed provenance versus user-edited scripts, craftbooks, documents, and data |
 | Schema evolution | App data-version declarations, migrations, backup, and rollback for custom JSON or other records |
@@ -234,4 +229,4 @@ The runtime pieces are farther along than the authoring experience. These are th
 | Portable script sandbox | A consistent OS-enforced path for user-edited scripts on every supported platform; today provenance-verified catalog scripts have a more portable execution path than modified or newly authored scripts |
 | Catalog workflow | A supported local authoring source, publish command, signing story, and private registry path alongside public Gilde contributions |
 
-Until those exist, treat the project type as the canonical source of an AI App. Use Gilde for public distribution, `.gzl` for controlled sharing of an already-authored type, and ordinary projects for prototypes whose composition is still changing.
+Until those exist, treat the project type as the canonical source of an AI App. Use Gilde for public distribution, `.gezapp` for controlled sharing of an already-authored type, and ordinary projects for prototypes whose composition is still changing.

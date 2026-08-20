@@ -428,7 +428,7 @@ Installation sequence:
 10. Keep the previous active version until the new version passes; prune it only
     after publication succeeds.
 
-The existing ZIP guard, `.gzl` manifest/hash pattern, model install registry,
+The existing ZIP guard, `.gezapp` manifest/hash pattern, model install registry,
 Gilde staging flow, disk-space preflight, and incomplete-download UI are the
 patterns to reuse. The current in-memory `AdmZip` and 500 MB document limits are
 not appropriate for multi-gigabyte catalogs; knowledge installation needs a

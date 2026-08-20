@@ -66,7 +66,7 @@ import {
 import { applyProjectType } from '../../project-type/apply.js';
 import { TypedProjectCreateError, createTypedProject } from '../../project-type/create.js';
 import { detectAndPersistProjectType } from '../../project-type/detect.js';
-import { importGzlBundle, packProjectTypeBundle } from '../../project-type/gzl.js';
+import { GEZAPP_MAX_ARCHIVE_BYTES, importGezapp, packGezapp } from '../../project-type/gezapp.js';
 import { readCommandApprovals } from '../../workspace/command-approvals.js';
 import { deriveWorkspaceFile } from '../../workspace/derive.js';
 import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../../workspace/errors.js';
@@ -471,39 +471,41 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     }
   });
 
-  /**
-   * Package a project type (and the gezel templates it references) into a
-   * `.gzl` share bundle, written into this project's artifacts. Returns the
-   * artifact path + the bundle manifest. See docs/project-types.md.
-   */
-  app.post('/:id/project-types/export', async (c) => {
+  /** Package the project's AI App into a `.gezapp` artifact. */
+  app.post('/:id/ai-apps/export', async (c) => {
     const id = c.req.param('id');
     const project = await ctx.store.getProject(id).catch(() => null);
     if (!project) return c.json({ error: 'project not found' }, 404);
     const body = (await c.req.json().catch(() => ({}))) as {
       typeId?: string;
-      name?: string;
-      description?: string;
-      creator?: string;
+      version?: string;
+      publisherName?: string;
+      publisherUrl?: string;
     };
     const typeId = body.typeId ?? project.projectType?.id;
     if (!typeId) {
       return c.json({ error: 'no typeId given and this project has no applied project type' }, 400);
     }
     try {
-      const { buffer, manifest } = await packProjectTypeBundle(
+      const { buffer, manifest } = await packGezapp(
         { catalog: ctx.catalog },
         {
           typeId,
-          ...(body.name ? { name: body.name } : {}),
-          ...(body.description ? { description: body.description } : {}),
-          ...(body.creator ? { creator: body.creator } : {}),
+          ...(body.version ? { version: body.version } : {}),
+          ...(body.publisherName
+            ? {
+                publisher: {
+                  name: body.publisherName,
+                  ...(body.publisherUrl ? { url: body.publisherUrl } : {}),
+                },
+              }
+            : {}),
           createdAt: new Date().toISOString(),
           exportedFromProject: id,
         },
       );
-      const slug = typeId.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '') || 'bundle';
-      const artifactPath = `shared/${slug}.gzl`;
+      const slug = typeId.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '') || 'ai-app';
+      const artifactPath = `shared/${slug}.gezapp`;
       const written = await ctx.store.writeProjectArtifactBinary(id, artifactPath, buffer);
       return c.json({ path: written, artifactPath, manifest, bytes: buffer.length });
     } catch (err) {
@@ -511,30 +513,33 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     }
   });
 
-  /**
-   * Import a `.gzl` bundle from a file in this project's artifacts. Without
-   * `confirm` it validates + returns the review (what the bundle contains);
-   * with `confirm: true` it installs the items into the local catalog home so
-   * they appear in the gallery. Nothing executes at import.
-   */
-  app.post('/:id/project-types/import', async (c) => {
+  /** Preview or install a `.gezapp` from this project's artifacts. */
+  app.post('/:id/ai-apps/import', async (c) => {
     const id = c.req.param('id');
     const project = await ctx.store.getProject(id).catch(() => null);
     if (!project) return c.json({ error: 'project not found' }, 404);
     const body = (await c.req.json().catch(() => ({}))) as { path?: string; confirm?: boolean };
-    if (!body.path) return c.json({ error: 'missing artifact path to the .gzl file' }, 400);
+    if (!body.path) return c.json({ error: 'missing artifact path to the .gezapp file' }, 400);
     const full = safeJoin(ctx.store.projectArtifactsDir(id), body.path);
     if (!full || !(await realpathContained(ctx.store.projectArtifactsDir(id), full))) {
       return c.json({ error: 'invalid path' }, 400);
     }
     let buffer: Buffer;
     try {
+      const info = await stat(full);
+      if (!info.isFile()) return c.json({ error: 'the .gezapp path is not a file' }, 400);
+      if (info.size > GEZAPP_MAX_ARCHIVE_BYTES) {
+        return c.json(
+          { error: `.gezapp exceeds ${GEZAPP_MAX_ARCHIVE_BYTES} byte archive limit` },
+          400,
+        );
+      }
       buffer = await readFile(full);
     } catch {
       return c.json({ error: `no file at artifacts/${body.path}` }, 404);
     }
     try {
-      const result = await importGzlBundle({ home: ctx.home }, buffer, {
+      const result = await importGezapp({ home: ctx.home, catalog: ctx.catalog }, buffer, {
         confirm: Boolean(body.confirm),
       });
       if (result.installed) await ctx.chat.resetClient();
