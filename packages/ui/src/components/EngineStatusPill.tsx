@@ -58,6 +58,7 @@ import {
   formatBytes,
   formatTokensPerSec,
 } from './engine-pill-stats.js';
+import { useHeaderDensity } from './header-density.js';
 import { deviceLabel, providerLabel } from './provider-label.js';
 import { type LiveTurnState, useOnDeviceLiveTurns } from './useOnDeviceLiveTurns.js';
 import { useStableHeaderPopoverPosition } from './useStableHeaderPopoverPosition.js';
@@ -959,6 +960,19 @@ function EngineStatusPillForProvider({
       ? 'Video'
       : 'Image'
     : chatPillLabel;
+  // Crowded titlebar: shed words rather than run off the bar. The machine
+  // name is the first to go — every local engine wears the same one, so it
+  // stops distinguishing anything the moment a second pill appears, and the
+  // model name below already tells the two apart. A named engine
+  // ("DwarfStar", "Video", "Image") is not a machine name and stays.
+  const density = useHeaderDensity();
+  const kindNamesTheMachine =
+    !activeMedia &&
+    (!onDeviceProvider || onDeviceProvider === 'llama-cpp' || onDeviceProvider === 'mlx');
+  const showKind = density === 'full' || !kindNamesTheMachine;
+  // Tighter still: the gezel's name goes, leaving engine + phase + model.
+  // Both stay in the pill's tooltip and in the popover's Status row.
+  const showActor = density !== 'tight';
 
   return (
     <div className="engine-pill-root" ref={rootRef}>
@@ -989,9 +1003,15 @@ function EngineStatusPillForProvider({
               {/* Keep the concrete engine visible beside live progress.
                   This is essential when a gezel override runs llama.cpp
                   alongside an idle default DwarfStar engine: two anonymous
-                  progress bars would recreate the same ambiguity. */}
-              <span className="engine-pill-kind">{platformPillLabel}</span>
-              {activeGezelName && <span className="engine-pill-actor">{activeGezelName} · </span>}
+                  progress bars would recreate the same ambiguity. On a
+                  crowded bar the machine name drops out (see `showKind`)
+                  and the model name below takes over that duty — which it
+                  can, because two pills wearing "This Mac" were never told
+                  apart by the name in the first place. */}
+              {showKind && <span className="engine-pill-kind">{platformPillLabel}</span>}
+              {showActor && activeGezelName && (
+                <span className="engine-pill-actor">{activeGezelName} · </span>
+              )}
               {showProgress ? (
                 <span
                   className="engine-pill-progress"
@@ -1013,10 +1033,12 @@ function EngineStatusPillForProvider({
               )}
             </>
           ) : (
-            platformPillLabel
+            showKind && platformPillLabel
           )}
           {displayModelName && (
-            <span className="engine-pill-model">{` · ${displayModelName}`}</span>
+            // The separator belongs to whatever precedes the model name, so
+            // a compacted idle pill reads "Qwen 3.8", not "· Qwen 3.8".
+            <span className="engine-pill-model">{`${busy || showKind ? ' · ' : ''}${displayModelName}`}</span>
           )}
           {healthPresentation?.inline && (
             <>

@@ -29,6 +29,7 @@ import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 import { GezelIcon } from './GezelIcon.js';
 import { getReadonlyGezelMediaProvider } from './GezelMediaProvider.js';
+import { QueuedTaskBubble } from './QueuedTaskBubble.js';
 import { ReportErrorLink } from './ReportErrorLink.js';
 import { TerminalBubble } from './TerminalBubble.js';
 import { TerminalStreamingBubble } from './TerminalStreamingBubble.js';
@@ -48,6 +49,7 @@ import {
   subscribeOptimisticUserMessages,
 } from './chat-optimistic-events.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
+import type { QueuedTaskEntry } from './queued-task-entries.js';
 import { compareTimelineRows, nextTerminalBottomGraceExpiry } from './timeline-row-order.js';
 import { buildTimelineThreads } from './timeline-threads.js';
 import { useNarrateAssistantReplies } from './useNarrateAssistantReplies.js';
@@ -89,6 +91,13 @@ function cssAttrValue(value: string): string {
 // enough that "after lunch" reads as a new thread, long enough that
 // stepping away to read docs doesn't fragment one task.
 const TERMINAL_SESSION_GAP_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * Queue cards shown before the rest collapse into one counted line. Four
+ * is enough to read a batch as a batch without the receipts outgrowing
+ * the conversation they annotate.
+ */
+const MAX_QUEUED_TASK_CARDS = 4;
 
 function mergeTerminalEntries(
   snapshot: TerminalTimelineEntry[] | undefined,
@@ -452,6 +461,15 @@ export interface ChatTimelineViewProps {
    * body (`scoped: false`). Dedupe + ordering live in the rail.
    */
   onTaskReference?: (ref: string, opts?: { scoped?: boolean }) => void;
+  /**
+   * Tasks the TaskRunner is holding, paired with the queue state that
+   * explains the hold. Rendered as receipt cards in the final lane —
+   * accepted work that hasn't spoken yet, so a busy machine reads as
+   * "coming up" instead of as a dropped request. Any entry whose task
+   * is already streaming a turn here is dropped: the live bubble IS its
+   * representation. Omitted by surfaces with no task authority.
+   */
+  queuedTasks?: QueuedTaskEntry[];
   /** Empty-state copy shown above the composer when no messages exist. */
   emptyPlaceholder?: string;
   /**
@@ -596,6 +614,7 @@ export function ChatTimelineView({
   onWorkspaceSeen,
   onOpenReference,
   onTaskReference,
+  queuedTasks,
   emptyPlaceholder,
   emptyContent,
   loadTimeline,
@@ -2371,6 +2390,28 @@ export function ChatTimelineView({
   // kept root's thread. See `timeline-threads.ts`.
   const threadItems = useMemo(() => buildTimelineThreads(rows), [rows]);
 
+  /**
+   * Queue receipts for held tasks, minus any task that is already
+   * streaming here. A live bubble IS that task's representation, and a
+   * card beside it claiming the work is "waiting its turn" would
+   * contradict what the reader can see happening.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: liveBump is a counter that forces re-derivation from the mutable liveRef.
+  const queuedTaskCards = useMemo(() => {
+    if (!queuedTasks?.length) return [];
+    const streaming = new Set<string>();
+    for (const [sessionId, slot] of liveRef.current.entries()) {
+      // `slot.taskRef` is copied in at slot-creation time from whatever
+      // history the envelope handler's closure had, which is empty for
+      // any turn that starts before the first page loads. Resolve
+      // against current messages too, or a task whose turn is visibly
+      // streaming keeps its "waiting" card right beside the bubble.
+      const ref = slot.taskRef ?? findLastForSession(messages, sessionId)?.taskRef;
+      if (ref) streaming.add(ref);
+    }
+    return queuedTasks.filter((entry) => !streaming.has(entry.task.ref));
+  }, [queuedTasks, messages, liveBump]);
+
   // Auto-scroll: snapshot whether the user is near the bottom *before*
   // every render, then if so, snap to the bottom *after*. If they were
   // scrolled up reading older history, leave them where they are.
@@ -2946,6 +2987,36 @@ export function ChatTimelineView({
     return { userMsg, assistantInfo };
   }, [stickyHeader, messages, liveBump]);
 
+  // Built once and rendered from both the empty branch and the main
+  // one: a project whose only activity is a queued task has no rows at
+  // all, and that is exactly the case the card exists for.
+  const shownQueuedTasks = queuedTaskCards.slice(0, MAX_QUEUED_TASK_CARDS);
+  const hiddenQueuedTasks = queuedTaskCards.length - shownQueuedTasks.length;
+  const queuedTaskEls = (
+    <>
+      {shownQueuedTasks.map((entry) => (
+        <QueuedTaskBubble
+          key={`queued-task:${entry.task.ref}`}
+          task={entry.task}
+          wait={entry.wait}
+          gezel={gezels.get(entry.wait.gezelId)}
+          onTaskReference={(ref) =>
+            window.dispatchEvent(
+              new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }),
+            )
+          }
+        />
+      ))}
+      {/* A fanout host can enqueue a shard per batch. Naming the
+          remainder keeps the cap from reading as "that's all of it". */}
+      {hiddenQueuedTasks > 0 && (
+        <p className="msg-queued-task-overflow muted small">
+          + {hiddenQueuedTasks} more task{hiddenQueuedTasks === 1 ? '' : 's'} waiting in the queue.
+        </p>
+      )}
+    </>
+  );
+
   if (loading && messages.length === 0) {
     return (
       <div className="chat-timeline chat-timeline-loading">
@@ -2967,6 +3038,7 @@ export function ChatTimelineView({
       <div className="chat-timeline" ref={scrollRef} data-testid="chat-timeline">
         {emptyContent ??
           (emptyPlaceholder ? <p className="placeholder">{emptyPlaceholder}</p> : null)}
+        {queuedTaskEls}
       </div>
     );
   }
@@ -3674,6 +3746,7 @@ export function ChatTimelineView({
           ? (emptyContent ??
             (emptyPlaceholder ? <p className="placeholder">{emptyPlaceholder}</p> : null))
           : els}
+        {queuedTaskEls}
         {showResponseRunway && <div className="timeline-response-runway" aria-hidden="true" />}
       </div>
       {!pinnedToBottom && (

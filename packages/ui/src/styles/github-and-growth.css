@@ -1210,6 +1210,15 @@
   gap: 0.6rem;
 }
 
+/* Clips the poppetje to its own crop — the SVG paints overflow:visible, so
+   without this the full figure spills past the proposal card. */
+.growth-cosmetic-figure {
+  display: inline-flex;
+  flex: none;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+}
+
 /* --- Celebration flourish (one-shot, latched) ------------------------ */
 
 @keyframes growth-celebrate-rock {

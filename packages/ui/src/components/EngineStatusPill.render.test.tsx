@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
+import { type HeaderDensity, HeaderDensityContext } from './header-density.js';
 import { providerLabel } from './provider-label.js';
 import type { LiveTurnState } from './useOnDeviceLiveTurns.js';
 
@@ -835,5 +836,104 @@ describe('EngineStatusPill — simultaneous local engines', () => {
         'Includes 2 leftover Gezel engine processes from an earlier service session',
       ),
     ).toBeInTheDocument();
+  });
+});
+
+describe('EngineStatusPill — crowded titlebar', () => {
+  const device = providerLabel('llama-cpp', window.__GEZEL__?.platform);
+
+  beforeEach(() => {
+    mockLiveTurns = new Map([
+      [
+        'talkie-session',
+        {
+          provider: 'llama-cpp',
+          phase: 'generating',
+          label: 'Generating',
+          startedAt: Date.now(),
+          lastEventAt: Date.now(),
+        },
+      ],
+    ]);
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'ds4',
+      defaultModel: {
+        ds4: 'deepseek-v4-flash',
+        'llama-cpp': 'talkie-1930-13b-q4',
+      },
+      deviceSafety: { mode: 'observe' },
+    } as ConfigResponse);
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      providers: { ds4: queueState(0), 'llama-cpp': queueState(1) },
+      taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+      sessions: [],
+      cache: [],
+      at: '',
+    } as QueueStatusResponse);
+    vi.mocked(api.listInflightTurns).mockResolvedValue({
+      inflight: [
+        {
+          sessionId: 'talkie-session',
+          gezelId: 'liesel',
+          projectId: 'just-chat',
+          providerName: 'llama-cpp',
+          model: 'talkie-1930-13b-q4',
+          userText: 'hi there Liesel',
+          startedAt: Date.now(),
+          elapsedMs: 3_000,
+        },
+      ],
+    } as never);
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [{ id: 'liesel', name: 'Liesel', updatedAt: '2026-08-13T00:00:00.000Z' }],
+    });
+    vi.mocked(api.listDs4Models).mockResolvedValue({
+      models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' } as never],
+    });
+    vi.mocked(api.listLlamaCppModels).mockResolvedValue({
+      models: [{ id: 'talkie-1930-13b-q4', name: 'Talkie 1930 13B' } as never],
+    });
+    vi.mocked(api.getUsage).mockResolvedValue({ providers: {}, lastUpdated: null });
+  });
+
+  async function pillsAt(density: HeaderDensity) {
+    const { container } = render(
+      <HeaderDensityContext.Provider value={density}>
+        <EngineStatusPill />
+      </HeaderDensityContext.Provider>,
+    );
+    await waitFor(() => {
+      expect(container.querySelectorAll('.engine-pill')).toHaveLength(2);
+    });
+    const [dwarfStar, talkie] = Array.from(container.querySelectorAll<HTMLElement>('.engine-pill'));
+    return { dwarfStar: dwarfStar as HTMLElement, talkie: talkie as HTMLElement };
+  }
+
+  it('keeps the machine name and the gezel at full density', async () => {
+    const { dwarfStar, talkie } = await pillsAt('full');
+    expect(dwarfStar).toHaveTextContent('DwarfStar · DeepSeek V4 Flash');
+    expect(talkie).toHaveTextContent(device);
+    expect(talkie).toHaveTextContent('Liesel');
+  });
+
+  it('drops the machine name — but not a named engine — when compact', async () => {
+    const { dwarfStar, talkie } = await pillsAt('compact');
+    // Every local engine wears the machine name, so it distinguishes nothing
+    // once a second pill is up; "DwarfStar" still does.
+    expect(talkie).not.toHaveTextContent(device);
+    expect(dwarfStar).toHaveTextContent('DwarfStar');
+    // The model name carried the separator when the machine name preceded it.
+    expect(dwarfStar.textContent).not.toMatch(/^\s*·/);
+    expect(talkie).toHaveTextContent('Liesel');
+    // Nothing is actually lost — the tooltip still names the machine.
+    expect(talkie.getAttribute('title')).toContain(device);
+  });
+
+  it('drops the gezel name too when tight', async () => {
+    const { talkie } = await pillsAt('tight');
+    expect(talkie).not.toHaveTextContent('Liesel');
+    expect(talkie).toHaveTextContent('Generating');
+    expect(talkie).toHaveTextContent('Talkie 1930');
+    expect(talkie.getAttribute('title')).toContain('Liesel');
   });
 });

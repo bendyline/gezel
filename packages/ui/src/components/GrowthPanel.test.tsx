@@ -170,6 +170,24 @@ describe('GrowthPanel', () => {
     });
   });
 
+  it('clips the cosmetic try-on figure so it stays inside the proposal card', async () => {
+    vi.mocked(api.getGezelGrowth).mockResolvedValue(PENDING);
+    const withPoppetje = {
+      ...GEZEL,
+      poppetje: { key: 'gz-maya', hat: null },
+    } as unknown as GezelDetailData;
+
+    const { container } = render(<GrowthPanel gezel={withPoppetje} />);
+    await waitFor(() => {
+      expect(screen.getByText('Maya reached level 3.')).toBeInTheDocument();
+    });
+    // The poppetje SVG paints overflow:visible — only the wrapper's clip
+    // keeps the body from spilling out of the card.
+    const figure = container.querySelector('.growth-cosmetic-figure');
+    expect(figure).not.toBeNull();
+    expect(figure!.querySelector('[data-testid="poppetje"]')).not.toBeNull();
+  });
+
   it('skips a whole level through the confirm dialog', async () => {
     vi.mocked(api.getGezelGrowth).mockResolvedValue(PENDING);
     vi.mocked(api.declineGrowthLevelUp).mockResolvedValue(

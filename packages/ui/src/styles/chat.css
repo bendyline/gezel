@@ -1213,6 +1213,90 @@
   color: var(--text-muted);
 }
 
+/* Queue receipt for a task the runner has accepted but not started. Shares
+   the handoff card's dashed-terracotta family — both are machinery
+   speaking, not a gezel — but stays quieter: no headline weight, and the
+   whole card sits at reduced opacity like the queued-message ghost, so a
+   thing that has not happened yet never outranks the conversation. */
+.msg-queued-task {
+  align-self: center;
+  align-items: stretch;
+  width: min(90%, 34rem);
+  max-width: 90%;
+  opacity: 0.85;
+}
+
+.msg-queued-task-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px dashed var(--chat-handoff-border, rgba(176, 114, 76, 0.45));
+  border-radius: var(--radius-md);
+  background: var(--chat-handoff-bg, rgba(176, 114, 76, 0.08));
+}
+
+.msg-queued-task-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.msg-queued-task-icon {
+  color: var(--accent);
+}
+
+.msg-queued-task-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.msg-queued-task-headline {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.msg-queued-task-number {
+  color: var(--text-muted);
+}
+
+.msg-queued-task-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.msg-queued-task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.15rem;
+  font-size: var(--text-xs);
+}
+
+.msg-queued-task-ref {
+  color: var(--text-muted);
+}
+
+/* Counted remainder when more tasks are held than we draw cards for. */
+.msg-queued-task-overflow {
+  align-self: center;
+  width: min(90%, 34rem);
+  max-width: 90%;
+  margin: 0;
+  text-align: center;
+}
+
 /* Collapsible "tools that ran during this turn" expando at the top of a
    completed assistant bubble. Closed by default; clicking the summary
    reveals the same thinking-tool list the StreamingBubble uses live.

@@ -1,10 +1,20 @@
-import type { ChatEventEnvelope, Task } from '@bendyline/gezel';
+import type { ChatEventEnvelope, Task, TaskWaitState } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 
 /** Debounce for task re-reads triggered by a burst of `task_event`s. */
 const TASK_REFRESH_DEBOUNCE_MS = 750;
+
+/**
+ * Re-read cadence while the runner is holding work. `waiting` is runtime
+ * state that moves without emitting a `task_event` — a provider slot
+ * frees, a night window opens — so a queue card would otherwise keep
+ * claiming a task is "about to start" long after it did. Only armed
+ * while something is actually waiting, so an idle project still polls
+ * nothing.
+ */
+const WAITING_REFRESH_MS = 15_000;
 
 /**
  * The project's `status: 'active'` tasks — the ones the scheduler ticks,
@@ -22,14 +32,16 @@ export function useProjectActiveTasks({
 }: {
   projectId: string;
   refreshKey?: number | undefined;
-}): { tasks: Task[]; loading: boolean } {
+}): { tasks: Task[]; waiting: TaskWaitState[]; loading: boolean } {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [waiting, setWaiting] = useState<TaskWaitState[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
       const res = await api.listProjectTasks(projectId, { status: 'active' });
       setTasks(res.tasks);
+      setWaiting(res.waiting ?? []);
     } catch {
       // Keep the last good list rather than blanking the row.
     } finally {
@@ -78,5 +90,12 @@ export function useProjectActiveTasks({
     };
   }, [projectId, load]);
 
-  return { tasks, loading };
+  const anyWaiting = waiting.length > 0;
+  useEffect(() => {
+    if (!anyWaiting) return;
+    const timer = window.setInterval(() => void load(), WAITING_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [anyWaiting, load]);
+
+  return { tasks, waiting, loading };
 }

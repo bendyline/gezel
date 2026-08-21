@@ -41,6 +41,8 @@
 import {
   type ModelTier,
   type Task,
+  type TaskWaitReason,
+  type TaskWaitState,
   createLogger,
   getEngagementMode,
   isTaskWorkAllowed,
@@ -244,6 +246,8 @@ export class TaskRunner {
       gezelId: string;
       providerName?: ProviderName;
       activationAt?: string;
+      /** When the handoff left the queue — the `since` a UI counts up from. */
+      dispatchedAt: number;
     }
   >();
   private nextId = 1;
@@ -394,6 +398,45 @@ export class TaskRunner {
       scheduled,
       ...(dispatchable.count > 0 && this.holdReason ? { holdReason: this.holdReason } : {}),
     };
+  }
+
+  /**
+   * Per-task queue state, for surfaces that must explain why an `active`
+   * task has produced no chat yet — the chat timeline's "queued" card
+   * above all. Deliberately reports only what the runner is *actually*
+   * holding: an active task the runner has never seen (no entry gezel,
+   * a dispatch that failed) is absent here rather than described as
+   * pending, so a stuck task reads as stuck instead of as imminent.
+   *
+   * A queue item and a dispatch can coexist for one ref (the next step
+   * enqueues while the current one still streams). The dispatch wins:
+   * it is the newer, more specific state.
+   */
+  waitingStates(): TaskWaitState[] {
+    const byRef = new Map<string, TaskWaitState>();
+    for (const handoff of this.pending) {
+      // Per-item `heldFor` is recomputed each tick and is the precise
+      // answer; the runner-wide `holdReason` only explains the
+      // dispatchable bucket, so it may not be applied to parked work.
+      const reason: TaskWaitReason = handoff.heldFor ?? this.holdReason ?? 'queued';
+      byRef.set(handoff.taskRef, {
+        ref: handoff.taskRef,
+        reason,
+        gezelId: handoff.gezelId,
+        stepId: handoff.stepId,
+        since: new Date(handoff.enqueuedAt).toISOString(),
+      });
+    }
+    for (const dispatch of this.activeDispatches.values()) {
+      byRef.set(dispatch.taskRef, {
+        ref: dispatch.taskRef,
+        reason: 'dispatching',
+        gezelId: dispatch.gezelId,
+        stepId: dispatch.stepId,
+        since: new Date(dispatch.dispatchedAt).toISOString(),
+      });
+    }
+    return [...byRef.values()];
   }
 
   /** Task refs represented by the runner right now. */
@@ -714,6 +757,7 @@ export class TaskRunner {
           stepId: handoff.stepId,
           gezelId: handoff.gezelId,
           providerName,
+          dispatchedAt: this.now(),
           ...(activationAt ? { activationAt } : {}),
         });
         inTickDispatches.set(providerName, (inTickDispatches.get(providerName) ?? 0) + 1);

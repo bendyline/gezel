@@ -1537,3 +1537,102 @@ describe('TaskRunner — entry-kind passthrough', () => {
     expect(dispatcher.dispatches[0]?.kind).toBe('entry');
   });
 });
+
+describe('TaskRunner — waitingStates', () => {
+  async function seedTask(num: number, gezelId: string): Promise<void> {
+    const now = new Date().toISOString();
+    await store.writeTask({
+      projectId: 'p1',
+      num,
+      ref: `p1/${num}`,
+      title: `t${num}`,
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId },
+      craftbook: fixtureCraftbook([
+        { id: 'plan', name: 'plan', assignee: { kind: 'gezel', gezelId }, createdAt: now },
+      ]),
+      activeStepId: 'plan',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+  }
+
+  it('reports nothing when the queue is empty', () => {
+    const runner = new TaskRunner({
+      store,
+      dispatcher: new FakeDispatcher(new Map([['bea', 'copilot']])),
+    });
+    expect(runner.waitingStates()).toEqual([]);
+  });
+
+  it("names a queued handoff, who it's for, and when it was enqueued", () => {
+    const runner = new TaskRunner({
+      store,
+      dispatcher: new FakeDispatcher(new Map([['bea', 'copilot']])),
+      now: () => Date.parse('2026-08-21T05:30:00.000Z'),
+    });
+    runner.enqueueHandoff({ taskRef: 'p1/6', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+
+    expect(runner.waitingStates()).toEqual([
+      {
+        ref: 'p1/6',
+        reason: 'queued',
+        gezelId: 'bea',
+        stepId: 'plan',
+        since: '2026-08-21T05:30:00.000Z',
+      },
+    ]);
+  });
+
+  it('files a night-shift handoff as scheduled rather than as backlog', () => {
+    const runner = new TaskRunner({
+      store,
+      dispatcher: new FakeDispatcher(new Map([['bea', 'copilot']])),
+    });
+    runner.enqueueHandoff({
+      taskRef: 'p1/6',
+      stepId: 'plan',
+      gezelId: 'bea',
+      projectId: 'p1',
+      nightShift: true,
+    });
+    expect(runner.waitingStates()[0]?.reason).toBe('night-shift');
+  });
+
+  it('reports a dispatched handoff as starting, superseding its queue entry', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await seedTask(6, 'bea');
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+    const runner = new TaskRunner({ store, dispatcher });
+    runner.enqueueHandoff({ taskRef: 'p1/6', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    await runner.tick();
+
+    const states = runner.waitingStates();
+    expect(states).toHaveLength(1);
+    expect(states[0]?.reason).toBe('dispatching');
+    expect(states[0]?.ref).toBe('p1/6');
+  });
+
+  it('drops a task once its dispatch settles', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    await seedTask(6, 'bea');
+
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+    const runner = new TaskRunner({ store, dispatcher });
+    runner.enqueueHandoff({ taskRef: 'p1/6', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    await runner.tick();
+    // The session finishing is what ends the "starting" window: with no
+    // active dispatch left the card must disappear, not linger claiming
+    // work is about to begin.
+    dispatcher.activeSessionIds.clear();
+    await runner.tick();
+
+    expect(runner.waitingStates()).toEqual([]);
+  });
+});

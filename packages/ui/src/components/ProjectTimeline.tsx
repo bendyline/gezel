@@ -4,6 +4,8 @@ import { api } from '../api.js';
 import { ChatTimelineView } from './ChatTimelineView.js';
 import type { ToolActivity } from './chat-bubbles.js';
 import type { OpenChatReference } from './chat-open-command.js';
+import { selectQueuedTaskEntries } from './queued-task-entries.js';
+import { useProjectActiveTasks } from './useProjectActiveTasks.js';
 
 /**
  * Project-scoped chat timeline. Loads + tails every session in the
@@ -174,6 +176,17 @@ export function ProjectTimeline({
     }, 500);
   }, []);
 
+  // Accepted-but-silent work. The runner can hold a task for minutes on
+  // a busy machine, and until it speaks the transcript shows nothing at
+  // all — so the user's reasonable reading is that starting the task
+  // did nothing. Narrowed to this timeline's scope so a per-gezel tab
+  // doesn't advertise another gezel's backlog.
+  const { tasks: activeTasks, waiting } = useProjectActiveTasks({ projectId });
+  const queuedTasks = useMemo(
+    () => selectQueuedTaskEntries({ tasks: activeTasks, waiting, gezelId, taskRef }),
+    [activeTasks, waiting, gezelId, taskRef],
+  );
+
   return (
     <ChatTimelineView
       scopeKey={
@@ -192,6 +205,7 @@ export function ProjectTimeline({
       onWorkspaceSeen={onWorkspaceSeen}
       onOpenReference={onOpenReference}
       {...(onTaskReference ? { onTaskReference } : {})}
+      queuedTasks={queuedTasks}
       emptyPlaceholder={emptyPlaceholder}
       loadTimeline={loadTimeline}
       streamUrl={streamUrl}

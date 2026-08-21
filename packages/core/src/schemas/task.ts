@@ -758,8 +758,56 @@ export const NewTaskStepSchema = z.object({
 });
 export type NewTaskStep = z.infer<typeof NewTaskStepSchema>;
 
+/**
+ * Why a task that is `active` and assigned still has not produced any
+ * chat. Ordered from "moving shortly" to "parked on purpose".
+ *
+ * `'dispatching'` is the narrow window after the runner handed the
+ * handoff to a provider but before the first turn persists a message —
+ * the work IS starting, it just has nothing to show yet.
+ */
+export const TaskWaitReasonSchema = z.enum([
+  'dispatching',
+  'provider-busy',
+  'night-shift',
+  'night-quota',
+  'engagement-off',
+  'engagement-paused',
+  'queued',
+]);
+export type TaskWaitReason = z.infer<typeof TaskWaitReasonSchema>;
+
+/**
+ * Runtime queue position for one task, as the TaskRunner sees it right
+ * now. Deliberately NOT part of {@link TaskSchema}: that is the on-disk
+ * shape, and this exists only while a daemon is running.
+ *
+ * Carried as a sibling of `tasks` for the same reason `terminalEntries`
+ * rides beside `messages` on the timeline response — chat-only consumers
+ * shouldn't pay for runner-shaped optional fields on every task record.
+ */
+export const TaskWaitStateSchema = z.object({
+  // Plain string, not `TaskRefSchema`: that helper is declared further
+  // down this module and would be in its temporal dead zone here. This
+  // field is outbound-only — the daemon builds it from a task it just
+  // read, so there is no untrusted ref to validate.
+  ref: z.string(),
+  reason: TaskWaitReasonSchema,
+  /** Gezel the queued step belongs to. */
+  gezelId: z.string(),
+  stepId: z.string().optional(),
+  /** ISO time the handoff went onto the queue. */
+  since: z.string(),
+});
+export type TaskWaitState = z.infer<typeof TaskWaitStateSchema>;
+
 export const ListTasksResponseSchema = z.object({
   tasks: z.array(TaskSchema),
+  /**
+   * Queue state for whichever of `tasks` the runner is currently holding
+   * or dispatching. Absent on daemons with no runner wired.
+   */
+  waiting: z.array(TaskWaitStateSchema).optional(),
 });
 export type ListTasksResponse = z.infer<typeof ListTasksResponseSchema>;
 

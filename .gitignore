@@ -213,3 +213,4 @@ packages/catalog/scripts/harvested-auth/
 /.tmp-docblocks-2.3.2
 /packages/app/.tmp-preview-debug
 .gezel/village.json
+/.gezel/quarantine

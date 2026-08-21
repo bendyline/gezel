@@ -473,6 +473,25 @@ the transcript, the reader gets the fact and the instructions go to
 provenance. Keep the wrapper's `msg-user` class — the timeline pairs a reply
 with the turn it answers by that class.
 
+**Accepted work leaves a trace before it speaks.** A task the user just
+started can sit on the TaskRunner's queue for minutes while the machine
+finishes other turns. During that window the task strip gains a pill reading
+"No chat yet" and the transcript below is *unchanged* — so the honest reading
+of the screen is "my request was dropped", and the user starts it again. Any
+work the daemon has accepted but not yet begun gets a receipt in the final
+lane of the transcript
+([`QueuedTaskBubble`](../packages/ui/src/components/QueuedTaskBubble.tsx)):
+the handoff card's centred dashed shape, at reduced opacity because it
+annotates a thing that has not happened, with the state as its eyebrow (In
+the queue / Starting / Scheduled / On hold), the task named, and one sentence
+saying what it is waiting on. Two rules keep it from lying. It appears only
+for work a runtime queue is actually holding — never inferred from "assigned
+and idle", because a card promising an imminent start buys a genuinely stuck
+task another hour of the user's patience. And it disappears the instant that
+task streams a turn: the live bubble is its representation, and a "waiting"
+card beside it contradicts what the reader can see. Batches collapse past a
+few cards into one counted line rather than burying the conversation.
+
 **Machine syntax never reaches a summary line.** A message body is not
 prose. It is markdown; it may carry reasoning the bubble hides; and when the
 salvage layer fails to promote a call it is literal tool-call markup.
@@ -734,6 +753,23 @@ tray. Derivation lives in
 [system-notices.ts](../packages/ui/src/system-notices.ts), so the rail and
 Settings can never drift apart. The one update outcome that *is* worth
 interrupting for — a verified update waiting to install — also stays a banner.
+
+**The titlebar sheds words before it sheds pills.** The status cluster is
+open-ended — one engine pill per busy on-device engine, one queue chip per
+busy provider — so on a crowded bar something has to give. Never a pill:
+each one is a live process the user needs to see, and a squeezed pill is an
+unreadable smear rather than a smaller pill. Drop *text* instead, in one
+ladder measured for the whole cluster at once so every pill compacts on the
+same beat: first the machine name ("This Mac" — every local engine wears it,
+so it stops distinguishing anything the moment a second pill appears) and the
+queue chip's activity phrase, then the gezel's name in an engine pill. What
+survives is what is unique to that pill: the engine, the phase, the model, the
+count. Nothing is lost outright — every dropped string stays in the pill's
+tooltip and its popover, which is the price of being allowed to drop it. A
+named engine ("DwarfStar", "Video") is not a machine name and never goes.
+[header-density.ts](../packages/ui/src/components/header-density.ts) owns the
+measurement; a plain width media/container query cannot see this, because the
+bar overflows from *how much is happening*, not from how narrow the window is.
 
 **Rows that differ only by state need the state named.** When one list holds
 items in two states that share a row shape — a queue's running turns above its
