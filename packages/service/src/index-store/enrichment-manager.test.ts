@@ -630,7 +630,7 @@ describe('buildEnrichDeps enricher override', () => {
     await deps.summarize('p');
     expect(oneShotCompletion).toHaveBeenCalledWith(
       'p',
-      120_000,
+      expect.any(Number),
       expect.objectContaining({
         providerName: 'mlx',
         model: 'big-executor',
@@ -638,6 +638,9 @@ describe('buildEnrichDeps enricher override', () => {
         tuningProfileId: 'instruct',
       }),
     );
+    // Deadlines are sized per call now (enrich-budget.ts); the historical
+    // flat wall is the floor, never the value.
+    expect(oneShotCompletion.mock.calls[0]?.[1]).toBeGreaterThanOrEqual(120_000);
   });
 
   it('runs one-shots as the project Boekwachter persona', async () => {
@@ -715,10 +718,11 @@ describe('buildEnrichDeps enricher override', () => {
     const { chat, store, oneShotCompletion } = makeDepsFixture();
     const deps = await buildEnrichDeps(store, chat);
     expect(deps.review).toBeDefined();
+    await deps.summarize('p');
     await deps.review!('p');
-    expect(oneShotCompletion).toHaveBeenCalledWith(
+    expect(oneShotCompletion).toHaveBeenLastCalledWith(
       'p',
-      180_000,
+      expect.any(Number),
       expect.objectContaining({
         providerName: 'mlx',
         model: 'big-executor',
@@ -727,6 +731,11 @@ describe('buildEnrichDeps enricher override', () => {
         tuningProfileId: 'instruct',
       }),
     );
+    // Same prompt, same model — a review still outranks a summary because it
+    // emits materially more output tokens.
+    const [summarizeMs, reviewMs] = oneShotCompletion.mock.calls.map((c) => c[1] as number);
+    expect(reviewMs).toBeGreaterThan(summarizeMs!);
+    expect(reviewMs).toBeGreaterThanOrEqual(180_000);
   });
 
   it('omits the review completion when no local model is configured', async () => {
@@ -798,5 +807,144 @@ describe('buildEnrichDeps enricher override', () => {
       provenance: { provider: 'mlx', gezelId: 'noor', gezelName: 'Noor' },
     });
     expect(oneShotCompletion).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * The 2026-08-21 incident: night shift went OFF at 06:00 and the catch-up
+ * sweep it had kicked at 05:34 was still walking the biggest project at
+ * 06:40, dispatching one-shots to the night model the whole way. Queued
+ * night TASKS stop themselves (the runner re-reads `isActive()` at
+ * admission); a loop the activation callback started cannot.
+ */
+describe('night-shift stand-down', () => {
+  function makeSweepFixture(
+    opts: {
+      projects?: Array<{ id: string }>;
+      batchesPerProject?: number;
+      night?: () => boolean;
+    } = {},
+  ) {
+    const batches = opts.batchesPerProject ?? 1;
+    const seen: Array<{ projectId: string; model: string | undefined }> = [];
+    const perProject = new Map<string, number>();
+    const oneShotCompletion = vi.fn().mockResolvedValue('a summary');
+    const enrich = vi.fn(async (id: string, deps: EnrichDeps) => {
+      const n = (perProject.get(id) ?? 0) + 1;
+      perProject.set(id, n);
+      await deps.summarize('probe');
+      seen.push({ projectId: id, model: deps.model });
+      return n >= batches
+        ? { files: 0, summarized: 0, embedded: 0 }
+        : { files: 1, summarized: 1, embedded: 1 };
+    });
+    const refreshStatic = vi.fn(async (_id: string) => {});
+    const chat = {
+      isAnyActive: () => false,
+      isProjectActive: () => false,
+      oneShotCompletion,
+      oneShotQueueWidth: vi.fn(() => 4),
+    } as unknown as ChatManager;
+    const store = {
+      listProjects: async () => opts.projects ?? [{ id: 'p1' }],
+      projectIndexingEnabled: async () => true,
+      readConfig: async () => ({
+        defaultModel: { mlx: 'day-enricher' },
+        nightShift: { modelOverride: { enabled: true, provider: 'mlx', model: 'night-enricher' } },
+      }),
+      listIndexRubrics: async () => ({}),
+    } as unknown as Store;
+    const contentIndex = {
+      enrich,
+      enrichAreas: vi.fn(async () => ({ areasUpdated: 0, architectureUpdated: false })),
+      review: vi.fn(async () => ({ files: 0, reviewed: 0 })),
+      aiShadows: vi.fn(async () => ({ files: 0, produced: 0, called: 0 })),
+      reviewCounts: vi.fn(async () => ({ eligible: 0, reviewed: 0, stale: 0, pending: 0 })),
+      listFileIssues: vi.fn(async () => ({
+        issues: [],
+        counts: { total: 0, bySeverity: {}, byCategory: {} },
+        truncated: false,
+        indexed: true,
+        reviewedFiles: 0,
+        eligibleFiles: 0,
+      })),
+      embedOnly: vi.fn().mockResolvedValue({ files: 0, embedded: 0 }),
+      embedImages: vi.fn().mockResolvedValue({ files: 0, embedded: 0, unavailable: false }),
+    } as unknown as ContentIndex;
+    const mgr = new IndexEnrichmentManager({
+      store,
+      chat,
+      contentIndex,
+      idle: agedIdleState(),
+      resolveBoekwachter: async () => BOOK,
+      refreshStatic,
+      isNightShiftActive: opts.night ?? (() => true),
+    });
+    return { mgr, enrich, refreshStatic, seen };
+  }
+
+  it('cancelCatchUp stops the sweep before the next project', async () => {
+    const { mgr, refreshStatic, enrich } = makeSweepFixture({
+      projects: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+    });
+    enrich.mockImplementationOnce(async (_id: string, _deps: EnrichDeps) => {
+      mgr.cancelCatchUp();
+      return { files: 0, summarized: 0, embedded: 0 };
+    });
+    await mgr.catchUpAll();
+    expect(refreshStatic.mock.calls.map((c) => c[0])).toEqual(['a']);
+  });
+
+  it('cancelCatchUp stops the running project between batches', async () => {
+    const { mgr, enrich } = makeSweepFixture({ batchesPerProject: 10 });
+    let batch = 0;
+    enrich.mockImplementation(async () => {
+      batch++;
+      if (batch === 2) mgr.cancelCatchUp();
+      return { files: 1, summarized: 1, embedded: 1 };
+    });
+    await mgr.catchUpAll();
+    // Batch 3 is where the stand-down lands; nothing after it runs.
+    expect(enrich).toHaveBeenCalledTimes(2);
+  });
+
+  it('a cancel cannot leak onto a sweep started afterwards', async () => {
+    const { mgr, refreshStatic } = makeSweepFixture({ projects: [{ id: 'a' }, { id: 'b' }] });
+    mgr.cancelCatchUp(); // no sweep running — must be inert
+    await mgr.catchUpAll();
+    expect(refreshStatic.mock.calls.map((c) => c[0])).toEqual(['a', 'b']);
+  });
+
+  it('a drive retargets off the night model when the window closes mid-project', async () => {
+    let night = true;
+    const { mgr, enrich, seen } = makeSweepFixture({
+      batchesPerProject: 3,
+      night: () => night,
+    });
+    enrich.mockImplementation(async (id: string, deps: EnrichDeps) => {
+      seen.push({ projectId: id, model: deps.model });
+      if (seen.length === 1) night = false;
+      return seen.length >= 3
+        ? { files: 0, summarized: 0, embedded: 0 }
+        : { files: 1, summarized: 1, embedded: 1 };
+    });
+    mgr.drive('p1', { intensity: 'full' });
+    await vi.waitFor(() => expect(mgr.isDriving('p1')).toBe(false));
+    expect(seen.map((s) => s.model)).toEqual(['night-enricher', 'day-enricher', 'day-enricher']);
+  });
+
+  it('cancelCatchUp leaves an on-demand drive alone — the user asked for it', async () => {
+    const { mgr, enrich } = makeSweepFixture({ batchesPerProject: 3 });
+    let batch = 0;
+    enrich.mockImplementation(async () => {
+      batch++;
+      if (batch === 1) mgr.cancelCatchUp();
+      return batch >= 3
+        ? { files: 0, summarized: 0, embedded: 0 }
+        : { files: 1, summarized: 1, embedded: 1 };
+    });
+    mgr.drive('p1', { intensity: 'full' });
+    await vi.waitFor(() => expect(mgr.isDriving('p1')).toBe(false));
+    expect(enrich).toHaveBeenCalledTimes(3);
   });
 });

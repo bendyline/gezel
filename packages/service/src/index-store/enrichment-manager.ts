@@ -118,6 +118,14 @@ export interface DriveOptions {
   reviews?: boolean;
 }
 
+/**
+ * Per-sweep stand-down flag. A token rather than a manager-level boolean so a
+ * cancel can never leak onto a sweep started after it.
+ */
+interface CatchUpToken {
+  aborted: boolean;
+}
+
 export class IndexEnrichmentManager {
   private readonly store: Store;
   private readonly chat: ChatManager;
@@ -142,6 +150,12 @@ export class IndexEnrichmentManager {
   /** Nonzero while a night-shift catch-up sweep is holding task dispatch. */
   private catchUpRuns = 0;
   private readonly catchUps = new Set<Promise<void>>();
+  /**
+   * Stand-down flags for the running catch-up sweeps. A set rather than one
+   * field because a shift can end and restart while the first sweep is still
+   * walking projects — a cancel then has to reach both.
+   */
+  private readonly catchUpAborts = new Set<CatchUpToken>();
 
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -299,23 +313,52 @@ export class IndexEnrichmentManager {
    * awaited) and then wakes the TaskRunner still gets the dispatch hold.
    */
   catchUpAll(): Promise<void> {
-    const run = this.runCatchUpAll().finally(() => this.catchUps.delete(run));
+    const token: CatchUpToken = { aborted: false };
+    this.catchUpAborts.add(token);
+    const run = this.runCatchUpAll(token).finally(() => {
+      this.catchUpAborts.delete(token);
+      this.catchUps.delete(run);
+    });
     this.catchUps.add(run);
     return run;
   }
 
-  private async runCatchUpAll(): Promise<void> {
+  /**
+   * Stand the running catch-up sweep down — the ON → OFF counterpart of the
+   * activation kick. Signals only: the file in flight finishes, then the
+   * sweep stops between batches and leaves the remainder to the ordinary
+   * background tick at day cadence and the day model. The token is
+   * per-sweep, so a cancel that lands after a sweep already ended cannot
+   * abort the next one.
+   *
+   * Deliberately does NOT touch on-demand drives: a user who pressed
+   * "index now" at 05:58 asked for that work, and the window closing is not
+   * a retraction. Their drive still stops routing to the night model — see
+   * the mid-drive resample in {@link runDrive}.
+   */
+  cancelCatchUp(): void {
+    let cancelled = 0;
+    for (const token of this.catchUpAborts) {
+      if (token.aborted) continue;
+      token.aborted = true;
+      cancelled++;
+    }
+    if (cancelled > 0) log.info('[enrich] night shift ended — catch-up sweep standing down');
+  }
+
+  private async runCatchUpAll(token: CatchUpToken): Promise<void> {
     this.catchUpRuns++;
     try {
       const projects = await this.store.listProjects().catch(() => []);
       for (const p of projects) {
+        if (token.aborted) return;
         if (p.indexingEnabled === false) continue;
         const existing = this.drives.get(p.id);
         if (existing) {
           await existing.run.catch(() => {});
           continue;
         }
-        const run = this.runDrive(p.id, { intensity: 'full' }).finally(() => {
+        const run = this.runDrive(p.id, { intensity: 'full' }, token).finally(() => {
           this.drives.delete(p.id);
           this.driveStops.delete(p.id);
         });
@@ -366,12 +409,13 @@ export class IndexEnrichmentManager {
    */
   private async drainLocalEmbedTiers(
     projectId: string,
-    opts: { night: boolean; yieldToChat?: boolean },
+    opts: { night: boolean; yieldToChat?: boolean; abort?: CatchUpToken },
   ): Promise<'done' | 'paused' | 'yielded'> {
     const textBatch = opts.night ? NIGHT_BATCH : EMBED_ONLY_BATCH;
     const imageBatch = opts.night ? IMAGE_EMBED_NIGHT_BATCH : IMAGE_EMBED_BATCH;
     if (!embeddingsDisabledReason()) {
       for (;;) {
+        if (opts.abort?.aborted) return 'paused';
         if (await this.driveHalted(projectId)) return 'paused';
         if (opts.yieldToChat && this.chat.isAnyActive()) return 'yielded';
         const r = await this.contentIndex.embedOnly(projectId, textBatch).catch(() => null);
@@ -384,6 +428,7 @@ export class IndexEnrichmentManager {
     }
     if (imageEmbedAvailability().ok) {
       for (;;) {
+        if (opts.abort?.aborted) return 'paused';
         if (await this.driveHalted(projectId)) return 'paused';
         if (opts.yieldToChat && this.chat.isAnyActive()) return 'yielded';
         const r = await this.contentIndex.embedImages(projectId, imageBatch).catch(() => null);
@@ -412,8 +457,19 @@ export class IndexEnrichmentManager {
     return meta ? isSharedLibraryProject(meta) : false;
   }
 
-  private async runDrive(projectId: string, opts: DriveOptions): Promise<void> {
+  private async runDrive(
+    projectId: string,
+    opts: DriveOptions,
+    abort?: CatchUpToken,
+  ): Promise<void> {
     const full = opts.intensity === 'full';
+    // One stand-down check for every batch boundary: the sweep's abort token,
+    // a mid-drive loss of the enrich target, an explicit stopDrive, and the
+    // indexing job's pause switch all mean the same thing here — stop between
+    // files and leave the remainder to the next tick.
+    let standDown = false;
+    const halt = async (): Promise<boolean> =>
+      abort?.aborted === true || standDown || (await this.driveHalted(projectId));
     // The review tier judges files against code-shaped rubrics (structure,
     // dead code, test coverage). Pointed at a policy document or a style
     // guide it produces confident nonsense, so the library gets the tiers
@@ -422,7 +478,7 @@ export class IndexEnrichmentManager {
     // tick, night shift, manual drive) inherits it.
     const libraryScope = await this.isSharedLibrary(projectId);
     const reviews = opts.reviews !== false && !libraryScope;
-    if (await this.driveHalted(projectId)) return;
+    if (await halt()) return;
     if (!(await this.store.projectIndexingEnabled(projectId).catch(() => true))) return;
     const label = (state: 'started' | 'ended', detail: string) =>
       this.events?.publishGlobalEvent({
@@ -447,7 +503,14 @@ export class IndexEnrichmentManager {
       // governance containment — upstream of buildEnrichDeps, so no Night
       // Shift override or Boekwachter model pin can route image bytes
       // anywhere but the local worker.
-      if ((await this.drainLocalEmbedTiers(projectId, { night: full })) === 'paused') return;
+      if (
+        (await this.drainLocalEmbedTiers(projectId, {
+          night: full,
+          ...(abort ? { abort } : {}),
+        })) === 'paused'
+      ) {
+        return;
+      }
 
       // (b3) face tier (lane B) — explicit biometric opt-in, same local-only
       // slot and containment as (b2). The one-time model download happens
@@ -457,7 +520,7 @@ export class IndexEnrichmentManager {
         (await this.contentIndex.ensureFaceModelsInstalled().catch(() => false))
       ) {
         for (;;) {
-          if (await this.driveHalted(projectId)) return;
+          if (await halt()) return;
           const r = await this.contentIndex.faceIndex(projectId, FACE_BATCH).catch(() => null);
           if (!r || r.files === 0 || r.unavailable) break;
           if (r.faces > 0) {
@@ -468,14 +531,44 @@ export class IndexEnrichmentManager {
 
       const boekwachter = await this.resolveBoekwachter(projectId);
       if (!boekwachter) return; // static is current; AI needs the roster opt-in
-      const deps = await buildEnrichDeps(this.store, this.chat, {
-        nightShift: this.isNightShiftActive(),
-        // Full-bore competes like interactive work; background stays ambient
-        // so the local engine holds it behind live chat.
-        ambient: !full,
-        boekwachter,
-        projectId,
-      });
+      const buildDeps = (nightShift: boolean) =>
+        buildEnrichDeps(this.store, this.chat, {
+          nightShift,
+          // Full-bore competes like interactive work; background stays ambient
+          // so the local engine holds it behind live chat.
+          ambient: !full,
+          boekwachter,
+          projectId,
+        });
+      let night = this.isNightShiftActive();
+      let deps = await buildDeps(night);
+      // The night flag picks the target model (`config.nightShift.modelOverride`),
+      // and a drive over a large project outlives the window: sampled once at
+      // the head, a drive that started at 05:50 was still routing files to the
+      // night model at 06:40. Re-sampled between batches instead, so the
+      // moment the shift ends the remaining files go to the day target — this
+      // is what protects on-demand drives, which the sweep's abort deliberately
+      // leaves running.
+      const syncDeps = async (): Promise<void> => {
+        const now = this.isNightShiftActive();
+        if (now === night) return;
+        night = now;
+        const next = await buildDeps(now);
+        // No day-side target (no local model configured, no Boekwachter pin)
+        // means the night override was the ONLY thing making this drive
+        // possible. Stop rather than grind the remaining files through the
+        // no-op summarizer and burn their attempt caps on empty output.
+        if (deps.model && !next.model) {
+          standDown = true;
+          log.info(`[enrich] ${projectId}: night shift ended and no day target — stopping drive`);
+          return;
+        }
+        deps = next;
+        log.info(
+          `[enrich] ${projectId}: night shift ${now ? 'started' : 'ended'} mid-drive — ` +
+            `enriching with ${deps.model ?? 'the default target'} from here`,
+        );
+      };
       const gezel = { gezelId: boekwachter.id, gezelName: boekwachter.name };
       const batch = full ? NIGHT_BATCH : BATCH;
       // Full-bore fills the target's queue: dispatch width-many per-file
@@ -486,13 +579,16 @@ export class IndexEnrichmentManager {
       // callbacks. Background stays serial; the media tier below stays
       // serial too — its producers are the local vision/STT stacks, not
       // the summarizer target this width describes.
-      const drivePool = full && deps.oneShotWidth ? { concurrency: deps.oneShotWidth } : undefined;
-      const driveOpts = (phase: 'enrich' | 'review') =>
-        drivePool
+      // Read off `deps` at call time, not once: a mid-drive retarget changes
+      // the queue width along with the model.
+      const driveOpts = (phase: 'enrich' | 'review') => {
+        const drivePool =
+          full && deps.oneShotWidth ? { concurrency: deps.oneShotWidth } : undefined;
+        return drivePool
           ? {
               ...drivePool,
               drain: {
-                shouldStop: () => this.driveHalted(projectId),
+                shouldStop: () => halt(),
                 onProgress: ({ files }: { files: number }) =>
                   this.events?.publishGlobalEvent({
                     type: 'index_progress',
@@ -505,6 +601,7 @@ export class IndexEnrichmentManager {
               },
             }
           : undefined;
+      };
       const rubrics: Map<string, ResolvedRubric> =
         deps.model && reviews
           ? await resolveRubrics(this.store).catch(() => new Map<string, ResolvedRubric>())
@@ -512,7 +609,8 @@ export class IndexEnrichmentManager {
 
       if (this.shadowProducers) {
         for (;;) {
-          if (await this.driveHalted(projectId)) return;
+          await syncDeps();
+          if (await halt()) return;
           const sh = await this.contentIndex
             .aiShadows(
               projectId,
@@ -535,7 +633,8 @@ export class IndexEnrichmentManager {
         }
       }
       for (;;) {
-        if (await this.driveHalted(projectId)) return;
+        await syncDeps();
+        if (await halt()) return;
         const r = await this.contentIndex
           .enrich(projectId, deps, batch, driveOpts('enrich'))
           .catch(() => null);
@@ -553,7 +652,8 @@ export class IndexEnrichmentManager {
       if (rubrics.size > 0) {
         let stored = 0;
         for (;;) {
-          if (await this.driveHalted(projectId)) return;
+          await syncDeps();
+          if (await halt()) return;
           const r = await this.contentIndex
             .review(projectId, deps, batch, rubrics, driveOpts('review'))
             .catch(() => null);
