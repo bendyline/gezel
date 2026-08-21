@@ -22,7 +22,7 @@ The production workflow never falls back to unsigned Windows or macOS installers
 
 ## Release outputs
 
-Versions use `1.YYDDD.RUN`, where `YY` is the two-digit year, `DDD` is the zero-padded UTC day of year, and `RUN` is the GitHub Actions run number. For example, `1.26109.42` is run 42 on 2026-04-19. [`scripts/stamp-version.mjs`](scripts/stamp-version.mjs) stamps the version only in CI; committed package versions remain `0.0.0`.
+Versions use `1.YYDDD.RUN`, where `YY` is the two-digit year, `DDD` is the zero-padded UTC day of year, and `RUN` is the GitHub Actions run number. For example, `1.26109.42` is run 42 on 2026-04-19. [`scripts/stamp-version.mjs`](scripts/stamp-version.mjs) temporarily stamps the desktop release surfaces in CI. Committed package manifests retain their independently managed npm-channel SemVer values; the private root manifest and unstamped runtime constants may use `0.0.0` as development sentinels.
 
 For version `<version>`, the draft release contains:
 
