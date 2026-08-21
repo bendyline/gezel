@@ -19,8 +19,11 @@ let history: HistoryManager;
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-doc-audit-'));
   history = new HistoryManager(home);
-  // A short window so a test can observe a sitting close.
-  store = new Store({ home, history, auditQuietWindowMs: 60 });
+  // A window far wider than any CI scheduling gap: a loaded runner can put
+  // 60ms+ between two awaited writes, which used to lapse a short window
+  // mid-burst and split one sitting into two. Sittings are closed explicitly
+  // via flushDocumentAudit(); the lapse-on-its-own path has its own test.
+  store = new Store({ home, history, auditQuietWindowMs: 60_000 });
   await store.ensureLayout();
 });
 
@@ -28,7 +31,6 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true });
 });
 
-const settle = () => new Promise((r) => setTimeout(r, 150));
 const kinds = (events: HistoryEvent[]) => events.map((e) => e.kind);
 
 describe('document edit audit', () => {
@@ -38,7 +40,7 @@ describe('document edit audit', () => {
     await store.writeDocument('guidelines.md', 'v1\nv2\n');
     await store.writeDocument('guidelines.md', 'v1\nv2\nv3\n');
     await store.writeDocument('guidelines.md', 'v1\nv2\nv3\nv4\n');
-    await settle();
+    await store.flushDocumentAudit();
 
     const events = await history.listEvents();
     // Newest-first from the log; the point is that four saves produced one
@@ -50,9 +52,8 @@ describe('document edit audit', () => {
 
   it('reports how much moved, measured against the sitting’s starting point', async () => {
     await store.writeDocument('policy.md', 'keep\nremove me\n');
-    await settle();
     await store.writeDocument('policy.md', 'keep\nbrand new line\n');
-    await settle();
+    await store.flushDocumentAudit();
 
     const edit = (await history.listEvents()).find((e) => e.kind === 'document.updated')!;
     expect(edit.details).toMatchObject({ addedLines: 1, removedLines: 1 });
@@ -60,10 +61,9 @@ describe('document edit audit', () => {
 
   it('attributes a gezel edit to that gezel, separately from the user’s', async () => {
     await store.writeDocument('shared.md', 'base\n');
-    await settle();
     await store.writeDocument('shared.md', 'base\nfrom the app\n');
     await store.writeDocument('shared.md', 'base\nfrom a gezel\n', { gezelId: 'ada' });
-    await settle();
+    await store.flushDocumentAudit();
 
     const edits = (await history.listEvents()).filter((e) => e.kind === 'document.updated');
     // Two actors, two stories — merging them would credit one with the
@@ -76,10 +76,9 @@ describe('document edit audit', () => {
 
   it('closes the sitting against the name the edits were made under', async () => {
     await store.writeDocument('draft.md', 'one\n');
-    await settle();
     await store.writeDocument('draft.md', 'one\ntwo\n');
+    // The rename itself closes the sitting — no explicit flush needed.
     await store.renameDocument('draft.md', 'final.md');
-    await settle();
 
     const edit = (await history.listEvents()).find((e) => e.kind === 'document.updated')!;
     expect(edit.details).toMatchObject({ path: 'draft.md' });
@@ -89,7 +88,20 @@ describe('document edit audit', () => {
     // Outside-in twins are machinery, not documents the user filed.
     await store.writeDocument('brief.docx_files/brief.md', 'twin\n');
     await store.writeDocument('brief.docx_files/brief.md', 'twin edited\n');
-    await settle();
+    await store.flushDocumentAudit();
     expect(await history.listEvents()).toEqual([]);
+  });
+
+  it('closes the sitting on its own once the quiet window lapses', async () => {
+    const fast = new Store({ home, history, auditQuietWindowMs: 50 });
+    await fast.ensureLayout();
+    await fast.writeDocument('note.md', 'v1\n');
+    // A single overwrite: whenever the timer fires, there is exactly one
+    // sitting to close, so this cannot flake on scheduling gaps.
+    await fast.writeDocument('note.md', 'v1\nv2\n');
+
+    await expect
+      .poll(async () => kinds(await history.listEvents()).sort(), { timeout: 5_000 })
+      .toEqual(['document.created', 'document.updated']);
   });
 });

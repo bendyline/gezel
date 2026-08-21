@@ -454,11 +454,25 @@ describe('Windows machine-service installer security', () => {
       const callbackBody = hook.slice(callbackStart, hook.indexOf('FunctionEnd', callbackStart));
       expect(callbackBody).toContain('!insertmacro RestartGezelServiceAfterAbortedInstall');
     }
-    // The wait itself is bounded — a wedged service must not hang setup.
+    // The wait itself is bounded — a wedged service must not hang setup — but
+    // it must outlast the service host's graceful + forced-stop ladder. The
+    // v1.26233.55 uninstall smoke exposed the old 10s/10s tie: NSIS reached
+    // `sc delete` while the host was still STOP_PENDING.
     const waitStart = position('!macro WaitGezelServiceStopped');
     const waitMacro = hook.slice(waitStart, hook.indexOf('!macroend', waitStart));
-    expect(waitMacro).toContain('${If} $8 >= 20');
-    expect(waitMacro).toContain('Sleep 500');
+    const attempts = Number(/!define GEZEL_SERVICE_STOP_POLL_ATTEMPTS (\d+)/.exec(hook)?.[1]);
+    const intervalMs = Number(/!define GEZEL_SERVICE_STOP_POLL_INTERVAL_MS (\d+)/.exec(hook)?.[1]);
+    const graceMs = Number(/constexpr unsigned long kGraceMs = (\d+);/.exec(serviceHost)?.[1]);
+    const postKillMs = Number(
+      /constexpr unsigned long kPostKillWaitMs = (\d+);/.exec(serviceHost)?.[1],
+    );
+    expect(attempts).toBeGreaterThan(0);
+    expect(intervalMs).toBeGreaterThan(0);
+    expect(graceMs).toBeGreaterThan(0);
+    expect(postKillMs).toBeGreaterThan(0);
+    expect((attempts - 1) * intervalMs).toBeGreaterThanOrEqual(graceMs + postKillMs + 5_000);
+    expect(waitMacro).toContain('${If} $8 >= ${GEZEL_SERVICE_STOP_POLL_ATTEMPTS}');
+    expect(waitMacro).toContain('Sleep ${GEZEL_SERVICE_STOP_POLL_INTERVAL_MS}');
     expect(waitMacro).toContain('"STOPPED"');
   });
 

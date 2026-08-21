@@ -92,6 +92,21 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   assert.match(windowsSmoke, /service-bundle\.tar\.gz/);
   assert.match(windowsSmoke, /service\/node_modules\/entities/);
   assert.match(windowsSmoke, /service\/node_modules\/parse5/);
+  const windowsUninstallStart = workflow.indexOf('- name: Uninstall Windows installer smoke');
+  assert.notEqual(
+    windowsUninstallStart,
+    -1,
+    'Windows release must uninstall its signed NSIS artifact',
+  );
+  const windowsUninstallSmoke = workflow.slice(
+    windowsUninstallStart,
+    workflow.indexOf('\n  # ── macOS', windowsUninstallStart),
+  );
+  assert.match(windowsUninstallSmoke, /AddSeconds\(30\)/);
+  assert.match(windowsUninstallSmoke, /Get-Service -Name GezelService/);
+  assert.match(windowsUninstallSmoke, /\$remainingService\.Dispose\(\)/);
+  assert.match(windowsUninstallSmoke, /Start-Sleep -Milliseconds 500/);
+  assert.match(windowsUninstallSmoke, /sc\.exe queryex GezelService/);
   const macosSmokeStart = workflow.indexOf('- name: Smoke-test packaged macOS app');
   const macosSmokeEnd = workflow.indexOf(
     '- name: Smoke-test macOS PKG install and recovery',
