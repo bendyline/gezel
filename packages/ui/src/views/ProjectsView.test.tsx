@@ -1208,7 +1208,7 @@ describe('ProjectsView', () => {
       'flat-modified',
     );
     await waitFor(() => {
-      expect(api.listProjectIndexFilesDetail).toHaveBeenCalledWith('pj-alpha');
+      expect(api.listProjectIndexFilesDetail).toHaveBeenCalledWith('pj-alpha', { hidden: false });
     });
     // Newest first, from the index-backed list (fresh.md is not in the walk).
     const flatButtons = await screen.findByRole('button', { name: /fresh\.md/ });
