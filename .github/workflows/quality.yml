@@ -75,8 +75,10 @@ jobs:
     needs: workflow-policy
     runs-on: ubuntu-latest
     # Runtime coverage executes the Vitest suites a second time with V8
-    # instrumentation after the ordinary unit pass.
-    timeout-minutes: 45
+    # instrumentation after the ordinary unit pass. A progressing run reached
+    # the previous 45-minute ceiling during service coverage; leave headroom
+    # for the remaining package sweeps and ordinary hosted-runner variance.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
