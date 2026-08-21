@@ -13,8 +13,16 @@ interface SearchPaletteProps {
    * daemon is unreachable sends them hunting for something that is there.
    */
   failed?: boolean;
+  /**
+   * A source scope timed out during the fan-out, so the list genuinely
+   * under-represents what exists — shown as a "may be partial" note.
+   * Deliberately NOT set for ordinary result caps, which are normal.
+   */
+  sourcesIncomplete?: boolean;
   onPick: (result: UnifiedSearchResult) => void;
   onHover: (index: number) => void;
+  /** Renders a "See all results" footer action when provided. */
+  onSeeAll?: () => void;
 }
 
 /**
@@ -27,8 +35,10 @@ export function SearchPalette({
   activeIndex,
   loading,
   failed = false,
+  sourcesIncomplete = false,
   onPick,
   onHover,
+  onSeeAll,
 }: SearchPaletteProps) {
   const total = groups.reduce((n, g) => n + g.items.length, 0);
   const activeRef = useRef<HTMLButtonElement | null>(null);
@@ -49,10 +59,16 @@ export function SearchPalette({
     );
   }
   if (total === 0) {
+    // "No results" is a claim about the user's data; never make it when a
+    // source was skipped on timeout — the match may simply not have answered.
     return (
       <div className="search-palette" data-testid="search-palette">
         <div className="search-palette-empty">
-          {failed ? "Search isn't responding — try again in a moment" : 'No results'}
+          {failed
+            ? "Search isn't responding — try again in a moment"
+            : sourcesIncomplete
+              ? "Some sources didn't answer in time — try again"
+              : 'No results'}
         </div>
       </div>
     );
@@ -117,7 +133,26 @@ export function SearchPalette({
         <div className="search-palette-more" aria-live="polite">
           Searching your files and memories…
         </div>
+      ) : sourcesIncomplete ? (
+        <div className="search-palette-more" aria-live="polite">
+          Some sources didn't answer in time — results may be partial.
+        </div>
       ) : null}
+      {!loading && onSeeAll && (
+        <div className="search-palette-more">
+          <button
+            type="button"
+            className="search-palette-see-all"
+            // mousedown + preventDefault, same reason as the option rows.
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onSeeAll();
+            }}
+          >
+            See all results
+          </button>
+        </div>
+      )}
     </div>
   );
 }

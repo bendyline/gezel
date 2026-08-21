@@ -92,8 +92,8 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   list_project_types: 'List project types',
   apply_project_type: 'Apply project type',
   start_project_from_type: 'Start project from a type',
-  export_project_type: 'Export project type',
-  import_project_type: 'Import project type',
+  export_ai_app: 'Export AI App',
+  import_ai_app: 'Import AI App',
   list_suggested_work: 'List suggested work',
   enable_suggested_work: 'Turn on suggested work',
   disable_suggested_work: 'Turn off suggested work',
@@ -311,19 +311,22 @@ function capitalizeFirst(text: string): string {
   return text[0]!.toUpperCase() + text.slice(1);
 }
 
+/**
+ * Reduce a wire tool name to the bare slug the label map is keyed on.
+ *
+ * Claude CLI references MCP tools as `mcp__<server>__<tool>`, and Copilot
+ * surfaces ours in its user-visible `gezel-<tool>` form. Both prefixes
+ * belong to the transport rather than the tool, and leaving them on misses
+ * the lookup — which is how the fallback once produced UI strings like
+ * "mcp gezel save memory".
+ */
+function bareToolSlug(name: string): string {
+  const bare = stripMcpPrefix(name);
+  return bare.startsWith('gezel-') ? bare.slice('gezel-'.length) : bare;
+}
+
 export function toolDisplayName(name: string): string {
-  // Claude CLI references MCP tools as `mcp__<server>__<tool>`. Strip
-  // the wire prefix first so the rich-name lookup and the fallback
-  // both operate on the bare tool slug ("save_memory" rather than
-  // "mcp__gezel__save_memory"). Without this the previous fallback
-  // produced UI strings like "mcp gezel save memory".
-  let bare = stripMcpPrefix(name);
-  // Copilot may surface our MCP tools in its user-visible
-  // `gezel-<tool>` wire form. This prefix belongs to the Gezel MCP server;
-  // unwrap it before both the rich lookup and unknown-tool fallback.
-  if (bare.startsWith('gezel-')) {
-    bare = bare.slice('gezel-'.length);
-  }
+  const bare = bareToolSlug(name);
   const displayName = TOOL_DISPLAY_NAMES[bare];
   if (displayName) return displayName;
   // Unknown tools: prefer the `@scope/tool` suffix over the scope itself.
@@ -334,6 +337,63 @@ export function toolDisplayName(name: string): string {
     return `Browser: ${rest}`;
   }
   return capitalizeFirst(bare.replace(/_/g, ' '));
+}
+
+/**
+ * True when the slug has a curated label — that is, when we know what the
+ * tool does rather than merely how to spell it. Callers use this to decide
+ * whether a name is worth phrasing in prose.
+ */
+export function isKnownTool(name: string): boolean {
+  return TOOL_DISPLAY_NAMES[bareToolSlug(name)] !== undefined;
+}
+
+/**
+ * English `-ing` spelling, as four rules applied in order.
+ *
+ * Safe to do by rule rather than by table because every label in
+ * {@link TOOL_DISPLAY_NAMES} opens with a bare-infinitive verb, and the
+ * present participle is the one English inflection with no irregular
+ * forms — only irregular spellings, all four of which are below. (Past
+ * tense would need a table: write/wrote, find/found, read/read.)
+ */
+function gerund(verb: string): string {
+  const lower = verb.toLowerCase();
+  // A final -e that carries its own vowel sound stays: "see" → "seeing",
+  // and dropping it from "dye" would collide with a different word.
+  if (/(?:ee|oe|ye)$/.test(lower)) return `${lower}ing`;
+  // Silent final -e goes: "create" → "creating", "queue" → "queuing".
+  if (/e$/.test(lower)) return `${lower.slice(0, -1)}ing`;
+  // Single-syllable consonant-vowel-consonant doubles its last letter:
+  // "run" → "running", "split" → "splitting". Matching on *exactly one
+  // vowel in the whole word* is what keeps multi-syllable look-alikes out
+  // — "edit" ends in a CVC run but holds two vowels, and "editting" is not
+  // a word. `w`, `x`, and `y` never double.
+  if (/^[^aeiou]*[aeiou][^aeiouwxy]$/.test(lower)) return `${lower + lower.slice(-1)}ing`;
+  return `${lower}ing`;
+}
+
+/**
+ * The same act as {@link toolDisplayName}, phrased as something someone is
+ * doing right now: `grep_files` → "Searching across files".
+ *
+ * A chat row can label a tool, because the row sits under a timestamp and
+ * an avatar that already say who did it and when. A one-line summary — a
+ * thread pill, a task card — has no such frame, and a bare "Search across
+ * files" there reads as an instruction to the person, not a report about
+ * the gezel. This is the form to use whenever a tool call has to stand in
+ * for a message.
+ *
+ * Only mapped labels are conjugated. The unknown-tool fallback builds its
+ * label from the slug, whose first token is not reliably a verb, and a
+ * guessed gerund ("Someing new tool") is worse than the plain label.
+ */
+export function toolActivityPhrase(name: string): string {
+  const label = toolDisplayName(name);
+  if (!isKnownTool(name)) return label;
+  const space = label.indexOf(' ');
+  if (space === -1) return capitalizeFirst(gerund(label));
+  return capitalizeFirst(gerund(label.slice(0, space))) + label.slice(space);
 }
 
 /** Cap for {@link toolErrorSummary} — long enough for a gate's first

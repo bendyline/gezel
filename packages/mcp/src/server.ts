@@ -37,6 +37,7 @@ import {
   NpmRegistryVersionSchema,
   type Outcome,
   ProviderNameSchema,
+  type ReadWorkspaceFilesResponse,
   type ScriptMeta,
   type StepDeliverable,
   StepGateUnionSchema,
@@ -49,13 +50,16 @@ import {
   applyStepPatch,
   assertCraftbookGraph,
   coerceDeliverableKind,
+  contextBudgetCeiling,
   craftbookDocFormatFromEnv,
   deliverableStep,
+  estimateTokens,
   expandStepDeliverable,
   formatReviewProvenance,
   inferDeliverableKind,
   isReservedShadowArtifactPath,
   isTrustedConstrainedToolset,
+  parseKnowledgeUri,
   pickRandomNameWithGender,
   prioritizePullsForCurrentBranch,
   removeStepAndCleanEdges,
@@ -81,7 +85,9 @@ import {
   CraftbookInvocationParamsArgSchema,
   binaryDocumentCraftbookRequest,
   buildBinaryDocumentTaskDescription,
+  inferCraftbookJobParams,
   normalizeCraftbookInvocationParams,
+  suggestedCraftbookInvocation,
 } from './craftbook-routing.js';
 import {
   binaryDocumentCraftbookRoute,
@@ -95,6 +101,13 @@ import {
   inferSourceDeliverablePath,
   shouldPromoteStartJobToProject,
 } from './kickoff-text.js';
+import {
+  type LinkedWorkspaceTarget,
+  isLinkedWorkspacePath,
+  linkedProjectEntries,
+  prefixLinkedEntry,
+  resolveLinkedWorkspacePath,
+} from './linked-workspace.js';
 import { closestFileNames } from './near-miss.js';
 import { normalizeMarkdown } from './normalize.js';
 import { CAP, PartialEditRegistry } from './partial-edits.js';
@@ -175,6 +188,14 @@ const sessionTaskRef = process.env.GEZEL_TASK_REF ?? '';
 // session. Lets the unified craftbook_* tools default their target to the
 // book being edited. Empty for task/project sessions.
 const sessionCraftbookId = process.env.GEZEL_CRAFTBOOK_ID ?? '';
+// The session model's context window (post-admission when the engine clamped
+// it), forwarded by ChatManager so tool renderers can budget their text
+// output. Absent for providers that don't report one.
+const rawSessionContextWindow = Number(process.env.GEZEL_CONTEXT_WINDOW ?? '');
+const sessionContextWindow =
+  Number.isFinite(rawSessionContextWindow) && rawSessionContextWindow > 0
+    ? rawSessionContextWindow
+    : undefined;
 
 // Trust anchor for the daemon's loopback HTTPS. When `GEZEL_CERT_PATH`
 // is set (the production case post-step-5), build a fetch that pins
@@ -195,6 +216,113 @@ const fetchImpl: typeof fetch = certPath
   : createPatientFetch();
 
 const api = new GezelClient({ baseUrl, token, fetch: fetchImpl });
+const linkedFetchImpl: typeof fetch = (input, init) => {
+  const headers = new Headers(init?.headers);
+  headers.set('x-gezel-linked-from', projectId);
+  return fetchImpl(input, { ...init, headers });
+};
+const linkedApi = new GezelClient({ baseUrl, token, fetch: linkedFetchImpl });
+
+type ConcreteWorkspaceTarget = Exclude<LinkedWorkspaceTarget, { kind: 'links-root' }>;
+let linkedIdsCache: { ids: string[]; expiresAt: number } | null = null;
+
+async function linkedProjectIds(): Promise<string[]> {
+  if (linkedIdsCache && linkedIdsCache.expiresAt > Date.now()) return linkedIdsCache.ids;
+  const project = await api.getProject(projectId);
+  const ids = project.linkedProjectIds ?? [];
+  linkedIdsCache = { ids, expiresAt: Date.now() + 2_000 };
+  return ids;
+}
+
+async function workspaceTarget(path: string): Promise<LinkedWorkspaceTarget> {
+  // Ordinary workspace calls keep their existing zero-request path. Project
+  // metadata is fetched only when the model addresses the virtual sibling
+  // namespace.
+  if (!isLinkedWorkspacePath(path)) return resolveLinkedWorkspacePath(projectId, [], path);
+  return resolveLinkedWorkspacePath(projectId, await linkedProjectIds(), path);
+}
+
+function workspaceClient(target: ConcreteWorkspaceTarget): GezelClient {
+  return target.kind === 'linked' ? linkedApi : api;
+}
+
+async function concreteWorkspaceTarget(path: string): Promise<ConcreteWorkspaceTarget> {
+  const target = await workspaceTarget(path);
+  if (target.kind === 'links-root') {
+    throw new Error('`..` is the linked-project directory; use list_dir({ path: ".." })');
+  }
+  return target;
+}
+
+async function readWorkspaceFile(path: string) {
+  const target = await concreteWorkspaceTarget(path);
+  const result = await workspaceClient(target).readProjectWorkspaceFile(
+    target.projectId,
+    target.path,
+  );
+  return { ...result, path: target.displayPath };
+}
+
+async function statWorkspacePath(path: string) {
+  const target = await concreteWorkspaceTarget(path);
+  return workspaceClient(target).statProjectWorkspacePath(target.projectId, target.path);
+}
+
+async function writeWorkspaceFile(path: string, content: string) {
+  const target = await concreteWorkspaceTarget(path);
+  return workspaceClient(target).writeProjectWorkspaceFile(target.projectId, {
+    path: target.path,
+    content,
+    ...(gezelId ? { gezelId } : {}),
+    ...(sessionId ? { sessionId } : {}),
+  });
+}
+
+async function readWorkspaceFiles(
+  requests: readonly WorkspaceReadFileRequest[],
+): Promise<ReadWorkspaceFilesResponse> {
+  const resolved = await Promise.all(
+    requests.map(async (request, index) => ({
+      index,
+      request,
+      target: await concreteWorkspaceTarget(request.path),
+    })),
+  );
+  const results: ReadWorkspaceFilesResponse['results'] = new Array(resolved.length);
+  const groups = new Map<string, typeof resolved>();
+  for (const item of resolved) {
+    const key = `${item.target.kind}:${item.target.projectId}`;
+    const group = groups.get(key) ?? [];
+    group.push(item);
+    groups.set(key, group);
+  }
+  await Promise.all(
+    [...groups.values()].map(async (group) => {
+      const first = group[0]!;
+      const response = await workspaceClient(first.target).toolReadWorkspaceFiles(
+        first.target.projectId,
+        {
+          files: group.map(({ request, target }) => ({ ...request, path: target.path })),
+        },
+      );
+      response.results.forEach((result, resultIndex) => {
+        const source = group[resultIndex]!;
+        results[source.index] = { ...result, path: source.target.displayPath };
+      });
+    }),
+  );
+  return {
+    results,
+    truncated: results.some(
+      (result) => result.status === 'error' || (result.status === 'ok' && result.truncated),
+    ),
+    totalBytesReturned: results.reduce(
+      (total, result) => total + (result.status === 'ok' ? result.bytesReturned : 0),
+      0,
+    ),
+    totalScannedBytes: results.reduce((total, result) => total + (result.scannedBytes ?? 0), 0),
+  };
+}
 // Process lifetime is session lifetime — this server is spawned per chat
 // session — so module scope is exactly session scope for draft state.
 const partialEdits = new PartialEditRegistry();
@@ -400,8 +528,17 @@ function isZodRawShape(value: unknown): value is Record<string, z.ZodType> {
 server.tool(
   'search_memory',
   'Search agent and project memories using semantic similarity. Returns the most relevant remembered facts, decisions, and context.',
-  { query: z.string().describe('What to search for in memory') },
-  async ({ query }) => {
+  {
+    query: z.string().describe('What to search for in memory'),
+    topK: z
+      .number()
+      .int()
+      .positive()
+      .max(50)
+      .optional()
+      .describe('Max memories to return (default 10).'),
+  },
+  async ({ query, topK }) => {
     try {
       const res = await fetchImpl(`${baseUrl}/api/memory/search`, {
         method: 'POST',
@@ -409,7 +546,7 @@ server.tool(
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ gezelId, projectId, query }),
+        body: JSON.stringify({ gezelId, projectId, query, ...(topK ? { topK } : {}) }),
       });
       if (!res.ok) {
         return errorResult(`search_memory failed: ${await responseErrorMessage(res)}`);
@@ -962,20 +1099,32 @@ if (process.env.GEZEL_CONNECTORS_ENABLED === '1') {
 
 server.tool(
   'list_dir',
-  'List the files and subdirectories at a path in the project. The project root is the default — pass a subdirectory path to narrow.',
+  'List the files and subdirectories at a path in the project. The project root is the default. When this project links other projects, list `..` to discover them and use `../<project-id>/...` to browse one with this same tool.',
   {
     path: z.string().optional().describe('Subdirectory path to list (default: project root).'),
   },
   async ({ path }) => {
     try {
-      const res = await api.listProjectWorkspace(projectId, path ?? '', false);
-      const listing = res.files.map((f) => `${f.isDirectory ? '📁' : '📄'} ${f.path}`).join('\n');
-      const summary = res.files.length
-        ? `Listed ${res.files.length} ${res.files.length === 1 ? 'entry' : 'entries'}.`
+      const target = await workspaceTarget(path ?? '');
+      const files =
+        target.kind === 'links-root'
+          ? linkedProjectEntries(await linkedProjectIds())
+          : (
+              await workspaceClient(target).listProjectWorkspace(
+                target.projectId,
+                target.path,
+                false,
+              )
+            ).files.map((entry) =>
+              target.kind === 'linked' ? prefixLinkedEntry(target.projectId, entry) : entry,
+            );
+      const listing = files.map((f) => `${f.isDirectory ? '📁' : '📄'} ${f.path}`).join('\n');
+      const summary = files.length
+        ? `Listed ${files.length} ${files.length === 1 ? 'entry' : 'entries'}.`
         : 'Empty directory.';
       return okResult(
         ListToolOutputSchema,
-        { summary, items: res.files, count: res.files.length },
+        { summary, items: files, count: files.length },
         { text: listing ? `${summary}\n${listing}` : summary },
       );
     } catch (err) {
@@ -1023,7 +1172,7 @@ server.tool(
       // compatibility, raw full reads are used internally by the source-write
       // guard and must remain byte-for-byte text without pagination metadata.
       if (startLine === undefined && endLine === undefined) {
-        const res = await api.readProjectWorkspaceFile(projectId, path);
+        const res = await readWorkspaceFile(path);
         return {
           content: [
             { type: 'text' as const, text: raw ? res.content : withLineNumbers(res.content) },
@@ -1031,15 +1180,13 @@ server.tool(
         };
       }
 
-      const response = await api.toolReadWorkspaceFiles(projectId, {
-        files: [
-          {
-            path,
-            ...(startLine !== undefined ? { startLine } : {}),
-            ...(endLine !== undefined ? { endLine } : {}),
-          },
-        ],
-      });
+      const response = await readWorkspaceFiles([
+        {
+          path,
+          ...(startLine !== undefined ? { startLine } : {}),
+          ...(endLine !== undefined ? { endLine } : {}),
+        },
+      ]);
       const result = response.results[0];
       if (!result) throw new Error('ranged read returned no result');
       if (result.status === 'error') throw new Error(`[${result.code}] ${result.error}`);
@@ -1064,7 +1211,12 @@ server.tool(
         }
         try {
           const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-          const listing = await api.listProjectWorkspace(projectId, dir, false);
+          const targetDir = await concreteWorkspaceTarget(dir);
+          const listing = await workspaceClient(targetDir).listProjectWorkspace(
+            targetDir.projectId,
+            targetDir.path,
+            false,
+          );
           const names = listing.files
             .filter((f) => !f.isDirectory)
             .map((f) => f.path.split('/').pop() ?? f.path);
@@ -1134,7 +1286,7 @@ server.tool(
         const rangeError = workspaceReadRangeError(request);
         if (rangeError) throw new Error(`${request.path}: ${rangeError}`);
       }
-      const response = await api.toolReadWorkspaceFiles(projectId, { files: requests });
+      const response = await readWorkspaceFiles(requests);
       const index = response.results.map((result, index) => {
         if (result.status === 'error') {
           return `${index + 1} ERROR ${result.path} [${result.code}] ${result.error}`;
@@ -1231,7 +1383,7 @@ server.tool(
   },
   async ({ path }) => {
     try {
-      const res = await api.statProjectWorkspacePath(projectId, path);
+      const res = await statWorkspacePath(path);
       const text =
         res.kind === 'missing'
           ? `missing: ${path}`
@@ -1283,8 +1435,11 @@ server.tool(
       };
     }
     const result = validateFile(filePath, content);
+    const validationTarget =
+      drawer === 'workspace' ? await concreteWorkspaceTarget(filePath).catch(() => null) : null;
     if (
       drawer === 'workspace' &&
+      validationTarget?.kind === 'current' &&
       /\.html?$/i.test(filePath) &&
       !result.checks.some((c) => c.ok === false)
     ) {
@@ -1333,8 +1488,12 @@ async function loadFileForValidation(
   // is missing.
   const isBinaryExt = /\.(png|jpe?g|webp|gif|svg|pdf|mp3|wav|mp4|webm|zip|tar|gz)$/i.test(filePath);
   if (drawer === 'workspace') {
+    const target = await concreteWorkspaceTarget(filePath);
     if (isBinaryExt) {
-      const blob = await api.fetchProjectWorkspaceBlob(projectId, filePath);
+      const blob = await workspaceClient(target).fetchProjectWorkspaceBlob(
+        target.projectId,
+        target.path,
+      );
       const bytes = new Uint8Array(await blob.arrayBuffer());
       return {
         bytes,
@@ -1348,7 +1507,10 @@ async function loadFileForValidation(
       };
     }
     try {
-      const result = await api.readProjectWorkspaceFile(projectId, filePath);
+      const result = await workspaceClient(target).readProjectWorkspaceFile(
+        target.projectId,
+        target.path,
+      );
       const text = result.content;
       const bytes = new TextEncoder().encode(text);
       return { text, bytes, totalBytes: bytes.byteLength };
@@ -1863,7 +2025,11 @@ server.tool(
 async function htmlRuntimeCheckSuffix(path: string): Promise<string> {
   if (!/\.html?$/i.test(path)) return '';
   try {
-    const check = await api.checkProjectPage(projectId, path);
+    const target = await concreteWorkspaceTarget(path);
+    // Linked-project capability is deliberately file-only. Runtime preview
+    // execution remains scoped to a session's active project.
+    if (target.kind === 'linked') return '';
+    const check = await api.checkProjectPage(projectId, target.path);
     if (!check.ran || check.ok === undefined) return '';
     if (check.ok) {
       return `\n\n[Runtime check] ${path} loaded headlessly with no runtime errors.`;
@@ -1965,12 +2131,7 @@ server.tool(
       return { content: [{ type: 'text' as const, text: htmlQualityRejection }], isError: true };
     }
     try {
-      await api.writeProjectWorkspaceFile(projectId, {
-        path,
-        content: normalizedContent,
-        ...(gezelId ? { gezelId } : {}),
-        ...(sessionId ? { sessionId } : {}),
-      });
+      await writeWorkspaceFile(path, normalizedContent);
       // A complete, validated file supersedes any provisional sequence
       // the model had open on this path.
       partialEdits.close(path);
@@ -1994,7 +2155,7 @@ async function rejectRegressiveWorkspaceOverwrite(
 ): Promise<string | null> {
   let priorContent: string | null = null;
   try {
-    priorContent = (await api.readProjectWorkspaceFile(projectId, path)).content;
+    priorContent = (await readWorkspaceFile(path)).content;
   } catch {
     priorContent = null;
   }
@@ -2029,7 +2190,7 @@ async function tryPersistFirstWritePartial(
   | { saved: false; reason: 'write-failed'; error: string }
 > {
   try {
-    await api.readProjectWorkspaceFile(projectId, path);
+    await readWorkspaceFile(path);
     return { saved: false, reason: 'exists' };
   } catch {
     // Missing files are the expected case. If the read failed for another
@@ -2037,12 +2198,7 @@ async function tryPersistFirstWritePartial(
   }
 
   try {
-    await api.writeProjectWorkspaceFile(projectId, {
-      path,
-      content,
-      ...(gezelId ? { gezelId } : {}),
-      ...(sessionId ? { sessionId } : {}),
-    });
+    await writeWorkspaceFile(path, content);
     return { saved: true };
   } catch (err) {
     return { saved: false, reason: 'write-failed', error: explainWriteFailure(err) };
@@ -2066,7 +2222,7 @@ server.tool(
     try {
       let prior = '';
       try {
-        const existing = await api.readProjectWorkspaceFile(projectId, path);
+        const existing = await readWorkspaceFile(path);
         prior = existing.content;
       } catch (err) {
         // Treat any read failure as "file doesn't exist." If `create`
@@ -2097,12 +2253,7 @@ server.tool(
       if (htmlQualityRejection) {
         return { content: [{ type: 'text' as const, text: htmlQualityRejection }], isError: true };
       }
-      await api.writeProjectWorkspaceFile(projectId, {
-        path,
-        content: merged,
-        ...(gezelId ? { gezelId } : {}),
-        ...(sessionId ? { sessionId } : {}),
-      });
+      await writeWorkspaceFile(path, merged);
       partialEdits.close(path);
       return {
         content: [
@@ -2150,9 +2301,11 @@ server.tool(
   },
   async ({ path, find, replace, occurrence, partial }) => {
     try {
-      const before = await api.readProjectWorkspaceFile(projectId, path);
-      const result = await api.replaceInProjectWorkspaceFile(projectId, {
-        path,
+      const target = await concreteWorkspaceTarget(path);
+      const targetApi = workspaceClient(target);
+      const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
+      const result = await targetApi.replaceInProjectWorkspaceFile(target.projectId, {
+        path: target.path,
         find,
         replace,
         ...(occurrence !== undefined ? { occurrence } : {}),
@@ -2218,9 +2371,11 @@ server.tool(
   },
   async ({ path, startLine, endLine, content, partial }) => {
     try {
-      const before = await api.readProjectWorkspaceFile(projectId, path);
-      const result = await api.replaceLinesInProjectWorkspaceFile(projectId, {
-        path,
+      const target = await concreteWorkspaceTarget(path);
+      const targetApi = workspaceClient(target);
+      const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
+      const result = await targetApi.replaceLinesInProjectWorkspaceFile(target.projectId, {
+        path: target.path,
         startLine,
         endLine,
         content,
@@ -2244,7 +2399,8 @@ server.tool(
         startLine,
         addedLines: result.addedLines,
         removedLines: result.removedLines,
-        readFile: async () => (await api.readProjectWorkspaceFile(projectId, path)).content,
+        readFile: async () =>
+          (await targetApi.readProjectWorkspaceFile(target.projectId, target.path)).content,
       });
       return {
         content: [
@@ -2284,9 +2440,11 @@ server.tool(
   },
   async ({ path, diff, partial }) => {
     try {
-      const before = await api.readProjectWorkspaceFile(projectId, path);
-      const result = await api.applyPatchToProjectWorkspaceFile(projectId, {
-        path,
+      const target = await concreteWorkspaceTarget(path);
+      const targetApi = workspaceClient(target);
+      const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
+      const result = await targetApi.applyPatchToProjectWorkspaceFile(target.projectId, {
+        path: target.path,
         diff,
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
@@ -2344,9 +2502,11 @@ server.tool(
   },
   async ({ path, marker, content, where, partial }) => {
     try {
-      const before = await api.readProjectWorkspaceFile(projectId, path);
-      const result = await api.insertAtMarkerInProjectWorkspaceFile(projectId, {
-        path,
+      const target = await concreteWorkspaceTarget(path);
+      const targetApi = workspaceClient(target);
+      const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
+      const result = await targetApi.insertAtMarkerInProjectWorkspaceFile(target.projectId, {
+        path: target.path,
         marker,
         content,
         ...(where ? { where } : {}),
@@ -2400,7 +2560,8 @@ server.tool(
   },
   async ({ path, recursive }) => {
     try {
-      await api.rmProjectWorkspacePath(projectId, path, {
+      const target = await concreteWorkspaceTarget(path);
+      await workspaceClient(target).rmProjectWorkspacePath(target.projectId, target.path, {
         ...(recursive ? { recursive } : {}),
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
@@ -2423,8 +2584,9 @@ server.tool(
   },
   async ({ path }) => {
     try {
-      await api.mkdirProjectWorkspace(projectId, {
-        path,
+      const target = await concreteWorkspaceTarget(path);
+      await workspaceClient(target).mkdirProjectWorkspace(target.projectId, {
+        path: target.path,
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
       });
@@ -2447,9 +2609,18 @@ server.tool(
   },
   async ({ fromPath, toPath }) => {
     try {
-      await api.renameProjectWorkspacePath(projectId, {
-        fromPath,
-        toPath,
+      const [fromTarget, toTarget] = await Promise.all([
+        concreteWorkspaceTarget(fromPath),
+        concreteWorkspaceTarget(toPath),
+      ]);
+      if (fromTarget.projectId !== toTarget.projectId) {
+        throw new Error(
+          'rename cannot move files across project roots; read the source, write the destination, then delete the source explicitly',
+        );
+      }
+      await workspaceClient(fromTarget).renameProjectWorkspacePath(fromTarget.projectId, {
+        fromPath: fromTarget.path,
+        toPath: toTarget.path,
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
       });
@@ -2919,12 +3090,7 @@ async function editResultSuffix(path: string, partial: boolean | undefined): Pro
 
 async function restoreWorkspaceFile(path: string, content: string): Promise<string> {
   try {
-    await api.writeProjectWorkspaceFile(projectId, {
-      path,
-      content,
-      ...(gezelId ? { gezelId } : {}),
-      ...(sessionId ? { sessionId } : {}),
-    });
+    await writeWorkspaceFile(path, content);
     return 'The previous file content was restored.';
   } catch (err) {
     return `Automatic restore failed: ${unwrapApiError(err)}. Re-read the file before continuing.`;
@@ -2958,7 +3124,7 @@ async function rejectInvalidWorkspaceEdit(
 
   let after: { path: string; content: string };
   try {
-    after = await api.readProjectWorkspaceFile(projectId, path);
+    after = await readWorkspaceFile(path);
   } catch (err) {
     return `${toolName} changed ${path}, but the edited file could not be re-read for validation: ${unwrapApiError(err)}. Re-read the file before making another edit.`;
   }
@@ -3214,9 +3380,12 @@ const WORKSPACE_LIKELY_EXTENSIONS = new Set([
  * Paths under these prefixes are legitimate artifact territory even
  * when their extension looks code-like (scripts/*.ts, tests/*.spec.ts,
  * mocks/*.html, drafts/*.css). The decision-table in the system prompt
- * lists these as canonical artifact folders.
+ * lists these as canonical artifact folders. `tasks/` is the per-task
+ * working folder (tasks/<num>/…): everything under it is by-construction
+ * working material, so an html/css deliverable there must not be
+ * redirected into the workspace.
  */
-const ARTIFACT_SCRIPT_PREFIXES = ['scripts/', 'tests/', 'mocks/', 'drafts/'];
+const ARTIFACT_SCRIPT_PREFIXES = ['scripts/', 'tests/', 'mocks/', 'drafts/', 'tasks/'];
 
 function classifyArtifactPath(cleanPath: string): { ok: true } | { ok: false; extension: string } {
   const lower = cleanPath.toLowerCase();
@@ -3254,6 +3423,7 @@ async function workspaceCollisionForArtifactPath(
  */
 async function artifactCollisionForWorkspacePath(path: string): Promise<string | null> {
   try {
+    if ((await concreteWorkspaceTarget(path)).kind === 'linked') return null;
     const cleanPath = normalizeArtifactPath(path);
     const result = await api.readProjectArtifactSlice(projectId, cleanPath, { head: 0 });
     return result.kind === 'found' && !result.fuzzy ? result.path : null;
@@ -3323,7 +3493,7 @@ async function listWorkspaceDeliverableFiles(projectId: string): Promise<string[
 
 server.tool(
   'list_artifacts',
-  'List files in the project artifacts folder, recursively across all subdirectories. Use this when handing work off between gezels — anything a teammate produced will show up here regardless of how deeply they nested it. Pass `path` to walk one subtree only (large drawers are capped, so scoping is how you see every file in a corpus); pass `recursive: false` for a one-level listing. Returned paths are relative to the artifacts root and can be read as-is — do NOT prefix with "artifacts/".',
+  'List files in the project artifacts folder, recursively across all subdirectories. Use this when handing work off between gezels — anything a teammate produced will show up here regardless of how deeply they nested it. A task\'s working files live under its own folder, `tasks/<num>/`. Pass `path` to walk one subtree only (large drawers are capped, so scoping is how you see every file in a corpus); pass `recursive: false` for a one-level listing. Returned paths are relative to the artifacts root and can be read as-is — do NOT prefix with "artifacts/".',
   {
     path: z
       .string()
@@ -3796,7 +3966,7 @@ server.tool(
 
 server.tool(
   'write_artifact',
-  "Create or update a file in the project's **artifacts** folder — the side drawer for supporting material (reports, plans, analysis, research, scratch notes). **NOT for the app's source code** — use `write_file` for that. Artifacts live in a separate folder so the user can distinguish your working notes from the code/content you ship. Calls that target an existing workspace path are refused unless `force: true` is set; source-code extensions (.tsx, .css, .html, .py, …) outside the canonical `scripts/`/`tests/`/`mocks/`/`drafts/` folders are automatically redirected into the workspace with `write_file` semantics.",
+  "Create or update a file in the project's **artifacts** folder — the side drawer for supporting material (reports, plans, analysis, research, scratch notes). **NOT for the app's source code** — use `write_file` for that. Artifacts live in a separate folder so the user can distinguish your working notes from the code/content you ship. When working a task, its working files belong in that task's folder, `tasks/<num>/` (e.g. `tasks/11/outline.md`). Calls that target an existing workspace path are refused unless `force: true` is set; source-code extensions (.tsx, .css, .html, .py, …) outside the canonical `tasks/`/`scripts/`/`tests/`/`mocks/`/`drafts/` folders are automatically redirected into the workspace with `write_file` semantics.",
   {
     path: z
       .string()
@@ -4003,13 +4173,33 @@ server.tool(
 
 server.tool(
   'read_document',
-  'Read one document from the shared library by path. Office documents (.docx, .pdf, .pptx, .xlsx) come back converted to markdown. Get paths from the library listing, list_documents, or a search_documents match.',
+  'Read one document from the shared library by path, or a knowledge-catalog article by its knowledge:// URI (from a `search` result with the knowledge source). Office documents (.docx, .pdf, .pptx, .xlsx) come back converted to markdown. Get paths from the library listing, list_documents, or a search_documents match.',
   {
     path: z
       .string()
-      .describe('File path relative to the documents root (e.g. "guidelines/coding.md")'),
+      .describe(
+        'File path relative to the documents root (e.g. "guidelines/coding.md"), or a knowledge:// URI (e.g. "knowledge://world-history/1234#line=10-40")',
+      ),
   },
   async ({ path }) => {
+    const knowledgeUri = parseKnowledgeUri(path);
+    if (knowledgeUri) {
+      const doc = await api.readKnowledgeDocument(knowledgeUri.catalogId, knowledgeUri.documentId);
+      let body = doc.markdown;
+      // Honor a #line=N[-M] fragment: bounded deep reads, not whole articles.
+      if (knowledgeUri.fragment && 'lineStart' in knowledgeUri.fragment) {
+        const lines = body.split('\n');
+        const start = Math.max(1, knowledgeUri.fragment.lineStart);
+        const end = knowledgeUri.fragment.lineEnd ?? Math.min(lines.length, start + 120);
+        body = lines.slice(start - 1, end).join('\n');
+      }
+      const provenance = [
+        `Source: ${doc.title} — ${path.split('#')[0]}`,
+        ...(doc.sourceUrl ? [`Origin: ${doc.sourceUrl}`] : []),
+        ...(doc.sourceUpdatedAt ? [`Snapshot: ${doc.sourceUpdatedAt}`] : []),
+      ].join('\n');
+      return { content: [{ type: 'text' as const, text: `${provenance}\n\n${body}` }] };
+    }
     const res = await api.readDocument(path, { as: 'markdown' });
     return { content: [{ type: 'text' as const, text: res.content }] };
   },
@@ -4050,7 +4240,7 @@ server.tool(
 
 server.tool(
   'search_documents',
-  'Search the CONTENT of every document in the shared library, including converted office documents. Returns path + line + snippet; call this first for any question the library might answer — team policy, guidelines, conventions — then read_document the best match.',
+  'Compatibility alias for shared-library-only content search. Prefer `search`, which searches shared documents together with relevant active-project content, artifacts, and memory. Follow a shared match with `read_document`.',
   {
     q: z.string().min(1).describe('Full-text query against document content'),
     limit: z.number().optional().describe('Max results (default 10)'),
@@ -4326,38 +4516,41 @@ server.tool(
 );
 
 server.tool(
-  'export_project_type',
-  "Package a project type (and the gezel role it ships with) into a shareable `.gzl` file, saved into the project's artifacts. Hand that file to someone else and they import it with import_project_type. Defaults to the current project's applied type.",
+  'export_ai_app',
+  "Package an AI App (entry project type, exact role/craftbook versions, pages, scripts, and seed data) into a shareable `.gezapp` file in the project's artifacts. Defaults to the current project's applied type.",
   {
     typeId: z
       .string()
       .optional()
       .describe("Project type id to export. Omit to export the current project's applied type."),
     project: z.string().optional().describe('Project id or name. Defaults to the current project.'),
-    name: z.string().optional().describe('Override the bundle name.'),
-    creator: z.string().optional().describe('Your name / handle, recorded in the bundle.'),
+    version: z
+      .string()
+      .optional()
+      .describe('Exact project-type version. Defaults to resolved latest.'),
+    publisherName: z.string().optional().describe('Publisher name recorded in the package.'),
+    publisherUrl: z.string().optional().describe('Optional publisher URL.'),
   },
-  async ({ typeId, project, name, creator }) => {
+  async ({ typeId, project, version, publisherName, publisherUrl }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.exportProjectType(resolvedProject, {
+      const res = await api.exportAiApp(resolvedProject, {
         ...(typeId ? { typeId } : {}),
-        ...(name ? { name } : {}),
-        ...(creator ? { creator } : {}),
+        ...(version ? { version } : {}),
+        ...(publisherName ? { publisherName } : {}),
+        ...(publisherUrl ? { publisherUrl } : {}),
       });
       return {
         content: [
           {
             type: 'text' as const,
-            text: `Packaged "${res.manifest.name}" into artifacts/${res.artifactPath} (${res.bytes} bytes, ${res.manifest.items.length} item(s)). Share that .gzl file — the recipient imports it with import_project_type.`,
+            text: `Packaged "${res.manifest.name}" into artifacts/${res.artifactPath} (${res.bytes} bytes, ${res.manifest.items.length} embedded item(s), ${res.manifest.dependencies.length} external dependency lock(s)). Share the .gezapp file; the recipient previews it with import_ai_app.`,
           },
         ],
       };
     } catch (err) {
       return {
-        content: [
-          { type: 'text' as const, text: `export_project_type failed: ${unwrapApiError(err)}` },
-        ],
+        content: [{ type: 'text' as const, text: `export_ai_app failed: ${unwrapApiError(err)}` }],
         isError: true,
       };
     }
@@ -4365,12 +4558,14 @@ server.tool(
 );
 
 server.tool(
-  'import_project_type',
-  "Import a shared `.gzl` project-type bundle from a file in the project's artifacts. Call it first with confirm omitted to PREVIEW what the bundle installs (types + gezel roles); call again with confirm:true to install. Nothing runs on import — items just become available when starting a new project.",
+  'import_ai_app',
+  'Preview or install a shared `.gezapp` from project artifacts. Call it first without confirm to verify schemas, hashes, compatibility, embedded items, and dependencies; call again with confirm:true to atomically install it. Nothing executes on import.',
   {
     path: z
       .string()
-      .describe('Artifact-relative path to the .gzl file, e.g. "shared/language-trainer.gzl".'),
+      .describe(
+        'Artifact-relative path to the .gezapp file, e.g. "shared/language-trainer.gezapp".',
+      ),
     project: z.string().optional().describe('Project id or name. Defaults to the current project.'),
     confirm: z
       .boolean()
@@ -4380,20 +4575,21 @@ server.tool(
   async ({ path, project, confirm }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
     try {
-      const res = await api.importProjectType(resolvedProject, {
+      const res = await api.importAiApp(resolvedProject, {
         path,
         ...(confirm !== undefined ? { confirm } : {}),
       });
       const list = res.items.map((i) => `${i.kind} "${i.id}" v${i.version}`).join(', ');
+      const missing = res.missingDependencies.length
+        ? ` Missing dependencies: ${res.missingDependencies.map((d) => `${d.kind}:${d.id}@${d.version}${d.required ? ' (required)' : ' (optional)'}`).join(', ')}.`
+        : '';
       const text = res.installed
-        ? `Installed from "${res.manifest.name}": ${list}. Start a new project to use it.`
-        : `Bundle "${res.manifest.name}" contains: ${list}. It passed verification. Call import_project_type again with confirm:true to install.`;
+        ? `Installed AI App "${res.manifest.name}" v${res.installed.version}: ${list}.${missing} Start a new project to use it.`
+        : `AI App "${res.manifest.name}" contains: ${list}. It passed package verification.${missing} Call import_ai_app again with confirm:true to install.`;
       return { content: [{ type: 'text' as const, text }] };
     } catch (err) {
       return {
-        content: [
-          { type: 'text' as const, text: `import_project_type failed: ${unwrapApiError(err)}` },
-        ],
+        content: [{ type: 'text' as const, text: `import_ai_app failed: ${unwrapApiError(err)}` }],
         isError: true,
       };
     }
@@ -4606,11 +4802,20 @@ type CraftbookLaunchResult =
 
 const invokeCraftbookRootTurnCache = new RootTurnInvocationCache<CraftbookLaunchResult>();
 
-async function currentRootTurnId(): Promise<string | null> {
+async function currentRootTurnContext(): Promise<{
+  rootTurnId: string;
+  userText?: string;
+} | null> {
   if (!sessionId) return null;
   try {
     const session = await api.getChatSession(sessionId);
-    return rootTurnIdFromMessages(sessionId, session.messages);
+    const rootTurnId = rootTurnIdFromMessages(sessionId, session.messages);
+    if (!rootTurnId) return null;
+    const latestUser = [...session.messages].reverse().find((message) => message.role === 'user');
+    return {
+      rootTurnId,
+      ...(latestUser?.content.trim() ? { userText: latestUser.content.trim() } : {}),
+    };
   } catch {
     // Fail open: inability to read the transcript must not block a legitimate
     // invocation. The ordinary task API remains the final mutation boundary.
@@ -4670,13 +4875,21 @@ async function launchCraftbookTask(args: {
   const craftbookName =
     projectCraftbooks.items.find((item) => item.manifest.id === args.craftbookId)?.manifest.name ??
     args.craftbookId;
+  const effectiveParams = inferCraftbookJobParams({
+    paramSchema:
+      declaredCraftbook?.manifest.kind === 'craftbook-template'
+        ? declaredCraftbook.manifest.paramSchema
+        : undefined,
+    params: args.params,
+    jobDescription: args.description,
+  });
   const task = await api.createTask(args.project, {
     ...sessionTaskNamingMode,
     title: args.title ?? craftbookName,
     description: normalizedCraftbookTaskDescription(args.description, args.craftbookId),
     craftbookId: args.craftbookId,
     ...(args.version ? { craftbookVersion: args.version } : {}),
-    ...(args.params && Object.keys(args.params).length > 0 ? { craftbookParams: args.params } : {}),
+    ...(Object.keys(effectiveParams).length > 0 ? { craftbookParams: effectiveParams } : {}),
     ...(args.assignee ? { assignee: assigneeFromArg(args.assignee) } : {}),
     ...(args.craftbookInvocationKey ? { craftbookInvocationKey: args.craftbookInvocationKey } : {}),
     ...(gezelId ? { createdBy: { kind: 'gezel', gezelId } as const } : {}),
@@ -4813,10 +5026,24 @@ server.tool(
       .join('\n');
     const top = res.suggestions[0]!;
     const topMissing = projectCraftbooks?.missingToolsets[top.id] ?? [];
+    const topManifest = projectCraftbooks?.items.find(
+      (item) => item.manifest.kind === 'craftbook-template' && item.manifest.id === top.id,
+    );
+    const nextInvocation = suggestedCraftbookInvocation({
+      craftbookId: top.id,
+      query,
+      paramSchema:
+        topManifest?.manifest.kind === 'craftbook-template'
+          ? topManifest.manifest.paramSchema
+          : undefined,
+    });
+    const nextCall = nextInvocation.params
+      ? `invoke_craftbook({"craftbookId":${JSON.stringify(nextInvocation.craftbookId)},"description":${JSON.stringify(nextInvocation.description)},"params":${JSON.stringify(nextInvocation.params)}})`
+      : `invoke_craftbook({"craftbookId":${JSON.stringify(nextInvocation.craftbookId)},"description":${JSON.stringify(nextInvocation.description)}})`;
     const nextAction =
       topMissing.length > 0
-        ? `Next call: invoke_craftbook({ craftbookId: "${top.id}" }). It will install any exact trusted zero-configuration bundled dependency; if setup still remains, it returns a hard error and creates no task. Do not call suggest_craftbook again with a rephrased query, switch to a generic project/job kickoff, or delegate the job raw.`
-        : `Next call: invoke_craftbook({ craftbookId: "${top.id}" }) — send it now unless a lower match clearly fits the job better. Do not call suggest_craftbook again with a rephrased query, switch to a generic project/job kickoff, delegate the job raw, or hand-write task steps; the recipe's gated steps already handle assignment and quality checks.`;
+        ? `Next call: ${nextCall}. It will install any exact trusted zero-configuration bundled dependency; if setup still remains, it returns a hard error and creates no task. Preserve the supplied description and params; do not call suggest_craftbook again with a rephrased query, switch to a generic project/job kickoff, or delegate the job raw.`
+        : `Next call: ${nextCall} — send it now unless a lower match clearly fits the job better. Preserve the supplied description and params; do not call suggest_craftbook again with a rephrased query, switch to a generic project/job kickoff, delegate the job raw, or hand-write task steps; the recipe's gated steps already handle assignment and quality checks.`;
     return {
       content: [
         {
@@ -4943,17 +5170,19 @@ server.tool(
   async ({ craftbookId, project, title, description, version, assignee, params, outputPath }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
     try {
+      const rootTurn = await currentRootTurnContext();
+      const effectiveDescription = description?.trim() || rootTurn?.userText;
       const invocationParams = normalizeCraftbookInvocationParams(params, outputPath);
       const invocation = {
         craftbookId,
         project: resolvedProject,
         title,
-        description,
+        description: effectiveDescription,
         version,
         assignee,
         params: invocationParams,
       };
-      const rootTurnId = await currentRootTurnId();
+      const rootTurnId = rootTurn?.rootTurnId ?? null;
       const launchInvocation = rootTurnId
         ? {
             ...invocation,
@@ -9052,34 +9281,47 @@ server.tool(
     limit: z.number().optional().describe('Max entries (default 20)'),
   },
   async ({ project, gezel, kind, from, to, q, limit }) => {
-    const projectId = project ? await resolveProjectId(project) : undefined;
-    const res = await api.listHistory({
-      ...(projectId ? { projectId } : {}),
-      ...(gezel ? { gezelId: gezel } : {}),
-      ...(kind ? { kind } : {}),
-      ...(from ? { from } : {}),
-      ...(to ? { to } : {}),
-      ...(q ? { q } : {}),
-      limit: limit ?? 20,
-    });
-    if (!res.entries.length) {
-      return { content: [{ type: 'text' as const, text: 'No history entries match.' }] };
+    try {
+      const resolvedProject = project ? await resolveProjectId(project) : undefined;
+      const res = await api.listHistory({
+        ...(resolvedProject ? { projectId: resolvedProject } : {}),
+        ...(gezel ? { gezelId: gezel } : {}),
+        ...(kind ? { kind } : {}),
+        ...(from ? { from } : {}),
+        ...(to ? { to } : {}),
+        ...(q ? { q } : {}),
+        limit: limit ?? 20,
+      });
+      const lines = res.entries.map((e) => {
+        if (e.entryType === 'session') {
+          const mins = Math.round(e.durationMs / 60_000);
+          const activity = mins === 0 ? '<1m' : `${mins}m`;
+          return `${e.lastActivityAt} · 💬 session · ${e.gezelId} in ${e.projectId} — ${e.title} (${e.messageCount} msgs, ${activity})`;
+        }
+        const scope = [
+          e.projectId ? `project:${e.projectId}` : null,
+          e.gezelId ? `gezel:${e.gezelId}` : null,
+        ]
+          .filter(Boolean)
+          .join(' ');
+        return `${e.at} · 📜 ${e.kind}${scope ? ` · ${scope}` : ''} — ${e.summary}`;
+      });
+      const summary = res.entries.length
+        ? `Found ${res.entries.length} history entr${res.entries.length === 1 ? 'y' : 'ies'}.`
+        : 'No history entries match.';
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary,
+          ...(q ? { query: q } : {}),
+          matches: res.entries,
+          count: res.entries.length,
+        },
+        { text: lines.length ? `${summary}\n${lines.join('\n')}` : summary },
+      );
+    } catch (err) {
+      return errorResult(`search_history failed: ${unwrapApiError(err)}`);
     }
-    const lines = res.entries.map((e) => {
-      if (e.entryType === 'session') {
-        const mins = Math.round(e.durationMs / 60_000);
-        const activity = mins === 0 ? '<1m' : `${mins}m`;
-        return `${e.lastActivityAt} · 💬 session · ${e.gezelId} in ${e.projectId} — ${e.title} (${e.messageCount} msgs, ${activity})`;
-      }
-      const scope = [
-        e.projectId ? `project:${e.projectId}` : null,
-        e.gezelId ? `gezel:${e.gezelId}` : null,
-      ]
-        .filter(Boolean)
-        .join(' ');
-      return `${e.at} · 📜 ${e.kind}${scope ? ` · ${scope}` : ''} — ${e.summary}`;
-    });
-    return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
   },
 );
 
@@ -9114,35 +9356,58 @@ server.tool(
 
 server.tool(
   'search_sessions',
-  'Search past chat-session transcripts across all gezels — what was actually said, not just session titles. Use to recall prior decisions, instructions, or conversations ("where did we discuss X?").',
+  'Search your own past chat-session transcripts in this project — what was actually said, not just session titles. Use to recall prior decisions, instructions, or conversations ("where did we discuss X?"). Team-scope sessions may pass explicit gezel/project filters to search other transcripts.',
   {
     q: z.string().min(1).describe('Full-text query against transcript content'),
-    gezel: z.string().optional().describe('Filter by gezel id'),
-    project: z.string().optional().describe('Filter by project id'),
+    gezel: z
+      .string()
+      .optional()
+      .describe('Search a different gezel’s transcripts (team scope only; defaults to you)'),
+    project: z
+      .string()
+      .optional()
+      .describe('Search a different project (team scope only; defaults to the active project)'),
     limit: z.number().optional().describe('Max sessions (default 10)'),
   },
   async ({ q, gezel, project, limit }) => {
-    const projectId = project ? await resolveProjectId(project) : undefined;
-    const res = await api.searchSessions({
-      q,
-      ...(gezel ? { gezel } : {}),
-      ...(projectId ? { project: projectId } : {}),
-      maxResults: limit ?? 10,
-    });
-    if (res.engine === 'unavailable') {
-      return errorResult('Transcript search is unavailable on this install.', {
-        code: 'search_unavailable',
-        retryable: false,
+    try {
+      const resolvedProject = project ? await resolveProjectId(project) : undefined;
+      // Default both filters to THIS session's scope. Worker sessions are only
+      // authorized for their own gezel + project (omitting the filters was a
+      // guaranteed 403); team-scope tokens may widen explicitly.
+      const res = await api.searchSessions({
+        q,
+        gezel: gezel ?? (gezelId || undefined),
+        project: resolvedProject ?? projectId,
+        maxResults: limit ?? 10,
       });
+      if (res.engine === 'unavailable') {
+        return errorResult('Transcript search is unavailable on this install.', {
+          code: 'search_unavailable',
+          retryable: false,
+        });
+      }
+      const lines = res.results.map(
+        (r) =>
+          `${r.lastActivityAt} · ${r.gezelId} in ${r.projectId} — ${r.title}${r.archived ? ' (archived)' : ''} [msg #${r.messageStart}]: ${r.snippet}`,
+      );
+      const summary = res.results.length
+        ? `Found ${res.results.length} matching session transcript${res.results.length === 1 ? '' : 's'}.`
+        : 'No session transcripts match.';
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary,
+          query: q,
+          matches: res.results,
+          count: res.results.length,
+          engine: res.engine,
+        },
+        { text: lines.length ? `${summary}\n${lines.join('\n')}` : summary },
+      );
+    } catch (err) {
+      return errorResult(`search_sessions failed: ${unwrapApiError(err)}`);
     }
-    if (!res.results.length) {
-      return { content: [{ type: 'text' as const, text: 'No session transcripts match.' }] };
-    }
-    const lines = res.results.map(
-      (r) =>
-        `${r.lastActivityAt} · ${r.gezelId} in ${r.projectId} — ${r.title}${r.archived ? ' (archived)' : ''} [msg #${r.messageStart}]: ${r.snippet}`,
-    );
-    return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
   },
 );
 
@@ -10259,9 +10524,178 @@ server.tool(
   },
 );
 
+/** Per-hit snippet cap in the rendered `search` text (structuredContent keeps the full snippet). */
+const SEARCH_SNIPPET_MAX_CHARS = 200;
+
+function clampSearchSnippet(snippet: string): string {
+  const collapsed = snippet.replace(/\s+/g, ' ').trim();
+  if (collapsed.length <= SEARCH_SNIPPET_MAX_CHARS) return collapsed;
+  return `${collapsed.slice(0, SEARCH_SNIPPET_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+/**
+ * Token budget for the rendered `search` text. The model explicitly asked for
+ * results, so it gets 2× the per-turn indexed-context ceiling for its window;
+ * when the window is unknown (env var absent), a fixed budget that keeps the
+ * worst case around ~8KB instead of the ~24KB an unbudgeted 30×800-char
+ * response could reach.
+ */
+function searchTextBudgetTokens(): number {
+  const ceiling = contextBudgetCeiling(sessionContextWindow);
+  return Number.isFinite(ceiling) ? ceiling * 2 : 2_000;
+}
+
+server.tool(
+  'search',
+  "Search indexed knowledge by meaning and keywords through one simple surface. Covers the active and linked projects' workspaces, artifacts, and memories, the shared document library, and any installed knowledge catalogs (reference material with citation URIs). Every result carries provenance and an exact path/line when available — open hits with `read_file` (workspace, including `../<project-id>/...` linked paths), `read_artifact` (artifacts), or `read_document` (shared paths and knowledge:// URIs). This is the preferred discovery tool; `grep_files` remains best for exact strings and regular expressions.",
+  {
+    query: z.string().min(1).describe('Natural-language description or keywords.'),
+    sources: z
+      .array(
+        z.enum(['workspace', 'artifacts', 'project-memory', 'gezel-memory', 'shared', 'knowledge']),
+      )
+      .optional()
+      .describe('Optional corpus filter. Omit to search all knowledge available to this project.'),
+    maxResults: z
+      .number()
+      .int()
+      .positive()
+      .max(100)
+      .optional()
+      .describe(
+        'Maximum results to request (default 30). The rendered text may show fewer when output is budgeted to the context window.',
+      ),
+    cursor: z
+      .number()
+      .int()
+      .min(0)
+      .max(10_000)
+      .optional()
+      .describe('Continuation cursor from a prior truncated search response.'),
+    pathPrefix: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'Only results under this path prefix (e.g. "src/engine/" or "../<project-id>/docs/"). Narrowing only.',
+      ),
+  },
+  async ({ query, sources, maxResults, cursor, pathPrefix }) => {
+    try {
+      const res = await api.toolSearch(projectId, {
+        query,
+        gezelId,
+        includeShared: true,
+        ...(sources ? { sources } : {}),
+        ...(maxResults ? { maxResults } : {}),
+        ...(cursor ? { offset: cursor } : {}),
+        ...(pathPrefix ? { pathPrefix } : {}),
+      });
+      const modelResults = res.results.map((result) => {
+        if (
+          result.projectId &&
+          result.projectId !== projectId &&
+          result.path &&
+          result.retrievalSource === 'workspace'
+        ) {
+          return { ...result, path: `../${result.projectId}/${result.path}` };
+        }
+        return result;
+      });
+      const lines = modelResults.map((r) => {
+        const provenance = r.retrievalSource ?? r.source ?? r.kind;
+        const projectScope =
+          r.projectId && r.projectId !== projectId ? ` project=${r.projectId}` : '';
+        // Mark only high-confidence hits; unmarked rows are the weak tier —
+        // a marker on every row would just spend tokens saying nothing.
+        const confidence = r.tier === 'strong' ? ' strong' : '';
+        const lineSpan = r.line
+          ? `:${r.line}${r.lineEnd && r.lineEnd !== r.line ? `-${r.lineEnd}` : ''}`
+          : '';
+        // Knowledge rows have no filesystem path — the citation URI is the
+        // handle the model passes to read_document.
+        const where = r.path ? `${r.path}${lineSpan}` : (r.uri ?? r.title);
+        const title = !r.path && r.uri ? ` ${r.title}` : '';
+        const preview = r.snippet ? ` — ${clampSearchSnippet(r.snippet)}` : '';
+        return `[${provenance}${projectScope}${confidence}] ${where}${title}${preview}`;
+      });
+      const craftbookLines = res.craftbooks.map((craftbook) => {
+        const source =
+          craftbook.source === 'bundled'
+            ? 'Gilde'
+            : craftbook.source === 'project'
+              ? 'project-local'
+              : 'local';
+        const description = craftbook.description ? ` — ${craftbook.description}` : '';
+        const callArguments = JSON.stringify(craftbook.invocation.arguments);
+        return `[craftbook:${source}] ${craftbook.name} (${craftbook.id})${description}\n  If this procedure fits and \`invoke_craftbook\` is available, call \`invoke_craftbook\` directly with arguments \`${callArguments}\`; otherwise ignore it.`;
+      });
+      const resultSummary = modelResults.length
+        ? `Found ${modelResults.length} relevant result${modelResults.length === 1 ? '' : 's'} across active, linked, and shared project knowledge${res.truncated ? ' (truncated)' : ''}`
+        : 'No indexed project knowledge matched';
+      const summary = res.craftbooks.length
+        ? `${resultSummary}; suggested ${res.craftbooks.length} relevant craftbook${res.craftbooks.length === 1 ? '' : 's'}.`
+        : `${resultSummary}.`;
+      // Budget the rendered text to the session model's context window.
+      // Summary and craftbook recipes are small and load-bearing, so they are
+      // reserved first; result rows then fill the remainder (always at least
+      // one, so a tight window still gets the best hit).
+      const craftbookSection = craftbookLines.length
+        ? `Craftbook options:\n${craftbookLines.join('\n')}`
+        : null;
+      const budget = searchTextBudgetTokens();
+      let usedTokens =
+        estimateTokens(summary) + (craftbookSection ? estimateTokens(craftbookSection) : 0);
+      const shownLines: string[] = [];
+      for (const line of lines) {
+        const cost = estimateTokens(line);
+        if (shownLines.length > 0 && usedTokens + cost > budget) break;
+        shownLines.push(line);
+        usedTokens += cost;
+      }
+      const hidden = lines.length - shownLines.length;
+      const moreExists = res.truncated || hidden > 0;
+      const nextCursor =
+        moreExists && shownLines.length > 0 ? (cursor ?? 0) + shownLines.length : undefined;
+      // Prescriptive recovery, grep_files-style: a truncated response tells
+      // the model exactly how to get the rest instead of dead-ending.
+      const truncationFooter =
+        moreExists && nextCursor !== undefined
+          ? `Results truncated${hidden > 0 ? ` (${hidden} retrieved but not shown — output budgeted to the context window)` : ''}. Continue with cursor=${nextCursor}, or narrow with pathPrefix/sources.`
+          : null;
+      const sections = [
+        ...(shownLines.length ? [shownLines.join('\n')] : []),
+        ...(truncationFooter ? [truncationFooter] : []),
+        ...(craftbookSection ? [craftbookSection] : []),
+      ];
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary,
+          query,
+          matches: modelResults,
+          count: modelResults.length,
+          truncated: moreExists,
+          ...(nextCursor !== undefined ? { nextCursor } : {}),
+          ...(hidden > 0
+            ? { truncationReason: 'output' as const }
+            : res.truncated
+              ? { truncationReason: 'limit' as const }
+              : {}),
+          engine: 'scoped-index',
+          craftbooks: res.craftbooks,
+        },
+        { text: sections.length ? `${summary}\n${sections.join('\n\n')}` : summary },
+      );
+    } catch (err) {
+      return errorResult(`search failed: ${unwrapApiError(err)}`);
+    }
+  },
+);
+
 server.tool(
   'search_code',
-  'Search the codebase by MEANING, not just exact text — "where is rate limiting handled?", "auth token refresh". Blends semantic vector search with keyword search and returns path + lineStart/lineEnd; follow with read_file({path,startLine:lineStart,endLine:lineEnd}). Use this when you don\'t know the exact name; use find_symbol when you do.',
+  'Compatibility alias for workspace-only semantic search. Prefer `search`, which also reaches project documents, artifacts, memories, and the shared library. Use `grep_files` for exact text or regular expressions.',
   {
     query: z.string().min(1).describe('Natural-language description or keywords.'),
     mode: z
@@ -10608,23 +11042,28 @@ server.tool(
         (r) =>
           `${r.path}${r.width ? ` (${r.width}x${r.height} ${r.format ?? ''})` : ''}${r.caption ? ` — ${r.caption}` : ''}`,
       );
-      const head = `${res.results.length} image${res.results.length === 1 ? '' : 's'} (engine=${res.engine}${res.truncated ? ', truncated' : ''})`;
-      return {
-        content: [{ type: 'text' as const, text: `${head}\n${lines.join('\n') || '(none)'}` }],
-      };
+      const summary = `${res.results.length} image${res.results.length === 1 ? '' : 's'} (engine=${res.engine}${res.truncated ? ', truncated' : ''})`;
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary,
+          query: args.query,
+          matches: res.results,
+          count: res.results.length,
+          truncated: res.truncated,
+          engine: res.engine,
+        },
+        { text: `${summary}\n${lines.join('\n') || '(none)'}` },
+      );
     } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `search_images failed: ${msg}` }],
-        isError: true,
-      };
+      return errorResult(`search_images failed: ${unwrapApiError(err)}`);
     }
   },
 );
 
 server.tool(
   'find_similar_images',
-  'Find images visually similar to a given image (by CLIP-style embedding). Requires the boekwachter to have captioned/embedded images first; returns engine=unavailable until then.',
+  'Find images visually similar to a given image (by CLIP embedding). The visual index fills in the background as images are indexed; returns engine=unavailable until this image has been embedded.',
   {
     path: z.string().min(1).describe('Workspace-relative path of the reference image.'),
     maxResults: z.number().int().positive().max(100).optional(),
@@ -10637,7 +11076,7 @@ server.tool(
           content: [
             {
               type: 'text' as const,
-              text: 'find_similar_images: no image embeddings yet (boekwachter has not processed images).',
+              text: 'find_similar_images: no visual embedding for this image yet — the index fills in the background; try again later.',
             },
           ],
         };
@@ -10703,20 +11142,22 @@ server.tool(
     try {
       const res = await api.toolFindEntity(projectId, args);
       const lines = res.entities.map((e) => `${e.kind}: ${e.label}  (${e.mentions} mentions)`);
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `${res.entities.length} entities (engine=${res.engine})\n${lines.join('\n') || '(none — index may have no structured metadata yet)'}`,
-          },
-        ],
-      };
+      const summary = `${res.entities.length} entit${res.entities.length === 1 ? 'y' : 'ies'} (engine=${res.engine})`;
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary,
+          ...(args.query ? { query: args.query } : {}),
+          matches: res.entities,
+          count: res.entities.length,
+          engine: res.engine,
+        },
+        {
+          text: `${summary}\n${lines.join('\n') || '(none — index may have no structured metadata yet)'}`,
+        },
+      );
     } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `find_entity failed: ${msg}` }],
-        isError: true,
-      };
+      return errorResult(`find_entity failed: ${unwrapApiError(err)}`);
     }
   },
 );
@@ -10764,19 +11205,22 @@ server.tool(
   async (args) => {
     try {
       const res = await api.toolSearchDocs(projectId, args);
-      const head = `${res.results.length} doc match${res.results.length === 1 ? '' : 'es'} (engine=${res.engine}${res.truncated ? ', truncated' : ''})`;
+      const summary = `${res.results.length} doc match${res.results.length === 1 ? '' : 'es'} (engine=${res.engine}${res.truncated ? ', truncated' : ''})`;
       const lines = res.results.map((r) => `${r.sourcePath}:${r.lineStart}: ${r.snippet}`);
-      return {
-        content: [
-          { type: 'text' as const, text: `${head}\n${lines.join('\n') || '(no matches)'}` },
-        ],
-      };
+      return okResult(
+        SearchToolOutputSchema,
+        {
+          summary,
+          query: args.query,
+          matches: res.results,
+          count: res.results.length,
+          truncated: res.truncated,
+          engine: res.engine,
+        },
+        { text: `${summary}\n${lines.join('\n') || '(no matches)'}` },
+      );
     } catch (err) {
-      const msg = unwrapApiError(err);
-      return {
-        content: [{ type: 'text' as const, text: `search_docs failed: ${msg}` }],
-        isError: true,
-      };
+      return errorResult(`search_docs failed: ${unwrapApiError(err)}`);
     }
   },
 );

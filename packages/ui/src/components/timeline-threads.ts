@@ -37,6 +37,8 @@ export type ThreadStreamingRow<S> = {
   kind: 'streaming';
   sessionId: string;
   slot: S;
+  /** Stable render anchor when `at` changes with live activity. */
+  threadAt?: string;
   at: string;
 };
 
@@ -85,10 +87,14 @@ export type TimelineThreadItem<M extends ThreadMessageLike, S, T, TS> =
  *    session's subsequent replies merge into the kept root's thread;
  *  - terminal rows pass through as standalone items in place.
  *
- * Item order mirrors first-appearance order of the input, which is
- * ascending `at` for persisted rows with streaming rows last — so
- * threads land where their *trigger* happened, and a brand-new
- * streaming session still sorts to the bottom.
+ * A thread moves to each reply's position as it is processed, so top-level
+ * groups are ordered by their newest activity rather than forever pinned to
+ * the trigger time. The trigger and accumulated replies still stay together:
+ * a late continuation cannot masquerade as a reply to a newer handoff, while
+ * the active exchange also does not remain stranded above that handoff. The
+ * caller orders streaming rows by observable activity, so the thread making
+ * the latest progress settles nearest the bottom (before any later
+ * terminal-work lane).
  */
 export function buildTimelineThreads<M extends ThreadMessageLike, S, T, TS>(
   rows: Array<ThreadInputRow<M, S, T, TS>>,
@@ -159,11 +165,26 @@ export function buildTimelineThreads<M extends ThreadMessageLike, S, T, TS>(
     const sessionId = row.kind === 'message' ? row.msg.sessionId : row.sessionId;
     let group = openBySession.get(sessionId);
     if (!group) {
-      group = { kind: 'thread', sessionId, at: row.at, replies: [] };
+      group = {
+        kind: 'thread',
+        sessionId,
+        at: row.kind === 'streaming' ? (row.threadAt ?? row.at) : row.at,
+        replies: [],
+      };
       items.push(group);
       openBySession.set(sessionId, group);
     }
     group.replies.push(row);
+    // The group may have been opened much earlier by its user trigger.
+    // Re-queue the whole unit at every reply (persisted or live) so its
+    // top-level position follows newest activity without separating cause
+    // from effect. `group` identity remains stable for fan-out aliases in
+    // `openBySession` and `groupByRoot`.
+    const currentIndex = items.indexOf(group);
+    if (currentIndex >= 0 && currentIndex !== items.length - 1) {
+      items.splice(currentIndex, 1);
+      items.push(group);
+    }
   }
 
   return items;

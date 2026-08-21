@@ -109,6 +109,69 @@ describe('ChatTimelineView — jumping to a failed turn', () => {
     expect(onFocusSession).toHaveBeenCalledWith('s2', 'g2', 'p1');
   });
 
+  it('loads older pages until a busy project timeline reaches the failed session', async () => {
+    const newest = message({
+      sessionId: 's3',
+      gezelId: 'g3',
+      content: 'newer task chatter',
+      at: '2026-07-25T12:00:00.000Z',
+    });
+    const middle = message({
+      sessionId: 's1',
+      content: 'still newer than the failure',
+      at: '2026-07-25T11:00:00.000Z',
+    });
+    const failed = message({
+      sessionId: 's2',
+      gezelId: 'g2',
+      content: 'the older turn that blew up',
+      at: '2026-07-25T10:00:00.000Z',
+      sessionLastTurnError: 'engine crashed behind task chatter',
+    });
+    const loadTimeline = vi.fn(
+      async (opts: { limit: number; before?: string }): Promise<ListTimelineResponse> => {
+        if (opts.before === 'cursor-2') {
+          return { messages: [failed], hasMore: false } as ListTimelineResponse;
+        }
+        if (opts.before === 'cursor-1') {
+          return {
+            messages: [middle],
+            hasMore: true,
+            nextCursor: 'cursor-2',
+          } as ListTimelineResponse;
+        }
+        return {
+          messages: [newest],
+          hasMore: true,
+          nextCursor: 'cursor-1',
+        } as ListTimelineResponse;
+      },
+    );
+    const onFocusSession = vi.fn();
+    queueFocusSessionError({ projectId: 'p1', sessionId: 's2' });
+
+    render(
+      <ChatTimelineView
+        scopeKey="project:p1"
+        activeSessionId={undefined}
+        loadTimeline={loadTimeline}
+        streamUrl={() => 'https://example.invalid/events'}
+        inflightScope={{ projectId: 'p1' }}
+        onFocusSession={onFocusSession}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(document.querySelector('.timeline-focus-flash')).toHaveAttribute(
+        'data-session-error',
+        's2',
+      ),
+    );
+    expect(loadTimeline).toHaveBeenCalledWith({ limit: 100, before: 'cursor-1' });
+    expect(loadTimeline).toHaveBeenCalledWith({ limit: 100, before: 'cursor-2' });
+    expect(onFocusSession).toHaveBeenCalledWith('s2', 'g2', 'p1');
+  });
+
   it('ignores a jump aimed at another project', async () => {
     const onFocusSession = renderTimeline();
     await screen.findByText('the turn that blew up');

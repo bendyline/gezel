@@ -191,7 +191,15 @@ std::optional<double> parse_number(const std::optional<std::string>& text) {
 using NvmlDevice = struct nvmlDevice_st*;
 struct NvmlUtilization { unsigned int gpu; unsigned int memory; };
 struct NvmlMemory { unsigned long long total; unsigned long long free; unsigned long long used; };
+struct NvmlProcessInfo {
+  unsigned int pid;
+  unsigned long long used_gpu_memory;
+  unsigned int gpu_instance_id;
+  unsigned int compute_instance_id;
+};
 constexpr int kNvmlSuccess = 0;
+constexpr int kNvmlErrorInsufficientSize = 7;
+constexpr unsigned long long kNvmlValueNotAvailable = ~0ULL;
 
 #ifdef _WIN32
 using DynamicLibrary = HMODULE;
@@ -218,6 +226,54 @@ void close_library(DynamicLibrary library) { if (library) dlclose(library); }
 template <typename T>
 T load_symbol(DynamicLibrary library, const char* name) {
   return reinterpret_cast<T>(symbol(library, name));
+}
+
+using NvmlProcessQuery = int (*)(NvmlDevice, unsigned int*, NvmlProcessInfo*);
+
+void merge_nvml_processes(
+    const std::vector<NvmlProcessInfo>& processes,
+    std::unordered_map<std::uint32_t, double>& bytes_by_pid) {
+  for (const NvmlProcessInfo& process : processes) {
+    if (process.pid == 0 || process.used_gpu_memory == kNvmlValueNotAvailable) continue;
+    const double bytes = static_cast<double>(process.used_gpu_memory);
+    const auto existing = bytes_by_pid.find(process.pid);
+    if (existing == bytes_by_pid.end()) {
+      bytes_by_pid.emplace(process.pid, bytes);
+    } else {
+      // A process can appear in both the compute and graphics queries for one
+      // device. NVML reports its whole allocation in each list, so take the
+      // larger reading instead of counting the same VRAM twice.
+      existing->second = std::max(existing->second, bytes);
+    }
+  }
+}
+
+bool query_nvml_processes(
+    NvmlProcessQuery query,
+    NvmlDevice device,
+    std::unordered_map<std::uint32_t, double>& bytes_by_pid) {
+  if (!query) return false;
+  unsigned int count = 0;
+  int result = query(device, &count, nullptr);
+  if (result == kNvmlSuccess) return true;
+  if (result != kNvmlErrorInsufficientSize || count == 0) return false;
+
+  // Processes can start between the size and data calls. Retry once with the
+  // new minimum size NVML returns rather than dropping attribution for the
+  // entire sample.
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    std::vector<NvmlProcessInfo> processes(count);
+    unsigned int returned = count;
+    result = query(device, &returned, processes.data());
+    if (result == kNvmlSuccess) {
+      processes.resize(std::min<std::size_t>(returned, processes.size()));
+      merge_nvml_processes(processes, bytes_by_pid);
+      return true;
+    }
+    if (result != kNvmlErrorInsufficientSize || returned <= count) return false;
+    count = returned;
+  }
+  return false;
 }
 
 void probe_nvml(ProbeReport& report) {
@@ -253,6 +309,24 @@ void probe_nvml(ProbeReport& report) {
       load_symbol<DeviceUtilization>(library, "nvmlDeviceGetUtilizationRates");
   const DeviceMemory get_memory =
       load_symbol<DeviceMemory>(library, "nvmlDeviceGetMemoryInfo");
+#ifndef _WIN32
+  // v3 is the current ABI; v2 has the same process-info layout and keeps
+  // attribution working on pre-R535 Linux drivers.
+  NvmlProcessQuery get_compute_processes =
+      load_symbol<NvmlProcessQuery>(library, "nvmlDeviceGetComputeRunningProcesses_v3");
+  if (!get_compute_processes) {
+    get_compute_processes =
+        load_symbol<NvmlProcessQuery>(library, "nvmlDeviceGetComputeRunningProcesses_v2");
+  }
+  NvmlProcessQuery get_graphics_processes =
+      load_symbol<NvmlProcessQuery>(library, "nvmlDeviceGetGraphicsRunningProcesses_v3");
+  if (!get_graphics_processes) {
+    get_graphics_processes =
+        load_symbol<NvmlProcessQuery>(library, "nvmlDeviceGetGraphicsRunningProcesses_v2");
+  }
+  std::unordered_map<std::uint32_t, double> process_bytes_by_pid;
+  bool process_accounting_available = false;
+#endif
 
   if (!init || !shutdown || !count_devices || !get_device) {
     report.errors.push_back("nvml: required entry points are missing");
@@ -304,6 +378,18 @@ void probe_nvml(ProbeReport& report) {
         reading.memory_total_mb = static_cast<double>(memory.total) / bytes_per_mb;
       }
     }
+#ifndef _WIN32
+    std::unordered_map<std::uint32_t, double> device_process_bytes;
+    const bool compute_available =
+        query_nvml_processes(get_compute_processes, device, device_process_bytes);
+    const bool graphics_available =
+        query_nvml_processes(get_graphics_processes, device, device_process_bytes);
+    process_accounting_available =
+        process_accounting_available || compute_available || graphics_available;
+    for (const auto& [pid, bytes] : device_process_bytes) {
+      process_bytes_by_pid[pid] += bytes;
+    }
+#endif
     report.readings.push_back(std::move(reading));
   }
   if (report.readings.size() > initial_count) {
@@ -311,6 +397,20 @@ void probe_nvml(ProbeReport& report) {
   } else {
     report.diagnostics.push_back("nvml: no NVIDIA devices exposed by the driver");
   }
+#ifndef _WIN32
+  if (process_accounting_available) {
+    report.sources.push_back("nvml-process-memory");
+    for (const auto& [pid, bytes] : process_bytes_by_pid) {
+      report.processes.push_back(GpuProcessMemory{
+          pid, read_text(fs::path("/proc") / std::to_string(pid) / "comm"), bytes, "external"});
+    }
+    std::sort(report.processes.begin(), report.processes.end(),
+              [](const GpuProcessMemory& left, const GpuProcessMemory& right) {
+                return left.dedicated_bytes > right.dedicated_bytes;
+              });
+    if (report.processes.size() > 64) report.processes.resize(64);
+  }
+#endif
   shutdown();
   close_library(library);
 }
@@ -796,6 +896,16 @@ int self_test() {
   if (parse_number(std::optional<std::string>("123.5")) != 123.5 ||
       parse_number(std::optional<std::string>("not-a-number"))) {
     std::cerr << "self-test failed: numeric parser\n";
+    return 1;
+  }
+  std::unordered_map<std::uint32_t, double> nvml_processes;
+  merge_nvml_processes(
+      {{101, 3ULL * 1024 * 1024, 0, 0},
+       {101, 5ULL * 1024 * 1024, 0, 0},
+       {202, kNvmlValueNotAvailable, 0, 0}},
+      nvml_processes);
+  if (nvml_processes.size() != 1 || nvml_processes[101] != 5ULL * 1024 * 1024) {
+    std::cerr << "self-test failed: NVML process accounting\n";
     return 1;
   }
   std::cout << "device-health self-test passed\n";

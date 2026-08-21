@@ -3,6 +3,10 @@ id: building-connected-apps-with-gezel-app-sdk
 title: Building connected apps with gezel-app-sdk
 order: 9
 summary: Discover Gezel, ask for user consent, and use local models or product APIs from another app.
+subcategory:
+  id: developer
+  title: Developer
+  order: 3
 ---
 
 # Building connected apps with gezel-app-sdk
@@ -10,6 +14,8 @@ summary: Discover Gezel, ask for user consent, and use local models or product A
 `@bendyline/gezel-app-sdk` is for software that runs *beside* Gezel. It lets a desktop or Node application discover the logged-in user's daemon, trust its loopback TLS certificate, ask the user for a scoped connection, remember the issued token securely, and use OpenAI-shaped model APIs.
 
 This differs from `@bendyline/gezel-sdk`, whose scripts run *inside* Gezel's sandbox. A connected app owns its own interface and process. Gezel owns model discovery and downloads, consent, revocation, and the local inference service.
+
+If the experience should live inside a Gezel project as a custom crew, dashboard, craftbooks, scripts, and data, see [Building AI Apps inside Gezel](building-ai-apps-inside-gezel.md) instead.
 
 The [Connected apps](../conceptual/connected-apps.md) article explains what the user sees. This article covers the developer side.
 

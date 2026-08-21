@@ -10,6 +10,7 @@ import type {
   HatOption,
   Poppetje as PoppetjeStruct,
   ProviderName,
+  RetrievalMode,
 } from '@bendyline/gezel';
 import {
   ACCESSORY_OPTIONS,
@@ -1073,12 +1074,28 @@ function ProviderOverride({
     [gezel.id, onUpdated],
   );
 
+  const saveRetrieval = useCallback(
+    async (value: RetrievalMode | 'inherit') => {
+      setSaving(true);
+      try {
+        const updated = await api.updateGezelSettings(gezel.id, {
+          retrieval: value === 'inherit' ? null : { ...gezel.retrieval, mode: value },
+        });
+        onUpdated(updated);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [gezel.id, gezel.retrieval, onUpdated],
+  );
+
   const effectiveProvider = gezel.provider ?? globalProvider;
   const sandboxCurrent: 'default' | 'on' | 'off' =
     gezel.sandboxCopilot === undefined ? 'default' : gezel.sandboxCopilot ? 'on' : 'off';
   const codexCurrent: CodexPermissionMode | 'inherit' = gezel.codexPermissionMode
     ? normalizeCodexPermissionMode(gezel.codexPermissionMode)
     : 'inherit';
+  const retrievalCurrent: RetrievalMode | 'inherit' = gezel.retrieval?.mode ?? 'inherit';
 
   return (
     <div className="provider-override">
@@ -1096,6 +1113,28 @@ function ProviderOverride({
         value={gezel.reasoningEffort}
         onChange={(v) => void saveEffort(v)}
       />
+      <span
+        className="muted small"
+        style={{ marginLeft: '0.75rem' }}
+        title="How much relevant indexed project knowledge is added to each substantive turn. Search remains available in Off mode."
+      >
+        Context:
+      </span>
+      {(['inherit', 'off', 'lean', 'balanced', 'deep'] as const).map((value) => (
+        <button
+          key={value}
+          type="button"
+          className={`provider-chip${retrievalCurrent === value ? ' provider-chip-active' : ''}`}
+          onClick={() => void saveRetrieval(value)}
+          disabled={saving}
+        >
+          {value === 'inherit'
+            ? 'Inherit'
+            : value === 'off'
+              ? 'Off'
+              : value[0]!.toUpperCase() + value.slice(1)}
+        </button>
+      ))}
       {effectiveProvider === 'copilot' && (
         <>
           <span
@@ -1148,11 +1187,13 @@ function ProviderOverride({
           ))}
         </>
       )}
-      <AdvancedTuningDisclosure
-        gezel={gezel}
-        effectiveProvider={effectiveProvider}
-        onUpdated={onUpdated}
-      />
+      {gezel.model && (
+        <AdvancedTuningDisclosure
+          gezel={gezel}
+          effectiveProvider={effectiveProvider}
+          onUpdated={onUpdated}
+        />
+      )}
     </div>
   );
 }

@@ -39,7 +39,11 @@ export function UnrecognizedModels({
               </span>
               <span className="local-model-attention-actions">
                 {item.canUpdate && (
-                  <button type="button" className="home-link" onClick={() => onUpdate(item.id)}>
+                  <button
+                    type="button"
+                    className="gz-link-button"
+                    onClick={() => onUpdate(item.id)}
+                  >
                     Update
                   </button>
                 )}
@@ -51,7 +55,11 @@ export function UnrecognizedModels({
                     Machine model
                   </span>
                 ) : (
-                  <button type="button" className="home-link" onClick={() => onRemove(item.id)}>
+                  <button
+                    type="button"
+                    className="gz-link-button"
+                    onClick={() => onRemove(item.id)}
+                  >
                     Remove
                   </button>
                 )}

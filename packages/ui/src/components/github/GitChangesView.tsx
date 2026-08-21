@@ -1,6 +1,7 @@
 import type { GitFileDiffResponse, GitWorkingChange } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../api.js';
+import { formatAbsoluteTime } from '../../relative-time.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
 import { ChangedFileList } from './ChangedFileList.js';
 import { GitDiffView } from './GitDiffView.js';
@@ -166,7 +167,11 @@ export function GitChangesView({
             ✨ {GIT_COPY.reviewPrButton}
           </button>
         )}
-        {lastSyncedAt && <p className="muted small">Last synced {friendlyDate(lastSyncedAt)}</p>}
+        {lastSyncedAt && (
+          <p className="muted small" title={formatAbsoluteTime(lastSyncedAt)}>
+            Last synced {friendlyDate(lastSyncedAt)}
+          </p>
+        )}
       </div>
     );
   }

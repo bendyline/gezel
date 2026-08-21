@@ -1,0 +1,309 @@
+/* ── Handboek — built-in documentation ─────────────────────────────
+   TOC rail + reading pane. The reading column is one of ux.md's
+   deliberate "editorial exceptions": squisq's theme sets its own
+   comfortable long-form sizes, so only the chrome here draws from the
+   compact --text-* scale. Mode toggle uses the shared keys-in-trays
+   recipe (.gz-tray/.gz-key). */
+
+.handboek-view {
+  display: grid;
+  grid-template-columns: minmax(200px, 250px) minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
+.handboek-toc {
+  overflow-y: auto;
+  padding: 1rem 0.75rem 1.5rem;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.handboek-toc-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text);
+  padding: 0.15rem 0.35rem 0.75rem;
+}
+
+.handboek-toc-filter {
+  width: 100%;
+  margin: 0 0 0.6rem;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.85rem;
+  border: 1px solid var(--border, #4443);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+}
+
+.handboek-toc-loading,
+.handboek-loading {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  padding: 0.5rem 0.35rem;
+}
+
+.handboek-toc-area {
+  margin-bottom: 0.45rem;
+}
+
+.handboek-toc-area-title {
+  margin: 0;
+}
+
+.handboek-toc-disclosure {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.handboek-toc-area-toggle {
+  padding: 0.25rem 0.35rem;
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.handboek-toc-disclosure:hover {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.handboek-toc-disclosure:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.handboek-toc-caret {
+  display: inline-block;
+  flex: 0 0 0.55rem;
+  color: var(--accent);
+  font-size: 0.95rem;
+  line-height: 1;
+  text-align: center;
+  transform-origin: center;
+  transition: transform 0.15s ease-out;
+}
+
+.handboek-toc-disclosure[aria-expanded="true"] .handboek-toc-caret {
+  transform: rotate(90deg);
+}
+
+.handboek-toc-area-contents {
+  margin-top: 0.05rem;
+}
+
+.handboek-toc-area ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.handboek-toc-subcategory {
+  margin-top: 0.2rem;
+}
+
+.handboek-toc-subcategory-title {
+  margin: 0;
+}
+
+.handboek-toc-subcategory-toggle {
+  padding: 0.25rem 0.45rem;
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.handboek-toc-area .handboek-toc-subcategory-entries {
+  margin: 0.05rem 0 0 0.55rem;
+  padding-left: 0.4rem;
+  border-left: 1px solid var(--border);
+}
+
+.handboek-toc-entry {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.3rem 0.45rem;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.handboek-toc-entry:hover {
+  background: var(--panel);
+}
+
+.handboek-toc-entry-active,
+.handboek-toc-entry-active:hover {
+  background: var(--panel);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.handboek-pane {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.handboek-pane-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.handboek-pane-titles {
+  min-width: 0;
+}
+
+.handboek-pane-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.handboek-pane-summary {
+  margin: 0.2rem 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.handboek-mode-tray {
+  flex-shrink: 0;
+}
+
+.handboek-error {
+  margin: 1rem 1.25rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-md);
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+
+.handboek-doc {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* Let wide document sections (tables, galleries, feature splits) use the
+   renderer's 1060px wide measure when the pane has room. Ordinary prose keeps
+   its own narrower 740px measure inside Squisq, so long-form reading remains
+   comfortable. */
+.handboek-doc > * {
+  max-width: 68rem;
+  margin: 0 auto;
+}
+
+/* Markdown tables can live inside a prose section (the generated model
+   scorecard does), so Squisq would otherwise keep the whole section on its
+   narrower prose measure. Promote only table-bearing prose sections to the
+   wide measure; prose-only sections stay comfortably readable. */
+.handboek-doc .squisq-page-section--prose:has(.squisq-md-table) .squisq-page-section-inner {
+  max-width: var(--squisq-page-wide-max);
+}
+
+.handboek-player {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 1rem 1.25rem 1.25rem;
+}
+
+.handboek-player > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.handboek-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.handboek-listen-key {
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .handboek-toc-caret {
+    transition: none;
+  }
+}
+
+/* Library content search — the file tree answers "where did I file it", this
+   answers "which document says this". Sits in the browser pane's header, so
+   it takes the ordinary in-panel input treatment rather than the titlebar
+   search's carved-into-the-chrome one. */
+.documents-search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.documents-search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.3rem 0.45rem;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+}
+
+.documents-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.documents-search-status {
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+/* One line of matched prose under the document name. Clamped: a search
+   result is a signpost to the document, not a substitute for opening it. */
+.documents-search-snippet {
+  display: block;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

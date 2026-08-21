@@ -56,6 +56,12 @@ export interface TranscribeOutput {
   language?: string;
   /** Wall-clock duration of the transcription itself. */
   durationMs: number;
+  /**
+   * Manifest id of the model that actually transcribed — the explicit
+   * request, else the provider's resolved fallback. Recorded so consumers
+   * (shadow sidecars, gates) can stamp provenance instead of NULL.
+   */
+  model?: string;
 }
 
 export interface SynthesizeInput {

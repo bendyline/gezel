@@ -33,6 +33,7 @@
  */
 
 import { closeSync, existsSync, fstatSync, openSync, readSync } from 'node:fs';
+import type { SessionTelemetry } from '@bendyline/gezel';
 import { parseDaemonActivityText } from './progress-fingerprint.ts';
 import type { FailureClass, NativeEngineIncidentSummary } from './types.ts';
 
@@ -78,6 +79,8 @@ export interface ClassifyTrialInput {
   daemonLog?: string | null;
   /** Structured JSONL copied from the trial home's native incident log. */
   nativeIncidentLog?: string | null;
+  /** Final structured service snapshot captured before daemon shutdown. */
+  sessionTelemetry?: readonly SessionTelemetry[] | null;
 }
 
 /** Failure modes where the trial died waiting/looping rather than on an
@@ -131,11 +134,29 @@ const STRUCTURED_CUDA_CRASH =
   /"expected":false[^\n]*"panicKind":"cuda-[^"]+"|"panicKind":"cuda-[^"]+"[^\n]*"expected":false/i;
 const JINJA_TEMPLATE_500 = /Jinja Exception: Conversation roles must alternate/;
 const VOORMAN_SCHEDULER_SKIP = /skip meester nudge — voorman is the Meester/;
+const PRE_PROVIDER_STALL_REASON = /pre-provider stall/i;
 
 /** Minimum repeats before a log signature counts as the cause: a single
  * Jinja 500 can be recovered from; a single scheduler skip is routine. */
 const JINJA_MIN_OCCURRENCES = 3;
 const VOORMAN_SKIP_MIN_OCCURRENCES = 10;
+
+/**
+ * Return high-precision evidence that every currently in-flight turn is still
+ * owned by service-side preparation and has never issued a provider request.
+ * This is an infra/harness stall, not evidence about model capability.
+ */
+export function describePreProviderStall(
+  sessions: readonly SessionTelemetry[] | null | undefined,
+): string | null {
+  const inflight = (sessions ?? []).filter((session) => session.inflight && session.currentTurn);
+  if (inflight.length === 0) return null;
+  if (inflight.some((session) => (session.currentTurn?.providerRequestsStarted ?? 0) > 0)) {
+    return null;
+  }
+  const phases = [...new Set(inflight.map((session) => session.currentTurn?.phase ?? 'preparing'))];
+  return `pre-provider stall in ${phases.join('/')} (${inflight.length} in-flight turn${inflight.length === 1 ? '' : 's'}, 0 provider requests started)`;
+}
 
 export function classifyTrial(input: ClassifyTrialInput): FailureClassification {
   if (input.success) {
@@ -186,6 +207,16 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
   }
   if (input.failureMode === 'spawn-error') {
     return { failureClass: 'infra', rule: 'spawn-error', evidence: reason.slice(0, 140) };
+  }
+  const preProvider =
+    (isStallish(input) && describePreProviderStall(input.sessionTelemetry)) ||
+    (PRE_PROVIDER_STALL_REASON.test(reason) ? reason.slice(0, 240) : null);
+  if (preProvider) {
+    return {
+      failureClass: 'infra',
+      rule: 'pre-provider-stall',
+      evidence: preProvider,
+    };
   }
   if (input.failureMode === 'engine-hung' || ENGINE_HUNG_REASON.test(reason)) {
     return { failureClass: 'infra', rule: 'engine-hung', evidence: reason.slice(0, 140) };

@@ -31,7 +31,7 @@ describe('ToolsetsEditor custom MCP import', () => {
 
     expect(screen.getByText('Additional project toolsets')).toBeInTheDocument();
     const addToolsetButton = screen.getByRole('button', { name: '+ Add toolset' });
-    expect(addToolsetButton).not.toHaveClass('home-link');
+    expect(addToolsetButton).not.toHaveClass('gz-link-button');
     fireEvent.click(addToolsetButton);
     fireEvent.click(screen.getByRole('tab', { name: 'Custom MCP' }));
     const text = '{"servers":{"local-tools":{"command":"node","args":["server.js"]}}}';

@@ -219,6 +219,24 @@ export function ImageModelManager({ disabledReason, onModelsChanged }: Props) {
     [attachSubscription],
   );
 
+  const retryPull = useCallback(
+    (id: string) => {
+      // Retry is allowed to replace the terminal row that is still in
+      // `pullsRef`. Calling startPull here would see that stale row during
+      // this React tick and return without starting anything, even after a
+      // queued setPulls(delete). Attach directly so the fresh subscription
+      // is enqueued immediately; React applies these state updates in order.
+      pullsRef.current.get(id)?.controller.abort();
+      setPulls((prev) => {
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
+      attachSubscription(id, (cb, signal) => api.pullImageModel(id, cb, signal));
+    },
+    [attachSubscription],
+  );
+
   const cancelPull = useCallback((id: string) => {
     // Tell the registry to actually abort the download. We optimistically
     // remove the row; the SSE will close shortly after with an error
@@ -261,17 +279,9 @@ export function ImageModelManager({ disabledReason, onModelsChanged }: Props) {
                 key={pull.id}
                 pull={pull}
                 onCancel={() => cancelPull(pull.id)}
-                onRetry={() => {
-                  // Drop the failed entry and re-kick the pull. The
-                  // shared downloader picks up from the existing
-                  // `.partial` so the user doesn't restart at zero.
-                  setPulls((prev) => {
-                    const next = new Map(prev);
-                    next.delete(pull.id);
-                    return next;
-                  });
-                  void startPull(pull.id);
-                }}
+                // The shared downloader picks up from the existing
+                // `.partial` so the user doesn't restart at zero.
+                onRetry={() => retryPull(pull.id)}
               />
             ))}
           </div>
@@ -302,7 +312,11 @@ export function ImageModelManager({ disabledReason, onModelsChanged }: Props) {
                     <td>{formatSize(m.approxSizeBytes)}</td>
                     <td className="muted small">{new Date(m.installedAt).toLocaleDateString()}</td>
                     <td>
-                      <button type="button" className="home-link" onClick={() => setToDelete(m.id)}>
+                      <button
+                        type="button"
+                        className="gz-link-button"
+                        onClick={() => setToDelete(m.id)}
+                      >
                         Delete
                       </button>
                     </td>
@@ -420,11 +434,11 @@ function ImagePullProgress({
         <code>{pull.id}</code>
         <span className="muted small">{statusLine}</span>
         {pull.error ? (
-          <button type="button" className="home-link" onClick={onRetry}>
+          <button type="button" className="gz-link-button" onClick={onRetry}>
             Retry
           </button>
         ) : (
-          <button type="button" className="home-link" onClick={onCancel}>
+          <button type="button" className="gz-link-button" onClick={onCancel}>
             Cancel
           </button>
         )}

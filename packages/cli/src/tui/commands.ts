@@ -1,5 +1,6 @@
 import type { CraftbookSummary } from '@bendyline/gezel';
 import { CLI_ENGAGEMENT_MODES } from '../engagement-mode.js';
+import { MANAGED_APP_TARGETS } from './managed-apps.js';
 import { type CliOpenReference, cliOpenBasename, normalizeCliOpenLookup } from './open-command.js';
 
 /**
@@ -39,6 +40,8 @@ export const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
   { name: 'do', description: 'do a task from a craftbook' },
   { name: 'continue', description: 'process due and active project tasks' },
   { name: 'nightshift', description: 'start, stop, or list night-shift work' },
+  { name: 'connect', description: 'connect a local app to Gezel' },
+  { name: 'disconnect', description: 'remove Gezel from a connected local app' },
   { name: 'focus', description: 'send into another active chat' },
   { name: 'cli', description: 'make bare input run shell commands' },
   { name: 'chat', description: 'make bare input message your gezel' },
@@ -127,6 +130,24 @@ export function suggestSlashWordwheel(
   craftbooks: ReadonlyArray<CraftbookSummary>,
   recentReferences: ReadonlyArray<CliOpenReference> = [],
 ): ReadonlyArray<SlashWordwheelSuggestion> {
+  const appMatch = input.match(/^\/(connect|disconnect)\s+(.*)$/i);
+  if (appMatch) {
+    const command = (appMatch[1] ?? '').toLowerCase() as 'connect' | 'disconnect';
+    const query = (appMatch[2] ?? '').trim().toLowerCase();
+    return MANAGED_APP_TARGETS.filter(
+      (target) =>
+        target.id.startsWith(query) ||
+        (target.aliases as readonly string[]).some((alias) => alias.startsWith(query)),
+    ).map((target) => ({
+      key: `${command}:${target.id}`,
+      label: `/${command} ${target.id}`,
+      description:
+        command === 'connect' ? target.description : `remove Gezel’s managed ${target.label} setup`,
+      submit: `/${command} ${target.id}`,
+      completion: `/${command} ${target.id}`,
+    }));
+  }
+
   const openMatch = input.match(/^\/open\s+(.*)$/i);
   if (openMatch) {
     const query = normalizeCliOpenLookup(openMatch[1] ?? '');

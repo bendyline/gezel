@@ -2,6 +2,7 @@ import type { GezelClient } from '@bendyline/gezel-client/node';
 import { describe, expect, it, vi } from 'vitest';
 import {
   _resetSniffNudgeMemoryForTests,
+  lastDeliveredHarnessIntervention,
   postMissingDeliverableFeedback,
   postSniffFeedback,
   structuralOrderRepairLine,
@@ -1590,6 +1591,29 @@ describe('postMissingDeliverableFeedback', () => {
     expect(target).toBe('reviewer-1');
     expect(body.projectId).toBe('squisq-code-review');
     expect(body.text).toContain('write_file({ path: "review.md"');
+  });
+
+  it('spaces repeats from the actual delayed delivery poll', async () => {
+    const client = makeClient({
+      sessions: [],
+      gezels: [{ id: 'reviewer-1', role: 'Reviewer' }],
+    });
+    const ctx = makeCtx(client);
+    const opts = {
+      minPolls: 1,
+      repeatEvery: 4,
+      targetGracePolls: 2,
+      projectId: 'squisq-code-review',
+    } as const;
+
+    for (let poll = 1; poll <= 6; poll += 1) {
+      await postMissingDeliverableFeedback(ctx, 'review.md', opts);
+    }
+    expect(client.messageGezel).toHaveBeenCalledTimes(1);
+    expect(lastDeliveredHarnessIntervention(ctx)).not.toBeNull();
+
+    await postMissingDeliverableFeedback(ctx, 'review.md', opts);
+    expect(client.messageGezel).toHaveBeenCalledTimes(2);
   });
 
   it('keeps project scope when ensuring a developer for a missing markdown deliverable', async () => {

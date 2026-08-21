@@ -31,6 +31,7 @@
 import type { ClaudeCliPoolView } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { formatRelativeTime } from '../relative-time.js';
 
 /** Polling cadence; matches QueueMeter / EngineStatusPill. */
 const POLL_MS = 3_000;
@@ -128,7 +129,7 @@ export function ClaudeCliPoolPill() {
           <div className="engine-pill-popover-header">Claude CLI workers</div>
           <ul className="claude-cli-pool-list">
             {pool.workers.map((w) => {
-              const ago = formatRelativeMs(Date.now() - w.lastUsedAt);
+              const ago = formatRelativeTime(w.lastUsedAt, { seconds: true });
               const busy = !w.idle && w.alive;
               return (
                 <li key={w.sessionId} className="claude-cli-pool-row">
@@ -153,12 +154,4 @@ export function ClaudeCliPoolPill() {
       )}
     </div>
   );
-}
-
-function formatRelativeMs(ms: number): string {
-  if (ms < 0) return 'just now';
-  if (ms < 5_000) return 'just now';
-  if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
-  if (ms < 60 * 60_000) return `${Math.floor(ms / 60_000)}m ago`;
-  return `${Math.floor(ms / (60 * 60_000))}h ago`;
 }

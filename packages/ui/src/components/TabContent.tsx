@@ -1,4 +1,5 @@
 import type { RecentTab } from '@bendyline/gezel';
+import { lazy } from 'react';
 import { BenchmarksView } from '../views/BenchmarksView.js';
 import { CraftbookScriptEditorView } from '../views/CraftbookScriptEditorView.js';
 import { CraftbookTabContent } from '../views/CraftbookTabContent.js';
@@ -7,7 +8,6 @@ import { DocumentDetail } from '../views/DocumentDetail.js';
 import { DocumentsView } from '../views/DocumentsView.js';
 import { GezelDetail } from '../views/GezelDetail.js';
 import { GezellenView } from '../views/GezellenView.js';
-import { HandboekView } from '../views/HandboekView.js';
 import { HistoryView } from '../views/HistoryView.js';
 import { ProjectDetailView, ProjectsView } from '../views/ProjectsView.js';
 import { ScriptEditorView } from '../views/ScriptEditorView.js';
@@ -16,6 +16,15 @@ import { SettingsView } from '../views/SettingsView.js';
 import { TaskTabContent } from '../views/TaskTabContent.js';
 import { TasksView } from '../views/TasksView.js';
 import { useDebugMode } from './useDebugMode.js';
+
+const HandboekView = lazy(() =>
+  import('../views/HandboekView.js').then(({ HandboekView }) => ({ default: HandboekView })),
+);
+
+// Lazy for the same reason as Handboek: the reader pane pulls in squisq.
+const KnowledgeView = lazy(() =>
+  import('../views/KnowledgeView.js').then(({ KnowledgeView }) => ({ default: KnowledgeView })),
+);
 
 interface TabContentProps {
   tab: RecentTab;
@@ -69,6 +78,11 @@ export function TabContent({ tab, activeProjectsByGezel, activeTurnsReady }: Tab
           return <HistoryView />;
         case 'handboek':
           return <HandboekView />;
+        case 'knowledge':
+          // The view itself renders an install pointer when no catalog is
+          // registered (a restored selection can outlive the last catalog),
+          // so no gate is needed here the way benchmarks needs one.
+          return <KnowledgeView />;
         case 'benchmarks':
           // Developer surface, not a shipped one: unstyled selects, inline
           // hex colours, and a runner that cannot execute in a packaged

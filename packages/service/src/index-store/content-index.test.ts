@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { ContentIndex } from './content-index.js';
+import { IndexStore } from './index-store.js';
 
 let dir: string;
 let home: string;
@@ -97,6 +98,33 @@ describe('ContentIndex (code-intel façade)', () => {
     const outline = await ci.outlineFile('p1', 'fresh.ts');
     expect(outline.engine).toBe('live');
     expect(outline.symbols.map((s) => s.name)).toContain('brandNew');
+  });
+
+  it('searches deep-pass area and architecture rollups for bigger-picture context', async () => {
+    await writeFile(join(dir, 'README.md'), '# Driving game\n');
+    await ci.refresh('p1');
+    const index = (await IndexStore.open(join(dir, '.gezel', 'index', 'index.db'), {
+      collectionId: 'p1',
+      kind: 'workspace',
+      rootPath: dir,
+    }))!;
+    index.upsertAreaSummary({
+      areaPath: '::project',
+      inputHash: 'h1',
+      summaryMd: 'Vehicle physics separates tire grip, suspension damping, and steering input.',
+      model: 'test',
+    });
+    index.upsertAreaSummary({
+      areaPath: 'docs',
+      inputHash: 'h2',
+      summaryMd: 'Release notes and contributor guidelines.',
+      model: 'test',
+    });
+    index.close();
+
+    const hits = await ci.searchAreaSummaries('p1', 'improve the vehicle physics', 5);
+    expect(hits[0]).toMatchObject({ areaPath: '::project' });
+    expect(hits.some((hit) => hit.areaPath === 'docs')).toBe(false);
   });
 
   it('guards against path traversal', async () => {

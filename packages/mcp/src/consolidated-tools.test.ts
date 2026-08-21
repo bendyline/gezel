@@ -509,6 +509,88 @@ describe('consolidated MCP tools', () => {
     expect(JSON.stringify(rawRange.content)).toContain('cannot be combined');
   });
 
+  it('returns strong Gilde and local craftbooks with direct invocation instructions from search', async () => {
+    handler = (url, method, body) => {
+      expect(url.pathname).toBe('/api/projects/project-a/tools/search');
+      expect(method).toBe('POST');
+      expect(body).toMatchObject({
+        query: 'improve the physics for how cars drive',
+        gezelId: 'meester',
+        includeShared: true,
+      });
+      return {
+        results: [
+          {
+            kind: 'file',
+            title: 'Vehicle dynamics',
+            path: 'src/physics.ts',
+            source: 'workspace',
+            retrievalSource: 'workspace',
+            projectId: 'project-a',
+            line: 12,
+            lineEnd: 20,
+            snippet: 'Suspension and tire friction.',
+            score: 0.8,
+          },
+        ],
+        truncated: false,
+        craftbooks: [
+          {
+            id: 'vehicle-physics',
+            name: 'Vehicle physics',
+            description: 'Tune realistic vehicle motion.',
+            source: 'bundled',
+            stepCount: 4,
+            score: 0.52,
+            invocation: {
+              tool: 'invoke_craftbook',
+              arguments: {
+                craftbookId: 'vehicle-physics',
+                description: 'improve the physics for how cars drive',
+              },
+            },
+          },
+          {
+            id: 'local-driving-review',
+            name: 'Driving review',
+            source: 'local',
+            stepCount: 2,
+            score: 0.4,
+            invocation: {
+              tool: 'invoke_craftbook',
+              arguments: {
+                craftbookId: 'local-driving-review',
+                description: 'improve the physics for how cars drive',
+              },
+            },
+          },
+        ],
+      };
+    };
+
+    const result = await client.callTool({
+      name: 'search',
+      arguments: { query: 'improve the physics for how cars drive' },
+    });
+    const text = (result.content as Array<{ type: string; text?: string }>)
+      .map((item) => item.text ?? '')
+      .join('\n');
+
+    expect(text).toContain('[workspace] src/physics.ts:12-20');
+    expect(text).toContain('[craftbook:Gilde] Vehicle physics');
+    expect(text).toContain('[craftbook:local] Driving review');
+    expect(text).toContain(
+      'call `invoke_craftbook` directly with arguments `{"craftbookId":"vehicle-physics","description":"improve the physics for how cars drive"}`',
+    );
+    expect(result.structuredContent).toMatchObject({
+      count: 1,
+      craftbooks: [
+        { id: 'vehicle-physics', source: 'bundled' },
+        { id: 'local-driving-review', source: 'local' },
+      ],
+    });
+  });
+
   it('calls grep_files with the hardened search contract and renders grep-style context', async () => {
     let requestBody: Record<string, unknown> | undefined;
     handler = (url, method, body) => {

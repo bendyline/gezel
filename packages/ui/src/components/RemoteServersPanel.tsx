@@ -7,6 +7,7 @@ import type {
 } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 
 /**
@@ -50,11 +51,7 @@ function deviceCode(fp: string): string {
 
 function formatRelative(ms?: number): string {
   if (!ms) return 'never';
-  const delta = Date.now() - ms;
-  if (delta < 60_000) return 'just now';
-  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
-  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
-  return `${Math.floor(delta / 86_400_000)}d ago`;
+  return formatRelativeTime(ms);
 }
 
 /**
@@ -553,7 +550,7 @@ export function RemoteServersPanel() {
               <li key={g.id} className="connected-app-row">
                 <div className="connected-app-meta">
                   <div className="connected-app-name">{g.appName}</div>
-                  <div className="muted small">
+                  <div className="muted small" title={formatAbsoluteTime(g.createdAt)}>
                     requested {formatRelative(g.createdAt)} — scopes: {g.scopes.join(', ')}
                   </div>
                 </div>
@@ -588,7 +585,7 @@ export function RemoteServersPanel() {
               <li key={d.appId} className="connected-app-row">
                 <div className="connected-app-meta">
                   <div className="connected-app-name">{d.appName}</div>
-                  <div className="muted small">
+                  <div className="muted small" title={formatAbsoluteTime(d.lastUsedAt)}>
                     paired {formatRelative(d.createdAt)} — last used {formatRelative(d.lastUsedAt)}
                   </div>
                 </div>
@@ -640,7 +637,7 @@ export function RemoteServersPanel() {
               <li key={r.remoteId} className="connected-app-row">
                 <div className="connected-app-meta">
                   <div className="connected-app-name">{r.displayName}</div>
-                  <div className="muted small">
+                  <div className="muted small" title={formatAbsoluteTime(r.lastSeenAt)}>
                     {r.baseUrl} — identity code{' '}
                     <code>{deviceCode(r.pinnedIdentityFingerprint)}</code> — last seen{' '}
                     {formatRelative(r.lastSeenAt)}

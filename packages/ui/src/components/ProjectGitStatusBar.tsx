@@ -8,6 +8,7 @@ import type {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { DropdownChevron, Popover, Select } from '../primitives/index.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { statusChipPhrase } from './github/gitCopy.js';
 import { GIT_CHANGED_EVENT, useGitSync } from './github/useGitSync.js';
 import type { ProjectClaudePermissionMode } from './project-ai-editability.js';
@@ -297,9 +298,9 @@ function ProjectControlsOverflow({
  * same actions.
  *
  * Everything that overlays out of this bar opens *upward*: the branch menu
- * and toast are hand-positioned (see styles.css), the Radix tooltip and
- * overflow popover are told `side="top"`, and the Radix selects flip on
- * their own via collision detection.
+ * and toast are hand-positioned (see styles/settings-and-status.css),
+ * the Radix tooltip and overflow popover are told `side="top"`, and the
+ * Radix selects flip on their own via collision detection.
  */
 export function ProjectGitStatusBar({
   projectId,
@@ -384,6 +385,32 @@ export function ProjectGitStatusBar({
     return () => window.removeEventListener(GIT_CHANGED_EVENT, onChanged);
   }, [projectId, refresh]);
 
+  // Drain-pace estimate across the 30s polls. Day-idle enrichment is
+  // deliberately slow (~150 files/hour when the machine is idle at all), so a
+  // large project can honestly read "continues while the app is idle" for
+  // days — the footer should pitch Night Shift / a full scan instead of
+  // letting that state look like progress. Observed rate wins; when nothing
+  // drained between polls, the theoretical idle pace is the optimistic floor.
+  const drainPaceRef = useRef<{ pending: number; at: number } | null>(null);
+  const [slowDrain, setSlowDrain] = useState(false);
+  useEffect(() => {
+    const pending = indexStatus?.enrichment?.pending;
+    if (pending === undefined || pending <= 0 || indexStatus?.aiDrive) {
+      drainPaceRef.current = null;
+      setSlowDrain(false);
+      return;
+    }
+    const prev = drainPaceRef.current;
+    drainPaceRef.current = { pending, at: Date.now() };
+    if (!prev) return;
+    const elapsedMs = Date.now() - prev.at;
+    if (elapsedMs < 20_000) return; // same poll burst — no signal
+    const drained = prev.pending - pending;
+    const idleFloorRatePerMs = 5 / 120_000; // day-idle batch cadence
+    const ratePerMs = drained > 0 ? drained / elapsedMs : idleFloorRatePerMs;
+    setSlowDrain(pending / ratePerMs > 24 * 60 * 60 * 1000);
+  }, [indexStatus]);
+
   const onUpdateIndex = useCallback(async () => {
     if (
       indexRefreshBusy ||
@@ -430,7 +457,17 @@ export function ProjectGitStatusBar({
     setFullScanError(null);
     fullScanBaseline.current = indexStatus;
     try {
-      await api.driveIndexEnrichment(projectId, { intensity: 'full' });
+      const res = await api.driveIndexEnrichment(projectId, { intensity: 'full' });
+      if (res.mode === 'embed-only') {
+        // No Boekwachter: the server still refreshed the semantic-search
+        // embeddings, but the LLM tiers need the roster — surface the same
+        // add-Boekwachter affordance the old 409 drove, as guidance rather
+        // than a failed scan.
+        setFullScanError({ code: 'boekwachter-required', message: res.hint ?? '' });
+        setFullScanState('idle');
+        window.setTimeout(() => void refreshIndex(), 800);
+        return;
+      }
       setFullScanState('running');
       window.setTimeout(() => void refreshIndex(), 800);
     } catch (err) {
@@ -569,9 +606,25 @@ export function ProjectGitStatusBar({
   const lastSynced = status?.github?.lastSyncedAt;
   const indexState = indexStatus?.state ?? 'never';
   const aiScanPending = indexStatus?.aiScanPending === true;
+  // Semantic search can be down process-wide (embedder disabled/unavailable)
+  // or per-index (sqlite-vec failed to load). Either way, results are
+  // silently keyword-only — say so instead of letting it read as a scan
+  // that never finishes.
+  const embeddingsState = indexStatus?.embeddings?.status;
+  const semanticSearchDown =
+    embeddingsState === 'disabled' ||
+    embeddingsState === 'unavailable' ||
+    indexStatus?.enrichment?.vectorsAvailable === false;
+  const semanticSearchReason =
+    indexStatus?.embeddings?.reason ??
+    (indexStatus?.enrichment?.vectorsAvailable === false
+      ? 'the vector extension failed to load'
+      : 'the embedding model could not be loaded');
   // Steady-state pill colour (the dot):
   //   fresh + scan done → green ('fresh')   — all up to date
   //   fresh + scan todo → amber ('scan')    — index fresh, AI scan still pending
+  //                        (semantic search down also lands here: the amber
+  //                        pill means "search not ready", which it is)
   //   stale / never     → red   ('stale')   — index out of date
   //   indexing          → blue pulse ('indexing', transient)
   //   disabled          → neutral ('disabled')
@@ -581,12 +634,17 @@ export function ProjectGitStatusBar({
       : indexState === 'indexing'
         ? 'indexing'
         : indexState === 'fresh'
-          ? aiScanPending
+          ? aiScanPending || semanticSearchDown
             ? 'scan'
             : 'fresh'
           : 'stale';
   const enrichment = indexStatus?.enrichment;
-  const aiCoverage = enrichment ? coveragePercent(enrichment.embedded, enrichment.eligible) : null;
+  // "Searchable" counts vectors from EITHER embed gate (the always-on
+  // embed-only tier or the full enrichment pass) — `embedded` alone reads
+  // "0 of N searchable" on an unstaffed project whose search works fine.
+  // Fallback for older daemons that don't send the combined counter.
+  const searchReady = enrichment?.searchReady ?? enrichment?.embedded ?? 0;
+  const aiCoverage = enrichment ? coveragePercent(searchReady, enrichment.eligible) : null;
   // The bar aggregates the totality of indexing (summaries + embeddings +
   // quality review); `aiCoverage` keeps feeding the caption's search-ready
   // count, which is a narrower question than "is all the work done".
@@ -725,7 +783,10 @@ export function ProjectGitStatusBar({
               >
                 {chipPhrase}
                 {!chipAttention && lastSynced && (
-                  <span className="muted small"> · synced {formatRelative(lastSynced)}</span>
+                  <span className="muted small" title={formatAbsoluteTime(lastSynced)}>
+                    {' '}
+                    · synced {formatRelativeTime(lastSynced, { seconds: true })}
+                  </span>
                 )}
               </button>
             )}
@@ -815,6 +876,13 @@ export function ProjectGitStatusBar({
                 <strong>{indexHeadline}</strong>
               </div>
 
+              {semanticSearchDown && (
+                <p className="project-index-panel-warning">
+                  Semantic search is off — {semanticSearchReason}. Results are keyword-only
+                  {embeddingsState === 'unavailable' ? '; retrying automatically' : ''}.
+                </p>
+              )}
+
               {enrichment && enrichment.eligible > 0 && overallProgress !== null && (
                 <div className="project-index-panel-progress">
                   <div className="project-index-panel-progress-label">
@@ -833,7 +901,7 @@ export function ProjectGitStatusBar({
                     <span style={{ width: `${overallProgress}%` }} />
                   </div>
                   <span className="project-index-panel-caption">
-                    {enrichment.embedded} of {enrichment.eligible} files searchable
+                    {searchReady} of {enrichment.eligible} files searchable
                     {enrichment.pending > 0 ? ` · ${enrichment.pending} waiting` : ''}
                   </span>
                 </div>
@@ -855,8 +923,8 @@ export function ProjectGitStatusBar({
                     </div>
                     <div>
                       <dt>Last scan</dt>
-                      <dd>
-                        {formatRelative(indexStatus.meta.scannedAt)} ·{' '}
+                      <dd title={formatAbsoluteTime(indexStatus.meta.scannedAt)}>
+                        {formatRelativeTime(indexStatus.meta.scannedAt, { seconds: true })} ·{' '}
                         {formatDuration(indexStatus.meta.durationMs)}
                       </dd>
                     </div>
@@ -907,17 +975,49 @@ export function ProjectGitStatusBar({
 
               <div className="project-index-panel-footer">
                 <span className="project-index-panel-note">
-                  {indexState === 'disabled'
-                    ? 'Workspace indexing is off. Turn it on in Project Settings.'
-                    : serverDrive === 'full'
-                      ? 'Full scan in progress — it shares the model with chat, so counts move as calls finish.'
-                      : serverDrive === 'background'
-                        ? 'Background scan in progress — it politely waits while you chat.'
-                        : indexState === 'indexing'
-                          ? 'The status updates automatically while the scan runs.'
-                          : aiScanPending
-                            ? 'AI indexing continues while the app is idle.'
-                            : 'Refresh the index whenever you need the latest workspace state.'}
+                  {indexState === 'disabled' ? (
+                    <>
+                      Workspace indexing is off.{' '}
+                      <button
+                        type="button"
+                        className="project-index-panel-link"
+                        onClick={() =>
+                          window.dispatchEvent(
+                            new CustomEvent('gezel:open-project-settings', {
+                              detail: { projectId },
+                            }),
+                          )
+                        }
+                      >
+                        Turn it on in Project Settings
+                      </button>
+                      .
+                    </>
+                  ) : serverDrive === 'full' ? (
+                    'Full scan in progress — it shares the model with chat, so counts move as calls finish.'
+                  ) : serverDrive === 'background' ? (
+                    'Background scan in progress — it politely waits while you chat.'
+                  ) : indexState === 'indexing' ? (
+                    'The status updates automatically while the scan runs.'
+                  ) : aiScanPending && slowDrain ? (
+                    <>
+                      At the idle pace this will take more than a day.{' '}
+                      <button
+                        type="button"
+                        className="project-index-panel-link"
+                        onClick={() =>
+                          window.dispatchEvent(new CustomEvent('gezel:open-night-shift'))
+                        }
+                      >
+                        Set up Night Shift
+                      </button>{' '}
+                      or use “Full AI scan now” to finish sooner.
+                    </>
+                  ) : aiScanPending ? (
+                    'AI indexing continues while the app is idle.'
+                  ) : (
+                    'Refresh the index whenever you need the latest workspace state.'
+                  )}
                 </span>
                 <div className="project-index-panel-actions">
                   <button
@@ -1135,24 +1235,6 @@ export function ProjectGitStatusBar({
       )}
     </div>
   );
-}
-
-/**
- * "5s ago" / "2m ago" / "3h ago" — short relative formatter for the
- * status bar's last-synced chip. Anything older than a day rolls into
- * a plain calendar date.
- */
-function formatRelative(iso: string): string {
-  const then = Date.parse(iso);
-  if (!Number.isFinite(then)) return 'recently';
-  const diffMs = Date.now() - then;
-  const sec = Math.max(1, Math.round(diffMs / 1000));
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.round(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  return new Date(then).toLocaleDateString();
 }
 
 function coveragePercent(complete: number, total: number): number | null {

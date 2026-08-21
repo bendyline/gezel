@@ -70,6 +70,14 @@ const AREA_PATHS: Record<RecentTabArea, JSX.Element> = {
       <path d="M9 17h6" />
     </>
   ),
+  // Globe — knowledge catalogs are world reference material
+  knowledge: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18" />
+      <path d="M12 3c2.8 2.4 4.2 5.6 4.2 9S14.8 18.6 12 21c-2.8-2.4-4.2-5.6-4.2-9S9.2 5.4 12 3z" />
+    </>
+  ),
   // Open recipe book — craftbooks are step-by-step procedures
   craftbooks: (
     <>

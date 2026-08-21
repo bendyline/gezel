@@ -906,13 +906,11 @@ describe('ChatManager — send + persistence', () => {
     expect(replies[0]!.content).toBe('SECOND turn text');
   }, 20_000);
 
-  it('honors a stop pressed during setup, before the turn wires its abort signal', async () => {
+  it('honors a stop pressed during setup, before the turn can wire cancellation', async () => {
     // A user who hits stop while the prompt is still being built — the
-    // ensureState / auto-recall prologue that runs before the per-turn
-    // AbortController exists — used to have their cancel silently dropped:
-    // cancelInflight found no controller to abort, and the turn then wired
-    // a fresh one and ran to completion. cancelInflight now parks the
-    // request and runSend aborts the instant it wires the controller, so
+    // ensureState prologue that runs before a live session exists used to have
+    // their cancel silently dropped. cancelInflight now parks the request and
+    // runSend aborts as soon as it can wire the controller, so
     // the turn unwinds into a `turn-aborted` message instead of ignoring
     // the stop. Regression guard: without the parking, `scriptStreamThenHang`
     // has no abort to unwind on and this test hangs to its timeout.
@@ -944,6 +942,7 @@ describe('ChatManager — send + persistence', () => {
     const last = disk!.messages.at(-1)!;
     expect(last.role).toBe('assistant');
     expect(last.synthetic).toBe('turn-aborted');
+    expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(0);
     // No non-synthetic assistant reply was ever committed — the cancel
     // took effect instead of the turn running through to a real answer.
     expect(disk!.messages.filter((m) => m.role === 'assistant' && !m.synthetic)).toHaveLength(0);
@@ -1158,6 +1157,9 @@ describe('ChatManager — task context', () => {
     expect(sys).toContain('Iterate on marketing mocks');
     expect(sys).toContain('Active step:');
     expect(sys).toContain('Design');
+    // The per-task working folder is advertised so even ad-hoc sessions
+    // (no craftbook prompt naming paths) know where working files belong.
+    expect(sys).toContain(`Task artifact folder: \`tasks/${task.num}/\``);
   });
 
   it('injects predecessor-step notes into a newly created successor session', async () => {
@@ -1553,7 +1555,8 @@ describe('ChatManager — resume', () => {
   // empty context and couldn't recall anything the user had just said.
   // Both Ollama and llama-cpp are stateless on the server side (no
   // resume token), so both must seed priorMessages from the persisted
-  // transcript.
+  // transcript. Each case cold-starts, tears down, and rebuilds its MCP
+  // subprocess, so retain a wider budget under full-suite process pressure.
   for (const providerName of ['ollama', 'llama-cpp'] as const) {
     it(`seeds priorMessages on resume for stateless provider: ${providerName}`, async () => {
       const home = await mkdtemp(join(tmpdir(), `gezel-resume-${providerName}-`));
@@ -1609,7 +1612,7 @@ describe('ChatManager — resume', () => {
         await localMgr.shutdown();
         await rm(home, { recursive: true, force: true });
       }
-    });
+    }, 60_000);
   }
 
   it('strips `<think>` / `<|channel>` markup from assistant priorMessages before replay', async () => {
@@ -3967,7 +3970,11 @@ describe('ChatManager — one-shot attribution', () => {
   });
 
   it('fans ephemeral local-engine telemetry out to the global engine pill feed', async () => {
-    const received: Array<{ sessionId: string; event: { type: string } }> = [];
+    const received: Array<{
+      sessionId: string;
+      projectId: string;
+      event: { type: string; activity?: string };
+    }> = [];
     const unsubscribe = events.subscribeAll((envelope) => received.push(envelope));
     mock.script('done');
     mock.scriptEngineTelemetry({
@@ -3989,10 +3996,15 @@ describe('ChatManager — one-shot attribution', () => {
       },
     });
 
-    await manager.oneShotCompletion('background summary', 1_000);
+    await manager.oneShotCompletion('background summary', 1_000, {
+      projectId: 'project-7',
+      jobLabel: 'Indexing src/app.ts',
+    });
 
     expect(received.map(({ event }) => event.type)).toEqual(['engine_phase', 'turn_stats', 'done']);
     expect(received[0]?.sessionId).toMatch(/^one-shot:/);
+    expect(received[0]?.projectId).toBe('project-7');
+    expect(received[0]?.event).toMatchObject({ activity: 'Indexing src/app.ts' });
     expect(received[1]?.sessionId).toBe(received[0]?.sessionId);
     unsubscribe();
   });
@@ -6531,14 +6543,14 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       }
     });
 
-    it('steers to search_documents and hides outside-in companion twins', async () => {
+    it('steers to search and hides outside-in companion twins', async () => {
       await store.writeDocument('brand/guidelines.md', 'House style.');
       // The editable markdown twin of a binary document. It is a derived
       // view of a document already listed, so offering it as a second
       // readable path invites the model to open the wrong one.
       await store.writeDocument('brand/deck.pptx_files/deck.md', 'converted twin');
       const sys = await sysFor({ role: 'voorman', force: false });
-      expect(sys).toContain('call `search_documents` with the topic');
+      expect(sys).toContain('call `search` with the topic');
       expect(sys).not.toContain('deck.pptx_files');
     });
   });

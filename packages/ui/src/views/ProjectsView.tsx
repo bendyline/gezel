@@ -39,6 +39,7 @@ import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { FileFlatList } from '../components/FileFlatList.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
 import { FileHiddenKey, FileViewModeKeys } from '../components/FileViewModeKeys.js';
+import { FindSimilarImages } from '../components/FindSimilarImages.js';
 import { GezelPicker } from '../components/GezelPicker.js';
 import { HtmlPreviewFrame, type HtmlPreviewLogEntry } from '../components/HtmlPreviewFrame.js';
 import { ProjectMemoriesEditor } from '../components/MemoriesTree.js';
@@ -49,6 +50,7 @@ import { ProjectConnectionsTab } from '../components/ProjectConnectionsTab.js';
 import { ProjectCrewRoster } from '../components/ProjectCrewRoster.js';
 import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
 import { ProjectIcon } from '../components/ProjectIcon.js';
+import { ProjectKnowledgeRow } from '../components/ProjectKnowledgeRow.js';
 import { ProjectMailTab } from '../components/ProjectMailTab.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
@@ -80,6 +82,7 @@ import {
   BINARY_FILE,
   type FileBrowserCustomList,
   FileBrowserPane,
+  MEDIA_IMAGE,
   NON_TEXT_CONTENT,
   NonTextFilePreview,
   looksBinary,
@@ -119,6 +122,7 @@ import { useShowWorkInProgressFeatures } from '../components/useShowWorkInProgre
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { crewLeadLabel, crewLeadLabelLower } from '../labels.js';
 import { Select, Tabs } from '../primitives/index.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { useEffectiveTheme } from '../theme.js';
 import { FileMapView } from './FileMapView.js';
 import { HistoryView } from './HistoryView.js';
@@ -595,6 +599,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   >([]);
   const [githubUrlDraft, setGitHubUrlDraft] = useState('');
   const [gitStatus, setGitStatus] = useState<string>('');
+  const [savingProjectLinks, setSavingProjectLinks] = useState(false);
   const [availableCredentials, setAvailableCredentials] = useState<AvailableCredential[]>([]);
   const configuredCredentials = availableCredentials.filter((credential) => credential.stored);
 
@@ -611,6 +616,17 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     () => projects.filter((project) => project.archived),
     [projects],
   );
+  const linkableProjects = useMemo(() => {
+    if (!selected) return [];
+    const linked = new Set(selected.linkedProjectIds ?? []);
+    return projects.filter(
+      (project) =>
+        project.id !== selected.id &&
+        !isSharedLibraryProject(project) &&
+        (!project.archived || linked.has(project.id)),
+    );
+  }, [projects, selected]);
+  const projectLinkLimitReached = (selected?.linkedProjectIds?.length ?? 0) >= 32;
 
   useEffect(() => {
     void refresh();
@@ -955,7 +971,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     }
     let cancelled = false;
     api
-      .listProjectIndexFilesDetail(selectedProjectId)
+      .listProjectIndexFilesDetail(selectedProjectId, { hidden: showWorkspaceHidden })
       .then((res) => {
         if (!cancelled) setWorkspaceIndexFiles(res.files);
       })
@@ -965,7 +981,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     return () => {
       cancelled = true;
     };
-  }, [fileTab, workspaceViewMode, selectedProjectId, indexScannedAt]);
+  }, [fileTab, workspaceViewMode, selectedProjectId, indexScannedAt, showWorkspaceHidden]);
 
   const workspaceReviewPath =
     fileTab === 'workspace' && openFile?.source === 'workspace' ? openFile.path : null;
@@ -1193,21 +1209,33 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // projectId rather than relying on `selected` so it works right after an
   // `openProject` whose `setSelected` hasn't flushed yet (the search quick-open
   // path). Switches to the right file panel, then loads the file.
-  const focusFile = useCallback(async (projectId: string, path: string, source: FileTab) => {
-    setTab(source);
-    const name = path.slice(path.lastIndexOf('/') + 1);
-    const media = mediaSentinel(name);
-    if (media) {
-      setOpenFile({ path, content: media, source });
-      return;
-    }
-    const res =
-      source === 'workspace'
-        ? await api.readProjectWorkspaceFile(projectId, path)
-        : await api.readProjectArtifact(projectId, path);
-    const content = looksBinary(res.content) ? BINARY_FILE : res.content;
-    setOpenFile({ ...res, content, source });
-  }, []);
+  const focusFile = useCallback(
+    async (projectId: string, path: string, source: FileTab, line?: number) => {
+      setTab(source);
+      const name = path.slice(path.lastIndexOf('/') + 1);
+      const media = mediaSentinel(name);
+      if (media) {
+        setOpenFile({ path, content: media, source });
+        return;
+      }
+      const res =
+        source === 'workspace'
+          ? await api.readProjectWorkspaceFile(projectId, path)
+          : await api.readProjectArtifact(projectId, path);
+      const content = looksBinary(res.content) ? BINARY_FILE : res.content;
+      setOpenFile({ ...res, content, source });
+      // Land on the match, not the top of the file: a search hit carries its
+      // line, and the editor-side reveal bridge centers it once mounted.
+      if (line) {
+        setWorkspaceSourceReveal((current) => ({
+          path,
+          line,
+          requestId: (current?.requestId ?? 0) + 1,
+        }));
+      }
+    },
+    [],
+  );
 
   // Respond to nav-shortcut clicks from the top-bar MRU chips in App.tsx:
   // the shortcut dispatches `gezel:open-project` with the id, and we open
@@ -1221,17 +1249,31 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     return () => window.removeEventListener('gezel:open-project', onOpen);
   }, [openProject]);
 
+  // "Turn it on in Project Settings" affordances (overview prose, status-bar
+  // note) land the user THERE instead of telling them where to go.
+  useEffect(() => {
+    const onOpenSettings = (e: Event) => {
+      const detail = (e as CustomEvent<{ projectId?: string }>).detail;
+      if (detail?.projectId && selected && detail.projectId !== selected.id) return;
+      setTab('settings');
+    };
+    window.addEventListener('gezel:open-project-settings', onOpenSettings);
+    return () => window.removeEventListener('gezel:open-project-settings', onOpenSettings);
+  }, [selected]);
+
   // Open a file in the currently-selected project (the already-open case — no
   // remount). The cross-project remount case is handled by the mailbox consume
   // in the forceProjectId effect below; draining it here keeps a queued intent
   // from firing later on a manual navigation.
   useEffect(() => {
     const onOpenFile = (e: Event) => {
-      const d = (e as CustomEvent<{ projectId?: string; path?: string; source?: FileTab }>).detail;
+      const d = (
+        e as CustomEvent<{ projectId?: string; path?: string; source?: FileTab; line?: number }>
+      ).detail;
       if (!d?.path || !d.source) return;
       if (selected && (!d.projectId || d.projectId === selected.id)) {
         consumeOpenFile(selected.id);
-        void focusFile(selected.id, d.path, d.source);
+        void focusFile(selected.id, d.path, d.source, d.line);
       }
     };
     window.addEventListener('gezel:open-file', onOpenFile);
@@ -1244,7 +1286,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     if (!forceProjectId) return;
     void openProject(forceProjectId).then(() => {
       const intent = consumeOpenFile(forceProjectId);
-      if (intent) void focusFile(forceProjectId, intent.path, intent.source);
+      if (intent) void focusFile(forceProjectId, intent.path, intent.source, intent.line);
     });
   }, [forceProjectId, openProject, focusFile]);
 
@@ -1393,6 +1435,29 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       }
     },
     [selected],
+  );
+
+  const toggleProjectLink = useCallback(
+    async (linkedProjectId: string, enabled: boolean) => {
+      if (!selected || savingProjectLinks) return;
+      const current = selected.linkedProjectIds ?? [];
+      const linkedProjectIds = enabled
+        ? Array.from(new Set([...current, linkedProjectId]))
+        : current.filter((id) => id !== linkedProjectId);
+      setSavingProjectLinks(true);
+      try {
+        const updated = await api.updateProject(selected.id, { linkedProjectIds });
+        setSelected(updated);
+        setProjects((items) =>
+          items.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)),
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSavingProjectLinks(false);
+      }
+    },
+    [savingProjectLinks, selected],
   );
 
   const saveMeesterProgressCheckExemption = useCallback(
@@ -1811,7 +1876,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       emptyMessage: 'No files yet.',
       trailingForEntry: (entry) =>
         entry.mtimeMs !== undefined ? (
-          <span className="file-flat-time">
+          <span className="file-flat-time" title={formatAbsoluteTime(new Date(entry.mtimeMs))}>
             {formatRelativeFileTime(new Date(entry.mtimeMs).toISOString())}
           </span>
         ) : null,
@@ -1869,18 +1934,23 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
         workspaceIssues,
       )
     : 0;
+  // The reveal bridge anchors to whatever file is open in an editor — search
+  // hits carry a line for artifacts too, not only workspace-tab review files.
+  // The index toggle itself stays workspace-only (reviews are workspace-scoped).
   const activeWorkspaceSourceReveal =
-    workspaceSourceReveal?.path === workspaceReviewPath ? workspaceSourceReveal : null;
-  const workspaceIndexToggle: ReactNode = workspaceReviewPath ? (
+    workspaceSourceReveal?.path === openFile?.path ? workspaceSourceReveal : null;
+  const workspaceIndexToggle: ReactNode = (
     <>
       <WorkspaceSourceLineReveal request={activeWorkspaceSourceReveal} />
-      <WorkspaceIndexToggle
-        open={workspaceIndexPaneOpen}
-        issueCount={selectedWorkspaceIssueCount}
-        onToggle={() => setWorkspaceIndexPaneOpen((open) => !open)}
-      />
+      {workspaceReviewPath ? (
+        <WorkspaceIndexToggle
+          open={workspaceIndexPaneOpen}
+          issueCount={selectedWorkspaceIssueCount}
+          onToggle={() => setWorkspaceIndexPaneOpen((open) => !open)}
+        />
+      ) : null}
     </>
-  ) : null;
+  );
 
   // Output pane: the set of previewable workspace HTML files, whether a
   // previewable index.html exists (drives the auto-on default), and the
@@ -2547,6 +2617,65 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             </div>
                           </label>
 
+                          {!isSharedLibraryProject(selected) && (
+                            <fieldset className="project-tab-settings">
+                              <legend>Linked projects</legend>
+                              <p className="muted small">
+                                Give this project one-way access to another project’s indexed
+                                knowledge and workspace. The other project does not gain access
+                                back. Shared documents are always included automatically.{' '}
+                                {(selected.linkedProjectIds ?? []).length} of 32 linked.
+                              </p>
+                              <div className="project-tab-settings-grid">
+                                {linkableProjects.map((project) => {
+                                  const checked = (selected.linkedProjectIds ?? []).includes(
+                                    project.id,
+                                  );
+                                  return (
+                                    <label key={project.id} className="new-row">
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        disabled={
+                                          savingProjectLinks ||
+                                          (!checked && projectLinkLimitReached)
+                                        }
+                                        onChange={(event) =>
+                                          void toggleProjectLink(project.id, event.target.checked)
+                                        }
+                                      />
+                                      <span>
+                                        {project.name}
+                                        <span className="muted small"> — {project.id}</span>
+                                        {project.archived ? (
+                                          <span className="muted small"> — archived</span>
+                                        ) : null}
+                                        {!projectManagedWorkspaceWritable(project) ? (
+                                          <span className="muted small">
+                                            {' '}
+                                            — workspace read-only
+                                          </span>
+                                        ) : null}
+                                      </span>
+                                    </label>
+                                  );
+                                })}
+                                {linkableProjects.length === 0 ? (
+                                  <span className="muted small">
+                                    No other projects are available.
+                                  </span>
+                                ) : null}
+                              </div>
+                              <small className="muted">
+                                Gezels address linked files with the existing file tools at{' '}
+                                <code>../project-id/…</code>. Writes still follow the linked
+                                project’s own workspace-write setting.
+                              </small>
+                            </fieldset>
+                          )}
+
+                          <ProjectKnowledgeRow project={selected} onUpdated={setSelected} />
+
                           <div className="config-label" style={{ marginTop: '0.75rem' }}>
                             Project properties
                             <ProjectPropertiesEditor
@@ -2794,7 +2923,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                     {entry.gezelId && (
                                       <span className="muted small"> · by {entry.gezelId}</span>
                                     )}
-                                    <span className="muted small">
+                                    <span
+                                      className="muted small"
+                                      title={formatAbsoluteTime(entry.at)}
+                                    >
                                       {' '}
                                       · {formatRelativeTime(entry.at)}
                                     </span>
@@ -3187,12 +3319,26 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               toolbarIndexToggle={workspaceIndexToggle}
                             />
                           ) : NON_TEXT_CONTENT.has(openFile.content) ? (
-                            <NonTextFilePreview
-                              content={openFile.content}
-                              path={openFile.path}
-                              fetchBlob={fileSource.fetchBlob}
-                              {...(openFile.size === undefined ? {} : { sizeBytes: openFile.size })}
-                            />
+                            <>
+                              <NonTextFilePreview
+                                content={openFile.content}
+                                path={openFile.path}
+                                fetchBlob={fileSource.fetchBlob}
+                                {...(openFile.size === undefined
+                                  ? {}
+                                  : { sizeBytes: openFile.size })}
+                              />
+                              {openFile.content === MEDIA_IMAGE &&
+                                openFile.source === 'workspace' && (
+                                  <FindSimilarImages
+                                    key={openFile.path}
+                                    projectId={selected.id}
+                                    path={openFile.path}
+                                    fetchBlob={fileSource.fetchBlob}
+                                    onOpen={(p) => void focusFile(selected.id, p, 'workspace')}
+                                  />
+                                )}
+                            </>
                           ) : isHtml(openFile.path) ? (
                             <HtmlFileViewer
                               projectId={selected.id}
@@ -3921,14 +4067,4 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatRelativeTime(iso: string): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return iso;
-  const deltaSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
-  if (deltaSec < 60) return `${deltaSec}s ago`;
-  if (deltaSec < 3600) return `${Math.floor(deltaSec / 60)}m ago`;
-  if (deltaSec < 86_400) return `${Math.floor(deltaSec / 3600)}h ago`;
-  return `${Math.floor(deltaSec / 86_400)}d ago`;
 }

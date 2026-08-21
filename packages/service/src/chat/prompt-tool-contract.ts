@@ -51,6 +51,7 @@ const NON_MODEL_FACING_TOOL_NAMES = new Set<string>(
 );
 
 const FILE_READ_TOOLS = new Set([
+  'search',
   'read_file',
   'read_files',
   'list_dir',

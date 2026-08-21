@@ -1,0 +1,119 @@
+/**
+ * Read-only, immutable catalog database opener. Deliberately NOT the
+ * service's `openIndexDatabase`, whose behaviors are all wrong for a signed
+ * publisher artifact: it mkdirs the parent, switches on WAL (sidecar files),
+ * and quarantine-RENAMES a corrupt database. A catalog reader must fail
+ * with a typed reason and never touch the bytes.
+ */
+
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import { GEZK_APPLICATION_ID, GEZK_INDEX_SCHEMA_VERSION } from '../format/constants.js';
+import { DatabaseSync } from '../format/node-sqlite.js';
+
+const nodeRequire = createRequire(import.meta.url);
+
+export class CatalogOpenError extends Error {
+  constructor(
+    message: string,
+    readonly reason:
+      | 'not-found'
+      | 'not-a-catalog'
+      | 'schema-version'
+      | 'vec-unavailable'
+      | 'corrupt',
+  ) {
+    super(message);
+    this.name = 'CatalogOpenError';
+  }
+}
+
+export interface CatalogDb {
+  db: DatabaseSync;
+  close(): void;
+}
+
+/**
+ * Open one catalog SQLite file read-only + immutable, load sqlite-vec, and
+ * verify the format stamps. `immutable=1` promises SQLite the file cannot
+ * change while open — no locking, no journal probing — which is true for a
+ * published catalog version and is what makes concurrent readers free.
+ */
+export function openCatalogDatabase(absPath: string): CatalogDb {
+  const uri = `${pathToFileURL(absPath).href}?immutable=1`;
+  let db: DatabaseSync;
+  try {
+    db = new DatabaseSync(uri, { readOnly: true, allowExtension: true });
+  } catch (err) {
+    throw new CatalogOpenError(
+      `cannot open catalog database ${absPath}: ${err instanceof Error ? err.message : String(err)}`,
+      'not-found',
+    );
+  }
+  try {
+    // sqlite-vec is required for shard databases; the caller decides whether
+    // a router-only operation may proceed without it. Same load pattern as
+    // the service index driver (extension resolved from the package on disk).
+    let vecLoaded = false;
+    try {
+      db.enableLoadExtension(true);
+      const sqliteVec = nodeRequire('sqlite-vec') as { getLoadablePath(): string };
+      db.loadExtension(sqliteVec.getLoadablePath());
+      vecLoaded = true;
+    } catch {
+      vecLoaded = false;
+    } finally {
+      try {
+        db.enableLoadExtension(false);
+      } catch {
+        /* older runtimes throw when toggling twice — harmless */
+      }
+    }
+
+    const appId = readPragmaNumber(db, 'application_id');
+    if (appId !== GEZK_APPLICATION_ID) {
+      throw new CatalogOpenError(
+        `not a .gezk catalog database (application_id ${appId})`,
+        'not-a-catalog',
+      );
+    }
+    const schemaVersion = readPragmaNumber(db, 'user_version');
+    if (schemaVersion !== GEZK_INDEX_SCHEMA_VERSION) {
+      throw new CatalogOpenError(
+        `unsupported index schema version ${schemaVersion} (reader supports ${GEZK_INDEX_SCHEMA_VERSION})`,
+        'schema-version',
+      );
+    }
+    if (!vecLoaded) {
+      throw new CatalogOpenError('sqlite-vec extension failed to load', 'vec-unavailable');
+    }
+
+    // Warm-read hints; both are per-connection and legal on read-only opens.
+    db.exec('PRAGMA mmap_size=536870912');
+    db.exec('PRAGMA cache_size=-8192');
+
+    return {
+      db,
+      close: () => {
+        try {
+          db.close();
+        } catch {
+          /* already closed */
+        }
+      },
+    };
+  } catch (err) {
+    try {
+      db.close();
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  }
+}
+
+function readPragmaNumber(db: DatabaseSync, pragma: string): number {
+  const row = db.prepare(`PRAGMA ${pragma}`).get() as Record<string, unknown> | undefined;
+  const value = row ? Object.values(row)[0] : undefined;
+  return typeof value === 'bigint' ? Number(value) : Number(value ?? Number.NaN);
+}

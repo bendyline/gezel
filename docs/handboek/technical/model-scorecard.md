@@ -3,6 +3,10 @@ id: model-scorecard
 title: "Model scorecard"
 order: 11
 summary: Measured results for every model we have tested, on both task sets.
+subcategory:
+  id: models-and-testing
+  title: Models and Testing
+  order: 4
 ---
 # Model scorecard
 

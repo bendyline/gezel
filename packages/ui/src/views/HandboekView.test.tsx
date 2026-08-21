@@ -4,13 +4,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
+vi.mock('../theme.js', () => ({ useEffectiveTheme: () => 'light' }));
 
 // The squisq renderers pull in heavy layout/measurement machinery that
 // jsdom can't drive — the view's own logic (TOC, selection, mode
 // toggle, article fetch) is what this file covers.
 vi.mock('@bendyline/squisq-react', () => ({
-  LinearDocView: ({ doc, className }: { doc: unknown; className?: string }) => (
-    <div data-testid="linear-doc-view" className={className}>
+  LinearDocView: ({
+    doc,
+    className,
+    surface,
+  }: {
+    doc: unknown;
+    className?: string;
+    surface?: { id: string };
+  }) => (
+    <div data-testid="linear-doc-view" data-surface-id={surface?.id ?? ''} className={className}>
       {doc ? 'doc' : 'no-doc'}
       <a href="../conceptual/the-crew.md">crew link</a>
       <a href="craftbook/research-report">book link</a>
@@ -21,15 +30,18 @@ vi.mock('@bendyline/squisq-react', () => ({
     captionStyle,
     audioMode,
     doc,
+    surface,
   }: {
     captionStyle?: string;
     audioMode?: string;
     doc?: { audio?: { segments: { duration: number }[] } };
+    surface?: { id: string };
   }) => (
     <div
       data-testid="doc-player"
       data-caption-style={captionStyle ?? ''}
       data-audio-mode={audioMode ?? ''}
+      data-surface-id={surface?.id ?? ''}
       data-clock-length={String(
         (doc?.audio?.segments ?? []).reduce((total, seg) => total + seg.duration, 0),
       )}
@@ -236,6 +248,21 @@ describe('HandboekView', () => {
     expect(screen.queryByTestId('linear-doc-view')).not.toBeInTheDocument();
     await user.click(screen.getByRole('radio', { name: 'Document' }));
     expect(await screen.findByTestId('linear-doc-view')).toBeInTheDocument();
+  });
+
+  it('uses the light reading surface in both document and video modes', async () => {
+    const user = userEvent.setup();
+    render(<HandboekView />);
+    expect(await screen.findByTestId('linear-doc-view')).toHaveAttribute(
+      'data-surface-id',
+      'gezel-chat-light',
+    );
+
+    await user.click(screen.getByRole('radio', { name: 'Video' }));
+    expect(await screen.findByTestId('doc-player')).toHaveAttribute(
+      'data-surface-id',
+      'gezel-chat-light',
+    );
   });
 
   it('gives the unnarrated player a clock to run on', async () => {

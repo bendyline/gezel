@@ -9,6 +9,9 @@ import type {
   ImageGenerationRequest,
   ImageGenerationResponse,
   ImageModelPullEvent,
+  KnowledgeCatalogRef,
+  KnowledgeInstallRequest,
+  KnowledgeSearchRequest,
   ListActiveImagePullsResponse,
   ListActiveVideoPullsResponse,
   ListAudioCatalogResponse,
@@ -125,6 +128,9 @@ import type {
   GetBoekwachterIssueRequest,
   GetBoekwachterIssueResponse,
   GetScriptSourceResponse,
+  GezappDependency,
+  GezappEmbeddedKind,
+  GezappManifest,
   GezelGender,
   GezelGrowthResponse,
   GezelIconHistoryResponse,
@@ -165,7 +171,6 @@ import type {
   GitSyncResponse,
   GrepArtifactRequest,
   GrepArtifactResponse,
-  GzelBundleManifest,
   HandboekArticle,
   HandboekHowDoIResponse,
   HandboekNarrationResponse,
@@ -199,6 +204,7 @@ import type {
   ListHistoryResponse,
   ListMentionCandidatesResponse,
   ListModelsResponse,
+  ListPeopleResponse,
   ListProjectsForGezelResponse,
   ListProjectsResponse,
   ListQuestionsResponse,
@@ -244,6 +250,8 @@ import type {
   ProjectApprovalsResponse,
   ProjectFolderPreviewResponse,
   ProjectResponse,
+  ProjectSearchRequest,
+  ProjectSearchResponse,
   ProviderName,
   Question,
   ReadArtifactSliceOpts,
@@ -277,6 +285,7 @@ import type {
   RestoreConfirm,
   RestoreReview,
   RestoreScanRequest,
+  RetrievalPolicy,
   RevertGezelIconRequest,
   RewriteTextRequest,
   RewriteTextResponse,
@@ -340,6 +349,7 @@ import type {
   TransformStreamEvent,
   TransformTextRequest,
   UnifiedSearchResponse,
+  UnifiedSearchResult,
   UpdateBoekwachterIssueRequest,
   UpdateBoekwachterIssueResponse,
   UpdateConfigRequest,
@@ -362,6 +372,7 @@ import type {
   WebSearchRequest,
   WebSearchResponse,
   WikipediaSearchRequest,
+  WipeFaceDataResponse,
   WorkspaceCommandIndex,
   WorkspaceEditResponse,
   WorkspaceIndexFilesDetailResponse,
@@ -1134,6 +1145,8 @@ export interface ConfigResponse {
     topK?: number;
     minScore?: number;
   };
+  /** Proactive indexed-context policy for substantive turns. */
+  retrieval?: RetrievalPolicy;
   summarization?: {
     enabled?: boolean;
     provider?: 'copilot' | 'openai' | 'ollama';
@@ -1449,6 +1462,13 @@ export interface ConfigResponse {
    * See `GezelConfig.gildeUpdates` in core schemas.
    */
   gildeUpdates?: {
+    enabled?: boolean;
+  };
+  /**
+   * Face recognition biometric opt-in (Settings → Image recognition).
+   * Default off. See `GezelConfig.faceRecognition` in core schemas.
+   */
+  faceRecognition?: {
     enabled?: boolean;
   };
   /**
@@ -2152,6 +2172,53 @@ const OllamaPullEventSchema: z.ZodType<OllamaPullEvent> = z.discriminatedUnion('
   z.object({ type: z.literal('done') }),
 ]);
 
+/** One installed knowledge catalog as reported by `/api/knowledge/catalogs`. */
+export interface KnowledgeCatalogStatus {
+  ref: KnowledgeCatalogRef;
+  enabled: boolean;
+  addedAt: string;
+  disabledReason?: string;
+  mounted: boolean;
+  name?: string;
+  description?: string;
+  language?: string;
+  license?: string;
+  documents?: number;
+  chunks?: number;
+  sizeBytes?: number;
+  vectorCompatible?: boolean;
+}
+
+export interface KnowledgeInstallJobSnapshot {
+  id: string;
+  startedAt: string;
+  finished: boolean;
+  error?: string;
+  events: Array<Record<string, unknown> & { type: string }>;
+}
+
+export interface KnowledgeTopicNode {
+  id: string;
+  parentId: string | null;
+  name: string;
+  description: string | null;
+  sortKey: string;
+  documentCount: number;
+}
+
+export interface KnowledgeDocumentMeta {
+  id: string;
+  title: string;
+  slug: string;
+  summary: string | null;
+  language: string;
+  topicId: string;
+  sourceUrl: string | null;
+  sourceRevision: string | null;
+  sourceUpdatedAt: string | null;
+  attribution: Record<string, string> | null;
+}
+
 export class GezelClient {
   private readonly baseUrl: string;
   private readonly token: string;
@@ -2533,6 +2600,71 @@ export class GezelClient {
     displayTarget: AmbientDashboardDisplayTarget,
   ): Promise<{ displayTarget: AmbientDashboardDisplayTarget }> {
     return this.request('PUT', '/api/ambient-dashboard/display-target', displayTarget);
+  }
+
+  // ── knowledge catalogs ──
+
+  /** Installed catalogs: refs, enabled state, health, counts, sizes. */
+  listKnowledgeCatalogs(): Promise<{ catalogs: KnowledgeCatalogStatus[] }> {
+    return this.request('GET', '/api/knowledge/catalogs');
+  }
+
+  /** Kick off a catalog install (file path or URL); poll or stream the job. */
+  installKnowledgeCatalog(body: KnowledgeInstallRequest): Promise<{ jobId: string }> {
+    return this.request('POST', '/api/knowledge/install', body);
+  }
+
+  getKnowledgeJob(jobId: string): Promise<KnowledgeInstallJobSnapshot> {
+    return this.request('GET', `/api/knowledge/jobs/${encodeURIComponent(jobId)}`);
+  }
+
+  cancelKnowledgeJob(jobId: string): Promise<{ cancelled: boolean }> {
+    return this.request('DELETE', `/api/knowledge/jobs/${encodeURIComponent(jobId)}`);
+  }
+
+  updateKnowledgeCatalog(
+    catalogId: string,
+    body: { enabled?: boolean; autoUpdate?: boolean },
+  ): Promise<{ ok: boolean }> {
+    return this.request('PATCH', `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}`, body);
+  }
+
+  removeKnowledgeCatalog(catalogId: string): Promise<{ ok: boolean }> {
+    return this.request('DELETE', `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}`);
+  }
+
+  searchKnowledge(body: KnowledgeSearchRequest): Promise<{ results: UnifiedSearchResult[] }> {
+    return this.request('POST', '/api/knowledge/search', body);
+  }
+
+  knowledgeCatalogTopics(catalogId: string): Promise<{ topics: KnowledgeTopicNode[] }> {
+    return this.request('GET', `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/topics`);
+  }
+
+  knowledgeCatalogDocuments(
+    catalogId: string,
+    opts?: { topicId?: string; offset?: number; limit?: number },
+  ): Promise<{ documents: KnowledgeDocumentMeta[]; total: number }> {
+    const params = new URLSearchParams();
+    if (opts?.topicId) params.set('topic', opts.topicId);
+    if (opts?.offset) params.set('offset', String(opts.offset));
+    if (opts?.limit) params.set('limit', String(opts.limit));
+    const query = params.toString();
+    return this.request(
+      'GET',
+      `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/documents${query ? `?${query}` : ''}`,
+    );
+  }
+
+  /** Metadata + normalized Markdown body for one catalog document. */
+  readKnowledgeDocument(
+    catalogId: string,
+    documentId: string,
+  ): Promise<KnowledgeDocumentMeta & { markdown: string }> {
+    return this.request(
+      'GET',
+      `/api/knowledge/catalogs/${encodeURIComponent(catalogId)}/document?id=${encodeURIComponent(documentId)}`,
+    );
   }
 
   // ── storage accounting, cleanup & backup ──
@@ -5073,38 +5205,37 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/apply-project-type`, body);
   }
 
-  /**
-   * Package a project type (+ referenced gezel templates) into a `.gzl` share
-   * bundle written into the project's artifacts. See docs/project-types.md.
-   */
-  exportProjectType(
+  /** Package an exact-version AI App into a `.gezapp` artifact. */
+  exportAiApp(
     id: string,
-    body: { typeId?: string; name?: string; description?: string; creator?: string },
-  ): Promise<{ path: string; artifactPath: string; manifest: GzelBundleManifest; bytes: number }> {
-    return this.request(
-      'POST',
-      `/api/projects/${encodeURIComponent(id)}/project-types/export`,
-      body,
-    );
+    body: {
+      typeId?: string;
+      version?: string;
+      publisherName?: string;
+      publisherUrl?: string;
+    },
+  ): Promise<{ path: string; artifactPath: string; manifest: GezappManifest; bytes: number }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/ai-apps/export`, body);
   }
 
-  /**
-   * Import a `.gzl` bundle from a file in the project's artifacts. Without
-   * `confirm` returns the review; with `confirm: true` installs the items.
-   */
-  importProjectType(
+  /** Preview or install a `.gezapp` artifact. */
+  importAiApp(
     id: string,
     body: { path: string; confirm?: boolean },
   ): Promise<{
-    manifest: GzelBundleManifest;
-    items: Array<{ kind: string; id: string; version: string }>;
-    installed?: Array<{ kind: string; id: string; version: string }>;
+    manifest: GezappManifest;
+    items: Array<{ kind: GezappEmbeddedKind; id: string; version: string }>;
+    dependencies: GezappDependency[];
+    missingDependencies: GezappDependency[];
+    packageSha256: string;
+    installed?: {
+      appId: string;
+      version: string;
+      receiptPath: string;
+      alreadyPresent: boolean;
+    };
   }> {
-    return this.request(
-      'POST',
-      `/api/projects/${encodeURIComponent(id)}/project-types/import`,
-      body,
-    );
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/ai-apps/import`, body);
   }
 
   // ── Connectors (external-data sources) ────────────────────────────────────
@@ -5888,6 +6019,11 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/search-code`, body);
   }
 
+  /** Unified indexed search across project content, artifacts, memory, and shared documents. */
+  toolSearch(id: string, body: ProjectSearchRequest): Promise<ProjectSearchResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/search`, body);
+  }
+
   toolSecurityScan(id: string, body: SecurityScanRequest = {}): Promise<SecurityScanResponse> {
     return this.request(
       'POST',
@@ -5994,6 +6130,30 @@ export class GezelClient {
       `/api/projects/${encodeURIComponent(id)}/tools/list-entity-mentions`,
       body,
     );
+  }
+
+  // ── people (face lane, biometric opt-in) ─────────────────────────────────
+
+  listPeople(id: string): Promise<ListPeopleResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/people`);
+  }
+
+  renamePerson(id: string, entityId: number, label: string): Promise<{ ok: boolean }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/people/${entityId}/rename`,
+      { label },
+    );
+  }
+
+  /** Forget = stop showing this person (tombstone); wipe is the erasure path. */
+  forgetPerson(id: string, entityId: number): Promise<{ ok: boolean }> {
+    return this.request('DELETE', `/api/projects/${encodeURIComponent(id)}/people/${entityId}`);
+  }
+
+  /** Disable face recognition and erase all face data everywhere. */
+  wipeFaceData(): Promise<WipeFaceDataResponse> {
+    return this.request('POST', '/api/people/wipe');
   }
 
   /** OS-idle heartbeat from the Electron shell (gates background enrichment). */
@@ -6343,10 +6503,17 @@ export class GezelClient {
    * Complete flat workspace file list from the last static index scan
    * (`{path, size, mtimeMs}` per file, up to the indexer's cap). Empty for
    * never-indexed or indexing-disabled projects — read `/index/status` to
-   * tell those states apart.
+   * tell those states apart. `hidden` includes Office lock files.
    */
-  listProjectIndexFilesDetail(id: string): Promise<WorkspaceIndexFilesDetailResponse> {
-    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/index/files?detail=1`);
+  listProjectIndexFilesDetail(
+    id: string,
+    opts?: { hidden?: boolean },
+  ): Promise<WorkspaceIndexFilesDetailResponse> {
+    const hidden = opts?.hidden ? '&hidden=1' : '';
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/index/files?detail=1${hidden}`,
+    );
   }
 
   /** Force a re-scan. Returns immediately; poll status for completion. */

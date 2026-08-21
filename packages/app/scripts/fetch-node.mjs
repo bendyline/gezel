@@ -61,6 +61,18 @@ const appRoot = resolve(here, '..');
 const DOWNLOAD_ATTEMPTS = 3;
 const RETRYABLE_HTTP_STATUSES = new Set([408, 425, 429]);
 
+async function removeTree(path) {
+  // Keep staged-runtime cleanup out of tsup's single-attempt synchronous
+  // unlink path. Windows scanners commonly inspect a newly copied node.exe;
+  // fs.rm's recursive retry path gives those transient handles time to close.
+  await rm(path, {
+    recursive: true,
+    force: true,
+    maxRetries: process.platform === 'win32' ? 20 : 2,
+    retryDelay: 100,
+  });
+}
+
 async function importPinned() {
   // Read the pins directly so we don't need a compile step first.
   const src = await readFile(join(appRoot, 'src', 'node-version.ts'), 'utf8');
@@ -162,7 +174,9 @@ async function downloadTo(url, dest) {
 }
 
 async function main() {
+  const distDir = resolve(appRoot, 'dist', 'node-bundle');
   if (process.env.GEZEL_NODE_SKIP === '1') {
+    await removeTree(distDir);
     console.log('[fetch-node] GEZEL_NODE_SKIP=1 — skipping bundle.');
     return;
   }
@@ -197,7 +211,6 @@ async function main() {
   const cacheVersion = join(cacheDir, 'version.txt');
   const cacheLicense = join(cacheDir, 'LICENSE.txt');
   // The dist copy is what the supervisor / electron-builder consume.
-  const distDir = resolve(appRoot, 'dist', 'node-bundle');
   const distBinary = join(distDir, info.outName);
   const distVersion = join(distDir, 'version.txt');
   const distLicense = join(distDir, 'LICENSE.txt');
@@ -260,7 +273,7 @@ async function main() {
           filter: (p) => p === info.filterTarget,
         });
       } finally {
-        await rm(scratch, { recursive: true, force: true });
+        await removeTree(scratch);
       }
       const extracted = await stat(cacheBinary).catch(() => null);
       if (!extracted?.isFile()) {
@@ -301,9 +314,11 @@ async function main() {
   }
 
   // ── Step 2: stage cache → dist on every build ───────────────────
-  // tsup --clean wipes dist between builds, so this always runs.
+  // tsup deliberately leaves staged runtimes alone; clean this destination
+  // here so platform changes cannot leave a stale node/node.exe behind.
   // copyFile is fast enough (~80MB Windows, ~few hundred ms) to not
   // be worth a hardlink optimization.
+  await removeTree(distDir);
   await mkdir(distDir, { recursive: true });
   await copyFile(cacheBinary, distBinary);
   await copyFile(cacheLicense, distLicense);

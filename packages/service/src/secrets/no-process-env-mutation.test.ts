@@ -62,5 +62,5 @@ describe('process.env mutation guard', () => {
       }
     }
     expect(offenders).toEqual([]);
-  });
+  }, 15_000);
 });

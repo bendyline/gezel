@@ -20,10 +20,22 @@ describe('buildLlamaCppEngineArgs — defaults & cache-reuse', () => {
     expect(has(args, '--cpu-moe')).toBe(false);
   });
 
-  it('does NOT auto-enable cache-reuse under multi-slot (b9843 would reject it)', () => {
-    expect(has(buildLlamaCppEngineArgs({ config: {}, slots: 4 }), '--cache-reuse')).toBe(false);
-    // Unknown slot count is treated conservatively (no default).
-    expect(has(buildLlamaCppEngineArgs({ config: {} }), '--cache-reuse')).toBe(false);
+  it('auto-enables cache-reuse at ANY slot count', () => {
+    // The old rule withheld the default whenever slots !== 1, on the belief
+    // that b9843 rejected it under multi-slot non-unified KV. Re-measured
+    // 2026-08-19 by launching the bundled 0.1.36 engine directly: a dense
+    // model accepts `--cache-reuse` at --parallel 1 AND --parallel 4 with no
+    // warning and no error, and `kv_unified='false'` is reported at every
+    // slot count including 1 — so it never was the discriminator. What the
+    // engine actually rejects is a context whose cache cannot be partially
+    // rewound (hybrid-recurrent, or Gemma windowed without --swa-full), and
+    // it declines those itself with an explicit warning.
+    expect(argValue(buildLlamaCppEngineArgs({ config: {}, slots: 4 }), '--cache-reuse')).toBe(
+      String(DEFAULT_CACHE_REUSE),
+    );
+    expect(argValue(buildLlamaCppEngineArgs({ config: {} }), '--cache-reuse')).toBe(
+      String(DEFAULT_CACHE_REUSE),
+    );
   });
 
   it('an explicit cache-reuse is passed regardless of slot count', () => {

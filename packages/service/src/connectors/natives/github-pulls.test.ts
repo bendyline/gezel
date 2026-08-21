@@ -4,6 +4,7 @@ import type { Store } from '../../fs/store.js';
 import type { SecretStore } from '../../secrets/types.js';
 import { clearConnectorTaskPreps, connectorTaskPrepFor } from '../task-prep.js';
 import type { AdapterDeps, ConnectorBindingRef } from '../types.js';
+import { sha8 } from '../writer.js';
 import {
   GitHubPullsAdapter,
   type GitHubPullsRuntime,
@@ -147,9 +148,17 @@ describe('GitHubPullsAdapter', () => {
     // whole change without one record per hunk.
     expect(overview.attachments?.[0]?.filename).toBe('pr-52.diff');
     expect(overview.attachments?.[1]?.filename).toBe('pr-52-files.json');
-    expect(new TextDecoder().decode(overview.attachments?.[1]?.content)).toContain(
-      '"path": "src/auth.ts"',
-    );
+    const manifest = JSON.parse(new TextDecoder().decode(overview.attachments?.[1]?.content)) as {
+      files: Array<{ path: string; recordHash: string }>;
+    };
+    expect(manifest.files[0]).toMatchObject({
+      path: 'src/auth.ts',
+      recordHash: sha8('pr-52-file-src/auth.ts'),
+      ordinal: 1,
+      status: 'modified',
+      additions: 3,
+      deletions: 1,
+    });
 
     const file = await adapter.fetchRecord('pr-52', batch.records[1]!);
     expect(file.dirSegments).toEqual(['files']);

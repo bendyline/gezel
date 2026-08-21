@@ -13,8 +13,10 @@ import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { SECURITY_LEVEL_PRESETS } from '../security-levels.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useUpdateState } from '../update-state.js';
+import '../styles/home-view.css';
 import { HomeWorkshop } from './home/HomeWorkshop.js';
 import { IntroHandboekArticle } from './home/IntroHandboekArticle.js';
+import { FIRST_RUN_INTRO_ANCHOR_ID } from './home/first-run-intro-anchor.js';
 
 type Provider = ProviderName;
 
@@ -414,7 +416,7 @@ export function HomeView({
         <section className="setup-section home-ondevice-link">
           <button
             type="button"
-            className="home-link"
+            className="gz-link-button"
             onClick={() => {
               const section =
                 onDeviceProviderForPlatform(health?.platform) === 'mlx' ? 'mlx' : 'llamaCpp';
@@ -662,7 +664,8 @@ function IntroSection({
     );
   }
   return (
-    <section className="home-intro">
+    // The download banner scrolls a waiting first-run user to this section.
+    <section className="home-intro" id={FIRST_RUN_INTRO_ANCHOR_ID}>
       <div className="home-intro-body">
         <header>
           <h2>

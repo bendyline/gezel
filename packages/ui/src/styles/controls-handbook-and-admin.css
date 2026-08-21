@@ -1,0 +1,459 @@
+/* ==========================================================================
+   Keys in trays — the standard for radio-like choice controls.
+   docs/ux.md → "Controls: keys in trays" is the contract; this block is the
+   single implementation. A group of mutually exclusive options is a shallow
+   tray routed into the bench; each option is a raised, mostly-square key
+   (--radius-md); the chosen key sits pressed and latched. Fully-rounded
+   capsules are reserved for true circles: dots, avatars, scrollbar thumbs,
+   switch knobs.
+
+   New markup uses .gz-tray + .gz-key (state: .gz-key-active, or
+   aria-checked="true" inside a role="radiogroup"). The legacy selectors
+   grouped below are aliases so existing surfaces pick up the standard
+   without markup churn — when you touch one of those surfaces, migrate its
+   markup to the gz-* classes and remove its alias here. Interactive states
+   wrap their pseudo-classes in :where() so every rule stays at bare-class
+   specificity and source order alone decides:
+   base < stacked < hover < mousedown < latched < disabled < focus.
+   This late-cascade block wins ties against the stripped legacy blocks in
+   earlier owner files. */
+
+/* Squisq supplies these as inline custom properties, so `!important` is
+   intentional: Gezel owns the host palette while Squisq's `gezellig` theme
+   continues to supply its editorial defaults. Every custom form enters
+   through GezelJsonEditor, making this a single, scoped integration seam. */
+.gezel-json-editor {
+  --squisq-jsonform-bg: var(--panel) !important;
+  --squisq-jsonform-text: var(--text) !important;
+  --squisq-jsonform-muted: var(--text-muted) !important;
+  --squisq-jsonform-primary: var(--accent) !important;
+  --squisq-jsonform-accent: var(--titlebar) !important;
+  --squisq-jsonform-warning: var(--danger) !important;
+  --squisq-jsonform-border: var(--border) !important;
+  --squisq-jsonform-input-bg: var(--surface) !important;
+  --squisq-jsonform-title-font: var(--font-display) !important;
+  --squisq-jsonform-body-font: var(--font-ui) !important;
+  --squisq-jsonform-radius: var(--radius-md) !important;
+}
+
+.gz-tray,
+.provider-switch,
+.gz-type-picker,
+.gezel-json-editor .squisq-jf-segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 0.3rem;
+  padding: 0.3rem;
+  background: var(--tray-bg);
+  border: 1px solid var(--tray-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--tray-shadow);
+}
+
+.gezel-json-editor .squisq-jf-segmented {
+  overflow: visible;
+}
+
+.gz-key,
+.provider-pill,
+.gz-type-chip,
+.pending-question-choice,
+.catalog-category,
+.gezel-json-editor .squisq-jf-segmented__btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.85rem;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--text);
+  background: var(--key-bg);
+  border: 1px solid var(--key-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--key-shadow);
+  cursor: pointer;
+  transition: box-shadow 140ms ease-out, transform 140ms ease-out, background 140ms ease-out, color
+    140ms ease-out;
+}
+
+/* Stacked keys carry a label plus a smaller hint line (e.g. Tempo). */
+.gz-key--stacked {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  text-align: left;
+}
+
+/* Icon-only keys for tight panel headers and toolbars: near-square padding,
+   no label gap. No visible text, so every key MUST carry both `title` and
+   `aria-label` (docs/ux.md → "Controls: keys in trays"). */
+.gz-key--icon {
+  padding: 0.3rem 0.45rem;
+  gap: 0;
+}
+
+.gz-key:where(:hover:not(:disabled)),
+.provider-pill:where(:hover:not(:disabled)),
+.gz-type-chip:where(:hover:not(:disabled)),
+.pending-question-choice:where(:hover:not(:disabled)),
+.catalog-category:where(:hover:not(:disabled)),
+.gezel-json-editor .squisq-jf-segmented__btn:where(:hover:not(:disabled)) {
+  background: var(--key-bg-hover);
+}
+
+/* Mousedown: the key physically pushes in. */
+.gz-key:where(:active:not(:disabled)),
+.provider-pill:where(:active:not(:disabled)),
+.gz-type-chip:where(:active:not(:disabled)),
+.pending-question-choice:where(:active:not(:disabled)),
+.catalog-category:where(:active:not(:disabled)),
+.gezel-json-editor .squisq-jf-segmented__btn:where(:active:not(:disabled)) {
+  transform: translateY(1px);
+  box-shadow: var(--key-pressed-shadow);
+}
+
+/* The chosen key: pressed flush with the tray and latched. */
+.gz-key-active,
+.gz-key:where([aria-checked="true"]),
+.gz-key:where([aria-pressed="true"]),
+.provider-pill-active,
+.gz-type-chip:where(.active),
+.pending-question-choice:where(.is-selected),
+.catalog-category-active,
+.gezel-json-editor .squisq-jf-segmented__btn--active {
+  transform: translateY(1px);
+  background: var(--key-pressed-bg);
+  border-color: var(--key-pressed-border);
+  color: var(--key-pressed-ink);
+  box-shadow: var(--key-pressed-shadow);
+}
+
+.gz-key:where(:disabled),
+.provider-pill:where(:disabled),
+.gz-type-chip:where(:disabled),
+.pending-question-choice:where(:disabled),
+.catalog-category:where(:disabled),
+.gezel-json-editor .squisq-jf-segmented__btn:where(:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* A key that reports a derived state rather than offering a choice (the
+   security posture's "Custom", reached by editing individual capability
+   switches): it sits latched at full strength while refusing interaction.
+   Pair with `disabled` + `aria-checked="true"` on a `.gz-key-active` key.
+   Placed after the disabled rule so the latch survives it. */
+.gz-key-state:where(:disabled) {
+  opacity: 1;
+  cursor: default;
+  transform: translateY(1px);
+  box-shadow: var(--key-pressed-shadow);
+}
+
+.gz-key:focus-visible,
+.provider-pill:focus-visible,
+.gz-type-chip:focus-visible,
+.pending-question-choice:focus-visible,
+.catalog-category:focus-visible,
+.gezel-json-editor .squisq-jf-segmented__btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* --- Settings → About → Storage on this device ------------------------
+   A plain two-column ledger: what the category is on the left, how much
+   room it takes on the right. Sizes are the reason anyone opens this, so
+   they get tabular figures and stay aligned down the column. */
+
+.storage-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.storage-group h4 {
+  margin: 0 0 0.15rem;
+  font-size: var(--text-md);
+}
+
+.storage-group p {
+  margin: 0 0 0.4rem;
+}
+
+.storage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  list-style: none;
+  overflow: hidden;
+}
+
+.storage-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.4rem 0.6rem;
+  font-size: var(--text-sm);
+}
+
+.storage-list li + li {
+  border-top: 1px solid var(--border);
+}
+
+.storage-list-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.storage-list-bytes {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --- Free up space dialog ---------------------------------------------
+   Shares the uninstall dialog's choice-row shape: the two are the same
+   decision at different moments, and looking alike is the point. The
+   content group is collapsed by default so clearing downloads never puts
+   a person one stray click from deleting their gezels. */
+
+.gz-cleanup-dialog {
+  max-width: 44rem;
+  overflow: hidden;
+}
+
+/* Keep the title, explanation, and decisions anchored to the dialog surface.
+   Only the potentially long category list scrolls; otherwise its intrinsic
+   height pushes the action row below the 85vh dialog box, where transparent
+   buttons show the dark overlay through themselves. */
+.gz-cleanup-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 0;
+  padding-right: 0.35rem;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.gz-cleanup-dialog > .gz-dialog-actions {
+  flex: 0 0 auto;
+  margin-top: 0;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
+}
+
+.gz-cleanup-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.gz-cleanup-choices legend {
+  margin-bottom: 0.15rem;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.gz-cleanup-choices label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.65rem;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.gz-cleanup-choices label:has(input:disabled) {
+  opacity: 0.55;
+}
+
+.gz-cleanup-choices input {
+  margin-top: 0.18rem;
+}
+
+.gz-cleanup-choices label > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.gz-cleanup-choices small {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.gz-cleanup-content-group {
+  margin-top: 0.9rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border);
+}
+
+.gz-cleanup-warning {
+  margin: 0.1rem 0 0.35rem;
+  padding: 0.5rem 0.65rem;
+  border-left: 3px solid var(--danger);
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.gz-cleanup-outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
+}
+
+.storage-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.85rem;
+}
+
+/* --- Back up / restore dialog ---------------------------------------- */
+
+.gz-backup-dialog {
+  max-width: 44rem;
+}
+
+.gz-backup-tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin: 0.6rem 0 0.8rem;
+}
+
+.gz-backup-tabs button {
+  border-radius: var(--radius-md);
+}
+
+.gz-backup-tabs button[aria-selected="true"] {
+  border-color: var(--accent);
+}
+
+.gz-backup-dialog .gz-backup-exclude {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.gz-backup-dialog .gz-backup-exclude > input[type="checkbox"] {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  cursor: pointer;
+}
+
+.gz-backup-replace {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.2rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* The pre-uninstall nudge: what leaving Gezel installed would strand. */
+.gz-uninstall-storage-note {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0.2rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.gz-uninstall-storage-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* ── First-run: the meester's introduction ─────────────────────────────
+   The workshop conversation used to open as a blank panel under a
+   composer. This is static — no model turn — so it is on screen while a
+   model is still downloading and never puts words in the meester's mouth
+   that they did not say. */
+.meester-greeting {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.25rem 1.25rem 1.5rem;
+  max-width: 62ch;
+}
+
+.meester-greeting-figure {
+  flex: none;
+  padding-top: 0.15rem;
+}
+
+.meester-greeting-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.meester-greeting-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--text);
+}
+
+.meester-greeting-lede {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+/* Openers stack rather than sit in a row: they are full sentences, and a
+   horizontal tray would either truncate them or force a scroller. */
+.meester-greeting-openers {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+  margin: 0.2rem 0 0;
+}
+
+.meester-greeting-opener {
+  text-align: left;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  white-space: normal;
+}
+
+/* Reading material offered while a multi-gigabyte download runs. */
+.first-run-banner-wait {
+  margin: 0.6rem 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}

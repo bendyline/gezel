@@ -18,6 +18,20 @@ describe('linkifyFileRefs', () => {
     );
   });
 
+  it('does not redirect a qualified label to a same-basename root file', () => {
+    const md = 'Requested `powerpoint/task-11/deck.pptx`.';
+    expect(linkifyFileRefs(md, [artifact('deck.pptx')])).toBe(md);
+  });
+
+  it('links a qualified label to its exact nested file when names collide', () => {
+    expect(
+      linkifyFileRefs('Wrote `powerpoint/task-11/deck.pptx`.', [
+        artifact('deck.pptx'),
+        artifact('powerpoint/task-11/deck.pptx'),
+      ]),
+    ).toBe('Wrote [powerpoint/task-11/deck.pptx](#artifact:powerpoint/task-11/deck.pptx).');
+  });
+
   it('links a span carrying a line locator, keeping the locator in the label', () => {
     expect(
       linkifyFileRefs('(`packages/cli/src/commands/image.ts:84,230`)', [

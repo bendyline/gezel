@@ -1,0 +1,3907 @@
+/* ── Project chat (per-project Chat tab) ── */
+
+.project-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Thinking indicator (chat surfaces) ── */
+
+.msg-thinking .msg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+/* ── Failed turn (preserve partial content, annotate why) ── */
+
+.msg-failed .msg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.msg-failed .msg-live-status {
+  color: #ff9b9b;
+}
+
+.msg-failed-banner {
+  margin-top: 0.25rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  color: #ff9b9b;
+  background: rgba(255, 155, 155, 0.08);
+  border: 1px solid rgba(255, 155, 155, 0.25);
+  font-size: 0.85rem;
+}
+
+/* ── Long-running turn banner ── */
+
+.msg-slow-banner {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  font-family: var(--font-ui);
+  color: var(--accent-hover, #996142);
+  background: rgba(176, 114, 76, 0.1);
+  border: 1px solid rgba(176, 114, 76, 0.28);
+  font-size: 0.82rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.msg-warning-banner {
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  font-family: var(--font-ui);
+  color: var(--warning);
+  background: var(--warning-bg);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  font-size: 0.82rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.msg-warning-link {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--font-ui);
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.12em;
+  cursor: pointer;
+}
+.msg-warning-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+.msg-image-gen-narrative {
+  margin-top: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  background: rgba(176, 114, 76, 0.06);
+  border: 1px solid rgba(176, 114, 76, 0.18);
+  font-size: 0.85rem;
+  font-style: italic;
+  color: var(--text-muted, #b3b3b3);
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+  line-height: 1.35;
+}
+.msg-image-gen-narrative-label {
+  font-style: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.72rem;
+  color: var(--accent, #b0724c);
+  flex: 0 0 auto;
+}
+.msg-image-gen-narrative-prompt {
+  flex: 1 1 auto;
+  word-break: break-word;
+}
+.msg-slow-banner-probe {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+.msg-slow-banner-probe-btn {
+  padding: 0.2rem 0.55rem;
+  font-size: 0.78rem;
+  border-radius: 4px;
+  border: 1px solid rgba(176, 114, 76, 0.4);
+  background: rgba(176, 114, 76, 0.15);
+  color: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.msg-slow-banner-probe-btn:hover:not(:disabled) {
+  background: rgba(176, 114, 76, 0.25);
+}
+.msg-slow-banner-probe-btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+.msg-slow-banner-probe-result {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.78rem;
+  opacity: 0.85;
+  line-height: 1.35;
+}
+
+/* Persistent cancel button rendered in the streaming bubble's role
+   row, alongside the StreamingStatusLine. Visible for the entire
+   live turn (thinking + streaming) so the user can stop a stuck or
+   no-longer-wanted turn at any point without waiting it out.
+   Suppressed for failed/queued turns by the bubble's render logic. */
+.msg-role-cancel {
+  /* Compact circular button that reads as a quiet utility, not an
+     emergency action. Nudged left with a small auto margin so it
+     drifts to the trailing edge of the role row even when the row
+     is otherwise short. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  margin-left: auto;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(176, 114, 76, 0.22);
+  background: rgba(176, 114, 76, 0.08);
+  color: var(--text-muted, #a0a0a0);
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.msg-role-cancel:hover:not(:disabled) {
+  background: rgba(176, 114, 76, 0.28);
+  color: #f3ede0;
+  border-color: rgba(176, 114, 76, 0.55);
+}
+.msg-role-cancel:active:not(:disabled) {
+  transform: scale(0.92);
+}
+.msg-role-cancel:disabled {
+  opacity: 0.45;
+  cursor: progress;
+}
+
+.thinking-dots {
+  display: inline-flex;
+  gap: 0.3rem;
+  padding: 0.5rem 0.7rem;
+  /* Warm tint so the pill reads on both the Gezellig orange bubbles and
+     the neutral light-mode surface. */
+  background: rgba(176, 114, 76, 0.12);
+  border-radius: 12px;
+}
+
+.thinking-dots span {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  /* Terracotta accent — matches the app palette and reads against the
+     warm bubble background with decent contrast. */
+  background: #c0875d;
+  border-radius: 50%;
+  opacity: 0.5;
+  animation: thinking-bounce 1.2s infinite ease-in-out;
+}
+
+.thinking-dots span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.thinking-dots span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+.msg-thinking-activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.msg-thinking-activity .msg-live-inline-activity {
+  margin-top: 0;
+}
+
+@keyframes thinking-bounce {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-0.2rem);
+  }
+}
+
+.thinking-tools {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  /* This list sits in a column whose children are left-aligned, so its
+     automatic width otherwise follows the prompt's max-content width.
+     Give the tool rows the bubble's actual width to clip against. */
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.thinking-tool {
+  /* Column layout: the icon/name/args header sits in .thinking-tool-row;
+     expandable blocks (diff, full args, image/audio rows) each get their
+     own full-width line underneath. A single inline-flex row here let a
+     wide diff sit *beside* the tool label and stretch the row past the
+     chat-bubble edge. min-width: 0 keeps long content scrolling inside
+     the bubble instead of widening it. */
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  min-width: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.thinking-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.thinking-tool code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+}
+
+.thinking-tool-name {
+  color: var(--text);
+  font-weight: 500;
+  /* Keep the tool label on one line — in a narrow panel the flex row would
+   * otherwise squeeze it and break mid-word ("Rea/d"). The args span next to
+   * it already ellipsizes, so it absorbs the squeeze instead. */
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.thinking-tool-args {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Crop to the card, not just a fixed cap. `min-width: 0` lets the flex
+     item shrink below its content; capping at `100%` (of the row) means a
+     long summary in a narrow bubble ellipsizes at the card edge instead of
+     pushing past it. 28rem stays the upper bound on a wide timeline. */
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: min(28rem, 100%);
+}
+
+/* Verified file paths inside tool summaries open in the conversation's
+ * References viewer. The button keeps the summary's monospace rhythm and
+ * reads as a quiet inline link rather than a second piece of chrome. */
+.thinking-tool-file-link {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+  text-underline-offset: 0.16em;
+}
+
+.thinking-tool-file-link:hover {
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
+  text-decoration-color: currentColor;
+}
+
+.thinking-tool-file-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.thinking-tool-icon {
+  color: #6ad38f;
+  font-weight: 600;
+  width: 0.9rem;
+  height: 0.9rem;
+  line-height: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.thinking-tool-failed .thinking-tool-icon {
+  color: #ff9b9b;
+}
+
+/* Pending mid-stream tool calls — markup detected in the streaming
+ * text but the salvage layer hasn't promoted them yet. Dimmed
+ * relative to executed rows so the user reads "queued" not "done". */
+.thinking-tools-pending {
+  opacity: 0.6;
+}
+
+.thinking-tool-pending {
+  font-style: italic;
+}
+
+/* Name/status are 0.8rem, the args preview 0.72rem. With center
+ * alignment those unequal boxes leave their baselines offset, so
+ * "streaming…" drifts below the label. Baseline-align the text… */
+.thinking-tool-pending .thinking-tool-row {
+  align-items: baseline;
+}
+
+/* …and keep the spinner centered against the text rather than dropping
+ * to the baseline (an icon box has no text baseline of its own). */
+.thinking-tool-pending .thinking-tool-icon {
+  color: var(--text-muted);
+  align-self: center;
+}
+
+/* Slightly stronger when the close tag has arrived (the salvage
+ * promotion is imminent — about to fire as soon as the iteration
+ * ends). Still dimmer than executed rows. */
+.thinking-tool-pending-ready {
+  opacity: 0.85;
+}
+
+/* Keep the base .thinking-tool-icon inline-flex centering; spin the
+ * SVG itself. A drawn shape is centered in its viewBox, so rotating it
+ * spins in place — unlike a font glyph, whose asymmetric em-box metrics
+ * make rotate() orbit an off-center point (visible as a wobble). */
+.thinking-tool-spinner > svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  transform-origin: center;
+  animation: thinking-tool-spin 1s linear infinite;
+}
+
+@keyframes thinking-tool-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Why a failed tool failed, inline under its row. Bounded by
+   `toolErrorSummary` (250 chars); the untruncated text stays in the
+   details drawer and the row's native tooltip. Line breaks are preserved
+   because a completion gate lists its unmet criteria as bullets. */
+.thinking-tool-error {
+  /* Indent past the ✗ so the reason hangs under the tool name. */
+  margin: 0.15rem 0 0.1rem 1.35rem;
+  color: var(--danger);
+  font-size: 0.74rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.thinking-tool-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Same cap-to-the-card rationale as .thinking-tool-args above. */
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: min(24rem, 100%);
+}
+
+/* Streaming-bubble header — shows gezel icon/name on the left, plus a
+   live status pill ("streaming · 12s · 3 tools") on the right so the
+   user can see progress at a glance even during long reasoning phases. */
+.msg-live-status {
+  margin-left: 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hide the verbose phase label ("thinking", "Thinking it through",
+   "queued — 3 ahead") when the chat panel is narrow. The live dot
+   stays visible to signal "active turn"; the progress bar + token
+   count + tool count carry the actual progress info. Threshold picked
+   from the screenshot where the bubble's role row started visibly
+   crowding the cancel × off-screen — adjust if a wider panel still
+   crowds. Container query (not viewport) so a chat panel that's been
+   user-shrunk inside a wide window still gets the compact treatment. */
+@container chat-rail (max-width: 700px) {
+  .msg-live-status-label {
+    display: none;
+  }
+}
+
+.msg-live-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: #c0875d;
+  animation: msg-live-pulse 1.2s infinite ease-in-out;
+}
+
+/* Inline progress bar shown during chunked-prefill phases — replaces
+   the verbose "X / Y tokens · Z tok/s" string in the status line. The
+   exact counts move into the bar's tooltip via `title=`. */
+.msg-live-progress {
+  display: inline-block;
+  width: 4.5rem;
+  height: 0.4rem;
+  border-radius: 0.2rem;
+  background: rgba(255, 255, 255, 0.24);
+  overflow: hidden;
+  vertical-align: middle;
+}
+.msg-live-progress-fill {
+  display: block;
+  height: 100%;
+  background: #c0875d;
+  border-radius: inherit;
+  transition: width 200ms ease-out;
+}
+
+/* Compact running-token count rendered immediately after the prefill
+   progress bar (e.g. "17.4K"). Sits in the gutter the bar's right
+   margin already provides; tabular numerals so the number doesn't
+   wobble as it ticks up between paint frames. */
+.msg-live-tokens {
+  margin-left: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes msg-live-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+.thinking-tool-duration {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+/* Per-tool image thumbnail row — shown beneath a tool entry that
+   returned image content blocks (e.g. Playwright `browser_snapshot`).
+   Click any thumbnail to open the reusable ImagePreview overlay. */
+.thinking-tool-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.35rem 0 0.1rem 1.4rem;
+}
+.thinking-tool-image {
+  display: inline-block;
+  width: 96px;
+  height: 64px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25) center / cover no-repeat;
+  cursor: zoom-in;
+  transition: border-color 0.12s ease;
+}
+.thinking-tool-image:hover {
+  border-color: rgba(176, 114, 76, 0.5);
+}
+.thinking-tool-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 3px;
+  display: block;
+}
+.thinking-tool-image-loading {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* Inline video player(s) under a tool row (generate_video). */
+.thinking-tool-videos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.35rem 0 0.1rem 1.4rem;
+  list-style: none;
+  padding: 0;
+}
+.thinking-tool-video-cell {
+  display: block;
+}
+.thinking-tool-video {
+  display: block;
+  max-width: min(420px, 100%);
+  max-height: 320px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: #000;
+}
+.thinking-tool-video-loading {
+  display: block;
+  width: 280px;
+  height: 158px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.thinking-tool-video-error {
+  display: block;
+  margin: 0.35rem 0 0.1rem 1.4rem;
+  font-size: 0.85em;
+  color: var(--color-danger, #c0563a);
+}
+
+/* Visible media strip above the collapsed tool-history disclosure, so a
+   generated image/clip isn't hidden behind the "N steps" expander. */
+.msg-tool-media {
+  margin: 0.2rem 0;
+}
+.msg-tool-media .thinking-tool-images,
+.msg-tool-media .thinking-tool-videos {
+  margin-left: 0;
+}
+
+/* Per-thumbnail wrapper — positions the corner ⋯ actions menu over
+   the image without affecting the underlying button's hit area. */
+.thinking-tool-image-cell {
+  position: relative;
+  list-style: none;
+}
+.thinking-tool-image-menu-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0;
+  transition: opacity 0.12s ease, background-color 0.12s ease, border-color 0.12s ease;
+}
+.thinking-tool-image-cell:hover .thinking-tool-image-menu-btn,
+.thinking-tool-image-cell:focus-within .thinking-tool-image-menu-btn,
+.thinking-tool-image-menu-btn.open {
+  opacity: 1;
+}
+.thinking-tool-image-menu-btn:hover,
+.thinking-tool-image-menu-btn.open {
+  background: rgba(176, 114, 76, 0.85);
+  border-color: rgba(176, 114, 76, 1);
+}
+
+/* ── Inline diff viewer for surgical-edit tools (Layer 4) ── */
+/* Lives under the tool row; collapsed by default. The body is a
+   <pre> with line-by-line spans coloured by the unified-diff prefix:
+   + green for adds, - red for deletes, space gray for context,
+   @@ blue for hunk headers. */
+.thinking-tool-diff {
+  /* No explicit width: the column-flex parent stretches it, and the
+     1.4rem indent (aligning under the tool name, past the icon) comes
+     out of the stretched width instead of overflowing the bubble. */
+  margin: 0.25rem 0 0.1rem 1.4rem;
+  font-size: 0.72rem;
+  min-width: 0;
+}
+.thinking-tool-diff-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.thinking-tool-diff-toggle:hover {
+  opacity: 1;
+  color: var(--text);
+}
+.thinking-tool-diff-body {
+  margin: 0.25rem 0 0 0;
+  padding: 0.4rem 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  background: var(--diff-surface);
+  border: 1px solid var(--diff-border);
+  border-radius: 4px;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 24rem;
+  overflow-y: auto;
+  max-width: 100%;
+}
+.thinking-tool-diff-line-ctx {
+  color: var(--text-muted);
+  opacity: 0.85;
+  display: block;
+}
+.thinking-tool-diff-line-add {
+  color: var(--diff-add);
+  background: var(--diff-add-bg);
+  display: block;
+}
+.thinking-tool-diff-line-rem {
+  color: var(--diff-rem);
+  background: var(--diff-rem-bg);
+  display: block;
+}
+.thinking-tool-diff-line-hunk {
+  color: var(--diff-hunk);
+  opacity: 0.85;
+  display: block;
+}
+.thinking-tool-diff-line-header {
+  color: var(--text-muted);
+  opacity: 0.65;
+  display: block;
+}
+
+/* ── Tool-call "details": full, copyable arguments behind a toggle ── */
+.thinking-tool-detail {
+  position: relative;
+  /* Width comes from the column-flex stretch (minus the 1.4rem indent)
+     — same containment rationale as .thinking-tool-diff above. */
+  margin: 0.2rem 0 0.1rem 1.4rem;
+  font-size: 0.72rem;
+  min-width: 0;
+}
+/* Hover peek — a floating preview of the top of the blob.
+   Portaled to <body> and positioned in viewport coordinates by
+   `ToolDetailPreview` (top/left arrive inline). It must NOT live inside
+   the chat's scroll container: an absolutely-positioned box there still
+   counts toward `scrollHeight`, so merely showing it made the
+   stick-to-bottom effect scroll the timeline, moving the toggle out
+   from under the cursor — a hover/scroll flicker loop. */
+.thinking-tool-detail-preview {
+  position: fixed;
+  z-index: 60;
+  max-width: 38rem;
+  max-height: 16rem;
+  overflow: hidden;
+  padding: 0.4rem 0.6rem;
+  background: var(--surface, #1b1b1f);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.thinking-tool-detail-preview pre {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.thinking-tool-detail-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: inherit;
+  padding: 0;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.thinking-tool-detail-toggle:hover {
+  opacity: 1;
+  color: var(--text);
+}
+.thinking-tool-detail-body {
+  position: relative;
+  margin: 0.25rem 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.thinking-tool-detail-section {
+  min-width: 0;
+}
+.thinking-tool-detail-label {
+  margin: 0 0 0.2rem 0.1rem;
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.thinking-tool-detail-section pre {
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  white-space: pre;
+  max-height: 24rem;
+  overflow: auto;
+}
+.thinking-tool-detail-section pre:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.thinking-tool-detail-copy {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.3rem;
+  padding: 0.1rem 0.45rem;
+  font-family: inherit;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.thinking-tool-detail-copy:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* ── Reusable full-screen image preview ── */
+.gz-overlay.image-preview-backdrop {
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  cursor: zoom-out;
+}
+.gz-dialog.image-preview-dialog {
+  width: fit-content;
+  min-width: 0;
+  max-width: 95vw;
+  max-height: 95vh;
+  box-sizing: border-box;
+  padding: 0.4rem;
+  gap: 0;
+  overflow: hidden;
+  background: rgba(10, 10, 10, 0.94);
+  border-color: rgba(255, 255, 255, 0.3);
+  cursor: default;
+}
+.image-preview-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  max-width: calc(95vw - 0.8rem);
+  max-height: calc(95vh - 0.8rem);
+}
+.image-preview-img {
+  display: block;
+  max-width: calc(95vw - 0.8rem);
+  max-height: 88vh;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 40px -8px rgba(0, 0, 0, 0.6);
+  background: #000;
+}
+.image-preview-caption {
+  width: 100%;
+  padding: 0 0.4rem 0.1rem;
+  box-sizing: border-box;
+  overflow: hidden;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.75);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.image-preview-actions {
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+  z-index: 1;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.image-preview-close,
+.image-preview-download {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+.image-preview-close {
+  display: flex;
+  padding: 0 0 2px;
+  font-size: 1.6rem;
+  line-height: 1;
+}
+.image-preview-download {
+  display: inline-flex;
+  text-decoration: none;
+}
+.image-preview-close:hover,
+.image-preview-download:hover {
+  background: color-mix(in srgb, var(--accent) 80%, transparent);
+  border-color: var(--accent);
+}
+.image-preview-close:focus-visible,
+.image-preview-download:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* Queued state: turn is waiting in the provider queue, not actually
+   running yet. Drops the pulsing dot (nothing's happening) and dims
+   the header text so the user can distinguish it at a glance from
+   "thinking" (actively reasoning). The body shows a `.queued-pill`
+   with a numbered place-in-line diagram so the bubble doesn't look
+   blank — same visual weight as `.thinking-dots` so the two states
+   are obvious peers in the timeline. */
+.msg-queued .msg-live-status {
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+.msg-queued-icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+  /* Slight vertical nudge so the queue rows sit on the text baseline
+     instead of riding slightly high. */
+  margin-top: 1px;
+}
+/* A turn parked inside a synchronous ask_gezel/ask_specialist
+   consultation: this gezel's model is idle, blocked on a peer's reply.
+   Dim the whole bubble so the active specialist visually dominates the
+   column and it's obvious the ball is in the other gezel's court — the
+   waiting gezel isn't the one doing the work right now. */
+.msg-awaiting {
+  opacity: 0.55;
+  transition: opacity 0.2s ease-out;
+}
+.msg-awaiting-icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+  /* Same baseline nudge as the queued hourglass. Static (no pulse) —
+     the gezel is passively waiting, not actively generating. */
+  margin-top: 1px;
+}
+/* Wire-pulse dots — accumulating ··· in the streaming bubble's
+   status line for each bare framing chunk Ollama sends with no
+   visible content. Muted so they read as ambient telemetry rather
+   than a status the user has to act on. Tabular numbers in case
+   the count overflow ("(NN)") kicks in. */
+.msg-wire-pulse {
+  color: var(--text-muted);
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+}
+.queued-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.7rem;
+  /* Same warm tint as `.thinking-dots` — visual continuity between
+     queued/thinking states. */
+  background: rgba(176, 114, 76, 0.12);
+  border-radius: 12px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.queue-position-visual {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.queue-position-you {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding-inline: 0.2rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 72%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--accent-hover);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.queue-position-ahead {
+  width: 0.32rem;
+  height: 0.32rem;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.45;
+}
+.queue-position-overflow {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+.queue-position-arrow {
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+.queued-pill-copy {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+.queued-pill-label {
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  font-weight: 600;
+}
+.queued-pill-detail {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Ghost bubble for a message waiting in the per-session queue. Styled
+   as a right-aligned user bubble (since it's a pending user message)
+   but dimmed + dashed-bordered so it clearly reads as "not sent yet"
+   vs. the already-delivered bubbles above it. */
+.msg-ghost-queued {
+  opacity: 0.75;
+}
+.msg-ghost-queued .msg-body {
+  background: rgba(176, 114, 76, 0.08);
+  border-color: rgba(176, 114, 76, 0.35);
+  border-style: dashed;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.msg-ghost-queued-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.msg-ghost-queued-actions {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+.msg-ghost-queued-btn {
+  font-size: 0.72rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.msg-ghost-queued-btn:hover {
+  border-color: rgba(176, 114, 76, 0.55);
+  color: #e0b897;
+  background: rgba(176, 114, 76, 0.1);
+}
+.msg-ghost-queued-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+/* Inline editor swapped in for the preview when the user edits a
+   queued message in place. Same dashed not-yet-sent vocabulary as the
+   ghost body, minus the italics (the user is writing, not skimming). */
+.msg-ghost-queued-editor {
+  width: 100%;
+  min-height: 3.4rem;
+  resize: vertical;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--radius-sm);
+  border: 1px dashed rgba(176, 114, 76, 0.55);
+  background: var(--surface);
+  color: var(--text);
+}
+.msg-ghost-queued-editor:focus {
+  outline: none;
+  border-style: solid;
+  border-color: rgba(176, 114, 76, 0.75);
+}
+.msg-ghost-queued-edit-error {
+  margin-top: 0.25rem;
+  font-size: var(--text-xs);
+  color: var(--danger);
+}
+
+/* Small "nudged" badge on user bubbles whose message was delivered
+   from the mid-turn queue. A badge, not a control — small radius. */
+.msg-nudge-chip {
+  margin-left: 0.35rem;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 0.3rem;
+  border: 1px solid rgba(176, 114, 76, 0.35);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+
+/* Machine-authored user turns — task dispatch seeds, step handoffs, page
+   reactions. They keep the user role the provider requires, so they land
+   in the user column; the terracotta fill is reserved for words the person
+   actually typed, so these drop to the neutral panel tone and muted ink.
+   Paired with the "System" author label — see `ChatMessage.origin`. */
+.msg-system .msg-body {
+  background: var(--panel);
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+/* Companion badge to `.msg-nudge-chip`, neutral rather than terracotta:
+   this message did not come from the user at all. Badge, not a control. */
+.msg-system-chip {
+  margin-left: 0.35rem;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+
+/* ── Hand-off note card ──
+   A task dispatch seed is a letter between gezels, not a turn either party
+   typed: it opens a task thread, and the paragraph the model receives is
+   procedure ("call `advance_task_step` when the step is done"). The card
+   keeps the one sentence a reader wants and files the rest under "Full
+   note". Centred and narrow so it reads as a transition between crew
+   members rather than a message in either column, and dashed in the same
+   warm accent as the `.msg-from-gezel` handoff bubble. */
+.msg-handoff-note {
+  align-self: center;
+  align-items: stretch;
+  width: min(90%, 34rem);
+  max-width: 90%;
+}
+
+.msg-handoff-note-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px dashed var(--chat-handoff-border, rgba(176, 114, 76, 0.45));
+  border-radius: var(--radius-md);
+  background: var(--chat-handoff-bg, rgba(176, 114, 76, 0.08));
+}
+
+.msg-handoff-note-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.msg-handoff-note-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.msg-handoff-note-project {
+  font-style: italic;
+}
+
+.msg-handoff-note-headline {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.msg-handoff-note-context {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.msg-handoff-note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.15rem;
+  font-size: var(--text-xs);
+}
+
+.msg-handoff-note-ref {
+  color: var(--text-muted);
+}
+
+/* The instructions the model was actually sent — provenance, closed by
+   default, and deliberately the quietest thing in the card. */
+.msg-handoff-note-details > summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-muted);
+}
+
+.msg-handoff-note-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.msg-handoff-note-details > summary::before {
+  content: "▸ ";
+}
+
+.msg-handoff-note-details[open] > summary::before {
+  content: "▾ ";
+}
+
+.msg-handoff-note-full {
+  margin: 0.35rem 0 0;
+  white-space: pre-wrap;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+/* Queue receipt for a task the runner has accepted but not started. Shares
+   the handoff card's dashed-terracotta family — both are machinery
+   speaking, not a gezel — but stays quieter: no headline weight, and the
+   whole card sits at reduced opacity like the queued-message ghost, so a
+   thing that has not happened yet never outranks the conversation. */
+.msg-queued-task {
+  align-self: center;
+  align-items: stretch;
+  width: min(90%, 34rem);
+  max-width: 90%;
+  opacity: 0.85;
+}
+
+.msg-queued-task-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px dashed var(--chat-handoff-border, rgba(176, 114, 76, 0.45));
+  border-radius: var(--radius-md);
+  background: var(--chat-handoff-bg, rgba(176, 114, 76, 0.08));
+}
+
+.msg-queued-task-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.msg-queued-task-icon {
+  color: var(--accent);
+}
+
+.msg-queued-task-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.msg-queued-task-headline {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.msg-queued-task-number {
+  color: var(--text-muted);
+}
+
+.msg-queued-task-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.msg-queued-task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.15rem;
+  font-size: var(--text-xs);
+}
+
+.msg-queued-task-ref {
+  color: var(--text-muted);
+}
+
+/* Counted remainder when more tasks are held than we draw cards for. */
+.msg-queued-task-overflow {
+  align-self: center;
+  width: min(90%, 34rem);
+  max-width: 90%;
+  margin: 0;
+  text-align: center;
+}
+
+/* Collapsible "tools that ran during this turn" expando at the top of a
+   completed assistant bubble. Closed by default; clicking the summary
+   reveals the same thinking-tool list the StreamingBubble uses live.
+   Kept low-contrast so it doesn't compete with the assistant's reply. */
+.msg-tool-history {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+.msg-tool-history > summary {
+  cursor: pointer;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  user-select: none;
+}
+.msg-tool-history > summary::-webkit-details-marker {
+  display: none;
+}
+.msg-tool-history > summary::before {
+  content: "▸";
+  display: inline-block;
+  transition: transform 0.15s ease;
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+.msg-tool-history[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.msg-tool-history-count {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.msg-tool-history-total {
+  font-variant-numeric: tabular-nums;
+}
+
+.msg-tool-history-failed {
+  color: #d77070;
+}
+
+/* Unrecovered tool failure, surfaced in the thread above the (closed)
+   step expando. A gate that rejected the work is the user's business —
+   "· 1 failed" behind a disclosure triangle is not enough to act on. */
+.msg-tool-failure {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  align-self: flex-start;
+  max-width: 100%;
+  min-width: 0;
+  margin-bottom: 0.3rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+  border-left-width: 2px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.msg-tool-failure-icon {
+  color: var(--danger);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.msg-tool-failure-body {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg-tool-failure-tool {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.msg-tool-failure-tool::after {
+  content: " — ";
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.msg-tool-history .thinking-tools {
+  margin-top: 0.45rem;
+  padding: 0.45rem 0.6rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* "Thinking" expander — chain-of-thought captured from <think> /
+   <reasoning> tags by the local providers. Same chip styling as the
+   tool-history expando so the two read as a matched pair. The body
+   renders the trace as a `<pre>` because the captured prose often
+   has unbalanced markdown (half-quoted code, partial fences) that a
+   markdown pass would mangle. */
+.msg-reasoning {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  align-self: flex-start;
+  max-width: 100%;
+}
+.msg-reasoning > summary {
+  cursor: pointer;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  user-select: none;
+}
+.msg-reasoning > summary::-webkit-details-marker {
+  display: none;
+}
+.msg-reasoning > summary::before {
+  content: "▸";
+  display: inline-block;
+  transition: transform 0.15s ease;
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+.msg-reasoning[open] > summary::before {
+  transform: rotate(90deg);
+}
+.msg-reasoning-label {
+  color: var(--text);
+  font-weight: 500;
+}
+.msg-reasoning-meta {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+.msg-reasoning-body {
+  margin: 0.45rem 0 0;
+  padding: 0.55rem 0.7rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+  max-height: 24rem;
+  overflow-y: auto;
+}
+
+/* Live think-phase stream — the always-open, dimmed counterpart to
+   `.msg-reasoning`, shown above the reply while ds4 reasons. Left-stripe
+   aside marks it as the model thinking (not the answer); it collapses
+   into the disclosure above once the turn commits. Same muted tokens as
+   the committed expander so the streaming view matches the final view. */
+.msg-stream-reasoning {
+  align-self: flex-start;
+  max-width: 100%;
+  margin: 0 0 0.5rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--border);
+}
+.msg-stream-reasoning-label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+.msg-stream-reasoning-body {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+/* Live tool-args block — the streaming counterpart to a tool row,
+   shown while the model generates a structured call (long write_file).
+   Same dimmed left-rule treatment as .msg-stream-reasoning; the body
+   is a short auto-scrolled tail of the args decoded out of their JSON
+   encoding, monospace because it's file content mid-write, not prose. */
+.msg-stream-toolargs {
+  align-self: flex-start;
+  max-width: 100%;
+  margin: 0.5rem 0;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--border);
+}
+.msg-stream-toolargs-label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+.msg-stream-toolargs-target {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+.msg-stream-toolargs-count {
+  font-variant-numeric: tabular-nums;
+}
+.msg-stream-toolargs-body {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+  opacity: 0.8;
+  max-height: 7rem;
+  overflow-y: auto;
+}
+
+/* Bottom-of-bubble activity counter — mirrors the header's wire-pulse
+   count next to the blinking stream caret, so "things are happening"
+   is visible where the user is actually looking. Tabular numerals so
+   the ticking count doesn't jitter the caret. */
+.msg-live-inline-activity {
+  display: inline-block;
+  margin-top: 0.25rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+/* ── Project chat split layout (chat left, references right) ── */
+
+.chat-rail-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  /* Stretch the single grid row to fill the container's flex height.
+     Without this the implicit row sizes to content (timeline + composer),
+     and the chat panel stops short of the bottom edge — leaving dead
+     dark space below the composer on tall windows like project chat. */
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0.75rem;
+  flex: 1;
+  min-height: 0;
+}
+
+/* A banner (today: the chat pill row) spans the whole rail — chat column,
+   grip, and context pane — so the status band reads as one toolbar across
+   the split instead of stopping at the grip. It occupies its own auto row
+   above the panes. The transparent grip track still spans both rows so its
+   painted handle stays aligned with the neighbouring output-pane handle;
+   the banner sits above the track so its controls keep the full hit area. */
+.chat-rail-body:has(> .chat-rail-banner) {
+  grid-template-rows: auto minmax(0, 1fr);
+  row-gap: 0;
+}
+.chat-rail-banner {
+  position: relative;
+  z-index: 1;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-width: 0;
+}
+.chat-rail-body:has(> .chat-rail-banner) > .chat-rail-main {
+  grid-column: 1;
+  grid-row: 2;
+}
+.chat-rail-body:has(> .chat-rail-banner) > .chat-rail-grip {
+  grid-column: 2;
+  grid-row: 1 / -1;
+}
+.chat-rail-body:has(> .chat-rail-banner) > .chat-rail-side {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+/* Compact / narrow form factor. The split rail becomes a single-pane tab
+   surface so chat never competes with context for width or height. */
+.chat-rail-body-compact {
+  display: flex;
+  flex-direction: column;
+  grid-template-columns: none;
+  gap: 0;
+}
+
+.chat-rail-body-compact > .chat-rail-main {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-rail-body-compact > .chat-rail-banner {
+  flex: 0 0 auto;
+}
+
+.chat-rail-compact-root {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-rail-compact-tabs.gz-tabs-list {
+  flex: 0 0 auto;
+  gap: 0;
+  padding-inline: 0.35rem;
+  background: color-mix(in srgb, var(--panel) 82%, var(--surface));
+}
+
+.chat-rail-compact-tabs .chat-rail-compact-tab {
+  flex: 1 1 0;
+  min-width: max-content;
+  padding: 0.45rem 0.7rem;
+  text-align: center;
+}
+
+.chat-rail-compact-panel.gz-tabs-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--panel) 76%, var(--surface));
+}
+
+.chat-rail-compact-panel.gz-tabs-content[data-state="active"] {
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-rail-compact-panel.gz-tabs-content[data-state="inactive"] {
+  display: none;
+}
+
+.chat-rail-compact-chat.gz-tabs-content {
+  background: transparent;
+}
+
+.chat-rail-compact-panel > .chat-rail-main {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-rail-compact-picker-row {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-rail-compact-picker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  min-width: 0;
+  max-width: min(24rem, 100%);
+  padding: 0.28rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-xs);
+}
+
+.chat-rail-compact-picker > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* When a reference is active, the component renders a draggable
+   grip between the chat and the side pane and switches the grid to
+   three columns: the side width is driven by a persisted fraction
+   of the container, so the split reflows sensibly when the window
+   resizes. */
+.chat-rail-body-split {
+  --chat-rail-side-fraction: 0.34;
+  --chat-rail-min-main-width: 480px;
+  --chat-rail-min-side-width: 192px;
+  --chat-rail-grip-track-width: 14px;
+  grid-template-columns:
+    minmax(var(--chat-rail-min-main-width), 1fr)
+    var(--chat-rail-grip-track-width)
+    minmax(
+      var(--chat-rail-min-side-width),
+      min(
+        calc(var(--chat-rail-side-fraction) * 100%),
+        calc(100% - var(--chat-rail-min-main-width) - var(--chat-rail-grip-track-width))
+      )
+    );
+  gap: 0;
+}
+
+.chat-rail-grip {
+  width: var(--chat-rail-grip-track-width, 14px);
+  cursor: col-resize;
+  background: transparent;
+  margin: 0;
+  border-radius: 3px;
+  transition: background 0.15s;
+  position: relative;
+}
+
+.chat-rail-grip::before,
+.chat-rail-grip::after {
+  /* Compact twin rails: the full-height element remains the generous
+     drag target, while only this small centered grip is visible. */
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 28px;
+  transform: translate(-50%, -50%);
+  background: color-mix(in srgb, var(--border) 72%, var(--text-muted));
+  border-radius: 1px;
+  opacity: 0;
+  box-shadow: 1px 0 0 color-mix(in srgb, var(--surface) 65%, transparent), 0 1px 2px
+    color-mix(in srgb, var(--text) 12%, transparent);
+  transition: opacity 0.15s ease-out, background 0.15s, box-shadow 0.15s;
+}
+
+.chat-rail-grip::before {
+  left: calc(50% - 2px);
+}
+
+.chat-rail-grip::after {
+  left: calc(50% + 2px);
+}
+
+.chat-rail-grip:hover::before,
+.chat-rail-grip:hover::after,
+.chat-rail-grip:focus-visible::before,
+.chat-rail-grip:focus-visible::after,
+.chat-rail-grip:active::before,
+.chat-rail-grip:active::after {
+  background: var(--accent);
+  opacity: 1;
+  box-shadow: 1px 0 0 color-mix(in srgb, var(--surface) 72%, transparent), 0 1px 3px
+    color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.chat-rail-grip:focus-visible {
+  outline: none;
+}
+
+/* While a resize drag is in flight, neutralize iframes / webviews
+   (they otherwise capture pointer events into their own browsing
+   context and starve our mousemove/mouseup listeners) and block
+   text selection across the app. The class is toggled on <body> by
+   ChatReferences' grip mousedown / mouseup handlers. */
+body.chat-rail-resizing {
+  cursor: col-resize !important;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body.chat-rail-resizing iframe,
+body.chat-rail-resizing webview {
+  pointer-events: none;
+}
+
+.chat-rail-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  /* Container-query scope for chat-internal width-responsive rules.
+     Pinned to the chat rail (not the viewport) so a wide window with
+     the side panel open still triggers narrow-panel layout when the
+     chat itself is cramped. Used today by `.msg-live-status-label`
+     (hide the verbose phase label when the streaming bubble's status
+     row would otherwise wrap). Add new chat-internal width rules here
+     rather than reaching for viewport media queries. */
+  container-type: inline-size;
+  container-name: chat-rail;
+}
+
+.chat-rail-main .chat-timeline,
+.chat-rail-main .chat-timeline-viewport {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---- Chat pill row -------------------------------------------------
+   The status band at the top of a project chat: threads that are
+   streaming / failed / recently active, the project's active tasks merged
+   with their latest chats, and a "Do +" action that starts a new task.
+
+   It rides in the rail's `.chat-rail-banner` row, spanning the chat column
+   and the context pane; in compact mode the banner stays above the pane tabs
+   so thread and task context remains visible while switching panels. The
+   cards must never wrap into a second row — overflow scrolls sideways under
+   a visible bar. */
+.chat-pill-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  min-height: var(--chat-toolbar-band-height);
+  padding: 0.3rem 0.5rem;
+  background: var(--tray-bg);
+  border: solid var(--tray-border);
+  border-width: 1px 0;
+  box-shadow: var(--tray-shadow);
+}
+/* Wraps the scroller so the overflow indicator can be positioned against
+   it rather than against the whole row — the track must stop where the
+   pills stop, not run under the "Do +" key. */
+.chat-pill-row-scroller {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.chat-pill-row-scroll {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  /* `overflow-x: auto` makes the other axis scrollable too. The pressed
+     pill's 1px translate would then create a tiny vertical scroll range. */
+  overflow-y: hidden;
+  /* The native bar stays hidden and `.chat-pill-row-bar` stands in for it.
+     A real one can't work here: on macOS with the default "Automatic"
+     scrollbar setting Chromium paints an overlay bar that is invisible at
+     rest — exactly the state where the user needs to be told more threads
+     exist — and forcing the classic bar costs 8px of layout height, which
+     the band shares with `.project-output-toolbar` via
+     `--chat-toolbar-band-height`. The stand-in is absolutely positioned, so
+     the band's height never depends on whether the pills overflow. */
+  scrollbar-width: none;
+}
+.chat-pill-row-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Sits in the row's bottom padding, level with its border, so it reads as
+   an underline on the band. Only rendered while the pills overflow. */
+.chat-pill-row-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--scrollbar-track);
+  cursor: pointer;
+}
+.chat-pill-row-bar-thumb {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  min-width: 1.5rem;
+  border-radius: 999px;
+  /* The resting colour is the app's *hover* thumb: at 4px tall the normal
+     one reads as a smudge rather than a control. */
+  background: var(--scrollbar-thumb-hover);
+  cursor: grab;
+}
+.chat-pill-row-bar-thumb:hover,
+.chat-pill-row-bar-thumb:active {
+  background: color-mix(in srgb, var(--scrollbar-thumb-hover) 65%, var(--fg));
+}
+.chat-pill-row-bar-thumb:active {
+  cursor: grabbing;
+}
+.chat-pill-row-empty {
+  white-space: nowrap;
+}
+
+.chat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  max-width: 14rem;
+  min-height: 3rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--key-border);
+  border-radius: var(--radius-md);
+  background: var(--key-bg);
+  color: var(--fg);
+  box-shadow: var(--key-shadow);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background 140ms ease-out, border-color 140ms ease-out, box-shadow 140ms ease-out,
+    transform 140ms ease-out;
+}
+.chat-pill:hover {
+  background: var(--key-bg-hover);
+}
+.chat-pill:active {
+  transform: translateY(1px);
+  box-shadow: var(--key-pressed-shadow);
+}
+.chat-pill.is-active {
+  transform: translateY(1px);
+  border-color: var(--key-pressed-border);
+  background: var(--key-pressed-bg);
+  color: var(--key-pressed-ink);
+  box-shadow: var(--key-pressed-shadow);
+}
+.chat-pill-thread {
+  width: 17rem;
+  max-width: 17rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.12rem;
+  text-align: left;
+}
+.chat-pill-terminal .terminal-prompt-sigil {
+  flex: 0 0 auto;
+}
+.chat-pill-terminal-command {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+.chat-pill-terminal-folder {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-pill-thread-line {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  white-space: nowrap;
+}
+/* Block, not the flex the line class hands out: `text-overflow` never
+   applies to a flex container's own text, so the title hard-cut instead
+   of ellipsing. */
+.chat-pill-thread-title {
+  display: block;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+.chat-pill-thread-context,
+.chat-pill-thread-update {
+  gap: 0.25rem;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-2xs);
+}
+.chat-pill-thread-context .poppetje,
+.chat-pill-thread-context svg {
+  flex: 0 0 auto;
+}
+.chat-pill-participants {
+  flex: 0 1 auto;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--fg);
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+.chat-pill-message-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-pill-separator {
+  flex: 0 0 auto;
+  color: var(--border-strong, var(--muted));
+}
+/* The status is the point of the line, so it holds its width and the
+   relative timestamp beside it gives way first. */
+.chat-pill-thread-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.chat-pill-thread-updated-at {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-pill.is-active :where(.chat-pill-thread-title, .chat-pill-participants, .chat-pill-label) {
+  color: var(--key-pressed-ink);
+}
+.chat-pill.is-active
+  :where(.chat-pill-thread-context, .chat-pill-thread-update, .chat-pill-separator) {
+  color: color-mix(in srgb, var(--key-pressed-ink) 78%, transparent);
+}
+.chat-pill-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Task pills use the same three-line density as chat pills: task identity
+   on top, latest-chat context in the middle, and chat activity below. */
+.chat-pill-task-title {
+  gap: 0.25rem;
+  color: var(--fg);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.chat-pill-task-icon {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+.chat-pill-task-number {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.chat-pill.is-active :where(.chat-pill-task-icon, .chat-pill-task-number) {
+  color: var(--key-pressed-ink);
+}
+.chat-pill-task .task-status-dot {
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
+/* State is carried by a dot rather than a color-only border, so it stays
+   legible for color-vision differences; the accessible name repeats it. */
+.chat-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.chat-pill-idle .chat-pill-dot {
+  background: var(--muted);
+}
+.chat-pill-inflight .chat-pill-dot {
+  background: var(--accent, #7faa76);
+  animation: engine-pill-dot-pulse 1.6s ease-in-out infinite;
+}
+.chat-pill-errored {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+.chat-pill-errored .chat-pill-dot {
+  background: var(--danger);
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-pill-inflight .chat-pill-dot {
+    animation: none;
+  }
+}
+
+.chat-pill-overflow {
+  color: var(--muted);
+}
+.chat-pill-overflow-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  align-items: flex-start;
+  width: 18rem;
+  max-width: 100%;
+}
+
+/* Pinned right so "start a new task" stays put while the pills scroll
+   under it. The panel background is what keeps the pills from showing
+   through as they pass beneath. */
+.chat-pill-new-task {
+  flex: 0 0 auto;
+  position: sticky;
+  right: 0;
+  width: auto;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.55rem;
+  border: 1px solid var(--key-border);
+  border-radius: var(--radius-md);
+  background: var(--key-bg);
+  color: var(--fg);
+  box-shadow: var(--key-shadow);
+  font-size: var(--text-sm);
+  line-height: 1;
+  cursor: pointer;
+  transition: background 140ms ease-out, box-shadow 140ms ease-out, transform 140ms ease-out;
+}
+.chat-pill-new-task:hover {
+  background: var(--key-bg-hover);
+}
+.chat-pill-new-task:active {
+  transform: translateY(1px);
+  box-shadow: var(--key-pressed-shadow);
+}
+
+/* Narrow chat rail: keep the three-line summary, but tighten its card.
+   Container query, not a viewport media query — see the rail note above. */
+@container chat-rail (max-width: 560px) {
+  .chat-pill {
+    max-width: 13rem;
+  }
+  .chat-pill-thread {
+    width: 13rem;
+  }
+  .chat-pill-thread .poppetje,
+  .chat-pill-thread svg {
+    display: none;
+  }
+}
+
+/* The viewport is the positioning context for the floating pin
+   toggle. The `.chat-timeline` inside stays the actual scroll
+   container — this wrapper only exists so the button can sit above
+   the scrollbar without being clipped or scrolling with the content. */
+.chat-timeline-viewport {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  /* Own stacking context so the overlays inside (`.chat-sticky-header`
+     at 5) are ordered against each other and the bubbles they cover —
+     not against the app shell.
+     Without this the viewport is `position: relative` with `z-index:
+     auto`, so the sticky header's 5 landed in the ROOT stack and beat
+     `.app-header`'s 2, painting over the titlebar's engine/queue
+     popovers. Everything that legitimately needs to escape the
+     timeline (Radix `.gz-popover`, tooltips, dialogs) is portaled to
+     body and unaffected. */
+  z-index: 0;
+  /* Left inset applied to a thread's reply column (rail + gutter).
+     The sticky context header lives outside the timeline's content
+     box and measures the active bubble's rendered bounds, so this
+     token only owns the in-flow thread geometry. */
+  --thread-indent: 1.05rem;
+}
+
+/* Sticky conversation-context header — pinned above the scroll
+   area when the user has scrolled past a bubble. Two stacked
+   lines: the most-recent user prompt + the assistant header
+   currently being scrolled through. Lets the user keep the
+   "what were we talking about?" context visible while reading a
+   long reply. Driven by IntersectionObserver-style state in
+   `ChatTimelineView`; hidden when nothing is occluded. */
+.chat-sticky-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.45rem 0.7rem;
+  /* Absolute-position the header so it OVERLAYS the top of the
+     scroll area instead of pushing it down. Pushing the scroll
+     container shorter every time the header toggled created a
+     scroll-anchoring feedback loop with `scroll-behavior: smooth`
+     that read as rapid flashing while the user scrolled past
+     bubble boundaries. The viewport is `position: relative` so
+     this anchors to its top-left/right inset by the same 0.75rem
+     gutter the in-flow version used. z-index keeps it above
+     bubbles being scrolled under it. */
+  position: absolute;
+  top: 0;
+  /* ChatTimelineView measures the occluded assistant bubble and
+     publishes its border-box here. That makes the sticky follow an
+     indented thread reply when a rail is present and the root column
+     when it is not. The gutter value is a safe pre-measure fallback. */
+  left: var(--chat-sticky-left, 0.75rem);
+  /* The measured width avoids fractional-pixel drift at the right
+     edge. Before measurement, derive the root-column width from the
+     timeline padding and its published native scrollbar gutter. */
+  width: var(--chat-sticky-width, calc((100% - 1.5rem - var(--chat-timeline-sb-width, 0px)) * 0.92));
+  z-index: 5;
+  min-width: 0;
+  /* Square top corners so the bubble scrolling underneath doesn't
+     peek through at the rounded curves; the soft drop shadow + the
+     bubble's own border still give the "sticky above, content below"
+     depth cue without a hard line cutting between them. */
+  border-radius: 0;
+  /* Mostly opaque so bubble text scrolling underneath doesn't read
+     through the header. Reuse the bubble surface for the same cool
+     paper tone in light mode; dark mode resolves it to the panel. */
+  background: color-mix(in srgb, var(--chat-bubble-bg, var(--panel)) 96%, transparent);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-top: none;
+  box-shadow: none;
+  font-size: 0.82rem;
+  line-height: 1.3;
+  /* Backdrop so anything leaking through the 4% transparent edge
+     is blurred rather than razor-sharp. */
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.chat-sticky-header-user,
+.chat-sticky-header-assistant {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+/* User line mirrors the right-aligned user bubble below: the
+   prompt text sits to the right, with the YOU label trailing it.
+   `row-reverse` swaps the visual order without touching the DOM
+   order, so screen readers / tooltips keep their normal sequence. */
+.chat-sticky-header-user {
+  flex-direction: row-reverse;
+}
+.chat-sticky-header-user .chat-sticky-header-preview {
+  text-align: right;
+}
+.chat-sticky-header-author {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.chat-sticky-header-preview {
+  /* Truncate to one line — the full text is in a `title` tooltip. */
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary, inherit);
+}
+.chat-sticky-header-assistant {
+  color: var(--text-primary, inherit);
+}
+/* Status line sits IMMEDIATELY after "Ada Developer" so the
+   accumulating wire-pulse dots flow naturally into the empty
+   space on the right, instead of being shoved to the far edge
+   with a gap in between. */
+.chat-sticky-header-assistant .msg-live-status {
+  font-size: 0.78rem;
+  /* Soak up unused horizontal space so the trailing wire-pulse
+     dots can grow rightward without bumping into anything else.
+     `min-width: 0` lets the inner text wrap / truncate cleanly
+     instead of pushing the row past the bubble width. */
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Context-window status banner — sticky above the scroll area for
+   the active session. Two variants: 'warning' (75-90% full) is a
+   yellow caution; 'compacted' (system has summarized older turns)
+   is a calmer accent. Both stay visible until the user starts a
+   new session, since the underlying state persists across turns. */
+.chat-context-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.55rem 0.8rem;
+  border-radius: 6px;
+  margin: 0 0 0.5rem 0;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+.chat-context-banner-icon {
+  flex-shrink: 0;
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+.chat-context-banner-body {
+  flex: 1;
+  min-width: 0;
+}
+.chat-context-banner-warning {
+  color: #8a6310;
+  background: rgba(232, 200, 117, 0.18);
+  border: 1px solid rgba(176, 132, 30, 0.5);
+}
+[data-theme="dark"] .chat-context-banner-warning {
+  color: #f0d488;
+  background: rgba(232, 200, 117, 0.1);
+  border: 1px solid rgba(232, 200, 117, 0.35);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .chat-context-banner-warning {
+    color: #f0d488;
+    background: rgba(232, 200, 117, 0.1);
+    border: 1px solid rgba(232, 200, 117, 0.35);
+  }
+}
+.chat-context-banner-compacted {
+  color: var(--accent, #b0724c);
+  background: rgba(176, 114, 76, 0.08);
+  border: 1px solid rgba(176, 114, 76, 0.25);
+}
+
+.chat-timeline-viewport .chat-timeline {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Meester chat surface: apply the rounded-box framing the old
+   `.meester-chat` div used to provide. Now lives on the chat-rail-main
+   wrapper so the references rail stays outside the box. */
+.home-meester .chat-rail-main {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg, #141414);
+  overflow: hidden;
+}
+
+/* Give the Meester composer the same quiet, self-contained compose surface as
+   project chat. The small inset keeps all four rounded corners legible inside
+   the larger conversation rail, while a deeper paper band groups the
+   recipient, thread picker, and toolbar above the lighter draft. */
+.home-workshop-conversation .chat-composer {
+  --compose-frame-bg: var(--chat-compose-header-bg);
+  --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
+  --compose-toolbar-bg: var(--chat-compose-header-bg);
+  /* Clear the outer rail's rounded lower-left corner while preserving the
+     tighter right inset beside the reference rail. */
+  margin: 0 0.25rem 0.25rem 0.5rem;
+  border: 1px solid var(--compose-frame-border);
+  border-radius: var(--radius-md);
+  background: var(--compose-frame-bg);
+}
+
+/* ── Interleaved chat timeline (project + global Meester views) ── */
+
+/* Typed colors let Chromium interpolate the native scrollbar paint even
+   though its WebKit scrollbar pseudo-elements have uneven transition
+   support across versions. The pseudo-element transition below remains
+   as a graceful fallback. */
+@property --chat-scrollbar-thumb-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
+@property --chat-scrollbar-track-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
+.chat-timeline {
+  --chat-scrollbar-thumb: color-mix(in srgb, var(--scrollbar-thumb) 62%, transparent);
+  --chat-scrollbar-thumb-hover: color-mix(in srgb, var(--scrollbar-thumb-hover) 74%, transparent);
+  --chat-scrollbar-track: color-mix(in srgb, var(--scrollbar-track) 45%, transparent);
+  --chat-scrollbar-thumb-color: transparent;
+  --chat-scrollbar-track-color: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  overflow-y: auto;
+  /* Hard stop horizontal scrolling at the container — any single-child
+     overflow (long URLs, unwrapped code, wide tables) either wraps or
+     gets its own in-bubble scroll via the child rules below. The timeline
+     itself should never grow a horizontal scrollbar. */
+  overflow-x: hidden;
+  padding: 0.75rem;
+  /* Needed so flex children respect the container's width instead of
+     expanding past it to fit their intrinsic content. */
+  min-width: 0;
+  scroll-behavior: smooth;
+  min-height: 12rem;
+  /* Preserve the scrollbar gutter so content never shifts, but keep its
+     chrome quiet until the user is interacting with this chat pane. */
+  scrollbar-color: var(--chat-scrollbar-thumb-color) var(--chat-scrollbar-track-color);
+  transition: --chat-scrollbar-thumb-color 160ms ease-out, --chat-scrollbar-track-color 160ms
+    ease-out;
+}
+
+.chat-timeline-viewport:hover .chat-timeline,
+.chat-timeline-viewport:focus-within .chat-timeline,
+.chat-timeline.chat-timeline-scrolling {
+  --chat-scrollbar-thumb-color: var(--chat-scrollbar-thumb);
+  --chat-scrollbar-track-color: var(--chat-scrollbar-track);
+}
+
+.chat-timeline::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chat-timeline::-webkit-scrollbar-track,
+.chat-timeline::-webkit-scrollbar-thumb {
+  background-color: var(--chat-scrollbar-track-color);
+  border-color: transparent;
+  transition: background-color 160ms ease-out, border-color 160ms ease-out;
+}
+
+.chat-timeline::-webkit-scrollbar-thumb {
+  background-color: var(--chat-scrollbar-thumb-color);
+}
+
+/* Native up/down buttons make the dormant gutter look active even when the
+   thumb is hidden. Collapse them for this pane; wheel, track, drag, touch,
+   keyboard, and the jump-to-bottom control remain available. */
+.chat-timeline::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
+.chat-timeline-viewport:hover .chat-timeline::-webkit-scrollbar-track,
+.chat-timeline-viewport:focus-within .chat-timeline::-webkit-scrollbar-track,
+.chat-timeline.chat-timeline-scrolling::-webkit-scrollbar-track {
+  background-color: var(--chat-scrollbar-track-color);
+  border-top-color: color-mix(in srgb, var(--border) 35%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--border) 35%, transparent);
+}
+
+.chat-timeline-viewport:hover .chat-timeline::-webkit-scrollbar-thumb,
+.chat-timeline-viewport:focus-within .chat-timeline::-webkit-scrollbar-thumb,
+.chat-timeline.chat-timeline-scrolling::-webkit-scrollbar-thumb {
+  background-color: var(--chat-scrollbar-thumb-color);
+  border-color: transparent;
+  background-clip: padding-box;
+}
+
+.chat-timeline-viewport:hover .chat-timeline::-webkit-scrollbar-thumb:hover,
+.chat-timeline-viewport:focus-within .chat-timeline::-webkit-scrollbar-thumb:hover,
+.chat-timeline.chat-timeline-scrolling::-webkit-scrollbar-thumb:hover {
+  background-color: var(--chat-scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-timeline {
+    transition: none;
+  }
+  .chat-timeline::-webkit-scrollbar-track,
+  .chat-timeline::-webkit-scrollbar-thumb {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .chat-timeline {
+    scrollbar-color: auto;
+  }
+}
+
+.chat-timeline-loading,
+.chat-timeline-error {
+  padding: 0.75rem;
+}
+
+.timeline-loading-pill {
+  align-self: center;
+  padding: 0.25rem 0.7rem;
+  margin-bottom: 0.2rem;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+}
+
+/* A short-lived tail below a prompt submitted from the composer attached to
+   this timeline. It gives the first response lines somewhere to appear instead
+   of wedging the new prompt directly against the composer. The element is
+   removed when the chat turn / terminal run settles. */
+.timeline-response-runway {
+  flex: 0 0 clamp(4.5rem, 22vh, 10rem);
+  width: 100%;
+  pointer-events: none;
+}
+
+/* Floating toggle for "pinned to bottom" mode — small circular button
+   at the lower-right of the timeline, just inside the scrollbar gutter.
+   Orange when pinned (actively following new messages); muted when
+   unpinned. Kept outside the scrolling content so it never scrolls
+   away. `right: 14px` clears macOS overlay scrollbars and a typical
+   Windows 15px gutter without pixel-probing per-OS. */
+.chat-timeline-pin-toggle {
+  position: absolute;
+  right: 22px;
+  bottom: 6px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface, #1f2124);
+  color: var(--muted, #8d8b86);
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease, transform
+    120ms ease;
+  /* Stay above message bubbles and their tool-expandos. */
+  z-index: 2;
+}
+.chat-timeline-pin-toggle:hover {
+  background: rgba(176, 114, 76, 0.14);
+  color: #e0b897;
+  border-color: rgba(176, 114, 76, 0.4);
+}
+.chat-timeline-pin-toggle:active {
+  transform: scale(0.94);
+}
+.chat-timeline-pin-toggle-on {
+  background: rgba(176, 114, 76, 0.2);
+  color: #e0b897;
+  border-color: rgba(176, 114, 76, 0.5);
+}
+.chat-timeline-pin-toggle-on:hover {
+  background: rgba(176, 114, 76, 0.3);
+}
+.chat-timeline-pin-glyph {
+  display: block;
+  /* Optical nudge so the arrow-to-bar glyph sits on the button's
+     geometric center — the bar at the bottom biases the ink downward
+     visually, so we shift up by 1px. */
+  transform: translateY(-1px);
+}
+
+/* One conversational turn, threaded: the trigger message (a user turn
+   or an inter-gezel handoff) on top, its replies railed underneath.
+   Groups are what the timeline's 0.9rem flex gap separates; inside a
+   thread the spacing tightens so trigger + replies read as one unit. */
+.timeline-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+  position: relative;
+}
+
+/* The reply column. The warm left rail + indent are the "these hang
+   off the message above" cue — same visual family as the handoff
+   bubble's dashed warm border. Total left inset (margin + rail +
+   padding) must equal `--thread-indent`; the sticky context header
+   subtracts the same variable to stay edge-aligned with the bubbles
+   inside this column. The 7px margin centers the 2px rail at x=8px —
+   directly under the session divider's flush-left 16px gezel icon. */
+.timeline-thread-replies {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+  margin-left: 7px;
+  border-left: 2px solid rgba(176, 114, 76, 0.28);
+  padding-left: calc(var(--thread-indent, 1.05rem) - 7px - 2px);
+}
+
+/* Threads whose left gutter is clear top-to-bottom (right-aligned user
+   root, or no root at all) draw the rail as one full-height line on the
+   thread itself, so it starts level with the trigger message instead of
+   appearing abruptly below it. The reply column's own border goes
+   transparent — keeping its layout contribution — so the translucent
+   line doesn't double-stack. Handoff-rooted threads stay on the border
+   rail: their trigger bubble is left-aligned and would sit on the line. */
+.timeline-thread-railed::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(176, 114, 76, 0.28);
+  pointer-events: none;
+}
+
+.timeline-thread-railed > .timeline-thread-replies {
+  border-left-color: transparent;
+}
+
+/* Directly under a session divider the rail reaches up through the
+   timeline's 0.9rem flex gap, the divider's 0.1rem bottom margin, and
+   into its 0.35rem bottom padding, so the thread visibly hangs from
+   the divider's gezel icon (flush-left, centered on the rail). The
+   rootless variant adds its own 0.1rem top margin to the climb. */
+.timeline-session-divider + .timeline-thread-railed::before {
+  top: -1.35rem;
+}
+
+.timeline-session-divider + .timeline-thread-rootless.timeline-thread-railed::before {
+  top: -1.45rem;
+}
+
+/* A thread whose trigger fell outside the loaded window (pagination
+   boundary, or a brand-new streaming session whose user message
+   hasn't landed yet). The rail alone marks these as replies; the
+   session divider above carries the "continuing" context. */
+.timeline-thread-rootless {
+  margin-top: 0.1rem;
+}
+
+/* Muted relative-time suffix on bubble headers ("· 14m ago"). Set on
+   thread roots and late replies — with replies grouped under their
+   trigger, vertical adjacency no longer implies wall-clock adjacency,
+   so the header carries the time cue. Lowercase against the header's
+   uppercase author name, matching the divider meta styling. */
+.msg-role-time {
+  color: var(--text-muted, #888);
+  font-size: 0.72rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: nowrap;
+}
+
+.timeline-session-divider {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0.1rem 0;
+  /* No left padding: the 16px gezel icon sits flush-left so its center
+     (x=8px) lines up with the thread rail hanging below it. */
+  padding: 0.35rem 0.5rem 0.35rem 0;
+  border-top: 1px dashed var(--border);
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--muted, #888);
+  opacity: 0.75;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+
+/* Chat-thread cap: inset only the painted line, not the divider's content.
+   Its 6px-shifted left curve meets the rail centered at x=8px below, while
+   the gezel icon remains flush-left and centered on that same rail. Terminal
+   dividers keep the base full-width border because they have no reply rail. */
+button.timeline-session-divider {
+  position: relative;
+  border-top: 0;
+}
+
+button.timeline-session-divider::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 6px;
+  border-top: 1px dashed var(--border);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.timeline-session-divider:hover {
+  background: rgba(255, 255, 255, 0.03);
+  opacity: 0.95;
+}
+
+.timeline-session-divider-activity {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.timeline-session-divider-activity:hover {
+  background: transparent;
+  opacity: 0.85;
+}
+
+.timeline-session-divider-active {
+  opacity: 1;
+  border-top-color: var(--accent, #b0724c);
+  border-top-style: solid;
+}
+
+button.timeline-session-divider-active::before {
+  border-top-color: var(--accent, #b0724c);
+  border-top-style: solid;
+}
+
+/* Same session re-entering after another session's bubbles
+ * interrupted the chronological order. Less visually loud than a
+ * fresh-conversation divider — it's a "you're back here" marker, not
+ * a "new thread starting" marker. */
+.timeline-session-divider-continuing {
+  border-top-style: dotted;
+  margin-top: 0.25rem;
+  padding-top: 0.2rem;
+  opacity: 0.55;
+}
+
+button.timeline-session-divider-continuing::before {
+  border-top-style: dotted;
+}
+
+.timeline-session-divider-continuing:hover {
+  opacity: 0.85;
+}
+
+/* Terminal session start. Solid line + slightly stronger opacity
+ * than the chat divider — terminal sessions are an explicit
+ * "I sat down and ran some commands" beat, and the user asked for
+ * a clear thread-start mark. Not interactive (rendered as a div),
+ * so no hover state. */
+.timeline-terminal-session-divider {
+  border-top-style: solid;
+  margin-top: 0.6rem;
+  /* Terminal dividers lead with a folder pill, not a rail-aligned
+     icon — keep the original inset. */
+  padding-left: 0.5rem;
+  opacity: 0.85;
+  cursor: default;
+}
+
+.timeline-divider-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.timeline-divider-meta {
+  color: var(--muted, #888);
+  font-size: 0.72rem;
+}
+
+.timeline-divider-handoff {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.26rem;
+  font-style: italic;
+  font-size: 0.72rem;
+  color: var(--accent, #b0724c);
+  margin-left: auto;
+}
+
+.timeline-divider-handoff-icon {
+  width: 0.8rem;
+  height: 0.8rem;
+  flex: 0 0 auto;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.timeline-msg-faded {
+  opacity: 0.55;
+  transition: opacity 120ms ease;
+}
+
+.timeline-msg-faded:hover {
+  /* Hover restores nearly-full opacity so users can read older context. */
+  opacity: 0.92;
+}
+
+/* ── Memories tab (Gezels view) ─────────────────────────────────── */
+
+.memories-pane {
+  display: grid;
+  grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
+  gap: 0.75rem;
+  min-height: 0;
+  height: calc(100vh - 260px);
+  margin-top: 0.6rem;
+}
+
+.memories-tree {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.4rem;
+  overflow-y: auto;
+  background: var(--surface);
+  font-size: 0.85rem;
+}
+
+.memories-tree-total {
+  margin: 0 0 0.35rem 0;
+  padding: 0 0.2rem;
+}
+
+.memories-tree-scope + .memories-tree-scope {
+  margin-top: 0.3rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.3rem;
+}
+
+.memories-tree-scope-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.4rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.memories-tree-scope-header:hover {
+  background: rgba(176, 114, 76, 0.08);
+  border-color: rgba(176, 114, 76, 0.18);
+}
+
+.memories-tree-caret {
+  display: inline-block;
+  width: 0.8rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.memories-tree-scope-label {
+  flex: 1;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memories-tree-children {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0.2rem 1.5rem;
+}
+
+.memories-tree-children li {
+  margin: 0;
+}
+
+.memories-tree-leaf {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.4rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 0.8rem;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+.memories-tree-leaf:hover {
+  background: rgba(176, 114, 76, 0.08);
+}
+
+.memories-tree-leaf-active {
+  background: rgba(176, 114, 76, 0.16);
+  border-color: rgba(176, 114, 76, 0.3);
+  color: var(--text);
+}
+
+.memories-preview {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 0.5rem;
+}
+
+.memories-preview-header {
+  padding: 0 0.2rem 0.4rem 0.2rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memories-preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 0.3rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  background: var(--bg, #141414);
+  border-radius: var(--radius-sm);
+}
+
+/* Composer error banner sits inside .chat-composer above the editor. */
+.chat-composer-error {
+  margin: 0 0 0.4rem 0;
+  font-size: 0.8rem;
+}
+
+/* "Previous turn still running" banner — shown when the service returns
+   an "already in flight" error. Surfaces the user text that's wedged
+   plus a cancel button so the user isn't silently blocked. */
+.chat-composer-wedged {
+  margin: 0 0 0.5rem 0;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid rgba(176, 114, 76, 0.35);
+  border-radius: 6px;
+  background: rgba(176, 114, 76, 0.08);
+  font-size: 0.82rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.chat-composer-wedged-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+.chat-composer-wedged-preview {
+  color: var(--muted);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-composer-wedged-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+.chat-composer-wedged-actions button {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.78rem;
+}
+.chat-composer-wedged-actions button.subtle {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
+.chat-rail-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  /* Keep the context pane a distinct sheet without the heavy recessed
+     contrast of `--surface` in light mode. */
+  background: color-mix(in srgb, var(--panel) 76%, var(--surface));
+  padding: 0.5rem;
+  margin: 2px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-rail-side:empty {
+  border-color: transparent;
+  background: transparent;
+  /* The aside is still a layout box even with no children. On the home
+     workshop the conversation collapses every chat-rail-body child into
+     row 1 col 1, so an empty side aside overlays the chat surface and
+     swallows clicks on the session header / composer toolbar. */
+  pointer-events: none;
+}
+
+.chat-rail-side-inner {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 0.4rem;
+}
+
+/* Every rail section fills the available space. Reference selection lives
+   in the References tab's dropdown rather than taking width from the viewer. */
+.chat-rail-section-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Tab strip that switches among rail sections and hosts dropdown triggers
+   when a section has multiple items. A lone section with one item renders
+   directly without this chrome. */
+.chat-rail-section-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.2rem 0.2rem 0;
+  flex: 0 0 auto;
+}
+
+.chat-rail-section-tab {
+  flex: 1;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: center;
+}
+
+.chat-rail-section-tab:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.chat-rail-section-tab.is-active {
+  background: rgba(243, 237, 224, 0.06);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.chat-rail-section-tab-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.chat-rail-section-tab-chevron {
+  transition: transform 140ms ease-out;
+}
+
+.chat-rail-section-tab-menu[data-state="open"] .chat-rail-section-tab-chevron {
+  transform: rotate(180deg);
+}
+
+.chat-rail-task-menu {
+  min-width: 13rem;
+  max-width: min(24rem, calc(100vw - 2rem));
+}
+
+.chat-rail-reference-menu {
+  min-width: 10rem;
+  max-width: min(24rem, calc(100vw - 2rem));
+}
+
+.chat-rail-reference-menu-item {
+  min-width: 0;
+}
+
+.chat-rail-reference-menu-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-rail-task-menu-item {
+  min-width: 0;
+}
+
+.chat-rail-menu-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.8rem;
+  flex: 0 0 0.8rem;
+  color: var(--accent);
+}
+
+.chat-rail-task-menu-ref {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  padding: 0;
+  font-size: var(--text-xs);
+}
+
+.chat-rail-task-menu-scope {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-rail-section-tab-chevron {
+    transition: none;
+  }
+}
+
+.chat-rail-viewer-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  min-height: 0;
+}
+
+/* ── Commands panel ── */
+
+.commands-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.commands-panel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.45rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.commands-panel-filter {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  padding: 0.2rem 0.45rem;
+}
+
+.commands-panel-state {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.commands-panel-empty,
+.commands-panel-error {
+  padding: 0.6rem 0.6rem;
+  margin: 0;
+}
+
+.commands-panel-error {
+  color: #b14a4a;
+}
+
+.commands-panel-groups {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  padding: 0.25rem 0;
+}
+
+.commands-panel-group {
+  padding: 0.1rem 0;
+}
+
+.commands-panel-group-title {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.4rem 0.6rem 0.2rem;
+  margin: 0;
+}
+
+.commands-panel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.commands-panel-show-all {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.35rem 0.6rem;
+}
+
+.commands-panel-show-all:hover {
+  text-decoration: underline;
+}
+
+.commands-panel-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.35rem 0.6rem;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.commands-panel-item:hover,
+.commands-panel-item:focus-visible {
+  background: rgba(243, 237, 224, 0.05);
+  border-left-color: var(--accent);
+  outline: none;
+}
+
+.commands-panel-item-name {
+  font-weight: 500;
+}
+
+/* The OS primer lists the literal line you'd type, so it reads as terminal
+ * text rather than as a friendly command label. */
+.commands-panel-item-code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--text-xs);
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.commands-panel-item-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.commands-panel-item-actions {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+}
+
+.commands-panel-mini {
+  padding: 0.1rem 0.5rem;
+  font-size: 0.75rem;
+  background: var(--surface-2, transparent);
+  border: 1px solid var(--border, currentColor);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.commands-panel-mini:hover {
+  background: var(--surface-3, var(--surface-2, transparent));
+}
+
+/* Quiet setup marker on a craftbook row whose required toolsets aren't
+   installed yet. Keep the row's title/aria-label explicit; the repeated
+   visual marker stays secondary so a long list does not become a warning
+   wall. Clicking the row opens the inline install flow. */
+.commands-panel-badge {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.3rem;
+  border: 1px solid color-mix(in srgb, var(--text-muted) 35%, transparent);
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.craftbook-toolset-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 16rem;
+  max-width: 22rem;
+  padding: 0.5rem;
+}
+
+.craftbook-toolset-setup h4 {
+  margin: 0;
+}
+
+.commands-panel-toast {
+  position: absolute;
+  bottom: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.3rem 0.7rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  background: rgba(57, 134, 80, 0.95);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+
+/* ── Craftbook command launcher: param popover ── */
+
+/* Radix Popover panel chrome (shared with any future popover). Mirrors
+   the dialog/card surface so the squisq form inside reads as a panel. */
+.gz-popover {
+  z-index: 60;
+  max-width: min(24rem, 92vw);
+  padding: 0.75rem;
+  background: var(--panel, #1c1d20);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.craftbook-param-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  /* Fixed width so the dialog doesn't grow/shrink as you type — the
+     live command preview is `white-space: nowrap`, which would otherwise
+     stretch the shrink-to-fit popover wider with every character. With a
+     fixed width the preview scrolls inside its box instead. `max-width`
+     lets it still shrink on a clamped (92vw) popover. */
+  width: 22rem;
+  max-width: 100%;
+}
+
+.craftbook-param-form-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+/* The command exactly as it'll be staged into the terminal. */
+.craftbook-param-form-preview {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8rem;
+  padding: 0.4rem 0.55rem;
+  background: var(--surface-2, rgba(0, 0, 0, 0.25));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.craftbook-param-form-preview code {
+  background: none;
+  padding: 0;
+}
+
+.craftbook-param-form-error {
+  color: var(--danger, #d9534f);
+  margin: 0;
+}
+
+.craftbook-param-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.chat-rail-side-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.2rem 0.4rem;
+}
+
+.chat-rail-side-header h4 {
+  margin: 0;
+}
+
+.chat-rail-ref-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  overflow-y: auto;
+  max-height: 40%;
+  flex-shrink: 0;
+}
+
+.chat-rail-ref {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0.3rem 0.45rem;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.8rem;
+}
+
+.chat-rail-ref:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.chat-rail-ref-active {
+  background: rgba(79, 125, 255, 0.15);
+  border-color: var(--accent, #b0724c);
+}
+
+.chat-rail-ref-kind {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.05rem 0.4rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.chat-rail-ref-kind-artifact {
+  background: rgba(106, 211, 143, 0.15);
+  color: #9cd9b2;
+}
+
+/* The mint ink above belongs to the dark rail. On parchment it falls below
+   readable small-text contrast, so light mode keeps the green identity but
+   uses the foundation palette's forest ink against the semantic success fill. */
+[data-theme="light"] .chat-rail-ref-kind-artifact {
+  background: var(--success-bg);
+  color: var(--gezel-sage-forest);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .chat-rail-ref-kind-artifact {
+    background: var(--success-bg);
+    color: var(--gezel-sage-forest);
+  }
+}
+
+.chat-rail-ref-kind-document {
+  background: rgba(79, 125, 255, 0.15);
+  color: #a8bcff;
+}
+
+.chat-rail-ref-kind-workspace {
+  background: rgba(255, 199, 100, 0.12);
+  color: #d7b86b;
+}
+
+/* The amber above is tuned for the dark panel; on parchment it lands around
+   1.9:1 against the reference header and reads as disabled text. Re-ink to a
+   dark ochre (~5.4:1) and give the chip a fill that survives a light surface. */
+[data-theme="light"] .chat-rail-ref-kind-workspace {
+  background: rgba(176, 114, 40, 0.18);
+  color: #7a5410;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .chat-rail-ref-kind-workspace {
+    background: rgba(176, 114, 40, 0.18);
+    color: #7a5410;
+  }
+}
+
+.chat-rail-ref-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+/* Right-rail "Task" surface — compact summary of the session's task. */
+.chat-rail-task {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  overflow-y: auto;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-rail-task-empty {
+  padding: 0.75rem;
+}
+
+.chat-rail-task-topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.chat-rail-task-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.chat-rail-task-ref {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.chat-rail-task-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+}
+
+.chat-rail-task-status-trigger {
+  font-family: var(--font-ui);
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.chat-rail-task-status-trigger:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.chat-rail-task-status-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chat-rail-task-status-trigger:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.chat-rail-task-status-trigger .gz-dropdown-chevron {
+  width: 0.6rem;
+  height: 0.6rem;
+}
+
+.chat-rail-task-status-active {
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: color-mix(in srgb, var(--success) 24%, var(--text));
+  border: 1px solid color-mix(in srgb, var(--success) 42%, transparent);
+  font-weight: 600;
+}
+
+.chat-rail-task-status-draft {
+  background: rgba(255, 199, 100, 0.12);
+  color: #d7b86b;
+}
+
+.chat-rail-task-status-complete {
+  background: rgba(79, 125, 255, 0.15);
+  color: #a8bcff;
+}
+
+.chat-rail-task-status-paused,
+.chat-rail-task-status-canceled {
+  opacity: 0.8;
+}
+
+.chat-rail-task-status-menu {
+  min-width: 8.5rem;
+  z-index: 1200;
+}
+
+.chat-rail-task-status-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.chat-rail-task-status-option .task-status-dot {
+  margin-top: 0;
+}
+
+.chat-rail-task-status-option.is-current {
+  opacity: 1;
+  font-weight: 600;
+}
+
+.chat-rail-task-status-error {
+  margin: 0;
+}
+
+.chat-rail-task-title {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+
+.chat-rail-task-desc {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.chat-rail-task-craftbook {
+  font-size: 0.8rem;
+}
+
+.chat-rail-task-craftbook .muted {
+  margin-right: 0.25rem;
+}
+
+.chat-rail-task-steps {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+}
+
+.chat-rail-task-step {
+  color: var(--muted);
+}
+
+.chat-rail-task-step.is-active {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.chat-rail-task-step.is-done {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.chat-rail-task-open {
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.chat-rail-task-open:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.chat-rail-task-history {
+  margin-top: 0.25rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
+}
+
+.chat-rail-task-history > h5 {
+  margin: 0 0 0.5rem;
+  font-size: var(--text-sm);
+}
+
+.chat-rail-task-history > p {
+  margin: 0;
+}
+
+.chat-rail-task-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-rail-task-note {
+  min-width: 0;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.chat-rail-task-note-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  flex-wrap: wrap;
+}
+
+.chat-rail-task-note-header > span:first-child {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.chat-rail-task-note-step::before {
+  content: "\00b7";
+  margin-right: 0.4rem;
+}
+
+.chat-rail-task-note .chat-rail-viewer-markdown .squisq-linear-content {
+  /* LinearDocView writes 16px inline, so the compact rail needs the same
+     targeted override used by chat bubbles with custom text scaling. */
+  font-size: var(--text-sm) !important;
+  padding: 0;
+}
+
+.chat-rail-task-note .chat-rail-viewer-markdown .squisq-page-section-inner {
+  padding: 0;
+}
+
+.chat-rail-task-note .chat-rail-viewer-markdown :is(p, ul, ol, pre, blockquote) {
+  margin-block: 0.35rem;
+}
+
+.chat-rail-task-note .chat-rail-viewer-markdown > :first-child,
+.chat-rail-task-note .chat-rail-viewer-markdown .squisq-linear-content > :first-child {
+  margin-top: 0;
+}
+
+.chat-rail-task-note .chat-rail-viewer-markdown > :last-child,
+.chat-rail-task-note .chat-rail-viewer-markdown .squisq-linear-content > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-rail-viewer {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  /* Without min-width: 0, a child with naturally-wide content (a long
+     markdown heading) grows the flex item past the grid cell and pushes
+     into the tab column on the right. */
+  min-width: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+}
+
+.chat-rail-viewer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.2rem 0.4rem 0.2rem;
+}
+
+.chat-rail-viewer-header > :first-child {
+  min-width: 0;
+}
+
+.chat-rail-viewer-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-left: 0.5rem;
+  word-break: break-all;
+}
+
+.chat-rail-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex: 0 0 auto;
+}
+
+.chat-rail-viewer-actions-trigger {
+  opacity: 1;
+}
+
+.chat-rail-viewer-actions-menu.app-nav-menu {
+  min-width: 12rem;
+}
+
+.chat-rail-viewer-action-error {
+  margin: 0 0.2rem 0.4rem;
+}
+
+.chat-rail-viewer-close {
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.1rem 0.45rem;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.chat-rail-viewer-close:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.chat-rail-viewer-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  /* Contain horizontal overflow — a wide <pre> block or a markdown
+     heading with a long unbreakable token would otherwise push past
+     the tab column on the right. */
+  overflow-x: auto;
+  padding: 0.4rem;
+  background: var(--bg, #141414);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.chat-rail-viewer-raw {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.chat-rail-viewer-iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 20rem;
+  border: none;
+  background: white;
+  border-radius: 4px;
+}
+
+.chat-rail-viewer-code {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 20rem;
+}
+
+.chat-rail-audio-preview {
+  min-height: 8rem;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-rail-audio-preview audio {
+  width: min(100%, 28rem);
+}
+
+.chat-rail-machine-file {
+  min-height: 20rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  padding: 1.5rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.chat-rail-machine-file-icon {
+  color: var(--accent);
+}
+
+.chat-rail-machine-file-label {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.chat-rail-machine-file-path {
+  max-width: 100%;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.chat-rail-machine-file-actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.35rem;
+}
+
+.chat-rail-machine-file-actions button {
+  border-radius: var(--radius-md);
+}
+
+.chat-rail-viewer-markdown {
+  color: var(--text);
+  max-width: 100%;
+  overflow-wrap: break-word;
+}
+
+/* Squisq's LinearDocView wraps itself in `.squisq-linear` with a fixed
+   height and its own overflow; override here so long headings wrap and
+   the whole view sizes to the container instead of the content. */
+.chat-rail-viewer-markdown .squisq-linear {
+  height: auto;
+  overflow: visible;
+  max-width: 100%;
+}
+.chat-rail-viewer-markdown h1,
+.chat-rail-viewer-markdown h2,
+.chat-rail-viewer-markdown h3,
+.chat-rail-viewer-markdown h4 {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}

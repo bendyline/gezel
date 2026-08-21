@@ -45,6 +45,17 @@ import {
 } from '../direct-file-work-prompt.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
 import {
+  cutAtFirstToolLeak,
+  findLoosePathArg,
+  firstExistingIndex,
+  hasSalvageableImmediateFileWriteContent,
+  immediateFileWritePathFromPrompt,
+  looksLikeLooseSingleFileHtml,
+  looseUnescapeToolArgumentText,
+  salvageImmediateFileWriteArgs,
+  tryRepairMalformedWriteToolArguments,
+} from '../immediate-write-salvage.js';
+import {
   appendCapTruncationHintToRejectedWrite,
   appendTruncationHintToToolResult,
   findClaudeInvokeToolCallSpans,
@@ -81,6 +92,13 @@ import type {
 import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
 import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs, runInQueue } from '../queue.js';
 import { RambleDetector } from '../ramble-detector.js';
+
+// Re-exported: these moved to ../immediate-write-salvage.ts when MLX needed
+// the same text-form abort, and existing tests import them from here.
+export {
+  hasSalvageableImmediateFileWriteContent,
+  tryRepairMalformedWriteToolArguments,
+} from '../immediate-write-salvage.js';
 import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
 import { type EnginePhaseEvent, StreamingSessionBase } from '../streaming-session.js';
 import { terminalToolClosingText } from '../terminal-tool-policy.js';
@@ -1585,36 +1603,6 @@ function disableThinkingForConstrainedTurn(
   }
 }
 
-function immediateFileWritePathFromPrompt(prompt: string): string {
-  const explicit = /write_file\s*\(\s*\{\s*path\s*:\s*["']([^"']+)["']/i.exec(prompt)?.[1];
-  if (explicit) return explicit;
-  const workspacePath = /workspace\/([A-Za-z0-9._/-]+index\.html)\b/i.exec(prompt)?.[1];
-  if (workspacePath) return workspacePath.replace(/^workspace\//i, '');
-  if (/\bindex\.html\b/i.test(prompt)) return 'index.html';
-  return 'index.html';
-}
-
-function salvageImmediateFileWriteArgs(
-  rawContent: string,
-  prompt: string,
-): { path: string; content: string } | null {
-  const loose = tryRepairMalformedWriteToolArguments(
-    'write_file',
-    rawContent,
-    new Set(['write_file']),
-  );
-  if (loose) return loose;
-
-  const cleaned = cutAtFirstToolLeak(looseUnescapeToolArgumentText(rawContent));
-  const htmlStart = firstExistingIndex(cleaned, ['<!doctype html', '<!DOCTYPE html', '<html']);
-  if (htmlStart < 0) return null;
-  let content = cleaned.slice(htmlStart).trim();
-  const htmlEnd = content.toLowerCase().lastIndexOf('</html>');
-  if (htmlEnd >= 0) content = content.slice(0, htmlEnd + '</html>'.length).trim();
-  if (!looksLikeLooseSingleFileHtml(content)) return null;
-  return { path: immediateFileWritePathFromPrompt(prompt), content };
-}
-
 export function hasInProgressFileRewritePayload(content: string): boolean {
   const fences = content.match(/```/g)?.length ?? 0;
   if (fences % 2 === 1) return true;
@@ -1633,18 +1621,6 @@ export function scenarioRepairTextAbortThreshold(
   return fullFileRewriteExpected || hasInProgressFileRewritePayload(content)
     ? SCENARIO_FILE_REPAIR_PAYLOAD_TEXT_ABORT_CHARS
     : SCENARIO_FILE_REPAIR_TEXT_ABORT_CHARS;
-}
-
-export function hasSalvageableImmediateFileWriteContent(
-  rawContent: string,
-  prompt: string,
-): boolean {
-  const salvaged = salvageImmediateFileWriteArgs(rawContent, prompt);
-  if (!salvaged) return false;
-  return (
-    /<\/html>\s*$/i.test(salvaged.content) ||
-    rawContent.length >= IMMEDIATE_FILE_WRITE_TEXT_ABORT_CHARS
-  );
 }
 
 export function hasSalvageableImmediateStructuredWriteArgs(rawArguments: string): boolean {
@@ -6880,114 +6856,6 @@ export function normalizeMalformedStructuredToolCalls(
     return { ...call, function: { ...call.function, arguments: '{}' } };
   });
   return { toolCalls: normalized, repaired, sanitized, sanitizedIds, sanitizedPaths };
-}
-
-export function tryRepairMalformedWriteToolArguments(
-  toolName: string,
-  rawArguments: string,
-  knownToolNames: ReadonlySet<string>,
-): { path: string; content: string } | null {
-  if (!toolName || !knownToolNames.has(toolName)) return null;
-  if (!isWriteShapedToolName(toolName)) return null;
-  if (!rawArguments.trim()) return null;
-
-  const decoded = cutAtFirstToolLeak(looseUnescapeToolArgumentText(rawArguments));
-  const path = findLoosePathArg(decoded);
-  const content = findLooseWriteContent(decoded);
-  if (!content || content.length < 20) return null;
-  const normalizedPath = normalizeLooseWritePath(path?.value, content);
-  if (!normalizedPath) return null;
-  return { path: normalizedPath, content };
-}
-
-function findLoosePathArg(text: string): { value: string; index: number } | null {
-  const patterns = [
-    /(?:^|[,{(\s])["']?path["']?\s*:\s*["']([^"'\r\n]{1,260})["']/i,
-    /(?:^|[,{(\s])["']?name["']?\s*:\s*["']([^"'\r\n]{1,260})["']/i,
-  ];
-  for (const re of patterns) {
-    const m = re.exec(text);
-    if (m?.[1] && m.index >= 0) return { value: m[1], index: m.index };
-  }
-  return null;
-}
-
-function findLooseWriteContent(text: string): string | null {
-  const contentKey = /(?:^|[,{(\s])["']?content["']?\s*:\s*["']/i.exec(text);
-  if (contentKey?.index !== undefined) {
-    const start = contentKey.index + contentKey[0].length;
-    return cleanLooseWriteContentTail(text.slice(start));
-  }
-
-  const path = findLoosePathArg(text);
-  const beforePath = path ? text.slice(0, path.index) : text;
-  const htmlStart = firstExistingIndex(beforePath, ['<!DOCTYPE', '<html', '<!doctype']);
-  if (htmlStart >= 0) return cleanLooseWriteContentTail(beforePath.slice(htmlStart));
-
-  const trimmed = beforePath.trim();
-  if (trimmed.startsWith('"') || trimmed.startsWith("'")) {
-    return cleanLooseWriteContentTail(trimmed.slice(1));
-  }
-  return null;
-}
-
-function cleanLooseWriteContentTail(raw: string): string | null {
-  let out = raw;
-  const pathSuffix = /(?:^|[,\s])["']?path["']?\s*:/i.exec(out);
-  if (pathSuffix?.index !== undefined && pathSuffix.index > 0) {
-    out = out.slice(0, pathSuffix.index);
-  }
-  out = out
-    .replace(/\s*["']{3}\s*[,)]?\s*;?\s*$/s, '')
-    .replace(/\s*["']\s*\}\s*\)?\s*;?\s*$/s, '')
-    .replace(/\s*["']\s*[,)]?\s*;?\s*$/s, '')
-    .trim();
-  return out.length > 0 ? out : null;
-}
-
-function normalizeLooseWritePath(value: string | undefined, content: string): string | null {
-  const trimmed = value?.trim() ?? '';
-  if (looksLikeLooseSingleFileHtml(content)) {
-    if (isTrustworthyLooseHtmlPath(trimmed)) return trimmed;
-    return 'index.html';
-  }
-  if (trimmed.length > 0 && !/^[,.:;'"`]+$/.test(trimmed)) return trimmed;
-  return null;
-}
-
-function isTrustworthyLooseHtmlPath(path: string): boolean {
-  if (path.length === 0 || /^[,.:;'"`]+$/.test(path)) return false;
-  return /\.html?$/i.test(path);
-}
-
-function looksLikeLooseSingleFileHtml(content: string): boolean {
-  return /<!doctype\s+html|<html[\s>]/i.test(content) && /<script[\s>]/i.test(content);
-}
-
-function firstExistingIndex(text: string, needles: string[]): number {
-  let best = -1;
-  const lower = text.toLowerCase();
-  for (const needle of needles) {
-    const idx = lower.indexOf(needle.toLowerCase());
-    if (idx >= 0 && (best < 0 || idx < best)) best = idx;
-  }
-  return best;
-}
-
-function cutAtFirstToolLeak(text: string): string {
-  const markers = ['<|channel', '<channel|>', '<|tool_call', '<tool_call|>', '<|end|>'];
-  const idx = firstExistingIndex(text, markers);
-  return idx >= 0 ? text.slice(0, idx) : text;
-}
-
-function looseUnescapeToolArgumentText(raw: string): string {
-  return raw
-    .replace(/\\r/g, '\r')
-    .replace(/\\n/g, '\n')
-    .replace(/\\t/g, '\t')
-    .replace(/\\"/g, '"')
-    .replace(/\\'/g, "'")
-    .replace(/\\\\/g, '\\');
 }
 
 /**

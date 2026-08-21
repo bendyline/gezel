@@ -285,12 +285,16 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
    * `sourcePath` is non-empty, an exact successful `read_file` of that path
    * qualifies; otherwise one of `tools` must have completed against an
    * external source. The runtime supplies the live tool-call evidence.
+   * `externalOptional` softens only the no-sourcePath branch: authored local
+   * sources remain mandatory, while a topic-only workflow may recommend web
+   * research without becoming impossible under an offline security policy.
    */
   z.object({
     kind: z.literal('researchEvidence'),
     sourcePath: z.string().optional(),
     tools: z.array(z.string().min(1)).min(1),
     minSuccessful: z.number().int().positive().optional(),
+    externalOptional: z.boolean().optional(),
   }),
   /**
    * A PR-review coverage ledger must name every changed path materialized in

@@ -250,11 +250,22 @@ export function Poppetje({
   const headTop = L.headCY - L.headR;
   const headSize = L.headR * 2;
   const shoulderSpan = (L.baseY - L.shoulderY) * 0.35;
+  // Hats are drawn inside the scaled head group and reach past the head
+  // ellipse — the straw brim is the widest (29 units) and the beanie pompom
+  // the tallest (35.3). A head-and-shoulders crop budgeted for the head alone
+  // shears them off the moment a frame clips this overflow:visible SVG, so the
+  // headshot makes room for whatever the figure is wearing.
+  const headUnit = L.headR / 22;
+  const hatHalfW = hat ? 30 * headUnit : 0;
+  const hatTopReach = hat ? 36 * headUnit : 0;
+  const headshotHalfW = Math.max(26, L.headR + 4, hatHalfW + 1);
+  const headshotTop = L.headCY - Math.max(L.headR, hatTopReach) - 4;
+  const headshotBottom = headTop + headSize + 4 + shoulderSpan;
   const viewBox =
     variant === 'icon'
       ? `${40 - L.headR - 4} ${headTop - 4} ${headSize + 8} ${headSize + 8}`
       : variant === 'headshot'
-        ? `14 ${headTop - 4} 52 ${headSize + 8 + shoulderSpan}`
+        ? `${40 - headshotHalfW} ${headshotTop} ${headshotHalfW * 2} ${headshotBottom - headshotTop}`
         : `0 0 ${W} ${H}`;
 
   const vbDims = viewBox.split(' ').map(Number);

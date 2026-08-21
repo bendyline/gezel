@@ -28,6 +28,7 @@ import { convertInSandbox } from './sandbox-convert.js';
  */
 
 const MAX_CHUNK_CHARS = 4000;
+const CHUNK_OVERLAP_CHARS = 400;
 
 /**
  * Extensions squisq can import to markdown. The sandbox worker guards each
@@ -178,9 +179,69 @@ export async function ensureShadowDocSidecar(
   return ensureConvertedMarkdownSidecar(sourceAbs, paths);
 }
 
+/** Split a line range into bounded, slightly-overlapping chunks without losing tails. */
+function chunkLineRange(
+  lines: readonly string[],
+  start: number,
+  end: number,
+  kind: string,
+): ChunkInput[] {
+  const out: ChunkInput[] = [];
+  let cursor = start;
+  while (cursor <= end) {
+    const first = lines[cursor] ?? '';
+    // Generated data sometimes contains one enormous physical line. Preserve
+    // it as overlapping windows; its source span is still that one line.
+    if (first.length > MAX_CHUNK_CHARS) {
+      let offset = 0;
+      while (offset < first.length) {
+        const text = first.slice(offset, offset + MAX_CHUNK_CHARS).trim();
+        if (text) {
+          out.push({ kind, lineStart: cursor + 1, lineEnd: cursor + 1, text });
+        }
+        if (offset + MAX_CHUNK_CHARS >= first.length) break;
+        offset += MAX_CHUNK_CHARS - CHUNK_OVERLAP_CHARS;
+      }
+      cursor++;
+      continue;
+    }
+
+    let chunkEnd = cursor;
+    let chars = first.length;
+    while (chunkEnd + 1 <= end) {
+      const nextLength = (lines[chunkEnd + 1] ?? '').length + 1;
+      if (chars + nextLength > MAX_CHUNK_CHARS) break;
+      chars += nextLength;
+      chunkEnd++;
+    }
+    const text = lines
+      .slice(cursor, chunkEnd + 1)
+      .join('\n')
+      .trim();
+    if (text) {
+      out.push({ kind, lineStart: cursor + 1, lineEnd: chunkEnd + 1, text });
+    }
+    if (chunkEnd >= end) break;
+
+    // Reuse a few trailing lines so facts on a boundary retain local context.
+    // Always advance at least one line to make the loop progress.
+    let nextCursor = chunkEnd + 1;
+    let overlap = 0;
+    for (let i = chunkEnd; i > cursor; i--) {
+      const length = (lines[i] ?? '').length + 1;
+      if (overlap + length > CHUNK_OVERLAP_CHARS) break;
+      overlap += length;
+      nextCursor = i;
+    }
+    cursor = Math.max(cursor + 1, nextCursor);
+  }
+  return out;
+}
+
 /**
  * Split converted markdown into section chunks (by heading) for FTS + later
- * embeddings. Falls back to a single capped chunk when there are no headings.
+ * embeddings. Long sections and heading-free documents are windowed rather
+ * than capped, so relevant content near the end remains retrievable.
  */
 export function chunkMarkdown(md: string): ChunkInput[] {
   const lines = md.split(/\r?\n/);
@@ -188,25 +249,17 @@ export function chunkMarkdown(md: string): ChunkInput[] {
   for (let i = 0; i < lines.length; i++) {
     if (/^#{1,6}\s/.test(lines[i]!)) headIdx.push(i);
   }
-  const cap = (s: string) => (s.length > MAX_CHUNK_CHARS ? s.slice(0, MAX_CHUNK_CHARS) : s);
   const out: ChunkInput[] = [];
   if (headIdx.length === 0) {
-    const text = md.trim();
-    return text ? [{ kind: 'doc', lineStart: 1, lineEnd: lines.length, text: cap(text) }] : [];
+    return chunkLineRange(lines, 0, lines.length - 1, 'doc');
   }
   if (headIdx[0]! > 0) {
-    const text = lines.slice(0, headIdx[0]).join('\n').trim();
-    if (text) out.push({ kind: 'preamble', lineStart: 1, lineEnd: headIdx[0]!, text: cap(text) });
+    out.push(...chunkLineRange(lines, 0, headIdx[0]! - 1, 'preamble'));
   }
   for (let h = 0; h < headIdx.length; h++) {
     const start = headIdx[h]!;
     const end = h + 1 < headIdx.length ? headIdx[h + 1]! - 1 : lines.length - 1;
-    const text = lines
-      .slice(start, end + 1)
-      .join('\n')
-      .trim();
-    if (text)
-      out.push({ kind: 'section', lineStart: start + 1, lineEnd: end + 1, text: cap(text) });
+    out.push(...chunkLineRange(lines, start, end, 'section'));
   }
   return out;
 }

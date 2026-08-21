@@ -272,11 +272,12 @@ describe('ContentIndex.review end-to-end', () => {
     expect(csv).toMatchObject({ found: false, eligible: false });
     expect(csv.pending).toBeUndefined();
 
-    const review = vi.fn(async (_prompt: string) => VALID_REPLY);
+    const review = vi.fn(async (_prompt: string, _activity?: string) => VALID_REPLY);
     const result = await ci.review('c', deps(review), 10, await builtinRubrics());
     // Only the HTML file is reviewable — the CSV never enters the queue.
     expect(result).toEqual({ files: 1, reviewed: 1 });
     expect(review.mock.calls[0]?.[0]).toContain('likely bugs');
+    expect(review.mock.calls[0]?.[1]).toBe('Reviewing index.html');
     expect((await ci.fileReview('c', 'index.html')).found).toBe(true);
   });
 

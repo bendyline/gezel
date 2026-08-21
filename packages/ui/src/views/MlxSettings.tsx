@@ -1,4 +1,4 @@
-import type { ConfigResponse, MlxRuntimeInfo } from '@bendyline/gezel-client';
+import type { ConfigResponse, MlxInstalledModel, MlxRuntimeInfo } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { CacheControlsPanel } from '../components/CacheControlsPanel.js';
@@ -32,6 +32,7 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
   const [modelPathDraft, setModelPathDraft] = useState(config?.mlxModelPath ?? '');
   const [packageSpecDraft, setPackageSpecDraft] = useState(config?.mlxPackageSpec ?? '');
   const [runtime, setRuntime] = useState<MlxRuntimeInfo | null>(null);
+  const [installed, setInstalled] = useState<MlxInstalledModel[]>([]);
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [resetStatus, setResetStatus] = useState<'idle' | 'resetting' | 'done'>('idle');
@@ -58,6 +59,24 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
   useEffect(() => {
     void refreshRuntime();
   }, [refreshRuntime]);
+
+  const refreshInstalled = useCallback(async () => {
+    try {
+      const res = await api.listMlxModels();
+      setInstalled(res.models);
+    } catch {
+      /* ignore — the model-manager panel below surfaces its own errors */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshInstalled();
+  }, [refreshInstalled]);
+
+  const handleModelsChanged = useCallback(() => {
+    void refreshInstalled();
+    void refreshRuntime();
+  }, [refreshInstalled, refreshRuntime]);
 
   const resetVenv = useCallback(async () => {
     setResetStatus('resetting');
@@ -136,6 +155,26 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
     [onConfigChanged],
   );
 
+  const saveDefaultModel = useCallback(
+    async (value: string | undefined) => {
+      setSaving('saving');
+      try {
+        const next = await api.updateConfig({
+          defaultModel: {
+            ...config?.defaultModel,
+            mlx: value ?? undefined,
+          },
+        });
+        onConfigChanged(next);
+        setSaving('saved');
+        setTimeout(() => setSaving('idle'), 1200);
+      } catch {
+        setSaving('idle');
+      }
+    },
+    [config?.defaultModel, onConfigChanged],
+  );
+
   const hasExternal = Boolean(config?.mlxBaseUrl);
 
   return (
@@ -146,9 +185,14 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
           On-device AI powered by Apple's MLX framework.
         </p>
 
+        <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
+          <span className="muted small">Status:</span>
+          <span className="gz-status-pill gz-status-pill--ok">ready</span>
+        </div>
+
         {!IS_APPLE_SILICON && (
           <div
-            className="home-status-pill home-status-warn"
+            className="gz-status-pill gz-status-pill--warn"
             style={{ marginTop: '0.5rem', display: 'inline-block' }}
           >
             This machine doesn't look like Apple Silicon — chat turns routed to MLX will error out
@@ -159,7 +203,7 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
         {hasExternal && (
           <div className="new-row" style={{ marginTop: '0.75rem' }}>
             <span
-              className="home-status-pill home-status-warn"
+              className="gz-status-pill gz-status-pill--warn"
               title={`External engine: ${config?.mlxBaseUrl}`}
             >
               using external engine
@@ -169,8 +213,31 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
         )}
       </section>
 
+      {installed.length > 1 && (
+        <section style={{ marginBottom: '2rem' }}>
+          <h4>Default model</h4>
+          <p className="muted small" style={{ marginTop: 0 }}>
+            Which local model new chat sessions use when a gezel doesn't pin one.
+          </p>
+          <div className="new-row" style={{ marginTop: '0.5rem' }}>
+            <select
+              aria-label="Default model"
+              value={config?.defaultModel?.mlx ?? ''}
+              onChange={(e) => void saveDefaultModel(e.target.value || undefined)}
+            >
+              <option value="">First local model</option>
+              {installed.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.name} ({model.id})
+                </option>
+              ))}
+            </select>
+          </div>
+        </section>
+      )}
+
       <section style={{ marginBottom: '2rem' }}>
-        <MlxModelManager onModelsChanged={() => void refreshRuntime()} />
+        <MlxModelManager onModelsChanged={handleModelsChanged} />
       </section>
 
       <EngineBudgetStrip provider="mlx" />
@@ -258,7 +325,7 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
               {resetStatus === 'resetting' ? 'Resetting…' : 'Reset gezel Python environment'}
             </button>
             {resetStatus === 'done' ? (
-              <span className="home-status-pill home-status-ok">venv was reset ✓</span>
+              <span className="gz-status-pill gz-status-pill--ok">venv was reset ✓</span>
             ) : (
               <span className="muted small">
                 Deletes the `mlx` venv; the next chat turn re-provisions it.

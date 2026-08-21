@@ -6,6 +6,42 @@ import { primitivesMock } from '../test-utils/primitivesMock.js';
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
 
+// A pushable stand-in for the global SSE stream, so tests can fire the
+// envelopes Home listens to (question/task lifecycle) without a network.
+const events = vi.hoisted(() => {
+  interface Consumer {
+    pending: unknown[];
+    wake: (() => void) | null;
+  }
+  const consumers = new Set<Consumer>();
+  return {
+    push(envelope: unknown) {
+      for (const c of consumers) {
+        c.pending.push(envelope);
+        c.wake?.();
+        c.wake = null;
+      }
+    },
+    async *consume(): AsyncGenerator<unknown> {
+      const self: Consumer = { pending: [], wake: null };
+      consumers.add(self);
+      try {
+        while (true) {
+          while (self.pending.length > 0) yield self.pending.shift();
+          await new Promise<void>((resolve) => {
+            self.wake = resolve;
+          });
+        }
+      } finally {
+        consumers.delete(self);
+      }
+    },
+  };
+});
+vi.mock('../shared-chat-events.js', () => ({
+  streamSharedAllChatEvents: () => events.consume(),
+}));
+
 // Stub the streamAllChatEvents subscription so the chat surface doesn't try
 // to open a real EventSource against jsdom's crippled fetch.
 vi.mock('@bendyline/gezel-client', async () => {
@@ -517,6 +553,37 @@ describe('HomeView', () => {
     });
     expect(screen.queryByText('Awaiting your nod')).not.toBeInTheDocument();
     expect(screen.queryByText('Run npx tsx to check the frame timing?')).not.toBeInTheDocument();
+  });
+
+  // The chip counted questions fetched once at mount. Dismissing them from
+  // the titlebar Updates drawer left the greeting insisting two things were
+  // still waiting, minutes after the user had cleared both.
+  it('drops the chip when the pending questions are answered elsewhere', async () => {
+    const question = {
+      id: 'q1',
+      projectId: 'default',
+      gezelId: 'gz-meester',
+      sessionId: 's1',
+      prompt: 'Approve?',
+      createdAt: new Date().toISOString(),
+    };
+    vi.mocked(api.listQuestions).mockResolvedValue({ questions: [question] } as never);
+    render(<HomeView />);
+    await waitFor(() => {
+      expect(screen.getByText('1 waiting on you')).toBeInTheDocument();
+    });
+
+    vi.mocked(api.listQuestions).mockResolvedValue({ questions: [] } as never);
+    events.push({
+      sessionId: 's1',
+      gezelId: 'gz-meester',
+      projectId: 'default',
+      event: { type: 'question_answered', question: { ...question, answer: { at: 'now' } } },
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText('1 waiting on you')).not.toBeInTheDocument();
+    });
   });
 
   it('shows only the actionable chip — never ambient status about projects', async () => {

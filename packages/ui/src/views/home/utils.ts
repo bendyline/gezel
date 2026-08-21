@@ -1,5 +1,6 @@
 import type { MeesterStatusReport, Project } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
+import { formatRelativeTime } from '../../relative-time.js';
 
 /** The views HomeView can route to (matches App.tsx's nav handler). */
 export type HomeNavView =
@@ -43,22 +44,9 @@ export function freshStatusReport(
   return Number.isFinite(age) && age < STATUS_FRESH_MS ? report : null;
 }
 
-/** Compact relative time, e.g. "just now" · "18m ago" · "yesterday" · "14d ago". */
+/** Compact relative time, e.g. "just now" · "18m ago" · "yesterday" · "2w ago". */
 export function timeAgo(iso: string | undefined, now: number = Date.now()): string {
-  if (!iso) return '';
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return '';
-  const s = Math.max(0, Math.round((now - then) / 1000));
-  if (s < 60) return 'just now';
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.round(h / 24);
-  if (d === 1) return 'yesterday';
-  if (d < 14) return `${d}d ago`;
-  const w = Math.round(d / 7);
-  return `${w}w ago`;
+  return formatRelativeTime(iso, { now });
 }
 
 /**

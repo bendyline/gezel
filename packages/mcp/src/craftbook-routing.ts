@@ -16,6 +16,63 @@ export const CraftbookInvocationParamsArgSchema = coerceJsonObject(z.record(z.st
   .optional()
   .describe('Invocation parameters declared by the craftbook, such as outputPath.');
 
+function stringParamProperties(paramSchema: unknown): Record<string, Record<string, unknown>> {
+  if (!paramSchema || typeof paramSchema !== 'object' || Array.isArray(paramSchema)) return {};
+  const properties = (paramSchema as { properties?: unknown }).properties;
+  if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return {};
+  return Object.fromEntries(
+    Object.entries(properties as Record<string, unknown>).filter(
+      (entry): entry is [string, Record<string, unknown>] =>
+        !!entry[1] && typeof entry[1] === 'object' && !Array.isArray(entry[1]),
+    ),
+  );
+}
+
+/**
+ * Preserve a free-text job when a craftbook exposes a `topic` input but the
+ * caller omitted every supported source form. This is deliberately
+ * schema-driven: books without a declared topic/source/content contract do
+ * not gain an unrelated parameter.
+ */
+export function inferCraftbookJobParams(args: {
+  paramSchema: unknown;
+  params?: Record<string, string>;
+  jobDescription?: string;
+}): Record<string, string> {
+  const params = { ...(args.params ?? {}) };
+  const jobDescription = args.jobDescription?.trim();
+  if (!jobDescription) return params;
+
+  const properties = stringParamProperties(args.paramSchema);
+  if (!properties.topic) return params;
+  const suppliedSource = ['sourcePath', 'topic', 'content'].some(
+    (key) => typeof params[key] === 'string' && params[key]!.trim().length > 0,
+  );
+  return suppliedSource ? params : { ...params, topic: jobDescription };
+}
+
+/** Build the concrete follow-up advertised by suggest_craftbook. */
+export function suggestedCraftbookInvocation(args: {
+  craftbookId: string;
+  query: string;
+  paramSchema?: unknown;
+}): {
+  craftbookId: string;
+  description: string;
+  params?: Record<string, string>;
+} {
+  const description = args.query.trim();
+  const params = inferCraftbookJobParams({
+    paramSchema: args.paramSchema,
+    jobDescription: description,
+  });
+  return {
+    craftbookId: args.craftbookId,
+    description,
+    ...(Object.keys(params).length > 0 ? { params } : {}),
+  };
+}
+
 /** Merge the convenience alias while normalizing either source of outputPath. */
 export function normalizeCraftbookInvocationParams(
   params: Record<string, string> | undefined,

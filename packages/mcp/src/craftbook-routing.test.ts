@@ -3,7 +3,9 @@ import {
   CraftbookInvocationParamsArgSchema,
   binaryDocumentCraftbookRequest,
   buildBinaryDocumentTaskDescription,
+  inferCraftbookJobParams,
   normalizeCraftbookInvocationParams,
+  suggestedCraftbookInvocation,
 } from './craftbook-routing.js';
 
 describe('invoke_craftbook params', () => {
@@ -39,6 +41,55 @@ describe('invoke_craftbook params', () => {
         'workspace/decks/marne.pptx',
       ),
     ).toEqual({ topic: 'Battle of the Marne', outputPath: 'decks/marne.pptx' });
+  });
+
+  it('preserves the free-text job as the topic when every source input was omitted', () => {
+    const paramSchema = {
+      type: 'object',
+      properties: {
+        sourcePath: { type: 'string' },
+        topic: { type: 'string' },
+        content: { type: 'string' },
+      },
+    };
+    expect(
+      inferCraftbookJobParams({
+        paramSchema,
+        params: { sourcePath: '', topic: '', content: '' },
+        jobDescription: 'Create a PowerPoint about Ireland',
+      }),
+    ).toEqual({
+      sourcePath: '',
+      topic: 'Create a PowerPoint about Ireland',
+      content: '',
+    });
+    expect(
+      suggestedCraftbookInvocation({
+        craftbookId: 'powerpoint-deck',
+        query: 'Create a PowerPoint about Ireland',
+        paramSchema,
+      }),
+    ).toEqual({
+      craftbookId: 'powerpoint-deck',
+      description: 'Create a PowerPoint about Ireland',
+      params: { topic: 'Create a PowerPoint about Ireland' },
+    });
+  });
+
+  it('never replaces an explicitly supplied source form or invents undeclared params', () => {
+    expect(
+      inferCraftbookJobParams({
+        paramSchema: { properties: { topic: { type: 'string' } } },
+        params: { sourcePath: 'source/brief.md' },
+        jobDescription: 'Create a PowerPoint about Ireland',
+      }),
+    ).toEqual({ sourcePath: 'source/brief.md' });
+    expect(
+      inferCraftbookJobParams({
+        paramSchema: { properties: { language: { type: 'string' } } },
+        jobDescription: 'Translate this into Dutch',
+      }),
+    ).toEqual({});
   });
 });
 

@@ -5,7 +5,8 @@
  * The menu replaces the flat fitness / Export / Update / Delete link run so
  * row actions don't turn every model into a toolbar. The context editor
  * is the third user of the shared `.gz-budget-slider` recipe (see the CSS
- * comment in styles.css) and follows the EngineMemoryBudgetPanel pattern:
+ * comment in styles/village-and-overview.css) and follows the
+ * EngineMemoryBudgetPanel pattern:
  * a draft that is `null` while following automatic, an "Auto" marker tick
  * on the track, explicit Save, and a first-class "Back to automatic".
  *

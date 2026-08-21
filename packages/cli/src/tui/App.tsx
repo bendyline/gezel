@@ -67,6 +67,13 @@ import {
   buildGezelPickerItems,
   resolveGezelArg,
 } from './gezel-picker.js';
+import {
+  connectManagedApp,
+  disconnectManagedApp,
+  listConnectedManagedApps,
+  managedAppUsage,
+  resolveManagedApp,
+} from './managed-apps.js';
 import type { TuiRuntimeDiagnostics } from './memory-diagnostics.js';
 import {
   type ModelChoice,
@@ -165,6 +172,8 @@ const HELP = [
   '/do — choose a craftbook and start it as a task',
   '/continue — process due schedules and active tasks in this project',
   '/nightshift start|stop|list — manage Night Shift',
+  '/connect vscode|pi|opencode|codex — connect a local app to Gezel',
+  '/disconnect [vscode|pi|opencode|codex] — remove one managed app setup',
   '/focus — send into another active chat   /cli — CLI mode   /chat — chat mode',
   '!cmd — run shell   @tools — list tools   @tool <name> {json} — run a tool',
   '/clear — clear feed   /quit — exit',
@@ -1392,6 +1401,44 @@ export function App(props: {
           }
           return;
         }
+        case 'connect': {
+          const app = resolveManagedApp(rest);
+          if (!app) return note(managedAppUsage('connect'), 'error');
+          note(`connecting ${app}…`);
+          try {
+            const result = await connectManagedApp(client, app);
+            note(result.message);
+          } catch (err) {
+            note(`could not connect ${app}: ${errMsg(err)}`, 'error');
+          }
+          return;
+        }
+        case 'disconnect': {
+          let app = resolveManagedApp(rest);
+          if (!rest.trim()) {
+            try {
+              const connected = await listConnectedManagedApps(client);
+              if (connected.length === 0) return note('no managed local apps are connected.');
+              if (connected.length > 1) {
+                return note(
+                  `more than one app is connected (${connected.join(', ')}); ${managedAppUsage('disconnect')}`,
+                  'error',
+                );
+              }
+              app = connected[0] ?? null;
+            } catch (err) {
+              return note(`could not inspect connected apps: ${errMsg(err)}`, 'error');
+            }
+          }
+          if (!app) return note(managedAppUsage('disconnect'), 'error');
+          try {
+            const result = await disconnectManagedApp(client, app);
+            note(result.message);
+          } catch (err) {
+            note(`could not disconnect ${app}: ${errMsg(err)}`, 'error');
+          }
+          return;
+        }
         case 'focus':
           return setOverlay('focus');
         case 'cli':
@@ -1576,7 +1623,8 @@ export function App(props: {
   );
 
   // Esc / Ctrl+C interrupt in-flight work; a second Ctrl+C on an idle prompt
-  // exits. Esc with nothing running just re-homes focus to your own session.
+  // exits. Question cards own Esc (it means Skip there), but must never suppress
+  // the app-level Ctrl+C contract while they own the ordinary input focus.
   const cancelActiveRef = useRef(cancelActive);
   cancelActiveRef.current = cancelActive;
   useInput(
@@ -1594,6 +1642,7 @@ export function App(props: {
         return;
       }
       if (key.escape) {
+        if (pendingQuestion) return;
         if (turns.size > 0 || activeRuns.size > 0) {
           void cancelActiveRef.current().then((did) => did && note('interrupted.'));
         } else if (pendingInput) {
@@ -1606,10 +1655,7 @@ export function App(props: {
         }
       }
     },
-    {
-      isActive:
-        overlay === null && (!pendingQuestion || pendingInput !== null || taskPrompt !== null),
-    },
+    { isActive: overlay === null },
   );
 
   if (status) {

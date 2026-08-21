@@ -30,8 +30,10 @@ These ship in the Electron app or the `gezeld` daemon. Two further components
 | [@radix-ui/react-tabs](https://radix-ui.com/primitives) | MIT | radix-ui.com |
 | [@radix-ui/react-tooltip](https://radix-ui.com/primitives) | MIT | radix-ui.com |
 | [@huggingface/transformers](https://github.com/huggingface/transformers.js) | Apache-2.0 | huggingface/transformers.js |
+| [@pdf-lib/upng](https://github.com/Hopding/upng) | MIT | Hopding/upng |
 | [commander](https://github.com/tj/commander.js) | MIT | tj/commander.js |
 | [hono](https://hono.dev) | MIT | hono.dev |
+| [jpeg-js](https://github.com/jpeg-js/jpeg-js) | BSD-3-Clause | jpeg-js/jpeg-js |
 | [kokoro-js](https://github.com/hexgrad/kokoro) | Apache-2.0 | hexgrad/kokoro |
 | [monaco-editor](https://github.com/microsoft/monaco-editor) | MIT | microsoft/monaco-editor |
 | [onnxruntime-node](https://github.com/microsoft/onnxruntime) | MIT | microsoft/onnxruntime |
@@ -246,6 +248,10 @@ weights are third-party and carry their own licenses.
 | **whisper** `tiny.en` / `base.en` / `small.en` (GGML) | speech-to-text (whisper.cpp provider) | MIT | [ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp) |
 | **Kokoro-82M** (ONNX) | text-to-speech (kokoro-js provider) | Apache-2.0 | [onnx-community/Kokoro-82M-v1.0-ONNX](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX) |
 | **all-MiniLM-L6-v2** | semantic memory embeddings (`@huggingface/transformers`) | Apache-2.0 | [Xenova/all-MiniLM-L6-v2](https://huggingface.co/Xenova/all-MiniLM-L6-v2) |
+| **bge-small-en-v1.5** | default text-search embeddings (`@huggingface/transformers`) | MIT | [Xenova/bge-small-en-v1.5](https://huggingface.co/Xenova/bge-small-en-v1.5) |
+| **CLIP ViT-B/32** (ONNX, vision tower) | visual image similarity (`@huggingface/transformers`) | MIT (model card; OpenAI CLIP weights) | [Xenova/clip-vit-base-patch32](https://huggingface.co/Xenova/clip-vit-base-patch32) |
+| **YuNet 2023mar** (ONNX) | face detection (face-recognition opt-in; sha256-pinned) | MIT | [opencv/opencv_zoo](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) |
+| **AuraFace-v1** (`glintr100.onnx`) | face embeddings (face-recognition opt-in; sha256-pinned) | Apache-2.0 | [fal/AuraFace-v1](https://huggingface.co/fal/AuraFace-v1) |
 
 ---
 

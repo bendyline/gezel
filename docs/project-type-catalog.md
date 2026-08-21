@@ -41,7 +41,7 @@ Three strategic claims:
    tools + visible progress — is hard to copy for cloud-first products, because
    the files-on-your-disk part *is* the feature (caregiving notes, tax receipts,
    journals: data people rightly refuse to put in someone else's cloud).
-3. **Types are the flywheel.** The `.gzl` exporter means users who grow a project
+3. **Types are the flywheel.** The `.gezapp` exporter means users who grow a project
    organically can package and share it. Fifty first-party types seed the norms and
    the quality bar for a community catalog.
 
@@ -819,7 +819,7 @@ Caregiving Binder, Mind Journal, Life Binder, and Tax Shoebox are chosen
 *because* the data never leaves the machine. Say it in the gallery, on the type
 card, in the project header. It is the moat, stated out loud.
 
-**13. The community registry.** `.gzl` export/import ships; what's missing is the
+**13. The community registry.** `.gezapp` export/import ships; what's missing is the
 place — submission, review (the import-review gate already enumerates
 capabilities), and a browsable community shelf in the gallery. The fifty
 first-party types set the quality bar; the registry turns the catalog into a
@@ -871,7 +871,7 @@ Video Archive), home-automation toolset (Home Automation), per-game toolchains
 - **Ritual uptake**: schedule opt-in rate and craftbook runs per typed project per
   week.
 - **Crew depth**: sessions per type's gezel beyond the first day.
-- **Flywheel**: `.gzl` exports, imports, and (once the registry exists) community
+- **Flywheel**: `.gezapp` exports, imports, and (once the registry exists) community
   submissions.
 
 Per-type, these tell us which compositions actually produce practices — and which

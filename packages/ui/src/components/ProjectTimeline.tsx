@@ -3,6 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { ChatTimelineView } from './ChatTimelineView.js';
 import type { ToolActivity } from './chat-bubbles.js';
+import type { OpenChatReference } from './chat-open-command.js';
+import { selectQueuedTaskEntries } from './queued-task-entries.js';
+import { useProjectActiveTasks } from './useProjectActiveTasks.js';
 
 /**
  * Project-scoped chat timeline. Loads + tails every session in the
@@ -30,6 +33,7 @@ export function ProjectTimeline({
   onArtifactSeen,
   onWorkspaceReference,
   onWorkspaceSeen,
+  onOpenReference,
   onTaskReference,
   emptyPlaceholder,
   onTerminalWorkingDirChanged,
@@ -48,6 +52,7 @@ export function ProjectTimeline({
   onArtifactSeen?: (path: string, projectId?: string) => void;
   onWorkspaceReference?: (path: string, projectId?: string) => void;
   onWorkspaceSeen?: (path: string, projectId?: string) => void;
+  onOpenReference?: (reference: OpenChatReference) => void;
   onTaskReference?: (ref: string, opts?: { scoped?: boolean }) => void;
   emptyPlaceholder?: string;
   onTerminalWorkingDirChanged?: (threadId: string, newWorkingDir: string) => void;
@@ -58,7 +63,7 @@ export function ProjectTimeline({
     input: string;
   };
   terminalFocusRequest?: { threadId: string; requestKey: number };
-  sessionFocusRequest?: { sessionId: string; requestKey: number };
+  sessionFocusRequest?: { sessionId: string; requestKey: number; messageIndex?: number };
 }) {
   const loadTimeline = useCallback(
     (opts: { limit: number; before?: string }) =>
@@ -153,15 +158,34 @@ export function ProjectTimeline({
   // Debounce the refetch: a handoff session mid-turn emits a delta per
   // token, and every one of them misses the allowlist until the refetch
   // lands. Without this guard that's a fetch per token.
-  const refetchPendingRef = useRef(false);
+  const refetchTimerRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (refetchTimerRef.current !== null) {
+        window.clearTimeout(refetchTimerRef.current);
+        refetchTimerRef.current = null;
+      }
+    },
+    [],
+  );
   const onUnknownSession = useCallback(() => {
-    if (refetchPendingRef.current) return;
-    refetchPendingRef.current = true;
-    setTimeout(() => {
-      refetchPendingRef.current = false;
+    if (refetchTimerRef.current !== null) return;
+    refetchTimerRef.current = window.setTimeout(() => {
+      refetchTimerRef.current = null;
       setSessionsRefreshKey((k) => k + 1);
     }, 500);
   }, []);
+
+  // Accepted-but-silent work. The runner can hold a task for minutes on
+  // a busy machine, and until it speaks the transcript shows nothing at
+  // all — so the user's reasonable reading is that starting the task
+  // did nothing. Narrowed to this timeline's scope so a per-gezel tab
+  // doesn't advertise another gezel's backlog.
+  const { tasks: activeTasks, waiting } = useProjectActiveTasks({ projectId });
+  const queuedTasks = useMemo(
+    () => selectQueuedTaskEntries({ tasks: activeTasks, waiting, gezelId, taskRef }),
+    [activeTasks, waiting, gezelId, taskRef],
+  );
 
   return (
     <ChatTimelineView
@@ -179,7 +203,9 @@ export function ProjectTimeline({
       onArtifactSeen={onArtifactSeen}
       onWorkspaceReference={onWorkspaceReference}
       onWorkspaceSeen={onWorkspaceSeen}
+      onOpenReference={onOpenReference}
       {...(onTaskReference ? { onTaskReference } : {})}
+      queuedTasks={queuedTasks}
       emptyPlaceholder={emptyPlaceholder}
       loadTimeline={loadTimeline}
       streamUrl={streamUrl}

@@ -24,10 +24,15 @@ import type {
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { GezelIcon } from './GezelIcon.js';
+import { useHeaderDensity } from './header-density.js';
 import { NightShiftMoonGlyph } from './night-shift-glyph.js';
 import { queueOpenSession } from './pending-open-session.js';
 import { providerLabel } from './provider-label.js';
-import { type LiveTurnState, useOnDeviceLiveTurns } from './useOnDeviceLiveTurns.js';
+import {
+  type LiveTurnState,
+  phaseBaseLabel,
+  useOnDeviceLiveTurns,
+} from './useOnDeviceLiveTurns.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useStableHeaderPopoverPosition } from './useStableHeaderPopoverPosition.js';
 
@@ -57,8 +62,8 @@ function getPlatformPillLabel(name: QueueProviderName): string {
 }
 // Short form ("Windows" / "Linux" / "Mac") used by the chip's
 // container-query fallback when the titlebar slot is too narrow for
-// the full label. CSS in styles.css picks which of the two spans is
-// visible — see `.queue-meter-chip-label-full` / `-short` rules.
+// the full label. CSS in styles/app-shell.css picks which of the two
+// spans is visible — see `.queue-meter-chip-label-full` / `-short` rules.
 function getCompactPillLabel(name: QueueProviderName): string {
   return providerLabel(name, window.__GEZEL__?.platform, { compact: true });
 }
@@ -74,6 +79,32 @@ function isBusy(state: ProviderQueueState): boolean {
 
 function totalQueued(state: ProviderQueueState): number {
   return state.queuedInteractive + state.queuedBackground;
+}
+
+/** Engines that run models on the user's own hardware. All three publish
+ *  live phase events, so any of them can annotate a queue row. */
+const LOCAL_ENGINE_PROVIDERS: readonly QueueProviderName[] = ['llama-cpp', 'mlx', 'ds4'];
+
+function isLocalEngineProvider(name: QueueProviderName): boolean {
+  return LOCAL_ENGINE_PROVIDERS.includes(name);
+}
+
+/**
+ * What a live local-engine turn is doing, in words.
+ *
+ * Deliberately derived from the phase rather than the phase event's
+ * `detail`: that string carries token counts and decode rates
+ * ("300 tokens · 11 tok/s"), which are the engine pill's subject. This
+ * panel answers who is working on what, so it stays qualitative and
+ * leaves the width for the job phrase.
+ *
+ * `generating` and `ready` produce nothing — a row that is listed as
+ * running already says the engine is working.
+ */
+function queuePhaseLabel(turn: LiveTurnState | undefined): string | undefined {
+  if (!turn) return undefined;
+  if (turn.phase === 'generating' || turn.phase === 'ready') return undefined;
+  return phaseBaseLabel(turn.phase);
 }
 
 const NO_HANDOFFS: TaskHandoffBucket = { count: 0, byGezel: {} };
@@ -158,6 +189,7 @@ function systemFallbackColors(actor: QueueActorIdentity): {
 interface QueueActorContext {
   actor: QueueActorIdentity;
   projectId?: string;
+  job?: string;
 }
 
 function resolveQueueActor(
@@ -183,6 +215,7 @@ function providerRepresentative(
   return {
     actor: resolveQueueActor(turn?.gezelId, turn?.actorLabel, gezels),
     ...(turn?.projectId ? { projectId: turn.projectId } : {}),
+    ...(turn?.job ? { job: turn.job } : {}),
   };
 }
 
@@ -205,12 +238,15 @@ function queueActorTooltip(
   projectId: string | undefined,
   projects: Map<string, Project>,
   provider?: QueueProviderName,
+  job?: string,
 ): string {
   const lines = [actor.label];
   const role = queueActorRole(actor);
   const project = queueProjectLabel(projectId, projects);
   if (role) lines.push(`Role: ${role}`);
   if (project) lines.push(`Project: ${project}`);
+  const activity = queueJobContext(job, projectId, project);
+  if (activity) lines.push(`Activity: ${activity}`);
   if (provider) lines.push(`Provider: ${getPlatformPillLabel(provider)}`);
   return lines.join('\n');
 }
@@ -302,18 +338,29 @@ function QueueChipIdentity({
   provider,
   actor,
   projectId,
+  job,
   projects,
   boringMode,
 }: {
   provider: QueueProviderName;
   actor: QueueActorIdentity;
   projectId: string | undefined;
+  job: string | undefined;
   projects: Map<string, Project>;
   boringMode: boolean;
 }) {
+  const project = queueProjectLabel(projectId, projects);
+  const activity = queueJobContext(job, projectId, project);
+  // The activity phrase is the longest thing in the chip and the first to go
+  // when the titlebar is crowded — "Reviewing game.json in Checkers…" costs
+  // more width than every other part of the chip put together, and the
+  // tooltip and the queue popover both still carry it. See header-density.ts.
+  const density = useHeaderDensity();
+  const activityContext =
+    density !== 'full' ? undefined : activity && project ? `${activity} in ${project}` : activity;
   if (!boringMode) {
     const { gezel } = actor;
-    const tooltip = queueActorTooltip(actor, projectId, projects, provider);
+    const tooltip = queueActorTooltip(actor, projectId, projects, provider, job);
     return (
       <>
         <span className="queue-meter-chip-avatar" aria-hidden="true">
@@ -334,22 +381,26 @@ function QueueChipIdentity({
         >
           {actor.label}
         </span>
+        {activityContext && <span className="queue-meter-chip-job">{activityContext}</span>}
       </>
     );
   }
 
   return (
-    <span className="queue-meter-chip-label">
-      {/* Full + short labels rendered together; the chip's container
-          query in styles.css shows whichever fits. The full provider
-          label remains available on hover in compact mode. */}
-      <span className="queue-meter-chip-label-full" title={getPlatformPillLabel(provider)}>
-        {getPlatformPillLabel(provider)}
+    <>
+      <span className="queue-meter-chip-label">
+        {/* Full + short labels rendered together; the chip's container
+            query in styles/app-shell.css shows whichever fits. The full
+            provider label remains available on hover in compact mode. */}
+        <span className="queue-meter-chip-label-full" title={getPlatformPillLabel(provider)}>
+          {getPlatformPillLabel(provider)}
+        </span>
+        <span className="queue-meter-chip-label-short" title={getPlatformPillLabel(provider)}>
+          {getCompactPillLabel(provider)}
+        </span>
       </span>
-      <span className="queue-meter-chip-label-short" title={getPlatformPillLabel(provider)}>
-        {getCompactPillLabel(provider)}
-      </span>
-    </span>
+      {activityContext && <span className="queue-meter-chip-job">{activityContext}</span>}
+    </>
   );
 }
 
@@ -552,6 +603,24 @@ export function QueueMeter() {
     }).map((name) => ({ name, state: status.providers[name]! }));
   }, [status]);
 
+  // Every session the provider queues already account for. The live-turn
+  // stream and `/api/queues` describe the same turns from two sides, so
+  // without this a turn can be listed twice: a ds4 ("DwarfStar") turn
+  // appeared both under its own in-flight section and, seconds apart,
+  // as a waiting row under "This Mac" because the configured engine had
+  // simply never registered a queue.
+  const queuedSessionIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!status) return ids;
+    for (const name of PROVIDER_ORDER) {
+      const state = status.providers[name];
+      if (!state) continue;
+      for (const item of state.active) if (item.sessionId) ids.add(item.sessionId);
+      for (const item of state.pending) if (item.sessionId) ids.add(item.sessionId);
+    }
+    return ids;
+  }, [status]);
+
   // Which on-device engine, if any, is the active provider. Drives the
   // live-turn subscription so it stays open across the "Preparing"
   // window (when the provider is missing from `status.providers`). A
@@ -577,7 +646,17 @@ export function QueueMeter() {
   // and this list goes empty — no double-render with the busy chips.
   const onDeviceState = onDeviceProvider ? status?.providers[onDeviceProvider] : undefined;
   const preparingTurns: Array<[string, LiveTurnState]> =
-    onDeviceProvider && !onDeviceState ? Array.from(liveTurns.entries()) : [];
+    onDeviceProvider && !onDeviceState
+      ? Array.from(liveTurns.entries()).filter(
+          ([sessionId, turn]) =>
+            !queuedSessionIds.has(sessionId) &&
+            // The stream carries every local engine's turns; only the one
+            // this section is named after belongs here. A turn whose engine
+            // hasn't identified itself yet (seeded by `user_message` ahead
+            // of the first phase event) is still ours to show.
+            (turn.provider === undefined || turn.provider === onDeviceProvider),
+        )
+      : [];
 
   // Nothing busy and nothing preparing → render nothing. Keeps the
   // header clean on the common idle case.
@@ -594,6 +673,7 @@ export function QueueMeter() {
         representative.projectId,
         projects,
         firstBusy.name,
+        representative.job,
       )}\nClick for queue details`;
     } else {
       const preparing = preparingTurns[0]?.[1];
@@ -632,6 +712,7 @@ export function QueueMeter() {
                       representative.projectId,
                       projects,
                       name,
+                      representative.job,
                     )
               }
             >
@@ -639,6 +720,7 @@ export function QueueMeter() {
                 provider={name}
                 actor={representative.actor}
                 projectId={representative.projectId}
+                job={representative.job}
                 projects={projects}
                 boringMode={boringMode}
               />
@@ -671,6 +753,7 @@ export function QueueMeter() {
               provider={onDeviceProvider}
               actor={resolveQueueActor(preparingTurns[0]?.[1].gezelId, undefined, gezels)}
               projectId={preparingTurns[0]?.[1].projectId}
+              job={undefined}
               projects={projects}
               boringMode={boringMode}
             />
@@ -829,7 +912,7 @@ function QueueMeterPanel({
                   gezels={gezels}
                   projects={projects}
                   boringMode={boringMode}
-                  phase={turn.label}
+                  phase={queuePhaseLabel(turn)}
                 />
                 <span className="queue-meter-panel-time muted">
                   {formatMs(Math.max(0, Date.now() - turn.startedAt))}
@@ -922,11 +1005,13 @@ function QueueMeterPanel({
               <ul className="queue-meter-panel-list">
                 {showLaneHeadings && <li className="queue-meter-panel-group">Running</li>}
                 {state.active.map((a, i) => {
-                  // For on-device turns, look up the current phase
-                  // label so the user can see what the engine is
-                  // actually doing instead of just "gezel + 58s".
+                  // For local-engine turns, look up the current phase so
+                  // the user can see what the engine is actually doing
+                  // instead of just "gezel + 58s".
                   const phase =
-                    name === 'llama-cpp' && a.sessionId ? liveTurns.get(a.sessionId) : undefined;
+                    isLocalEngineProvider(name) && a.sessionId
+                      ? liveTurns.get(a.sessionId)
+                      : undefined;
                   // Phase 3: surface the cache-warm signal next to
                   // active turns. The session's cache entry is keyed by
                   // sessionId on whichever engine adapter the
@@ -970,7 +1055,7 @@ function QueueMeterPanel({
                         projects={projects}
                         boringMode={boringMode}
                         job={a.job}
-                        phase={phase?.label}
+                        phase={queuePhaseLabel(phase)}
                         extra={cacheEntry ? 'cached' : undefined}
                       />
                       <span

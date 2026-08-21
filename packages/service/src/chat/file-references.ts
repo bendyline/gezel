@@ -172,6 +172,29 @@ export function scanPathTokens(content: string): PathToken[] {
   return out;
 }
 
+/**
+ * Detect the historical resolver bug where a qualified missing path such as
+ * `powerpoint/task-11/deck.pptx` fell back to a same-basename file at the
+ * project root. Timeline reads use this to repair already-persisted reference
+ * metadata against the current inventory without re-indexing every message.
+ */
+export function hasQualifiedReferenceMismatch(
+  content: string,
+  references: readonly ReferencedFile[],
+): boolean {
+  if (references.length === 0) return false;
+  const referencedPaths = new Set(references.map((file) => file.path.toLowerCase()));
+  const referencedBasenames = new Set(
+    references.map((file) => file.path.toLowerCase().slice(file.path.lastIndexOf('/') + 1)),
+  );
+  return scanPathTokens(content).some((token) => {
+    if (!token.qualified) return false;
+    const lower = token.path.toLowerCase();
+    if (referencedPaths.has(lower)) return false;
+    return referencedBasenames.has(lower.slice(lower.lastIndexOf('/') + 1));
+  });
+}
+
 function normalizeToken(raw: string): PathToken | null {
   const s = normalizeFileToken(raw);
   if (!s || s.length > 512) return null;
@@ -183,9 +206,11 @@ function normalizeToken(raw: string): PathToken | null {
 
 function resolveToken(token: PathToken, index: FileInventoryIndex): ReferencedFile | null {
   const lower = token.path.toLowerCase();
-  const hit =
-    index.byFullPath.get(lower) ??
-    index.byBasename.get(token.qualified ? lower.slice(lower.lastIndexOf('/') + 1) : lower);
+  // A qualified mention is an exact claim. Falling back to its basename can
+  // silently turn `task-11/deck.pptx` into the unrelated `deck.pptx` at the
+  // project root. Bare names may use the basename index, whose `null` entries
+  // preserve ambiguity when more than one real file shares the name.
+  const hit = token.qualified ? index.byFullPath.get(lower) : index.byBasename.get(lower);
   if (!hit) return null;
   // A token with neither a slash nor an extension is an ordinary English
   // word until proven otherwise. Let one match the small, gezel-produced

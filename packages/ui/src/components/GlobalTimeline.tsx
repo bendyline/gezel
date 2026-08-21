@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { api } from '../api.js';
 import { ChatTimelineView } from './ChatTimelineView.js';
 import type { ToolActivity } from './chat-bubbles.js';
+import type { OpenChatReference } from './chat-open-command.js';
 
 /**
  * Global Meester timeline. Loads + tails every chat session anywhere in
@@ -18,8 +19,10 @@ export function GlobalTimeline({
   onArtifactSeen,
   onWorkspaceReference,
   onWorkspaceSeen,
+  onOpenReference,
   onTaskReference,
   emptyPlaceholder,
+  emptyContent,
 }: {
   activeSessionId: string | undefined;
   onFocusSession?: (sessionId: string, gezelId: string, projectId: string) => void;
@@ -28,8 +31,11 @@ export function GlobalTimeline({
   onArtifactSeen?: (path: string, projectId?: string) => void;
   onWorkspaceReference?: (path: string, projectId?: string) => void;
   onWorkspaceSeen?: (path: string, projectId?: string) => void;
+  onOpenReference?: (reference: OpenChatReference) => void;
   onTaskReference?: (ref: string, opts?: { scoped?: boolean }) => void;
   emptyPlaceholder?: string;
+  /** Rich empty state; see ChatTimelineView. */
+  emptyContent?: import('react').ReactNode;
 }) {
   const loadTimeline = useCallback(
     (opts: { limit: number; before?: string }) => api.listGlobalTimeline(opts),
@@ -47,8 +53,10 @@ export function GlobalTimeline({
       onArtifactSeen={onArtifactSeen}
       onWorkspaceReference={onWorkspaceReference}
       onWorkspaceSeen={onWorkspaceSeen}
+      onOpenReference={onOpenReference}
       {...(onTaskReference ? { onTaskReference } : {})}
       emptyPlaceholder={emptyPlaceholder}
+      emptyContent={emptyContent}
       loadTimeline={loadTimeline}
       streamUrl={streamUrl}
       showProjectName

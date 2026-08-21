@@ -1,6 +1,7 @@
 import type { GitHubPullDetail, GitHubPullSummary } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../../api.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../../relative-time.js';
 
 /**
  * The Pull requests sub-tab: open-PR list on the left, a read-only
@@ -229,7 +230,9 @@ function PrDetailPanel({ projectId, num }: { projectId: string; num: number }) {
                   </>
                 )}
                 {' · '}
-                {new Date(c.createdAt).toLocaleString()}
+                <span title={formatAbsoluteTime(c.createdAt)}>
+                  {formatRelativeTime(c.createdAt)}
+                </span>
               </div>
               <pre style={{ whiteSpace: 'pre-wrap', margin: 0, fontFamily: 'inherit' }}>
                 {c.body}

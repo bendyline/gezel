@@ -73,8 +73,8 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'list_project_types',
   'apply_project_type',
   'start_project_from_type',
-  'export_project_type',
-  'import_project_type',
+  'export_ai_app',
+  'import_ai_app',
   'ensure_gezel',
   'update_gezel',
   'message_gezel',
@@ -166,6 +166,7 @@ export const ALWAYS_REGISTERED_TOOLS = [
   'wikipedia_search',
 
   // Search / files
+  'search',
   'grep_files',
   'find_files',
   'diff_files',

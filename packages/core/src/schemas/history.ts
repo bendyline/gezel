@@ -191,6 +191,8 @@ export const HistoryEventKindSchema = z.enum([
   'config.credential.updated',
   'config.engagementMode.changed',
   'memory.auto-recalled',
+  /** Per-turn indexed context injected on the user-message channel. */
+  'retrieval.context-injected',
   'memory.auto-summarized',
   'memory.compacted',
   'memory.lessons-updated',

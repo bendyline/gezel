@@ -49,6 +49,8 @@ export const StorageCategoryIdSchema = z.enum([
   'secrets',
   'folder-backups',
   'git-clones',
+  'knowledge-user',
+  'knowledge-shared',
 ]);
 export type StorageCategoryId = z.infer<typeof StorageCategoryIdSchema>;
 

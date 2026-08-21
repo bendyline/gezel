@@ -69,6 +69,48 @@ describe('classifyTrial — terminal classes', () => {
     });
     expect(c).toMatchObject({ failureClass: 'model', rule: 'model-default' });
   });
+
+  it('attributes a structured pre-provider stall to infra', () => {
+    const c = classifyTrial({
+      success: false,
+      failureMode: 'chat-stalled',
+      reason: 'chat stalled for 302s',
+      sessionTelemetry: [
+        {
+          sessionId: 's1',
+          inflight: true,
+          currentTurn: { phase: 'recall', providerRequestsStarted: 0 },
+        } as never,
+      ],
+    });
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'pre-provider-stall' });
+    expect(c.evidence).toContain('0 provider requests');
+  });
+
+  it('does not call a provider-side stall pre-provider', () => {
+    const c = classifyTrial({
+      success: false,
+      failureMode: 'chat-stalled',
+      reason: 'chat stalled for 302s',
+      sessionTelemetry: [
+        {
+          sessionId: 's1',
+          inflight: true,
+          currentTurn: { phase: 'provider', providerRequestsStarted: 1 },
+        } as never,
+      ],
+    });
+    expect(c).toMatchObject({ failureClass: 'model', rule: 'model-default' });
+  });
+
+  it('preserves runner-recorded pre-provider evidence without a telemetry file', () => {
+    const c = classifyTrial({
+      success: false,
+      failureMode: 'chat-stalled',
+      reason: 'pre-provider stall in recall for 302s',
+    });
+    expect(c).toMatchObject({ failureClass: 'infra', rule: 'pre-provider-stall' });
+  });
 });
 
 describe('classifyTrial — log-signature rules (stall-gated)', () => {

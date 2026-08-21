@@ -316,6 +316,7 @@ const PROJECT_RETRIEVAL_HANDOFF_TOOLS: ReadonlySet<string> = new Set([
 ]);
 const PROJECT_RETRIEVAL_DIRECT_TOOLS: ReadonlySet<string> = new Set([
   ...PROJECT_RETRIEVAL_HANDOFF_TOOLS,
+  'search',
   'search_code',
   'grep_files',
   'find_symbol',

@@ -3,6 +3,10 @@ id: writing-scripts-with-gezel-sdk
 title: Writing scripts with gezel-sdk
 order: 8
 summary: Build typed, capability-limited automations that run inside a Gezel project.
+subcategory:
+  id: developer
+  title: Developer
+  order: 3
 ---
 
 # Writing scripts with gezel-sdk
@@ -103,4 +107,4 @@ The package has three public entry points:
 
 The separate `@bendyline/gezel-script-stdlib` package contains Gezel's trusted standard gate scripts. Use those by their `standard` scope when they already express the check you need; write a project script when the behavior belongs to one project, and a reusable craftbook script when it belongs to a workflow others will install.
 
-If the code lives in another application rather than inside Gezel's sandbox, use [gezel-app-sdk](building-connected-apps-with-gezel-app-sdk.md) instead.
+If the code becomes part of a complete reusable in-Gezel experience, see [Building AI Apps inside Gezel](building-ai-apps-inside-gezel.md). If it lives in another application rather than inside Gezel's sandbox, use [gezel-app-sdk](building-connected-apps-with-gezel-app-sdk.md) instead.

@@ -9,6 +9,7 @@ import {
 import { Select } from '../primitives/index.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { detectDs4Availability } from '../views/ds4-availability.js';
+import { deviceLabel } from './provider-label.js';
 
 /**
  * Combined provider + model picker. Replaces the old `Provider:` chip
@@ -58,17 +59,20 @@ function parseComposite(
   return { kind: 'override', provider, model: model || undefined };
 }
 
-/** "This Mac" / "This Windows PC" / "This Linux PC" — friendly label
- *  for on-device runtimes (mlx, llama-cpp). The runtime name (MLX vs
+/** "This Mac" / "This PC" / "This Device" — friendly label for
+ *  on-device runtimes (mlx, llama-cpp). The runtime name (MLX vs
  *  llama.cpp) is folded into the provider key, not the prefix, so the
- *  user sees a stable "your computer" label across both. */
+ *  user sees a stable "your computer" label across both. The preload
+ *  bridge is authoritative; the user-agent sniff only covers the plain
+ *  web build, where no bridge exists. */
 function platformLabel(): string {
-  if (typeof navigator === 'undefined') return 'This computer';
-  const ua = navigator.userAgent ?? '';
-  if (/Mac/i.test(ua)) return 'This Mac';
-  if (/Win/i.test(ua)) return 'This Windows PC';
-  if (/Linux/i.test(ua)) return 'This Linux PC';
-  return 'This computer';
+  const bridged = window.__GEZEL__?.platform;
+  if (bridged) return deviceLabel(bridged);
+  const ua = typeof navigator === 'undefined' ? '' : (navigator.userAgent ?? '');
+  if (/Mac/i.test(ua)) return deviceLabel('darwin');
+  if (/Win/i.test(ua)) return deviceLabel('win32');
+  if (/Linux/i.test(ua)) return deviceLabel('linux');
+  return deviceLabel();
 }
 
 function providerLabelFor(provider: ProviderName): string {

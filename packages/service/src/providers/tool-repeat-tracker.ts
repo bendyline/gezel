@@ -308,6 +308,7 @@ function recommendedCraftbookId(output: string): string | null {
   const patterns = [
     /"recommendedCraftbook"\s*:\s*\{[^}]*"id"\s*:\s*"([^"]+)"/,
     /"recommendedCraftbookId"\s*:\s*"([^"]+)"/,
+    /invoke_craftbook\(\{[^)]*"craftbookId"\s*:\s*"([^"]+)"/,
     /invoke_craftbook\(\{\s*craftbookId:\s*"([^"]+)"/,
   ];
   for (const pattern of patterns) {

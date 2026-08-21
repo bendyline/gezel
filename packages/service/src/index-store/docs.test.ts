@@ -1,6 +1,6 @@
 import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { adjacentDocFilesPaths, shadowDocFilesPaths } from './docs.js';
+import { adjacentDocFilesPaths, chunkMarkdown, shadowDocFilesPaths } from './docs.js';
 
 const ART = join(sep, 'home', 'proj', 'artifacts');
 
@@ -30,5 +30,27 @@ describe('adjacentDocFilesPaths', () => {
     const paths = adjacentDocFilesPaths(ART, 'decks/brief.pptx');
     expect(paths.mdRel).toBe('decks/brief_files/brief.md');
     expect(paths.dir).toBe(join(ART, 'decks', 'brief_files'));
+  });
+});
+
+describe('chunkMarkdown', () => {
+  it('windows heading-free documents without dropping the tail', () => {
+    const lines = Array.from({ length: 360 }, (_, i) => `line ${i + 1}: vehicle dynamics notes`);
+    lines[359] = 'line 360: zqRearAxleTailToken';
+    const chunks = chunkMarkdown(lines.join('\n'));
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.every((chunk) => chunk.text.length <= 4_000)).toBe(true);
+    expect(chunks.some((chunk) => chunk.text.includes('zqRearAxleTailToken'))).toBe(true);
+    expect(chunks.at(-1)?.lineEnd).toBe(360);
+  });
+
+  it('preserves every window of a single very long physical line', () => {
+    const text = `${'a'.repeat(8_500)}zqLongLineTailToken`;
+    const chunks = chunkMarkdown(text);
+
+    expect(chunks.length).toBeGreaterThan(2);
+    expect(chunks.some((chunk) => chunk.text.includes('zqLongLineTailToken'))).toBe(true);
+    expect(chunks.every((chunk) => chunk.lineStart === 1 && chunk.lineEnd === 1)).toBe(true);
   });
 });

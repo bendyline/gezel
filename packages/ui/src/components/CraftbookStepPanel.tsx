@@ -231,6 +231,65 @@ export function CraftbookStepPanel({
         </label>
 
         <label className="task-step-field">
+          <span className="task-step-field-label">Indexed context</span>
+          <Select.Root
+            value={step.retrieval?.mode ?? '__inherit'}
+            disabled={readOnly || busy}
+            onValueChange={(value) =>
+              patch(
+                value === '__inherit'
+                  ? { retrieval: null }
+                  : {
+                      retrieval: {
+                        mode: value as 'off' | 'lean' | 'balanced' | 'deep',
+                        ...(step.retrieval?.maxTokens
+                          ? { maxTokens: step.retrieval.maxTokens }
+                          : {}),
+                        ...(step.retrieval?.sources ? { sources: step.retrieval.sources } : {}),
+                      },
+                    },
+              )
+            }
+          >
+            <Select.Trigger>
+              <Select.Value />
+            </Select.Trigger>
+            <Select.Content>
+              <Select.Item value="__inherit">Inherit from gezel</Select.Item>
+              <Select.Item value="off">Off — tools only</Select.Item>
+              <Select.Item value="lean">Lean — paths and hints</Select.Item>
+              <Select.Item value="balanced">Balanced — a few excerpts</Select.Item>
+              <Select.Item value="deep">Deep — broad evidence</Select.Item>
+            </Select.Content>
+          </Select.Root>
+        </label>
+
+        <label className="task-step-field">
+          <span className="task-step-field-label">Context token cap</span>
+          <input
+            key={`retrieval-budget-${key}`}
+            type="number"
+            min={0}
+            max={16000}
+            defaultValue={step.retrieval?.maxTokens ?? ''}
+            disabled={readOnly || busy || !step.retrieval || step.retrieval.mode === 'off'}
+            placeholder="Mode default"
+            onBlur={(event) => {
+              if (!step.retrieval) return;
+              const raw = event.currentTarget.value.trim();
+              const maxTokens = raw ? Number.parseInt(raw, 10) : undefined;
+              if (maxTokens !== undefined && !Number.isFinite(maxTokens)) return;
+              if (maxTokens === step.retrieval.maxTokens) return;
+              const { maxTokens: _priorMaxTokens, ...withoutMaxTokens } = step.retrieval;
+              patch({
+                retrieval:
+                  maxTokens === undefined ? withoutMaxTokens : { ...withoutMaxTokens, maxTokens },
+              });
+            }}
+          />
+        </label>
+
+        <label className="task-step-field">
           <span className="task-step-field-label">Suggested role</span>
           <input
             key={`role-${key}`}

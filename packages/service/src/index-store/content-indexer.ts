@@ -1,7 +1,7 @@
 import type { Dirent } from 'node:fs';
 import { readFile, readdir, rm, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
-import { nowIso } from '@bendyline/gezel';
+import { createLogger, nowIso } from '@bendyline/gezel';
 import { PROJECT_SHADOW_DIR_NAME, projectLocalIndexDbFile } from '@bendyline/gezel/paths';
 import { isLibraryInternalPath } from '../fs/sync-junk.js';
 import { indexFileSecurity } from '../security/extract.js';
@@ -31,6 +31,8 @@ import {
  * and for changed code/markdown files extract symbols into the IndexStore. This
  * is the deterministic structural tier (Phase 1) — no LLM, fully offline.
  */
+
+const log = createLogger('index:content');
 
 /** Generous safety cap so a runaway tree can't index forever. */
 const MAX_FILES = 50_000;
@@ -89,7 +91,7 @@ export async function indexWorkspaceContent(
   store: IndexStore,
   workspaceDir: string,
   artifactsDir: string,
-  opts: { scope?: 'workspace' | 'library' } = {},
+  opts: { scope?: 'workspace' | 'library'; maxFiles?: number } = {},
 ): Promise<ContentIndexStats> {
   const stats: ContentIndexStats = {
     scanned: 0,
@@ -103,8 +105,9 @@ export async function indexWorkspaceContent(
   const indexedAt = nowIso();
   const forceCode = store.getMeta('extractor_version') !== String(EXTRACTOR_VERSION);
 
-  const walkedFiles = await discoverWorkspaceFiles(workspaceDir, {
-    maxFiles: MAX_FILES,
+  const maxFiles = opts.maxFiles ?? MAX_FILES;
+  const { files: walkedFiles, capped } = await discoverWorkspaceFiles(workspaceDir, {
+    maxFiles,
     // The shared document library is a user folder, not a source tree: it
     // holds outside-in companion twins (a derived markdown view of a
     // document already in the listing) and whatever a cloud-sync client
@@ -321,6 +324,26 @@ export async function indexWorkspaceContent(
             },
           ]);
         }
+      } else {
+        // A doc-modality format with no importer (.odt/.odp/.ods/.rtf, …).
+        // Without a stub these were invisible to search entirely — worse than
+        // a BLOCKED docx, which at least indexes a "held" marker. Index the
+        // filename words plus an honest note so the file is findable by name
+        // and its state is explicit rather than silently absent.
+        const nameWords = file.path
+          .replace(/\.[^.]+$/, '')
+          .split(/[^a-zA-Z0-9]+/)
+          .filter(Boolean)
+          .join(' ');
+        store.setMetadata(file.path, [{ key: 'doc:convert', value: 'unsupported' }]);
+        store.putChunks(file.path, hash, [
+          {
+            kind: 'doc',
+            lineStart: 1,
+            lineEnd: 1,
+            text: `${nameWords} document [no importer for this format — not converted]`,
+          },
+        ]);
       }
       continue;
     }
@@ -394,6 +417,13 @@ export async function indexWorkspaceContent(
       store.putSymbols(file.path, hash, syms);
       stats.symbols += syms.length;
       store.putChunks(file.path, hash, chunkMarkdown(body));
+    } else if (cls.modality === 'text') {
+      // Plain text, config, data, and small unknown-text files previously had
+      // no keyword-searchable body until an asynchronous enrichment pass made
+      // a summary. Deterministic chunks make the static index useful
+      // immediately and preserve content beyond the old first-1,000-char
+      // fallback.
+      store.putChunks(file.path, hash, chunkMarkdown(content));
     }
 
     // Built-in security signals for any code file (regex + entropy — cheap, and
@@ -405,20 +435,30 @@ export async function indexWorkspaceContent(
   }
 
   // Prune files that disappeared; their shadow companions go with them.
-  for (const f of store.allFiles()) {
-    if (!seen.has(f.path)) {
-      store.deleteFile(f.path);
-      stats.removed++;
-      if (isConvertibleDoc(extname(f.path))) {
-        const paths = shadowDocFilesPaths(artifactsDir, f.path);
-        if (paths) await rm(paths.dir, { recursive: true, force: true }).catch(() => {});
+  // Never off a capped walk: `seen` then under-represents the tree, and the
+  // sweep would delete live rows and shadow sidecars (converted docs, vision
+  // descriptions, STT transcripts) whose model calls would have to be re-paid.
+  if (capped) {
+    log.warn(
+      `workspace walk hit the ${maxFiles}-file cap under ${workspaceDir}; later files are not indexed this pass and the removal/shadow sweeps are skipped`,
+    );
+  } else {
+    for (const f of store.allFiles()) {
+      if (!seen.has(f.path)) {
+        store.deleteFile(f.path);
+        stats.removed++;
+        if (isConvertibleDoc(extname(f.path))) {
+          const paths = shadowDocFilesPaths(artifactsDir, f.path);
+          if (paths) await rm(paths.dir, { recursive: true, force: true }).catch(() => {});
+        }
       }
     }
+    await sweepShadowOrphans(artifactsDir, seen);
   }
-  await sweepShadowOrphans(artifactsDir, seen);
 
-  // Stamp only after a complete walk so an interrupted forced pass retries.
-  if (forceCode) store.setMeta('extractor_version', String(EXTRACTOR_VERSION));
+  // Stamp only after a complete walk so an interrupted (or capped) forced
+  // pass retries — rows past a cap may hold old-version extractions.
+  if (forceCode && !capped) store.setMeta('extractor_version', String(EXTRACTOR_VERSION));
 
   return stats;
 }
@@ -426,13 +466,15 @@ export async function indexWorkspaceContent(
 const SHADOW_SWEEP_MAX_DIRS = 50_000;
 
 /**
- * Delete shadow companion dirs whose source no longer exists — renames, a
- * crash between DB prune and dir delete, or sources dropped by the walk cap.
- * `seen` is this pass's live source set; a companion dir's name IS its source
- * basename plus `_files`, so the reverse map is lossless. Own walk, no depth
- * cap (GC must reach what the budgeted listing walker never shows), and
- * Dirents never follow symlinks so a planted link cannot recurse the sweep
- * outside the shadow root.
+ * Delete shadow companion dirs whose source no longer exists — renames, or a
+ * crash between DB prune and dir delete. Only ever called off a COMPLETE walk:
+ * `seen` is this pass's live source set, and on a capped walk it
+ * under-represents the tree, so sweeping would delete sidecars of live files
+ * past the cap (the caller skips both sweeps in that case). A companion dir's
+ * name IS its source basename plus `_files`, so the reverse map is lossless.
+ * Own walk, no depth cap (GC must reach what the budgeted listing walker never
+ * shows), and Dirents never follow symlinks so a planted link cannot recurse
+ * the sweep outside the shadow root.
  */
 async function sweepShadowOrphans(artifactsDir: string, seen: ReadonlySet<string>): Promise<void> {
   const shadowRoot = join(artifactsDir, PROJECT_SHADOW_DIR_NAME);
@@ -476,6 +518,7 @@ export async function runWorkspaceContentIndex(
   workspaceDir: string,
   collectionId: string,
   artifactsDir: string,
+  opts: { maxFiles?: number } = {},
 ): Promise<ContentIndexStats | null> {
   await ensureIndexGitignore(workspaceDir);
   const store = await IndexStore.open(projectLocalIndexDbFile(workspaceDir), {
@@ -485,7 +528,7 @@ export async function runWorkspaceContentIndex(
   });
   if (!store) return null;
   try {
-    return await indexWorkspaceContent(store, workspaceDir, artifactsDir);
+    return await indexWorkspaceContent(store, workspaceDir, artifactsDir, opts);
   } finally {
     store.close();
   }

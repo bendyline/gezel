@@ -950,6 +950,62 @@ describe('ProjectsView', () => {
     });
   });
 
+  it('adds and removes one-way project links from Settings', async () => {
+    const project = {
+      id: 'pj-alpha',
+      name: 'Racing game',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+      packages: [],
+      managedWorkspaceWritePolicy: 'allow' as const,
+      linkedProjectIds: [],
+    };
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [
+        project as Project,
+        {
+          id: 'vehicle-physics',
+          name: 'Vehicle physics',
+          workingDir: 'D:\\projects\\vehicle-physics',
+          managedWorkspaceWritePolicy: 'deny',
+        } as Project,
+        { id: 'archived-not-linked', name: 'Old prototype', archived: true } as Project,
+      ],
+    } as never);
+    vi.mocked(api.getProject).mockResolvedValue(project as never);
+    vi.mocked(api.updateProject).mockImplementation(
+      async (_id, patch) => ({ ...project, ...patch }) as never,
+    );
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+
+    expect(await screen.findByText('Linked projects')).toBeInTheDocument();
+    expect(screen.getByText(/0 of 32 linked/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Shared documents are always included automatically/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/workspace read-only/)).toBeInTheDocument();
+    expect(screen.queryByText('Old prototype')).not.toBeInTheDocument();
+
+    const checkbox = screen.getByRole('checkbox', { name: /Vehicle physics/ });
+    fireEvent.click(checkbox);
+    await waitFor(() =>
+      expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', {
+        linkedProjectIds: ['vehicle-physics'],
+      }),
+    );
+    await waitFor(() => expect(checkbox).toBeChecked());
+
+    fireEvent.click(checkbox);
+    await waitFor(() =>
+      expect(api.updateProject).toHaveBeenLastCalledWith('pj-alpha', {
+        linkedProjectIds: [],
+      }),
+    );
+  });
+
   it('shows workspace indexing issues and toggles the Boekwachter results pane', async () => {
     const editableProject = {
       id: 'pj-alpha',
@@ -1152,7 +1208,7 @@ describe('ProjectsView', () => {
       'flat-modified',
     );
     await waitFor(() => {
-      expect(api.listProjectIndexFilesDetail).toHaveBeenCalledWith('pj-alpha');
+      expect(api.listProjectIndexFilesDetail).toHaveBeenCalledWith('pj-alpha', { hidden: false });
     });
     // Newest first, from the index-backed list (fresh.md is not in the walk).
     const flatButtons = await screen.findByRole('button', { name: /fresh\.md/ });

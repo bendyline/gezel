@@ -7,7 +7,7 @@
  * a runtime signal, not durable state (nothing here goes through Store).
  */
 
-import type { SessionGpuTask, SessionTelemetry } from '@bendyline/gezel';
+import type { SessionGpuTask, SessionTelemetry, SessionTurnPhase } from '@bendyline/gezel';
 
 /**
  * Tool names that mutate files on disk. Kept in exact parity with the eval
@@ -31,6 +31,7 @@ interface SessionCounters {
   gezelId: string;
   projectId: string;
   turnsStarted: number;
+  providerRequestsStarted: number;
   deltaChunks: number;
   streamedContentChars: number;
   wirePulses: number;
@@ -48,6 +49,9 @@ interface SessionCounters {
   lastGpuActivityAt: number | null;
   currentTurn: {
     startedAt: number;
+    phase: SessionTurnPhase;
+    phaseStartedAt: number;
+    providerRequestsStarted: number;
     streamedContentChars: number;
     toolCalls: number;
     fileMutations: number;
@@ -72,8 +76,12 @@ export class SessionTelemetryTracker {
     row.gezelId = scope.gezelId;
     row.projectId = scope.projectId;
     row.turnsStarted += 1;
+    const startedAt = Date.now();
     row.currentTurn = {
-      startedAt: Date.now(),
+      startedAt,
+      phase: 'preparing',
+      phaseStartedAt: startedAt,
+      providerRequestsStarted: 0,
       streamedContentChars: 0,
       toolCalls: 0,
       fileMutations: 0,
@@ -83,6 +91,25 @@ export class SessionTelemetryTracker {
   noteTurnEnd(sessionId: string): void {
     const row = this.bySession.get(sessionId);
     if (row) row.currentTurn = null;
+  }
+
+  noteTurnPhase(sessionId: string, phase: SessionTurnPhase): void {
+    const current = this.bySession.get(sessionId)?.currentTurn;
+    if (!current || current.phase === phase) return;
+    current.phase = phase;
+    current.phaseStartedAt = Date.now();
+  }
+
+  noteProviderRequestStart(sessionId: string): void {
+    const row = this.bySession.get(sessionId);
+    if (!row) return;
+    row.providerRequestsStarted += 1;
+    if (!row.currentTurn) return;
+    row.currentTurn.providerRequestsStarted += 1;
+    if (row.currentTurn.phase !== 'provider') {
+      row.currentTurn.phase = 'provider';
+      row.currentTurn.phaseStartedAt = Date.now();
+    }
   }
 
   noteDelta(sessionId: string, chars: number): void {
@@ -192,6 +219,7 @@ function emptyCounters(gezelId: string, projectId: string): SessionCounters {
     gezelId,
     projectId,
     turnsStarted: 0,
+    providerRequestsStarted: 0,
     deltaChunks: 0,
     streamedContentChars: 0,
     wirePulses: 0,
@@ -228,6 +256,7 @@ function toTelemetry(sessionId: string, row: SessionCounters, inflight: boolean)
     projectId: row.projectId,
     inflight,
     turnsStarted: row.turnsStarted,
+    providerRequestsStarted: row.providerRequestsStarted,
     deltaChunks: row.deltaChunks,
     streamedContentChars: row.streamedContentChars,
     wirePulses: row.wirePulses,

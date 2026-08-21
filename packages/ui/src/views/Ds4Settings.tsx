@@ -55,23 +55,23 @@ export function Ds4Settings({ config, health, title }: Props) {
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
           <span className="muted small">Status:</span>
           {availability.status === 'available' && (
-            <span className="home-status-pill home-status-ok">
+            <span className="gz-status-pill gz-status-pill--ok">
               engine available · {availability.backend}
             </span>
           )}
           {availability.status === 'external' && (
             <span
-              className="home-status-pill home-status-warn"
+              className="gz-status-pill gz-status-pill--warn"
               title={`Using an external ds4-server at: ${config?.ds4BaseUrl}`}
             >
               using external DwarfStar server
             </span>
           )}
           {availability.status === 'requires-cuda' && (
-            <span className="home-status-pill home-status-warn">requires NVIDIA / CUDA</span>
+            <span className="gz-status-pill gz-status-pill--warn">requires NVIDIA / CUDA</span>
           )}
           {availability.status === 'unavailable' && (
-            <span className="home-status-pill home-status-warn">unavailable on this device</span>
+            <span className="gz-status-pill gz-status-pill--warn">unavailable on this device</span>
           )}
         </div>
         {availability.status === 'available' && (

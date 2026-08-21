@@ -20,9 +20,18 @@ export const SessionGpuTaskSchema = z.enum([
 ]);
 export type SessionGpuTask = z.infer<typeof SessionGpuTaskSchema>;
 
+/** Coarse service-side ownership of the currently-running chat turn. */
+export const SessionTurnPhaseSchema = z.enum(['preparing', 'recall', 'provider']);
+export type SessionTurnPhase = z.infer<typeof SessionTurnPhaseSchema>;
+
 export const SessionTurnTelemetrySchema = z.object({
   /** Epoch ms when the in-flight turn started. */
   startedAt: z.number(),
+  phase: SessionTurnPhaseSchema,
+  /** Epoch ms when `phase` last changed. */
+  phaseStartedAt: z.number(),
+  /** Provider requests issued by this user-visible turn, including retries. */
+  providerRequestsStarted: z.number().int().nonnegative(),
   streamedContentChars: z.number().int().nonnegative(),
   toolCalls: z.number().int().nonnegative(),
   fileMutations: z.number().int().nonnegative(),
@@ -36,6 +45,8 @@ export const SessionTelemetrySchema = z.object({
   /** True while a send is currently running for this session. */
   inflight: z.boolean(),
   turnsStarted: z.number().int().nonnegative(),
+  /** Provider requests issued across all turns in this daemon process. */
+  providerRequestsStarted: z.number().int().nonnegative(),
   deltaChunks: z.number().int().nonnegative(),
   streamedContentChars: z.number().int().nonnegative(),
   wirePulses: z.number().int().nonnegative(),

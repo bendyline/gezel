@@ -1,6 +1,7 @@
 import type { AmbientDashboardStatusResponse, AmbientDashboardTheme } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { AmbientDashboardThemeSelect } from './AmbientDashboardThemeSelect.js';
 
 /**
@@ -265,11 +266,14 @@ export function AmbientDashboardCard() {
               </p>
             </div>
           )}
-          <span className="muted small">
+          <span
+            className="muted small"
+            title={status?.lastGeneratedAt ? formatAbsoluteTime(status.lastGeneratedAt) : undefined}
+          >
             {status?.running
               ? 'The meester is composing a dashboard…'
               : status?.lastGeneratedAt
-                ? `Last generated ${new Date(status.lastGeneratedAt).toLocaleString()}`
+                ? `Last generated ${formatRelativeTime(status.lastGeneratedAt)}`
                 : 'Nothing generated yet. The first image may wait for the browser runtime download to finish.'}
           </span>
           <button type="button" onClick={() => void generateNow()} disabled={status?.running}>

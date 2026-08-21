@@ -625,6 +625,11 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       projectContext +=
         ' The workspace is a real folder on your disk (outside `~/.gezel`) — address files by paths relative to the workspace root (e.g. `package.json`), never by absolute path, and remember writes are permanent.';
     }
+    const linkedProjectIds = project.linkedProjectIds ?? [];
+    if (linkedProjectIds.length > 0) {
+      const links = linkedProjectIds.map((id) => `- \`../${id}/\``).join('\n');
+      projectContext += `\n\n### Linked projects\n\nThis project has one-way access to these linked projects:\n${links}\nThe \`search\` tool already includes their indexed knowledge. Use the ordinary workspace file tools with paths such as \`../<project-id>/src/file.ts\` to list, read, create, edit, rename, or delete linked-project files. A linked project's own workspace-write setting still controls mutations. Links are direct, not transitive. The shared document library is also searched automatically and remains available through the document tools.`;
+    }
     if (isProjectStrategicOwner) {
       projectContext += isSolo
         ? ' You are the lead of this project and will handle it yourself; team-management tools are intentionally not available here.'
@@ -816,7 +821,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
         : 'No delegation tool is wired this turn; explain that the workspace change is blocked instead of inventing a handoff.';
     if (hasReadFile && hasWriteFile) {
       const artifactsLine = hasArtifactTools
-        ? `\n- **Artifacts** (${formatToolList(artifactTools)}) — a separate side drawer: plans, scratch automation, drafts, and handoff notes that are not workspace files. If a path appears in \`### Workspace files\`, use ${formatToolList([...workspaceReadTools, ...workspaceWriteTools])}; do not use artifact tools for it. Conventions: \`scripts/\` for re-runnable Playwright/Node scripts, \`tests/\` for *.spec.ts you own, \`reports/\`/\`drafts/\` for narrative.\n`
+        ? `\n- **Artifacts** (${formatToolList(artifactTools)}) — a separate side drawer: plans, scratch automation, drafts, and handoff notes that are not workspace files. If a path appears in \`### Workspace files\`, use ${formatToolList([...workspaceReadTools, ...workspaceWriteTools])}; do not use artifact tools for it. Conventions: \`tasks/<num>/\` for a task's working files, \`scripts/\` for re-runnable Playwright/Node scripts, \`tests/\` for *.spec.ts you own, \`reports/\`/\`drafts/\` for narrative.\n`
         : '\n';
       const decisionLine = hasWriteArtifact
         ? 'Decision test: would the user ship this file at release, or does it appear in `### Workspace files`? Yes → `write_file`. No → `write_artifact`. External `workingDir` projects: `write_file` touches the real directory.'
@@ -915,7 +920,7 @@ ${artifactsLine}
       workspaceFilesBlock += `\n(${workspaceFiles.length - 200} more files truncated)`;
     }
     if (retrievalFirstHint) {
-      const retrievalTools = toolsFrom(['search_code', 'grep_files']);
+      const retrievalTools = toolsFrom(['search', 'grep_files', 'search_code']);
       if (retrievalTools.length > 0) {
         workspaceFilesBlock += `\nTo find something in these files, call ${retrievalTools
           .map((t) => `\`${t}\``)
@@ -926,7 +931,8 @@ ${artifactsLine}
 
   let documentsContext = '';
   if (documentFiles && documentFiles.length > 0) {
-    const hasSearchDocuments = toolsFrom(['search_documents']).length > 0;
+    const searchDocumentTool = toolsFrom(['search', 'search_documents'])[0];
+    const hasSearchDocuments = searchDocumentTool !== undefined;
     const hasReadDocument = toolsFrom(['read_document']).length > 0;
     if (trimExecutor) {
       // Executor trim: the full listing is strategic-altitude cross-project
@@ -935,7 +941,7 @@ ${artifactsLine}
       // policy" with no trigger, and the trim's measured win was token
       // savings only, which a one-line pointer keeps.
       const pointerTool = hasSearchDocuments
-        ? '`search_documents`'
+        ? `\`${searchDocumentTool}\``
         : hasReadDocument
           ? '`list_documents`'
           : null;
@@ -973,8 +979,7 @@ ${artifactsLine}
         } not shown${fullTreeHint})`;
       }
       if (hasSearchDocuments && hasReadDocument) {
-        documentsContext +=
-          '\nFor questions about team policy, guidelines, or conventions, consult this library before answering from memory: call `search_documents` with the topic, then `read_document` the match — do not read documents one by one.';
+        documentsContext += `\nFor questions about team policy, guidelines, or conventions, consult this library before answering from memory: call \`${searchDocumentTool}\` with the topic, then \`read_document\` the match — do not read documents one by one.`;
       } else if (hasReadDocument) {
         documentsContext +=
           '\nConsult these documents with `read_document` when they bear on the request.';
@@ -1057,6 +1062,16 @@ ${artifactsLine}
       `### Current task: ${t.ref} — "${t.title}"`,
       `Status: **${t.status}**. Assigned to: **${assigneeLabel}**.`,
     ];
+    // Fanout children advertise the HOST's folder (artifactDir is inherited
+    // at spawn) — shards share one namespace so collect gates resolve.
+    // Roster-gated: naming a tool the turn didn't wire is a documented
+    // failure class (ADR 0001).
+    const taskArtifactFolder = t.artifactDir ?? `tasks/${t.num}`;
+    if (availableTools === undefined || availableToolNameSet.has('write_artifact')) {
+      lines.push(
+        `Task artifact folder: \`${taskArtifactFolder}/\` in the **artifacts drawer** — store this task's working files (notes, drafts, reports, analysis) there, e.g. \`write_artifact({ path: ${JSON.stringify(`${taskArtifactFolder}/notes.md`)}, ... })\`, unless the step procedure names another path.`,
+      );
+    }
     if (t.craftbookParams && Object.keys(t.craftbookParams).length > 0) {
       const params = Object.entries(t.craftbookParams)
         .sort(([a], [b]) => a.localeCompare(b))

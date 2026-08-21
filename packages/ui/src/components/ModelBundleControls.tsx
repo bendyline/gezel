@@ -207,7 +207,7 @@ export function ExportModelBundleButton({
 
   return (
     <>
-      <button type="button" className="home-link" disabled={busy} onClick={() => void run()}>
+      <button type="button" className="gz-link-button" disabled={busy} onClick={() => void run()}>
         {busy ? 'Exporting…' : 'Export'}
       </button>
       {error && (

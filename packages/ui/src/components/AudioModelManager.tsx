@@ -197,7 +197,11 @@ export function AudioModelManager({ kind, disabledReason, onModelsChanged }: Pro
                     <td>{formatSize(m.approxSizeBytes)}</td>
                     <td className="muted small">{new Date(m.installedAt).toLocaleDateString()}</td>
                     <td>
-                      <button type="button" className="home-link" onClick={() => setToDelete(m.id)}>
+                      <button
+                        type="button"
+                        className="gz-link-button"
+                        onClick={() => setToDelete(m.id)}
+                      >
                         Delete
                       </button>
                     </td>
@@ -296,7 +300,7 @@ function AudioPullProgress({
       <div className="ollama-pull-head">
         <code>{pull.id}</code>
         <span className="muted small">{statusLine}</span>
-        <button type="button" className="home-link" onClick={onCancel}>
+        <button type="button" className="gz-link-button" onClick={onCancel}>
           {pull.error ? 'Dismiss' : 'Cancel'}
         </button>
       </div>

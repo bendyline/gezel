@@ -65,6 +65,7 @@ import {
   type ProjectTabVisibility,
   type ProviderName,
   type Question,
+  type RetrievalPolicy,
   SHARED_PROJECT_FALLBACK_ID,
   SHARED_PROJECT_ID,
   SHARED_PROJECT_MARKER,
@@ -154,6 +155,7 @@ import {
   type FileInventoryIndex,
   artifactPathsOf,
   buildFileInventoryIndex,
+  hasQualifiedReferenceMismatch,
   matchReferencedFilesWithIndex,
   referencedFilesFromArtifactPaths,
 } from '../chat/file-references.js';
@@ -1927,6 +1929,7 @@ export class Store {
       reasoningEffort?: string | null;
       numCtx?: number | null;
       autoRecall?: boolean | null;
+      retrieval?: RetrievalPolicy | null;
       font?: string | null;
       sandboxCopilot?: boolean | null;
       claudePermissionMode?: 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | null;
@@ -1982,6 +1985,8 @@ export class Store {
     else if (patch.numCtx !== undefined) frontmatter.numCtx = patch.numCtx;
     if (patch.autoRecall === null) delete frontmatter.autoRecall;
     else if (patch.autoRecall !== undefined) frontmatter.autoRecall = patch.autoRecall;
+    if (patch.retrieval === null) delete frontmatter.retrieval;
+    else if (patch.retrieval !== undefined) frontmatter.retrieval = patch.retrieval;
     if (patch.font === null) delete frontmatter.font;
     else if (patch.font !== undefined) frontmatter.font = patch.font;
     if (patch.sandboxCopilot === null) delete frontmatter.sandboxCopilot;
@@ -2011,6 +2016,7 @@ export class Store {
     if (patch.reasoningEffort !== undefined) changed.push('reasoningEffort');
     if (patch.numCtx !== undefined) changed.push('numCtx');
     if (patch.autoRecall !== undefined) changed.push('autoRecall');
+    if (patch.retrieval !== undefined) changed.push('retrieval');
     if (patch.font !== undefined) changed.push('font');
     if (patch.sandboxCopilot !== undefined) changed.push('sandboxCopilot');
     if (patch.claudePermissionMode !== undefined) changed.push('claudePermissionMode');
@@ -2231,6 +2237,7 @@ export class Store {
         reasoningEffort: parsed.frontmatter.reasoningEffort,
         numCtx: parsed.frontmatter.numCtx,
         autoRecall: parsed.frontmatter.autoRecall,
+        retrieval: parsed.frontmatter.retrieval,
         font: parsed.frontmatter.font,
         voice: parsed.frontmatter.voice,
         templateId: parsed.frontmatter.templateId,
@@ -2642,6 +2649,30 @@ export class Store {
     const projects = metas.filter((m): m is Project => m !== null);
     projects.sort((a, b) => a.name.localeCompare(b.name));
     return projects;
+  }
+
+  /**
+   * Resolve the live, direct project links for a source project. Stale ids are
+   * ignored defensively and the shared library never appears here because it
+   * is an implicit search source with its own document-tool boundary.
+   */
+  async linkedProjectIds(id: string): Promise<string[]> {
+    const source = await this.tryGetProjectMeta(id);
+    if (!source || isSharedLibraryProject(source)) return [];
+    const resolved: string[] = [];
+    for (const linkedId of source.linkedProjectIds ?? []) {
+      if (linkedId === id || resolved.includes(linkedId)) continue;
+      const target = await this.tryGetProjectMeta(linkedId);
+      if (!target || isSharedLibraryProject(target)) continue;
+      resolved.push(linkedId);
+    }
+    return resolved;
+  }
+
+  /** Server-side authorization backstop for linked-workspace requests. */
+  async projectLinksTo(sourceProjectId: string, targetProjectId: string): Promise<boolean> {
+    if (sourceProjectId === targetProjectId) return false;
+    return (await this.linkedProjectIds(sourceProjectId)).includes(targetProjectId);
   }
 
   async createProject(
@@ -3198,11 +3229,36 @@ export class Store {
     );
   }
 
+  /** Per-project chains serializing {@link touchProject}'s metadata bumps. */
+  private readonly touchChains = new Map<string, Promise<void>>();
+
   async touchProject(id: string): Promise<void> {
-    const meta = await this.tryGetProjectMeta(id);
-    if (!meta) return;
-    const updated: Project = { ...meta, updatedAt: nowIso() };
-    await this.writeProjectMeta(updated);
+    // Serialized per project AND best-effort. Every workspace write ends in
+    // this updatedAt bump, so a burst of writes (an agent or the eval corpus
+    // seeder creating hundreds of files) raced read-modify-write renames of
+    // the same project.json — EPERM on Windows (rename over a path another
+    // rename holds), silently-lost bumps elsewhere. And the caller's actual
+    // write already succeeded by the time we run: a failed TIMESTAMP bump
+    // must never convert that success into a 500.
+    const prev = this.touchChains.get(id) ?? Promise.resolve();
+    const next = prev
+      .then(async () => {
+        const meta = await this.tryGetProjectMeta(id);
+        if (!meta) return;
+        const updated: Project = { ...meta, updatedAt: nowIso() };
+        await this.writeProjectMeta(updated);
+      })
+      .catch((err) => {
+        log.warn(
+          `touchProject(${id}) failed (updatedAt bump only — the triggering write succeeded):`,
+          err instanceof Error ? err.message : err,
+        );
+      });
+    this.touchChains.set(id, next);
+    void next.finally(() => {
+      if (this.touchChains.get(id) === next) this.touchChains.delete(id);
+    });
+    await next;
   }
 
   /**
@@ -3266,6 +3322,8 @@ export class Store {
       icon?: ProjectIconId | null;
       workingDir?: string | null;
       voormanGezelId?: string | null;
+      /** Replaces this project's one-way linked-project set. */
+      linkedProjectIds?: string[];
       voormanAutoAssignedAt?: string;
       about?: string;
       missionObjectives?: string;
@@ -3279,6 +3337,8 @@ export class Store {
       claudePermissionMode?: import('@bendyline/gezel').ClaudePermissionMode;
       /** Replaces the stored per-project ambient nudge override. */
       nudgeConfig?: ProjectNudgeConfig;
+      /** Which of the user's knowledge catalogs are in scope here. */
+      knowledgeCatalogs?: import('@bendyline/gezel').ProjectKnowledgeCatalogs;
       /** Replaces the optional project-tab visibility overrides. */
       tabVisibility?: ProjectTabVisibility;
       /** Project shape — `solo` (a single-gezel job/game) vs `crew`. */
@@ -3328,6 +3388,30 @@ export class Store {
       }
     }
     if (typeof patch.workingDir === 'string') this.assertSafeWorkingDir(patch.workingDir);
+    let nextLinkedProjectIds: string[] | undefined;
+    if (patch.linkedProjectIds !== undefined) {
+      if (isSharedLibraryProject(meta)) {
+        throw new Error(
+          'the shared library is already available to every project and cannot link projects',
+        );
+      }
+      if (patch.linkedProjectIds.length > 32) {
+        throw new Error('a project may link at most 32 other projects');
+      }
+      if (new Set(patch.linkedProjectIds).size !== patch.linkedProjectIds.length) {
+        throw new Error('linkedProjectIds must not contain duplicates');
+      }
+      for (const linkedId of patch.linkedProjectIds) {
+        if (linkedId === id) throw new Error('a project cannot link to itself');
+        const target = await this.tryGetProjectMeta(linkedId);
+        if (!target) throw new Error(`linked project ${linkedId} not found`);
+        if (isSharedLibraryProject(target)) {
+          throw new Error('the shared document library is already linked implicitly');
+        }
+      }
+      nextLinkedProjectIds =
+        patch.linkedProjectIds.length > 0 ? [...patch.linkedProjectIds] : undefined;
+    }
     let nextGitHub = mergeGitHubPatch(meta.github, patch.github);
     // Auto-link: if the user is pointing workingDir at an existing
     // github clone, populate the github link silently (origin URL +
@@ -3373,6 +3457,7 @@ export class Store {
       ...(patch.voormanAutoAssignedAt !== undefined
         ? { voormanAutoAssignedAt: patch.voormanAutoAssignedAt }
         : {}),
+      ...(patch.linkedProjectIds !== undefined ? { linkedProjectIds: nextLinkedProjectIds } : {}),
       ...(patch.github !== undefined ? { github: nextGitHub } : {}),
       ...(patch.connectors === null
         ? { connectors: undefined }
@@ -3392,6 +3477,9 @@ export class Store {
         ? { claudePermissionMode: patch.claudePermissionMode }
         : {}),
       ...(patch.nudgeConfig !== undefined ? { nudgeConfig: patch.nudgeConfig } : {}),
+      ...(patch.knowledgeCatalogs !== undefined
+        ? { knowledgeCatalogs: patch.knowledgeCatalogs }
+        : {}),
       ...(patch.tabVisibility !== undefined ? { tabVisibility: patch.tabVisibility } : {}),
       ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
       ...(patch.leadLabel === null
@@ -3456,6 +3544,12 @@ export class Store {
       metaChanged.push('description');
     if (patch.icon !== undefined && patch.icon !== meta.icon) metaChanged.push('icon');
     if (patch.workingDir !== undefined) metaChanged.push('workingDir');
+    if (
+      patch.linkedProjectIds !== undefined &&
+      !isDeepStrictEqual(nextLinkedProjectIds ?? [], meta.linkedProjectIds ?? [])
+    ) {
+      metaChanged.push('linkedProjectIds');
+    }
     if (
       patch.nudgeConfig !== undefined &&
       !isDeepStrictEqual(patch.nudgeConfig, meta.nudgeConfig)
@@ -3689,6 +3783,28 @@ export class Store {
       summary: `Deleted project "${meta.name}"${removeWorkspace ? ' and its workspace' : ''}`,
       details: { name: meta.name, removedWorkspace: removeWorkspace, workspaceSource: source },
     });
+
+    // Links are one-way capabilities. Once the target no longer exists,
+    // remove its id from every source project so settings and prompts do not
+    // retain a dead capability. Cleanup failure never makes an already-safe
+    // deletion look reversible; unresolved ids are ignored by linkedProjectIds.
+    const remaining = await this.listProjects().catch(() => []);
+    await Promise.all(
+      remaining.map(async (project) => {
+        if (!(project.linkedProjectIds ?? []).includes(id)) return;
+        const linkedProjectIds = project.linkedProjectIds!.filter((linkedId) => linkedId !== id);
+        await this.writeProjectMeta({
+          ...project,
+          linkedProjectIds: linkedProjectIds.length > 0 ? linkedProjectIds : undefined,
+          updatedAt: nowIso(),
+        }).catch((err) => {
+          log.warn(
+            `[store] failed to remove deleted project ${id} from links on ${project.id}:`,
+            err,
+          );
+        });
+      }),
+    );
 
     return { name: meta.name, removedWorkspace: removeWorkspace, workspaceSource: source };
   }
@@ -5394,12 +5510,16 @@ export class Store {
     const projectFileIndex = new Map<string, FileInventoryIndex>();
     const uniqueProjects = new Set(sessions.map((s) => s.projectId));
     for (const pid of uniqueProjects) {
-      const hasUnparsedAssistant = sessions.some(
+      const needsReferenceResolution = sessions.some(
         (s) =>
           s.projectId === pid &&
-          s.messages.some((m) => m.role === 'assistant' && !m.referencedFiles),
+          s.messages.some(
+            (m) =>
+              m.role === 'assistant' &&
+              (!m.referencedFiles || hasQualifiedReferenceMismatch(m.content, m.referencedFiles)),
+          ),
       );
-      if (!hasUnparsedAssistant) continue;
+      if (!needsReferenceResolution) continue;
       const [artifacts, workspace] = await Promise.all([
         this.listProjectArtifactsRecursive(pid)
           .then((files) => files.filter((f) => !f.isDirectory).map((f) => f.path))
@@ -5452,10 +5572,12 @@ export class Store {
         // carrying only the legacy artifact-only field is recomputed rather
         // than widened, so existing history gains workspace references too.
         let refs = m.referencedFiles;
-        if (m.role === 'assistant' && !refs) {
+        const mismatchedQualifiedReference =
+          m.role === 'assistant' && !!refs && hasQualifiedReferenceMismatch(m.content, refs);
+        if (m.role === 'assistant' && (!refs || mismatchedQualifiedReference)) {
           const index = projectFileIndex.get(s.projectId);
           const computed = index ? matchReferencedFilesWithIndex(m.content, index) : [];
-          if (computed.length > 0) refs = computed;
+          if (computed.length > 0 || mismatchedQualifiedReference) refs = computed;
           else if (m.referencedArtifacts?.length) {
             refs = referencedFilesFromArtifactPaths(m.referencedArtifacts);
           }
@@ -5490,6 +5612,7 @@ export class Store {
             ? { origin: 'system' as const }
             : {}),
           ...(refs && refs.length > 0 ? { referencedFiles: refs } : {}),
+          ...(m.retrieval && m.retrieval.hits.length > 0 ? { retrieval: m.retrieval } : {}),
           ...(legacyArtifactRefs.length > 0 ? { referencedArtifacts: legacyArtifactRefs } : {}),
           ...(tRefs && tRefs.length > 0 ? { referencedTasks: tRefs } : {}),
           ...(m.toolCalls && m.toolCalls.length > 0 ? { toolCalls: m.toolCalls } : {}),

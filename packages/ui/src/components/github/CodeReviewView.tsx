@@ -1,6 +1,7 @@
 import type { CodeReview, CodeReviewKind } from '@bendyline/gezel';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../api.js';
+import { formatAbsoluteTime } from '../../relative-time.js';
 import { MarkdownField } from '../MarkdownField.js';
 import { CodeReviewStatusCard } from './CodeReviewStatusCard.js';
 import { GIT_COPY, friendlyDate, plural, reviewKindWord } from './gitCopy.js';
@@ -119,7 +120,7 @@ export function CodeReviewView({
               <span className="gh-review-history-title">
                 {reviewKindWord(r.kind)} · {r.branch}
               </span>
-              <span className="muted small">
+              <span className="muted small" title={formatAbsoluteTime(r.settledAt ?? r.createdAt)}>
                 {plural(r.filesChanged, 'file')} · {friendlyDate(r.settledAt ?? r.createdAt)}
               </span>
             </button>

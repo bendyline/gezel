@@ -16,10 +16,12 @@ import type {
   FindEntityResponse,
   FindSimilarImagesResponse,
   FindSymbolResponse,
+  ImageRegion,
   ListDependenciesResponse,
   ListEntityMentionsResponse,
   ListFileIssuesRequest,
   ListFileIssuesResponse,
+  ListPeopleResponse,
   MapAttackSurfaceResponse,
   MapRepoResponse,
   OutlineFileResponse,
@@ -57,6 +59,13 @@ import { buildFileMap } from '../filemap/build.js';
 import { VillageFileStore } from '../filemap/village-file.js';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { ProjectBoekwachterIssueRecord, Store } from '../fs/store.js';
+import type {
+  FaceDetectOutcome,
+  FaceModelPaths,
+  ImageEmbedJob,
+  ImageEmbedOutcome,
+} from '../memory/image-embeddings.js';
+import { IMAGE_EMBED_EXTS } from '../memory/image-pixels.js';
 import { runSecurityScan } from '../security/scan.js';
 import { type AiShadowDeps, aiShadowFile } from './ai-shadow.js';
 import { ARCHITECTURE_KEY, type AreaPassResult, runAreaPass } from './area-pass.js';
@@ -68,8 +77,10 @@ import {
 import { classifyFile } from './classify.js';
 import type { ContentIndexStats } from './content-indexer.js';
 import { ensureShadowDocSidecar, isConvertibleDoc, shadowDocFilesPaths } from './docs.js';
-import { type EnrichDeps, enrichFile } from './enrich.js';
+import { type EnrichDeps, embedOnlyFile, enrichFile } from './enrich.js';
 import { buildEntitiesFromMetadata } from './entities.js';
+import { ensureFaceModels, installedFaceModels } from './face/catalog.js';
+import { clusterNewFaces, mergeFaceClusters, syncPersonEntities } from './face/clustering.js';
 import { refreshGitStats } from './git-stats.js';
 import { ensureIndexGitignore } from './gitignore.js';
 import {
@@ -1080,7 +1091,7 @@ export class ContentIndex {
 
       const hits = index.searchCodeHybrid(
         mode === 'keyword' ? null : queryVector,
-        query,
+        mode === 'semantic' ? null : query,
         limit + 1,
       );
       const truncated = hits.length > limit;
@@ -1150,15 +1161,21 @@ export class ContentIndex {
     eligible: number;
     summarized: number;
     embedded: number;
+    searchReady: number;
     pending: number;
     skipped: number;
     shadowsPending: number;
+    embedOnlyPending: number;
     embedModel?: string;
+    vectorsAvailable: boolean;
   } | null> {
     const opened = await this.open(projectId);
     if (!opened) return null;
     try {
-      return opened.index.enrichmentCounts();
+      // vectorsAvailable rides along so status can distinguish "embedding
+      // still pending" from "this index cannot store vectors at all"
+      // (sqlite-vec failed to load — hybrid search is silently keyword-only).
+      return { ...opened.index.enrichmentCounts(), vectorsAvailable: opened.index.vecAvailable };
     } finally {
       opened.index.close();
     }
@@ -1209,6 +1226,198 @@ export class ContentIndex {
         embedded += r.embedded;
       });
       return { files, summarized, embedded };
+    } finally {
+      index.close();
+    }
+  }
+
+  /**
+   * Run one batch of the always-on embed-only tier: give chunks vectors with
+   * no LLM involved, so semantic search works before any Boekwachter joins
+   * the roster. Deliberately serial and modest — the shared embeddings worker
+   * does the work, and this runs ahead of (not instead of) the roster-gated
+   * enrichment tiers. Stops the batch early when embeddings are unavailable
+   * so one outage can't burn every file's attempt budget.
+   */
+  async embedOnly(
+    projectId: string,
+    limit = 10,
+  ): Promise<{ files: number; embedded: number } | null> {
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    const { index, workspaceDir, artifactsDir } = opened;
+    try {
+      if (!index.vecAvailable) return { files: 0, embedded: 0 };
+      const { embedBatch } = await import('../memory/embeddings.js');
+      let files = 0;
+      let embedded = 0;
+      for (const file of index.filesNeedingEmbedOnly(limit)) {
+        const outcome = await embedOnlyFile(index, workspaceDir, artifactsDir, file, embedBatch);
+        files++;
+        if (outcome === 'embedded') embedded++;
+        if (outcome === 'unavailable') break;
+      }
+      return { files, embedded };
+    } finally {
+      index.close();
+    }
+  }
+
+  /**
+   * Run one batch of the always-on IMAGE-embed tier (lane A of image search):
+   * CLIP vectors into the hash-keyed image_vectors table, no LLM involved.
+   * Same pre-Boekwachter placement discipline as {@link embedOnly}; unlike it,
+   * this does NOT require sqlite-vec — image vectors are plain BLOBs. Per-image
+   * outcomes consume the gate (ok / terminal unsupported / capped attempt); a
+   * pipeline-level failure sets `unavailable` so callers stop the drain instead
+   * of burning every file's attempt budget in one outage. `embed` is a test
+   * seam; production lazily imports the real worker-backed embedder.
+   */
+  async embedImages(
+    projectId: string,
+    limit = 5,
+    embed?: (jobs: ImageEmbedJob[]) => Promise<ImageEmbedOutcome[]>,
+  ): Promise<{ files: number; embedded: number; unavailable: boolean } | null> {
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    const { index, workspaceDir } = opened;
+    try {
+      let files = 0;
+      let embedded = 0;
+      const jobs: Array<{ path: string; hash: string; relPath: string }> = [];
+      for (const f of index.filesNeedingImageEmbed(limit)) {
+        if (!f.hash) continue;
+        const ext = f.path.slice(f.path.lastIndexOf('.')).toLowerCase();
+        const abs = IMAGE_EMBED_EXTS.has(ext) ? safeJoin(workspaceDir, f.path) : null;
+        if (!abs) {
+          // No pure-JS decoder for the format (or an unresolvable path):
+          // terminal for this hash, cheap — the embedder never runs.
+          index.markImageEmbedUnsupported(f.hash, f.path);
+          files++;
+          continue;
+        }
+        jobs.push({ path: abs, hash: f.hash, relPath: f.path });
+      }
+      if (jobs.length === 0) return { files, embedded, unavailable: false };
+      const embedFn = embed ?? (await import('../memory/image-embeddings.js')).embedImageFiles;
+      let outcomes: ImageEmbedOutcome[];
+      try {
+        outcomes = await embedFn(jobs.map(({ path, hash }) => ({ path, hash })));
+      } catch {
+        // Model unloadable / cooldown — process-wide, not these files' fault.
+        // One capped attempt on the first job for poison-input safety (the
+        // embedOnlyFile discipline), then tell the caller to stop the drain.
+        const first = jobs[0]!;
+        index.markImageEmbedAttempt(first.hash, first.relPath);
+        return { files, embedded, unavailable: true };
+      }
+      const byHash = new Map(jobs.map((j) => [j.hash, j]));
+      for (const outcome of outcomes) {
+        const job = byHash.get(outcome.hash);
+        if (!job) continue;
+        files++;
+        if ('vector' in outcome) {
+          index.putImageVector(job.hash, job.relPath, outcome.vector);
+          index.markImageEmbedOk(job.hash, job.relPath);
+          embedded++;
+        } else if ('skip' in outcome) {
+          index.markImageEmbedUnsupported(job.hash, job.relPath);
+        } else {
+          index.markImageEmbedAttempt(job.hash, job.relPath);
+        }
+      }
+      return { files, embedded, unavailable: false };
+    } finally {
+      index.close();
+    }
+  }
+
+  /**
+   * Download the pinned face models if missing (~261 MB, sha256-verified).
+   * Called by the enrichment manager once the biometric opt-in is on —
+   * {@link faceIndex} itself never touches the network.
+   */
+  async ensureFaceModelsInstalled(): Promise<boolean> {
+    return (await ensureFaceModels(this.home)) !== null;
+  }
+
+  /**
+   * Run one batch of the face tier (lane B, biometric opt-in — the CALLER
+   * checks `config.faceRecognition.enabled` and has already ensured the
+   * models are installed): detect faces, embed them, cluster incrementally,
+   * and refresh Person entities. `deps` is the test seam for both the
+   * detector and the model paths.
+   */
+  async faceIndex(
+    projectId: string,
+    limit = 5,
+    deps?: {
+      detect?: (jobs: ImageEmbedJob[], models: FaceModelPaths) => Promise<FaceDetectOutcome[]>;
+      models?: FaceModelPaths;
+    },
+  ): Promise<{ files: number; faces: number; unavailable: boolean } | null> {
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    const { index, workspaceDir } = opened;
+    try {
+      const candidates = index.filesNeedingFaceIndex(limit);
+      if (candidates.length === 0) return { files: 0, faces: 0, unavailable: false };
+      // Never downloads: the manager's opt-in path calls
+      // ensureFaceModelsInstalled() first, so a missing install here is a
+      // fast, network-free "unavailable".
+      const models = deps?.models ?? installedFaceModels(this.home);
+      if (!models) return { files: 0, faces: 0, unavailable: true };
+
+      let files = 0;
+      let faces = 0;
+      const jobs: Array<{ path: string; hash: string; relPath: string }> = [];
+      for (const f of candidates) {
+        if (!f.hash) continue;
+        const ext = f.path.slice(f.path.lastIndexOf('.')).toLowerCase();
+        const abs = IMAGE_EMBED_EXTS.has(ext) ? safeJoin(workspaceDir, f.path) : null;
+        if (!abs) {
+          index.markFaceUnsupported(f.hash, f.path);
+          files++;
+          continue;
+        }
+        jobs.push({ path: abs, hash: f.hash, relPath: f.path });
+      }
+      if (jobs.length === 0) return { files, faces, unavailable: false };
+
+      const detectFn = deps?.detect ?? (await import('../memory/image-embeddings.js')).detectFaces;
+      let outcomes: FaceDetectOutcome[];
+      try {
+        outcomes = await detectFn(
+          jobs.map(({ path, hash }) => ({ path, hash })),
+          models,
+        );
+      } catch {
+        const first = jobs[0]!;
+        index.markFaceAttempt(first.hash, first.relPath);
+        return { files, faces, unavailable: true };
+      }
+      const byHash = new Map(jobs.map((j) => [j.hash, j]));
+      let touchedClusters = false;
+      for (const outcome of outcomes) {
+        const job = byHash.get(outcome.hash);
+        if (!job) continue;
+        files++;
+        if ('faces' in outcome) {
+          clusterNewFaces(index, job.hash, job.relPath, outcome.faces);
+          index.markFaceOk(job.hash, job.relPath, outcome.faces.length);
+          faces += outcome.faces.length;
+          if (outcome.faces.length > 0) touchedClusters = true;
+        } else if ('skip' in outcome) {
+          index.markFaceUnsupported(job.hash, job.relPath);
+        } else {
+          index.markFaceAttempt(job.hash, job.relPath);
+        }
+      }
+      if (touchedClusters) {
+        mergeFaceClusters(index);
+        syncPersonEntities(index);
+      }
+      return { files, faces, unavailable: false };
     } finally {
       index.close();
     }
@@ -1274,6 +1483,46 @@ export class ContentIndex {
     if (!opened) return null;
     try {
       return opened.index.getAreaSummary(ARCHITECTURE_KEY)?.summaryMd ?? null;
+    } finally {
+      opened.index.close();
+    }
+  }
+
+  /**
+   * Query the deep-pass folder/project rollups without another embedding or
+   * schema migration. These are a small corpus (usually tens of rows), so a
+   * deterministic token-overlap rank is cheaper and easier to keep current
+   * than a second FTS mirror.
+   */
+  async searchAreaSummaries(
+    projectId: string,
+    query: string,
+    maxResults = 5,
+  ): Promise<Array<{ areaPath: string; summary: string; score: number }>> {
+    const opened = await this.open(projectId);
+    if (!opened) return [];
+    try {
+      const queryTokens = searchTokens(query);
+      if (queryTokens.size === 0) return [];
+      return opened.index
+        .allAreaSummaries()
+        .map((area) => {
+          const haystack = searchTokens(`${area.areaPath} ${area.summaryMd}`);
+          let matches = 0;
+          for (const token of queryTokens) {
+            if (haystack.has(token)) matches++;
+          }
+          const coverage = matches / queryTokens.size;
+          const density = matches / Math.max(1, Math.min(12, haystack.size));
+          return {
+            areaPath: area.areaPath,
+            summary: area.summaryMd,
+            score: Math.min(1, coverage * 0.8 + density * 0.2),
+          };
+        })
+        .filter((area) => area.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, maxResults);
     } finally {
       opened.index.close();
     }
@@ -1639,6 +1888,7 @@ export class ContentIndex {
             sourcePath: h.filePath,
             markdownPath: shadow ? `artifacts/${shadow.mdRel}` : h.filePath,
             lineStart: h.lineStart,
+            lineEnd: h.lineEnd,
             snippet: h.snippet,
           };
         }),
@@ -1677,6 +1927,7 @@ export class ContentIndex {
         return {
           path: hit.path,
           lineStart: hit.lineStart,
+          lineEnd: hit.lineEnd,
           snippet: hit.snippet,
           score: hit.score,
           ...(shadow && isConvertibleDoc(hit.path.split('.').pop() ?? '')
@@ -1779,7 +2030,7 @@ export class ContentIndex {
     query: string,
     maxResults = 20,
   ): Promise<{
-    results: Array<{ path: string; lineStart: number; snippet: string }>;
+    results: Array<{ path: string; lineStart: number; lineEnd: number; snippet: string }>;
     truncated: boolean;
   }> {
     const index = await this.openArtifacts(projectId);
@@ -1791,6 +2042,7 @@ export class ContentIndex {
         results: hits.slice(0, maxResults).map((h) => ({
           path: h.filePath,
           lineStart: h.lineStart,
+          lineEnd: h.lineEnd,
           snippet: h.snippet,
         })),
         truncated: hits.length > maxResults,
@@ -1876,12 +2128,16 @@ export class ContentIndex {
     if (!opened) return { results: [], engine: 'unavailable', truncated: false };
     const { index } = opened;
     try {
-      const chunkId = index.imageChunkId(relPath);
-      const all = index.allImageVectors();
-      const target = chunkId != null ? all.find((v) => v.chunkId === chunkId) : undefined;
+      const hash = index.getFile(relPath)?.hash;
+      const target = hash ? index.imageVectorByHash(hash) : null;
+      // Mid-migration remnants with a different dim can't be compared.
+      const all = target
+        ? index.allImageVectors().filter((v) => v.vec.length === target.vec.length)
+        : [];
       if (!target || all.length <= 1) {
-        // No CLIP embeddings yet (boekwachter hasn't captioned images) → can't
-        // do visual similarity. Degrades honestly.
+        // No image embeddings yet (the embed tier hasn't reached this file, or
+        // no embedder is available) → can't do visual similarity. Degrades
+        // honestly.
         return { results: [], engine: 'unavailable', truncated: false };
       }
       const scored = all
@@ -1968,6 +2224,100 @@ export class ContentIndex {
     }
   }
 
+  // ── people (face lane) ─────────────────────────────────────────────────────
+
+  /** Person clusters with counts + sample images for the People UI. */
+  async listPeople(projectId: string, maxSamples = 4): Promise<ListPeopleResponse> {
+    const opened = await this.open(projectId);
+    if (!opened) return { people: [], available: false };
+    const { index } = opened;
+    try {
+      const membersByCluster = new Map<string, ReturnType<IndexStore['faceVectors']>>();
+      for (const v of index.faceVectors()) {
+        if (!v.clusterId) continue;
+        const list = membersByCluster.get(v.clusterId) ?? [];
+        list.push(v);
+        membersByCluster.set(v.clusterId, list);
+      }
+      const people: ListPeopleResponse['people'] = [];
+      for (const entity of index.findEntities(undefined, { kind: 'person', limit: 200 })) {
+        const members = membersByCluster.get(entity.canonical) ?? [];
+        const cluster = index.faceClusters().find((c) => c.id === entity.canonical);
+        const exemplarMember = cluster?.exemplarHash
+          ? members.find(
+              (m) => m.contentHash === cluster.exemplarHash && m.faceIndex === cluster.exemplarFace,
+            )
+          : undefined;
+        const toSample = (m: (typeof members)[number]) => {
+          const region = parseRegionJson(m.region);
+          return { path: m.filePath, ...(region ? { region } : {}) };
+        };
+        people.push({
+          entityId: entity.id,
+          label: entity.label,
+          clusterId: entity.canonical,
+          count: members.length,
+          ...(exemplarMember ? { exemplar: toSample(exemplarMember) } : {}),
+          samples: members.slice(0, maxSamples).map(toSample),
+        });
+      }
+      people.sort((a, b) => b.count - a.count);
+      return { people, available: true };
+    } finally {
+      index.close();
+    }
+  }
+
+  /** Rename a person entity ("Who is this?" → user-assigned label). */
+  async renamePerson(projectId: string, entityId: number, label: string): Promise<boolean> {
+    const opened = await this.open(projectId);
+    if (!opened) return false;
+    try {
+      const entity = opened.index.entityById(entityId);
+      if (!entity || entity.kind !== 'person') return false;
+      opened.index.updateEntityLabel(entityId, label);
+      return true;
+    } finally {
+      opened.index.close();
+    }
+  }
+
+  /**
+   * Forget a person: delete the entity + mentions, tombstone the cluster so
+   * new photos of them are absorbed silently instead of resurrecting as a
+   * fresh "Person N". This is "stop showing me this person" — data erasure
+   * is {@link wipeAllFaceData}.
+   */
+  async forgetPerson(projectId: string, entityId: number): Promise<boolean> {
+    const opened = await this.open(projectId);
+    if (!opened) return false;
+    try {
+      const entity = opened.index.entityById(entityId);
+      if (!entity || entity.kind !== 'person') return false;
+      opened.index.deleteEntity(entityId);
+      opened.index.markFaceClusterForgotten(entity.canonical);
+      return true;
+    } finally {
+      opened.index.close();
+    }
+  }
+
+  /** Data erasure: face vectors, clusters, gates, and person entities everywhere. */
+  async wipeAllFaceData(projectIds: string[]): Promise<number> {
+    let wiped = 0;
+    for (const projectId of projectIds) {
+      const opened = await this.open(projectId).catch(() => null);
+      if (!opened) continue;
+      try {
+        opened.index.wipeFaceData();
+        wiped++;
+      } finally {
+        opened.index.close();
+      }
+    }
+    return wiped;
+  }
+
   async listEntityMentions(
     projectId: string,
     entity: string,
@@ -1981,10 +2331,13 @@ export class ContentIndex {
       if (!match) return { found: false, mentions: [] };
       const mentions = index.entityMentions(match.id, maxResults).map((m) => {
         const date = index.getMetadata(m.filePath).date;
+        const region = parseRegionJson(m.region);
         return {
           path: m.filePath,
           ...(m.line != null ? { line: m.line } : {}),
           ...(date ? { date } : {}),
+          ...(region ? { region } : {}),
+          ...(m.confidence != null ? { confidence: m.confidence } : {}),
         };
       });
       // Order by date when available (the entity_timeline view).
@@ -2168,6 +2521,26 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** Cosine similarity between two equal-length vectors. */
+/** Tolerant parse of a face_vectors/entity_mentions region JSON column. */
+function parseRegionJson(raw: string | null): ImageRegion | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<ImageRegion> | null;
+    if (
+      parsed &&
+      typeof parsed.x === 'number' &&
+      typeof parsed.y === 'number' &&
+      typeof parsed.w === 'number' &&
+      typeof parsed.h === 'number'
+    ) {
+      return { x: parsed.x, y: parsed.y, w: parsed.w, h: parsed.h };
+    }
+  } catch {
+    /* stored by us, but stay tolerant of hand-edited dbs */
+  }
+  return null;
+}
+
 function cosine(a: Float32Array, b: Float32Array): number {
   const n = Math.min(a.length, b.length);
   let dot = 0;
@@ -2402,4 +2775,34 @@ function severityRank(s: SecuritySeverity): number {
 }
 function maxSeverity(a: SecuritySeverity, b: SecuritySeverity): SecuritySeverity {
   return severityRank(b) > severityRank(a) ? b : a;
+}
+
+const SEARCH_STOP_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'for',
+  'how',
+  'in',
+  'is',
+  'of',
+  'on',
+  'or',
+  'the',
+  'to',
+  'with',
+]);
+
+function searchTokens(text: string): Set<string> {
+  const tokens =
+    text
+      .normalize('NFKC')
+      .toLocaleLowerCase()
+      .match(/[\p{L}\p{N}_]+/gu) ?? [];
+  return new Set(
+    tokens
+      .filter((token) => !SEARCH_STOP_WORDS.has(token))
+      .map((token) => (token.length > 4 && token.endsWith('s') ? token.slice(0, -1) : token)),
+  );
 }

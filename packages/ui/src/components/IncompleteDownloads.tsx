@@ -37,11 +37,11 @@ export function IncompleteDownloads({
               </span>
               <span style={{ display: 'inline-flex', gap: '0.75rem' }}>
                 {d.resumable && (
-                  <button type="button" className="home-link" onClick={() => onResume(d.id)}>
+                  <button type="button" className="gz-link-button" onClick={() => onResume(d.id)}>
                     Resume
                   </button>
                 )}
-                <button type="button" className="home-link" onClick={() => onDelete(d.id)}>
+                <button type="button" className="gz-link-button" onClick={() => onDelete(d.id)}>
                   Delete
                 </button>
               </span>

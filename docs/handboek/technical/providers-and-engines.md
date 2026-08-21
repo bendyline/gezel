@@ -3,6 +3,10 @@ id: providers-and-engines
 title: Providers and engines
 order: 3
 summary: Working with cloud models through the Claude and Codex CLIs, local engines, and how credentials are handled.
+subcategory:
+  id: how-gezel-works
+  title: How Gezel works
+  order: 1
 ---
 
 # Providers and engines

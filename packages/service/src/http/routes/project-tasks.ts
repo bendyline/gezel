@@ -11,6 +11,7 @@ import {
   type Task,
   type TaskNoteAuthor,
   TaskStatusSchema,
+  type TaskWaitState,
   UpdateTaskCraftbookRequestSchema,
   UpdateTaskNoteRequestSchema,
   UpdateTaskRequestSchema,
@@ -56,6 +57,16 @@ const ListFilterSchema = z.object({
   assignee: z.string().optional(),
 });
 
+/**
+ * Narrow the runner's live queue to the tasks in this response. Scoping
+ * to what was actually listed keeps a project request from leaking other
+ * projects' refs, and keeps the payload proportional to the page.
+ */
+function waitingFor(ctx: ServiceContext, tasks: Task[]): TaskWaitState[] {
+  const refs = new Set(tasks.map((task) => task.ref));
+  return ctx.taskRunner.waitingStates().filter((state) => refs.has(state.ref));
+}
+
 function parseNum(raw: string | undefined): number | null {
   if (!raw) return null;
   const n = Number.parseInt(raw, 10);
@@ -99,7 +110,7 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
       ...(filter.status ? { status: filter.status } : {}),
       ...(filter.assignee ? { assigneeGezelId: filter.assignee } : {}),
     });
-    return c.json({ tasks });
+    return c.json({ tasks, waiting: waitingFor(ctx, tasks) });
   });
 
   app.post('/:projectId/tasks', async (c) => {
@@ -560,7 +571,7 @@ export function globalTaskRoutes(ctx: ServiceContext): Hono {
       ...(filter.status ? { status: filter.status } : {}),
       ...(filter.assignee ? { assigneeGezelId: filter.assignee } : {}),
     });
-    return c.json({ tasks });
+    return c.json({ tasks, waiting: waitingFor(ctx, tasks) });
   });
   return app;
 }

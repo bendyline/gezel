@@ -21,13 +21,25 @@ type Auth = {
   team?: boolean;
 };
 
-function appWith(auth: Auth | null, mode: TokenScopeMode = 'enforce', log?: (m: string) => void) {
+function appWith(
+  auth: Auth | null,
+  mode: TokenScopeMode = 'enforce',
+  log?: (m: string) => void,
+  isProjectLinked?: (source: string, target: string) => Promise<boolean>,
+) {
   const app = new Hono();
   app.use('*', async (c, next) => {
     if (auth) c.set('auth', auth);
     await next();
   });
-  app.use('/api/projects/*', projectScopeGuard({ mode, ...(log ? { log } : {}) }));
+  app.use(
+    '/api/projects/*',
+    projectScopeGuard({
+      mode,
+      ...(log ? { log } : {}),
+      ...(isProjectLinked ? { isProjectLinked } : {}),
+    }),
+  );
   app.all('*', (c) => c.json({ ok: true }));
   return app;
 }
@@ -83,6 +95,20 @@ describe('projectScopeGuard', () => {
     const json = (await res.json()) as { error: string };
     expect(json.error).toContain('proj-a');
     expect(json.error).toContain('proj-b');
+  });
+
+  it('admits only file routes on an explicitly linked project', async () => {
+    const linked = vi.fn(
+      async (source: string, target: string) => source === 'proj-a' && target === 'proj-b',
+    );
+    const app = appWith(session('proj-a'), 'enforce', undefined, linked);
+    const headers = { 'x-gezel-linked-from': 'proj-a' };
+    expect(
+      (await app.request('/api/projects/proj-b/workspace/read?path=x', { headers })).status,
+    ).toBe(200);
+    expect((await app.request('/api/projects/proj-b/tasks/1', { headers })).status).toBe(403);
+    expect((await app.request('/api/projects/proj-b/workspace/read?path=x')).status).toBe(403);
+    expect(linked).toHaveBeenCalledWith('proj-a', 'proj-b');
   });
 
   it('lets a TEAM (coordinator) session reach any project', async () => {
@@ -321,13 +347,16 @@ describe('gezelScopeGuard', () => {
   });
 });
 
-function sessionPolicyApp(auth: Auth | null) {
+function sessionPolicyApp(
+  auth: Auth | null,
+  isProjectLinked?: (source: string, target: string) => Promise<boolean>,
+) {
   const app = new Hono();
   app.use('*', async (c, next) => {
     if (auth) c.set('auth', auth);
     await next();
   });
-  const guard = sessionRouteGuard();
+  const guard = sessionRouteGuard({ ...(isProjectLinked ? { isProjectLinked } : {}) });
   app.use('/api/*', guard);
   app.use('/events/*', guard);
   app.all('*', (c) => c.json({ ok: true }));
@@ -348,6 +377,32 @@ describe('sessionRouteGuard', () => {
     expect((await app.request('/api/projects/proj-a/workspace')).status).toBe(200);
     expect((await app.request('/api/projects/proj-a/tasks/1')).status).toBe(200);
     expect((await app.request('/api/projects/proj-b/workspace')).status).toBe(403);
+  });
+
+  it('allows linked workspace CRUD without opening other target-project capabilities', async () => {
+    const app = sessionPolicyApp(
+      session('proj-a'),
+      async (source, target) => source === 'proj-a' && target === 'proj-b',
+    );
+    const headers = { 'x-gezel-linked-from': 'proj-a' };
+    expect((await app.request('/api/projects/proj-b/workspace', { headers })).status).toBe(200);
+    expect(
+      (
+        await app.request('/api/projects/proj-b/workspace/file', {
+          method: 'PUT',
+          headers: { ...headers, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            path: 'x.txt',
+            content: 'x',
+            gezelId: 'gz-1',
+            sessionId: 'proj-a',
+          }),
+        })
+      ).status,
+    ).toBe(200);
+    expect((await app.request('/api/projects/proj-b/artifacts', { headers })).status).toBe(403);
+    expect((await app.request('/api/projects/proj-b/tasks/1', { headers })).status).toBe(403);
+    expect((await app.request('/api/projects/proj-b', { headers })).status).toBe(403);
   });
 
   it('lets coordinator sessions cross projects but still blocks UI/admin capabilities', async () => {
@@ -515,6 +570,36 @@ describe('sessionRouteGuard', () => {
         )
       ).status,
     ).toBe(403);
+  });
+
+  it('binds generic project search private memory to the current gezel', async () => {
+    const app = sessionPolicyApp(session('proj-a'));
+    expect(
+      (
+        await app.request(
+          '/api/projects/proj-a/tools/search',
+          jsonPost({ query: 'vehicle physics', gezelId: 'gz-1' }),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await app.request(
+          '/api/projects/proj-a/tools/search',
+          jsonPost({ query: 'vehicle physics', gezelId: 'gz-2' }),
+        )
+      ).status,
+    ).toBe(403);
+    // Omitting the gezel id intentionally disables private-memory search and
+    // remains safe for non-MCP callers.
+    expect(
+      (
+        await app.request(
+          '/api/projects/proj-a/tools/search',
+          jsonPost({ query: 'vehicle physics' }),
+        )
+      ).status,
+    ).toBe(200);
   });
 
   it('admits only coordinator, project-scoped craftbook toolset installs and requests', async () => {

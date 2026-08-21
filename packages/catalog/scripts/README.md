@@ -82,10 +82,12 @@ GITHUB_TOKEN=ghp_xxx pnpm --filter @bendyline/gezel-catalog import-mcp-registry 
 pnpm --filter @bendyline/gezel-catalog import-mcp-registry --prune --dry-run --verbose
 
 # routine refresh: pull what changed, drop what's gone
-GITHUB_TOKEN=ghp_xxx pnpm --filter @bendyline/gezel-catalog import-mcp-registry --prune
+GITHUB_TOKEN=ghp_xxx pnpm --filter @bendyline/gezel-catalog import-mcp-registry \
+  --prune --keep-versions=2
 
 # full re-import
-GITHUB_TOKEN=ghp_xxx pnpm --filter @bendyline/gezel-catalog import-mcp-registry --full --prune
+GITHUB_TOKEN=ghp_xxx pnpm --filter @bendyline/gezel-catalog import-mcp-registry \
+  --full --prune --keep-versions=2
 ```
 
 ### Flags
@@ -99,7 +101,7 @@ GITHUB_TOKEN=ghp_xxx pnpm --filter @bendyline/gezel-catalog import-mcp-registry 
 | `--prune` | Reconcile on-disk entries against upstream and remove the ones it no longer vouches for. Rejected with `--package` / `--limit`. |
 | `--prune-max-ratio=<F>` | Ratio ceiling for the prune guard (default `0.1`). |
 | `--all-versions` | Import every published version, not just the newest. See [Version sprawl](#version-sprawl). |
-| `--keep-versions=<N>` | Trim each imported toolset to its newest N eligible versions. Off by default. Rejected with `--package` / `--limit`. |
+| `--keep-versions=<N>` | Trim each imported toolset to its newest N eligible versions, while retaining folders referenced by `yankedVersions`. Off by default; routine community refreshes use `2`. Rejected with `--package` / `--limit`. |
 | `--retain-only` | Trim version history and nothing else — no import, no reconcile, no network. Requires `--keep-versions`. |
 | `--dry-run` | Compute outcomes without touching disk. |
 | `--verbose` | Per-entry stdout. |
@@ -163,36 +165,37 @@ the archive when you deliberately want it, e.g. reconstructing a yank
 chain.
 
 **Retention.** `--keep-versions=N` trims each imported toolset down to
-its newest N eligible versions. It is **off by default and belongs in
-its own PR**: compacting rewrites files already in gilde's git history,
-and a routine refresh should not produce that churn. `3` is a reasonable
-value — two fallbacks deep. Pair it with `--retain-only`: retention reads
-only local disk, so that mode touches no network and finishes in seconds
-instead of paying for a listing sweep it makes no use of.
+its newest N eligible versions, plus every on-disk folder named by the
+identity's `yankedVersions`. Gilde validates those yank references against
+the version tree, so they are required history rather than install
+fallbacks. The routine community policy is `2`: current plus previous.
+The flag remains opt-in at the CLI level so smoke tests and targeted imports
+do not sweep unrelated toolsets. Pair it with `--retain-only` for a local,
+network-free cleanup that finishes in seconds.
 
 ```bash
 # what would it drop?
 pnpm --filter @bendyline/gezel-catalog import-mcp-registry \
-  --retain-only --keep-versions=3 --dry-run
+  --retain-only --keep-versions=2 --dry-run
 
 # do it
 pnpm --filter @bendyline/gezel-catalog import-mcp-registry \
-  --retain-only --keep-versions=3
+  --retain-only --keep-versions=2
 ```
 
-Measured against the checkout as of 2026-08-09, `--keep-versions=3` drops
-8,275 of 14,510 version folders across the 3,910 importer-owned toolsets.
+Measured after the 2026-08-20 full sync, `--keep-versions=2` drops 6,781
+of 20,289 version folders across 11,386 importer-owned toolsets, leaving
+13,508. That retained total includes 21 older folders referenced by
+`yankedVersions`; 142 fully tombstoned toolsets are also left intact.
 
 **Retention's reach is capped by the slug map.** Only slugs recorded in
 `.import-state/import-slug-map.json` are touched, and that file is
 operator-local state — it is not committed alongside the content it
 describes. On a checkout whose state directory has been reset or was
 never populated, on-disk toolsets it doesn't know about are reported as
-`unmapped` and skipped by *both* prune and retention. The same run above
-left 2,428 of 6,338 on-disk toolsets untouched for exactly that reason.
-If a sweep reports a large `unmapped` count, the state directory is stale
-relative to the content — reconcile that first rather than raising any
-ceiling.
+`unmapped` and skipped by *both* prune and retention. If a sweep reports
+a large `unmapped` count, the state directory is stale relative to the
+content — reconcile that first rather than raising any ceiling.
 
 Retention carries no removal-ratio ceiling, unlike `--prune`. That guard
 exists because prune's input is a network sweep and a truncated one looks
@@ -209,6 +212,8 @@ guards are structural instead:
   That state is a deliberate tombstone (every folder yanked), and the
   loaders distinguish `tombstoned` from `no-eligible-versions`; emptying
   `versions/` would silently convert one into the other.
+- Every on-disk folder referenced by `yankedVersions` is retained. Gilde's
+  identity validation requires the reference to name a real version folder.
 - Folder names that aren't semver are never removed. The loaders already
   ignore them, and we don't reorder what we can't parse.
 

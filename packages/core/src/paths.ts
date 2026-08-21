@@ -598,6 +598,51 @@ export function projectHistoryFile(root: string, projectId: string): string {
   return join(projectPrivateDir(root, projectId), 'history.jsonl');
 }
 
+// ── knowledge catalogs (docs/knowledge-catalogs.md) ─────────────────────────
+
+/** Root of the user-private knowledge tier. Owned by the knowledge manager. */
+export function knowledgeDir(root: string): string {
+  return join(root, 'knowledge');
+}
+
+/** The authoritative per-user registry of installed/enabled catalogs. */
+export function knowledgeRegistryFile(root: string): string {
+  return join(knowledgeDir(root), 'registry.json');
+}
+
+/** User-private extracted catalog versions live under this tree. */
+export function knowledgeCatalogsDir(root: string): string {
+  return join(knowledgeDir(root), 'catalogs');
+}
+
+/**
+ * One immutable extracted catalog version:
+ * `knowledge/catalogs/<publisherId>/<catalogId>/<version>/<digest16>/`.
+ * The digest segment makes re-publishing the same version string with
+ * different bytes land in a different directory instead of silently
+ * shadowing the installed one.
+ */
+export function knowledgeCatalogVersionDir(
+  root: string,
+  publisherId: string,
+  catalogId: string,
+  version: string,
+  contentDigest: string,
+): string {
+  return join(
+    knowledgeCatalogsDir(root),
+    publisherId,
+    catalogId,
+    version,
+    contentDigest.slice(0, 16),
+  );
+}
+
+/** Resumable download staging for catalog archives. */
+export function knowledgeDownloadsDir(root: string): string {
+  return join(knowledgeDir(root), 'downloads');
+}
+
 /**
  * Single per-project file holding the array of structured Q&A
  * (`Question` records) created by the `ask_user_question` MCP tool.
@@ -826,14 +871,37 @@ export function craftbookShardPrefix(id: string): string {
   return id.slice(0, 2).toLowerCase();
 }
 
+// ---------- installed AI Apps (.gezapp) ----------
+
+/** Installed AI App packages, kept as versioned catalog slices. */
+export function aiAppsRoot(root: string): string {
+  return join(root, 'ai-apps');
+}
+
+/** Active-version registry for installed AI Apps. */
+export function aiAppsRegistryFile(root: string): string {
+  return join(aiAppsRoot(root), 'registry.json');
+}
+
+export function aiAppVersionDir(root: string, appId: string, version: string): string {
+  return join(aiAppsRoot(root), appId, version);
+}
+
+export function aiAppItemsDir(root: string, appId: string, version: string): string {
+  return join(aiAppVersionDir(root, appId, version), 'items');
+}
+
+export function aiAppReceiptFile(root: string, appId: string, version: string): string {
+  return join(aiAppVersionDir(root, appId, version), 'receipt.json');
+}
+
 // ---------- project types (local catalog source) ----------
 
 /**
  * Local catalog source for user-installed / imported project types. Mirrors
  * the bundled catalog layout under
- * `~/.gezel/project-types/{prefix}/{id}/versions/{version}/`. A `.gzl`
- * import or a "install from gilde" action copies items here so they browse
- * next to the bundled ones. See docs/project-types.md.
+ * `~/.gezel/project-types/{prefix}/{id}/versions/{version}/`. Manually
+ * authored local items browse next to bundled and mounted `.gezapp` items.
  */
 export function projectTypesRoot(root: string): string {
   return join(root, 'project-types');

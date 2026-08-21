@@ -6,7 +6,9 @@ daemon and emits one stable JSON shape for the device safety gate.
 
 Adapters:
 
-- NVIDIA on Windows/Linux: dynamically loads the driver-provided NVML library.
+- NVIDIA on Windows/Linux: dynamically loads the driver-provided NVML library;
+  on Linux it also reports per-process compute/graphics VRAM so the daemon can
+  match supervised engine PIDs without exposing command lines.
 - AMD on Windows: dynamically loads the driver-provided AMD Display Library
   (ADL), queries its performance log, and reads the driver's dedicated-VRAM
   usage counter.

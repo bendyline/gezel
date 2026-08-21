@@ -111,7 +111,7 @@ export function ToolsetConfigForm({
       ))}
       {error && <p className="error small">{error}</p>}
       <div className="toolset-config-actions">
-        <button type="button" className="home-link" onClick={onCancel} disabled={busy}>
+        <button type="button" className="gz-link-button" onClick={onCancel} disabled={busy}>
           Cancel
         </button>
         <button type="submit" disabled={busy}>
@@ -146,14 +146,14 @@ function renderInput(f: ToolsetConfigField, ctx: InputCtx) {
           <code>{ctx.initialSecretMasks[f.id] ?? '****'}</code>
           <button
             type="button"
-            className="home-link"
+            className="gz-link-button"
             onClick={() => ctx.setEditingSecret({ ...ctx.editingSecret, [f.id]: true })}
           >
             Update
           </button>
           <button
             type="button"
-            className="home-link"
+            className="gz-link-button"
             onClick={() => ctx.setSecrets({ ...ctx.secrets, [f.id]: null })}
           >
             Clear

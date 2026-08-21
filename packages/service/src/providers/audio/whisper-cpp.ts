@@ -200,6 +200,11 @@ export class WhisperCppProvider implements SpeechToTextProvider {
       text,
       durationMs: Date.now() - started,
     };
+    // Echo the model that actually ran: the explicit request, else the
+    // documented fallback (first installed model), resolved HERE so the
+    // fallback rule lives in one place and consumers can stamp provenance.
+    const model = input.model ?? (await this.listInstalledModels().catch(() => []))[0]?.id;
+    if (model) out.model = model;
     if (payload.language) out.language = payload.language;
     if (Array.isArray(payload.segments) && payload.segments.length > 0) {
       out.segments = payload.segments

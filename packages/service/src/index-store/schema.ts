@@ -11,7 +11,8 @@ import type { SqliteDriver } from './sqlite-driver.js';
  * duplicated text is cheap relative to the vectors.
  *
  * The vector default dim is 384 (all-MiniLM-L6-v2, the existing embeddings
- * model). `vec_image` (a different model/dim) is created in Phase 5.
+ * model). Image vectors live in the plain-BLOB `image_vectors` table (v12),
+ * not a vec0 table — dimension-agnostic and independent of sqlite-vec.
  *
  * `GEZEL_EMBED_DIM` overrides the text-vector dim to match a non-384
  * `GEZEL_EMBED_MODEL` (the index-bench embedding A/B). It must be set BEFORE
@@ -148,13 +149,79 @@ CREATE TABLE IF NOT EXISTS enrichments (
   attempts INTEGER DEFAULT 0
 );
 
+-- CLIP-style whole-image embeddings (v12). Keyed by content hash, NOT chunk
+-- id: putChunks is delete-then-insert and the AI-shadow tier re-chunks every
+-- image it captions, so a chunk-keyed vector orphans on the first re-chunk
+-- (the original v1 shape had exactly that latent bug — it shipped with zero
+-- writers, so re-keying cost nothing). A plain BLOB, deliberately not vec0:
+-- dimension-agnostic, brute-force cosine is fine at this scale, and image
+-- vectors must work even where sqlite-vec didn't load.
 CREATE TABLE IF NOT EXISTS image_vectors (
-  chunk_id INTEGER PRIMARY KEY,
+  content_hash TEXT PRIMARY KEY,
   collection_id TEXT NOT NULL,
   file_path TEXT NOT NULL,
-  vec BLOB
+  model TEXT,
+  dim INTEGER,
+  vec BLOB,
+  created_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_image_vectors_col ON image_vectors (collection_id);
+
+-- Image-embed gate (v12): same content-addressed discipline as shadow_state.
+-- state 'ok'/'unsupported' consume the gate; 'failed' rows retry while
+-- attempts < the cap. Separate from embed_state (text) so the two tiers'
+-- failure accounting never mixes.
+CREATE TABLE IF NOT EXISTS image_embed_state (
+  content_hash TEXT PRIMARY KEY,
+  collection_id TEXT,
+  file_path TEXT,
+  state TEXT,
+  attempts INTEGER DEFAULT 0,
+  updated_at TEXT
+);
+
+-- Face lane (v12, biometric opt-in). One row per detected face; region is
+-- JSON {x,y,w,h} in source pixels; cluster_id NULL = below the quality gate
+-- or not yet clustered. Vectors are ArcFace-space unit vectors (512-d).
+CREATE TABLE IF NOT EXISTS face_vectors (
+  content_hash TEXT NOT NULL,
+  face_index INTEGER NOT NULL,
+  collection_id TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  region TEXT,
+  quality REAL,
+  cluster_id TEXT,
+  vec BLOB,
+  created_at TEXT,
+  PRIMARY KEY (content_hash, face_index)
+);
+CREATE INDEX IF NOT EXISTS idx_face_vectors_cluster ON face_vectors (cluster_id);
+
+-- Person clusters. centroid = running mean of member vectors, re-normalized.
+-- state 'forgotten' tombstones a user-forgotten person: the centroid is kept
+-- so new photos of them are silently absorbed instead of resurrecting as a
+-- fresh "Person N" (data erasure is the separate wipe path).
+CREATE TABLE IF NOT EXISTS face_clusters (
+  id TEXT PRIMARY KEY,
+  collection_id TEXT NOT NULL,
+  centroid BLOB,
+  size INTEGER DEFAULT 0,
+  exemplar_hash TEXT,
+  exemplar_face INTEGER,
+  state TEXT,
+  updated_at TEXT
+);
+
+-- Face-detection gate, per image hash. faces = count found (0 is a valid 'ok').
+CREATE TABLE IF NOT EXISTS face_state (
+  content_hash TEXT PRIMARY KEY,
+  collection_id TEXT,
+  file_path TEXT,
+  state TEXT,
+  faces INTEGER,
+  attempts INTEGER DEFAULT 0,
+  updated_at TEXT
+);
 
 CREATE TABLE IF NOT EXISTS entities (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -309,6 +376,31 @@ CREATE TABLE IF NOT EXISTS shadow_state (
   updated_at TEXT
 );
 
+-- Embed-only gate (v11): chunks embedded WITHOUT a summarizer, so semantic
+-- search works before any Boekwachter joins the roster. Deliberately a
+-- separate table from enrichments — the full-enrichment pass writes that
+-- gate on success, and reusing it here would consume the summary gate and
+-- permanently block later summarization (a naive embed-only pass poisoned it
+-- exactly that way in design review). Same content-addressed discipline as
+-- shadow_state; a full enrichment supersedes rows here (the work-list also
+-- checks enrichments.embedded_at).
+CREATE TABLE IF NOT EXISTS embed_state (
+  content_hash TEXT PRIMARY KEY,
+  collection_id TEXT,
+  file_path TEXT,
+  embedded_at TEXT,
+  attempts INTEGER DEFAULT 0
+);
+
+-- Symbol-summary retry ledger (v11): a parse or engine failure previously
+-- left nothing behind, silently costing a file its per-symbol one-liners
+-- until its content changed. Capped retries like every other gate; success
+-- needs no row (stored symbol_summaries are the success signal).
+CREATE TABLE IF NOT EXISTS symbol_summary_state (
+  content_hash TEXT PRIMARY KEY,
+  attempts INTEGER DEFAULT 0
+);
+
 -- Mirror of the append-only history JSONL (the audit log). kind/project/gezel/at
 -- are real columns so HistoryFilter fields stay SQL-filterable; only the q text
 -- goes through fts_history. INSERT OR IGNORE on the event id makes JSONL
@@ -339,7 +431,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts_history
   USING fts5(body, event_id UNINDEXED, collection_id UNINDEXED);
 `;
 
-const SCHEMA_VERSION = 10;
+// v11: embed_state table (embed-only gate — additive CREATE, no backfill).
+// v12: image_vectors re-keyed by content_hash (old chunk_id table had zero
+// writers — dropped in place), plus image_embed_state and the face-lane
+// tables (face_vectors/face_clusters/face_state). Additive otherwise.
+const SCHEMA_VERSION = 12;
 
 /**
  * Add a column to an existing table if it isn't already present. SQLite has no
@@ -362,8 +458,26 @@ function addColumnIfMissing(db: SqliteDriver, table: string, column: string, dec
  * Create all tables idempotently. Vector tables are created only when the
  * sqlite-vec extension loaded. Returns whether FTS is available (it always is
  * with a normal sqlite build, but we probe to stay honest).
+ *
+ * `vectors: false` skips vector-table creation entirely — the global FTS
+ * mirror (`global.db`) never stores embeddings, and giving it a `vec_text`
+ * anyway meant every embed-model swap ran a pointless DROP/CREATE + gate
+ * clear against a database with no vectors in it.
  */
-export function applySchema(db: SqliteDriver): { fts: boolean; vec: boolean } {
+export function applySchema(
+  db: SqliteDriver,
+  opts: { vectors?: boolean } = {},
+): { fts: boolean; vec: boolean } {
+  // v11 → v12: the original image_vectors was keyed by chunk_id — an unstable
+  // key (putChunks delete-then-inserts) that shipped with zero writers, so no
+  // install has rows in it. Drop the old shape so BASE_DDL's CREATE IF NOT
+  // EXISTS lays down the content_hash-keyed table.
+  try {
+    const cols = db.prepare('PRAGMA table_info(image_vectors)').all<{ name: string }>();
+    if (cols.some((c) => c.name === 'chunk_id')) db.exec('DROP TABLE image_vectors');
+  } catch {
+    /* introspection failed — BASE_DDL below will surface any real problem */
+  }
   db.exec(BASE_DDL);
 
   // Additive migrations for DBs created before these columns existed (v2 → v3).
@@ -406,14 +520,29 @@ export function applySchema(db: SqliteDriver): { fts: boolean; vec: boolean } {
   }
 
   let vec = false;
-  if (db.vecAvailable) {
+  if (db.vecAvailable && opts.vectors !== false) {
+    // `distance_metric=cosine` matches vec_mem: vectors are L2-normalized so
+    // the RANKING is identical to the L2 default, but the reported distance
+    // scale is not — declaring it keeps any future distance→similarity
+    // conversion from being quietly wrong. `IF NOT EXISTS` means pre-existing
+    // tables keep their original metric until the next re-embed migration
+    // recreates them; fine, because nothing converts vec_text distances.
     try {
       db.exec(
-        `CREATE VIRTUAL TABLE IF NOT EXISTS vec_text USING vec0(embedding float[${TEXT_EMBED_DIM}]);`,
+        `CREATE VIRTUAL TABLE IF NOT EXISTS vec_text USING vec0(embedding float[${TEXT_EMBED_DIM}] distance_metric=cosine);`,
       );
       vec = true;
     } catch {
-      vec = false;
+      // Older sqlite-vec builds reject distance_metric — fall back to the
+      // default (L2), which ranks identically on normalized vectors.
+      try {
+        db.exec(
+          `CREATE VIRTUAL TABLE IF NOT EXISTS vec_text USING vec0(embedding float[${TEXT_EMBED_DIM}]);`,
+        );
+        vec = true;
+      } catch {
+        vec = false;
+      }
     }
   }
 

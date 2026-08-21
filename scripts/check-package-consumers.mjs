@@ -77,6 +77,7 @@ const PUBLISHED = [
   'app-sdk',
   'plugin-sdk',
   'catalog',
+  'knowledge',
   'mcp',
   'service',
   'connectors-spectral',
@@ -110,6 +111,7 @@ const IMPORTABLE = [
   '@bendyline/gezel-app-sdk',
   '@bendyline/gezel-plugin-sdk',
   '@bendyline/gezel-catalog',
+  '@bendyline/gezel-knowledge',
   '@bendyline/gezel-mcp',
 ];
 
@@ -546,6 +548,43 @@ try {
     });
     if (result.status !== 0) fail(`gezel ${args.join(' ')}\n${result.stderr}`);
     else ok(`gezel ${args.join(' ')}`);
+  }
+
+  // A fresh-home one-shot owns an in-process daemon. Its structured startup
+  // and shutdown logs must stay off stdout so shell pipelines receive exactly
+  // the reply and trailing newline.
+  const cliRunHome = mkdtempSync(join(tmpdir(), 'gezel-packed-cli-run-'));
+  const cliRunPrompt = 'Reply exactly with: packed-cli-stdout-only';
+  try {
+    const result = run(
+      process.execPath,
+      [bin, '--home', cliRunHome, '--standalone', 'run', cliRunPrompt],
+      {
+        cwd: consumer,
+        env: {
+          ...process.env,
+          GEZEL_HOME: cliRunHome,
+          GEZEL_MOCK_PROVIDER: '1',
+          GEZEL_DISABLE_MACHINE_ENGINE: '1',
+          GEZEL_SKIP_SYSTEM_BOOTSTRAP: '1',
+          GEZEL_SECRETS_BACKEND: 'file',
+          GEZEL_LOG_LEVEL: 'info',
+        },
+        timeout: 60_000,
+      },
+    );
+    const expected = `Mock reply: ${cliRunPrompt}\n`;
+    if (result.status !== 0) {
+      fail(`gezel run failed\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    } else if (result.stdout !== expected) {
+      fail(
+        `gezel run polluted stdout\nexpected: ${JSON.stringify(expected)}\nactual:   ${JSON.stringify(result.stdout)}\nstderr: ${result.stderr}`,
+      );
+    } else {
+      ok('gezel run keeps stdout reply-only');
+    }
+  } finally {
+    rmSync(cliRunHome, { recursive: true, force: true });
   }
 
   // ── 6. Default install: boot without the optional PTY peer ─────────────

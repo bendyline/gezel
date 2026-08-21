@@ -276,6 +276,12 @@ export function configRoutes(ctx: ServiceContext): Hono {
       // Live gilde content updates toggle (Settings → About). Same
       // whitelist rule as above.
       gildeUpdates: config.gildeUpdates,
+      // Knowledge-catalog defaults (Settings → Knowledge). Same whitelist
+      // rule as above — the registry file stays authoritative for installs.
+      knowledge: config.knowledge,
+      // Face recognition biometric opt-in (Settings → People). Same
+      // whitelist rule as above.
+      faceRecognition: config.faceRecognition,
       // Ambient dashboard + wallpaper toggles (Settings → Ambient
       // display). Same whitelist rule as above.
       ambientDashboard: config.ambientDashboard,

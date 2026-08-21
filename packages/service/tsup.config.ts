@@ -16,6 +16,10 @@ export default defineConfig({
     // inference runs off the Electron main thread; must exist as its own file
     // for `new Worker(...)` to resolve at runtime.
     'memory/embed-worker': 'src/memory/embed-worker.ts',
+    // Sibling worker for CLIP image embeddings (+ the face lane's ONNX
+    // sessions). Separate from embed-worker so the two modalities' models,
+    // memory budgets, and crash accounting stay independent.
+    'memory/image-embed-worker': 'src/memory/image-embed-worker.ts',
     // Deterministic workspace file/classification/symbol/SQLite indexing is
     // CPU-heavy on large repositories. Keep it off the daemon event loop (and
     // therefore off Electron's main thread in embedded dev mode).
@@ -24,13 +28,28 @@ export default defineConfig({
     // metadata can be enormous, so the first inspection must not run on the
     // embedded Electron main thread; subsequent polls hit the parent cache.
     'providers/llama-cpp/gguf-metadata-worker': 'src/providers/llama-cpp/gguf-metadata-worker.ts',
+    // Owns every knowledge-catalog SQLite connection: CatalogHandle is
+    // synchronous (node:sqlite), so shard scans must run off the daemon
+    // loop (gezk-format-v1.md §9).
+    'knowledge/search-worker': 'src/knowledge/search-worker.ts',
     // Standalone subpath (`@bendyline/gezel-service/handboek`) so the CLI's
     // static-site export can run the documentation engine without importing
     // the whole daemon.
     handboek: 'src/handboek/engine.ts',
   },
   format: ['esm'],
-  dts: true,
+  // Only the package's two public import surfaces need bundled declarations.
+  // Passing every executable entry to rollup-plugin-dts also makes its worker
+  // typecheck the daemon and all six internal workers as independent roots.
+  // Those 13-byte `export {}` worker declarations are not published APIs and
+  // can push Node's isolated worker heap over its limit on memory-constrained
+  // builds.
+  dts: {
+    entry: {
+      index: 'src/index.ts',
+      handboek: 'src/handboek/engine.ts',
+    },
+  },
   sourcemap: true,
   clean: true,
   target: 'es2022',

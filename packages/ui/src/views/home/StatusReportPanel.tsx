@@ -4,6 +4,7 @@ import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { useMemo } from 'react';
 import { gezelChatTheme } from '../../components/chat-theme.js';
+import { formatAbsoluteTime } from '../../relative-time.js';
 import { timeAgo } from './utils.js';
 
 /**
@@ -45,7 +46,9 @@ export function StatusReportPanel({
         )}
       </div>
       <div className="home-workshop-status-foot">
-        <span className="home-workshop-status-meta">Written {timeAgo(report.generatedAt)}</span>
+        <span className="home-workshop-status-meta" title={formatAbsoluteTime(report.generatedAt)}>
+          Written {timeAgo(report.generatedAt)}
+        </span>
         {onRefresh && (
           <button
             type="button"

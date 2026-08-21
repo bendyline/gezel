@@ -69,16 +69,19 @@ describe('listings with hidden=1', () => {
   it('workspace hides dotfiles and node_modules by default and shows them on request', async () => {
     const workspaceDir = await svc.context.store.projectWorkspaceDir(projectId);
     await writeFile(join(workspaceDir, '.env'), 'SECRET=1');
+    await writeFile(join(workspaceDir, '~$deck.pptx'), 'lock');
     await mkdir(join(workspaceDir, 'node_modules', 'pkg'), { recursive: true });
     await writeFile(join(workspaceDir, 'node_modules', 'pkg', 'index.js'), '');
 
     const plain = await client.listProjectWorkspace(projectId, '', true);
     expect(plain.files.map((f) => f.path)).not.toContain('.env');
+    expect(plain.files.map((f) => f.path)).not.toContain('~$deck.pptx');
     expect(plain.files.map((f) => f.path)).not.toContain('node_modules');
 
     const hidden = await client.listProjectWorkspace(projectId, '', true, { hidden: true });
     const paths = hidden.files.map((f) => f.path);
     expect(paths).toContain('.env');
+    expect(paths).toContain('~$deck.pptx');
     expect(paths).toContain('node_modules');
     expect(paths).toContain('sub/note.md');
     expect(paths.some((p) => p.startsWith('node_modules/'))).toBe(false);
@@ -122,6 +125,23 @@ describe('GET /api/projects/:id/index/files?detail=1', () => {
     const note = res.files.find((f) => f.path === 'sub/note.md');
     expect(note?.mtimeMs).toBeTypeOf('number');
     expect(note?.size).toBeTypeOf('number');
+  });
+
+  it('hides Office lock files unless hidden=1 is requested', async () => {
+    const workspaceDir = await svc.context.store.projectWorkspaceDir(projectId);
+    await writeFile(join(workspaceDir, '~$deck.pptx'), 'lock');
+    await svc.context.workspaceIndex.refreshAndWait(projectId);
+
+    const plain = await client.listProjectIndexFilesDetail(projectId);
+    expect(plain.files.map((file) => file.path)).not.toContain('~$deck.pptx');
+
+    const httpFetch = svc.cert ? createTrustingFetch({ cert: svc.cert.certPem }) : fetch;
+    const response = await httpFetch(
+      `${svc.cert ? 'https' : 'http'}://127.0.0.1:${svc.port}/api/projects/${projectId}/index/files?detail=1&hidden=1`,
+      { headers: { authorization: `Bearer ${svc.context.token}` } },
+    );
+    const hidden = (await response.json()) as { files: Array<{ path: string }> };
+    expect(hidden.files.map((file) => file.path)).toContain('~$deck.pptx');
   });
 
   it('keeps the prefix-autocomplete mode unchanged', async () => {

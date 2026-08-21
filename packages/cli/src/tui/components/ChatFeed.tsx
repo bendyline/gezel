@@ -11,16 +11,19 @@ const TABLE_LOGO = [
   '   o   /_|            |_\\',
 ].join('\n');
 
-const KIND_COLOR: Record<FeedRow['kind'], string | undefined> = {
-  user: 'white',
-  pending: 'yellow',
-  assistant: 'cyan',
-  thinking: 'magenta',
-  write: 'yellow',
-  tool: 'yellow',
-  note: 'magenta',
-  error: 'red',
-  shell: undefined,
+export const CHAT_FEED_ROW_STYLES: Record<
+  FeedRow['kind'],
+  { color: string | undefined; dimColor: boolean }
+> = {
+  user: { color: 'white', dimColor: false },
+  pending: { color: 'yellow', dimColor: true },
+  assistant: { color: 'cyan', dimColor: false },
+  thinking: { color: 'magentaBright', dimColor: false },
+  write: { color: 'yellow', dimColor: true },
+  tool: { color: 'yellow', dimColor: false },
+  note: { color: 'magenta', dimColor: false },
+  error: { color: 'red', dimColor: false },
+  shell: { color: undefined, dimColor: false },
 };
 
 /**
@@ -56,6 +59,7 @@ export function ChatFeed(props: {
         </Box>
       ) : (
         shown.map((row) => {
+          const rowStyle = CHAT_FEED_ROW_STYLES[row.kind];
           // Shell output is already a terminal-formatted block. Rendering a
           // speaker label inline steals width from only its first line, which
           // makes column-aware output such as `ls` wrap asymmetrically.
@@ -94,16 +98,11 @@ export function ChatFeed(props: {
                 {isFocused ? '▎' : ' '}
               </Text>
               <Text wrap="wrap">
-                <Text bold color={KIND_COLOR[row.kind]}>
+                <Text bold color={rowStyle.color}>
                   {who}
                   {': '}
                 </Text>
-                <Text
-                  color={KIND_COLOR[row.kind]}
-                  dimColor={
-                    row.kind === 'pending' || row.kind === 'thinking' || row.kind === 'write'
-                  }
-                >
+                <Text color={rowStyle.color} dimColor={rowStyle.dimColor}>
                   {clip(
                     row.taskEvent
                       ? taskEventText(row, gezels, boring)

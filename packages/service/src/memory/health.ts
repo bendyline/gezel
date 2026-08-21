@@ -19,7 +19,7 @@
 import { createLogger } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import { parseMemoryDay } from './daily-markdown.js';
-import { embedModelId } from './embed-core.js';
+import { embedProfileId } from './embed-core.js';
 import { embeddingsDisabledReason } from './embeddings.js';
 import type { MemoryManager } from './manager.js';
 import { countIndexed, readEmbedStamp } from './vector-index.js';
@@ -135,7 +135,7 @@ export class MemoryHealthMonitor {
     // cutover re-embeds every existing (MiniLM-built, unstamped) index once.
     // Rebuild stamps the current model, so subsequent sweeps are no-ops.
     const stamp = await readEmbedStamp(indexDir);
-    if (stamp !== embedModelId()) return true;
+    if (stamp !== embedProfileId()) return true;
     // The vector index is a derived cache; if it has fewer rows than the
     // markdown source-of-truth it drifted (manual edits, a crashed save, or a
     // store migration) → rebuild.

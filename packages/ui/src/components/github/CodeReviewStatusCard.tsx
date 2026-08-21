@@ -1,5 +1,6 @@
 import type { CodeReview } from '@bendyline/gezel';
 import { useState } from 'react';
+import { formatAbsoluteTime } from '../../relative-time.js';
 import { ConfirmDialog } from '../ConfirmDialog.js';
 import { GIT_COPY, friendlyDate, plural, reviewKindWord } from './gitCopy.js';
 
@@ -40,7 +41,7 @@ export function CodeReviewStatusCard({ review, onCancel, disabled }: Props) {
             </>
           )}
         </span>
-        <span className="muted small">
+        <span className="muted small" title={formatAbsoluteTime(review.createdAt)}>
           {plural(review.filesChanged, 'file')}
           {progress ? ` · ${progress}` : ''}
           {review.activeStepName ? ` · ${review.activeStepName}` : ''}

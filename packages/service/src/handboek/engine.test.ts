@@ -137,6 +137,21 @@ describe('handboek engine', () => {
       title: 'General work',
       order: 2,
     });
+    const technical = toc.areas.find((a) => a.area === 'technical')!;
+    expect(technical.entries.map((entry) => [entry.id, entry.subcategory?.title])).toEqual([
+      ['architecture', 'How Gezel works'],
+      ['where-files-live', 'How Gezel works'],
+      ['providers-and-engines', 'How Gezel works'],
+      ['tools-and-toolsets', 'How Gezel works'],
+      ['security-model', 'How Gezel works'],
+      ['cli-reference', 'The Gezel Command Line'],
+      ['npm-packages', 'The Gezel Command Line'],
+      ['writing-scripts-with-gezel-sdk', 'Developer'],
+      ['building-connected-apps-with-gezel-app-sdk', 'Developer'],
+      ['building-ai-apps-inside-gezel', 'Developer'],
+      ['how-we-test-models', 'Models and Testing'],
+      ['model-scorecard', 'Models and Testing'],
+    ]);
   });
 
   it('serves a curated article with personalization in app mode', async () => {
@@ -147,11 +162,33 @@ describe('handboek engine', () => {
     expect(article!.generated).toBe(false);
   });
 
+  it('links catalog discovery articles to the public Gezel Gilde', async () => {
+    const engine = makeEngine();
+    for (const [articleId, url] of [
+      ['craftbooks-overview', 'https://gezelgilde.com/craftbooks/'],
+      ['local-models-and-tiers', 'https://gezelgilde.com/models/'],
+      ['roles-index', 'https://gezelgilde.com/roles/'],
+      ['tools-and-toolsets', 'https://gezelgilde.com/toolsets/'],
+      ['tools-and-toolsets', 'https://gezelgilde.com/community/'],
+      ['building-ai-apps-inside-gezel', 'https://gezelgilde.com/toolsets/#project-types'],
+      ['building-ai-apps-inside-gezel', 'https://gezelgilde.com/craftbooks/'],
+      ['building-ai-apps-inside-gezel', 'https://gezelgilde.com/roles/'],
+      ['building-ai-apps-inside-gezel', 'https://gezelgilde.com/models/'],
+    ] as const) {
+      const article = await engine.article(articleId, { mode: 'site' });
+      expect(article!.markdown).toContain(url);
+    }
+  });
+
   it('serves generated craftbook and project-type articles', async () => {
     const engine = makeEngine();
+    const bookIndex = await engine.article('craftbooks-index', { mode: 'site' });
+    expect(bookIndex!.markdown).toContain('https://gezelgilde.com/craftbooks/');
     const book = await engine.article('craftbook/status-report', { mode: 'site' });
     expect(book!.title).toBe('Status Report');
     expect(book!.markdown).toContain('| 1 | Collect | Voorman |');
+    const ptIndex = await engine.article('project-types-index', { mode: 'site' });
+    expect(ptIndex!.markdown).toContain('https://gezelgilde.com/toolsets/#project-types');
     const pt = await engine.article('project-type/web-shop', { mode: 'site' });
     expect(pt!.markdown).toContain('web-developer');
     expect(pt!.markdown).toContain('`0 9 * * 1`');

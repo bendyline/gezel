@@ -244,16 +244,16 @@ function StatusPill({ probe }: { probe: ProbeState }) {
   switch (probe.kind) {
     case 'idle':
     case 'probing':
-      return <span className="home-status-pill">Probing…</span>;
+      return <span className="gz-status-pill">Probing…</span>;
     case 'ready':
-      return <span className="home-status-pill home-status-ok">Ready</span>;
+      return <span className="gz-status-pill gz-status-pill--ok">Ready</span>;
     case 'no-models':
-      return <span className="home-status-pill home-status-warn">No local models</span>;
+      return <span className="gz-status-pill gz-status-pill--warn">No local models</span>;
     case 'engine-not-configured':
-      return <span className="home-status-pill home-status-warn">Engine not configured</span>;
+      return <span className="gz-status-pill gz-status-pill--warn">Engine not configured</span>;
     case 'engine-unreachable':
-      return <span className="home-status-pill home-status-fail">Engine unreachable</span>;
+      return <span className="gz-status-pill gz-status-pill--fail">Engine unreachable</span>;
     case 'probe-failed':
-      return <span className="home-status-pill home-status-fail">Service unreachable</span>;
+      return <span className="gz-status-pill gz-status-pill--fail">Service unreachable</span>;
   }
 }

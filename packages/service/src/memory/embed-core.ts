@@ -13,6 +13,7 @@
  * batch bounds peak allocation regardless of how many texts a caller passes.
  */
 
+import { createHash } from 'node:crypto';
 import { createLogger } from '@bendyline/gezel';
 import {
   HF_CACHE_DIR_ENV,
@@ -74,7 +75,45 @@ export function queryInstruction(): string {
   if (process.env.GEZEL_EMBED_NO_QUERY_INSTRUCTION === '1') return '';
   const model = embedModelId();
   if (/bge-/i.test(model)) return 'Represent this sentence for searching relevant passages: ';
+  // The e5 family (incl. multilingual-e5-*) is trained with BOTH sides
+  // prefixed — "query: " / "passage: " — and measurably underperforms
+  // without them (its model card calls unprefixed use an error).
+  if (/(^|\/|-)e5-/i.test(model) || /multilingual-e5/i.test(model)) return 'query: ';
   return '';
+}
+
+/**
+ * Passage-side counterpart to {@link queryInstruction}. Empty for every
+ * model family except e5, whose training prefixes BOTH sides; bge prefixes
+ * only queries, and symmetric models (MiniLM, gte) prefix nothing — so the
+ * default install's behavior is unchanged by this hook existing.
+ */
+export function passageInstruction(): string {
+  if (process.env.GEZEL_EMBED_NO_QUERY_INSTRUCTION === '1') return '';
+  const model = embedModelId();
+  if (/(^|\/|-)e5-/i.test(model) || /multilingual-e5/i.test(model)) return 'passage: ';
+  return '';
+}
+
+/**
+ * The full embedding-profile identity — everything that determines whether
+ * two stored vectors live in the same space: model id, dimension, pooling,
+ * normalization, and BOTH instruction prefixes (hashed — an instruction
+ * change silently changes vectors, which the bare model-id stamp never
+ * caught; audit finding C5). This string is what the reconcile-on-mismatch
+ * stamps compare (content index `meta.embed_model`, memory `mem_meta`), so
+ * a dim/pooling/prefix change now correctly invalidates vectors the same
+ * way a model swap always has. Old bare-model-id stamps mismatch once and
+ * trigger the already-supported drop-and-re-embed.
+ *
+ * Pooling and normalization are compile-time constants of this pipeline
+ * (`runEmbed` always uses mean+normalize) — encoded literally so a future
+ * change to that call site is forced to bump the profile.
+ */
+export function embedProfileId(): string {
+  const sha8 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex').slice(0, 8);
+  const dim = Number(process.env.GEZEL_EMBED_DIM) || 384;
+  return `${embedModelId()}|d${dim}|mean|norm|q:${sha8(queryInstruction())}|p:${sha8(passageInstruction())}`;
 }
 
 type Pipeline = (
@@ -113,11 +152,18 @@ export class PipelineLoadError extends Error {
  * Keep the retry classification deliberately narrow. Bad model ids, missing
  * native libraries, and incompatible runtimes need operator action; transport
  * failures and registry throttling commonly recover on their own.
+ *
+ * The undici mid-stream abort family (`terminated`, `other side closed`,
+ * `premature close`, `aborted`) is here because its absence was a wild-caught
+ * product bug: a model download killed at ~103s surfaced as a bare
+ * `TypeError: terminated`, classified FATAL, and stickily disabled semantic
+ * search for the daemon's lifetime — silently, since search degrades to
+ * keyword instead of erroring (evals/runs/EMBED-CALIBRATION-2026-08-19.md).
  */
 export function isRetryablePipelineLoadFailure(error: unknown): boolean {
   const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
   const code = (error as NodeJS.ErrnoException | null | undefined)?.code ?? '';
-  return /(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|UND_ERR_|fetch failed|network(?: request)? failed|socket hang up|timed?\s*out|HTTP\s+(?:408|425|429|5\d\d)|TLS|SSL|certificate)/i.test(
+  return /(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|UND_ERR_|ERR_STREAM_PREMATURE_CLOSE|fetch failed|network(?: request)? failed|socket hang up|timed?\s*out|terminated|other side closed|premature close|aborted|HTTP\s+(?:408|425|429|5\d\d)|TLS|SSL|certificate)/i.test(
     `${code} ${message}`,
   );
 }

@@ -1619,6 +1619,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             cacheId,
             this.deps.systemMessage,
             this.deps.systemPromptLayers,
+            // The wire tools this turn will actually send. Warming without
+            // them renders a prompt through a different template branch,
+            // which on Qwen shares 3 tokens with the real turn.
+            body.tools as readonly unknown[] | undefined,
           );
           const extras = adapter.buildRequestExtras(cacheId);
           Object.assign(body, extras);

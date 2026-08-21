@@ -740,13 +740,77 @@ async function resolveRipgrepExecutable(
   timeoutMs: number,
 ): Promise<string | null> {
   const onPath = await resolveExecutableOnPath('rg', forbiddenRoot, timeoutMs);
-  if (onPath) return onPath;
+  // Windows app aliases and stale package-manager shims can be ordinary files
+  // that pass F_OK but still fail at process creation. Probe the exact launch
+  // contract before choosing PATH over the bundled binary. On POSIX, X_OK plus
+  // a direct spawn is the launch contract already: a separate health process
+  // can be starved under load and make us silently switch to a different rg.
+  if (onPath && (process.platform !== 'win32' || (await canRunRipgrep(onPath, timeoutMs)))) {
+    return onPath;
+  }
   try {
     const { rgPath } = await import('@vscode/ripgrep');
-    return await validateExecutable(rgPath, forbiddenRoot);
+    const bundled = await validateTrustedBundledRipgrep(rgPath);
+    if (!bundled) return null;
+    return process.platform !== 'win32' || (await canRunRipgrep(bundled, timeoutMs))
+      ? bundled
+      : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * The path comes from the statically imported @vscode/ripgrep package, not a
+ * model or workspace argument. It may legitimately sit under the project root
+ * in self-hosted development, so validate its file identity without applying
+ * the general "no workspace executables" rule used for PATH candidates.
+ */
+async function validateTrustedBundledRipgrep(candidate: string): Promise<string | null> {
+  if (!isAbsolute(candidate) || !/^rg(?:\.exe)?$/i.test(basename(candidate))) return null;
+  try {
+    const executable = await realpath(candidate);
+    const executableStat = await stat(executable);
+    if (!executableStat.isFile()) return null;
+    await access(executable, process.platform === 'win32' ? fsConstants.F_OK : fsConstants.X_OK);
+    return executable;
+  } catch {
+    return null;
+  }
+}
+
+async function canRunRipgrep(executable: string, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolvePromise) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolvePromise(ok);
+    };
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(executable, ['--version'], {
+        shell: false,
+        env: minimalSearchEnvironment(),
+        stdio: 'ignore',
+        ...windowsHeadlessSpawnOptions(),
+      });
+    } catch {
+      resolvePromise(false);
+      return;
+    }
+    const timer = setTimeout(
+      () => {
+        child.kill();
+        finish(false);
+      },
+      Math.max(100, timeoutMs),
+    );
+    timer.unref?.();
+    child.once('error', () => finish(false));
+    child.once('close', (code) => finish(code === 0));
+  });
 }
 
 async function findExecutableOnPath(

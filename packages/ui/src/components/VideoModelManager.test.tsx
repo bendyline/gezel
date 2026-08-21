@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -23,6 +23,30 @@ const TWO_MODELS = {
       installedAt: '2026-07-17T00:00:00Z',
     },
   ],
+};
+
+const GiB = 1024 ** 3;
+
+const VIDEO_MODEL = {
+  sourceId: 'bundled',
+  source: { id: 'bundled', label: 'Bundled' },
+  manifest: {
+    schemaVersion: 1,
+    kind: 'video-model',
+    id: 'test-video-model',
+    name: 'Test Video Model',
+    version: '1.0.0',
+    description: 'Test video model',
+    tags: ['video'],
+    maintainer: { name: 'Test Lab', url: 'https://example.com' },
+    license: 'Apache-2.0',
+    licenseClass: 'open',
+    recoScore: 10,
+    approxSizeBytes: 4 * GiB,
+    family: 'ltx',
+    hardwareTier: 'mid',
+    minVramGB: 16,
+  },
 };
 
 describe('VideoModelManager active-model selection', () => {
@@ -78,5 +102,48 @@ describe('VideoModelManager machine-wide models', () => {
     expect(screen.getByText('Machine-wide')).toBeInTheDocument();
     // Only the user-owned row keeps its Delete action.
     expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(1);
+  });
+});
+
+describe('VideoModelManager downloads', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.listInstalledVideoModels).mockResolvedValue({ models: [] } as never);
+    vi.mocked(api.listActiveVideoPulls).mockResolvedValue({ pulls: [] } as never);
+    vi.mocked(api.listCatalogItems).mockResolvedValue({ items: [VIDEO_MODEL] } as never);
+  });
+
+  it('starts a new pull immediately when a failed download is retried', async () => {
+    const callbacks: Array<Parameters<typeof api.pullVideoModel>[1]> = [];
+    vi.mocked(api.pullVideoModel).mockImplementation(((_id, onEvent) => {
+      callbacks.push(onEvent);
+      return Promise.resolve();
+    }) as typeof api.pullVideoModel);
+
+    render(<VideoModelManager />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Download' }));
+    expect(api.pullVideoModel).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      callbacks[0]?.({
+        type: 'progress',
+        file: 'model.safetensors',
+        fileIndex: 0,
+        fileCount: 1,
+        bytesWritten: GiB,
+        totalBytes: 4 * GiB,
+        bytesWrittenAll: GiB,
+        totalBytesAll: 4 * GiB,
+      });
+      callbacks[0]?.({ type: 'error', error: 'network error' });
+    });
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => expect(api.pullVideoModel).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Downloading/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
   });
 });

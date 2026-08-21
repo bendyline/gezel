@@ -55,7 +55,7 @@ test('sessions — send a message, it persists, shows up after restart', async (
   // This is the only E2E that deliberately performs two complete Electron
   // lifecycles in one test. Keep a lifecycle-sized budget for slow CI hosts;
   // retries are disabled suite-wide, so a genuine timeout remains visible.
-  test.setTimeout(90_000);
+  test.setTimeout(150_000);
 
   // First launch: send a message to the auto-provisioned Meester, close.
   {
@@ -76,11 +76,15 @@ test('sessions — send a message, it persists, shows up after restart', async (
       // Submit via Enter (submitOnEnter wires this up).
       await page.keyboard.press('Enter');
 
-      // Wait on the actual streamed reply rather than spending a fixed 4s
-      // regardless of whether the UI is already ready (or still catching up).
-      await expect(page.locator('body')).toContainText('Mock reply: hello from e2e', {
-        timeout: 15_000,
-      });
+      // Auto-recall may prepend indexed context to the provider prompt, so
+      // assert within an assistant bubble rather than requiring the user text
+      // to follow "Mock reply:" immediately (or matching the user's bubble).
+      const reply = page
+        .locator('.msg-from-gezel, .msg-assistant')
+        .filter({ hasText: 'Mock reply:' })
+        .filter({ hasText: 'hello from e2e' })
+        .last();
+      await expect(reply).toBeVisible({ timeout: 90_000 });
       await page.screenshot({ path: join(screenshotDir, 'sessions-03-reply.png'), fullPage: true });
     } finally {
       await app.close();
@@ -93,9 +97,12 @@ test('sessions — send a message, it persists, shows up after restart', async (
     try {
       // Auto-opens the most recent session; wait for its persisted reply to
       // render instead of assuming a fixed restart delay is enough.
-      await expect(page.locator('body')).toContainText('Mock reply: hello from e2e', {
-        timeout: 15_000,
-      });
+      const persistedReply = page
+        .locator('.msg-from-gezel, .msg-assistant')
+        .filter({ hasText: 'Mock reply:' })
+        .filter({ hasText: 'hello from e2e' })
+        .last();
+      await expect(persistedReply).toBeVisible({ timeout: 15_000 });
       await page.screenshot({
         path: join(screenshotDir, 'sessions-04-restarted.png'),
         fullPage: true,

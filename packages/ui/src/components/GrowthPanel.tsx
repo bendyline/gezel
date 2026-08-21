@@ -413,7 +413,13 @@ function CosmeticTryOn({
   const tryOn = { ...poppetje, [cosmetic.slot]: cosmetic.option } as PoppetjeStruct;
   return (
     <div className="growth-cosmetic-tryon">
-      <Poppetje poppetje={tryOn} variant="headshot" size={56} />
+      {/* A bare <Poppetje> paints its whole body — the SVG is
+          overflow:visible and the variant only crops the viewBox — so this
+          wrapper's clip is what makes the try-on a head-and-shoulders
+          portrait instead of a figure spilling out of the card. */}
+      <div className="growth-cosmetic-figure">
+        <Poppetje poppetje={tryOn} variant="headshot" size={56} />
+      </div>
       <span className="muted small">{cosmetic.label}</span>
     </div>
   );

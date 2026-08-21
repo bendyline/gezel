@@ -139,6 +139,18 @@ async function setup(ctx: EvalContext): Promise<void> {
     about: `Benchmark corpus: a pinned subset of ${manifest.id} used to measure index quality. Read-only for agents.`,
     missionObjectives: 'Serve as the boekwachter index-quality benchmark corpus.',
   });
+  // Indexing 3.0 gated the AI tiers on a Boekwachter project member — the
+  // enrich drive 409s (`boekwachter-required`) without one. Recruit the
+  // install's designated Boekwachter (fresh trial homes create it at boot)
+  // onto the bench crew before driving, mirroring what a user does from the
+  // status bar's "Add a Boekwachter" affordance.
+  const config = await client.getConfig();
+  if (config.boekwachterGezelId) {
+    await client.addGezelToProject(project.id, config.boekwachterGezelId);
+    log(`[bench] recruited boekwachter ${config.boekwachterGezelId} onto ${project.id}`);
+  } else {
+    log('[bench] WARNING: install has no designated boekwachter — the enrich drive will 409');
+  }
   const { seeded } = await seedCorpusIntoProject(client, project.id, corpusDir, {
     ...(limitFiles ? { limitFiles } : {}),
     priorityPaths: [
@@ -224,6 +236,7 @@ async function setup(ctx: EvalContext): Promise<void> {
 
 export const indexBenchScenario: EvalScenario = {
   id: 'index-bench',
+  requiresEmbeddings: true,
   description:
     'Direct index-quality benchmark (no agent): seeds a pinned real-codebase corpus, measures golden-query retrieval before/after LLM enrichment, and reports coverage + cost. The --models sweep is the enricher A/B.',
   prompt: 'Index bench runs entirely in setup; this prompt is never sent.',

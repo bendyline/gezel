@@ -20,6 +20,7 @@ import {
   evalDaemonEnvForTrial,
   hardStallShape,
   inflightDeferMsForEngine,
+  isHarnessInterventionSettling,
   llamaCppEvalLaunchOverridesForModel,
   llamaCppReasoningEffortEvalConfig,
   llamaCppReasoningEvalLaunchOverrides,
@@ -295,8 +296,15 @@ describe('evalDaemonEnvForTrial', () => {
     // model under evaluation and corrupt the result.
     expect(evalDaemonEnvForTrial({})).toEqual({
       GEZEL_DISABLE_MEMORY_EXTRACTION: '1',
+      GEZEL_DISABLE_EMBEDDINGS: '1',
       GEZEL_DISABLE_MODEL_ROUTING: '1',
     });
+  });
+
+  it('enables embeddings only for a dedicated retrieval scenario', () => {
+    expect(evalDaemonEnvForTrial({ enableEmbeddings: true })).not.toHaveProperty(
+      'GEZEL_DISABLE_EMBEDDINGS',
+    );
   });
 
   it('enableModelRouting opts back in (a dedicated routing eval)', () => {
@@ -337,6 +345,7 @@ describe('evalDaemonEnvForTrial', () => {
   it('maps craftbookDocFormat to GEZEL_CRAFTBOOK_DOC_FORMAT (the format A/B lever)', () => {
     expect(evalDaemonEnvForTrial({ craftbookDocFormat: 'json' })).toEqual({
       GEZEL_DISABLE_MEMORY_EXTRACTION: '1',
+      GEZEL_DISABLE_EMBEDDINGS: '1',
       GEZEL_DISABLE_MODEL_ROUTING: '1',
       GEZEL_CRAFTBOOK_DOC_FORMAT: 'json',
     });
@@ -1083,6 +1092,13 @@ describe('poisoned-session recovery', () => {
 });
 
 describe('re-engage nudge state', () => {
+  it('holds generic interventions for one response window after a repair lands', () => {
+    const deliveredAt = 10_000;
+    expect(isHarnessInterventionSettling(deliveredAt, deliveredAt + 60_000)).toBe(true);
+    expect(isHarnessInterventionSettling(deliveredAt, deliveredAt + 120_000)).toBe(false);
+    expect(isHarnessInterventionSettling(null, deliveredAt)).toBe(false);
+  });
+
   it('gives the harness-dispatched target one bounded hard-watchdog completion window', () => {
     const deliveredAt = 1_000;
     const inflight = [

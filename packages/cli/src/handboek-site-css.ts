@@ -141,6 +141,18 @@ body.hb {
 .hb-sidebar h2.hb-current { color: var(--hb-ink-warm); }
 .hb-sidebar ul, .hb-onthispage ul { list-style: none; margin: 0; padding: 0; }
 .hb-sidebar li { margin: 0.15rem 0; }
+.hb-sidebar .hb-sidebar-subcategory { margin-top: 0.8rem; }
+.hb-sidebar .hb-sidebar-subcategory:first-child { margin-top: 0; }
+.hb-sidebar .hb-sidebar-subcategory-title {
+  margin: 0 0 0.25rem;
+  font-family: var(--hb-font-ui);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hb-ink-quiet);
+}
+.hb-sidebar .hb-sidebar-subcategory ul { padding-left: 0.45rem; }
 .hb-sidebar a, .hb-onthispage a { color: var(--hb-ink-muted); }
 .hb-sidebar a:hover, .hb-onthispage a:hover { color: var(--hb-accent); }
 .hb-sidebar a.hb-current {

@@ -133,10 +133,10 @@ export function CopilotInstallCard({
             totalBytes={state.totalBytes}
           />
           <div className="home-copilot-login-actions">
-            <button type="button" className="home-link" onClick={() => void cancel()}>
+            <button type="button" className="gz-link-button" onClick={() => void cancel()}>
               Cancel
             </button>
-            <button type="button" className="home-link" onClick={() => setShowLog((v) => !v)}>
+            <button type="button" className="gz-link-button" onClick={() => setShowLog((v) => !v)}>
               {showLog ? 'Hide details' : 'Show details'}
             </button>
           </div>
@@ -224,7 +224,7 @@ function IdleBody({
         </p>
         {failed && <InstallError error={failed.error} />}
         <div className="home-copilot-login-actions">
-          <button type="button" className="home-link" onClick={onInstall}>
+          <button type="button" className="gz-link-button" onClick={onInstall}>
             Update to {availability.pinnedVersion}
           </button>
         </div>

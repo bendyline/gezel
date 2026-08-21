@@ -7,6 +7,7 @@ import { GezelGrowthSummarySchema } from './growth.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { QuestionSchema } from './question.js';
 import { MessageImageDigestSchema } from './recognition.js';
+import { RetrievalPolicySchema, RetrievalSourceSchema } from './retrieval.js';
 import { SessionGpuTaskSchema } from './session-telemetry.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
 
@@ -178,6 +179,12 @@ export const GezelFrontmatterSchema = z.object({
   /** When false, suppresses auto-recall on session start for this gezel. */
   autoRecall: z.boolean().optional(),
   /**
+   * Per-gezel proactive indexed-context policy. Supersedes `autoRecall` when
+   * present; absent inherits the install default. The generic `search` tool is
+   * still available in `off` mode.
+   */
+  retrieval: RetrievalPolicySchema.optional(),
+  /**
    * Chat bubble font id (one of `GEZEL_CHAT_FONTS[*].id`). When unset or
    * unrecognized, chat bubbles inherit the app default (Hanken Grotesk).
    */
@@ -302,6 +309,8 @@ export const GezelSummarySchema = z.object({
   suggestedTuningProfile: TuningProfileIdSchema.optional(),
   numCtx: z.number().int().positive().optional(),
   autoRecall: z.boolean().optional(),
+  /** Mirrors `GezelFrontmatter.retrieval`. */
+  retrieval: RetrievalPolicySchema.optional(),
   font: z.string().optional(),
   /** Mirrors `GezelFrontmatter.voice` — Kokoro TTS voice id. */
   voice: z.string().optional(),
@@ -583,6 +592,27 @@ export const ChatMessageSchema = z.object({
    * scrolling the body for the ref.
    */
   referencedTasks: z.array(z.string()).optional(),
+  /**
+   * Indexed-context sources consulted for THIS user turn (proactive
+   * retrieval). Citations only — source/path/line/score, never the retrieved
+   * text (which lives solely in the provider prompt). Lets the UI render a
+   * "consulted N sources" row so proactive RAG is visible diligence instead
+   * of invisible machinery.
+   */
+  retrieval: z
+    .object({
+      hits: z.array(
+        z.object({
+          source: RetrievalSourceSchema,
+          projectId: z.string().optional(),
+          path: z.string().optional(),
+          line: z.number().int().positive().optional(),
+          lineEnd: z.number().int().positive().optional(),
+          score: z.number(),
+        }),
+      ),
+    })
+    .optional(),
   /**
    * Tool calls the assistant fired during this turn. Populated on the
    * final assistant message; the UI renders them as a collapsible
@@ -1147,6 +1177,12 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     type: z.literal('engine_phase'),
     provider: z.enum(['llama-cpp', 'mlx', 'ds4']),
     phase: z.enum(['starting', 'loading_model', 'prefill', 'generating', 'ready']),
+    /**
+     * Human-readable subject for an ephemeral background completion. Unlike
+     * `detail` (engine diagnostics), this names the user's work — for example
+     * "Indexing src/app.ts". Ordinary chat turns leave it absent.
+     */
+    activity: z.string().optional(),
     detail: z.string().optional(),
     progress: z.number().min(0).max(1).optional(),
     ttftMs: z.number().int().nonnegative().optional(),

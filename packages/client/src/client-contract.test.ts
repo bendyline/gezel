@@ -315,6 +315,12 @@ const cases: ContractCase[] = [
     path: '/api/projects/p1/index/files?detail=1',
     invoke: (c) => c.listProjectIndexFilesDetail('p1'),
   },
+  {
+    name: 'index files detail including hidden files',
+    method: 'GET',
+    path: '/api/projects/p1/index/files?detail=1&hidden=1',
+    invoke: (c) => c.listProjectIndexFilesDetail('p1', { hidden: true }),
+  },
   { name: 'remote list', method: 'GET', path: '/api/remotes', invoke: (c) => c.listRemotes() },
   {
     name: 'remote inspect',

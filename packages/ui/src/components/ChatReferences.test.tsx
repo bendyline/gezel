@@ -468,6 +468,31 @@ describe('ChatReferences task picker', () => {
 });
 
 describe('ChatReferences reference picker', () => {
+  it('keeps the open preview mounted when history repeats the same file sighting', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onArtifactSeen }) => (
+          <button type="button" onClick={() => onArtifactSeen('reports/status.md')}>
+            Replay reference history
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    const replay = screen.getByRole('button', { name: 'Replay reference history' });
+    await user.click(replay);
+    await waitFor(() => expect(apiMocks.previewReference).toHaveBeenCalledTimes(1));
+
+    // A timeline reconciliation used to replace the Reference object here.
+    // ReferenceViewer depended on that object identity, cleared its content,
+    // and fetched again — the visible flash reported by users.
+    await user.click(replay);
+    expect(apiMocks.previewReference).toHaveBeenCalledTimes(1);
+  });
+
   it('exposes parsed and tool-backed files in most-recent-first order', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     const user = userEvent.setup();

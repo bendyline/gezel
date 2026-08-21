@@ -372,17 +372,17 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
       <section style={{ marginBottom: '2rem' }}>
         <h3>{title ?? localEngineSettingsLabel('llama-cpp', health?.platform)}</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          Run AI models directly on this device, making the best use of the hardware you already
-          have. Your conversations stay on your computer — no account to set up, no data sent to the
-          cloud.
+          Run AI models directly on this device using the llama.cpp engine, making the best use of
+          the hardware you already have. Your conversations stay on your computer — no account to
+          set up, no data sent to the cloud.
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
           <span className="muted small">Status:</span>
-          <span className="home-status-pill home-status-ok">ready</span>
+          <span className="gz-status-pill gz-status-pill--ok">ready</span>
           {hasExternalBaseUrl && (
             <span
-              className="home-status-pill home-status-warn"
+              className="gz-status-pill gz-status-pill--warn"
               title={`Using an external engine at: ${config?.llamaCppBaseUrl}`}
             >
               using external engine

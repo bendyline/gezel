@@ -14,3 +14,4 @@ regression surface when an anecdote is carrying architectural weight.
 | [0005](0005-indexing-3.0.md) | Accepted | Indexing 3.0: the `artifacts/shadow` tree, index provenance, whole-file reviews |
 | [0006](0006-shared-library-project.md) | Accepted | The shared document library is a project (Documents becomes a facade) |
 | [0007](0007-ambient-display-applier.md) | Accepted | Gezel is the wallpaper rotator, applied from Electron main |
+| [0008](0008-per-task-artifact-folders.md) | Accepted | Per-task artifact folders (`tasks/<num>/`) over dedicated task-file tools |

@@ -1,0 +1,2084 @@
+/* ── Shared quiet controls and status pills ── */
+
+.gz-link-button {
+  background: transparent;
+  color: var(--accent, #b0724c);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+
+.gz-link-button:hover {
+  color: var(--text);
+}
+
+.gz-status-pill {
+  /* inline-block + nowrap so a long label (e.g. "dense — may respond slowly
+     here") stays one solid pill and wraps as a whole unit, instead of the
+     text breaking across lines and splitting the pill background/border. */
+  display: inline-block;
+  white-space: nowrap;
+  vertical-align: middle;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.7rem;
+  /* True capsule — the sanctioned exception to the small-radius rule for
+     non-interactive status badges (see docs/ux.md "Corners"). Interactive
+     chips like .license-button stay on the small radius. */
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* The resting "this is fine" chip — System Health, engine readiness, "on
+   device". It is chrome, not an event, so it takes the workshop's sage
+   rather than `--success`: the mint green read as a near-miss of the sage
+   titlebar sitting inches above it. `--success` is still the right token
+   for a state that just *changed* (a save landed, a diff line added). */
+.gz-status-pill--ok {
+  color: var(--sage-ink);
+  border-color: color-mix(in srgb, var(--gezel-sage) 70%, transparent);
+  background: color-mix(in srgb, var(--gezel-sage) 20%, transparent);
+}
+
+.gz-status-pill--warn {
+  color: color-mix(in srgb, var(--warning) 45%, var(--text));
+  border-color: color-mix(in srgb, var(--warning) 50%, var(--border));
+  background: var(--warning-bg);
+}
+
+/* Amber-tinted pill that tells the user verbose diagnostics are being
+   written. Identity-distinct from the ok/warn variants so it's hard to
+   forget debug mode is on. */
+.gz-status-pill--debug {
+  color: color-mix(in srgb, var(--warning) 55%, var(--text));
+  border-color: color-mix(in srgb, var(--warning) 50%, transparent);
+  background: var(--warning-bg);
+  font-weight: 500;
+}
+
+/* ── Ollama settings ── */
+
+.ollama-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.ollama-settings h3 {
+  margin: 0;
+}
+
+.ollama-section {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.ollama-section.ollama-section--flat {
+  padding: 0;
+  border: none;
+  background: none;
+}
+
+.ollama-section h4 {
+  margin: 0 0 0.5rem 0;
+}
+
+/* DwarfStar lists installed and downloadable builds in one flow of rows
+   rather than the installed-models table the other engines use — each row
+   carries two lines of memory/context guidance that a cell can't hold. The
+   surface and hairline separators still come from the same recipe so the
+   panel reads as one family with MLX and llama.cpp. */
+.ds4-model-list {
+  padding: 0.25rem 0.75rem;
+}
+
+.ds4-model-row.new-row {
+  margin: 0;
+  padding: 0.6rem 0;
+}
+
+.ds4-model-row.new-row:not(:first-child) {
+  border-top: 1px solid var(--border);
+}
+
+.shared-model-migration-copy {
+  margin: 0 0 0.65rem;
+  max-width: 48rem;
+}
+
+.shared-model-migration-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shared-model-migration-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.shared-model-migration-list li > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .shared-model-migration-list li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+.ollama-model-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.ollama-model-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.ollama-model-table .model-name-column {
+  width: 36%;
+}
+
+.ollama-model-table th,
+.ollama-model-table td {
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.ollama-model-table th {
+  font-weight: 500;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Installed-model rows use two deliberate lines instead of wrapping based on
+   incidental space. The model id stays intact on line one; any status marks
+   occupy line two. */
+.ollama-model-table td.model-name-table-cell {
+  min-width: 10.5rem;
+}
+
+.model-name-cell,
+.model-fitness-cell,
+.model-actions-cell {
+  display: grid;
+  grid-template-rows: auto minmax(1.15rem, auto);
+  row-gap: 0.2rem;
+  align-items: start;
+  justify-items: start;
+}
+
+.model-name-cell > code {
+  width: fit-content;
+  white-space: nowrap;
+}
+
+.model-name-meta,
+.model-action-links {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-sm);
+  min-height: 1.15rem;
+  white-space: nowrap;
+}
+
+/* Tooltip trigger wrapping the on-disk size + memory headline; block so
+   the hover target covers both lines of the cell. */
+.model-size-cell {
+  display: inline-block;
+  cursor: help;
+}
+
+.model-memory-headline {
+  display: block;
+  margin-top: 0.2rem;
+  white-space: nowrap;
+}
+
+/* Nudge the fitness stack a couple of pixels left so the bordered badge
+   aligns optically with the plain FITNESS heading. */
+.ollama-model-table td.model-fitness-table-cell {
+  padding-left: 0.35rem;
+}
+
+.model-fitness-cell {
+  white-space: nowrap;
+}
+
+.model-actions-table-cell {
+  white-space: nowrap;
+}
+
+/* The optional "Machine model" note gets its own track so the overflow menu
+   lands in the same vertical line on every row, present or not. */
+.model-actions-cell {
+  display: grid;
+  grid-template-rows: none;
+  grid-template-columns: 1fr auto;
+  align-items: flex-start;
+  justify-items: start;
+  gap: var(--space-xs);
+  width: 100%;
+}
+
+.model-action-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+}
+
+.model-fitness-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+  line-height: 1.25;
+}
+
+/* Fitness results sit on the deeper model-table paper, where the generic
+   success green is too close in luminance to its translucent fill. Pull the
+   ink toward the theme text color and strengthen the outline while keeping
+   the badge recognizably green in both themes. */
+.model-fitness-badge.gz-status-pill--ok {
+  color: var(--sage-ink);
+  border-color: color-mix(in srgb, var(--gezel-sage) 85%, var(--text));
+  font-weight: 500;
+}
+
+.model-fitness-badge--probing {
+  color: color-mix(in srgb, var(--accent) 58%, var(--text));
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  font-weight: 500;
+}
+
+/* Model identifiers (HF repo paths, install tags, pull names) used to render
+   in monospace, which made the gallery feel like a package manager. The
+   pill below carries the same "this is an identifier" signal without the
+   technical register, and matches the chrome typography of the rest of
+   the UI. Shared across the installed-models table, the pull progress
+   header, and the catalog card spec line. */
+.ollama-model-table code,
+.ollama-curated-item code,
+.ollama-pull-head code,
+.catalog-ollama-specs code {
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.05rem 0.4rem;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .ollama-model-table code,
+  :root:not([data-theme="light"]) .ollama-curated-item code,
+  :root:not([data-theme="light"]) .ollama-pull-head code,
+  :root:not([data-theme="light"]) .catalog-ollama-specs code {
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
+[data-theme="dark"] .ollama-model-table code,
+[data-theme="dark"] .ollama-curated-item code,
+[data-theme="dark"] .ollama-pull-head code,
+[data-theme="dark"] .catalog-ollama-specs code {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ollama-curated {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.ollama-curated-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  align-items: center;
+}
+
+.ollama-curated-item button {
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.ollama-curated-item button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ollama-pull-list {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.ollama-pull {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid rgba(102, 127, 98, 0.35);
+  border-radius: 6px;
+  /* Tint matches the sage titlebar (#667f62) so active downloads read as
+     part of the gezel theme instead of a random blue highlight. */
+  background: rgba(102, 127, 98, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.ollama-pull-error {
+  background: rgba(255, 100, 100, 0.08);
+  border-color: rgba(255, 100, 100, 0.3);
+}
+
+.ollama-pull-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.ollama-pull-head code {
+  flex-shrink: 0;
+}
+
+.ollama-pull-head > span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-model-attention {
+  background: color-mix(in srgb, var(--warning) 5%, var(--surface));
+}
+
+.local-model-attention-intro {
+  margin: 0;
+  max-width: 52rem;
+}
+
+.local-model-attention-row {
+  border-color: color-mix(in srgb, var(--warning) 42%, var(--border));
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+}
+
+.local-model-attention-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  min-width: 12rem;
+}
+
+.local-model-attention-reason {
+  min-width: 12rem;
+}
+
+.ollama-pull-head > .local-model-attention-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-md);
+  overflow: visible;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .local-model-attention-row .ollama-pull-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .local-model-attention-reason {
+    white-space: normal;
+  }
+}
+
+.ollama-pull-bar {
+  position: relative;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.ollama-pull-bar-fill {
+  height: 100%;
+  background: var(--accent, #b0724c);
+  transition: width 120ms linear;
+}
+
+.ollama-pull-bar-label {
+  position: absolute;
+  right: 0.4rem;
+  top: -1.1rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ollama-pull-bar-indeterminate .ollama-pull-bar-fill {
+  width: 35%;
+  animation: ollama-pull-bar-slide 1.4s linear infinite;
+}
+
+@keyframes ollama-pull-bar-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(285%);
+  }
+}
+
+.model-picker-wrap {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.model-picker-warn {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 8px;
+  background: rgba(255, 199, 100, 0.12);
+  color: #d7b86b;
+  cursor: help;
+  border: 1px solid rgba(255, 199, 100, 0.3);
+}
+
+/* ── Provider cards in Settings ── */
+
+.provider-card {
+  margin-bottom: 1.5rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+/* In single-purpose settings panes (the AI providers, Image generation,
+   Audio, Web search, Channels) the outer "provider-card" chrome reads as
+   visual noise: each tab is already a single subject, the inner h3
+   already carries a border-bottom separator, and the wider-screen model
+   gallery looks better against the panel's natural background. Strip the
+   tint, border, and rounded corners but keep vertical spacing so stacked
+   sub-cards (Copilot CLI / PAT / Timeouts / Sandbox; Webhook + future
+   channels) stay readable. */
+.settings-panel-flat .provider-card {
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.provider-card > h3:first-child {
+  margin-top: 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.provider-card > .settings-card-header:first-child {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-bottom: 0.75rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.provider-card > .settings-card-header:first-child > h3 {
+  margin: 0;
+}
+
+/* Ollama settings live inside a provider-card; the inner sub-sections
+   should sit flat instead of drawing their own borders. */
+.provider-card .ollama-settings > .ollama-section {
+  padding: 0;
+  border: none;
+  background: transparent;
+  margin-top: 1rem;
+}
+
+.provider-card .ollama-settings > .ollama-section--download {
+  padding-top: 10px;
+}
+
+/* Section headings match the sibling provider tabs' register — title
+   case serif, not the uppercase eyebrow treatment this panel used to
+   carry alone. */
+.provider-card .ollama-settings > .ollama-section > h4 {
+  margin-top: 0;
+  font-size: var(--text-xl);
+}
+
+/* ── CatalogBrowser (shared between Ollama models, gezel templates, toolsets) ── */
+
+.catalog-browser {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.catalog-filter {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.catalog-filter input {
+  flex: 1;
+  padding: 0.4rem 0.55rem;
+  background: var(--bg, #141414);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.catalog-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+/* Catalog category filters are keys-in-trays aliases (see the block at the
+   end of this file). */
+
+.catalog-category-count {
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+}
+
+.catalog-category-active .catalog-category-count {
+  opacity: 0.85;
+}
+
+.catalog-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  gap: 0.6rem;
+}
+
+.catalog-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Model cards sit one warm paper step away from their panel so the grid
+   reads as a collection of objects instead of ruled-off page sections.
+   Keep the lift quiet: these cards are informational, not clickable. */
+.catalog-browser--models .catalog-item {
+  border-color: color-mix(in srgb, var(--border) 88%, var(--accent));
+  background: color-mix(in srgb, var(--panel) 72%, var(--surface));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.catalog-item-header {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+
+.catalog-item-logo {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Isolated SVG-image variant. SVG markup is sanitized and encoded into an
+   image URL rather than inserted into the live application document. */
+.catalog-item-logo-svg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  box-sizing: border-box;
+  color: #e0b897;
+}
+
+.catalog-item-logo-svg {
+  object-fit: contain;
+}
+
+.catalog-item-logo-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.catalog-item-head {
+  flex: 1;
+  min-width: 0;
+}
+
+.catalog-item-name {
+  font-weight: 500;
+}
+
+.catalog-item-attribution {
+  margin-top: 0.1rem;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.25;
+}
+
+.catalog-item-attribution strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.catalog-item-meta {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.catalog-item-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.catalog-item-source {
+  padding: 0.05rem 0.4rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.catalog-item-description {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.catalog-item-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+/* ★ Recommended closes the card's identity block, on its own line under the
+   tags however many rows they wrap to. */
+.catalog-item-head > .reco-badge {
+  margin-top: 0.3rem;
+}
+
+.catalog-item-tag {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 8px;
+  /* Thematic tint of the accent orange (#b0724c). Pills live near the card's
+     install button and its orange focus, so the color reads as "on brand"
+     rather than the old blue which felt imported from a generic theme.
+     Light mode: the same peach `#e0b897` text used in dark mode washed out
+     against the parchment-tinted background — flip to a dark brown ink so
+     the pill content is legible. */
+  background: rgba(176, 114, 76, 0.22);
+  color: #5a3825;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .catalog-item-tag {
+    background: rgba(176, 114, 76, 0.14);
+    color: #e0b897;
+  }
+}
+
+[data-theme="dark"] .catalog-item-tag {
+  background: rgba(176, 114, 76, 0.14);
+  color: #e0b897;
+}
+
+.catalog-item-action {
+  margin-top: auto;
+}
+
+/* Hand-rolled catalog lists — the managers that read a small fixed
+   catalog (audio STT/TTS, image recognition) instead of going through
+   CatalogBrowser. The rows they hold are the same object the browser
+   shows as a `.catalog-item` card, so they get the same bounded card:
+   unbounded, a full-width row let the description run into the next
+   model's identifier and stranded the Download key at the far edge of
+   the pane, half a screen from the model it belongs to. */
+.catalog-ollama-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  gap: 0.6rem;
+}
+
+.catalog-ollama-list > .catalog-ollama-action {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, var(--accent));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 72%, var(--surface));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 7%, transparent);
+  /* Cards in a row share the tallest one's height: start their text at
+     the top edge and keep the key on the bottom one, rather than letting
+     the whole row float to the bottom of a short card. */
+  align-items: stretch;
+}
+
+.catalog-ollama-list > .catalog-ollama-action > button {
+  align-self: flex-end;
+}
+
+.catalog-ollama-action {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.catalog-ollama-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.catalog-ollama-specs {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.35rem;
+  row-gap: 0.15rem;
+  align-items: baseline;
+}
+
+/* The `owner/repo` chip, linked to its Hugging Face page. It keeps the muted
+   ink of the spec line it sits in — the underline on hover is what says
+   "link", so the row doesn't grow a bright blue word. */
+.hf-repo-link {
+  color: inherit;
+  text-decoration: none;
+  border-radius: 4px;
+}
+
+.hf-repo-link:hover code {
+  text-decoration: underline;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.hf-repo-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .hf-repo-link:hover code {
+    background: rgba(255, 255, 255, 0.12);
+  }
+}
+
+[data-theme="dark"] .hf-repo-link:hover code {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* Inline "may exceed this machine" fit hint in the model spec row. */
+.catalog-ollama-warn {
+  color: var(--warning);
+}
+
+.catalog-ollama-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+/* License chip on an image/video catalog card. Shares .gz-status-pill's
+   shape but is interactive — it links to the license text on HuggingFace —
+   and is colour-coded by how restrictive the license is:
+     open                 → green   (free, including commercial use)
+     commercial-restricted→ amber   (no commercial use)
+     custom-restricted    → accent  (commercial OK under custom terms) */
+.license-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+/* ★ Recommended — a curated on-device model (has a recoScore + open license).
+   Accent-toned to read as a positive endorsement, distinct from the license
+   chips it sits beside. See RecommendedBadge.tsx. */
+.reco-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.55rem;
+  border-radius: 10px;
+  color: var(--accent);
+  background: rgba(176, 114, 76, 0.12);
+  border: 1px solid rgba(176, 114, 76, 0.3);
+  white-space: nowrap;
+}
+
+a.license-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.license-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.license-button__ext {
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+
+.license-button--open {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 45%, transparent);
+  background: var(--success-bg);
+}
+
+.license-button--commercial-restricted {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+  background: var(--warning-bg);
+}
+
+.license-button--custom-restricted {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.catalog-ollama-action button {
+  flex-shrink: 0;
+  padding: 0.3rem 0.75rem;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.catalog-ollama-action button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Per-gezel toolsets panel + template picker dialog ── */
+
+.gezel-toolsets-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  margin-bottom: 0.5rem;
+}
+
+.gezel-toolsets-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.gezel-toolsets-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.gezel-toolsets-list li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  background: rgba(79, 125, 255, 0.08);
+  border-radius: 12px;
+  font-size: 0.8rem;
+}
+
+.gezel-toolsets-list code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ── Toolsets tile grid ─────────────────────────────────────────────
+   Each toolsets entry (installed or inherited-via-role-default) renders
+   as a small tile: 32px icon + name + per-tile actions. Inherited
+   tiles are visually muted so the user can tell at a glance which
+   are pinned vs which are coming from the role default. */
+
+.toolsets-inherit-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.55rem;
+  background: rgba(176, 114, 76, 0.06);
+  border: 1px dashed rgba(176, 114, 76, 0.35);
+  border-radius: 6px;
+  margin-top: 0.25rem;
+}
+
+.toolsets-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.toolsets-tile {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  transition: border-color 0.15s ease;
+}
+
+.toolsets-tile-installed {
+  color: var(--text);
+}
+
+.toolsets-tile-inherited {
+  color: var(--muted);
+  background: transparent;
+  border-style: dashed;
+  opacity: 0.78;
+}
+
+.toolsets-tile:hover {
+  border-color: rgba(176, 114, 76, 0.55);
+}
+
+.toolsets-tile-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 4px;
+  box-sizing: border-box;
+  color: #e0b897;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toolsets-tile-inherited .toolsets-tile-icon {
+  opacity: 0.62;
+}
+
+.toolsets-tile-icon-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.toolsets-tile-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.toolsets-tile-name {
+  font-weight: 500;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toolsets-tile-caption {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.toolsets-tile-actions {
+  display: flex;
+  gap: 0.2rem;
+  opacity: 0.55;
+  transition: opacity 0.12s ease;
+}
+
+.toolsets-tile:hover .toolsets-tile-actions {
+  opacity: 1;
+}
+
+.toolsets-tile-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.toolsets-tile-action > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.toolsets-tile-action:hover:not([disabled]) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.toolsets-tile-action-danger:hover:not([disabled]) {
+  color: #e57373;
+}
+
+.toolsets-tile-action[disabled] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.toolsets-tile-action-spinner {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.template-picker-dialog,
+.new-gezel-dialog {
+  min-width: 50rem;
+  max-width: 80vw;
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.template-picker-dialog .catalog-browser,
+.new-gezel-dialog .catalog-browser {
+  flex: 1;
+  min-height: 0;
+}
+
+.toolsets-notice {
+  margin: 0.15rem 0 0;
+}
+
+.toolsets-picker-tabs {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.toolsets-picker-tabs > .gz-tabs-content {
+  flex: 1;
+  min-height: 0;
+}
+
+.toolsets-picker-tabs > .gz-tabs-content[data-state="inactive"] {
+  display: none;
+}
+
+.toolsets-custom-import {
+  width: min(42rem, 72vw);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.25rem;
+}
+
+.toolsets-custom-import h4,
+.toolsets-custom-import p {
+  margin: 0;
+}
+
+.toolsets-custom-import label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
+.toolsets-custom-import textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 14rem;
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.toolsets-custom-file input {
+  padding: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.toolsets-custom-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* Tab panels live inside the dialog's flex column — let the active
+   panel grow so the catalog browser can fill the available height. */
+.new-gezel-dialog .gz-tabs-root,
+.new-gezel-dialog .gz-tabs-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.new-gezel-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.new-gezel-gender-field select {
+  margin-left: 0.5rem;
+}
+
+.new-gezel-template-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.new-gezel-template-form {
+  padding: 0.6rem;
+  background: rgba(79, 125, 255, 0.06);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Radix primitives — overlay, dialog, select, tabs
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.gz-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 1000;
+  animation: gz-fade-in 140ms ease-out;
+}
+
+.gz-overlay[data-state="closed"] {
+  animation: gz-fade-out 120ms ease-in;
+}
+
+@keyframes gz-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes gz-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.gz-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--surface, var(--panel));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.25rem 0.9rem 1.25rem;
+  min-width: 26rem;
+  max-width: 90vw;
+  max-height: 85vh;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  z-index: 1001;
+  animation: gz-dialog-in 160ms ease-out;
+  /* Base body register for dialog prose. Without this, description text
+     that carries no explicit size falls to the UA 16px default and reads
+     larger than the controls around it. Controls/labels/actions below keep
+     their own sizes; this only tames untamed body copy. */
+  font-size: var(--text-md);
+}
+
+.gz-dialog[data-state="closed"] {
+  animation: gz-dialog-out 120ms ease-in;
+}
+
+.gz-dialog-wide {
+  min-width: 32rem;
+  max-width: 40rem;
+}
+
+.gz-dialog-error {
+  color: var(--danger, #d06a6a);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+/* A model export can make three full passes over tens of gigabytes: source
+   hashing, bundle writing, and checksum verification. Keep that work in one
+   calm surface with an explicit cancellation path until the verified partial
+   file is published. */
+.gz-dialog.model-export-dialog,
+.gz-dialog.model-import-dialog {
+  width: min(31rem, 90vw);
+  min-width: min(31rem, 90vw);
+}
+
+.model-export-dialog-body {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.model-export-dialog-body p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.model-export-progress {
+  display: block;
+  width: 100%;
+  height: 0.65rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  accent-color: var(--accent);
+}
+
+.model-export-progress::-webkit-progress-bar {
+  background: var(--panel);
+}
+
+.model-export-progress::-webkit-progress-value {
+  background: var(--accent);
+}
+
+.model-export-progress-copy {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.model-export-complete {
+  display: grid;
+  gap: 0.25rem;
+  line-height: 1.45;
+}
+
+.model-export-complete strong {
+  overflow-wrap: anywhere;
+}
+
+/* ── Transformation dialog (TransformDialog) ─────────────────────────
+   The unified AI rewrite/insert surface. Wider than the stock dialog so
+   the before/after panes and the monaco diff have room; everything
+   inside keeps the --text-* scale and radius tokens. */
+.gz-dialog.gz-transform-dialog {
+  min-width: 44rem;
+  max-width: min(64rem, 92vw);
+}
+.gz-transform-top {
+  display: flex;
+  align-items: stretch;
+  gap: 0.9rem;
+}
+.gz-transform-instruction {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.gz-transform-klerk-row {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  text-align: center;
+}
+.gz-transform-thinking {
+  font-size: var(--text-xs);
+  color: var(--text-muted, var(--muted));
+  max-height: 11rem;
+  overflow-y: auto;
+  border-left: 2px solid var(--border);
+  padding: 0.15rem 0 0.15rem 0.6rem;
+}
+/* The feed renders through Squisq's LinearDocView; rein its reading
+   register into the muted metacommentary scale so streamed thinking
+   reads as an aside, not a second document. */
+.gz-transform-thinking :is(p, li, h1, h2, h3, h4, strong) {
+  font-size: var(--text-xs) !important;
+  line-height: 1.5 !important;
+}
+.gz-transform-thinking-raw {
+  margin: 0;
+  font-family: var(--font-ui);
+  white-space: pre-wrap;
+}
+.gz-transform-error {
+  color: var(--danger, #d06a6a);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+.gz-transform-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+}
+.gz-transform-view-toggle {
+  align-self: flex-start;
+}
+.gz-transform-panes {
+  display: flex;
+  gap: 0.75rem;
+  min-height: 0;
+}
+.gz-transform-before,
+.gz-transform-after {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.gz-transform-pane-label {
+  font-size: var(--text-xs);
+}
+/* Both panes render Squisq content (read-only LinearDocView on the
+   left, an embedded WYSIWYG editor on the right) inside matching
+   bordered wells so the comparison reads symmetric. */
+.gz-transform-before-text {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  overflow-y: auto;
+  max-height: min(45vh, 320px);
+  background: var(--panel);
+}
+.gz-transform-before-raw {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  font-family: var(--font-ui);
+  white-space: pre-wrap;
+}
+.gz-transform-after-editor {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+  min-height: 12rem;
+  max-height: min(45vh, 320px);
+  overflow-y: auto;
+  background: var(--surface, var(--panel));
+}
+.gz-transform-after-editor .gz-transform-after-wysiwyg {
+  min-height: 12rem;
+}
+.gz-transform-empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md, 6px);
+  padding: 0.75rem;
+  margin: 0;
+}
+.gz-transform-diff-host {
+  height: min(45vh, 320px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 6px);
+  overflow: hidden;
+}
+.gz-transform-diff-error {
+  color: var(--danger, #d06a6a);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+/* `.gz-dialog label textarea` already supplies width, padding, border, and
+   resize; only the height and reading register are missing. Left in
+   --font-ui rather than monospace: the body is prose with a few fenced
+   blocks, and monospace would need a typography exception for no gain. */
+.gz-dialog-report .gz-dialog-report-field textarea {
+  min-height: 20rem;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.gezel-template-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.gezel-template-list li {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.gezel-template-list li.suggested {
+  border-color: var(--accent);
+  background: rgba(176, 114, 76, 0.06);
+}
+.gezel-template-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.gezel-template-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 0.05rem 0.35rem;
+  margin-left: auto;
+}
+.gezel-template-list li button {
+  align-self: flex-start;
+}
+
+@keyframes gz-dialog-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes gz-dialog-out {
+  from {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -48%) scale(0.98);
+  }
+}
+
+/* Dialog titles are the serif register (via the global h* rule) at a pinned
+   size from the scale, instead of riding the UA 1.17em default — which,
+   compounding on the dialog's own base font-size, drifts between dialogs. */
+.gz-dialog h2,
+.gz-dialog h3 {
+  margin: 0;
+  font-size: var(--text-xl);
+  line-height: 1.3;
+}
+.gz-dialog h4 {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: 1.3;
+}
+/* Links are chrome — keep them sans even if a future title nests one (the
+   `.gz-link-button { font: inherit }` shorthand would otherwise pull in the
+   serif inside an h*). Size still inherits from context. */
+.gz-dialog a,
+.gz-dialog .gz-link-button {
+  font-family: var(--font-ui);
+}
+
+.gz-dialog input[type="text"],
+.gz-dialog input:not([type]),
+.gz-dialog input[type="password"],
+.gz-dialog textarea {
+  padding: 0.45rem 0.6rem;
+  background: var(--bg, #141414);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.95rem;
+  font-family: inherit;
+}
+
+.gz-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.gz-dialog-actions button {
+  padding: 0.4rem 0.9rem;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.gz-dialog-actions .primary {
+  background: var(--accent, #b0724c);
+  color: #fff;
+  border-color: var(--accent, #b0724c);
+}
+
+.gz-dialog-actions button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gz-dialog-actions .danger {
+  background: #c94646;
+  color: #fff;
+  border-color: #c94646;
+}
+
+.gz-dialog-actions .danger:hover:not([disabled]) {
+  background: #d85555;
+}
+
+/* ── macOS uninstall ────────────────────────────────────────────────
+   One authenticated system action with explicit, independent retention
+   choices. Native checkboxes stay native; the surrounding rows carry the
+   consequence and filesystem scope so "purge" never hides what disappears. */
+.gz-uninstall-dialog {
+  max-width: 44rem;
+}
+
+.gz-uninstall-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0.2rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.gz-uninstall-choices legend {
+  margin-bottom: 0.15rem;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.gz-uninstall-choices label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.65rem;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.gz-uninstall-choices input {
+  margin-top: 0.18rem;
+}
+
+.gz-uninstall-choices label > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.gz-uninstall-choices small {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.gz-uninstall-choices code {
+  font-size: 0.95em;
+}
+
+.gz-uninstall-preserve,
+.gz-uninstall-auth-note,
+.gz-uninstall-warning {
+  margin: 0.1rem 0 0;
+}
+
+.gz-uninstall-warning {
+  padding: 0.5rem 0.65rem;
+  border-left: 3px solid var(--danger);
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+/* ── Select ── */
+
+.gz-select-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.55rem;
+  background: var(--bg, #141414);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font-size: 0.9rem;
+  font-family: inherit;
+  cursor: pointer;
+  line-height: 1.3;
+}
+
+.gz-select-trigger:hover {
+  border-color: var(--accent, #b0724c);
+}
+
+.gz-select-trigger:focus-visible {
+  outline: 2px solid var(--accent, #b0724c);
+  outline-offset: 1px;
+}
+
+.gz-select-trigger[data-placeholder] {
+  color: var(--text-muted);
+}
+
+.gz-select-trigger[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Shared open-V indicator for selects and custom dropdown triggers. */
+.gz-dropdown-chevron {
+  display: block;
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+/* Holds the shared dropdown chevron clear of the selected value. */
+.gz-select-icon {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+  opacity: 1;
+  margin-left: auto;
+}
+
+.gz-select-content {
+  background: var(--surface, var(--panel));
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  z-index: 1100;
+  overflow: hidden;
+  min-width: var(--radix-select-trigger-width);
+  max-height: var(--radix-select-content-available-height);
+  animation: gz-fade-in 120ms ease-out;
+}
+
+.gz-select-viewport {
+  padding: 0.25rem;
+}
+
+.gz-select-label {
+  padding: 0.35rem 0.6rem 0.2rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.gz-select-separator {
+  height: 1px;
+  margin: 0.25rem 0.35rem;
+  background: var(--border);
+}
+
+.gz-select-item {
+  padding: 0.35rem 0.6rem;
+  border-radius: 2px;
+  font-size: 0.9rem;
+  color: var(--text);
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+
+.gz-select-item[data-highlighted] {
+  background: var(--accent, #b0724c);
+  color: #fff;
+}
+
+.gz-select-item[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Ambient dashboard theme picker ──
+ *
+ * Squisq's theme chooser previews the actual paper, title face, and three
+ * identifying colors instead of reducing a visual choice to a name. Keep the
+ * Gezel control on the shared Radix Select so focus, typeahead, collision
+ * handling, and keyboard navigation still come from the primitives layer.
+ */
+
+.ambient-theme-select-trigger {
+  min-height: 2.4rem;
+  padding: 0.25rem 0.45rem;
+  border-radius: var(--radius-md);
+}
+
+.ambient-theme-preview {
+  min-width: 0;
+}
+
+.ambient-theme-select-trigger > .ambient-theme-preview {
+  flex: 1;
+}
+
+.ambient-theme-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+}
+
+.ambient-theme-name-chip {
+  display: block;
+  min-width: 0;
+  padding: 0.42rem 0.6rem;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ambient-theme-swatches {
+  display: inline-flex;
+  gap: 0.18rem;
+  flex: 0 0 auto;
+}
+
+.ambient-theme-swatch {
+  display: block;
+  width: 0.78rem;
+  height: 0.78rem;
+  border: 1px solid color-mix(in srgb, var(--text) 20%, transparent);
+  border-radius: 2px;
+  box-shadow: 0 1px 1px color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.ambient-theme-description {
+  display: -webkit-box;
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.ambient-theme-select-menu {
+  width: min(42rem, calc(100vw - 2rem));
+  border-radius: var(--radius-lg);
+}
+
+.ambient-theme-select-menu .gz-select-viewport {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem;
+  padding: 0.4rem;
+}
+
+.ambient-theme-select-menu .gz-select-item {
+  display: flex;
+  align-items: stretch;
+  padding: 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+}
+
+.ambient-theme-select-menu .gz-select-item > span {
+  display: flex;
+  width: 100%;
+}
+
+.ambient-theme-select-menu .gz-select-item[data-highlighted] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  color: var(--text);
+}
+
+.ambient-theme-select-menu .gz-select-item[data-state="checked"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+@media (max-width: 620px) {
+  .ambient-theme-select-menu .gz-select-viewport {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ── Single-gezel picker ── */
+
+.gezel-picker-trigger {
+  min-width: 13rem;
+  padding: 0.25rem 0.45rem;
+  border-radius: var(--radius-md);
+}
+
+.gezel-picker-trigger > span:first-child,
+.gezel-picker-option,
+.gezel-picker-option-text {
+  min-width: 0;
+}
+
+.gezel-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.gezel-picker-option .gezel-icon {
+  border-radius: var(--radius-sm);
+}
+
+.gezel-picker-option-text {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.gezel-picker-option-name,
+.gezel-picker-option-role {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gezel-picker-option-name {
+  flex: 0 1 auto;
+  font-weight: 600;
+}
+
+.gezel-picker-option-role {
+  flex: 1 1 auto;
+  color: var(--text-muted);
+}
+
+.gezel-picker-menu .gz-select-item {
+  padding: 0.3rem 0.45rem;
+}
+
+.gezel-picker-menu .gz-select-item[data-highlighted] .gezel-picker-option-role {
+  color: inherit;
+  opacity: 0.78;
+}
+
+.gezel-picker-empty {
+  color: var(--text-muted);
+}
+
+/* ── Tabs ── */
+
+.gz-tabs-list {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  /* Without these, a tab row that overflows the container clips the
+     trailing tabs to "…" — the May-2026 narrow-window screenshot
+     showed "Artif…" cut off at the right edge. `overflow-x: auto`
+     turns the row into a horizontal scroller; `flex-wrap: nowrap`
+     keeps a single line so users always see SOMETHING is scrollable
+     rather than wrapping into multiple stacked rows that fight the
+     tab affordance. `scrollbar-width: thin` keeps the bar from
+     stealing vertical space, and `scrollbar-color` paints it in the
+     gezel palette so it doesn't read as native OS chrome. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  /* Keep horizontal scroll as a fallback so overflowing tabs are still
+     reachable, but hide the bar itself — it read as native OS chrome
+     cutting across the tab row. The project tab bar avoids overflow
+     entirely in compact mode by switching to icon tabs (below). */
+  scrollbar-width: none;
+}
+.gz-tabs-list::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.gz-tabs-list > * {
+  flex: 0 0 auto;
+}
+
+.gz-tabs-list::-webkit-scrollbar {
+  height: 4px;
+}
+.gz-tabs-list::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 2px;
+}
+.gz-tabs-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Wrapper for an entity detail's inner tab row. */
+.entity-tabs-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.entity-tabs-row > .gz-tabs-root {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The Tabs.Root above already paints its own bottom border via
+   .gz-tabs-list. Suppress the inner one so we don't get a doubled
+   line where the row border and the list border stack. */
+.entity-tabs-row > .gz-tabs-root .gz-tabs-list {
+  border-bottom: none;
+}
+
+/* The project tab row sits directly under the window chrome with no
+   panel header above it, so without these the first tab reads as
+   welded to the top-left corner of the pane. */
+.entity-tabs-row.project-tabs-row {
+  padding-top: 2px;
+  padding-left: 4px;
+}
+
+/* Archived remains visible as a read-only status annotation in the header;
+   the reversible action itself lives in Project Settings. */
+.project-archived-badge {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 0.08rem 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--text-muted) 45%, var(--border));
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+}

@@ -5,6 +5,7 @@ import { GEZEL_VERSION, createLogger, isSafeEntityId } from '@bendyline/gezel';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { ZodError } from 'zod';
 import { safeJoin } from '../fs/safe-paths.js';
+import { embeddingsHealth } from '../memory/embeddings.js';
 import {
   bearerAuth,
   denyRemoteInferenceScope,
@@ -47,6 +48,7 @@ import { handboekRoutes } from './routes/handboek.js';
 import { historyRoutes } from './routes/history.js';
 import { imageGenRoutes } from './routes/image-gen.js';
 import { imagesRoutes } from './routes/images.js';
+import { knowledgeRoutes } from './routes/knowledge.js';
 import { llamaCppRoutes } from './routes/llama-cpp.js';
 import { machineEngineProxy } from './routes/machine-engine-proxy.js';
 import { machineServingRoutes } from './routes/machine-serving.js';
@@ -66,6 +68,7 @@ import { opencodeSetupRoutes } from './routes/opencode-setup.js';
 import { pageCheckRoutes } from './routes/page-check.js';
 import { pageInvokeRoutes } from './routes/page-invoke.js';
 import { pageReadRoutes } from './routes/page-read.js';
+import { peopleWipeRoutes, projectPeopleRoutes } from './routes/people.js';
 import { permissionRoutes } from './routes/permissions.js';
 import { piSetupRoutes } from './routes/pi-setup.js';
 import { previewCapabilityRoutes } from './routes/preview-capabilities.js';
@@ -102,6 +105,7 @@ import { v1ChatRoutes } from './routes/v1-chat.js';
 import { v1EmbeddingsRoutes } from './routes/v1-embeddings.js';
 import { v1GezelsRoutes } from './routes/v1-gezels.js';
 import { v1IdentityRoutes } from './routes/v1-identity.js';
+import { v1KnowledgeAssetsRoutes } from './routes/v1-knowledge-assets.js';
 import { v1ModelsEnsureRoutes } from './routes/v1-models-ensure.js';
 import { v1ModelsRoutes } from './routes/v1-models.js';
 import { v1OpenApiRoutes } from './routes/v1-openapi.js';
@@ -336,7 +340,12 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // own-project/own-gezel and explicitly shared MCP routes classified by the
   // deny-by-default guard. Root/UI callers bypass it.
   const sessionRouteLog = createLogger('session-route');
-  const scopedSessionRoutes = sessionRouteGuard({ log: (m) => sessionRouteLog.warn(m) });
+  const isProjectLinked = (sourceProjectId: string, targetProjectId: string) =>
+    ctx.store.projectLinksTo(sourceProjectId, targetProjectId);
+  const scopedSessionRoutes = sessionRouteGuard({
+    log: (m) => sessionRouteLog.warn(m),
+    isProjectLinked,
+  });
   app.use('/api/*', scopedSessionRoutes);
   app.use('/events/*', scopedSessionRoutes);
   // Per-session token scope (#10): confine a session-scoped MCP token to
@@ -349,6 +358,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     projectScopeGuard({
       mode: resolveTokenScopeMode(process.env.GEZEL_TOKEN_SCOPE),
       log: (m) => scopeLog.warn(m),
+      isProjectLinked,
     }),
   );
   // Team-route gating (#10 increment 2): deny a NON-coordinator session
@@ -478,6 +488,11 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
       // this env var only when the binary is on disk, so its presence is the
       // same fact the provider itself launches from.
       ds4ServerBundled: Boolean(process.env.GEZEL_DS4_SERVER_BIN),
+      // Process-wide semantic-search health. Sent unconditionally: 'cold'
+      // is itself information (nothing has needed the embedder yet), and a
+      // sticky 'disabled' here is the only place the failure is visible at
+      // the daemon level.
+      embeddings: embeddingsHealth(),
       // Boot probe rather than an env var: this one is a property of the
       // running process's own token, not something a supervisor could have
       // told us. `null` (non-Windows) is omitted, not sent as a value —
@@ -497,9 +512,17 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     app.use('/v1/remote/*', requireScope('remote-inference'));
     app.use('/v1/remote/models/ensure', requireScope('machine-models'));
     app.use('/v1/remote/models/ensure/*', requireScope('machine-models'));
-    app.use('/v1/remote/manage/*', requireScope('machine-models'));
+    // The knowledge overlay must register BEFORE the broad manage gate so a
+    // machine-models-only token cannot reach the knowledge broker, and a
+    // machine-knowledge-assets token cannot reach model management.
+    app.use('/v1/remote/manage/knowledge/*', requireScope('machine-knowledge-assets'));
+    app.use('/v1/remote/manage/*', (c, next) => {
+      if (c.req.path.startsWith('/v1/remote/manage/knowledge/')) return next();
+      return requireScope('machine-models')(c, next);
+    });
     // Model ensure must win over the exact `/models` discovery handler.
     app.route('/v1/remote/models/ensure', v1ModelsEnsureRoutes(ctx));
+    app.route('/v1/remote/manage/knowledge', v1KnowledgeAssetsRoutes());
     app.route('/v1/remote/manage/llama-cpp', llamaCppRoutes(ctx));
     app.route('/v1/remote/manage/ds4', ds4Routes(ctx));
     app.route('/v1/remote/manage/mlx', mlxRoutes(ctx));
@@ -589,6 +612,10 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/projects', toolRoutes(ctx));
   // Per-project terminal threads live at /api/projects/:id/terminals/*
   app.route('/api/projects', terminalRoutes(ctx));
+  // People (face lane): /api/projects/:id/people[...] + the global
+  // disable-and-erase endpoint at /api/people/wipe.
+  app.route('/api/projects', projectPeopleRoutes(ctx));
+  app.route('/api/people', peopleWipeRoutes(ctx));
   app.route('/api/tasks', globalTaskRoutes(ctx));
   app.route('/api/craftbooks', craftbookRoutes(ctx));
   app.route('/api/usage', usageRoutes(ctx));
@@ -634,6 +661,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/ambient-dashboard', ambientDashboardRoutes(ctx));
   app.route('/api/system-toolsets', systemToolsetRoutes(ctx));
   app.route('/api/gilde-updates', gildeUpdateRoutes(ctx));
+  app.route('/api/knowledge', knowledgeRoutes(ctx));
   app.route('/api/codex-setup', codexSetupRoutes(ctx));
   app.route('/api/opencode-setup', opencodeSetupRoutes(ctx));
   app.route('/api/pi-setup', piSetupRoutes(ctx));

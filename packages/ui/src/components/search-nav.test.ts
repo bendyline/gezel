@@ -91,6 +91,28 @@ describe('resultToActions', () => {
       'gezel:open-file',
     ]);
   });
+
+  it('maps a knowledge result to: queue intent, open area, then live event', () => {
+    const actions = resultToActions(
+      result({
+        kind: 'knowledge',
+        id: 'knowledge:shop-notes:abc123',
+        catalogId: 'shop-notes',
+        documentId: 'dovetails',
+        uri: 'knowledge://shop-notes/dovetails#chunk=abc123',
+      }),
+    );
+    const intent = { catalogId: 'shop-notes', documentId: 'dovetails' };
+    expect(actions).toEqual([
+      { kind: 'open-knowledge', intent },
+      { kind: 'event', type: 'gezel:open-tab', detail: { kind: 'area', area: 'knowledge' } },
+      { kind: 'event', type: 'gezel:open-knowledge-document', detail: intent },
+    ]);
+  });
+
+  it('drops a knowledge result without a catalogId', () => {
+    expect(resultToActions(result({ kind: 'knowledge', id: 'knowledge:x' }))).toEqual([]);
+  });
 });
 
 describe('groupResults / flattenGroups', () => {

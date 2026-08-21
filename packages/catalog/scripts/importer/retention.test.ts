@@ -74,16 +74,18 @@ describe('retainNewestVersions', () => {
     expect(await versionsOf(dir)).toEqual(['0.11.10']);
   });
 
-  it('keeps N eligible versions, skipping past yanked ones', async () => {
+  it('keeps N eligible versions plus folders referenced by yankedVersions', async () => {
     const dir = await seed('yanked-mcp', {
-      versions: ['1.0.0', '1.1.0', '1.2.0'],
+      versions: ['0.9.0', '1.0.0', '1.1.0', '1.2.0'],
       yankedVersions: ['1.2.0'],
     });
-    await retainNewestVersions({ root, keep: 2, slugMap: map('yanked-mcp') });
+    const out = await retainNewestVersions({ root, keep: 2, slugMap: map('yanked-mcp') });
 
-    // 1.2.0 is yanked so it is not eligible and not retained; the two
-    // newest *eligible* survive.
-    expect(await versionsOf(dir)).toEqual(['1.0.0', '1.1.0']);
+    // 1.2.0 is not eligible, but the identity still references it as
+    // yanked. Keep that folder alongside the two newest eligible
+    // versions and discard only the unreferenced older release.
+    expect(await versionsOf(dir)).toEqual(['1.0.0', '1.1.0', '1.2.0']);
+    expect(out.removed.map((r) => r.version)).toEqual(['0.9.0']);
   });
 
   it('never drops below minSupportedVersion into the keep set', async () => {

@@ -11,9 +11,10 @@ const packageThresholds = {
   // landing silently while the richer behavior-oriented strategy evolves.
   core: 54.8,
   service: 71.7,
-  ui: 49.9,
+  ui: 54.7,
   app: 69.7,
   catalog: 88.9,
+  knowledge: 57.9,
   mcp: 95.5,
   client: 66.7,
   cli: 82.6,
@@ -40,11 +41,19 @@ async function walk(dir) {
   return files;
 }
 
-async function resolveSourceImport(testFile, specifier) {
+export async function resolveSourceImport(testFile, specifier) {
   if (!specifier.startsWith('.')) return null;
   const base = resolve(dirname(testFile), specifier);
-  const candidates = extname(base)
-    ? [base.replace(/\.js$/, '.ts'), base.replace(/\.jsx$/, '.tsx'), base]
+  const extension = extname(base);
+  const candidates = extension
+    ? extension === '.js' || extension === '.jsx'
+      ? [
+          `${base.slice(0, -extension.length)}.ts`,
+          `${base.slice(0, -extension.length)}.tsx`,
+          `${base.slice(0, -extension.length)}.js`,
+          `${base.slice(0, -extension.length)}.jsx`,
+        ]
+      : [base]
     : [
         `${base}.ts`,
         `${base}.tsx`,
@@ -122,38 +131,43 @@ async function inspectPackage(name, minimumPercent) {
   };
 }
 
-const results = (
-  await Promise.all(
-    Object.entries(packageThresholds).map(([name, threshold]) => inspectPackage(name, threshold)),
-  )
-).filter(Boolean);
+export async function main(args = process.argv.slice(2)) {
+  const results = (
+    await Promise.all(
+      Object.entries(packageThresholds).map(([name, threshold]) => inspectPackage(name, threshold)),
+    )
+  ).filter(Boolean);
 
-console.log('Package test-surface inventory (direct imports + colocated tests)');
-console.log('package                 source  tests  covered   rate   floor');
-for (const result of results) {
-  console.log(
-    `${result.package.padEnd(23)} ${String(result.productionFiles).padStart(6)} ${String(result.testFiles).padStart(6)} ${String(result.directlyCoveredFiles).padStart(8)} ${`${result.percent.toFixed(1)}%`.padStart(7)} ${`${result.minimumPercent.toFixed(1)}%`.padStart(7)}`,
-  );
-}
-
-const outputIndex = process.argv.indexOf('--json');
-if (outputIndex >= 0) {
-  const outputArg = process.argv[outputIndex + 1];
-  if (!outputArg) throw new Error('--json requires an output path');
-  const output = resolve(root, outputArg);
-  await mkdir(dirname(output), { recursive: true });
-  await writeFile(
-    output,
-    `${JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2)}\n`,
-  );
-}
-
-const failed = results.filter((result) => !result.passes);
-if (failed.length > 0) {
-  for (const result of failed) {
-    console.error(
-      `${result.package}: ${result.percent.toFixed(1)}% direct test surface is below ${result.minimumPercent.toFixed(1)}%`,
+  console.log('Package test-surface inventory (direct imports + colocated tests)');
+  console.log('package                 source  tests  covered   rate   floor');
+  for (const result of results) {
+    console.log(
+      `${result.package.padEnd(23)} ${String(result.productionFiles).padStart(6)} ${String(result.testFiles).padStart(6)} ${String(result.directlyCoveredFiles).padStart(8)} ${`${result.percent.toFixed(1)}%`.padStart(7)} ${`${result.minimumPercent.toFixed(1)}%`.padStart(7)}`,
     );
   }
-  process.exitCode = 1;
+
+  const outputIndex = args.indexOf('--json');
+  if (outputIndex >= 0) {
+    const outputArg = args[outputIndex + 1];
+    if (!outputArg) throw new Error('--json requires an output path');
+    const output = resolve(root, outputArg);
+    await mkdir(dirname(output), { recursive: true });
+    await writeFile(
+      output,
+      `${JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2)}\n`,
+    );
+  }
+
+  const failed = results.filter((result) => !result.passes);
+  if (failed.length > 0) {
+    for (const result of failed) {
+      console.error(
+        `${result.package}: ${result.percent.toFixed(1)}% direct test surface is below ${result.minimumPercent.toFixed(1)}%`,
+      );
+    }
+    process.exitCode = 1;
+  }
 }
+
+const invokedPath = process.argv[1] ? resolve(process.argv[1]) : null;
+if (invokedPath === fileURLToPath(import.meta.url)) await main();

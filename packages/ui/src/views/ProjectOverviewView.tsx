@@ -8,7 +8,9 @@ import { getProjectType, resolveProjectTypeId } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { MarkdownField } from '../components/MarkdownField.js';
+import { PeoplePanel } from '../components/PeoplePanel.js';
 import { ProjectIcon } from '../components/ProjectIcon.js';
+import { workspaceIndexLabel } from '../components/WorkspaceIndexPane.js';
 import { RailSection } from './home/RailSection.js';
 
 /**
@@ -105,8 +107,10 @@ export function ProjectOverviewView({
             <span className="project-overview-chip muted">{map.fileCount} files indexed</span>
           )}
           {(scanning || aiPending) && (
+            // Same vocabulary as the status bar's index chip — three surfaces
+            // naming the same states differently read as three systems.
             <span className="project-overview-chip pending">
-              {scanning ? 'scanning…' : 'AI study in progress…'}
+              {workspaceIndexLabel(indexStatus)}
             </span>
           )}
         </div>
@@ -114,7 +118,19 @@ export function ProjectOverviewView({
 
       {!map?.indexed && indexingDisabled && (
         <p className="muted">
-          Workspace indexing is off for this project. You can turn it on in Project Settings.
+          Workspace indexing is off for this project.{' '}
+          <button
+            type="button"
+            className="project-index-panel-link"
+            onClick={() =>
+              window.dispatchEvent(
+                new CustomEvent('gezel:open-project-settings', { detail: { projectId } }),
+              )
+            }
+          >
+            Turn it on in Project Settings
+          </button>
+          .
         </p>
       )}
 
@@ -225,6 +241,8 @@ export function ProjectOverviewView({
           )}
         </RailSection>
       )}
+
+      <PeoplePanel projectId={projectId} />
 
       {recent.length > 0 && (
         <RailSection label="Recent activity" testId="overview-activity">

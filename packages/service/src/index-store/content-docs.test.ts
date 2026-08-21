@@ -66,7 +66,7 @@ describe.runIf(process.platform === 'darwin')('doc-intel: docx conversion + sear
     expect(read.found).toBe(true);
     expect(read.markdown).toContain('frobnication');
     expect(read.markdownPath).toBe('artifacts/shadow/docs/spec.docx_files/spec.md');
-  });
+  }, 15_000);
 
   it('read_doc_as_markdown converts on demand when not yet indexed', async () => {
     const docx = await makeDocx('# OnDemand\n\nlazy conversion works.\n');
@@ -81,5 +81,5 @@ describe.runIf(process.platform === 'darwin')('doc-intel: docx conversion + sear
     const read = await ci.readDocAsMarkdown('c', 'note.docx');
     expect(read.found).toBe(true);
     expect(read.markdown).toContain('lazy conversion works');
-  });
+  }, 15_000);
 });

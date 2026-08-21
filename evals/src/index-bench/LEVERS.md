@@ -186,6 +186,41 @@ Harness lessons wild-caught this round (all fixed):
   per-question stall deadline. Each question is now a clean one-turn probe,
   which also matches real usage. Dropped worst-question latency 28min→~3min.
 
+### similarity-threshold recalibration for bge (2026-08-19)
+The bge promotion shipped the vectors but not the floors: every similarity
+threshold was still MiniLM-calibrated. New reproducible harness
+`evals/src/bin/embed-calibration.ts` (memory-shaped fixture pairs, both
+comparison modes — passage↔passage for dedup, query→passage for search
+floors). Results + verdicts: `evals/runs/EMBED-CALIBRATION-2026-08-19.md`.
+Headlines: dedup 0.90→0.85 (was under-deduping — paraphrase p25 = 0.906),
+memory search floor 0.35→0.45 (old floor sat below the bge unrelated-band
+median), recall DEFAULT_MIN_SCORE 0.35→0.45, craftbook blend floors
+0.15→0.25 / 0.28→0.32. CODE_MIN_SCORE/LIBRARY_MIN_SCORE unchanged — they
+filter rank-fusion scores, which are embedder-independent. No Phase-A run:
+none of the changed floors are on the bench's measured path. **Re-run the
+harness on every embedder change.**
+
+### C5 multilingual embedder A/B + first Windows baseline (2026-08-20)
+First runs on Windows (Vulkan) with a qwen3.8-27b-q4 enricher — fresh
+absolute baseline, not comparable to the Mac/e4b history. Full report:
+`evals/runs/INDEX-BENCH-2026-08-20.md`.
+| embedder | sem R@5 | MRR | kw R@5 |
+|---|---|---|---|
+| bge-small-en-v1.5 | 42% | 0.38 | 33% |
+| **multilingual-e5-small** (query:/passage: prefixed) | **58%** | **0.43** | 33% |
+e5 gains 2 goldens with zero losses — including **closed-caption → rank 1**,
+one of the four "robustly hard" misses that resisted every bge lever. It
+ALSO unlocks cross-lingual NL↔EN retrieval (calibration harness:
+`evals/runs/EMBED-CALIBRATION-2026-08-19.md`). NOT promoted yet: n=1 with a
+summary-regeneration confound, and e5's compressed cosine scale breaks the
+memory-dedup threshold outright (paraphrase/distinct bands overlap) — the
+dedup gate needs a redesign before any fleet-wide swap. e5 prefix support
+(`passageInstruction()`) landed in embed-core; the bench runs also
+wild-caught and fixed a touchProject write race and the scenario's missing
+boekwachter recruit, and left one OPEN product bug: a killed embedder
+download permanently disables embeddings for the daemon's lifetime with no
+status surface (the run looked green with zero vectors).
+
 ### windowing PROMOTED to default
 `GEZEL_INDEX_WINDOW` now defaults ON; opt out with `=0` (the index-bench control
 arm, `--no-window`). Rationale: deterministic retrieval win + agent-outcome

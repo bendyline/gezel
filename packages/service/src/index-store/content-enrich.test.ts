@@ -61,6 +61,63 @@ async function realEmbed(): Promise<((texts: string[]) => Promise<number[][]>) |
   }
 }
 
+describe('embed-only tier (semantic search without a Boekwachter)', () => {
+  it('embeds with no LLM, leaves the summary gate open, and a later full pass still summarizes', async () => {
+    const embed = await realEmbed();
+    if (!embed) return;
+
+    await mkdir(join(dir, 'src'), { recursive: true });
+    await writeFile(
+      join(dir, 'src', 'throttle.ts'),
+      'export function guard(req: Request) { /* limits how many API requests per second a client may make */ return true; }\n',
+    );
+    await writeFile(join(dir, 'src', 'colors.ts'), 'export const palette = ["#fff", "#000"];\n');
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
+
+    // Embed-only: vectors from signatures/windows alone — no summarizer runs.
+    const r = await ci.embedOnly('c', 10);
+    expect(r).not.toBeNull();
+    expect(r!.embedded).toBe(2);
+    const res = await ci.searchCode('c', 'how do we limit API request rate?', { mode: 'semantic' });
+    expect(res.engine).toBe('semantic');
+    expect(res.results[0]?.path).toBe('src/throttle.ts');
+
+    // THE gate-collision regression this tier was designed around: the
+    // summary work-list must be untouched, so a Boekwachter recruited later
+    // still summarizes every file. embed_state is done; enrichments is not.
+    const counts = await ci.enrichmentCounts('c');
+    expect(counts!.embedOnlyPending).toBe(0);
+    expect(counts!.pending).toBe(2);
+    expect(counts!.summarized).toBe(0);
+
+    const deps: EnrichDeps = {
+      summarize: async (prompt: string) =>
+        prompt.includes('palette')
+          ? 'Defines a colour palette of hex swatches for theming.'
+          : 'Implements rate limiting and throttling for incoming API requests.',
+      embed,
+      model: 'test',
+    };
+    const stats = await ci.enrich('c', deps, 10);
+    expect(stats!.files).toBe(2);
+    expect(stats!.summarized).toBe(2);
+
+    // The full pass supersedes embed-only: nothing left for either tier.
+    const again = await ci.embedOnly('c', 10);
+    expect(again!.files).toBe(0);
+    const settled = await ci.enrichmentCounts('c');
+    expect(settled!.pending).toBe(0);
+    expect(settled!.embedOnlyPending).toBe(0);
+
+    // And the doc-gist guard held: a full pass over already-chunked files
+    // must not stack duplicate summary chunks (search still ranks cleanly).
+    const after = await ci.searchCode('c', 'how do we limit API request rate?', {
+      mode: 'semantic',
+    });
+    expect(after.results[0]?.path).toBe('src/throttle.ts');
+  }, 120_000);
+});
+
 describe('enrichment + search_code', () => {
   it('keyword search_code finds a symbol even before enrichment (FTS)', async () => {
     await mkdir(join(dir, 'src'), { recursive: true });
@@ -170,9 +227,10 @@ describe('per-symbol summaries', () => {
     await runWorkspaceContentIndex(dir, 'c', artifacts);
   };
 
-  const dispatchingDeps = (prompts: string[]): EnrichDeps => ({
-    summarize: async (prompt: string) => {
+  const dispatchingDeps = (prompts: string[], activities: string[] = []): EnrichDeps => ({
+    summarize: async (prompt: string, activity?: string) => {
       prompts.push(prompt);
+      if (activity) activities.push(activity);
       if (prompt.startsWith('For each listed symbol')) {
         // Fenced + preamble on purpose: the parser must tolerate both.
         return 'Sure! ```json\n{"foo":"Counts characters.","bar":"Calls foo.","ghost":"ignored"}\n```';
@@ -186,10 +244,12 @@ describe('per-symbol summaries', () => {
   it('stores one-liners from a single batched JSON reply and serves them via fileContext', async () => {
     await seed();
     const prompts: string[] = [];
-    await ci.enrich('c', dispatchingDeps(prompts), 10);
+    const activities: string[] = [];
+    await ci.enrich('c', dispatchingDeps(prompts, activities), 10);
 
     // One file-summary call + one symbol-summary call for the code file.
     expect(prompts.filter((p) => p.startsWith('For each listed symbol')).length).toBe(1);
+    expect(activities).toEqual(['Indexing src/b.ts', 'Indexing src/b.ts']);
 
     const ctx = await ci.fileContext('c', 'src/b.ts');
     expect(ctx.summary).toBe('A file about foo and bar.');

@@ -43,6 +43,12 @@ export interface ThreadPill {
   state: ThreadPillState;
   /** Bounded latest-message text supplied by the session summary. */
   lastMessagePreview?: string;
+  /**
+   * Tool the session is running right now, streamed rather than persisted.
+   * Lets a live pill say what the gezel is doing instead of echoing the
+   * message that started the turn.
+   */
+  liveToolName?: string;
   /** Primary session gezel first, followed by any gezels that spoke into it. */
   involvedGezelIds: string[];
   taskRef?: string;
@@ -107,6 +113,8 @@ export function selectThreadPills(input: {
   now: number;
   pinnedSessionId?: string | undefined;
   groupedTaskRefs?: ReadonlySet<string>;
+  /** Session id → the tool it is running, from the live event stream. */
+  liveTools?: ReadonlyMap<string, string>;
   maxInline?: number;
 }): {
   pills: ThreadPill[];
@@ -120,6 +128,7 @@ export function selectThreadPills(input: {
     now,
     pinnedSessionId,
     groupedTaskRefs,
+    liveTools,
     maxInline = MAX_INLINE_THREAD_PILLS,
   } = input;
 
@@ -139,6 +148,9 @@ export function selectThreadPills(input: {
 
     const error = errored.get(s.id) ?? s.lastTurnError;
     const state: ThreadPillState = inflight.has(s.id) ? 'inflight' : error ? 'errored' : 'idle';
+    // A tool only describes what is happening while the turn is open; once
+    // it closes, the message that landed is the truthful summary.
+    const liveToolName = state === 'inflight' ? liveTools?.get(s.id) : undefined;
 
     const pill: ThreadPill = {
       sessionId: s.id,
@@ -149,6 +161,7 @@ export function selectThreadPills(input: {
       involvedGezelIds:
         s.involvedGezelIds && s.involvedGezelIds.length > 0 ? s.involvedGezelIds : [s.gezelId],
       ...(s.lastMessagePreview ? { lastMessagePreview: s.lastMessagePreview } : {}),
+      ...(liveToolName ? { liveToolName } : {}),
       ...(s.taskRef ? { taskRef: s.taskRef } : {}),
       ...(error ? { error } : {}),
     };
@@ -229,6 +242,7 @@ export function useChatThreadPills({
   const [loading, setLoading] = useState(true);
   const [inflight, setInflight] = useState<ReadonlySet<string>>(() => new Set());
   const [errored, setErrored] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const [liveTools, setLiveTools] = useState<ReadonlyMap<string, string>>(() => new Map());
   // Re-run selection on a timer tick as well as on data change, so a thread
   // that ages out of the recency window eventually drops without a refetch.
   const [ageTick, setAgeTick] = useState(0);
@@ -285,6 +299,21 @@ export function useChatThreadPills({
     return () => window.removeEventListener('gezel:session-error-cleared', onCleared);
   }, [loadSessions]);
 
+  const noteLiveTool = useCallback((sessionId: string, name: string | null) => {
+    setLiveTools((prev) => {
+      if (name === null) {
+        if (!prev.has(sessionId)) return prev;
+        const next = new Map(prev);
+        next.delete(sessionId);
+        return next;
+      }
+      if (prev.get(sessionId) === name) return prev;
+      const next = new Map(prev);
+      next.set(sessionId, name);
+      return next;
+    });
+  }, []);
+
   const refreshTimer = useRef<number | null>(null);
   useEffect(() => {
     const ctrl = new AbortController();
@@ -308,6 +337,20 @@ export function useChatThreadPills({
         })) {
           const { event: ev, sessionId } = env as ChatEventEnvelope;
           if (gezelId && env.gezelId !== gezelId) continue;
+
+          // What the gezel is doing right now. `tool_args_delta` fires while
+          // the call is still being composed, which is the long part of the
+          // wait; `tool` re-stamps it with the name that actually ran.
+          if (ev.type === 'tool_args_delta' || ev.type === 'tool') {
+            noteLiveTool(sessionId, ev.name);
+          } else if (
+            ev.type === 'complete' ||
+            ev.type === 'done' ||
+            ev.type === 'error' ||
+            ev.type === 'cancelled'
+          ) {
+            noteLiveTool(sessionId, null);
+          }
 
           // A turn opens on user_message and closes on done/error/cancelled —
           // the same state machine the sidebar runs in App.tsx.
@@ -374,7 +417,7 @@ export function useChatThreadPills({
         refreshTimer.current = null;
       }
     };
-  }, [projectId, gezelId, loadSessions]);
+  }, [projectId, gezelId, loadSessions, noteLiveTool]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: ageTick is the recompute trigger for the recency cutoff — the body reads Date.now(), not the tick.
   const { pills, overflow, taskPills } = useMemo(
@@ -385,9 +428,10 @@ export function useChatThreadPills({
         errored,
         now: Date.now(),
         pinnedSessionId,
+        liveTools,
         ...(groupedTaskRefs ? { groupedTaskRefs } : {}),
       }),
-    [sessions, inflight, errored, pinnedSessionId, groupedTaskRefs, ageTick],
+    [sessions, inflight, errored, liveTools, pinnedSessionId, groupedTaskRefs, ageTick],
   );
 
   return { pills, overflow, taskPills, loading };

@@ -25,8 +25,16 @@ const BASE_CONFIG = {
   provider: 'mlx',
 } as ConfigResponse;
 
+const INSTALLED_MODELS = {
+  models: [
+    { id: 'gemma4-12b-q4', name: 'Gemma 4 (12B)' },
+    { id: 'qwen3.6-27b-q8', name: 'Qwen 3.6 (27B)' },
+  ],
+} as Awaited<ReturnType<typeof api.listMlxModels>>;
+
 describe('MlxSettings', () => {
   beforeEach(() => {
+    vi.mocked(api.listMlxModels).mockResolvedValue(INSTALLED_MODELS);
     vi.mocked(api.getMlxRuntime).mockResolvedValue({
       source: 'system',
       uvVersion: '0.5.0',
@@ -56,6 +64,41 @@ describe('MlxSettings', () => {
     expect(models.compareDocumentPosition(memory) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
+  });
+
+  it('shows the default-model dropdown above model management', async () => {
+    render(<MlxSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} />);
+
+    const defaultModel = await screen.findByRole('heading', { name: 'Default model' });
+    expect(screen.getByRole('option', { name: 'First local model' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('option', { name: 'Gemma 4 (12B) (gemma4-12b-q4)' }),
+    ).toBeInTheDocument();
+
+    const models = screen.getByTestId('mlx-manager');
+    expect(defaultModel.compareDocumentPosition(models) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it('selecting a default model patches config.defaultModel.mlx', async () => {
+    const onConfigChanged = vi.fn();
+    render(
+      <MlxSettings
+        config={{ ...BASE_CONFIG, defaultModel: { openai: 'gpt-day' } } as ConfigResponse}
+        onConfigChanged={onConfigChanged}
+      />,
+    );
+
+    const picker = await screen.findByRole('combobox', { name: 'Default model' });
+    await userEvent.selectOptions(picker, 'qwen3.6-27b-q8');
+
+    await waitFor(() => {
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        defaultModel: { openai: 'gpt-day', mlx: 'qwen3.6-27b-q8' },
+      });
+    });
+    expect(onConfigChanged).toHaveBeenCalled();
   });
 
   it('shows "No Python runtime available" when the runtime info has source=null', async () => {
@@ -151,6 +194,13 @@ describe('MlxSettings', () => {
       await screen.findByRole('heading', { name: 'This Mac (Apple MLX)' }),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Show llama local device processing/)).not.toBeInTheDocument();
+  });
+
+  it('shows the engine as ready below the description', () => {
+    render(<MlxSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} />);
+
+    expect(screen.getByText('Status:')).toBeInTheDocument();
+    expect(screen.getByText('ready')).toHaveClass('gz-status-pill', 'gz-status-pill--ok');
   });
 
   it('renders the cache controls panel for mlx', async () => {

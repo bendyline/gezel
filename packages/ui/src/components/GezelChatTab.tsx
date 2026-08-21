@@ -4,7 +4,7 @@ import {
   type ProjectForGezel,
   pronounFormsForGender,
 } from '@bendyline/gezel';
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
 import { ChatComposer } from './ChatComposer.js';
@@ -91,6 +91,23 @@ export function GezelChatTab({
   const [projects, setProjects] = useState<ProjectForGezel[] | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [focusSessionId, setFocusSessionId] = useState<string>('');
+  // Timeline-scroll companion to focusSessionId: carries the transcript-search
+  // hit's message index so the viewport lands on the match, not just the
+  // session. requestKey makes re-focusing the same session re-fire.
+  const [sessionFocusRequest, setSessionFocusRequest] = useState<{
+    sessionId: string;
+    requestKey: number;
+    messageIndex?: number;
+  } | null>(null);
+  const focusRequestKeyRef = useRef(0);
+  const requestSessionFocus = useCallback((sessionId: string, messageIndex?: number) => {
+    focusRequestKeyRef.current += 1;
+    setSessionFocusRequest({
+      sessionId,
+      requestKey: focusRequestKeyRef.current,
+      ...(messageIndex !== undefined ? { messageIndex } : {}),
+    });
+  }, []);
   const workingProjectIdsRef = useRef(workingProjectIds);
   const activeTurnsReadyRef = useRef(activeTurnsReady);
   const activityDefaultAppliedRef = useRef(false);
@@ -111,6 +128,7 @@ export function GezelChatTab({
       activityDefaultAppliedRef.current = true;
       projectChoiceWasManualRef.current = true;
       setFocusSessionId(intent.sessionId);
+      requestSessionFocus(intent.sessionId, intent.messageIndex);
     }
     api
       .listProjectsForGezel(gezel.id)
@@ -132,7 +150,7 @@ export function GezelChatTab({
     return () => {
       cancelled = true;
     };
-  }, [gezel.id]);
+  }, [gezel.id, requestSessionFocus]);
 
   // The project roster and the daemon's in-flight snapshot load in parallel.
   // Apply the working-project preference exactly once after both are ready;
@@ -166,10 +184,11 @@ export function GezelChatTab({
       projectChoiceWasManualRef.current = true;
       if (detail.projectId) setSelectedProjectId(detail.projectId);
       setFocusSessionId(detail.sessionId);
+      requestSessionFocus(detail.sessionId, detail.messageIndex);
     };
     window.addEventListener('gezel:open-session', onOpenSession);
     return () => window.removeEventListener('gezel:open-session', onOpenSession);
-  }, [gezel.id]);
+  }, [gezel.id, requestSessionFocus]);
 
   // Clicking an already-open working gezel does not remount this component.
   // Treat that click as an explicit request to return to their active project.
@@ -254,6 +273,7 @@ export function GezelChatTab({
               }
             }
             focusSessionId={focusSessionId || undefined}
+            sessionFocusRequest={sessionFocusRequest ?? undefined}
           />
         )
       )}
@@ -284,11 +304,13 @@ function GezelChatBody({
   engineLabel,
   project,
   focusSessionId,
+  sessionFocusRequest,
 }: {
   gezel: GezelDetail;
   engineLabel: string | null;
   project: ProjectForGezel;
   focusSessionId?: string;
+  sessionFocusRequest?: { sessionId: string; requestKey: number; messageIndex?: number };
 }) {
   const [sessionId, setSessionId] = useState<string>(focusSessionId ?? '');
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
@@ -362,8 +384,10 @@ function GezelChatBody({
             onArtifactSeen={onArtifactSeen}
             onWorkspaceReference={onWorkspaceReference}
             onWorkspaceSeen={onWorkspaceSeen}
+            onOpenReference={onOpenReference}
             onTaskReference={onTaskReference}
             emptyPlaceholder={emptyPlaceholder}
+            sessionFocusRequest={sessionFocusRequest}
           />
           {activeSource ? (
             <ExternalConversationPanel source={activeSource}>
@@ -492,6 +516,7 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
             onArtifactSeen={onArtifactSeen}
             onWorkspaceReference={onWorkspaceReference}
             onWorkspaceSeen={onWorkspaceSeen}
+            onOpenReference={onOpenReference}
             onTaskReference={onTaskReference}
             emptyPlaceholder={emptyPlaceholder}
           />

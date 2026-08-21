@@ -108,6 +108,11 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
       ipcRenderer.invoke('gezel:backup:choose-save-path', defaultName ?? null),
     chooseOpenPath: () => ipcRenderer.invoke('gezel:backup:choose-open-path'),
   },
+  // Knowledge catalog install: pick a .gezk; the daemon does the reading.
+  selectKnowledgeArchive: async () => {
+    const result = await ipcRenderer.invoke('gezel:knowledge:choose-archive');
+    return result?.path ?? null;
+  },
   // App updates. `state` is the pull for a freshly-mounted renderer;
   // `onStateChanged` is the push for transitions while it is open. `install`
   // opens the verified installer on macOS (Installer.app raises the admin

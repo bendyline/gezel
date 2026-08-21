@@ -190,6 +190,8 @@ import type { MlxRuntimeStatusBus } from '../python/mlx-runtime-status-bus.js';
 import { getPairedRemoteFetch } from '../remotes/pinned-fetch.js';
 import type { RemotesRegistry } from '../remotes/registry.js';
 import { listStdlibScripts } from '../scripts/stdlib-source.js';
+import { retrieveProjectContext } from '../search/project-retrieval.js';
+import type { SearchService } from '../search/search-service.js';
 import type { SecretStore } from '../secrets/types.js';
 import { resolveInstalledSystemLibrary } from '../system-toolsets/resolve.js';
 import {
@@ -221,6 +223,32 @@ import {
   type ResolveExternalConversationInput,
 } from './external-conversation-recorder.js';
 import { artifactPathsOf, extractReferencedFiles } from './file-references.js';
+
+/**
+ * Replace a value-taking CLI option with Gezel's authoritative value.
+ *
+ * Playwright MCP accepts both `--output-dir path` and
+ * `--output-dir=path`. Its catalog runtime arguments are not the right
+ * place to choose a destination: the active project is known only when a
+ * chat session is built. Removing either spelling before appending our
+ * value keeps every browser side file inside that project's artifacts tree.
+ */
+function withForcedCliOption(args: readonly string[], option: string, value: string): string[] {
+  const kept: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === option) {
+      // A separate-value spelling owns the next argv entry. A malformed
+      // option followed by another flag simply has no value to skip.
+      if (i + 1 < args.length && !args[i + 1]?.startsWith('--')) i++;
+      continue;
+    }
+    if (arg?.startsWith(`${option}=`)) continue;
+    if (arg !== undefined) kept.push(arg);
+  }
+  kept.push(option, value);
+  return kept;
+}
 
 /**
  * The slice of `WorkspaceIndexManager` the reference parser needs. Narrowed
@@ -340,6 +368,14 @@ const TURN_LIBRARY_RECALL_MIN_CHARS = 15;
  * the app never reads as a hang.
  */
 const BACKGROUND_DRAIN_TIMEOUT_MS = 15_000;
+const DEFAULT_INTERACTIVE_RECALL_DEADLINE_MS = 2_000;
+
+export function resolveInteractiveRecallDeadlineMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = Number.parseInt(env.GEZEL_AUTO_RECALL_INTERACTIVE_DEADLINE_MS ?? '', 10);
+  return Number.isFinite(raw) && raw > 0
+    ? Math.min(raw, 30_000)
+    : DEFAULT_INTERACTIVE_RECALL_DEADLINE_MS;
+}
 
 const log = createLogger('chat');
 const memLog = createLogger('memory');
@@ -610,6 +646,15 @@ interface LiveSessionState {
    * model too.
    */
   libraryRecallPaths?: Set<string>;
+  /** Query fingerprints already injected through per-turn project retrieval. */
+  retrievalQueryHashes?: Set<string>;
+  /**
+   * Query fingerprints whose zero-injection probe has already been logged.
+   * Separate from retrievalQueryHashes on purpose: a query that found nothing
+   * today must stay eligible for injection later (the index may catch up),
+   * while its "found nothing" telemetry should not repeat every turn.
+   */
+  retrievalProbeHashes?: Set<string>;
   /** Live LLM session. May be rebuilt on provider reset or resume failure. */
   session: LLMSession | null;
   /** Model shared by provider binding, prompt construction, and live telemetry. */
@@ -732,6 +777,8 @@ interface InflightTurn {
   userText: string;
   startedAt: number;
   abort?: AbortController;
+  /** True once a provider request has actually been issued for this turn. */
+  providerStarted?: boolean;
   /** Set by `cancelInflight`; remains attached to this exact turn object. */
   cancelled?: boolean;
   /**
@@ -1472,6 +1519,12 @@ export class ChatManager {
     this.contentIndexRef = index;
   }
   private contentIndexRef?: import('../index-store/content-index.js').ContentIndex;
+
+  /** Unified scoped search used for per-turn project grounding. */
+  setSearchService(search: SearchService): void {
+    this.searchServiceRef = search;
+  }
+  private searchServiceRef?: SearchService;
 
   /**
    * Workspace file index, used to recognize workspace paths an assistant
@@ -2696,18 +2749,12 @@ export class ChatManager {
     // effect. Providers that don't honor the signal (older
     // implementations) fall back to the `disconnect()` below.
     //
-    // `entry.abort` is set only once the turn reaches its provider phase
-    // (runSend, right before `sendAndWait`). Its presence is therefore a
-    // reliable "is there a live provider call to tear down?" signal:
-    //  - wired: abort the controller and disconnect the session below.
-    //  - not wired: the turn is still in its prologue (prompt build /
-    //    auto-recall). There's nothing to abort yet, so the cancel remains
-    //    marked on this turn object; runSend honors it the instant it wires
-    //    the controller. Do NOT disconnect the live session: setup still holds its
-    //    `state.session` reference, and racing a `disconnect()` + null
-    //    against runSend's `const session = state.session!` capture
-    //    crashed the turn with a null session.
-    const wired = entry.abort !== undefined;
+    // `entry.abort` is wired as soon as a live session exists, before optional
+    // first-turn recall, so stop can release an embedding wait too. Only
+    // disconnect the provider session after `providerStarted` flips: recall
+    // still holds `state.session`, and nulling it there races runSend's next
+    // capture. An aborted prologue exits before issuing a provider request.
+    const providerStarted = entry.providerStarted === true;
     entry.abort?.abort();
     const state = this.states.get(sessionId);
     const cancelledEvent = { type: 'cancelled' as const };
@@ -2720,7 +2767,7 @@ export class ChatManager {
       };
       this.events.publish(scope, cancelledEvent);
       this.events.publish(scope, doneEvent);
-      if (wired && state.session) {
+      if (providerStarted && state.session) {
         // Null the reference BEFORE awaiting teardown. The salvage
         // snapshot above already read everything this turn needs from
         // the live session; leaving the pointer in place while
@@ -3630,6 +3677,11 @@ export class ChatManager {
     capabilityFloor?: ModelTier;
     /** Book join key for the routing ranker's gate-evidence lookup. */
     bookCatalogId?: string;
+    /**
+     * Continue the latest non-archived session for this task step. Used only
+     * by boot rehydration after the prior process (and its live turn) ended.
+     */
+    resumeExisting?: boolean;
   }): Promise<{ sessionId: string }> {
     const dispatchConfig = await this.store.readConfig();
     const roleBasedNameOnlyMode =
@@ -3696,7 +3748,25 @@ export class ChatManager {
         );
       }
     }
-    const session = await this.createSession({
+    let resumedExisting = false;
+    let session: ChatSession | null = null;
+    if (args.resumeExisting) {
+      const summaries = await this.store.listSessions({
+        gezelId: args.gezelId,
+        projectId: args.projectId,
+      });
+      const prior = summaries.find(
+        (candidate) =>
+          !candidate.archived &&
+          candidate.taskRef === args.taskRef &&
+          candidate.stepId === dispatchStepId,
+      );
+      if (prior) {
+        session = await this.store.getSession(args.gezelId, prior.id);
+        resumedExisting = session !== null;
+      }
+    }
+    session ??= await this.createSession({
       gezelId: args.gezelId,
       projectId: args.projectId,
       taskRef: args.taskRef,
@@ -3714,7 +3784,7 @@ export class ChatManager {
           }
         : {}),
     });
-    if (routed && session.model === routed.model) {
+    if (!resumedExisting && routed && session.model === routed.model) {
       log.info(
         `[chat] model-routing: step ${dispatchStepId} of ${args.taskRef} → ${routed.provider}/${routed.model} (${routed.reason})`,
       );
@@ -3798,8 +3868,9 @@ export class ChatManager {
       : roleBasedNameOnlyMode
         ? undefined
         : args.fromGezelName;
-    const seed =
-      args.kind === 'entry'
+    const seed = resumedExisting
+      ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Continue this existing task thread from the progress and tool evidence above. Re-read only what you still need, keep appending focused notes with \`write_task_note\`, and call \`advance_task_step\` when the step is done.`
+      : args.kind === 'entry'
         ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
         : selfHandoff
           ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well. Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
@@ -6308,6 +6379,13 @@ export class ChatManager {
     if (!state.session) {
       fail(new Error('[chat] no live session after ensureState — this should not happen'));
     }
+    // Wire cancellation before auto-recall. The embedding worker cannot abort
+    // an ONNX call already in native code, but the interactive wait can stop
+    // immediately and the provider seam below observes the same aborted signal.
+    const turnAbort = new AbortController();
+    inflightTurn.abort = turnAbort;
+    if (inflightTurn.cancelled) turnAbort.abort();
+
     // Auto-recall: if this is the session's first USER turn and nothing
     // has been recalled yet, search memories now and rebuild the live
     // session so the injected block lands in the system prompt. Hidden
@@ -6319,10 +6397,12 @@ export class ChatManager {
     // production too. Only runs once per session and survives restarts
     // (record.recall is persisted).
     if (state.record.messages.length === 1 && !state.record.recall && !opts?.hidden) {
-      await this.tryAutoRecall(state, userText, scope);
+      this.telemetry.noteTurnPhase(sessionId, 'recall');
+      await this.tryAutoRecall(state, userText, scope, turnAbort.signal);
+      this.telemetry.noteTurnPhase(sessionId, 'preparing');
     }
     const session = state.session!;
-    // Per-turn AbortController — gives `cancelInflight` a direct
+    // The per-turn AbortController gives `cancelInflight` a direct
     // line to the provider's in-flight fetch. Without it, cancel
     // only disconnects the session (tearing down the MCP bridge
     // and SDK instance); the in-flight `sendAndWait` promise still
@@ -6330,16 +6410,12 @@ export class ChatManager {
     // on slow local models means the user hits cancel and then
     // waits another minute for the orphan turn to finish before
     // their next message can start.
-    const turnAbort = new AbortController();
-    inflightTurn.abort = turnAbort;
     if (!inflightTurn.cancelled) {
       this.inflight.set(sessionId, inflightTurn);
     }
-    // Honor a stop pressed during the async prologue above (ensureState /
-    // auto-recall), before this controller existed. The cancellation flag
-    // lives on this exact turn object; abort now so `sendAndWait` sees an already-aborted
-    // signal and unwinds before the provider call really starts, instead
-    // of running the whole turn against a cancel the user already issued.
+    // Honor a stop pressed during ensureState, before this controller existed.
+    // The cancellation flag lives on this exact turn object; abort now so
+    // auto-recall/provider work sees the parked cancellation immediately.
     if (inflightTurn.cancelled) {
       turnAbort.abort();
     }
@@ -6647,7 +6723,17 @@ export class ChatManager {
       // build-request — see migration plan). New behaviors land
       // here without manager.ts changes.
       const messageOrigin = resolveTurnMessageOrigin(opts);
-      const libraryRecall = await this.resolveTurnLibraryRecall(state, userText, messageOrigin);
+      const projectRetrieval = await this.resolveTurnProjectRetrieval(
+        state,
+        userText,
+        messageOrigin,
+      );
+      // The unified retrieval includes the shared library. Keep the older
+      // library-only behavior as a graceful fallback for tests/embedders that
+      // have not wired SearchService yet.
+      const libraryRecall = projectRetrieval
+        ? []
+        : await this.resolveTurnLibraryRecall(state, userText, messageOrigin);
       const preludeForTurn = await this.resolveUserPromptPrelude(
         state,
         userText,
@@ -6661,6 +6747,26 @@ export class ChatManager {
         promptForTurn = `${preludeForTurn.text}\n\n${promptForTurn}`;
         log.info(
           `session ${sessionId}: behavior ${preludeForTurn.behaviorId} fired — prepending prelude`,
+        );
+      }
+      if (projectRetrieval) {
+        promptForTurn = `${projectRetrieval.prompt}\n\n${promptForTurn}`;
+        // Stamp the consulted sources on the stored user message — citations
+        // only (source/path/line/score), never the retrieved text — so the
+        // UI can show what this turn consulted instead of the retrieval
+        // being invisible machinery.
+        userMessage.retrieval = {
+          hits: projectRetrieval.hits.map((hit) => ({
+            source: hit.source,
+            ...(hit.projectId ? { projectId: hit.projectId } : {}),
+            ...(hit.path ? { path: hit.path } : {}),
+            ...(hit.line ? { line: hit.line } : {}),
+            ...(hit.lineEnd ? { lineEnd: hit.lineEnd } : {}),
+            score: hit.score,
+          })),
+        };
+        log.info(
+          `session ${sessionId}: indexed context injected (${projectRetrieval.policy.mode}, ${projectRetrieval.estimatedTokens} est. tokens, ${projectRetrieval.hits.length} hits)`,
         );
       }
       // Live-preview loopback: runtime errors the preview iframe's shim
@@ -6935,6 +7041,9 @@ export class ChatManager {
         const iterStartedAt = nowIso();
         let finalContent: string;
         try {
+          if (inflightTurn.cancelled) throw new Error('Turn cancelled by user.');
+          inflightTurn.providerStarted = true;
+          this.telemetry.noteProviderRequestStart(sessionId);
           finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
         } catch (err) {
           if (isContextOverflowError(err) && compactionsThisSend < this.maxCompactionsPerSend) {
@@ -6966,6 +7075,7 @@ export class ChatManager {
             liveSession = forced.fresh;
             liveUnsub = subscribeLive(liveSession);
             compactionsThisSend++;
+            this.telemetry.noteProviderRequestStart(sessionId);
             finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
           } else if (!isSessionGoneError(err)) throw err;
           else {
@@ -7000,6 +7110,7 @@ export class ChatManager {
             state.session = fresh;
             liveSession = fresh;
             liveUnsub = subscribeLive(liveSession);
+            this.telemetry.noteProviderRequestStart(sessionId);
             finalContent = await liveSession.sendAndWait(promptForTurn, sendOpts);
           }
         }
@@ -8812,7 +8923,12 @@ export class ChatManager {
     state: LiveSessionState,
     userText: string,
     scope: PublishScope,
+    signal?: AbortSignal,
   ): Promise<void> {
+    // Production uses the per-turn user-message retrieval planner. Keep this
+    // frozen-system-prompt path only as compatibility for tests/embedders that
+    // have not wired SearchService; running both duplicates the same evidence.
+    if (this.searchServiceRef) return;
     const record = state.record;
     try {
       const config = await this.store.readConfig();
@@ -8831,8 +8947,11 @@ export class ChatManager {
         ...(gezel?.parsed.frontmatter.autoRecall !== undefined
           ? { gezelOptIn: gezel.parsed.frontmatter.autoRecall }
           : {}),
+        interactiveDeadlineMs: resolveInteractiveRecallDeadlineMs(),
+        ...(signal ? { signal } : {}),
         ...(this.debug ? { debug: this.debug } : {}),
       });
+      if (signal?.aborted) return;
       if (!hits || hits.length === 0) return;
       record.recall = {
         at: nowIso(),
@@ -9723,6 +9842,11 @@ export class ChatManager {
        */
       actorLabel?: string;
       /**
+       * Project that owns this ephemeral work. Display/scope metadata only:
+       * provider scheduling still follows the explicit model and gezel fields.
+       */
+      projectId?: string;
+      /**
        * Short label describing the job — surfaced in the QueueMeter so
        * the user can see what a busy gezel is actually doing. Examples:
        * "icon · Maya", "summary · session ae463fc7", "about · Reviewer",
@@ -9934,7 +10058,7 @@ export class ChatManager {
     const oneShotScope: PublishScope = {
       sessionId: `one-shot:${randomUUID()}`,
       gezelId: gezelId ?? '',
-      projectId: '',
+      projectId: opts.projectId ?? '',
     };
     const oneShotModel = session.model ?? model;
     let publishedEngineTelemetry = false;
@@ -9962,6 +10086,7 @@ export class ChatManager {
         type: 'engine_phase',
         provider: telemetryProvider,
         phase: ev.phase,
+        ...(opts.jobLabel ? { activity: opts.jobLabel } : {}),
         ...(ev.detail ? { detail: ev.detail } : {}),
         ...(typeof ev.progress === 'number' ? { progress: ev.progress } : {}),
         ...(typeof ev.ttftMs === 'number' ? { ttftMs: ev.ttftMs } : {}),
@@ -10003,6 +10128,7 @@ export class ChatManager {
             signal: oneShotSignal,
             ...(opts.ambient ? { ambient: true } : {}),
             ...(gezelId ? { gezelId } : {}),
+            ...(opts.projectId ? { projectId: opts.projectId } : {}),
             ...(actorLabel ? { actorLabel } : {}),
             ...(opts.jobLabel ? { job: opts.jobLabel } : {}),
             ...(opts.onQueueWait ? { onQueueWait: opts.onQueueWait } : {}),
@@ -12794,6 +12920,129 @@ export class ChatManager {
     }
   }
 
+  private async resolveTurnProjectRetrieval(
+    state: LiveSessionState,
+    userText: string,
+    messageOrigin: TurnMessageOrigin,
+  ) {
+    const search = this.searchServiceRef;
+    if (!search) return null;
+    try {
+      const [gezel, config] = await Promise.all([
+        this.store.getGezel(state.record.gezelId),
+        this.store.readConfig(),
+      ]);
+      if (!gezel) return null;
+      const contextWindow =
+        state.record.numCtx ??
+        state.session?.numCtx ??
+        this.providers.get(state.record.providerName)?.getContextWindow?.();
+      const linkedProjectIds = await this.store.linkedProjectIds(state.record.projectId);
+      // Captured by the probe callback so telemetry exists even when the
+      // floor/hydration turn the whole retrieval into null — the exact blind
+      // spot where "arms all scored low" used to leave no audit trace at all.
+      let probe: {
+        query: string;
+        queryHash: string;
+        policy: { mode: string; inheritedFrom: string; maxTokens: number };
+        rawResults: number;
+        arms?: unknown[];
+      } | null = null;
+      const result = await retrieveProjectContext({
+        store: this.store,
+        search,
+        record: state.record,
+        gezel,
+        config,
+        userText,
+        messageOrigin,
+        projectIds: [state.record.projectId, ...linkedProjectIds],
+        ...(contextWindow ? { contextWindow } : {}),
+        onSearchProbe: (p) => {
+          probe = p;
+        },
+      });
+      if (!result) {
+        // Zero-injection telemetry (per query hash, once per session): the
+        // arms ran; nothing cleared the floor or survived hydration.
+        const zero = probe as {
+          queryHash: string;
+          policy: { mode: string; inheritedFrom: string; maxTokens: number };
+          rawResults: number;
+          arms?: unknown[];
+        } | null;
+        if (zero) {
+          const probed = state.retrievalProbeHashes ?? new Set<string>();
+          if (!probed.has(zero.queryHash)) {
+            probed.add(zero.queryHash);
+            state.retrievalProbeHashes = probed;
+            await this.historyManager
+              ?.log({
+                kind: 'retrieval.context-injected',
+                projectId: state.record.projectId,
+                gezelId: state.record.gezelId,
+                summary: `Indexed context retrieval found nothing above the floor (${zero.policy.mode})`,
+                details: {
+                  sessionId: state.record.id,
+                  queryHash: zero.queryHash,
+                  mode: zero.policy.mode,
+                  inheritedFrom: zero.policy.inheritedFrom,
+                  estimatedTokens: 0,
+                  maxTokens: zero.policy.maxTokens,
+                  truncated: false,
+                  rawResults: zero.rawResults,
+                  hits: [],
+                  ...(zero.arms ? { arms: zero.arms } : {}),
+                },
+              })
+              .catch(() => {});
+          }
+        }
+        return null;
+      }
+      const already = state.retrievalQueryHashes ?? new Set<string>();
+      if (already.has(result.queryHash)) return null;
+      already.add(result.queryHash);
+      state.retrievalQueryHashes = already;
+      const probeArms = (probe as { arms?: unknown[] } | null)?.arms;
+      await this.historyManager
+        ?.log({
+          kind: 'retrieval.context-injected',
+          projectId: state.record.projectId,
+          gezelId: state.record.gezelId,
+          summary: `Injected ${result.hits.length} indexed context ${result.hits.length === 1 ? 'hit' : 'hits'} (${result.policy.mode})`,
+          details: {
+            sessionId: state.record.id,
+            queryHash: result.queryHash,
+            mode: result.policy.mode,
+            inheritedFrom: result.policy.inheritedFrom,
+            estimatedTokens: result.estimatedTokens,
+            maxTokens: result.policy.maxTokens,
+            truncated: result.truncated,
+            hits: result.hits.map((hit) => ({
+              source: hit.source,
+              projectId: hit.projectId,
+              path: hit.path,
+              line: hit.line,
+              lineEnd: hit.lineEnd,
+              score: hit.score,
+              // Knowledge provenance (citation coordinates only, never text).
+              ...(hit.uri ? { uri: hit.uri } : {}),
+              ...(hit.catalogId ? { catalogId: hit.catalogId } : {}),
+              ...(hit.catalogVersion ? { catalogVersion: hit.catalogVersion } : {}),
+            })),
+            // Per-arm timing/outcome telemetry (non-content — never snippets).
+            ...(probeArms ? { arms: probeArms } : {}),
+          },
+        })
+        .catch(() => {});
+      return result;
+    } catch (err) {
+      log.warn('[project-retrieval] search failed:', err instanceof Error ? err.message : err);
+      return null;
+    }
+  }
+
   private async resolveUserPromptPrelude(
     state: LiveSessionState,
     userText: string,
@@ -14922,6 +15171,15 @@ export class ChatManager {
         GEZEL_SESSION_ID: record.id,
         GEZEL_HOME: this.home,
         GEZEL_EXECUTION_DENSITY: executionDensity,
+        // The session model's context window, so the mcp child can budget its
+        // own tool output (the `search` renderer) — the subprocess otherwise
+        // knows nothing about the model it serves. Runtime (post-admission)
+        // wins over the catalog figure when the engine clamped it.
+        ...((runtime?.effectiveContextWindow ?? modelContextWindow)
+          ? {
+              GEZEL_CONTEXT_WINDOW: String(runtime?.effectiveContextWindow ?? modelContextWindow),
+            }
+          : {}),
         GEZEL_ROLE_BASED_NAME_ONLY_MODE:
           (record.roleBasedNameOnlyMode ?? globalConfig.roleBasedNameOnlyMode ?? false) ? '1' : '0',
         ...(record.expectedDeliverable
@@ -15152,6 +15410,7 @@ export class ChatManager {
       // configures. The only one today is `@playwright/mcp`, which needs
       // `PLAYWRIGHT_BROWSERS_PATH` to find Chromium in our managed dir.
       const extraArgs: string[] = [];
+      let runtimeArgs = t.runtime.args;
       const isLocalPreviewBrowser =
         isManagedSystemPlaywright(t) &&
         systemOnlyIds.has(t.toolsetId) &&
@@ -15162,12 +15421,25 @@ export class ChatManager {
       if (t.toolsetId === '@playwright/mcp') {
         const { playwrightBrowsersDir } = await import('@bendyline/gezel/paths');
         env.PLAYWRIGHT_BROWSERS_PATH = playwrightBrowsersDir(this.home);
+        // Playwright MCP otherwise falls back to `.playwright-mcp` beneath
+        // the daemon's inherited cwd. In an Electron dev run that is often
+        // packages/app/, which leaks screenshots, snapshots, and console
+        // logs into the source tree. The destination is session-resolved and
+        // absolute so every provider transport (bridge, Copilot, CLI) writes
+        // browser evidence into the active project's artifacts drawer.
+        // Override either catalog spelling instead of trusting a static path
+        // that cannot know which project owns this session.
+        runtimeArgs = withForcedCliOption(
+          runtimeArgs,
+          '--output-dir',
+          join(this.store.projectArtifactsDir(record.projectId), 'screenshots'),
+        );
         // Default to headless so `browser_*` tools don't pop a real Chrome
         // window every time a gezel navigates — users were surprised by a
         // `--no-sandbox` Chromium appearing mid-conversation. Set
         // `config.playwrightHeadless = false` to watch the browser for
         // debugging.
-        if (config.playwrightHeadless !== false && !t.runtime.args.includes('--headless')) {
+        if (config.playwrightHeadless !== false && !runtimeArgs.includes('--headless')) {
           extraArgs.push('--headless');
         }
         // Each session gets its own ephemeral browser profile. Without
@@ -15177,7 +15449,7 @@ export class ChatManager {
         // spawn gets a fresh tmpdir and crash-leftovers don't poison
         // future runs. We don't need cross-spawn cookie persistence —
         // sessions don't share auth state by design.
-        if (!t.runtime.args.includes('--isolated')) {
+        if (!runtimeArgs.includes('--isolated')) {
           extraArgs.push('--isolated');
         }
         // Permit explicitly requested loopback HTTPS targets that use a local
@@ -15186,7 +15458,7 @@ export class ChatManager {
         // short-lived path capability, so this TLS setting cannot bypass the
         // preview authorization boundary.
         if (
-          !t.runtime.args.includes('--ignore-https-errors') &&
+          !runtimeArgs.includes('--ignore-https-errors') &&
           env.PLAYWRIGHT_MCP_IGNORE_HTTPS_ERRORS !== '0'
         ) {
           extraArgs.push('--ignore-https-errors');
@@ -15194,7 +15466,7 @@ export class ChatManager {
         // Boundary flags are Gezel-owned in local-only mode. A modified
         // system manifest that tries to supply its own proxy/origin policy is
         // refused instead of relying on CLI duplicate-option precedence.
-        if (isLocalPreviewBrowser && hasLocalPreviewBrowserNetworkOverride(t.runtime.args)) {
+        if (isLocalPreviewBrowser && hasLocalPreviewBrowserNetworkOverride(runtimeArgs)) {
           log.warn(
             'security: refusing local-preview Playwright because its system manifest overrides network-boundary arguments',
           );
@@ -15203,7 +15475,7 @@ export class ChatManager {
         if (isLocalPreviewBrowser && opts.workspacePreview?.origin) {
           extraArgs.push(
             ...localPreviewBrowserLaunchArgs(opts.workspacePreview.origin, [
-              ...t.runtime.args,
+              ...runtimeArgs,
               ...extraArgs,
             ]),
           );
@@ -15243,7 +15515,7 @@ export class ChatManager {
         toolsetId: t.toolsetId,
         kind: 'stdio',
         command: 'node',
-        args: [runtimeEntry, ...t.runtime.args, ...extraArgs],
+        args: [runtimeEntry, ...runtimeArgs, ...extraArgs],
         env,
       };
       // The local-preview posture lives in the wrapper: `decorateTools`

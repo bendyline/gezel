@@ -112,6 +112,19 @@ const escalationMemory = new WeakMap<EvalContext, Map<string, SniffEscalationSta
  */
 const lastNudgeDelivery = new WeakMap<EvalContext, { at: number; stage: number }>();
 
+/** Generic watchdog nudges must not stack on a scenario-specific repair that
+ * has just landed. Two minutes is one bounded local-model response window. */
+export const HARNESS_INTERVENTION_SETTLE_MS = 2 * 60_000;
+const lastHarnessInterventionDelivery = new WeakMap<EvalContext, number>();
+
+export function noteHarnessInterventionDelivered(ctx: EvalContext, at = Date.now()): void {
+  lastHarnessInterventionDelivery.set(ctx, at);
+}
+
+export function lastDeliveredHarnessIntervention(ctx: EvalContext): number | null {
+  return lastHarnessInterventionDelivery.get(ctx) ?? null;
+}
+
 export function lastDeliveredSniffNudge(ctx: EvalContext): { at: number; stage: number } | null {
   return lastNudgeDelivery.get(ctx) ?? null;
 }
@@ -596,6 +609,7 @@ export async function postSniffFeedback(
     }
     posted.add(key);
     lastNudgeDelivery.set(ctx, { at: Date.now(), stage });
+    noteHarnessInterventionDelivered(ctx);
     // A delivered nudge arms BOTH ladders' delivered-then-completed
     // counters — the plateau must keep counting across signature churn.
     const armedStates = plateauState ? [state, plateauState] : [state];
@@ -1077,6 +1091,7 @@ const missingDeliverableState = new WeakMap<
       firstSeenTargetGezelId?: string;
       firstSeenTargetAtPoll?: number;
       coordinatorFallbackSentAtPoll?: number;
+      lastNudgeSentAtPoll?: number;
     }
   >
 >();
@@ -1189,7 +1204,8 @@ export async function postMissingDeliverableFeedback(
     !newNearMiss &&
     !newTarget &&
     state.nudgesSent > 0 &&
-    (state.absentPolls - minPolls) % repeatEvery !== 0
+    state.lastNudgeSentAtPoll !== undefined &&
+    state.absentPolls - state.lastNudgeSentAtPoll < repeatEvery
   ) {
     return;
   }
@@ -1271,6 +1287,8 @@ export async function postMissingDeliverableFeedback(
       );
     }
     state.nudgesSent += 1;
+    state.lastNudgeSentAtPoll = state.absentPolls;
+    noteHarnessInterventionDelivered(ctx);
     if (specialist?.gezelId && !urgentWrongSurfaceNearMiss) {
       state.lastTargetGezelId = specialist.gezelId;
     }

@@ -56,6 +56,10 @@ export async function deployMlRuntime(repoRoot, target, label) {
       filter: '@bendyline/internal-ml-runtime',
       target: staging,
       label,
+      // This deployment-only package has no dependency path to Gilde or
+      // Squisq. Dedicated deploy preserves the lockfile's workspace Sharp
+      // compatibility substitution, which legacy deploy cannot materialize.
+      ignoreLocalReleaseLinks: true,
     });
 
     const targetModules = join(target, 'node_modules');

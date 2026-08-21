@@ -185,6 +185,25 @@ describe('GezelDetail', () => {
     expect(screen.getByRole('tab', { name: 'Memories' })).toBeInTheDocument();
   });
 
+  it('hides advanced tuning while the gezel inherits the default model', async () => {
+    render(<GezelDetail gezelId="gz-maya" />);
+    await screen.findByRole('heading', { name: 'Maya' });
+
+    expect(screen.queryByText('Advanced tuning')).not.toBeInTheDocument();
+  });
+
+  it('shows advanced tuning for an explicitly selected model', async () => {
+    vi.mocked(api.getGezel).mockResolvedValue({
+      ...DETAIL,
+      provider: 'openai',
+      model: 'gpt-5',
+    } as GezelDetailData);
+    render(<GezelDetail gezelId="gz-maya" />);
+    await screen.findByRole('heading', { name: 'Maya' });
+
+    expect(screen.getByText('Advanced tuning')).toBeInTheDocument();
+  });
+
   it('returns to Chat when switching from Toolsets to a fixed-function gezel', async () => {
     vi.mocked(api.getGezel).mockImplementation(async (id) =>
       id === 'gz-image' ? FIXED_FUNCTION_DETAIL : DETAIL,

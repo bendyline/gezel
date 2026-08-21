@@ -67,9 +67,27 @@ export interface MlxCacheAdapterOptions {
  * lifetime of installs is negligible at this scale and the shorter id
  * is friendlier in logs.
  */
-export function gezelPrefixId(systemPrompt: string): string {
-  const hex = createHash('sha256').update(systemPrompt, 'utf8').digest('hex');
-  return `prefix-${hex.slice(0, 16)}`;
+export function gezelPrefixId(systemPrompt: string, tools?: readonly unknown[]): string {
+  const h = createHash('sha256').update(systemPrompt, 'utf8');
+  // The tool ROSTER is part of the prefix identity. Qwen-family templates
+  // render the tool block at the top of the system message, so two sessions
+  // whose rosters differ do not share a token prefix even with identical
+  // prompt text — and roles carry different rosters, so that is the common
+  // case, not an edge case. Hashing only names+arity keeps the id stable
+  // against harmless description churn while still separating real rosters.
+  if (tools && tools.length > 0) {
+    const sig = tools
+      .map((t) => {
+        const fn = (t as { function?: { name?: string; parameters?: { properties?: object } } })
+          ?.function;
+        const props = fn?.parameters?.properties ?? {};
+        return `${fn?.name ?? '?'}:${Object.keys(props).sort().join(',')}`;
+      })
+      .sort()
+      .join('|');
+    h.update('\u0000tools\u0000', 'utf8').update(sig, 'utf8');
+  }
+  return `prefix-${h.digest('hex').slice(0, 16)}`;
 }
 
 /**
@@ -128,8 +146,8 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
    * derives the hash via {@link gezelPrefixId}. Idempotent; same
    * (sessionId, systemPrompt) → same prefixId → same map state.
    */
-  setSessionPrefix(sessionId: string, systemPrompt: string): string {
-    const prefixId = gezelPrefixId(systemPrompt);
+  setSessionPrefix(sessionId: string, systemPrompt: string, tools?: readonly unknown[]): string {
+    const prefixId = gezelPrefixId(systemPrompt, tools);
     this.sessionPrefix.set(sessionId, prefixId);
     return prefixId;
   }
@@ -145,6 +163,7 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
     sessionId: string,
     systemPrompt?: string,
     layers?: SystemPromptLayers,
+    tools?: readonly unknown[],
   ): Promise<void> {
     if (layers) {
       // Layered mode: register the [gp, gezel] ids the server will try
@@ -159,8 +178,22 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
       return;
     }
     if (!systemPrompt) return;
-    const prefixId = this.setSessionPrefix(sessionId, systemPrompt);
-    await this.warmPrefix(prefixId, systemPrompt);
+    // Tools are part of the prefix identity, not decoration: Qwen renders
+    // the tool block at the TOP of the system message, so a prefix warmed
+    // without them is not a token-prefix of any real turn. They also feed
+    // the prefix id, because a prefix warmed for roster A would otherwise
+    // be a false hit for a session carrying roster B.
+    // Rendering the warm prompt WITH tools is what makes the warmed entry a
+    // real token-prefix of later turns (Qwen puts the tool block at the top
+    // of the system message, so without them the two share 3 tokens). It is
+    // gated with the rest of the prefix-stability work because on its own it
+    // adds ~5-6K tokens of warm prefill and the payoff needs the snapshot
+    // boundary too — measured as a net reuse regression without it.
+    const stablePrefix =
+      process.env.GEZEL_MLX_STABLE_PREFIX === '1' || process.env.GEZEL_MLX_STABLE_PREFIX === 'true';
+    const warmTools = stablePrefix ? tools : undefined;
+    const prefixId = this.setSessionPrefix(sessionId, systemPrompt, warmTools);
+    await this.warmPrefix(prefixId, systemPrompt, warmTools);
   }
 
   buildRequestExtras(sessionId: string): Record<string, unknown> {
@@ -294,12 +327,16 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
    * tokens, but skipping the round-trip saves a few ms and one log
    * line per session open).
    */
-  async warmPrefix(prefixId: string, systemPrompt: string): Promise<void> {
+  async warmPrefix(
+    prefixId: string,
+    systemPrompt: string,
+    tools?: readonly unknown[],
+  ): Promise<void> {
     if (this.warmedPrefixes.has(prefixId)) return;
     const existing = this.warmingPrefixes.get(prefixId);
     if (existing) return existing;
 
-    const warming = this.warmPrefixOnce(prefixId, systemPrompt);
+    const warming = this.warmPrefixOnce(prefixId, systemPrompt, tools);
     this.warmingPrefixes.set(prefixId, warming);
     try {
       await warming;
@@ -310,7 +347,11 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
     }
   }
 
-  private async warmPrefixOnce(prefixId: string, systemPrompt: string): Promise<void> {
+  private async warmPrefixOnce(
+    prefixId: string,
+    systemPrompt: string,
+    tools?: readonly unknown[],
+  ): Promise<void> {
     if (this.warmedPrefixes.has(prefixId)) return;
     const baseUrl = await this.resolveBaseUrl().catch(() => null);
     if (!baseUrl) return;
@@ -327,6 +368,9 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
             // for templates that reject system-only input, then snapshots
             // their stable token prefix before either user turn.
             messages: [{ role: 'system', content: systemPrompt }],
+            // Render through the same tool-aware template branch the real
+            // turns use, or the warmed tokens are not their prefix.
+            ...(tools && tools.length > 0 ? { tools } : {}),
             // Critical: persist=true writes the warmed entry to disk so
             // sibling sessions opened after this process restart still
             // benefit. Without persist the prefix would only live in

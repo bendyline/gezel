@@ -8,6 +8,8 @@ import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import { resolveProjectBoekwachter } from '../gezels/autonomous-roles.js';
+import { embeddingsDisabledReason } from '../memory/embeddings.js';
+import { faceEmbedAvailability, imageEmbedAvailability } from '../memory/image-embeddings.js';
 import type { SystemIdleState } from '../system/idle-state.js';
 import type { AiShadowProducers } from './ai-shadow.js';
 import type { ContentIndex } from './content-index.js';
@@ -37,6 +39,17 @@ const BATCH = 5;
 // re-fires, so the shift sustains ~BUDGET/INTERVAL duty cycle all night).
 const NIGHT_BATCH = 25;
 const NIGHT_TICK_BUDGET_MS = 90_000;
+// Embed-only tier batch (day). Larger than BATCH because it makes no LLM
+// calls — the local embeddings worker is the only cost — but still bounded so
+// a tick stays polite on shared hardware.
+const EMBED_ONLY_BATCH = 10;
+// Image-embed tier batches (lane A). Smaller than the text tier: each image
+// costs a decode (100+ ms on a big photo) plus a vision-tower forward.
+const IMAGE_EMBED_BATCH = 5;
+const IMAGE_EMBED_NIGHT_BATCH = 20;
+// Face tier batch (lane B): a detector pass plus one ArcFace forward per
+// detected face — the heaviest of the local image tiers.
+const FACE_BATCH = 5;
 
 export interface IndexEnrichmentActivity {
   id: 'index-enrichment';
@@ -122,11 +135,15 @@ export class IndexEnrichmentManager {
   private readonly refreshStatic: ((projectId: string) => Promise<unknown>) | undefined;
   /** In-flight on-demand drives, one per project (joiners get the same run). */
   private readonly drives = new Map<string, { mode: DriveIntensity; run: Promise<void> }>();
+  /** In-flight immediate embed drains (drainEmbedOnly), one per project. */
+  private readonly embedDrains = new Map<string, Promise<void>>();
   /** Nonzero while a night-shift catch-up sweep is holding task dispatch. */
   private catchUpRuns = 0;
+  private readonly catchUps = new Set<Promise<void>>();
 
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly backgroundTicks = new Set<Promise<void>>();
   private running = false;
   private activity: IndexEnrichmentActivity | null = null;
 
@@ -152,20 +169,35 @@ export class IndexEnrichmentManager {
   start(): void {
     this.startupTimer = setTimeout(() => {
       this.startupTimer = null;
-      void this.tick().catch((err) => log.warn(`[enrich] startup tick failed: ${describe(err)}`));
+      this.launchBackgroundTick('startup');
     }, this.startupDelayMs);
     unref(this.startupTimer);
     this.tickTimer = setInterval(() => {
-      void this.tick().catch((err) => log.warn(`[enrich] tick failed: ${describe(err)}`));
+      this.launchBackgroundTick('periodic');
     }, this.intervalMs);
     unref(this.tickTimer);
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.startupTimer) clearTimeout(this.startupTimer);
     if (this.tickTimer) clearInterval(this.tickTimer);
     this.startupTimer = null;
     this.tickTimer = null;
+    await Promise.allSettled([
+      ...this.backgroundTicks,
+      ...this.catchUps,
+      ...[...this.drives.values()].map(({ run }) => run),
+    ]);
+  }
+
+  private launchBackgroundTick(kind: 'startup' | 'periodic'): void {
+    const run = this.tick()
+      .catch((err) => {
+        const label = kind === 'startup' ? 'startup tick' : 'tick';
+        log.warn(`[enrich] ${label} failed: ${describe(err)}`);
+      })
+      .finally(() => this.backgroundTicks.delete(run));
+    this.backgroundTicks.add(run);
   }
 
   /** Live, durable-for-the-tick status consumed by the Night Shift menu. */
@@ -245,7 +277,13 @@ export class IndexEnrichmentManager {
    * catch-up flag is raised synchronously so a caller that kicks this (not
    * awaited) and then wakes the TaskRunner still gets the dispatch hold.
    */
-  async catchUpAll(): Promise<void> {
+  catchUpAll(): Promise<void> {
+    const run = this.runCatchUpAll().finally(() => this.catchUps.delete(run));
+    this.catchUps.add(run);
+    return run;
+  }
+
+  private async runCatchUpAll(): Promise<void> {
     this.catchUpRuns++;
     try {
       const projects = await this.store.listProjects().catch(() => []);
@@ -265,6 +303,82 @@ export class IndexEnrichmentManager {
     } finally {
       this.catchUpRuns--;
     }
+  }
+
+  /**
+   * Kick the always-on local embed tiers (text + lane-A images) for one
+   * project RIGHT NOW — no idle wait, no roster gate. This is what makes
+   * "semantic search minutes after pointing gezel at a folder" true: the
+   * background tick requires ~3 min of OS idle, which is exactly the state
+   * a user who just created a project is never in. Politeness comes from
+   * yielding to live chat between batches instead — a turn starting mid-
+   * drain stops it, and the next tick or scan resumes the remainder.
+   * Fired by the workspace scan-complete hook and the roster-less fallback
+   * of `POST /index/enrich`.
+   */
+  drainEmbedOnly(projectId: string): { started: boolean; alreadyRunning: boolean } {
+    // A full drive already covers this work; don't double-open the index.
+    if (this.drives.has(projectId) || this.embedDrains.has(projectId)) {
+      return { started: false, alreadyRunning: true };
+    }
+    const run = (async () => {
+      if (await this.isPaused()) return;
+      // Guarded like isSharedLibrary: narrow test doubles may not carry it.
+      const indexingEnabled =
+        typeof this.store.projectIndexingEnabled === 'function'
+          ? await this.store.projectIndexingEnabled(projectId).catch(() => true)
+          : true;
+      if (!indexingEnabled) return;
+      await this.drainLocalEmbedTiers(projectId, { night: true, yieldToChat: true });
+    })()
+      .catch((err) => log.warn(`[enrich] embed drain ${projectId} failed: ${describe(err)}`))
+      .finally(() => this.embedDrains.delete(projectId));
+    this.embedDrains.set(projectId, run);
+    return { started: true, alreadyRunning: false };
+  }
+
+  /**
+   * Drain the text embed-only tier, then the image-embed tier. Shared by
+   * the drive path (pause-sensitive, chat-blind — a drive is explicit user
+   * intent) and the immediate kick above (also yields to live chat).
+   */
+  private async drainLocalEmbedTiers(
+    projectId: string,
+    opts: { night: boolean; yieldToChat?: boolean },
+  ): Promise<'done' | 'paused' | 'yielded'> {
+    const textBatch = opts.night ? NIGHT_BATCH : EMBED_ONLY_BATCH;
+    const imageBatch = opts.night ? IMAGE_EMBED_NIGHT_BATCH : IMAGE_EMBED_BATCH;
+    if (!embeddingsDisabledReason()) {
+      for (;;) {
+        if (await this.isPaused()) return 'paused';
+        if (opts.yieldToChat && this.chat.isAnyActive()) return 'yielded';
+        const r = await this.contentIndex.embedOnly(projectId, textBatch).catch(() => null);
+        if (!r || r.files === 0) break;
+        if (r.embedded > 0) {
+          log.info(`[enrich] ${projectId}: ${r.embedded} files embed-only (semantic search)`);
+        }
+        if (r.embedded === 0) break; // embeddings unavailable — don't spin
+      }
+    }
+    if (imageEmbedAvailability().ok) {
+      for (;;) {
+        if (await this.isPaused()) return 'paused';
+        if (opts.yieldToChat && this.chat.isAnyActive()) return 'yielded';
+        const r = await this.contentIndex.embedImages(projectId, imageBatch).catch(() => null);
+        if (!r || r.files === 0 || r.unavailable) break;
+        if (r.embedded > 0) {
+          log.info(`[enrich] ${projectId}: ${r.embedded} images embedded (visual similarity)`);
+        }
+      }
+    }
+    return 'done';
+  }
+
+  /** Face tier gate: the explicit biometric opt-in AND a healthy face stack. */
+  private async faceRecognitionEnabled(): Promise<boolean> {
+    if (!faceEmbedAvailability().ok) return false;
+    const config = await this.store.readConfig().catch(() => null);
+    return config?.faceRecognition?.enabled === true;
   }
 
   private async isSharedLibrary(projectId: string): Promise<boolean> {
@@ -304,6 +418,32 @@ export class IndexEnrichmentManager {
       if (this.refreshStatic) await this.refreshStatic(projectId).catch(() => {});
       else await this.contentIndex.refresh(projectId).catch(() => {});
 
+      // (b)+(b2) always-on local embed tiers (text + lane-A images), drained
+      // BEFORE the roster gate: the embedders are local and LLM-free, so
+      // semantic search needs no Boekwachter — a drive on an unstaffed
+      // project still delivers it. This placement is also the image lane's
+      // governance containment — upstream of buildEnrichDeps, so no Night
+      // Shift override or Boekwachter model pin can route image bytes
+      // anywhere but the local worker.
+      if ((await this.drainLocalEmbedTiers(projectId, { night: full })) === 'paused') return;
+
+      // (b3) face tier (lane B) — explicit biometric opt-in, same local-only
+      // slot and containment as (b2). The one-time model download happens
+      // here (the disclosed cost of the opt-in), never inside faceIndex.
+      if (
+        (await this.faceRecognitionEnabled()) &&
+        (await this.contentIndex.ensureFaceModelsInstalled().catch(() => false))
+      ) {
+        for (;;) {
+          if (await this.isPaused()) return;
+          const r = await this.contentIndex.faceIndex(projectId, FACE_BATCH).catch(() => null);
+          if (!r || r.files === 0 || r.unavailable) break;
+          if (r.faces > 0) {
+            log.info(`[enrich] ${projectId}: ${r.faces} faces indexed in ${r.files} images`);
+          }
+        }
+      }
+
       const boekwachter = await this.resolveBoekwachter(projectId);
       if (!boekwachter) return; // static is current; AI needs the roster opt-in
       const deps = await buildEnrichDeps(this.store, this.chat, {
@@ -312,6 +452,7 @@ export class IndexEnrichmentManager {
         // so the local engine holds it behind live chat.
         ambient: !full,
         boekwachter,
+        projectId,
       });
       const gezel = { gezelId: boekwachter.id, gezelName: boekwachter.name };
       const batch = full ? NIGHT_BATCH : BATCH;
@@ -438,11 +579,69 @@ export class IndexEnrichmentManager {
         // merely a request to skip the cheap structural pass. Do not consume
         // an older on-disk index if the project was disabled after a scan.
         if (p.indexingEnabled === false) continue;
-        // Roster presence is the explicit opt-in for AI indexing. The cheap
-        // WorkspaceIndexManager scan runs independently for every project.
+        if (this.chat.isProjectActive(p.id)) continue;
+        // Always-on embed-only tier, ahead of the roster gate: the embedder
+        // is local and LLM-free, so every indexing-enabled project gets
+        // semantic search — recruiting a Boekwachter upgrades it with
+        // summaries/reviews/media rather than gating it.
+        if (!embeddingsDisabledReason()) {
+          const embedded = await this.contentIndex
+            .embedOnly(p.id, night ? NIGHT_BATCH : EMBED_ONLY_BATCH)
+            .catch(() => null);
+          if (embedded && embedded.embedded > 0) {
+            didWork = true;
+            log.info(`[enrich] ${p.id}: ${embedded.embedded} files embed-only (semantic search)`);
+            this.events?.publishGlobalEvent({
+              type: 'index_progress',
+              phase: 'enrich',
+              state: 'progress',
+              projectId: p.id,
+              detail: `${embedded.embedded} files embedded for search`,
+            });
+          }
+        }
+        // Always-on image-embed tier (lane A), same pre-roster slot and the
+        // same governance containment as the drive path: local worker only,
+        // upstream of every model-routing seam.
+        if (imageEmbedAvailability().ok) {
+          const imgs = await this.contentIndex
+            .embedImages(p.id, night ? IMAGE_EMBED_NIGHT_BATCH : IMAGE_EMBED_BATCH)
+            .catch(() => null);
+          if (imgs && imgs.embedded > 0) {
+            didWork = true;
+            log.info(`[enrich] ${p.id}: ${imgs.embedded} images embedded (visual similarity)`);
+            this.events?.publishGlobalEvent({
+              type: 'index_progress',
+              phase: 'enrich',
+              state: 'progress',
+              projectId: p.id,
+              detail: `${imgs.embedded} images embedded for visual similarity`,
+            });
+          }
+        }
+        // Face tier (lane B) — biometric opt-in, same local-only slot.
+        if (
+          (await this.faceRecognitionEnabled()) &&
+          (await this.contentIndex.ensureFaceModelsInstalled().catch(() => false))
+        ) {
+          const fr = await this.contentIndex.faceIndex(p.id, FACE_BATCH).catch(() => null);
+          if (fr && fr.faces > 0) {
+            didWork = true;
+            log.info(`[enrich] ${p.id}: ${fr.faces} faces indexed in ${fr.files} images`);
+            this.events?.publishGlobalEvent({
+              type: 'index_progress',
+              phase: 'enrich',
+              state: 'progress',
+              projectId: p.id,
+              detail: `${fr.files} images checked for people`,
+            });
+          }
+        }
+        // Roster presence is the explicit opt-in for AI indexing (summaries,
+        // reviews, media). The cheap WorkspaceIndexManager scan and the
+        // embed-only tier above run independently for every project.
         const boekwachter = await this.resolveBoekwachter(p.id);
         if (!boekwachter) continue;
-        if (this.chat.isProjectActive(p.id)) continue;
         this.activity = {
           id: 'index-enrichment',
           title: 'Workspace indexing',
@@ -450,7 +649,7 @@ export class IndexEnrichmentManager {
           projectId: p.id,
           ...(p.name ? { projectName: p.name } : {}),
         };
-        const deps = await this.buildDeps(night, boekwachter);
+        const deps = await this.buildDeps(night, boekwachter, p.id);
         const rubrics: Map<string, ResolvedRubric> = deps.model
           ? await resolveRubrics(this.store).catch(() => new Map<string, ResolvedRubric>())
           : new Map<string, ResolvedRubric>();
@@ -611,11 +810,16 @@ export class IndexEnrichmentManager {
   }
 
   /** Resolve the configured summarizer (if any) + the always-local embedder. */
-  private async buildDeps(nightShift: boolean, boekwachter: GezelDetail): Promise<EnrichDeps> {
+  private async buildDeps(
+    nightShift: boolean,
+    boekwachter: GezelDetail,
+    projectId: string,
+  ): Promise<EnrichDeps> {
     return buildEnrichDeps(this.store, this.chat, {
       nightShift,
       ambient: true,
       boekwachter,
+      projectId,
     });
   }
 }

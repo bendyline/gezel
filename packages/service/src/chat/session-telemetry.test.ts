@@ -49,9 +49,29 @@ describe('SessionTelemetryTracker', () => {
     expect(t.snapshot('s1', false)?.currentTurn).toBeNull();
     t.noteTurnStart(scope('s1'));
     expect(t.snapshot('s1', true)?.currentTurn).toMatchObject({
+      phase: 'preparing',
+      providerRequestsStarted: 0,
       streamedContentChars: 0,
       toolCalls: 0,
       fileMutations: 0,
+    });
+  });
+
+  it('attributes pre-provider phases and counts provider request attempts', () => {
+    const t = new SessionTelemetryTracker();
+    t.noteTurnStart(scope('s1'));
+    t.noteTurnPhase('s1', 'recall');
+    expect(t.snapshot('s1', true)?.currentTurn).toMatchObject({
+      phase: 'recall',
+      providerRequestsStarted: 0,
+    });
+
+    t.noteProviderRequestStart('s1');
+    const snap = t.snapshot('s1', true);
+    expect(snap?.providerRequestsStarted).toBe(1);
+    expect(snap?.currentTurn).toMatchObject({
+      phase: 'provider',
+      providerRequestsStarted: 1,
     });
   });
 

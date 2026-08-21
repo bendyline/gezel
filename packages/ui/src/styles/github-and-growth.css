@@ -1,0 +1,1251 @@
+/* ── GitHub tab: changes / diff / conflicts / timeline ── */
+
+/* The tab fills the project body like the chat tab does: a flex column
+   whose active sub-tab body grows to the bottom of the window. Without
+   this the div collapses to its content height and only the (now-removed)
+   `height: calc(100vh - Npx)` hacks on the sub-layouts gave it any size. */
+.project-github {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.github-toolbar {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex: 0 0 auto;
+  padding: 0.6rem 0.75rem;
+}
+
+.gh-banner-warn {
+  padding: 0.5rem 0.75rem;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-md);
+  margin-bottom: 0.5rem;
+  font-size: 0.88rem;
+}
+
+.gh-banner-nudge {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.75rem;
+  background: var(--success-bg);
+  border: 1px solid var(--success);
+  border-radius: var(--radius-md);
+  margin-bottom: 0.5rem;
+  font-size: 0.88rem;
+}
+
+.gh-banner-nudge .gh-banner-dismiss {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.gh-clone-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 3rem 1rem;
+  color: var(--text-muted);
+}
+
+.gh-tab-badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0 0.45rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Changes view: GitHub-Desktop-style two-pane layout. */
+.gh-changes-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) 1fr;
+  gap: 0.75rem;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.gh-changes-rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.gh-changes-rail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.gh-changes-discard-all {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.gh-changes-discard-all:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.gh-changes-truncated {
+  padding: 0.25rem 0.6rem;
+  margin: 0;
+}
+
+.gh-changes-rail-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+}
+
+.gh-changes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.gh-changes-list li {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
+.gh-changes-list li.is-selected {
+  background: var(--surface);
+}
+
+.gh-changes-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.84rem;
+}
+
+.gh-change-kind {
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.gh-change-kind-modified {
+  color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.gh-change-kind-added {
+  color: var(--diff-add);
+  background: var(--diff-add-bg);
+}
+
+.gh-change-kind-deleted {
+  color: var(--diff-rem);
+  background: var(--diff-rem-bg);
+}
+
+.gh-change-kind-renamed {
+  color: var(--diff-hunk);
+  background: var(--diff-surface);
+}
+
+.gh-change-kind-conflicted {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.gh-change-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gh-change-dir {
+  margin-left: 0.4rem;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+}
+
+.gh-change-counts {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.gh-change-add {
+  color: var(--diff-add);
+}
+
+.gh-change-rem {
+  color: var(--diff-rem);
+  margin-left: 0.3rem;
+}
+
+/* Overlaid on the row's right edge so it reserves no width; the +/-
+   counts hide while it's revealed. */
+.gh-change-discard {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 1.8rem;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  font-size: 0.85rem;
+}
+
+.gh-changes-list li:hover .gh-change-discard,
+.gh-change-discard:focus-visible {
+  opacity: 1;
+}
+
+.gh-changes-list li:hover .gh-change-counts,
+.gh-changes-list li:has(.gh-change-discard:focus-visible) .gh-change-counts {
+  visibility: hidden;
+}
+
+.gh-change-discard:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+/* Save box pinned under the changed-file list. */
+.gh-save-box {
+  border-top: 1px solid var(--border);
+  padding: 0.5rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.gh-save-textarea-wrap {
+  position: relative;
+}
+
+.gh-save-message {
+  width: 100%;
+  resize: vertical;
+  min-height: 3.2em;
+  max-height: 9em;
+  font: inherit;
+  font-size: 0.84rem;
+  padding: 0.4rem 1.9rem 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.gh-save-message.is-suggesting {
+  animation: gh-suggest-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes gh-suggest-pulse {
+  50% {
+    border-color: var(--accent);
+  }
+}
+
+.gh-save-suggest {
+  position: absolute;
+  right: 0.3rem;
+  bottom: 0.4rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  opacity: 0.7;
+}
+
+.gh-save-suggest:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.gh-save-also-sync {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.gh-save-button {
+  width: 100%;
+}
+
+/* Right-hand diff pane. */
+.gh-changes-diff-pane {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.gh-changes-diff-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.gh-changes-diff-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gh-changes-loading,
+.gh-changes-empty {
+  padding: 1.5rem;
+}
+
+.gh-changes-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 3rem 1rem;
+  text-align: center;
+}
+
+.gh-changes-empty-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--success);
+}
+
+/* The diff renderer itself. */
+.git-diff {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.git-diff-placeholder {
+  padding: 1.5rem;
+}
+
+.git-diff-note {
+  padding: 0.4rem 0.7rem;
+  font-family: var(--font-ui, inherit);
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.git-diff-note-deleted {
+  color: var(--diff-rem);
+  background: var(--diff-rem-bg);
+}
+
+.git-diff-line {
+  display: flex;
+  align-items: flex-start;
+}
+
+.git-diff-gutter {
+  flex: none;
+  width: 3.2em;
+  padding-right: 0.6em;
+  text-align: right;
+  color: var(--diff-gutter);
+  user-select: none;
+}
+
+.git-diff-marker {
+  flex: none;
+  width: 1em;
+  user-select: none;
+}
+
+.git-diff-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.git-diff-line-add {
+  background: var(--diff-add-bg);
+}
+
+.git-diff-line-add .git-diff-marker {
+  color: var(--diff-add);
+}
+
+.git-diff-line-rem {
+  background: var(--diff-rem-bg);
+}
+
+.git-diff-line-rem .git-diff-marker {
+  color: var(--diff-rem);
+}
+
+.git-diff-sep {
+  padding: 0.25rem 0.7rem;
+  text-align: center;
+  color: var(--diff-sep);
+  font-size: 0.72rem;
+  background: var(--diff-surface);
+  user-select: none;
+}
+
+.git-diff-truncation {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-ui, inherit);
+}
+
+.git-diff-show-all {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.15rem 0.6rem;
+}
+
+/* Conflict resolution flow. */
+.gh-conflicts {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.gh-conflicts-header {
+  padding: 0.75rem 1rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.gh-conflicts-header h3 {
+  margin: 0 0 0.25rem;
+}
+
+.gh-conflicts-header p {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.gh-conflicts-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  min-height: 0;
+}
+
+.gh-conflicts-rail {
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+}
+
+.gh-conflicts-rail-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.84rem;
+}
+
+.gh-conflicts-rail-item.is-selected {
+  background: var(--surface);
+}
+
+.gh-conflicts-dot {
+  flex: none;
+  color: var(--warning);
+}
+
+.gh-conflicts-dot.is-resolved {
+  color: var(--success);
+}
+
+.gh-conflicts-rail-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gh-conflicts-detail {
+  min-width: 0;
+  overflow-y: auto;
+  padding: 0.75rem 1rem;
+}
+
+.gh-conflict-file {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.gh-conflict-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.gh-conflict-card header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.gh-conflict-content {
+  margin: 0;
+  max-height: 14rem;
+  overflow: auto;
+  background: var(--diff-surface);
+  border: 1px solid var(--diff-border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem;
+  font-size: 0.76rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.gh-conflict-card button,
+.gh-conflict-actions button {
+  align-self: flex-start;
+}
+
+.gh-conflict-ai-cta {
+  display: flex;
+  justify-content: center;
+}
+
+.gh-conflict-ai-button {
+  background: transparent;
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-md);
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 0.4rem 0.9rem;
+}
+
+.gh-conflict-ai-button:hover:not(:disabled) {
+  background: var(--warning-bg);
+}
+
+.gh-conflict-ai-preview h4 {
+  margin: 0 0 0.5rem;
+}
+
+.gh-conflict-ai-editor {
+  width: 100%;
+  min-height: 14rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  padding: 0.5rem;
+}
+
+.gh-conflict-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.gh-conflict-loading,
+.gh-conflict-error,
+.gh-conflict-settled {
+  padding: 1rem;
+}
+
+.gh-conflicts-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.gh-conflicts-footer-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Timeline (save history). */
+.gh-timeline-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) 1fr;
+  gap: 0.75rem;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.gh-timeline-rail {
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.gh-timeline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.gh-timeline-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.84rem;
+}
+
+.gh-timeline-item.is-selected {
+  background: var(--surface);
+}
+
+.gh-timeline-subject {
+  font-weight: 500;
+}
+
+.gh-timeline-more {
+  display: block;
+  width: 100%;
+  padding: 0.5rem;
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.gh-timeline-detail {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  padding: 0.6rem 0.75rem;
+}
+
+.gh-timeline-detail-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.6rem;
+}
+
+.gh-timeline-file {
+  margin-bottom: 0.9rem;
+}
+
+.gh-timeline-file-path {
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.2rem;
+}
+
+.gh-timeline-loading,
+.gh-timeline-empty {
+  padding: 1.5rem;
+}
+
+/* Code review sub-tab: kickoff cards + running status + history on the
+   left, the finished report on the right. Same two-pane grid family as
+   the Changes layout. */
+.gh-review-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) 1fr;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  align-items: start;
+  min-height: 0;
+  flex: 1;
+}
+
+.gh-review-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 0;
+}
+
+.gh-review-kickoff-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.gh-review-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.gh-review-card p {
+  margin: 0;
+}
+
+.gh-review-status-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.gh-review-status-running {
+  border-color: var(--accent);
+}
+
+.gh-review-status-attention {
+  border-color: var(--warning);
+  background: var(--warning-bg);
+}
+
+.gh-review-status-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.gh-review-stop {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.gh-review-stop:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+.gh-review-history {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.gh-review-history-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  padding: 0.4rem 0.6rem;
+}
+
+.gh-review-history-item.is-selected {
+  background: var(--surface);
+}
+
+.gh-review-history-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gh-review-outcome-chip {
+  flex: 0 0 auto;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.68rem;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.gh-review-outcome-complete {
+  color: var(--diff-add);
+  background: var(--diff-add-bg);
+  border-color: transparent;
+}
+
+.gh-review-outcome-error {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: transparent;
+}
+
+.gh-review-report {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  padding: 0.75rem;
+  min-height: 12rem;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.gh-review-report-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.gh-review-rail-button {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+}
+
+.gh-review-rail-button:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+/* Compact widths: stack the two-pane layouts. */
+@media (max-width: 860px) {
+  .gh-changes-layout,
+  .gh-timeline-layout,
+  .gh-review-layout {
+    grid-template-columns: 1fr;
+    flex: 0 0 auto;
+  }
+
+  .gh-conflicts-body {
+    grid-template-columns: 1fr;
+  }
+
+  .gh-conflicts-rail {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    max-height: 10rem;
+  }
+}
+
+/* ============================== Growth ==============================
+   Level badges, the Growth-tab character sheet, and the level-up
+   consent UI. Deliberately calm: muted palette, no pulsing except the
+   one-shot celebration flourish (suppressed under reduced motion). */
+
+.level-badge-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.level-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  margin-left: 0.35rem;
+  cursor: help;
+}
+
+.level-badge--overlay {
+  position: absolute;
+  bottom: -2px;
+  right: -6px;
+  margin-left: 0;
+  background: var(--bg);
+  box-shadow: var(--surface-shadow);
+}
+
+.level-badge-dot,
+.growth-tab-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.growth-tab-dot {
+  margin-left: 0.35rem;
+  vertical-align: middle;
+}
+
+.growth-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 760px;
+  padding: 0.75rem 0;
+}
+
+.growth-panel h5 {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.growth-notice,
+.growth-deferred-reminder {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 0.85rem;
+}
+
+.growth-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.growth-header-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.growth-header-text h4 {
+  margin: 0;
+}
+
+.growth-xp-bar {
+  height: 8px;
+  border-radius: 3px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  max-width: 320px;
+}
+
+.growth-xp-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 400ms ease;
+}
+
+.growth-counters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.5rem;
+  max-width: 560px;
+}
+
+.growth-counter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.6rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: help;
+}
+
+.growth-counter-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.growth-counter-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.growth-empty {
+  max-width: 480px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.growth-trait-ghost {
+  margin-top: 0.5rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  text-align: center;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.growth-drift-warning {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 0.85rem;
+  max-width: 560px;
+}
+
+.growth-trait {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.7rem;
+  margin-bottom: 0.45rem;
+  background: var(--surface);
+  max-width: 560px;
+}
+
+.growth-trait summary {
+  cursor: pointer;
+}
+
+.growth-trait-text {
+  font-weight: 600;
+}
+
+.growth-trait-evidence blockquote {
+  margin: 0.5rem 0 0;
+  padding: 0.4rem 0.7rem;
+  border-left: 3px solid var(--accent);
+  background: var(--bg);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.85rem;
+}
+
+.growth-trait-evidence footer {
+  margin-top: 0.25rem;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.growth-day-chip,
+.growth-kind-chip,
+.growth-tuning-chip,
+.growth-cosmetic-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.growth-retire {
+  margin-top: 0.4rem;
+  color: var(--danger);
+}
+
+.growth-cosmetics-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* --- Level-up banner + proposal cards ------------------------------- */
+
+.growth-levelup {
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+  background: var(--surface);
+}
+
+.growth-levelup h4 {
+  margin: 0 0 0.2rem;
+}
+
+.growth-levelup > p {
+  margin: 0 0 0.75rem;
+}
+
+.growth-proposals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.6rem;
+}
+
+.growth-proposal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.growth-proposal-card h5 {
+  margin: 0;
+  font-size: 0.92rem;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
+}
+
+.growth-proposal-kind {
+  align-self: flex-start;
+  padding: 0.02rem 0.45rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.growth-proposal-trait-text {
+  margin: 0;
+  font-style: italic;
+}
+
+.growth-proposal-actions {
+  margin-top: auto;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.growth-levelup-actions {
+  margin-top: 0.75rem;
+  display: flex;
+  gap: 1rem;
+}
+
+.growth-cosmetic-tryon {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* Clips the poppetje to its own crop — the SVG paints overflow:visible, so
+   without this the full figure spills past the proposal card. */
+.growth-cosmetic-figure {
+  display: inline-flex;
+  flex: none;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+}
+
+/* --- Celebration flourish (one-shot, latched) ------------------------ */
+
+@keyframes growth-celebrate-rock {
+  0% {
+    transform: rotate(0deg) scale(1);
+  }
+  20% {
+    transform: rotate(-4deg) scale(1.04);
+  }
+  45% {
+    transform: rotate(3deg) scale(1.06);
+  }
+  70% {
+    transform: rotate(-2deg) scale(1.03);
+  }
+  100% {
+    transform: rotate(0deg) scale(1);
+  }
+}
+
+.growth-celebrate {
+  animation: growth-celebrate-rock 1.6s ease-in-out 1;
+  transform-origin: bottom center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .growth-celebrate {
+    animation: none;
+  }
+}

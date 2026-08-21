@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { isGitInstalled, runGit } from '../git/git.js';
 import { createGitIgnoreResolver } from '../git/ignore.js';
-import { findHtmlPages, walkDir, walkDirDetailed } from './tree.js';
+import { findHtmlPages, listDirEntries, walkDir, walkDirDetailed } from './tree.js';
 
 let root: string;
 const gitOk = await isGitInstalled();
@@ -141,6 +141,28 @@ describe('walkDirDetailed', () => {
     expect(paths).toContain('.github/workflows/ci.yml');
     expect(paths).toContain('node_modules');
     expect(paths).toContain('shadow/report_files/report.md');
+  });
+
+  it('hides Office lock files unless includeHidden is set', async () => {
+    await Promise.all([seed('deck.pptx'), seed('~$deck.pptx'), seed('sub/~$notes.docx')]);
+
+    const plain = await walkDirDetailed(root);
+    expect(plain.entries.map((entry) => entry.path).sort()).toEqual(['deck.pptx', 'sub']);
+
+    const hidden = await walkDirDetailed(root, { includeHidden: true });
+    expect(hidden.entries.map((entry) => entry.path).sort()).toEqual([
+      'deck.pptx',
+      'sub',
+      'sub/~$notes.docx',
+      '~$deck.pptx',
+    ]);
+
+    expect((await listDirEntries(root, '')).map((entry) => entry.name)).not.toContain(
+      '~$deck.pptx',
+    );
+    expect(
+      (await listDirEntries(root, '', { includeHidden: true })).map((entry) => entry.name),
+    ).toContain('~$deck.pptx');
   });
 
   it('includeHidden lists vendor dirs without walking into them', async () => {

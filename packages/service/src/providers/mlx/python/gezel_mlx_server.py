@@ -73,7 +73,10 @@ import cache_persist  # noqa: E402
 import think_budget  # noqa: E402
 import cache_seed  # noqa: E402
 import tool_grammar  # noqa: E402
+import tool_call_stream  # noqa: E402
+import template_stability  # noqa: E402
 from lfm2_compat import ensure_lfm2_config_compat  # noqa: E402
+from qwen3_5_text_compat import is_text_only_qwen3_5_checkpoint  # noqa: E402
 
 
 # ───────── Leaked special-token scrub ─────────
@@ -97,6 +100,68 @@ _LEAKED_MARKER_RE = re.compile(
     r"<\|?(?:eos|bos|pad|unk|mask|turn|tool_response|start_of_turn|end_of_turn|im_start|im_end)\|?>",
     re.IGNORECASE,
 )
+
+
+def _make_tool_stream(request_id: str, tools=None):
+    """Build a splitter for this request, or None to keep the old behaviour.
+
+    Returns None whenever the flag is off OR the model's chat template
+    matches no mlx_vlm tool parser — in both cases the caller streams raw
+    content and the gezel-side salvage path stays in charge. Never guess a
+    marker pair: a wrong boundary would silently eat visible output.
+    """
+    if not getattr(ARGS, "stream_tool_calls", False):
+        return None
+    markers = tool_call_stream.resolve_tool_markers(PROCESSOR)
+    if markers is None:
+        return None
+    start, end = markers
+    return tool_call_stream.ToolCallStreamState(
+        start_marker=start, end_marker=end, request_id=request_id, tools=tools
+    )
+
+
+def _tool_stream_fragments(state, chunk_text: str):
+    """Fragments to emit for a chunk; empty when extraction is disabled."""
+    if state is None:
+        return []
+    return state.feed(chunk_text)
+
+
+def _tool_stream_payload(frag, request_id: str, model: str, chunk) -> Dict[str, Any]:
+    """Wrap one fragment in the same chunk envelope the content path uses."""
+    if frag.content is not None:
+        delta: Dict[str, Any] = {"role": "assistant", "content": frag.content}
+    else:
+        call: Dict[str, Any] = {
+            "index": frag.tool_call_index,
+            "function": {"arguments": frag.arguments or ""},
+        }
+        if frag.tool_call_id is not None:
+            call["id"] = frag.tool_call_id
+            call["type"] = "function"
+            # The grammar fixes the name inside the argument body, so the
+            # name field stays empty rather than being guessed here; the
+            # client's parser reads it from the arguments as it always has.
+            call["function"]["name"] = frag.name or ""
+        delta = {"role": "assistant", "tool_calls": [call]}
+    return {
+        "id": request_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+        "usage": {
+            "input_tokens": getattr(chunk, "prompt_tokens", 0),
+            "output_tokens": getattr(chunk, "generation_tokens", 0),
+            "total_tokens": (
+                getattr(chunk, "prompt_tokens", 0) + getattr(chunk, "generation_tokens", 0)
+            ),
+            "prompt_tps": getattr(chunk, "prompt_tps", 0.0),
+            "generation_tps": getattr(chunk, "generation_tps", 0.0),
+            "cached_tokens": getattr(chunk, "cached_tokens", 0),
+        },
+    }
 
 
 def _scrub_leaked_markers(text: str) -> str:
@@ -269,6 +334,19 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
+    "--stream-tool-calls",
+    action="store_true",
+    help=(
+        "Emit OpenAI-shaped `tool_calls` argument deltas instead of streaming "
+        "the model's tool markup as content. OFF by default: the gezel-side "
+        "salvage path stays the fallback for models whose chat template "
+        "matches no mlx_vlm tool parser. On, the client gets a real tool-call "
+        "boundary and can end a turn once the call is usable — the same lever "
+        "llama-server gives us, and the reason MLX turns otherwise run to "
+        "completion (measured 41 turns at a 136s median, 203 min/10 trials)."
+    ),
+)
+parser.add_argument(
     "--kv-bits",
     type=int,
     default=0,
@@ -396,8 +474,96 @@ print(f"Loading model from: {ARGS.model}", flush=True)
 _LFM2_FF_DIM = ensure_lfm2_config_compat(ARGS.model)
 if _LFM2_FF_DIM is not None:
     print(f"Applied lfm2 config compat: block_ff_dim={_LFM2_FF_DIM}", flush=True)
-MODEL, PROCESSOR = load(ARGS.model)
+_QWEN3_5_TEXT_ONLY = is_text_only_qwen3_5_checkpoint(ARGS.model)
+if _QWEN3_5_TEXT_ONLY:
+    print(
+        "Detected text-only Qwen 3.5 checkpoint; allowing absent vision-tower weights.",
+        flush=True,
+    )
+MODEL, PROCESSOR = load(ARGS.model, strict=not _QWEN3_5_TEXT_ONLY)
 print("Model and processor loaded successfully.", flush=True)
+
+
+# Prefix-stability work (template relocation + reasoning-stable snapshot
+# boundaries), OFF by default. Wired, unit-tested, and demonstrably firing —
+# a single turn reused 6,980 tokens against 165 prefilled — but the paired
+# arms measured it as a REGRESSION on its own metric:
+#
+#   reuse%   34 (off) -> 26 -> 22 -> 14 (all fixes on)
+#   prefill/trial 37,486 (off) -> 43,586 (on)
+#
+# Truncating saves at the stable boundary buys matches but shrinks what each
+# match is worth, and warming with tools raises the prefill denominator. Net
+# negative at n=1-5 with ~3x trial spread, so it is neither shippable nor
+# disproven. Same posture as GEZEL_LAYERED_PREFIX_CACHE: keep it measurable.
+_STABLE_PREFIX_ENABLED = os.environ.get("GEZEL_MLX_STABLE_PREFIX") in ("1", "true")
+
+
+def _resolve_stable_chat_template() -> Optional[str]:
+    """Relocate the reasoning preamble below the cache-stable content.
+
+    Qwen 3.5+ templates put the reasoning-effort line ABOVE the tool block,
+    so flipping reasoning mode between turns — which the constrained-write
+    path does deliberately — changed the prompt from token 3 onward and
+    re-prefilled the entire tool block every time. Measured on
+    qwen3.8-27b-q4: 3 shared tokens before, 2,921 after.
+
+    Verified before adoption and abandoned on any doubt: a mis-rendered
+    prompt is far worse than a cold cache.
+    """
+    if not _STABLE_PREFIX_ENABLED:
+        return None
+    tok = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
+    original = getattr(tok, "chat_template", None)
+    if not isinstance(original, str) or not original:
+        return None
+    patched = template_stability.relocate_reasoning_preamble(original)
+    if patched is None:
+        print("[template] preamble relocation not applicable to this template", flush=True)
+        return None
+    probe_messages = [
+        {"role": "system", "content": "Your role is Builder.\n\n" + ("about text. " * 64)},
+        {"role": "user", "content": "hi"},
+    ]
+    probe_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "write_file",
+                "description": "Write a file to the workspace.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+                },
+            },
+        }
+    ]
+
+    def _render(template: str, kwargs: Dict[str, Any]) -> str:
+        return tok.apply_chat_template(
+            probe_messages,
+            tools=probe_tools,
+            add_generation_prompt=True,
+            tokenize=False,
+            chat_template=template,
+            **kwargs,
+        )
+
+    try:
+        ok, reason = template_stability.verify_prefix_stability(
+            _render, tok.encode, patched, original
+        )
+    except Exception as exc:  # noqa: BLE001 — verification must never block boot
+        print(f"[template] preamble relocation verification errored: {exc}", flush=True)
+        return None
+    if not ok:
+        print(f"[template] preamble relocation REJECTED: {reason}", flush=True)
+        return None
+    print(f"[template] preamble relocated for prefix stability — {reason}", flush=True)
+    return patched
+
+
+STABLE_CHAT_TEMPLATE = _resolve_stable_chat_template()
 
 
 # ───────── GPU memory ceiling (Metal) ─────────
@@ -1247,11 +1413,39 @@ class BatchEngine:
                 f"reused={plan.reused} prefill={len(plan.segment)}",
                 flush=True,
             )
+            if plan.mode == "fresh-untrimmable" and plan.cached_len:
+                # Name the churn instead of leaving it to inference. Two
+                # rounds of this investigation guessed the cause from cache
+                # SIZES (which say what was available, not what matched) and
+                # both guesses were wrong; decoding the two sides at the
+                # divergence point is the only thing that identifies it.
+                try:
+                    _tk = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
+                    _cached = list(getattr(sub.seed_state, "token_ids", None) or [])
+                    _lo = max(0, plan.lcp - 6)
+                    print(
+                        f"[batch] churn cache_id={sub.request.cache_id} "
+                        f"at={plan.lcp} "
+                        f"cached={_tk.decode(_cached[_lo:plan.lcp + 24])!r} "
+                        f"prompt={_tk.decode(list(sub.prompt_tokens)[_lo:plan.lcp + 24])!r}",
+                        flush=True,
+                    )
+                except Exception as exc:  # noqa: BLE001 — diagnostics never break a turn
+                    print(f"[batch] churn preview unavailable: {exc}", flush=True)
             if plan.mode == "fresh-untrimmable":
+                # lcp/cached is the diagnostic pair: lcp near 0 means the
+                # prompt churned early (fix the prompt), lcp near cached
+                # means the snapshot boundary was cut past the stable
+                # region (fix the boundary). Same symptom, opposite fixes.
                 print(
                     f"[batch] WARNING full prefill: cache_id={sub.request.cache_id} "
                     f"had divergent untrimmable state without a reusable prompt "
-                    f"snapshot (tokens={len(plan.segment)})",
+                    f"snapshot (tokens={len(plan.segment)} lcp={plan.lcp} "
+                    f"cached={plan.cached_len} "
+                    f"lcp_frac={plan.lcp / plan.cached_len:.2f})"
+                    if plan.cached_len
+                    else f"[batch] WARNING full prefill: cache_id={sub.request.cache_id} "
+                    f"had divergent untrimmable state (tokens={len(plan.segment)})",
                     flush=True,
                 )
         return plan.segment, plan.caches, plan.all_tokens
@@ -1652,12 +1846,52 @@ class BatchEngine:
         )
 
 
+def _batched_tool_payload(frag, rid: str, model: str, in_toks: int, out_count: int, sub) -> Dict[str, Any]:
+    """Batched-route envelope for one tool-stream fragment.
+
+    Mirrors `_tool_stream_payload` but sources usage from the sub rather than
+    a generation chunk — the batched worker reports counters separately.
+    """
+    if frag.content is not None:
+        delta: Dict[str, Any] = {"role": "assistant", "content": frag.content}
+    else:
+        call: Dict[str, Any] = {
+            "index": frag.tool_call_index,
+            "function": {"arguments": frag.arguments or ""},
+        }
+        if frag.tool_call_id is not None:
+            call["id"] = frag.tool_call_id
+            call["type"] = "function"
+            call["function"]["name"] = frag.name or ""
+        delta = {"role": "assistant", "tool_calls": [call]}
+    return {
+        "id": rid,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+        "usage": {
+            "input_tokens": in_toks,
+            "output_tokens": out_count,
+            "total_tokens": in_toks + out_count,
+            "prompt_tps": 0.0,
+            "generation_tps": 0.0,
+            "cached_tokens": sub.reused_tokens,
+        },
+    }
+
+
 async def _batched_stream_iter(sub: "_Sub"):
     """SSE generator for the batched path — same wire frames as the serial
     route, fed from the engine worker's per-sub queue."""
     request = sub.request
     rid = sub.request_id
     in_toks = len(sub.prompt_tokens)
+    # Same structured tool-call split as the serial route. The batched path
+    # is the one the eval harness actually exercises (max-concurrency 1 still
+    # runs through the batch engine), so wiring only the serial route left
+    # the flag inert.
+    tool_stream = _make_tool_stream(rid, getattr(request, 'tools', None))
     try:
         while True:
             item = await sub.queue.get()
@@ -1667,6 +1901,12 @@ async def _batched_stream_iter(sub: "_Sub"):
                 if await sub.http_request.is_disconnected():
                     sub.cancelled = True
                     return
+                if tool_stream is not None:
+                    for _frag in tool_stream.feed(delta):
+                        yield "data: " + json.dumps(
+                            _batched_tool_payload(_frag, rid, request.model, in_toks, out_count, sub)
+                        ) + "\n\n"
+                    continue
                 yield "data: " + json.dumps(
                     {
                         "id": rid,
@@ -1696,6 +1936,13 @@ async def _batched_stream_iter(sub: "_Sub"):
                 ) + "\n\n"
             elif kind == "done":
                 _, reason, prompt_tps, generation_tps = item
+                if tool_stream is not None:
+                    for _frag in tool_stream.flush():
+                        yield "data: " + json.dumps(
+                            _batched_tool_payload(
+                                _frag, rid, request.model, in_toks, len(sub.token_ids), sub
+                            )
+                        ) + "\n\n"
                 yield "data: " + json.dumps(
                     {
                         "id": rid,
@@ -1860,6 +2107,14 @@ class ChatRequest(BaseModel):
     # Per-request chat-template override (gezel extension). Swaps the
     # model's stored Jinja template for a curated one without reinstalling.
     chat_template_override: Optional[str] = None
+    # Template variables the caller wants bound when rendering the prompt —
+    # `enable_thinking`, `reasoning_effort`, and friends. llama-server has
+    # honored this field for a while and the MLX provider has always SENT it;
+    # until it was declared here pydantic dropped it silently, so every
+    # constrained turn that asked for thinking to be off still rendered a
+    # prompt ending in `<think>`. That one missing field was the bulk of the
+    # measured MLX/llama-cpp divergence — see `_build_prompt`.
+    chat_template_kwargs: Optional[Dict[str, Any]] = None
 
 
 class CacheStatsEntry(BaseModel):
@@ -1981,6 +2236,15 @@ class CacheWarmRequest(BaseModel):
     cache_id: str
     messages: List[ChatMessageReq]
     model: Optional[str] = None
+    # A warmed prefix is only reusable if it is a genuine token-prefix of the
+    # real turns that follow, which means rendering through the SAME template
+    # branch they do. Without `tools` this path fell to the non-tokenizer
+    # render, and on Qwen — which puts the tool block at the top of the system
+    # message — the warmed entry shared 3 tokens with every real prompt. Every
+    # prefix-hit was a false hit: disk load, eviction pin, then a full
+    # prefill anyway.
+    tools: Optional[List[Dict[str, Any]]] = None
+    chat_template_kwargs: Optional[Dict[str, Any]] = None
     # When True, write the warmed entry to disk immediately (don't wait
     # for eviction or shutdown). Used by the gezel-prefix warming flow
     # so subsequent sessions can load the prefix on miss without
@@ -2009,7 +2273,9 @@ async def cache_warm(req: CacheWarmRequest) -> JSONResponse:
     if synthetic_user:
         warm_messages.append(ChatMessageReq(role="user", content="hi"))
 
-    prompt_text = _build_prompt(warm_messages)
+    prompt_text = _build_prompt(
+        warm_messages, req.tools, None, req.chat_template_kwargs
+    )
     tok = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
     prompt_tokens = [int(t) for t in tok.encode(prompt_text)]
     snapshot_target = None
@@ -2017,12 +2283,26 @@ async def cache_warm(req: CacheWarmRequest) -> JSONResponse:
         alternate_messages = list(req.messages) + [
             ChatMessageReq(role="user", content="__gezel_cache_boundary_probe__")
         ]
-        alternate_text = _build_prompt(alternate_messages)
+        alternate_text = _build_prompt(
+            alternate_messages, req.tools, None, req.chat_template_kwargs
+        )
         alternate_tokens = [int(t) for t in tok.encode(alternate_text)]
         target = cache_seed.stable_snapshot_boundary(
             prompt_tokens, alternate_tokens, _SNAPSHOT_BOUNDARY_MARGIN
         )
         snapshot_target = target
+
+    # A warm entry must be stable on EVERY axis the real turns vary, not just
+    # the synthetic user. Measured: warming stopped at the synthetic-user
+    # boundary (2,509 tokens) while a constrained turn diverges 27 tokens
+    # earlier at the reasoning preamble (2,482) — and an untrimmable cache
+    # cannot rewind 27 tokens any more than it can rewind 2,000, so every
+    # prefix hit was still a full prefill. Take the tighter of the two.
+    reasoning_target = _reasoning_stable_boundary(req, prompt_tokens)
+    if reasoning_target:
+        snapshot_target = (
+            reasoning_target if not snapshot_target else min(snapshot_target, reasoning_target)
+        )
         if snapshot_target == 0:
             print(
                 f"[cache] no stable synthetic-user boundary for "
@@ -2222,10 +2502,86 @@ def _template_needs_tool_linkage(tokenizer: Any, chat_template_override: Any) ->
     return needs
 
 
+# Template variables naming reasoning DEPTH rather than the on/off switch.
+# Mirrors `REASONING_DEPTH_TEMPLATE_KWARGS` in providers/reasoning-depth.ts;
+# kept in sync by reasoning-template-kwargs-wiring.test.ts.
+_REASONING_DEPTH_KWARGS = frozenset({"reasoning_effort", "reasoning_strength"})
+
+
+def _reasoning_stable_boundary(request, prompt_tokens) -> Optional[int]:
+    """Last prompt position that does not depend on this turn's reasoning mode.
+
+    Gezel flips `enable_thinking` between constrained and ordinary turns, and
+    the template renders a reasoning preamble whose presence follows it. With
+    the preamble relocated below the stable content that difference sits at
+    the END of the system block — close enough to the whole prompt to look
+    harmless, and fatal anyway, because a hybrid (linear-attention) cache
+    cannot be trimmed back by even one token.
+
+    Returns an absolute boundary to snapshot at, or None to keep the default
+    end-of-prompt behaviour (correct for models whose cache CAN trim).
+    """
+    if not _needs_reasoning_stable_snapshot():
+        return None
+    kwargs = dict(request.chat_template_kwargs or {})
+    flipped = dict(kwargs)
+    flipped["enable_thinking"] = not bool(kwargs.get("enable_thinking", True))
+    try:
+        alternate = _build_prompt(
+            request.messages, request.tools, request.chat_template_override, flipped
+        )
+        tok = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
+        alternate_tokens = [int(t) for t in tok.encode(alternate)]
+    except Exception as exc:  # noqa: BLE001 — never fail a turn over a boundary hint
+        print(f"[cache] reasoning-stable boundary unavailable: {exc}", flush=True)
+        return None
+    boundary = cache_seed.stable_snapshot_boundary(
+        prompt_tokens, alternate_tokens, _SNAPSHOT_BOUNDARY_MARGIN
+    )
+    # 0 disables capture entirely in plan_snapshot_segments. If the two modes
+    # diverge immediately there is nothing stable to save, and the default
+    # end-of-prompt snapshot would just re-save an unusable entry.
+    return boundary or None
+
+
+def _needs_reasoning_stable_snapshot() -> bool:
+    """True when a volatile tail in the saved state costs the ENTIRE entry.
+
+    Deliberately the same predicate the engine already uses to decide whether
+    to capture prompt snapshots at all (`prompt_snapshot=y` in the boot log),
+    rather than a second hand-rolled cache probe: an earlier version called
+    `all_trimmable(MODEL.make_cache())` and defaulted to False on any problem,
+    which silently disabled this fix on precisely the untrimmable models it
+    exists for. One predicate, one answer.
+    """
+    if not _STABLE_PREFIX_ENABLED:
+        return False
+    global _REASONING_SNAPSHOT_NEEDED
+    if _REASONING_SNAPSHOT_NEEDED is None:
+        # Probe the SAME object the engine probes — `_get_batch_engine`
+        # builds `BatchEngine(_UnwrapLM(lm))`, and the VLM wrapper's
+        # `make_cache` is not the language model's. Probing the wrapper
+        # reported a trimmable cache for a model that logs
+        # `prompt_snapshot=y` and `fresh-untrimmable` in the same run.
+        _REASONING_SNAPSHOT_NEEDED = cache_seed.probe_needs_prompt_snapshot(
+            getattr(MODEL, "language_model", MODEL)
+        )
+        print(
+            f"[cache] reasoning-stable snapshot "
+            f"{'ENABLED (cache cannot be rewound)' if _REASONING_SNAPSHOT_NEEDED else 'not needed (trimmable cache)'}",
+            flush=True,
+        )
+    return _REASONING_SNAPSHOT_NEEDED
+
+
+_REASONING_SNAPSHOT_NEEDED = None
+
+
 def _build_prompt(
     messages: List[ChatMessageReq],
     tools: Optional[List[Dict[str, Any]]] = None,
     chat_template_override: Optional[str] = None,
+    chat_template_kwargs: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Apply the model's chat template to OpenAI-shape messages.
 
@@ -2293,26 +2649,69 @@ def _build_prompt(
             add_generation_prompt=True,
             tokenize=False,
         )
+        # A caller-supplied override always wins — it is the escape hatch for
+        # a known-bad embedded template and must not be silently second-
+        # guessed. Otherwise use the prefix-stable rewrite when one verified.
         if chat_template_override:
             base_kwargs["chat_template"] = chat_template_override
-        # Attempt order, most-capable first:
-        #   1. + enable_thinking  (Qwen3 reasoning forced inside <think>)
-        #   2. - enable_thinking  (kwarg rejected by this template)
-        #   3. - tools            (template can't render tools at all)
+        elif STABLE_CHAT_TEMPLATE:
+            base_kwargs["chat_template"] = STABLE_CHAT_TEMPLATE
+        # Reasoning defaults ON (Qwen3 reasoning forced inside <think>), then
+        # the caller's template vars override it. The default has to stay True:
+        # every model whose template reads the switch was tuned here, and
+        # flipping the default would silently disable reasoning for ordinary
+        # turns rather than only the constrained ones the caller names.
+        template_vars: Dict[str, Any] = {"enable_thinking": True}
+        if chat_template_kwargs:
+            template_vars.update(chat_template_kwargs)
+        # Attempt order, most-capable first. The DEPTH dials get their own
+        # rung above the switch because they are the ones that reject values:
+        # Qwen 3.8's jinja `raise_exception`s on any effort outside
+        # {xhigh, medium, low}, and a template raises rather than returning —
+        # so a bad depth value must not cost us `enable_thinking`, which is
+        # worth far more (it decides whether the turn reasons at all).
+        #   1. + all template vars   (switch + caller's depth)
+        #   2. - depth dials         (template rejected a depth VALUE)
+        #   3. - template vars       (template reads none of them)
+        #   4. - tools               (template can't render tools at all)
+        #
+        # Each rung catches Exception, not (TypeError, ValueError): a Jinja
+        # TemplateError is neither, and the fallbacks are strictly more
+        # conservative than the rung above, so degrading beats a dead turn.
+        depth_keys = [k for k in template_vars if k in _REASONING_DEPTH_KWARGS]
         try:
-            return tokenizer.apply_chat_template(
-                raw, enable_thinking=True, **base_kwargs
-            )
-        except (TypeError, ValueError) as exc_thinking:
+            return tokenizer.apply_chat_template(raw, **template_vars, **base_kwargs)
+        except Exception as exc_vars:
+            if depth_keys:
+                without_depth = {
+                    k: v for k, v in template_vars.items() if k not in _REASONING_DEPTH_KWARGS
+                }
+                try:
+                    result = tokenizer.apply_chat_template(
+                        raw, **without_depth, **base_kwargs
+                    )
+                    print(
+                        f"[tool-prompt] template rejected reasoning depth "
+                        f"{ {k: template_vars[k] for k in depth_keys} }; retried "
+                        f"with the switch only: {exc_vars}",
+                        flush=True,
+                    )
+                    return result
+                except Exception:
+                    pass
             try:
                 result = tokenizer.apply_chat_template(raw, **base_kwargs)
+                # Loud, because falling back here silently restores the
+                # template's own reasoning defaults — which is exactly the
+                # divergence this parameter exists to close.
                 print(
-                    f"[tool-prompt] enable_thinking rejected by template; "
-                    f"retried without it: {exc_thinking}",
+                    f"[tool-prompt] template rejected {sorted(template_vars)}; "
+                    f"retried without them (reasoning falls back to the "
+                    f"template default): {exc_vars}",
                     flush=True,
                 )
                 return result
-            except (TypeError, ValueError) as exc_tools:
+            except Exception as exc_tools:
                 if tools:
                     print(
                         f"[tool-prompt] TOOLS DROPPED — apply_chat_template could "
@@ -2364,7 +2763,10 @@ async def chat_completions(request: ChatRequest, http_request: Request):
         )
 
     prompt_text = _build_prompt(
-        request.messages, request.tools, request.chat_template_override
+        request.messages,
+        request.tools,
+        request.chat_template_override,
+        request.chat_template_kwargs,
     )
 
     # Build the tool-call grammar logits processor once per request (the
@@ -2449,6 +2851,12 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             seed_state=cache_state,
             request_id=request_id,
             http_request=http_request,
+            # Save at the last reasoning-mode-invariant position. Without
+            # this the saved entry carries this turn's reasoning preamble,
+            # and the next turn in the other mode diverges from it by ~27
+            # tokens — which an untrimmable hybrid cache cannot rewind, so
+            # the whole multi-thousand-token entry is discarded.
+            snapshot_target=_reasoning_stable_boundary(request, prompt_tokens),
         )
         sub.pinned_cache_ids = pinned_cache_ids
         # Pessimistic placeholder until admission: the authoritative
@@ -2536,6 +2944,8 @@ async def chat_completions(request: ChatRequest, http_request: Request):
                 generation_kwargs["logits_processors"] = _lps
 
             output_text = ""
+
+            tool_stream = _make_tool_stream(request_id, getattr(request, 'tools', None))
             last_chunk = None
             # Serialize generation across concurrent requests — see
             # `_GENERATION_LOCK` doc. Held only across the
@@ -2575,6 +2985,18 @@ async def chat_completions(request: ChatRequest, http_request: Request):
                         continue
                     output_text += chunk_text
 
+                    # With --stream-tool-calls the raw text is split into
+                    # content and tool-call argument deltas, so the client
+                    # sees a real call boundary instead of markup embedded in
+                    # prose. Without it this is a no-op passthrough and the
+                    # gezel-side salvage path behaves exactly as before.
+                    for _frag in _tool_stream_fragments(tool_stream, chunk_text):
+                        yield "data: " + json.dumps(
+                            _tool_stream_payload(_frag, request_id, request.model, chunk)
+                        ) + "\n\n"
+                    if tool_stream is not None:
+                        continue
+
                     payload = {
                         "id": request_id,
                         "object": "chat.completion.chunk",
@@ -2605,6 +3027,16 @@ async def chat_completions(request: ChatRequest, http_request: Request):
                         },
                     }
                     yield f"data: {json.dumps(payload)}\n\n"
+
+            if tool_stream is not None and last_chunk is not None:
+
+                for _frag in tool_stream.flush():
+
+                    yield "data: " + json.dumps(
+
+                        _tool_stream_payload(_frag, request_id, request.model, last_chunk)
+
+                    ) + "\n\n"
 
             if client_gone:
                 # Skip terminal + [DONE] frames — there's nobody to

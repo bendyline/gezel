@@ -595,6 +595,12 @@ export const TimelineMessageSchema = z.object({
    */
   referencedFiles: z.array(ReferencedFileSchema).optional(),
   /**
+   * Mirrors `ChatMessage.retrieval` — the indexed-context sources consulted
+   * for this user turn (citations only, never retrieved text). The bubble
+   * renders a collapsed "consulted N sources" row from it.
+   */
+  retrieval: ChatMessageSchema.shape.retrieval,
+  /**
    * Mirrors `ChatMessage.referencedArtifacts` — the artifact-only
    * projection of `referencedFiles`, kept for older clients.
    *

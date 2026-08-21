@@ -175,6 +175,57 @@ describe('ChatPillRow', () => {
     expect(pill.querySelector('.chat-pill-thread-status')).toHaveTextContent('Ready');
   });
 
+  // The design-review finding: a hand-off card whose context line read
+  // `Sumarni, Si… · <toolcall <function=search…`. Angle-bracket protocol
+  // syntax has no business in a summary a person reads at a glance.
+  it('says what a leaked tool call was doing instead of showing its markup', async () => {
+    vi.mocked(api.listChatSessions).mockResolvedValue({
+      sessions: [
+        session('s1', 'g1', {
+          lastMessagePreview: '<tool_call><function=search_memory><parameter=query>layout',
+        }),
+      ],
+    });
+    renderRow();
+
+    const pill = await screen.findByRole('button', { name: /^Esra: Thread s1\./ });
+    expect(pill.querySelector('.chat-pill-message-preview')).toHaveTextContent('Searching memory…');
+    expect(pill.textContent).not.toContain('<');
+  });
+
+  it('reports the running tool while a turn is in flight', async () => {
+    vi.mocked(api.listChatSessions).mockResolvedValue({
+      sessions: [session('s1', 'g1', { lastMessagePreview: 'where does the config live?' })],
+    });
+    renderRow();
+
+    const pill = await screen.findByRole('button', { name: /^Esra: Thread s1\./ });
+    expect(pill.querySelector('.chat-pill-message-preview')).toHaveTextContent(
+      'where does the config live?',
+    );
+
+    stream.push(envelope('s1', userMessage('where does the config live?')));
+    stream.push(envelope('s1', { type: 'tool_args_delta', name: 'grep_files', content: '{"pat' }));
+    await waitFor(() => {
+      expect(pill.querySelector('.chat-pill-message-preview')).toHaveTextContent(
+        'Searching across files…',
+      );
+    });
+
+    // The reply that lands is a better summary than the tool that produced it.
+    stream.push(
+      envelope('s1', {
+        type: 'complete',
+        message: { role: 'assistant', content: 'Under src/config.', at: new Date().toISOString() },
+      }),
+    );
+    await waitFor(() => {
+      expect(pill.querySelector('.chat-pill-message-preview')).toHaveTextContent(
+        'Under src/config.',
+      );
+    });
+  });
+
   it('flips a pill to streaming from a live event with no refetch, then clears it', async () => {
     vi.mocked(api.listChatSessions).mockResolvedValue({ sessions: [session('s1', 'g1')] });
     renderRow();

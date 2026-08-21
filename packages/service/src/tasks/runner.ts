@@ -41,6 +41,8 @@
 import {
   type ModelTier,
   type Task,
+  type TaskWaitReason,
+  type TaskWaitState,
   createLogger,
   getEngagementMode,
   isTaskWorkAllowed,
@@ -88,6 +90,8 @@ export interface PendingHandoff {
   kind?: 'handoff' | 'entry';
   /** Step activation timestamp captured when this handoff was enqueued. */
   activationAt?: string;
+  /** Reuse the latest persisted session for this task step after a service restart. */
+  resumeExisting?: boolean;
   enqueuedAt: number;
   /** Monotonic id for stable sort + debugging. */
   id: number;
@@ -156,6 +160,8 @@ export interface TaskRunnerDispatcher {
     capabilityFloor?: ModelTier;
     /** Book join key for per-model gate evidence in the routing ranker. */
     bookCatalogId?: string;
+    /** Continue the latest persisted task-step session instead of opening a duplicate. */
+    resumeExisting?: boolean;
   }): Promise<{ sessionId: string }>;
 
   /** Cancel a dispatched handoff whose task/activation is no longer current. */
@@ -170,13 +176,15 @@ export interface TaskRunnerDispatcher {
    */
   resolveProviderName(gezelId: string, opts?: { nightShift?: boolean }): Promise<ProviderName>;
 
-  /**
-   * Fetch a provider by name so the runner can read `queue.snapshot()`.
-   * Returning `null` means "no queue yet; safe to dispatch." Providers
-   * without a queue (MockProvider) dispatch unconditionally — tests
-   * need the work to flow.
-   */
+  /** Fetch an already-initialized provider so the runner can read its queue. */
   getProvider(name: ProviderName): LLMProvider | null;
+
+  /**
+   * Initialize a cold provider before admission. Production supplies this so
+   * a boot-time fanout cannot mistake "not initialized yet" for unlimited
+   * capacity. Optional for queue-less test dispatchers.
+   */
+  ensureProvider?(name: ProviderName): Promise<LLMProvider | null>;
 }
 
 export interface TaskRunnerOptions {
@@ -236,7 +244,10 @@ export class TaskRunner {
       taskRef: string;
       stepId: string;
       gezelId: string;
+      providerName?: ProviderName;
       activationAt?: string;
+      /** When the handoff left the queue — the `since` a UI counts up from. */
+      dispatchedAt: number;
     }
   >();
   private nextId = 1;
@@ -389,6 +400,45 @@ export class TaskRunner {
     };
   }
 
+  /**
+   * Per-task queue state, for surfaces that must explain why an `active`
+   * task has produced no chat yet — the chat timeline's "queued" card
+   * above all. Deliberately reports only what the runner is *actually*
+   * holding: an active task the runner has never seen (no entry gezel,
+   * a dispatch that failed) is absent here rather than described as
+   * pending, so a stuck task reads as stuck instead of as imminent.
+   *
+   * A queue item and a dispatch can coexist for one ref (the next step
+   * enqueues while the current one still streams). The dispatch wins:
+   * it is the newer, more specific state.
+   */
+  waitingStates(): TaskWaitState[] {
+    const byRef = new Map<string, TaskWaitState>();
+    for (const handoff of this.pending) {
+      // Per-item `heldFor` is recomputed each tick and is the precise
+      // answer; the runner-wide `holdReason` only explains the
+      // dispatchable bucket, so it may not be applied to parked work.
+      const reason: TaskWaitReason = handoff.heldFor ?? this.holdReason ?? 'queued';
+      byRef.set(handoff.taskRef, {
+        ref: handoff.taskRef,
+        reason,
+        gezelId: handoff.gezelId,
+        stepId: handoff.stepId,
+        since: new Date(handoff.enqueuedAt).toISOString(),
+      });
+    }
+    for (const dispatch of this.activeDispatches.values()) {
+      byRef.set(dispatch.taskRef, {
+        ref: dispatch.taskRef,
+        reason: 'dispatching',
+        gezelId: dispatch.gezelId,
+        stepId: dispatch.stepId,
+        since: new Date(dispatch.dispatchedAt).toISOString(),
+      });
+    }
+    return [...byRef.values()];
+  }
+
   /** Task refs represented by the runner right now. */
   workSnapshot(): { queuedTaskRefs: string[]; dispatchedTaskRefs: string[] } {
     return {
@@ -453,10 +503,10 @@ export class TaskRunner {
         if (!assigneeId) continue;
         result.taskRefs.push(task.ref);
         if (task.nightShift?.enabled === true) result.nightShiftTaskRefs.push(task.ref);
-        // Persisted sessions are history, not evidence of live process work.
-        // A failed handoff remains non-archived, and treating it as "live"
-        // strands the active task forever after restart. enqueueHandoff plus
-        // tick's activeDispatches check provide the in-process dedupe.
+        // No process-local turn survives a restart, but the persisted task
+        // session still contains useful tool calls, observations, and provider
+        // state. Re-enqueue the work and tell ChatManager to continue that
+        // exact thread rather than manufacturing another empty session.
         this.enqueueHandoff({
           taskRef: task.ref,
           stepId: step.id,
@@ -464,6 +514,7 @@ export class TaskRunner {
           projectId: proj.id,
           ...(task.nightShift?.enabled === true ? { nightShift: true as const } : {}),
           ...(step.lastActivatedAt ? { activationAt: step.lastActivatedAt } : {}),
+          resumeExisting: true,
         });
       }
     }
@@ -508,6 +559,11 @@ export class TaskRunner {
     // lags until those sends acquire. Count our own dispatches per
     // provider so we don't over-dispatch within a single tick.
     const inTickDispatches = new Map<ProviderName, number>();
+    // A pooled local provider may be intentionally absent from the singleton
+    // registry even after initialization. Cache the admission handle for this
+    // pass so a 21-item fanout binds/probes that provider once, not 21 times.
+    const admissionProviders = new Map<ProviderName, LLMProvider | null>();
+    const admissionFailures = new Set<ProviderName>();
 
     // Pre-pass: validate each handoff (still active, step current) and
     // partition into normal vs. night-shift work. Reading the task here
@@ -583,6 +639,11 @@ export class TaskRunner {
           return null;
         });
       if (!providerName) continue;
+      if (admissionFailures.has(providerName)) {
+        handoff.heldFor = 'provider-busy';
+        keep.push(handoff);
+        continue;
+      }
 
       // Quota reserve: the shift may be ON while this handoff's cloud
       // provider sits inside the user's configured reserve. Hold ONLY this
@@ -601,7 +662,28 @@ export class TaskRunner {
         }
       }
 
-      const provider = this.dispatcher.getProvider(providerName);
+      let provider = admissionProviders.get(providerName) ?? null;
+      if (!admissionProviders.has(providerName)) {
+        provider = this.dispatcher.getProvider(providerName);
+      }
+      if (!admissionProviders.has(providerName) && !provider && this.dispatcher.ensureProvider) {
+        let initializationFailed = false;
+        provider = await this.dispatcher.ensureProvider(providerName).catch((err) => {
+          initializationFailed = true;
+          log.error(
+            `[task-runner] provider initialization failed for ${providerName}:`,
+            err instanceof Error ? err.message : err,
+          );
+          return null;
+        });
+        if (initializationFailed) {
+          admissionFailures.add(providerName);
+          handoff.heldFor = 'provider-busy';
+          keep.push(handoff);
+          continue;
+        }
+      }
+      admissionProviders.set(providerName, provider);
       const lane = 'background' as const;
       if (provider?.queue) {
         const inFlight = inTickDispatches.get(providerName) ?? 0;
@@ -611,6 +693,21 @@ export class TaskRunner {
         // session is ever created, and preserves any reserved foreground
         // capacity for typed chat.
         if (!provider.queue.hasCapacity(lane, inFlight)) {
+          handoff.heldFor = 'provider-busy';
+          keep.push(handoff);
+          continue;
+        }
+      } else if (this.dispatcher.ensureProvider) {
+        // Some production providers (notably per-model remotes) cannot expose
+        // a singleton queue by provider name. Treat that as a conservative
+        // one-wide lane across ticks, rather than restoring the old unlimited
+        // cold-provider fanout race. Queue-less test dispatchers omit
+        // ensureProvider and retain their lightweight unconditional behavior.
+        const activeForProvider = [...this.activeDispatches.values()].filter(
+          (dispatch) => dispatch.providerName === providerName,
+        ).length;
+        const inFlight = inTickDispatches.get(providerName) ?? 0;
+        if (activeForProvider + inFlight >= 1) {
           handoff.heldFor = 'provider-busy';
           keep.push(handoff);
           continue;
@@ -647,6 +744,7 @@ export class TaskRunner {
           ...(floor
             ? { capabilityFloor: floor, bookCatalogId: mainBookSource(task).catalogId }
             : {}),
+          ...(handoff.resumeExisting ? { resumeExisting: true } : {}),
         });
         const activationAt =
           handoff.activationAt ??
@@ -658,6 +756,8 @@ export class TaskRunner {
           taskRef: handoff.taskRef,
           stepId: handoff.stepId,
           gezelId: handoff.gezelId,
+          providerName,
+          dispatchedAt: this.now(),
           ...(activationAt ? { activationAt } : {}),
         });
         inTickDispatches.set(providerName, (inTickDispatches.get(providerName) ?? 0) + 1);

@@ -618,7 +618,7 @@ export function ChatReferences({
       // so our `mousemove` / `mouseup` handlers stop firing and the
       // grip gets "stuck to" the cursor. The `chat-rail-resizing`
       // class on <body> disables pointer events on iframes for the
-      // duration of the drag (CSS in styles.css), and blocks text
+      // duration of the drag (CSS in styles/chat.css), and blocks text
       // selection + sets the global cursor as a bonus.
       document.body.classList.add('chat-rail-resizing');
       document.body.style.cursor = 'col-resize';
@@ -1352,7 +1352,7 @@ type ResolvedReference =
 
 async function resolveReference(
   projectId: string,
-  reference: Reference,
+  reference: Pick<Reference, 'kind' | 'path'>,
 ): Promise<ResolvedReference> {
   const order: RefKind[] = [
     reference.kind,
@@ -1408,6 +1408,9 @@ function ReferenceViewer({
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const referenceKey = reference.key;
+  const referenceKind = reference.kind;
+  const referencePath = reference.path;
 
   useEffect(() => {
     let cancelled = false;
@@ -1420,10 +1423,13 @@ function ReferenceViewer({
     setMachineFile(false);
     setError(null);
     setActionError(null);
-    setResolvedKind(reference.kind);
+    setResolvedKind(referenceKind);
     void (async () => {
       try {
-        const res = await resolveReference(projectId, reference);
+        const res = await resolveReference(projectId, {
+          kind: referenceKind,
+          path: referencePath,
+        });
         if (cancelled) return;
         if (res.mode === 'media') {
           createdUrl = URL.createObjectURL(res.blob);
@@ -1436,14 +1442,14 @@ function ReferenceViewer({
           setContentMode(res.mode);
         }
         setResolvedKind(res.kind);
-        if (res.kind !== reference.kind) {
-          onResolved?.(reference.key, res.kind);
+        if (res.kind !== referenceKind) {
+          onResolved?.(referenceKey, res.kind);
         }
       } catch (err) {
         if (!cancelled) {
           setError(
             err instanceof GezelApiError && err.status === 404
-              ? `Not found in artifacts, workspace, or documents: ${reference.path}`
+              ? `Not found in artifacts, workspace, or documents: ${referencePath}`
               : (err as Error).message,
           );
         }
@@ -1455,7 +1461,7 @@ function ReferenceViewer({
       cancelled = true;
       if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
-  }, [projectId, reference, onResolved]);
+  }, [projectId, referenceKey, referenceKind, referencePath, onResolved]);
 
   const resolvedDiffers = resolvedKind !== reference.kind;
   const actionRequest = { projectId, kind: resolvedKind, path: reference.path } as const;

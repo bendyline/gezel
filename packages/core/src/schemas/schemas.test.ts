@@ -16,6 +16,7 @@ import {
   ModelContextOverrideUpdateSchema,
   ProjectFileEntrySchema,
   ProjectSchema,
+  ProjectSearchResponseSchema,
   TaskStatusSchema,
   UpdateBoekwachterIssueRequestSchema,
   UpdateProjectRequestSchema,
@@ -134,6 +135,24 @@ describe('GezelFrontmatterSchema', () => {
     const result = GezelFrontmatterSchema.parse({ name: 'T', temperature: 0.7 } as unknown);
     expect((result as Record<string, unknown>).temperature).toBeUndefined();
   });
+
+  it('accepts bounded indexed-context policies', () => {
+    const result = GezelFrontmatterSchema.parse({
+      name: 'T',
+      retrieval: { mode: 'lean', maxTokens: 240, sources: ['workspace', 'shared'] },
+    });
+    expect(result.retrieval).toEqual({
+      mode: 'lean',
+      maxTokens: 240,
+      sources: ['workspace', 'shared'],
+    });
+    expect(() =>
+      GezelFrontmatterSchema.parse({
+        name: 'T',
+        retrieval: { mode: 'deep', maxTokens: 16_001 },
+      }),
+    ).toThrow();
+  });
 });
 
 describe('ProjectSchema', () => {
@@ -156,6 +175,19 @@ describe('ProjectSchema', () => {
       updatedAt: '2026-01-01',
     });
     expect(result.workingDir).toBe('/Users/dev/project');
+  });
+
+  it('parses one-way project links and defaults to no links', () => {
+    const plain = ProjectSchema.parse({
+      id: 'project-a',
+      name: 'Project A',
+      createdAt: '2026-08-19T00:00:00.000Z',
+      updatedAt: '2026-08-19T00:00:00.000Z',
+    });
+    expect(plain.linkedProjectIds).toBeUndefined();
+
+    const linked = ProjectSchema.parse({ ...plain, linkedProjectIds: ['project-b'] });
+    expect(linked.linkedProjectIds).toEqual(['project-b']);
   });
 
   it('accepts an optional voormanGezelId', () => {
@@ -189,6 +221,34 @@ describe('ProjectSchema', () => {
       updatedAt: '2026-01-01',
     });
     expect(result.indexingEnabled).toBe(false);
+  });
+});
+
+describe('ProjectSearchResponseSchema', () => {
+  it('carries directly invokable Gilde and local craftbook options beside search results', () => {
+    const parsed = ProjectSearchResponseSchema.parse({
+      results: [],
+      truncated: false,
+      craftbooks: [
+        {
+          id: 'vehicle-physics',
+          name: 'Vehicle physics',
+          source: 'bundled',
+          stepCount: 4,
+          score: 0.6,
+          invocation: {
+            tool: 'invoke_craftbook',
+            arguments: {
+              craftbookId: 'vehicle-physics',
+              description: 'Improve the physics for how cars drive',
+            },
+          },
+        },
+      ],
+    });
+
+    expect(parsed.craftbooks[0]?.source).toBe('bundled');
+    expect(parsed.craftbooks[0]?.invocation.tool).toBe('invoke_craftbook');
   });
 });
 
@@ -453,6 +513,16 @@ describe('UpdateProjectRequestSchema', () => {
   it('accepts the project archive flag', () => {
     expect(UpdateProjectRequestSchema.parse({ archived: true }).archived).toBe(true);
     expect(UpdateProjectRequestSchema.parse({ archived: false }).archived).toBe(false);
+  });
+
+  it('accepts replacing or clearing project links', () => {
+    expect(UpdateProjectRequestSchema.parse({ linkedProjectIds: ['project-b'] })).toEqual({
+      linkedProjectIds: ['project-b'],
+    });
+    expect(UpdateProjectRequestSchema.parse({ linkedProjectIds: [] })).toEqual({
+      linkedProjectIds: [],
+    });
+    expect(() => UpdateProjectRequestSchema.parse({ linkedProjectIds: ['not valid'] })).toThrow();
   });
 
   it('sets or clears a project maker-mark override', () => {

@@ -21,6 +21,12 @@ import {
   walkDirDetailed,
 } from './tree.js';
 
+// Artifact drawers routinely contain connector corpora whose record count is
+// larger than the generic workspace/prompt walk budget. Keep the generic
+// walker conservative while giving project-owned artifacts enough headroom for
+// complete corpus and completion-gate enumeration.
+const ARTIFACT_WALK_MAX_ENTRIES = 5_000;
+
 export type ProjectArtifactResolveResult =
   | { kind: 'found'; content: string; path: string; fuzzy: boolean }
   | { kind: 'ambiguous'; candidates: string[] }
@@ -166,6 +172,7 @@ export class ProjectArtifactsStore {
     const base = subpath === '' ? root : safeJoin(root, subpath);
     if (base === null) return { entries: [], truncated: false };
     const walked = await walkDirDetailed(base, {
+      maxEntries: ARTIFACT_WALK_MAX_ENTRIES,
       ...(opts?.withStats ? { withStats: true } : {}),
       ...(opts?.includeHidden ? { includeHidden: true } : {}),
       // The reserved shadow cache only exists at the drawer root; scoping the

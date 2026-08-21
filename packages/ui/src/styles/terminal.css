@@ -1,0 +1,1202 @@
+/* ── In-chat terminal (per-project) ─────────────────────────────────── */
+
+.terminal-group {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.85rem;
+}
+
+.terminal-group-output {
+  padding: 0.65rem 0.75rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 45%, transparent);
+}
+
+.terminal-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.72rem;
+  color: var(--color-muted, #999);
+  margin-bottom: 0.25rem;
+}
+
+.terminal-folder-pill {
+  background: var(--color-surface-2, #2a2a2a);
+  color: var(--color-fg-strong, #ddd);
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.7rem;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+.terminal-exit-pill {
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.7rem;
+}
+
+.terminal-exit-ok {
+  background: var(--success-bg);
+  color: color-mix(in srgb, var(--success) 55%, var(--text));
+}
+
+.terminal-exit-fail {
+  background: var(--danger-bg);
+  color: color-mix(in srgb, var(--danger) 55%, var(--text));
+}
+
+.terminal-truncated-pill {
+  background: rgba(180, 140, 60, 0.18);
+  color: rgba(230, 200, 130, 1);
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.7rem;
+}
+
+.terminal-duration {
+  font-size: 0.7rem;
+  color: var(--color-muted, #999);
+}
+
+/* In-flight bubble cues. The pulsing running-pill signals
+ * activity without burning frames (single 1.5s opacity loop). */
+.terminal-running-pill {
+  background: rgba(108, 204, 255, 0.16);
+  color: rgba(180, 220, 255, 1);
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.7rem;
+  animation: terminal-running-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes terminal-running-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.terminal-cancel-btn {
+  background: rgba(200, 80, 80, 0.16);
+  color: rgba(240, 160, 160, 1);
+  border: 0;
+  padding: 0.1rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.terminal-cancel-btn:hover {
+  background: rgba(200, 80, 80, 0.28);
+}
+
+.terminal-group-streaming .terminal-output-body {
+  /* Subtle left-edge "still flowing" marker on the live bubble so
+   * the user can tell at a glance which output is in progress vs
+   * settled. */
+  border-left: 2px solid var(--color-accent, #6cf);
+}
+
+/* Interactive prompt reply UI, rendered inside the streaming
+ * bubble when the server detects the shell is waiting on stdin. */
+.terminal-input-prompt {
+  margin-top: 0.4rem;
+  padding: 0.4rem 0.55rem;
+  background: rgba(108, 204, 255, 0.06);
+  border: 1px solid rgba(108, 204, 255, 0.28);
+  border-radius: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.terminal-input-prompt-line {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.76rem;
+  color: var(--color-muted, #aaa);
+  white-space: pre-wrap;
+}
+
+.terminal-input-prompt-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.terminal-input-reply {
+  flex: 1;
+  background: var(--color-surface-2, #1c1c1c);
+  border: 1px solid var(--color-border, #333);
+  color: var(--color-fg, #ddd);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.78rem;
+  min-width: 8rem;
+}
+
+.terminal-input-send-btn,
+.terminal-input-yesno-btn {
+  background: rgba(108, 204, 255, 0.18);
+  color: rgba(180, 220, 255, 1);
+  border: 0;
+  padding: 0.2rem 0.7rem;
+  border-radius: 0.25rem;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+.terminal-input-send-btn:hover,
+.terminal-input-yesno-btn:hover {
+  background: rgba(108, 204, 255, 0.3);
+}
+
+.terminal-input-hint {
+  font-size: 0.7rem;
+  color: var(--color-muted, #888);
+  font-style: italic;
+}
+
+.terminal-cmd-body {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+/* `>` has a high optical center in the terminal face, so baseline alignment
+ * makes it look like it floats above lowercase command text. Keep the real
+ * baselines intact and lower only the echoed-command sigil by a hair. */
+.terminal-cmd-body > .terminal-prompt-sigil {
+  transform: translateY(0.12em);
+}
+
+.terminal-prompt-sigil {
+  color: var(--color-accent, #6cf);
+  font-weight: 600;
+}
+
+.terminal-cmd-code {
+  font-family: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.terminal-resolved-hint {
+  margin-top: 0.25rem;
+  font-size: 0.7rem;
+  color: var(--color-muted, #999);
+  font-style: italic;
+}
+
+.terminal-output-viewport {
+  margin: 0;
+  border-radius: 0.4rem;
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  /* Let ordinary command results become part of the timeline instead of
+   * nesting a second vertical scroller after only a couple dozen lines.
+   * Truly enormous output still caps here, while spatial/wide terminal
+   * layouts retain their independent horizontal scrollbar. */
+  max-height: 96rem;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.terminal-output-viewport:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.terminal-output-body {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-surface-2, #1c1c1c);
+  font-family: inherit;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  tab-size: 4;
+  /* Terminal layout is spatial: tables, progress meters, and TUI-like
+   * output use columns deliberately. Preserve every line exactly and keep
+   * overflow inside its viewport instead of reflowing it as chat prose. */
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
+}
+
+.terminal-file-link {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 0.16em;
+  cursor: pointer;
+}
+
+.terminal-file-link:hover,
+.terminal-file-link:focus-visible {
+  color: var(--accent);
+  text-decoration-style: solid;
+}
+
+.terminal-file-link:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* Light-mode terminal surfaces — `--color-*` tokens above are undefined
+ * so dark fallbacks ship in both themes. Goal in light mode is "monospace
+ * content block on paper", NOT "dark terminal slab" — re-skin the output
+ * body + folder pill to read as friendly code blocks against the cream
+ * canvas. ANSI palette overrides below retune the SGR colors for a light
+ * bg (dark-bg variants would be near-invisible on cream). */
+[data-theme="light"] .terminal-folder-pill {
+  background: rgba(176, 114, 76, 0.18);
+  color: #6b3f24;
+}
+[data-theme="light"] .terminal-output-body {
+  background: transparent;
+  color: var(--text, #1c1c1c);
+  border: 0;
+  padding: 0.25rem 0.1rem 0.25rem 0.6rem;
+  border-left: 2px solid rgba(176, 114, 76, 0.32);
+  border-radius: 0;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .terminal-folder-pill {
+    background: rgba(176, 114, 76, 0.18);
+    color: #6b3f24;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body {
+    background: transparent;
+    color: var(--text, #1c1c1c);
+    border: 0;
+    padding: 0.25rem 0.1rem 0.25rem 0.6rem;
+    border-left: 2px solid rgba(176, 114, 76, 0.32);
+    border-radius: 0;
+  }
+}
+
+/* ANSI SGR color + style classes emitted by AnsiOutput. Palette
+ * tuned for a dark terminal-output-body background — colors stay
+ * readable without burning the eye. "bright" variants are roughly
+ * +25% lightness from their base, matching the convention most
+ * terminals follow for the high-intensity 90-97 / 100-107 SGR
+ * range. */
+.terminal-output-body .ansi-fg-black {
+  color: #6b7280;
+} /* lifted from pure black so it stays visible on dark bg */
+.terminal-output-body .ansi-fg-red {
+  color: #ef4d4d;
+}
+.terminal-output-body .ansi-fg-green {
+  color: #4ade80;
+}
+.terminal-output-body .ansi-fg-yellow {
+  color: #facc15;
+}
+.terminal-output-body .ansi-fg-blue {
+  color: #7aa2ff;
+}
+.terminal-output-body .ansi-fg-magenta {
+  color: #d77ed7;
+}
+.terminal-output-body .ansi-fg-cyan {
+  color: #5eead4;
+}
+.terminal-output-body .ansi-fg-white {
+  color: #e5e7eb;
+}
+.terminal-output-body .ansi-fg-bright-black {
+  color: #9ca3af;
+}
+.terminal-output-body .ansi-fg-bright-red {
+  color: #ff7878;
+}
+.terminal-output-body .ansi-fg-bright-green {
+  color: #86efac;
+}
+.terminal-output-body .ansi-fg-bright-yellow {
+  color: #fde047;
+}
+.terminal-output-body .ansi-fg-bright-blue {
+  color: #a0c0ff;
+}
+.terminal-output-body .ansi-fg-bright-magenta {
+  color: #f0a8f0;
+}
+.terminal-output-body .ansi-fg-bright-cyan {
+  color: #99f6e4;
+}
+.terminal-output-body .ansi-fg-bright-white {
+  color: #ffffff;
+}
+
+.terminal-output-body .ansi-bg-black {
+  background-color: #1f2937;
+}
+.terminal-output-body .ansi-bg-red {
+  background-color: #7f1d1d;
+}
+.terminal-output-body .ansi-bg-green {
+  background-color: #14532d;
+}
+.terminal-output-body .ansi-bg-yellow {
+  background-color: #713f12;
+}
+.terminal-output-body .ansi-bg-blue {
+  background-color: #1e3a8a;
+}
+.terminal-output-body .ansi-bg-magenta {
+  background-color: #581c87;
+}
+.terminal-output-body .ansi-bg-cyan {
+  background-color: #134e4a;
+}
+.terminal-output-body .ansi-bg-white {
+  background-color: #d1d5db;
+}
+.terminal-output-body .ansi-bg-bright-black {
+  background-color: #374151;
+}
+.terminal-output-body .ansi-bg-bright-red {
+  background-color: #991b1b;
+}
+.terminal-output-body .ansi-bg-bright-green {
+  background-color: #166534;
+}
+.terminal-output-body .ansi-bg-bright-yellow {
+  background-color: #854d0e;
+}
+.terminal-output-body .ansi-bg-bright-blue {
+  background-color: #1e40af;
+}
+.terminal-output-body .ansi-bg-bright-magenta {
+  background-color: #6b21a8;
+}
+.terminal-output-body .ansi-bg-bright-cyan {
+  background-color: #115e59;
+}
+.terminal-output-body .ansi-bg-bright-white {
+  background-color: #f3f4f6;
+}
+
+.terminal-output-body .ansi-bold {
+  font-weight: 700;
+}
+.terminal-output-body .ansi-dim {
+  opacity: 0.65;
+}
+.terminal-output-body .ansi-italic {
+  font-style: italic;
+}
+.terminal-output-body .ansi-underline {
+  text-decoration: underline;
+}
+.terminal-output-body .ansi-hidden {
+  visibility: hidden;
+}
+/* Reverse is approximated; when no explicit fg/bg is set the
+ * parser leaves both null and we lean on this fallback rule to
+ * paint the swap. When fg/bg ARE set the parser swaps the class
+ * names directly, so this rule still picks up the right look. */
+.terminal-output-body .ansi-reverse:not([class*="ansi-fg-"]):not([class*="ansi-bg-"]) {
+  background-color: var(--color-fg, #e5e7eb);
+  color: var(--color-surface-2, #1c1c1c);
+}
+
+/* Light-mode ANSI palette — the rules above are tuned for a dark
+ * output background; on cream the bright variants (yellow `#facc15`,
+ * green `#4ade80`, white `#e5e7eb`) wash out to near-invisible. Swap
+ * to darker, more saturated shades that hold their meaning while
+ * reading as natural prose on the parchment surface. */
+[data-theme="light"] .terminal-output-body .ansi-fg-black {
+  color: #1f2937;
+}
+[data-theme="light"] .terminal-output-body .ansi-fg-red {
+  color: #b91c1c;
+}
+[data-theme="light"] .terminal-output-body .ansi-fg-green {
+  color: #166534;
+}
+[data-theme="light"] .terminal-output-body .ansi-fg-yellow {
+  color: #a16207;
+}
+[data-theme="light"] .terminal-output-body .ansi-fg-blue {
+  color: #1d4ed8;
+}
+[data-theme="light"] .terminal-output-body .ansi-fg-magenta {
+  color: #a21caf;
+}
+[data-theme="light"] .terminal-output-body .ansi-fg-cyan {
+  color: #0e7490;
+}
+[data-theme="light"] .terminal-output-body .ansi-fg-white {
+  color: #4b5563;
+}
+[data-theme="light"] .terminal-output-body .ansi-fg-bright-black {
+  color: #4b5563;
+}
+[data-theme="light"] .terminal-output-body .ansi-fg-bright-red {
+  color: #dc2626;
+}
+[data-theme="light"] .terminal-output-body .ansi-fg-bright-green {
+  color: #15803d;
+}
+[data-theme="light"] .terminal-output-body .ansi-fg-bright-yellow {
+  color: #b45309;
+}
+[data-theme="light"] .terminal-output-body .ansi-fg-bright-blue {
+  color: #2563eb;
+}
+[data-theme="light"] .terminal-output-body .ansi-fg-bright-magenta {
+  color: #c026d3;
+}
+[data-theme="light"] .terminal-output-body .ansi-fg-bright-cyan {
+  color: #0891b2;
+}
+[data-theme="light"] .terminal-output-body .ansi-fg-bright-white {
+  color: #1f2937;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-black {
+    color: #1f2937;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-red {
+    color: #b91c1c;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-green {
+    color: #166534;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-yellow {
+    color: #a16207;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-blue {
+    color: #1d4ed8;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-magenta {
+    color: #a21caf;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-cyan {
+    color: #0e7490;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-white {
+    color: #4b5563;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-bright-black {
+    color: #4b5563;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-bright-red {
+    color: #dc2626;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-bright-green {
+    color: #15803d;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-bright-yellow {
+    color: #b45309;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-bright-blue {
+    color: #2563eb;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-bright-magenta {
+    color: #c026d3;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-bright-cyan {
+    color: #0891b2;
+  }
+  :root:not([data-theme="dark"]) .terminal-output-body .ansi-fg-bright-white {
+    color: #1f2937;
+  }
+}
+
+.terminal-error-banner {
+  background: rgba(200, 80, 80, 0.16);
+  color: rgba(240, 160, 160, 1);
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.3rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.78rem;
+}
+
+/* Composer mode toggle (AI chat ⇄ Terminal). A quiet one-pixel frame owns
+ * the complete compose surface; the active `@` / `>` tab cuts through its
+ * right edge to read as part of that frame. The glyphs mirror the escape
+ * syntax users can type (`@florian …` → chat, `> ls` → terminal), while
+ * aria-label carries the longer human text. */
+.project-chat-compose-shell {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  /* Follow the roster + timeline content gutter instead of letting the
+   * composer frame sit flush against the project pane's left edge. */
+  margin-left: 0.75rem;
+  /* The @/> mode tabs hang off the right edge with 2px of clearance, and the
+   * scroll container they sit in has no padding and ends at the window frame.
+   * Anything painted outside their border box was therefore clipped — most
+   * visibly the 4px :focus-visible ring, so keyboard focus drew a half ring.
+   * A small gutter gives the tabs and their ring somewhere to land. */
+  margin-right: 0.5rem;
+  /* Keep the framed control from sitting directly on the project pane's
+   * bottom edge. This belongs to the shell so it clears both the composer
+   * and its attached chat/terminal tabs without adding space inside them. */
+  padding-bottom: 4px;
+  --compose-frame-bg: color-mix(in srgb, var(--panel) 88%, var(--surface));
+  --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
+  --compose-toolbar-bg: color-mix(in srgb, var(--panel) 97%, var(--chat-bubble-bg));
+  /* Height of chat's recipient band. Terminal has no recipient row, so this
+   * same budget is transferred to its command-entry window below. Sharing one
+   * variable keeps the two compose modes the same overall height while giving
+   * terminal typing — rather than empty chrome — the extra room. */
+  --compose-header-offset: calc(2.1875rem + 8px);
+}
+
+/* Chat mode gets the same deeper header band as Home. Terminal mode keeps its
+ * existing frame and toolbar treatment when `.chat-composer` is absent. */
+.project-chat-compose-shell:has(.chat-composer) {
+  --compose-frame-bg: var(--chat-compose-header-bg);
+  --compose-toolbar-bg: var(--chat-compose-header-bg);
+}
+
+.project-chat-compose-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border: 1px solid var(--compose-frame-border);
+  border-radius: var(--radius-md);
+  background: var(--compose-frame-bg);
+  /* Sit above inactive mode tabs in their 1px overlap so those tabs read as
+   * tucked behind the composer instead of drawing a stray left border over
+   * its edge. The active tab is raised back above this surface below. */
+  position: relative;
+  z-index: 1;
+  /* Chat mode is intentionally floorless: the composer sizes to its
+   * content (TO row + thread picker + toolbar + Squisq editor) so the
+   * timeline above claims ALL remaining height. A fixed floor here used
+   * to round the composer up to 280px while its real content was ~204px,
+   * leaving a ~76px band of dead background below the editor on tall
+   * windows (the "wasted space at the bottom of the chat"). Terminal
+   * mode re-adds the floor via `.project-chat-compose-main-terminal`
+   * below — its textarea needs the room, and the terminal flex rules
+   * stretch it to fill, so no dead space appears there. */
+}
+
+/* Terminal mode is floorless like chat (sizes to its content) so the two
+ * composers settle at the same height. Its toolbar now leads the stack,
+ * followed by the folder dropdown and the expanded command entry. `gap: 0`
+ * keeps those three surfaces flush. */
+.project-chat-compose-main-terminal {
+  gap: 0;
+  /* 4px left inset matching the chat composer (`.chat-composer`
+   * padding-left), so the `/` dropdown + toolbar + input align with the
+   * chat editor's left edge instead of running full-bleed. The right
+   * edge stays flush for the @/> tab attachment. */
+  padding-left: 0.25rem;
+}
+
+/* Stack toolbar → folder context → command entry. The command-entry band
+ * absorbs the height terminal formerly spent on an empty recipient offset,
+ * preserving mode-switch geometry while putting all available space to use. */
+.project-chat-compose-main .terminal-composer {
+  display: flex;
+  flex-direction: column;
+  /* Override the standalone `.terminal-composer` gap (0.4rem) so the
+   * toolbar sits flush on the input band, like squisq's toolbar-on-editor
+   * seam — no cream stripe between the green bar and the textbox. */
+  gap: 0;
+}
+
+.project-chat-compose-main .terminal-composer-input-wrap {
+  /* Border-box height: the 90px entry floor that matches the current Squisq
+   * chat surface, plus the space reclaimed from terminal's removed empty
+   * recipient band. */
+  height: calc(90px + var(--compose-header-offset));
+  flex: 1 1 calc(90px + var(--compose-header-offset));
+  min-height: 90px;
+  align-items: stretch;
+}
+
+.project-chat-compose-main .terminal-composer-input-wrap .terminal-prompt-sigil {
+  align-self: flex-start;
+}
+
+.project-chat-compose-main .terminal-composer-input {
+  min-height: 0;
+  resize: none;
+}
+
+/* The autofocused terminal textarea would otherwise paint the global
+ * `textarea:focus-visible` ring (2px terracotta outline), which reads as
+ * a hard bordered box floating under the toolbar. The squisq chat editor
+ * is a contenteditable (not a textarea), so it gets only a soft
+ * box-shadow ring — suppress the hard outline here and let the parchment
+ * input-wrap be the surface, matching the chat editor's clean
+ * toolbar-on-paper look. */
+.project-chat-compose-main .terminal-composer-input:focus-visible {
+  outline: none;
+}
+
+.project-chat-compose-mode-bar {
+  display: flex;
+  /* The mode bar stretches to the full compose-shell height. Bottom-align
+   * the tabs with the stable input band so both sit below the Send / terminal
+   * toolbar instead of following the variable recipient + context rows. */
+  align-items: flex-end;
+  /* Keep the tabs just clear of the window's right edge. Their bottom
+   * alignment is owned by the mode-specific toggle margin below. */
+  padding-right: 2px;
+  /* Negative margin lets the active tab's left edge overlap the
+   * composer's right border by 1px, giving the "tab attached to
+   * panel" look. */
+  margin-left: -1px;
+  position: relative;
+  /* Keep this wrapper out of its own stacking context: the active button
+   * needs to rise above compose-main while its inactive sibling stays
+   * underneath it. */
+  z-index: auto;
+}
+
+/* Right edge of the composer is flush so the tabs attached on
+ * the right visually merge into the panel — no rounded gap
+ * between the tab and the composer border. Both composer flavors
+ * get this: our own `.terminal-composer` and Squisq's
+ * `.squisq-editor-shell` on the chat side. Scoped to the
+ * project-chat compose area so other places that embed these
+ * components keep their full rounding. */
+.project-chat-compose-main .terminal-composer,
+.project-chat-compose-main .squisq-editor-shell {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* Drop the outer rounded box around `.terminal-composer` so it
+ * matches the chat side, which doesn't paint its own panel frame
+ * (the user's mental model: the composer IS the row of inputs,
+ * not a card around them). The header + input-wrap inside keep
+ * their own styling; we just nuke the wrapping frame. Scoped
+ * here so terminal composers in other surfaces (if any later)
+ * keep their card appearance. */
+.project-chat-compose-main .terminal-composer {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
+/* Match the terminal rail to the restrained chat toolbar so switching modes
+ * changes the toolset, not the visual weight of the compose frame. */
+.project-chat-compose-main .terminal-composer-toolbar {
+  background: var(--compose-toolbar-bg) !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+/* `.chat-composer` ships with 4px of horizontal padding outside Squisq.
+ * Remove it here so the editor reaches the compose frame; the toolbar header
+ * then owns the precise one-pixel inset above. Other chat embeds keep their
+ * usual breathing room. */
+.project-chat-compose-main .chat-composer {
+  padding-inline: 0;
+}
+
+.project-chat-compose-toggle {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  /* The tabs belong to the outer one-pixel frame, not the nested editor
+   * surface. Lift the stack clear of the composer's rounded bottom corner
+   * while preserving its one-pixel attachment to the right edge. */
+  margin-bottom: 8px;
+}
+
+.project-chat-compose-toggle button {
+  /* `--surface` sits 3/255 from `--panel` in dark, so an inactive tab was
+   * drawn only by its 1px border and read as a clipped fragment rather than a
+   * key. `--key-bg` is the token the rest of the app's keys already use and
+   * separates from the pane in both themes. */
+  background: var(--key-bg, var(--surface));
+  color: var(--text-muted);
+  border: 1px solid var(--compose-frame-border);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  padding: 0.35rem 0.4rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  line-height: 1;
+  min-width: 1.6rem;
+  text-align: center;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.project-chat-compose-toggle button.active {
+  background: var(--compose-frame-bg);
+  color: var(--text);
+  position: relative;
+  z-index: 2;
+  /* Left border of the active tab matches the composer's
+   * background, hiding the composer's right border directly behind
+   * it so the tab visually merges with the panel. */
+  border-left-color: var(--compose-frame-bg);
+  font-weight: 600;
+}
+
+.project-chat-compose-toggle button:not(.active):hover {
+  background: color-mix(in srgb, var(--surface) 76%, var(--compose-frame-bg));
+  color: var(--text);
+}
+
+/* Terminal composer + folder tree (per-project terminal mode) */
+.terminal-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border, #333);
+  border-radius: 0.5rem;
+  background: var(--color-surface, #1a1a1a);
+}
+
+/* Toolbar pinned to the top of the terminal composer. Mirrors the squisq
+ * editor's top toolbar (above the chat editor) so the terminal surface
+ * reads as a symmetric sibling: the same ~32px height and the same wash
+ * `.squisq-toolbar` carries in gezel per theme — warm tint in dark, sage in
+ * light (see the `.squisq-toolbar` overrides above, and the light-theme rule
+ * below for why that one can't just reuse the same rgba).
+ * Holds the command galleries and the right-aligned Fire action. */
+.terminal-composer-toolbar {
+  /* 35px = the squisq chat toolbar's rendered height in the real app
+   * (its tabs + buttons run a touch taller than the bare view-tab
+   * metric), so the two toolbars line up across a mode switch. */
+  height: 35px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0 0.4rem;
+  background: rgba(176, 114, 76, 0.08);
+}
+
+/* Compact toolbar button that warms on hover / when its popover is open. */
+.terminal-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 24px;
+  padding: 0 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted, #999);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.terminal-toolbar-btn:hover,
+.terminal-toolbar-btn[data-state="open"] {
+  background: rgba(176, 114, 76, 0.16);
+  border-color: rgba(176, 114, 76, 0.32);
+  color: var(--text, #f0f0f0);
+}
+.terminal-toolbar-btn svg {
+  flex: 0 0 auto;
+}
+.terminal-toolbar-fire-btn {
+  margin-left: auto;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  color: var(--text);
+  font-weight: 600;
+}
+.terminal-toolbar-fire-btn:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 54%, transparent);
+  color: var(--text);
+}
+[data-theme="light"] .terminal-toolbar-btn:hover,
+[data-theme="light"] .terminal-toolbar-btn[data-state="open"] {
+  background: rgba(88, 138, 63, 0.24);
+  border-color: rgba(88, 138, 63, 0.4);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .terminal-toolbar-btn:hover,
+  :root:not([data-theme="dark"]) .terminal-toolbar-btn[data-state="open"] {
+    background: rgba(88, 138, 63, 0.24);
+    border-color: rgba(88, 138, 63, 0.4);
+  }
+}
+
+/* The gallery popover: drop the default gz-popover padding (CommandsPanel
+ * carries its own) and give it a bounded box so the panel's group list
+ * scrolls inside instead of the popover growing unbounded. */
+.gz-popover.terminal-commands-popover {
+  padding: 0;
+  width: min(20rem, 92vw);
+  max-width: min(20rem, 92vw);
+  height: min(60vh, 30rem);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+/* The same sage wash `.squisq-toolbar` carries — but that toolbar composites
+ * over squisq's opaque white shell (`.squisq-editor-shell { background: #fff }`)
+ * while this one sits on a transparent composer over parchment, so the identical
+ * rgba rendered as a visibly darker, more saturated green. Lay the wash over the
+ * same white base so both toolbars land on one colour. */
+[data-theme="light"] .terminal-composer-toolbar {
+  background: linear-gradient(rgba(88, 138, 63, 0.22), rgba(88, 138, 63, 0.22)) #fff;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .terminal-composer-toolbar {
+    background: linear-gradient(rgba(88, 138, 63, 0.22), rgba(88, 138, 63, 0.22)) #fff;
+  }
+}
+
+.terminal-composer-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--color-muted, #999);
+}
+
+.terminal-composer-cwd {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--color-fg, #ddd);
+}
+
+.terminal-composer-input-wrap {
+  border: 1px solid var(--color-border, #333);
+  border-radius: 0.3rem;
+  background: var(--color-surface-2, #111);
+  padding: 0.6rem 0.7rem;
+  display: flex;
+  /* Sigil top-aligns with the first line of the textarea — the
+   * caret-style `>` belongs at the start of typing, not vertically
+   * centered against a 5-line block. */
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+/* The sigil is a plain span beside a Monaco host that owns its own metrics,
+ * so it has to reproduce them to share a baseline: 13.6px/21px and the 6px
+ * top padding from TerminalCodeEditor's editor options. Without the padding
+ * the `>` floats a full 6px above the first typed line. The last nudge is
+ * the optical one the echoed-command sigil also carries — `>` sits high in
+ * the terminal face, so true baseline alignment still reads as too high. */
+.terminal-composer-input-wrap .terminal-prompt-sigil {
+  flex-shrink: 0;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13.6px;
+  line-height: 21px;
+  padding-top: 6px;
+  transform: translateY(0.12em);
+}
+
+.terminal-composer-input {
+  flex: 1 1 auto;
+  background: transparent;
+  color: var(--color-fg, #ddd);
+  border: 0;
+  outline: none;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.85rem;
+  line-height: 1.55;
+  padding: 0;
+  /* Tall to match the chat composer's editor minHeight (120px in
+   * the Squisq EditorShell). User can drag-resize the textarea
+   * to grow it further. */
+  min-height: 7.5rem;
+  resize: vertical;
+}
+
+.terminal-composer-input::placeholder {
+  color: var(--color-muted, #777);
+}
+
+/* Host for the Monaco terminal editor — fills the input band; Monaco owns its
+ * own font/padding/caret, so this is just the flex sizing box. */
+.terminal-editor-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  align-self: stretch;
+  height: 100%;
+  overflow: hidden;
+}
+/* The Monaco editor element renders a stray 1px outline on focus; the wrap
+ * already carries the focus affordance, so suppress it here. */
+.terminal-editor-host .monaco-editor,
+.terminal-editor-host .monaco-editor .overflow-guard {
+  outline: none;
+}
+
+/* Placeholder hint (a Monaco content widget at the text origin) shown while
+ * the buffer is empty. Muted + non-interactive so it reads as a prompt. */
+.terminal-editor-placeholder {
+  color: var(--color-muted, #777);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.85rem;
+  line-height: 21px;
+  transform: translateY(1px);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0.85;
+}
+[data-theme="light"] .terminal-editor-placeholder {
+  color: var(--text-muted, #666);
+}
+
+/* The autocomplete (suggest) widget opens from the ~84px input, so it must
+ * escape the composer's clipping. `fixedOverflowWidgets` renders it in a
+ * body-level layer; keep the compose column from clipping it on the way out. */
+.project-chat-compose-main {
+  overflow: visible;
+}
+
+.terminal-composer-hint {
+  font-size: 0.7rem;
+  color: var(--color-muted, #777);
+}
+
+/* Single-line picker: `Folder: [current + chevron] ⟳`. The bordered box +
+ * scroll behavior that used to live on the container now belongs
+ * to .folder-tree-popup, which only mounts while picking. */
+.folder-tree-switcher {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.78rem;
+}
+
+.folder-tree-label {
+  color: var(--color-muted, #999);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.folder-tree-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--color-border, #333);
+  border-radius: 0.3rem;
+  background: var(--color-surface, #1a1a1a);
+  color: var(--color-fg, #ddd);
+  cursor: pointer;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.78rem;
+}
+
+.folder-tree-trigger:hover {
+  background: var(--color-surface-2, #2a2a2a);
+}
+
+.folder-tree-trigger-caret {
+  color: var(--color-muted, #777);
+}
+
+/* Wide-row treatment when the picker lives at the top of the
+ * per-project terminal composer. Mirrors `.gezel-chat-session-header`
+ * (the thread-picker row above the chat editor) so the chat /
+ * terminal modes have visually parallel "selector" rows.
+ *  - subtle bottom border + lighter background, matching session row
+ *  - "Folder:" label hidden (the wide trigger carries enough context)
+ *  - trigger stretches to fill the row, caret right-aligned */
+.project-chat-compose-main .folder-tree-switcher {
+  /* Use the same inset as `.gezel-chat-session-header`: the `/` trigger gets
+   * the same breathing room as the thread dropdown, and the equal block
+   * padding keeps both context rows the same height across a mode switch. */
+  padding: 0.4rem 0.6rem 0.4rem 0.25rem;
+  border-bottom: 1px solid var(--color-border, #333);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 0.8rem;
+}
+
+.project-chat-compose-main .folder-tree-label {
+  display: none;
+}
+
+.project-chat-compose-main .folder-tree-trigger {
+  flex: 1;
+  justify-content: space-between;
+  /* Match the chat session-picker trigger so the two context-dropdown
+   * rows render at the same height. The chat trigger carries both
+   * `.gz-select-trigger` and `.gezel-chat-session-select`; equal
+   * specificity means the former's 0.9rem wins over the latter's 0.8rem,
+   * so the live chat dropdown is 0.9rem / 0.3rem 0.55rem / lh 1.3 /
+   * radius 2px — mirror those exactly here. */
+  font-size: 0.9rem;
+  line-height: 1.3;
+  padding: 0.3rem 0.55rem;
+  border-radius: 2px;
+}
+
+.folder-tree-popup {
+  position: absolute;
+  bottom: 100%;
+  left: 0.4rem;
+  margin-bottom: 0.25rem;
+  min-width: 16rem;
+  max-width: min(28rem, calc(100vw - 2rem));
+  border: 1px solid var(--color-border, #333);
+  border-radius: 0.5rem;
+  background: var(--color-surface, #1a1a1a);
+  max-height: 14rem;
+  overflow-y: auto;
+  padding: 0.3rem;
+  z-index: 100;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.folder-tree-node {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  color: var(--color-fg, #ddd);
+  background: transparent;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.78rem;
+}
+
+.folder-tree-node:hover {
+  background: var(--color-surface-2, #2a2a2a);
+}
+
+.folder-tree-node.active {
+  background: var(--color-accent, #6cf);
+  color: var(--color-bg, #111);
+}
+
+/* Light-mode terminal-chrome — make the input wrap + folder picker read
+ * as friendly content blocks on cream, NOT a dark terminal slab. All
+ * three surfaces share the same `#f6f1e7` parchment used by the chat
+ * editor's WYSIWYG surface, so the terminal mode visually parallels the
+ * chat mode (same paper, different chrome). Dark input text + terracotta
+ * border ties them to the rest of the gezellig palette. */
+[data-theme="light"] .terminal-composer-input-wrap {
+  /* Solid parchment fill (the same `#f6f1e7` the squisq chat editor's
+   * WYSIWYG surface uses) so the green toolbar sits flush on a filled
+   * input block — one cohesive panel, exactly like the chat side. A
+   * transparent wrap let cream show through its padding, making the
+   * toolbar read as a floating band instead of a flush seam. */
+  background: #f6f1e7;
+  border: 0;
+  border-bottom: 1px solid rgba(176, 114, 76, 0.28);
+  border-radius: 0;
+  padding: 0.4rem 0 0.4rem 0.1rem;
+}
+/* Inset the textarea text + caret away from the terracotta focus ring
+ * (`:focus-visible` paints `outline: 2px solid var(--accent)` at the
+ * textarea edge). Without this the first character sits hard against
+ * that ring — see the "sadsadfsa" example. */
+[data-theme="light"] .terminal-composer-input {
+  padding: 0.35rem 0.5rem;
+}
+[data-theme="light"] .folder-tree-trigger,
+[data-theme="light"] .folder-tree-popup {
+  background: #f6f1e7;
+  border-color: rgba(176, 114, 76, 0.3);
+  color: var(--text, #1c1c1c);
+}
+[data-theme="light"] .terminal-composer-input {
+  color: var(--text, #1c1c1c);
+}
+[data-theme="light"] .terminal-composer-input::placeholder {
+  color: var(--text-muted, #666);
+}
+[data-theme="light"] .folder-tree-node {
+  color: var(--text, #1c1c1c);
+}
+[data-theme="light"] .folder-tree-trigger:hover,
+[data-theme="light"] .folder-tree-node:hover {
+  background: #ece3cf;
+}
+[data-theme="light"] .project-chat-compose-main .folder-tree-switcher {
+  border-top-color: rgba(176, 114, 76, 0.2);
+  background: transparent;
+}
+/* Sigil + muted helper text in light mode — the dark-bg cyan accent
+ * (`#6cf`) and pale `#999` muted both clash with the warm cream
+ * palette. Warm sigil + slightly darker muted reads naturally. */
+[data-theme="light"] .terminal-prompt-sigil {
+  color: var(--accent, #b0724c);
+}
+[data-theme="light"] .terminal-group-header,
+[data-theme="light"] .terminal-duration,
+[data-theme="light"] .terminal-resolved-hint,
+[data-theme="light"] .terminal-composer-hint,
+[data-theme="light"] .folder-tree-label,
+[data-theme="light"] .folder-tree-trigger-caret {
+  color: var(--text-muted, #666);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .terminal-composer-input-wrap {
+    /* Parchment fill — see the `[data-theme="light"]` rule above. */
+    background: #f6f1e7;
+    border: 0;
+    border-bottom: 1px solid rgba(176, 114, 76, 0.28);
+    border-radius: 0;
+    padding: 0.4rem 0 0.4rem 0.1rem;
+  }
+  :root:not([data-theme="dark"]) .terminal-composer-input {
+    padding: 0.35rem 0.5rem;
+  }
+  :root:not([data-theme="dark"]) .folder-tree-trigger,
+  :root:not([data-theme="dark"]) .folder-tree-popup {
+    background: #f6f1e7;
+    border-color: rgba(176, 114, 76, 0.3);
+    color: var(--text, #1c1c1c);
+  }
+  :root:not([data-theme="dark"]) .terminal-composer-input {
+    color: var(--text, #1c1c1c);
+  }
+  :root:not([data-theme="dark"]) .terminal-composer-input::placeholder {
+    color: var(--text-muted, #666);
+  }
+  :root:not([data-theme="dark"]) .folder-tree-node {
+    color: var(--text, #1c1c1c);
+  }
+  :root:not([data-theme="dark"]) .folder-tree-trigger:hover,
+  :root:not([data-theme="dark"]) .folder-tree-node:hover {
+    background: #ece3cf;
+  }
+  :root:not([data-theme="dark"]) .project-chat-compose-main .folder-tree-switcher {
+    border-top-color: rgba(176, 114, 76, 0.2);
+    background: transparent;
+  }
+  :root:not([data-theme="dark"]) .terminal-prompt-sigil {
+    color: var(--accent, #b0724c);
+  }
+  :root:not([data-theme="dark"]) .terminal-group-header,
+  :root:not([data-theme="dark"]) .terminal-duration,
+  :root:not([data-theme="dark"]) .terminal-resolved-hint,
+  :root:not([data-theme="dark"]) .terminal-composer-hint,
+  :root:not([data-theme="dark"]) .folder-tree-label,
+  :root:not([data-theme="dark"]) .folder-tree-trigger-caret {
+    color: var(--text-muted, #666);
+  }
+}

@@ -2,7 +2,7 @@ import type { GezelSummary } from '@bendyline/gezel';
 import { Box, Text, renderToString } from 'ink';
 import { describe, expect, it } from 'vitest';
 import type { FeedRow } from '../feed.js';
-import { ChatFeed } from './ChatFeed.js';
+import { CHAT_FEED_ROW_STYLES, ChatFeed } from './ChatFeed.js';
 
 const gezels = [
   {
@@ -67,6 +67,10 @@ describe('ChatFeed', () => {
 
     expect(output).toContain('▎thinking: I should inspect the workspace first.');
     expect(output).not.toContain('Builder: I should inspect');
+    expect(CHAT_FEED_ROW_STYLES.thinking).toEqual({
+      color: 'magentaBright',
+      dimColor: false,
+    });
   });
 
   it('rewrites actor names in task updates for boring mode', () => {

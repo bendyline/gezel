@@ -54,7 +54,7 @@ describe('area pass (deep-pass tier 2)', () => {
       10,
     );
 
-    const summarize = vi.fn(async (prompt: string) =>
+    const summarize = vi.fn(async (prompt: string, _activity?: string) =>
       prompt.includes('top-level folder') ? 'Overall architecture note.' : 'Folder summary.',
     );
     const r = await ci.enrichAreas('p1', deps(summarize));
@@ -64,6 +64,11 @@ describe('area pass (deep-pass tier 2)', () => {
     const src = map.areas.find((a) => a.path === 'src');
     expect(src?.purpose).toBe('Folder summary.');
     expect(map.architecture).toBe('Overall architecture note.');
+    expect(summarize.mock.calls.map((call) => call[1])).toEqual([
+      'Mapping docs',
+      'Mapping src',
+      'Mapping the project',
+    ]);
   });
 
   it('is hash-gated: unchanged areas cost no LLM calls on a re-run', async () => {

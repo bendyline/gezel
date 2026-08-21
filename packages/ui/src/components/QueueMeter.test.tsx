@@ -4,6 +4,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
+import { HeaderDensityContext } from './header-density.js';
 import type { LiveTurnState } from './useOnDeviceLiveTurns.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
@@ -13,7 +14,8 @@ vi.mock('../api.js', () => ({ api: createMockApi() }));
 // own visibility/render logic is what's under test here; the hook's
 // `enabled` gating is exercised separately by its own consumers.
 let mockLiveTurns = new Map<string, LiveTurnState>();
-vi.mock('./useOnDeviceLiveTurns.js', () => ({
+vi.mock('./useOnDeviceLiveTurns.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./useOnDeviceLiveTurns.js')>()),
   useOnDeviceLiveTurns: () => mockLiveTurns,
 }));
 
@@ -255,7 +257,8 @@ describe('QueueMeter — preparing window', () => {
             {
               sessionId: 'index-enrichment',
               actorLabel: 'Boekwachter',
-              job: 'index enrichment',
+              projectId: 'project-7',
+              job: 'Indexing src/app.ts',
               runningForMs: 16_000,
             },
           ],
@@ -269,6 +272,12 @@ describe('QueueMeter — preparing window', () => {
     });
 
     await waitFor(() => expect(button).toHaveTextContent('Boekwachter'));
+    expect(button).toHaveTextContent('Indexing src/app.ts');
+    expect(button).toHaveTextContent('Spanish lessons');
+    expect(button).toHaveAttribute(
+      'title',
+      expect.stringContaining('Activity: Indexing src/app.ts'),
+    );
     expect(button).not.toHaveTextContent(/This (Windows|Linux|Mac)/);
     expect(button.querySelector('.queue-meter-chip .gezel-icon-fallback')).not.toBeNull();
     expect(screen.queryByText(/Unknown/i)).not.toBeInTheDocument();
@@ -276,7 +285,7 @@ describe('QueueMeter — preparing window', () => {
     await userEvent.click(button);
     const panel = await screen.findByLabelText('AI chat queue');
     expect(within(panel).getByText('Boekwachter')).toBeInTheDocument();
-    expect(within(panel).getByText(/index enrichment/)).toBeInTheDocument();
+    expect(within(panel).getByText(/Indexing src\/app\.ts/)).toBeInTheDocument();
   });
 
   it('uses System as the final fallback for unattributed service work', async () => {
@@ -362,7 +371,12 @@ describe('QueueMeter — preparing window', () => {
   it('lists the waiting turn with its gezel + phase and a cancel control', async () => {
     mockLiveTurns.set(
       'sess-1',
-      liveTurn({ gezelId: 'gez-1', projectId: 'project-7', label: 'Loading model' }),
+      liveTurn({
+        gezelId: 'gez-1',
+        projectId: 'project-7',
+        phase: 'loading_model',
+        label: 'Loading model weights · 12 tok/s',
+      }),
     );
 
     render(<QueueMeter />);
@@ -371,12 +385,14 @@ describe('QueueMeter — preparing window', () => {
     });
     await userEvent.click(button);
 
-    // Gezel name resolved from the listGezels map, plus the live phase.
+    // Gezel name resolved from the listGezels map, plus the live phase —
+    // the phase word, never the event detail's engine metrics.
     const panel = await screen.findByLabelText('AI chat queue');
     expect(within(panel).getByText('Alejandro')).toBeInTheDocument();
     expect(
       within(panel).getByText('Language Trainer · Spanish lessons · Loading model'),
     ).toBeInTheDocument();
+    expect(within(panel).queryByText(/tok\/s/)).not.toBeInTheDocument();
 
     // Cancel targets the session id, not a provider-queue entry id —
     // there's no provider queue yet during preparing.
@@ -384,8 +400,72 @@ describe('QueueMeter — preparing window', () => {
     expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('sess-1');
   });
 
+  it('does not repeat a turn another engine is already running', async () => {
+    // Configured engine is llama-cpp and it never registered a queue, so
+    // the preparing section is live. The turn itself is on ds4, which the
+    // snapshot already reports as in flight — it belongs to that section
+    // and must not also appear as a waiting row under "This Mac".
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      ...PREPARING_STATUS,
+      providers: {
+        ds4: {
+          running: 1,
+          queuedInteractive: 0,
+          queuedBackground: 0,
+          concurrency: 1,
+          active: [
+            {
+              sessionId: 'sess-1',
+              gezelId: 'gez-1',
+              projectId: 'project-7',
+              job: 'Reviewing powerpoint/task-3',
+              runningForMs: 47_000,
+            },
+          ],
+          pending: [],
+        },
+      },
+    } as QueueStatusResponse);
+    mockLiveTurns.set(
+      'sess-1',
+      liveTurn({ gezelId: 'gez-1', projectId: 'project-7', phase: 'generating', provider: 'ds4' }),
+    );
+
+    render(<QueueMeter />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
+
+    const panel = await screen.findByLabelText('AI chat queue');
+    expect(within(panel).getByText('DwarfStar')).toBeInTheDocument();
+    expect(within(panel).queryByText(/starting engine/)).not.toBeInTheDocument();
+    expect(within(panel).getAllByText('Alejandro')).toHaveLength(1);
+  });
+
+  it('keeps a preparing row for a turn on the engine that is still starting', async () => {
+    mockLiveTurns.set(
+      'sess-1',
+      liveTurn({ gezelId: 'gez-1', phase: 'loading_model', provider: 'llama-cpp' }),
+    );
+    mockLiveTurns.set(
+      'sess-2',
+      liveTurn({ gezelId: 'gez-1', phase: 'generating', provider: 'ds4' }),
+    );
+
+    render(<QueueMeter />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: 'AI chat queue — click for details' }),
+    );
+
+    // Only the llama-cpp turn is waiting on the engine this section names;
+    // the ds4 turn is another engine's business.
+    const panel = await screen.findByLabelText('AI chat queue');
+    expect(within(panel).getByText('starting engine · 1 waiting')).toBeInTheDocument();
+    expect(within(panel).getAllByText('Alejandro')).toHaveLength(1);
+  });
+
   it('opens the exact queued chat, including its project', async () => {
-    mockLiveTurns.set('sess-1', liveTurn({ gezelId: 'gez-1', label: 'Loading model' }));
+    mockLiveTurns.set('sess-1', liveTurn({ gezelId: 'gez-1', phase: 'loading_model' }));
     vi.mocked(api.getChatSession).mockResolvedValue({
       version: 1,
       id: 'sess-1',
@@ -783,5 +863,62 @@ describe('QueueMeter — night-shift handoffs', () => {
       name: 'AI chat queue — click for details',
     });
     expect(button).toHaveTextContent('Tasks3');
+  });
+});
+
+describe('QueueMeter — crowded titlebar', () => {
+  /** One busy chip whose job carries a real activity phrase. */
+  const REVIEWING: QueueStatusResponse = {
+    ...ACTIVE_STATUS,
+    providers: {
+      'llama-cpp': {
+        ...ACTIVE_STATUS.providers['llama-cpp'],
+        active: [
+          {
+            sessionId: 'sess-1',
+            gezelId: 'gez-1',
+            projectId: 'project-7',
+            job: 'project-7 · Reviewing game.json',
+            runningForMs: 12_000,
+          },
+        ],
+      },
+    } as QueueStatusResponse['providers'],
+  };
+
+  beforeEach(() => {
+    mockLiveTurns = new Map();
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'llama-cpp' } as ConfigResponse);
+    vi.mocked(api.getQueueStatus).mockResolvedValue(REVIEWING);
+    vi.mocked(api.listGezels).mockResolvedValue({ gezels: [ALEJANDRO] } as never);
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [{ id: 'project-7', name: 'Spanish lessons' }],
+    } as never);
+  });
+
+  async function chipAt(density: 'full' | 'compact') {
+    const { container } = render(
+      <HeaderDensityContext.Provider value={density}>
+        <QueueMeter />
+      </HeaderDensityContext.Provider>,
+    );
+    await waitFor(() => {
+      expect(container.querySelector('.queue-meter-chip')).not.toBeNull();
+    });
+    return container.querySelector('.queue-meter-chip') as HTMLElement;
+  }
+
+  it('names the activity while there is room for it', async () => {
+    const chip = await chipAt('full');
+    expect(chip).toHaveTextContent('Reviewing game.json in Spanish lessons');
+    expect(chip).toHaveTextContent('Alejandro');
+  });
+
+  it('drops the activity — the longest string in the chip — when crowded', async () => {
+    const chip = await chipAt('compact');
+    expect(chip.querySelector('.queue-meter-chip-job')).toBeNull();
+    // Who is working stays; the tooltip and the queue popover still say on what.
+    expect(chip).toHaveTextContent('Alejandro');
+    expect(chip.getAttribute('title')).toContain('Reviewing game.json');
   });
 });

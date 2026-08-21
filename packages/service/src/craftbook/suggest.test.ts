@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { EmbeddingsDisabledError } from '../memory/embeddings.js';
-import { type CraftbookCandidate, rankCraftbookSuggestions } from './suggest.js';
+import {
+  type CraftbookCandidate,
+  rankCraftbookSuggestions,
+  usefulCraftbooksForSearch,
+} from './suggest.js';
 
 const cand = (
   id: string,
@@ -134,5 +138,41 @@ describe('lexical-only mode (embeddings unavailable)', () => {
       { embedder: failingEmbedder },
     );
     expect(ranked).toEqual([]);
+  });
+});
+
+describe('usefulCraftbooksForSearch', () => {
+  it('keeps only strong semantic or lexical matches and caps omni-search noise', () => {
+    const ranked = [
+      {
+        ...cand('semantic', 'Physics workflow', 'Improve vehicle dynamics'),
+        // Above SEARCH_MIN_BLEND_SCORE (0.32, bge-calibrated) — qualifies.
+        score: 0.36,
+        semantic: 0.48,
+        lexical: 0.02,
+      },
+      {
+        ...cand('lexical', 'Vehicle physics', 'Tune driving physics'),
+        score: 0.09,
+        lexical: 0.09,
+      },
+      {
+        ...cand('weak', 'Generic workflow', 'A merely best option'),
+        score: 0.2,
+        semantic: 0.25,
+        lexical: 0.02,
+      },
+      {
+        ...cand('third', 'Physics QA', 'Test vehicle dynamics'),
+        score: 0.35,
+        semantic: 0.45,
+        lexical: 0.03,
+      },
+    ];
+
+    expect(usefulCraftbooksForSearch(ranked).map((item) => item.id)).toEqual([
+      'semantic',
+      'lexical',
+    ]);
   });
 });

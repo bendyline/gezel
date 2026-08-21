@@ -31,13 +31,13 @@ describe('FileHiddenKey', () => {
     );
     expect(screen.getByRole('button', { name: 'Show hidden files' })).toHaveAttribute(
       'title',
-      'Show hidden files — dot-files and folders like node_modules.',
+      'Show hidden files — Office lock files, dot-files, and folders like node_modules.',
     );
 
     rerender(<FileHiddenKey kind="artifacts" value={false} onChange={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Show hidden files' })).toHaveAttribute(
       'title',
-      'Show hidden files — dot-files and the generated shadow folder.',
+      'Show hidden files — Office lock files, dot-files, and the generated shadow folder.',
     );
   });
 });

@@ -17,7 +17,8 @@ export function documentRoutes(ctx: ServiceContext): Hono {
     const recursive = c.req.query('recursive') === '1';
     // `stats=1` / `hidden=1` mirror the project file routes — the documents
     // library is browsed through the same file panel, which sorts by mtime and
-    // has a show-hidden key. Only meaningful with `recursive=1`.
+    // has a show-hidden key for dotfiles and Office lock files. Only meaningful
+    // with `recursive=1`.
     const withStats = c.req.query('stats') === '1';
     const includeHidden = c.req.query('hidden') === '1';
     if (recursive) {
@@ -55,7 +56,10 @@ export function documentRoutes(ctx: ServiceContext): Hono {
         : undefined,
     });
     // The library is a project, so its content index is the one that has
-    // ranked, embedding-backed retrieval over these documents.
+    // ranked, embedding-backed retrieval over these documents. No queryVector
+    // is passed on purpose: searchLibrary self-embeds the query when the vec
+    // table is available, so this single-call route is already hybrid — the
+    // precomputed-vector parameter only pays off in multi-corpus fan-outs.
     const libraryId = await ctx.store.sharedProjectId();
     if (!libraryId) return c.json({ results: [], engine: 'unavailable' });
     const found = await ctx.contentIndex.searchLibrary(libraryId, params.q, {

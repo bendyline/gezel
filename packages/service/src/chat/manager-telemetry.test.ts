@@ -77,6 +77,7 @@ describe('ChatManager session telemetry', () => {
     expect(snap).not.toBeNull();
     expect(snap?.gezelId).toBe('ada');
     expect(snap?.turnsStarted).toBe(1);
+    expect(snap?.providerRequestsStarted).toBeGreaterThanOrEqual(1);
     expect(snap?.deltaChunks).toBe(2);
     expect(snap?.streamedContentChars).toBe('Wrote the file.'.length);
     expect(snap?.toolCalls).toBeGreaterThanOrEqual(1);

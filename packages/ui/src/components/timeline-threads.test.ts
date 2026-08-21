@@ -30,7 +30,7 @@ function assistantRow(sessionId: string, at: string, content: string): Row {
 }
 
 function streamingRow(sessionId: string, at: string): Row {
-  return { kind: 'streaming', sessionId, at, slot: { anchor: at } };
+  return { kind: 'streaming', sessionId, at, threadAt: at, slot: { anchor: at } };
 }
 
 function terminalRow(id: string, at: string): Row {
@@ -113,21 +113,66 @@ describe('buildTimelineThreads', () => {
     ]);
   });
 
-  it('attaches streaming rows to the session’s open thread', () => {
+  it('attaches streaming rows to the session’s open thread and moves active work last', () => {
     const items = buildTimelineThreads<Msg, { anchor: string }, { id: string }, { id: string }>([
       userRow('s1', '2026-01-01T10:00:00.000Z', 'go'),
       userRow('s2', '2026-01-01T10:00:10.000Z', 'other session'),
-      // Streaming rows sort to the bottom of the flat input regardless
-      // of anchor — the builder still files them under their session.
+      // Streaming rows sort to the live-work lane at the bottom of the
+      // flat input. The builder moves the complete s1 group there rather
+      // than leaving its live reply stranded at s1's old trigger.
       streamingRow('s1', '2026-01-01T10:00:20.000Z'),
     ]);
     expect(shape(items)).toEqual([
-      'thread(s1, "go", replies=1)',
       'thread(s2, "other session", replies=0)',
+      'thread(s1, "go", replies=1)',
     ]);
-    const first = items[0]!;
-    if (first.kind !== 'thread') throw new Error('expected thread');
-    expect(first.replies[0]!.kind).toBe('streaming');
+    const active = items[1]!;
+    if (active.kind !== 'thread') throw new Error('expected thread');
+    expect(active.replies[0]!.kind).toBe('streaming');
+  });
+
+  it('orders multiple active threads by their streaming-row activity', () => {
+    const items = buildTimelineThreads<Msg, { anchor: string }, { id: string }, { id: string }>([
+      userRow('older-active', '2026-01-01T10:00:00.000Z', 'first task'),
+      userRow('newer-active', '2026-01-01T10:00:10.000Z', 'second task'),
+      userRow('waiting', '2026-01-01T10:00:20.000Z', 'pending task'),
+      streamingRow('newer-active', '2026-01-01T10:01:00.000Z'),
+      streamingRow('older-active', '2026-01-01T10:02:00.000Z'),
+    ]);
+
+    expect(shape(items)).toEqual([
+      'thread(waiting, "pending task", replies=0)',
+      'thread(newer-active, "second task", replies=1)',
+      'thread(older-active, "first task", replies=1)',
+    ]);
+  });
+
+  it('keeps a thread at its newest completed reply after live work retires', () => {
+    const items = buildTimelineThreads<Msg, { anchor: string }, { id: string }, { id: string }>([
+      userRow('iterating', '2026-01-01T10:00:00.000Z', 'work through the task'),
+      userRow('pending', '2026-01-01T10:01:00.000Z', 'queued handoff'),
+      assistantRow('iterating', '2026-01-01T10:02:00.000Z', 'iteration complete'),
+    ]);
+
+    expect(shape(items)).toEqual([
+      'thread(pending, "queued handoff", replies=0)',
+      'thread(iterating, "work through the tas", replies=1)',
+    ]);
+  });
+
+  it('keeps the later terminal-work lane below a re-queued active chat thread', () => {
+    const items = buildTimelineThreads<Msg, { anchor: string }, { id: string }, { id: string }>([
+      userRow('active', '2026-01-01T10:00:00.000Z', 'chat task'),
+      userRow('waiting', '2026-01-01T10:00:10.000Z', 'pending task'),
+      streamingRow('active', '2026-01-01T10:01:00.000Z'),
+      terminalRow('recent-terminal', '2026-01-01T10:01:30.000Z'),
+    ]);
+
+    expect(shape(items)).toEqual([
+      'thread(waiting, "pending task", replies=0)',
+      'thread(active, "chat task", replies=1)',
+      'terminal(recent-terminal)',
+    ]);
   });
 
   it('creates a bottom thread for a streaming row in a brand-new session', () => {
@@ -139,6 +184,22 @@ describe('buildTimelineThreads', () => {
       'thread(s1, "existing conversatio", replies=0)',
       'thread(fresh, "<rootless>", replies=1)',
     ]);
+  });
+
+  it('keeps a rootless live thread render anchor stable while activity moves', () => {
+    const row: Row = {
+      kind: 'streaming',
+      sessionId: 'background',
+      at: '2026-01-01T10:05:00.000Z',
+      threadAt: '2026-01-01T10:00:00.000Z',
+      slot: { anchor: 'stable' },
+    };
+    const [item] = buildTimelineThreads<Msg, { anchor: string }, { id: string }, { id: string }>([
+      row,
+    ]);
+
+    expect(item?.kind).toBe('thread');
+    expect(item?.at).toBe('2026-01-01T10:00:00.000Z');
   });
 
   it('merges fan-out duplicate roots into the kept root’s thread', () => {
@@ -167,13 +228,13 @@ describe('buildTimelineThreads', () => {
     ]);
   });
 
-  it('passes terminal rows through in place', () => {
+  it('passes terminal rows through and orders a later chat reply after them', () => {
     const items = buildTimelineThreads<Msg, { anchor: string }, { id: string }, { id: string }>([
       userRow('s1', '2026-01-01T10:00:00.000Z', 'run the build'),
       terminalRow('t1', '2026-01-01T10:00:30.000Z'),
       assistantRow('s1', '2026-01-01T10:01:00.000Z', 'build passed'),
     ]);
-    expect(shape(items)).toEqual(['thread(s1, "run the build", replies=1)', 'terminal(t1)']);
+    expect(shape(items)).toEqual(['terminal(t1)', 'thread(s1, "run the build", replies=1)']);
   });
 
   it('starts a fresh thread per user turn in the same session', () => {

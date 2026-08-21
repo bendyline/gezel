@@ -54,8 +54,20 @@ vi.mock('../components/ModelPicker.js', async () => {
   );
   return {
     ...actual,
-    ModelPicker: ({ provider }: { provider: string }) => (
-      <div data-testid={`model-picker-${provider}`} />
+    ModelPicker: ({
+      provider,
+      onChange,
+    }: {
+      provider: string;
+      onChange: (value: string | undefined) => void;
+    }) => (
+      <button
+        type="button"
+        data-testid={`model-picker-${provider}`}
+        onClick={() => onChange(`${provider}-test-model`)}
+      >
+        Choose {provider} model
+      </button>
     ),
   };
 });
@@ -448,6 +460,33 @@ describe('SettingsView', () => {
       expect(defaultTray.getByRole('button', { name: label })).toBeInTheDocument();
       expect(nightShiftTray.getByRole('radio', { name: label })).toBeInTheDocument();
     }
+  });
+
+  it('shows the default-model picker when llama.cpp is the default provider', async () => {
+    const config = {
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'qwen3.6-27b-q4' },
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+    };
+    vi.mocked(api.getConfig).mockResolvedValue(config as never);
+    vi.mocked(api.updateConfig).mockResolvedValue({
+      ...config,
+      defaultModel: { 'llama-cpp': 'llama-cpp-test-model' },
+    } as never);
+
+    render(<SettingsView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Artificial Intelligence' }));
+
+    const picker = await screen.findByTestId('model-picker-llama-cpp');
+    expect(picker).toBeInTheDocument();
+    fireEvent.click(picker);
+
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        defaultModel: { 'llama-cpp': 'llama-cpp-test-model' },
+      }),
+    );
   });
 
   it('hides DwarfStar on Windows unless it has an external server or is selected', async () => {

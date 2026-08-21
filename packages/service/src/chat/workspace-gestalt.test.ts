@@ -39,7 +39,7 @@ describe('renderWorkspaceGestalt', () => {
     expect(block).toContain('- `(root)` (2 files) — Build config.');
     expect(block).not.toContain('assets'); // no purpose → no line
     expect(block).toContain('Entry points: `src/main.ts`');
-    expect(block).toContain('`search_code`');
+    expect(block).toContain('`search`');
   });
 
   it('caps areas and entry points', () => {

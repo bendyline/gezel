@@ -314,6 +314,70 @@ describe('sampleMachineMemoryUsage', () => {
     });
   });
 
+  it('attributes Linux NVML memory to a retained supervised engine PID', () => {
+    const usage = sampleMachineMemoryUsage({
+      profile: profile(),
+      engineCommittedBytes: 10 * GiB,
+      engineLifecycles: [
+        {
+          provider: 'llama-cpp',
+          modelId: 'orinith-1.0-9b',
+          replicaIdx: 0,
+          running: true,
+          active: false,
+          pid: 4242,
+          lastUsedAt: 1_000,
+          unloadAt: 301_000,
+          idleTimeoutMs: 300_000,
+          releaseReason: 'idle',
+        },
+      ],
+      deviceHealth: {
+        state: 'healthy',
+        mode: 'observe',
+        sampledAt: 'driver-now',
+        sources: ['nvml', 'nvml-process-memory'],
+        readings: [
+          {
+            vendor: 'nvidia',
+            deviceId: '0',
+            name: 'Test GPU',
+            memoryUsedMb: 12 * 1024,
+            memoryTotalMb: 24 * 1024,
+          },
+        ],
+        processes: [
+          {
+            pid: 4242,
+            name: 'llama-server',
+            dedicatedBytes: 11 * GiB,
+            owner: 'external',
+          },
+          {
+            pid: 7777,
+            name: 'desktop',
+            dedicatedBytes: 0.5 * GiB,
+            owner: 'external',
+          },
+        ],
+        reasons: [],
+        summary: 'healthy',
+      },
+    });
+
+    expect(usage).toMatchObject({
+      usedBytes: 12 * GiB,
+      gezelBytesObserved: 11 * GiB,
+      engineReservedBytes: 10 * GiB,
+      otherBytes: 1 * GiB,
+      gezelEngineProcessCount: 1,
+      gpuProcesses: [
+        expect.objectContaining({ pid: 4242, owner: 'gezel-engine' }),
+        expect.objectContaining({ pid: 7777, owner: 'external' }),
+      ],
+    });
+  });
+
   it('attributes Windows dedicated VRAM to actual Gezel engine processes', () => {
     const usage = sampleMachineMemoryUsage({
       profile: profile({ source: 'gpu-vulkan', gpuVendor: 'amd', gpuVramBytes: 32 * GiB }),

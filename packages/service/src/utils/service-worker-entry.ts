@@ -12,12 +12,14 @@ import { fileURLToPath } from 'node:url';
  */
 export const SERVICE_WORKER_ENTRIES = {
   embeddings: { built: 'memory/embed-worker.js' },
+  'image-embeddings': { built: 'memory/image-embed-worker.js' },
   'static-index': { built: 'index-store/static-index-worker.js' },
   'document-convert': {
     built: 'index-store/convert-worker.js',
     source: 'index-store/convert-worker.ts',
   },
   'gguf-metadata': { built: 'providers/llama-cpp/gguf-metadata-worker.js' },
+  knowledge: { built: 'knowledge/search-worker.js' },
 } as const;
 
 export type ServiceWorkerEntry = keyof typeof SERVICE_WORKER_ENTRIES;

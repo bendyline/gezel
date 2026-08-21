@@ -12,6 +12,8 @@ export interface OpenSessionIntent {
   gezelId: string;
   sessionId: string;
   projectId?: string;
+  /** 1-based message index — a transcript-search hit's location in the session. */
+  messageIndex?: number;
 }
 
 interface StoredIntent extends OpenSessionIntent {

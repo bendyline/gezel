@@ -85,22 +85,21 @@ Everything the user files, minus what is not a document:
 
 ## How gezels reach it
 
-Four paths, in the order a gezel actually uses them:
+Three paths, in the order a gezel actually uses them:
 
 1. **The standing listing.** Every non-executor prompt carries a recursive
    listing of the library (capped; described rows on larger models). Executors
    get a one-line pointer instead — they still need to know it exists.
-2. **`search_documents`.** Content search with real ranking, backed by the
-   shared project's hybrid index. This is the steer in the prompt: search
-   first, then `read_document` the match.
-3. **Auto-recall.** On a session's first message, the library is searched with
-   the same query embedding as memory and workspace code. Hits render as
-   `[library]` rows in the recall block. Not scoped to the session's project —
-   a policy filed once is the answer wherever it is asked.
-4. **Per-turn recall.** The turn-1 snapshot is frozen for the session, so a
-   topic that arrives on turn eight would otherwise get nothing. A user-channel
-   prelude offers strongly-matching documents for the current message, once per
-   document per session. Silent — and free — when nothing matches.
+2. **`search`.** The preferred discovery tool searches the shared library
+   together with the active project's workspace, artifacts, and memories. A
+   shared hit retains `[shared]` provenance; follow it with `read_document`.
+   `search_documents` remains as a shared-only compatibility alias.
+3. **Per-turn indexed context.** According to the Off/Lean/Balanced/Deep
+   policy, the current message can receive relevant shared excerpts alongside
+   project evidence. It uses the same scoped retrieval and token budget as the
+   generic search surface, so a topic introduced later in a thread is not
+   limited by a frozen turn-one snapshot. See
+   [Project retrieval and indexed context](project-retrieval.md).
 
 ## Freshness
 

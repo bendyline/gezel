@@ -37,6 +37,48 @@ type SessionAuth = {
   team?: boolean;
 };
 
+export type LinkedProjectAccessCheck = (
+  sourceProjectId: string,
+  targetProjectId: string,
+) => Promise<boolean>;
+
+const LINKED_PROJECT_SOURCE_HEADER = 'x-gezel-linked-from';
+
+/**
+ * File-only capability exposed by a one-way project link. Metadata, tasks,
+ * artifacts, execution, terminals, and project administration remain outside
+ * the linked surface even when the source project links the target.
+ */
+export function isLinkedWorkspaceRoute(method: string, rest: string): boolean {
+  const verb = method.toUpperCase();
+  if (verb === 'GET') {
+    return /^\/workspace(?:\/?|\/(?:read|stat|raw)\/?$)$/.test(rest);
+  }
+  if (verb === 'PUT') return /^\/workspace\/file\/?$/.test(rest);
+  if (verb === 'POST') {
+    return (
+      /^\/workspace\/(?:replace|replace-lines|patch|insert-at-marker|mkdir|rename)\/?$/.test(
+        rest,
+      ) ||
+      rest === '/tools/read-files' ||
+      rest === '/tools/read-files/'
+    );
+  }
+  return verb === 'DELETE' && /^\/workspace\/path\/?$/.test(rest);
+}
+
+async function linkedWorkspaceAccessAllowed(
+  c: Context,
+  auth: Pick<SessionAuth, 'projectId'>,
+  targetProjectId: string,
+  rest: string,
+  check: LinkedProjectAccessCheck | undefined,
+): Promise<boolean> {
+  if (!check || c.req.header(LINKED_PROJECT_SOURCE_HEADER) !== auth.projectId) return false;
+  if (!isLinkedWorkspaceRoute(c.req.method, rest)) return false;
+  return check(auth.projectId, targetProjectId).catch(() => false);
+}
+
 /**
  * Deny-by-default route policy for the bearer passed to a session's builtin
  * MCP subprocess. Project/identity prefix guards are necessary but not
@@ -49,7 +91,9 @@ type SessionAuth = {
  * config, raw sessions/events, terminal shells, engine administration, etc.
  * remain unavailable.
  */
-export function sessionRouteGuard(opts: { log?: (msg: string) => void } = {}): MiddlewareHandler {
+export function sessionRouteGuard(
+  opts: { log?: (msg: string) => void; isProjectLinked?: LinkedProjectAccessCheck } = {},
+): MiddlewareHandler {
   return async (c, next) => {
     const raw = c.get('auth');
     if (!raw?.scopes.includes('session')) return next();
@@ -63,7 +107,7 @@ export function sessionRouteGuard(opts: { log?: (msg: string) => void } = {}): M
       gezelId: raw.gezelId,
       ...(raw.team !== undefined ? { team: raw.team } : {}),
     };
-    const allowed = await isSessionRouteAllowed(c, auth);
+    const allowed = await isSessionRouteAllowed(c, auth, opts.isProjectLinked);
     if (!allowed.ok) return denySessionRoute(c, opts, allowed.reason);
     return next();
   };
@@ -100,7 +144,11 @@ function queryUsesOwnHistoryScope(c: Context, auth: SessionAuth): boolean {
   return c.req.query('project') === auth.projectId && c.req.query('gezel') === auth.gezelId;
 }
 
-async function isSessionRouteAllowed(c: Context, auth: SessionAuth): Promise<SessionRouteDecision> {
+async function isSessionRouteAllowed(
+  c: Context,
+  auth: SessionAuth,
+  isProjectLinked?: LinkedProjectAccessCheck,
+): Promise<SessionRouteDecision> {
   const path = c.req.path;
   const method = c.req.method.toUpperCase();
 
@@ -131,7 +179,11 @@ async function isSessionRouteAllowed(c: Context, auth: SessionAuth): Promise<Ses
   if (projectMatch) {
     const targetProject = projectMatch[1]!;
     const rest = projectMatch[2] ?? '';
-    if (!auth.team && targetProject !== auth.projectId) {
+    if (
+      !auth.team &&
+      targetProject !== auth.projectId &&
+      !(await linkedWorkspaceAccessAllowed(c, auth, targetProject, rest, isProjectLinked))
+    ) {
       return sessionDeny(`project ${targetProject} is outside the token scope`);
     }
     if (/^\/terminals(?:\/|$)/.test(rest)) {
@@ -166,6 +218,12 @@ async function isSessionRouteAllowed(c: Context, auth: SessionAuth): Promise<Ses
       const body = await readJsonSafe(c);
       if (!bodyUsesOwnScope(body, auth, { gezel: true, session: true })) {
         return sessionDeny('project action attribution does not match the session token');
+      }
+    }
+    if (method === 'POST' && rest === '/tools/search') {
+      const body = await readJsonSafe(c);
+      if (body?.gezelId !== undefined && body.gezelId !== auth.gezelId) {
+        return sessionDeny('project search private-memory scope does not match the session token');
       }
     }
     if (method === 'DELETE' && rest === '/workspace/path') {
@@ -464,6 +522,7 @@ export function projectIdFromPath(path: string): string | null {
 export function projectScopeGuard(opts: {
   mode: TokenScopeMode;
   log?: (msg: string) => void;
+  isProjectLinked?: LinkedProjectAccessCheck;
 }): MiddlewareHandler {
   return async (c, next) => {
     if (opts.mode === 'off') return next();
@@ -475,6 +534,19 @@ export function projectScopeGuard(opts: {
     const id = projectIdFromPath(c.req.path);
     if (id === null) return next(); // collection / non-item route
     if (id === auth.projectId) return next(); // own project
+    const projectMatch = /^\/api\/projects\/[^/]+(\/.*)?$/.exec(c.req.path);
+    const rest = projectMatch?.[1] ?? '';
+    if (
+      await linkedWorkspaceAccessAllowed(
+        c,
+        { projectId: auth.projectId },
+        id,
+        rest,
+        opts.isProjectLinked,
+      )
+    ) {
+      return next();
+    }
     const verb = opts.mode === 'audit' ? 'WOULD-DENY' : 'DENY';
     opts.log?.(
       `[token-scope] ${verb} session=${auth.appId} scopedProject=${auth.projectId} path=${c.req.path}`,

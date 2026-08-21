@@ -130,7 +130,7 @@ export function CraftbookToolsetSetup({ missing, onAllInstalled, onCancel }: Pro
       </ul>
       {error && <p className="error small">{error}</p>}
       <div className="toolset-config-actions">
-        <button type="button" className="home-link" onClick={onCancel}>
+        <button type="button" className="gz-link-button" onClick={onCancel}>
           Cancel
         </button>
       </div>

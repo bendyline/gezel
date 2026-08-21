@@ -11,7 +11,7 @@ import { ReportErrorDialog } from './ReportErrorDialog.js';
  * `className` rather than a variant enum: the three shapes the hosts need
  * already have classes, and a variant enum would only be a lookup table onto
  * those same three. The default suits an inline link inside a red banner;
- * neutral surfaces pass `home-link`, action rows pass their own button class.
+ * neutral surfaces pass `gz-link-button`, action rows pass their own button class.
  */
 export function ReportErrorLink({
   report,

@@ -280,10 +280,11 @@ export interface SampleMachineMemoryUsageOptions {
  * RAM counters into the live memory strip's portable wire shape.
  *
  * Driver telemetry reliably gives aggregate GPU use. On Windows, the bundled
- * helper also reads the OS GPU Process Memory counter and classifies Gezel's
- * supervised engine processes; on macOS, physical-footprint sampling observes
- * gezeld and same-home engines, including Metal allocations. Other hosts fall
- * back to the broker reservation + daemon RSS.
+ * helper also reads process memory (the OS GPU Process Memory counter on
+ * Windows, NVML on NVIDIA Linux) and classifies Gezel's supervised engine
+ * processes; on macOS, physical-footprint sampling observes gezeld and
+ * same-home engines, including Metal allocations. Other hosts fall back to
+ * the broker reservation + daemon RSS.
  *
  * A discrete card uses process accounting when available and otherwise keeps
  * the older reservation estimate clearly approximate. The reservation itself
@@ -396,6 +397,17 @@ export function sampleMachineMemoryUsage(
   // fallback measurement of this card. Without OS process accounting, leave
   // attribution unknown (zero here, with the reservation shown separately).
   const gezelBytesEstimated = 0;
+  const supervisedEnginePids = new Set(
+    (opts.engineLifecycles ?? [])
+      .filter(
+        (lifecycle) =>
+          lifecycle.running &&
+          typeof lifecycle.pid === 'number' &&
+          Number.isInteger(lifecycle.pid) &&
+          lifecycle.pid > 0,
+      )
+      .map((lifecycle) => lifecycle.pid as number),
+  );
   const gpuProcesses: GpuProcessMemory[] = (opts.deviceHealth?.processes ?? [])
     .filter(
       (process) =>
@@ -404,9 +416,18 @@ export function sampleMachineMemoryUsage(
         Number.isFinite(process.dedicatedBytes) &&
         process.dedicatedBytes >= 0,
     )
-    .map((process) => ({ ...process }));
+    .map((process) =>
+      process.owner === 'external' && supervisedEnginePids.has(process.pid)
+        ? { ...process, owner: 'gezel-engine' as const }
+        : { ...process },
+    );
+  const processAccountingAvailable =
+    gpuProcesses.length > 0 ||
+    (opts.deviceHealth?.sources ?? []).some(
+      (source) => source === 'windows-gpu-process-memory' || source === 'nvml-process-memory',
+    );
   const observedGezelBytes =
-    usedBytes !== null && gpuProcesses.length > 0
+    usedBytes !== null && processAccountingAvailable
       ? clamp(
           gpuProcesses
             .filter((process) => process.owner !== 'external')

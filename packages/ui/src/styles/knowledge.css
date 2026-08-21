@@ -1,0 +1,210 @@
+/*
+ * Knowledge catalog browser (KnowledgeView) — imported by the lazy view
+ * itself, deliberately absent from styles.css, so it ships in the same
+ * chunk as the view (the handbook.css precedent).
+ *
+ * Three panes on one shared surface: catalog + topic rail, document list,
+ * reader. The panel's own edges are the only edges — the reader draws no
+ * border of its own.
+ */
+
+.knowledge-view {
+  display: grid;
+  grid-template-columns: minmax(200px, 250px) minmax(220px, 300px) minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
+.knowledge-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  overflow-y: auto;
+  padding: 1rem 0.75rem 1.5rem;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.knowledge-rail-search {
+  width: 100%;
+  font-size: var(--text-sm);
+}
+
+.knowledge-catalog-name {
+  margin: 0;
+  font-size: var(--text-xl);
+}
+
+.knowledge-catalog-meta {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.knowledge-topics {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.knowledge-topics ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 0.9rem;
+}
+
+.knowledge-topic-row {
+  display: flex;
+  width: 100%;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.knowledge-topic-row:hover {
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.knowledge-topic-row[aria-current="true"] {
+  background: var(--panel);
+  font-weight: 600;
+}
+
+.knowledge-topic-count {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.knowledge-list {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.knowledge-list-header {
+  padding: 1rem 1rem 0.5rem;
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.knowledge-doc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.knowledge-doc-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.knowledge-doc-row:hover {
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.knowledge-doc-row[aria-current="true"] {
+  background: var(--panel);
+}
+
+.knowledge-doc-title {
+  font-size: var(--text-md);
+  font-weight: 500;
+}
+
+.knowledge-doc-summary {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.knowledge-list-more {
+  margin: 0.25rem 1rem 1rem;
+  align-self: flex-start;
+}
+
+.knowledge-reader {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.knowledge-reader-header {
+  padding: 1.25rem 1.5rem 0;
+}
+
+.knowledge-reader-header h2 {
+  margin: 0 0 0.25rem;
+}
+
+.knowledge-reader-meta {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.knowledge-reader-body {
+  flex: 1;
+  padding: 0.5rem 1.5rem 1rem;
+  min-width: 0;
+}
+
+.knowledge-reader-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1.5rem 1rem;
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.knowledge-reader-footer .knowledge-footer-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.knowledge-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  height: 100%;
+  padding: 2rem;
+  text-align: center;
+}

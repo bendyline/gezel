@@ -25,6 +25,12 @@ import { readSecurityJson, writeSecurityJson } from '../fs/security-json.js';
  *                user-daemon → machine-engine bridge. Adds model download,
  *                deletion, native binary, and engine-pool management; never
  *                grantable through `/v1/apps/register`.
+ *   - `machine-knowledge-assets` — sibling of `machine-models` for the
+ *                knowledge-catalog broker surface (`/v1/remote/manage/
+ *                knowledge/*`): content-addressed ensure/status/inventory/
+ *                reclaim of signed registry coordinates only. Never
+ *                grantable through `/v1/apps/register`; see
+ *                docs/service-boundaries.md.
  * `scopes` stays a `string[]` on records for forward-compat, but app
  * registration validates requests against {@link APP_GRANTABLE_SCOPES}.
  */
@@ -37,6 +43,7 @@ export const KNOWN_SCOPES = [
   'session',
   'remote-inference',
   'machine-models',
+  'machine-knowledge-assets',
 ] as const;
 export type GezelScope = (typeof KNOWN_SCOPES)[number];
 

@@ -10,6 +10,7 @@ import type { LlamaBackend } from '@bendyline/gezel/native';
 import { recordLlamaQuarantine } from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
+import { noModelYetMessage } from '../active-install-message.js';
 import {
   resolveCatalogLlamaCppEngineConfig,
   resolveCatalogReasoningBudget,
@@ -304,6 +305,12 @@ export async function buildLlamaCppProvider(opts: {
     // See the MLX path for the rationale: a configured/pinned model ID that
     // no longer resolves is a stale selection, not an empty install — name
     // it so the user knows which saved selection to fix.
+    // A first run pins a model and downloads it; the user then tries to chat
+    // while they wait. Consult the live install so the failure can say what is
+    // actually happening instead of telling them to start the download that is
+    // already running.
+    const activeInstall = () =>
+      opts.llamaCppModels?.getActiveInstalls().find((i) => i.phase !== undefined) ?? null;
     let message: string;
     if (defaultModelId && !modelCatalogInfo) {
       const installed = opts.llamaCppModels ? await opts.llamaCppModels.listInstalled() : [];
@@ -312,9 +319,9 @@ export async function buildLlamaCppProvider(opts: {
           `Pick a local model in Settings → This Mac (${installed
             .map((m) => m.id)
             .join(', ')}), or download "${defaultModelId}" again.`
-        : `Local model: the selected model "${defaultModelId}" is not available locally, and no models are downloaded. Download a model from the list above.`;
+        : noModelYetMessage('Local model', activeInstall());
     } else {
-      message = 'Local model: no model downloaded. Download a model from the list above.';
+      message = noModelYetMessage('Local model', activeInstall());
     }
     const err = new Error(message);
     (err as Error & { isActionable: boolean }).isActionable = true;

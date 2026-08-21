@@ -62,7 +62,7 @@ export class TabErrorBoundary extends Component<Props, State> {
               Try again
             </button>
             <ReportErrorLink
-              className="home-link"
+              className="gz-link-button"
               report={{
                 surface: 'tab-crash',
                 message: error.message,

@@ -10,9 +10,12 @@ import {
 } from 'react';
 import { api } from '../api.js';
 import { DropdownMenu } from '../primitives/index.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { AreaIcon } from './AreaIcon.js';
 import { GezelIcon } from './GezelIcon.js';
+import { humanMessagePreview } from './message-preview.js';
 import { formatFolderLabel } from './terminal-folder-label.js';
+import { toolActivityPhrase } from './tool-display.js';
 import { type ThreadPill, useChatThreadPills } from './useChatThreadPills.js';
 import { useProjectActiveTasks } from './useProjectActiveTasks.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
@@ -382,7 +385,12 @@ function TerminalPillButton({
             </span>
           </>
         )}
-        <span className="chat-pill-thread-updated-at">Updated {updated}</span>
+        <span
+          className="chat-pill-thread-updated-at"
+          title={formatAbsoluteTime(thread.lastActivityAt)}
+        >
+          Updated {updated}
+        </span>
       </span>
     </button>
   );
@@ -457,7 +465,10 @@ function ThreadSummaryLines({
         <span className="chat-pill-message-preview">{message}</span>
       </span>
       <span className="chat-pill-thread-line chat-pill-thread-update">
-        <span className="chat-pill-thread-updated-at">
+        <span
+          className="chat-pill-thread-updated-at"
+          title={formatAbsoluteTime(pill.lastActivityAt)}
+        >
           Updated {formatLongRelativeTime(pill.lastActivityAt)}
         </span>
         <span className="chat-pill-separator" aria-hidden="true">
@@ -472,26 +483,36 @@ function ThreadSummaryLines({
   );
 }
 
+/**
+ * Prose runs to whatever length the gezel wrote, so it is clipped early and
+ * the CSS ellipsis takes it from there. Activity phrases are curated and
+ * short; a few more characters keeps the longest of them ("Setting what
+ * success looks like") whole.
+ */
+const MESSAGE_PREVIEW_MAX = 30;
+const ACTIVITY_PREVIEW_MAX = 34;
+
+/**
+ * The pill's context line: what the gezel is doing, or the last thing said.
+ *
+ * A live tool call outranks the transcript. Mid-turn the stored preview is
+ * still the message that *started* the turn, so a pill reading "Working"
+ * beside the user's own question tells them nothing they don't know —
+ * whereas "Searching across files…" is the answer to what they're waiting
+ * on.
+ */
 function messagePreviewFor(pill: ThreadPill): string {
-  return pill.lastMessagePreview
-    ? truncatePreview(plainMessagePreview(pill.lastMessagePreview), 30)
-    : 'No messages yet';
+  if (pill.state === 'inflight' && pill.liveToolName) {
+    return truncatePreview(`${toolActivityPhrase(pill.liveToolName)}…`, ACTIVITY_PREVIEW_MAX);
+  }
+  const preview = pill.lastMessagePreview ? humanMessagePreview(pill.lastMessagePreview) : '';
+  return preview ? truncatePreview(preview, MESSAGE_PREVIEW_MAX) : 'No messages yet';
 }
 
 function truncatePreview(value: string, maxCharacters: number): string {
   const characters = Array.from(value.trim());
   if (characters.length <= maxCharacters) return characters.join('');
   return `${characters.slice(0, maxCharacters - 1).join('')}…`;
-}
-
-function plainMessagePreview(value: string): string {
-  return value
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/@\[([^\]]+)\]\([^)]+\)/g, '@$1')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/[*_~`#>]+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 function threadStatusLabel(state: ThreadPill['state']): string {
@@ -501,22 +522,7 @@ function threadStatusLabel(state: ThreadPill['state']): string {
 }
 
 function formatLongRelativeTime(iso: string): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return iso;
-  const minutes = Math.floor(Math.max(0, Date.now() - then) / 60_000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
-  const days = Math.floor(hours / 24);
-  if (days === 1) return 'yesterday';
-  if (days < 7) return `${days} days ago`;
-  const weeks = Math.floor(days / 7);
-  if (weeks < 5) return `${weeks} ${weeks === 1 ? 'week' : 'weeks'} ago`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months} ${months === 1 ? 'month' : 'months'} ago`;
-  const years = Math.floor(days / 365);
-  return `${years} ${years === 1 ? 'year' : 'years'} ago`;
+  return formatRelativeTime(iso, { style: 'long', fallback: iso });
 }
 
 function TaskPillButton({
@@ -586,7 +592,10 @@ function TaskPillButton({
         <span className="chat-pill-message-preview">{message}</span>
       </span>
       <span className="chat-pill-thread-line chat-pill-thread-update">
-        <span className="chat-pill-thread-updated-at">
+        <span
+          className="chat-pill-thread-updated-at"
+          title={latestThread ? formatAbsoluteTime(latestThread.lastActivityAt) : undefined}
+        >
           {updated ? `Updated ${updated}` : task.ref}
         </span>
         <span className="chat-pill-separator" aria-hidden="true">

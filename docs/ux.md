@@ -38,7 +38,8 @@ pacing of a transition. If a first-time user can't quite put a finger on
 
 ## What that translates into
 
-- **Color** lives in [packages/ui/src/styles.css](../packages/ui/src/styles.css).
+- **Color** lives in
+  [styles/foundation.css](../packages/ui/src/styles/foundation.css).
   The `--gezel-*` foundation palette is the authored source for paper, ink,
   sage, and terracotta tones; theme-resolving semantic aliases (`--bg`,
   `--surface`, `--panel`, `--border`, `--text`, `--text-muted`, `--accent`,
@@ -84,14 +85,16 @@ sits **pressed and latched**. The 3D is expressed through light and depth
 only — gradients a few percent apart, a 1px top highlight, an inset recess —
 never through textures.
 
-Implementation lives in exactly two places, both in
-[styles.css](../packages/ui/src/styles.css):
+Implementation lives in exactly two places:
 
-- **Tokens** in `:root` and the three theme-override blocks:
+- **Tokens** in
+  [styles/foundation.css](../packages/ui/src/styles/foundation.css), in
+  `:root` and the three theme-override blocks:
   `--tray-bg/-border/-shadow`, `--key-bg/-bg-hover/-border/-shadow`, and
   `--key-pressed-bg/-border/-ink/-shadow`.
-- **The "Keys in trays" block at the end of the file** — the single CSS
-  recipe. `.gz-tray` is the group; `.gz-key` is the option
+- **The "Keys in trays" block** in
+  [styles/controls-handbook-and-admin.css](../packages/ui/src/styles/controls-handbook-and-admin.css)
+  — the single CSS recipe. `.gz-tray` is the group; `.gz-key` is the option
   (`.gz-key--stacked` for label + hint); the latched state is
   `.gz-key-active` or `aria-checked="true"`.
 
@@ -183,7 +186,8 @@ Rules:
 
 The standard treatment for **continuous "how much may gezel take" ranges** —
 memory budgets, cache budgets, per-model context size. One CSS recipe
-(`.gz-budget-slider` in [styles.css](../packages/ui/src/styles.css)), one
+(`.gz-budget-slider` in
+[styles/village-and-overview.css](../packages/ui/src/styles/village-and-overview.css)), one
 interaction contract, shared by every user (`EngineMemoryBudgetPanel`,
 `CacheControlsPanel`, `ModelContextSliderPanel`). Don't restyle a slider
 per-surface; if a surface needs something the recipe lacks, extend the recipe
@@ -218,7 +222,8 @@ The contract:
 Two typefaces, both bundled as woff2 (see
 [assets/fonts/fonts.css](../packages/ui/src/assets/fonts/fonts.css)) — no
 web-font CDN, no runtime fetch. They are exposed as CSS variables in
-[styles.css](../packages/ui/src/styles.css) `:root` and you should always
+[styles/foundation.css](../packages/ui/src/styles/foundation.css) `:root`
+and you should always
 reference the variable, never the family name:
 
 | Token             | Family             | Role                                                        |
@@ -268,7 +273,8 @@ deliberate exception — they set their own comfortable reading size (1rem+)
 and don't draw from this scale.
 
 **Reference implementation:** the `.settings-panel` typography block in
-[styles.css](../packages/ui/src/styles.css) is the canonical application —
+[styles/settings-and-status.css](../packages/ui/src/styles/settings-and-status.css)
+is the canonical application —
 one scoped block that pins the panel's headings, body, controls, and links
 to the rules above so no single tab mixes a dozen font/size combos. New
 dialog and panel surfaces should follow the same shape: a small scoped
@@ -290,8 +296,8 @@ What lives where:
 
 | Layer                               | Where                                                     |
 | ----------------------------------- | --------------------------------------------------------- |
-| Design tokens (colors, space, etc.) | [styles.css](../packages/ui/src/styles.css) `:root`       |
-| Overlay, dialog, tabs, select CSS   | [styles.css](../packages/ui/src/styles.css) `gz-*` blocks |
+| Design tokens (colors, space, etc.) | [styles/foundation.css](../packages/ui/src/styles/foundation.css) `:root` |
+| Overlay, dialog, tabs, select CSS   | [`styles/` ownership map](../packages/ui/src/styles/README.md) `gz-*` blocks |
 | Headless primitives (JSX)           | [primitives/](../packages/ui/src/primitives/)             |
 | Shared behavior components          | [components/](../packages/ui/src/components/)             |
 | Top-level views                     | [views/](../packages/ui/src/views/)                       |
@@ -396,8 +402,8 @@ starting points (project types, craftbooks), use the shared gallery-dialog
 layout: header with title + search, a category rail on the left, a card
 gallery in the middle, and a right-hand pane holding the selection's hero
 + properties form + footer actions. The CSS skeleton is the `gz-npd-*`
-block in [styles.css](../packages/ui/src/styles.css) (named for the New
-Project dialog, its first tenant); New Task reuses it with a `gz-ntd`
+block in [styles/project-surfaces.css](../packages/ui/src/styles/project-surfaces.css)
+(named for the New Project dialog, its first tenant); New Task reuses it with a `gz-ntd`
 modifier for task-only pieces. New gallery surfaces should reuse the
 skeleton the same way — extend it rather than fork it. Lead the gallery
 with the curated, context-relevant subset (e.g. craftbooks recommended
@@ -407,7 +413,8 @@ for the project's type) and keep the full catalog one rail-click away.
 document — a night-shift report, a draft plan — the document is not a
 ten-line teaser stacked above the answer keys. `PendingQuestionCard` lifts
 it into its own right-hand column (`.pending-question-split*` in
-[styles.css](../packages/ui/src/styles.css)): the card and its actions on
+[styles/project-surfaces.css](../packages/ui/src/styles/project-surfaces.css)):
+the card and its actions on
 the left, the whole document as a portrait page on the right, scrolling in
 place. `.pending-question-splitwrap` is a named `question-card` query
 container, so the same card falls back to one column in a narrow chat
@@ -448,9 +455,72 @@ the bubble: the sticky scroll header renders the same verdict, and a new
 one must too. Cross-gezel messages are a separate case already answered by
 `from` — they keep the "Aldric → Maya" handoff bubble.
 
+**Hand-offs are a card, not a paragraph.** The dispatch seed that opens a
+task thread is addressed to the model: it names the sender, the step and the
+task ref in its first sentence and then spends four more on tool-calling
+procedure ("call `advance_task_step` when the step is done"). Rendered
+verbatim that reads as machinery talking, and the sticky header clamped it
+mid-word. Any turn
+[`parseTaskHandoffNote`](../packages/core/src/task-handoff-note.ts)
+recognises renders instead as a small letter card, centred and dashed in the
+handoff accent so it reads as a transition between crew members rather than a
+message in either column: a kind eyebrow (Hand-off / New task / Next step /
+Resumed), **one sentence** — "Liesel passed the review step to Koray." — one
+action (the task chip), and the seed itself behind a closed "Full note"
+expando. The sticky header carries the same sentence and the same eyebrow.
+The rule generalises: when the machinery has to say something to a model in
+the transcript, the reader gets the fact and the instructions go to
+provenance. Keep the wrapper's `msg-user` class — the timeline pairs a reply
+with the turn it answers by that class.
+
+**Accepted work leaves a trace before it speaks.** A task the user just
+started can sit on the TaskRunner's queue for minutes while the machine
+finishes other turns. During that window the task strip gains a pill reading
+"No chat yet" and the transcript below is *unchanged* — so the honest reading
+of the screen is "my request was dropped", and the user starts it again. Any
+work the daemon has accepted but not yet begun gets a receipt in the final
+lane of the transcript
+([`QueuedTaskBubble`](../packages/ui/src/components/QueuedTaskBubble.tsx)):
+the handoff card's centred dashed shape, at reduced opacity because it
+annotates a thing that has not happened, with the state as its eyebrow (In
+the queue / Starting / Scheduled / On hold), the task named, and one sentence
+saying what it is waiting on. Two rules keep it from lying. It appears only
+for work a runtime queue is actually holding — never inferred from "assigned
+and idle", because a card promising an imminent start buys a genuinely stuck
+task another hour of the user's patience. And it disappears the instant that
+task streams a turn: the live bubble is its representation, and a "waiting"
+card beside it contradicts what the reader can see. Batches collapse past a
+few cards into one counted line rather than burying the conversation.
+
+**Machine syntax never reaches a summary line.** A message body is not
+prose. It is markdown; it may carry reasoning the bubble hides; and when the
+salvage layer fails to promote a call it is literal tool-call markup.
+Rendered straight into a one-line summary, that produced a hand-off card
+reading `Sumarni, Si… · <toolcall <function=search…` — angle-bracket
+protocol syntax in a headline, and the sharpest break of plain shop talk on
+the surface. Every glanceable line built from a message body goes through
+[`humanMessagePreview`](../packages/ui/src/components/message-preview.ts),
+which keeps prose when there is any and otherwise **translates rather than
+hides**: a tool call becomes "Searching across files…", hidden reasoning
+becomes "Thinking…". Translation is the point — scrubbing to an empty line
+is just as clean and tells the reader nothing about a thread that did, in
+fact, do something. Reach for
+[`toolActivityPhrase`](../packages/ui/src/components/tool-display.ts)
+wherever a tool has to stand in for a message: a chat row may *label* a tool
+("Search across files") because a timestamp and an avatar frame it, but a
+summary line has no such frame and reads the same label as an instruction to
+the reader. And while a turn is open, the running tool outranks the stored
+preview — mid-turn that text is still the message which *started* the turn,
+so a pill reading "Working" beside the user's own question answers nothing
+they are waiting on. All of this is display-only: the stored transcript
+keeps what the model actually emitted, so the model can still see its own
+mistake.
+
 **Transformation dialog.** AI edits to user text never land silently. The
 editor toolbar's single transform button opens the transformation dialog
-(`TransformDialog`, `gz-transform-*` block in styles.css): an instruction
+(`TransformDialog`, `gz-transform-*` block in
+[styles/catalog-and-primitives.css](../packages/ui/src/styles/catalog-and-primitives.css)):
+an instruction
 field, a "Transform with {Klerk}" row that shows the Klerk's poppetje
 pulsing plus a quiet live metacommentary feed while the model works, and a
 result area toggling (bare key tray) between an editable Before/After view
@@ -528,7 +598,11 @@ separate meter against the broker budget, but it must say `reserved` (never
 measured-use meter. Name what is holding the reservation underneath. Memory
 borrowed for a reclaimable system cache uses alternating cache-color and
 empty-pool stripes: it is physically occupied, but remains available when the
-operating system needs the capacity.
+operating system needs the capacity. When a discrete-GPU driver exposes only
+aggregate use and no process accounting, the remainder must say `Unattributed`
+rather than `Other`, with a note that it may include retained Gezel models;
+`Other` is only a defensible claim after the Gezel process footprint was
+actually observed.
 [MachineMemoryStrip](../packages/ui/src/components/MachineMemoryStrip.tsx) is
 the reference.
 
@@ -544,6 +618,30 @@ who wants a colliding prefix. Full-length values still travel in the API
 and are what the code compares —
 [RemoteServersPanel](../packages/ui/src/components/RemoteServersPanel.tsx)
 is the reference.
+
+**Time is always relative, and the exact stamp lives on hover.** Every
+"when did this happen" label goes through the one formatter in
+[relative-time.ts](../packages/ui/src/relative-time.ts) —
+`formatRelativeTime` for the label, `formatAbsoluteTime` on the `title` of
+whatever element carries it. Never hand-roll a scale, and never let a
+relative label roll over into a calendar date once it gets old: a surface
+that shows "synced 7/24/2026" beside "17d ago" is asking the reader to hold
+two calendars at once. The scale runs `just now → 18m ago → 3h ago →
+yesterday → 4d ago → 2w ago → 3mo ago → 2y ago`; `{ style: 'long' }` spells
+the units out for prose lines and `{ seconds: true }` counts seconds under
+the first minute for rows that tick while you watch them (file mtimes,
+worker pools). Standalone labels use a `<time>` element with `dateTime` set.
+
+**Sage is chrome; `--success` is an event.** The workshop's green is sage —
+`--sage`, `--sage-deep`, `--sage-ink`, `--sage-soft` on `:root` in
+[foundation.css](../packages/ui/src/styles/foundation.css). Resting state
+that just says "this is fine" takes it: the System Health chips, engine
+readiness, "on device", every `.gz-status-pill--ok`. `--success` is the
+mint reserved for something that *changed* — a save landed, a diff line was
+added — and it is a near-miss of sage, so a resting chip painted with it
+reads as an off-token green sitting inches under the sage titlebar. If you
+find yourself writing `var(--sage, #somehex)`, pin the primitive
+(`--gezel-sage`) instead: a fallback is a token waiting to shift under you.
 
 **Status bars.** Ambient state that describes a whole surface — what branch
 it's on, whether the index is fresh, whether gezels may edit — belongs along
@@ -655,6 +753,23 @@ tray. Derivation lives in
 [system-notices.ts](../packages/ui/src/system-notices.ts), so the rail and
 Settings can never drift apart. The one update outcome that *is* worth
 interrupting for — a verified update waiting to install — also stays a banner.
+
+**The titlebar sheds words before it sheds pills.** The status cluster is
+open-ended — one engine pill per busy on-device engine, one queue chip per
+busy provider — so on a crowded bar something has to give. Never a pill:
+each one is a live process the user needs to see, and a squeezed pill is an
+unreadable smear rather than a smaller pill. Drop *text* instead, in one
+ladder measured for the whole cluster at once so every pill compacts on the
+same beat: first the machine name ("This Mac" — every local engine wears it,
+so it stops distinguishing anything the moment a second pill appears) and the
+queue chip's activity phrase, then the gezel's name in an engine pill. What
+survives is what is unique to that pill: the engine, the phase, the model, the
+count. Nothing is lost outright — every dropped string stays in the pill's
+tooltip and its popover, which is the price of being allowed to drop it. A
+named engine ("DwarfStar", "Video") is not a machine name and never goes.
+[header-density.ts](../packages/ui/src/components/header-density.ts) owns the
+measurement; a plain width media/container query cannot see this, because the
+bar overflows from *how much is happening*, not from how narrow the window is.
 
 **Rows that differ only by state need the state named.** When one list holds
 items in two states that share a row shape — a queue's running turns above its

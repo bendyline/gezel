@@ -3,6 +3,10 @@ id: where-files-live
 title: Where files live
 order: 2
 summary: The gezel home folder, mapped.
+subcategory:
+  id: how-gezel-works
+  title: How Gezel works
+  order: 1
 ---
 
 # Where files live

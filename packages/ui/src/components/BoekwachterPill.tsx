@@ -28,8 +28,24 @@ export function BoekwachterPill() {
   const [workerName, setWorkerName] = useState<string | null>(null);
   const [worker, setWorker] = useState<GezelSummary | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Project NAMES for the pill copy — every other surface shows names, and a
+  // raw id (`spring-cleaning-2`) reads as debug output in the header. Cached
+  // once per mount; a rename mid-burst shows the old name for a moment, which
+  // beats an id every time.
+  const projectNamesRef = useRef<Map<string, string> | null>(null);
 
   useEffect(() => {
+    const projectName = async (id: string): Promise<string> => {
+      if (!projectNamesRef.current) {
+        try {
+          const res = await api.listProjects();
+          projectNamesRef.current = new Map(res.projects.map((p) => [p.id, p.name]));
+        } catch {
+          return id;
+        }
+      }
+      return projectNamesRef.current.get(id) ?? id;
+    };
     const ctrl = new AbortController();
     (async () => {
       try {
@@ -42,7 +58,7 @@ export function BoekwachterPill() {
           const ev = (env as ChatEventEnvelope).event;
           if (ev.type !== 'index_progress') continue;
           const label = PHASE_LABEL[ev.phase] ?? ev.phase;
-          const project = ev.projectId ? ` ${ev.projectId}` : '';
+          const project = ev.projectId ? ` ${await projectName(ev.projectId)}` : '';
           setMessage(`${label}${project}${ev.detail ? ` — ${ev.detail}` : ''}`);
           setWorkerId(ev.gezelId ?? null);
           setWorkerName(ev.gezelName ?? null);

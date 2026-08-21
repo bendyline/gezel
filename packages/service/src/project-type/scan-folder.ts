@@ -73,7 +73,7 @@ export async function scanFolderProfile(
   opts?: { maxFiles?: number },
 ): Promise<LanguageProfile | null> {
   try {
-    const files = await discoverWorkspaceFiles(dir, {
+    const { files } = await discoverWorkspaceFiles(dir, {
       maxFiles: opts?.maxFiles ?? FOLDER_SCAN_MAX_FILES,
       gitTimeoutMs: SCAN_GIT_TIMEOUT_MS,
     });

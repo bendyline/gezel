@@ -42,7 +42,7 @@ const SUMMARIZE_TIMEOUT_MS = 120_000;
 const REVIEW_TIMEOUT_MS = 180_000;
 
 export interface EnrichDeps {
-  summarize: (prompt: string) => Promise<EnrichCompletionResult>;
+  summarize: (prompt: string, activity?: string) => Promise<EnrichCompletionResult>;
   embed: (texts: string[]) => Promise<number[][]>;
   model?: string;
   /**
@@ -51,7 +51,7 @@ export interface EnrichDeps {
    * output tokens than a 2-3 sentence summary. Absent when no local model is
    * configured; the review pass skips entirely then.
    */
-  review?: (prompt: string) => Promise<EnrichCompletionResult>;
+  review?: (prompt: string, activity?: string) => Promise<EnrichCompletionResult>;
   /**
    * Default/primary attribution for legacy bare-string completions and
    * non-completion work. Runtime completions carry their own actual target so
@@ -272,6 +272,8 @@ export async function buildEnrichDeps(
     ambient?: boolean;
     /** The project-roster Boekwachter whose persona owns this pass. */
     boekwachter?: Pick<GezelSummary, 'id' | 'name' | 'provider' | 'model'>;
+    /** Project owning the indexed paths, for queue and chat activity context. */
+    projectId?: string;
   } = {},
 ): Promise<EnrichDeps> {
   const { embedBatch } = await import('../memory/embeddings.js');
@@ -299,12 +301,13 @@ export async function buildEnrichDeps(
     : { actorLabel: 'Boekwachter' };
   const oneShot =
     (target: { providerName: ProviderName; model: string }, timeoutMs: number, jobLabel: string) =>
-    async (prompt: string): Promise<EnrichCompletion> => ({
+    async (prompt: string, activity?: string): Promise<EnrichCompletion> => ({
       text: await chat.oneShotCompletion(prompt, timeoutMs, {
         providerName: target.providerName,
         model: target.model,
         ...gezelOpts,
-        jobLabel,
+        ...(opts.projectId ? { projectId: opts.projectId } : {}),
+        jobLabel: activity?.trim() || jobLabel,
         tuningProfileId: INDEX_TUNING_PROFILE,
         ...(opts.ambient ? { ambient: true } : {}),
       }),
@@ -322,13 +325,13 @@ export async function buildEnrichDeps(
   // three markup-heavy files burned their attempt caps with zero log lines).
   const withPolicyFallback =
     (
-      primary: (prompt: string) => Promise<EnrichCompletion>,
-      fallback: ((prompt: string) => Promise<EnrichCompletion>) | null,
+      primary: (prompt: string, activity?: string) => Promise<EnrichCompletion>,
+      fallback: ((prompt: string, activity?: string) => Promise<EnrichCompletion>) | null,
       label: string,
     ) =>
-    async (prompt: string): Promise<EnrichCompletionResult> => {
+    async (prompt: string, activity?: string): Promise<EnrichCompletionResult> => {
       try {
-        return await primary(prompt);
+        return await primary(prompt, activity);
       } catch (err) {
         const message = errorMessage(err);
         if (isPolicyBlockMessage(message)) {
@@ -337,7 +340,7 @@ export async function buildEnrichDeps(
               `${label} blocked by ${providerName} policy filter; retrying on ${fallbackTarget.providerName}:${fallbackTarget.model}`,
             );
             try {
-              return await fallback(prompt);
+              return await fallback(prompt, activity);
             } catch (fallbackErr) {
               // Local-engine failure is transient (deferred, cold, busy) —
               // burn a normal retry attempt instead of giving up on the hash.
@@ -518,6 +521,99 @@ export async function readEnrichableText(
   return readFile(abs, 'utf8').catch(() => null);
 }
 
+/**
+ * Ensure a file has embeddable chunks and return them. Docs/text keep their
+ * static section chunks; code (which gets zero static chunks) receives a gist
+ * chunk built from the summary + symbol signatures — signatures alone when no
+ * summary exists — plus windowed large-symbol chunks. Shared by the full
+ * enrichment pass and the embed-only tier so the chunk shape can never drift
+ * between them.
+ */
+function ensureEmbeddableChunks(
+  store: IndexStore,
+  file: FileRecord,
+  summary: string,
+  content: string | null,
+): ReturnType<IndexStore['chunksForFile']> {
+  let chunks = store.chunksForFile(file.path);
+  if (chunks.length === 0) {
+    const symbols = store.symbolsForFile(file.path);
+    const symbolText = symbols.map((s) => s.signature || s.name).join('\n');
+    const text =
+      [summary, symbolText].filter(Boolean).join('\n\n') || content?.slice(0, 1000) || '';
+    const toPut: ChunkInput[] = [];
+    if (text.trim()) toPut.push({ kind: 'summary', lineStart: 1, lineEnd: 1, text });
+    if (WINDOW_ENABLED() && content && file.kind === 'code') {
+      toPut.push(...largeSymbolWindows(content, symbols));
+    }
+    if (toPut.length > 0) {
+      store.putChunks(file.path, file.hash, toPut);
+      chunks = store.chunksForFile(file.path);
+    }
+  } else if (summary && chunks[0]?.kind !== 'summary') {
+    // Prepend a summary chunk for docs so the file-level gist is searchable
+    // too. Guarded on the leading chunk's kind: a reused summary re-entering
+    // this path (embed-model migration re-embeds, or a full pass after the
+    // embed-only tier already prepended) must not stack a second copy —
+    // the rebuild below demotes prior chunks to 'section', so an unguarded
+    // second visit would duplicate the summary text.
+    store.putChunks(file.path, file.hash, [
+      { kind: 'summary', lineStart: 1, lineEnd: 1, text: summary },
+      ...chunks.map((c) => ({
+        kind: 'section',
+        lineStart: c.lineStart,
+        lineEnd: c.lineEnd,
+        text: c.text,
+      })),
+    ]);
+    chunks = store.chunksForFile(file.path);
+  }
+  return chunks;
+}
+
+export type EmbedOnlyOutcome = 'embedded' | 'skipped' | 'unavailable';
+
+/**
+ * The always-on embed-only tier: give a file's chunks vectors WITHOUT any
+ * LLM, so semantic search works before a Boekwachter joins the roster. Writes
+ * the `embed_state` gate — never `enrichments`, whose consumption would
+ * permanently block later summarization (the full pass readmits only
+ * un-enriched hashes). A later full enrichment supersedes this work.
+ */
+export async function embedOnlyFile(
+  store: IndexStore,
+  workspaceDir: string,
+  artifactsDir: string,
+  file: FileRecord,
+  embed: (texts: string[]) => Promise<number[][]>,
+): Promise<EmbedOnlyOutcome> {
+  if (!file.hash) return 'skipped';
+  if (!store.vecAvailable) return 'unavailable';
+  const content = await readEnrichableText(workspaceDir, artifactsDir, file);
+  // Reuse a summary this hash already has (it survives an embed-model swap)
+  // so the gist chunk matches what the full pass would build.
+  const summary = store.getSummary(file.hash) ?? '';
+  const chunks = ensureEmbeddableChunks(store, file, summary, content);
+  try {
+    if (chunks.length > 0) {
+      const vectors = await embed(chunks.map((c) => c.text));
+      for (let i = 0; i < chunks.length; i++) {
+        const v = vectors[i];
+        if (v) store.addTextVector(chunks[i]!.id, v);
+      }
+    }
+    // Zero chunks (empty/unreadable file) is done for this hash, not retryable.
+    store.markEmbedOnly(file.hash, file.path);
+    return 'embedded';
+  } catch {
+    // An embed failure is usually process-wide (model failed to load). Record
+    // the capped per-file attempt for poison-input safety, and tell the caller
+    // to stop the batch rather than burn every file's budget in one outage.
+    store.markEmbedOnlyAttempt(file.hash, file.path);
+    return 'unavailable';
+  }
+}
+
 export async function enrichFile(
   store: IndexStore,
   workspaceDir: string,
@@ -543,7 +639,7 @@ export async function enrichFile(
     let completion: ResolvedEnrichCompletion | undefined;
     try {
       completion = resolveEnrichCompletion(
-        await deps.summarize(buildSummaryPrompt(file, content)),
+        await deps.summarize(buildSummaryPrompt(file, content), `Indexing ${file.path}`),
         deps,
       );
       summary = completion.text.trim();
@@ -564,12 +660,17 @@ export async function enrichFile(
   }
 
   // 1b. Per-symbol one-liners (code only, LLM configured, not yet covered for
-  //     this hash). One batched call per file; a parse failure stores nothing
-  //     and is not retried for this hash — same semantics as the file summary.
-  //     Skipped when the file summary was policy-blocked: this prompt carries
-  //     the same content, so it would just burn another refused request.
+  //     this hash). One batched call per file; a parse/engine failure records
+  //     a capped attempt so a transient hiccup retries on a later sweep
+  //     instead of silently costing the file its one-liners until its content
+  //     changes. Skipped when the file summary was policy-blocked: this
+  //     prompt carries the same content, so it would just burn another
+  //     refused request.
   if (!blockedByPolicy && file.kind === 'code' && deps.model && content?.trim()) {
-    if (store.symbolSummariesFor(file.path, file.hash).size === 0) {
+    if (
+      store.symbolSummariesFor(file.path, file.hash).size === 0 &&
+      store.symbolSummaryAttempts(file.hash) < MAX_ENRICH_ATTEMPTS
+    ) {
       const all = store.symbolsForFile(file.path);
       // Top-level symbols first; methods fill any remaining budget.
       const picked = [...all.filter((s) => !s.parent), ...all.filter((s) => s.parent)].slice(
@@ -581,7 +682,10 @@ export async function enrichFile(
         let completion: ResolvedEnrichCompletion | undefined;
         try {
           completion = resolveEnrichCompletion(
-            await deps.summarize(buildSymbolSummaryPrompt(file, content, picked)),
+            await deps.summarize(
+              buildSymbolSummaryPrompt(file, content, picked),
+              `Indexing ${file.path}`,
+            ),
             deps,
           );
           raw = completion.text;
@@ -597,6 +701,8 @@ export async function enrichFile(
             completion?.model ?? deps.model,
             completion?.provenance,
           );
+        } else {
+          store.markSymbolSummaryAttempt(file.hash);
         }
       }
     }
@@ -605,34 +711,7 @@ export async function enrichFile(
   // 2. Ensure embeddable chunks. Docs already have section chunks (Phase 2);
   //    code/text get a single chunk built from the summary + symbol signatures
   //    (works even without an LLM).
-  let chunks = store.chunksForFile(file.path);
-  if (chunks.length === 0) {
-    const symbols = store.symbolsForFile(file.path);
-    const symbolText = symbols.map((s) => s.signature || s.name).join('\n');
-    const text =
-      [summary, symbolText].filter(Boolean).join('\n\n') || content?.slice(0, 1000) || '';
-    const toPut: ChunkInput[] = [];
-    if (text.trim()) toPut.push({ kind: 'summary', lineStart: 1, lineEnd: 1, text });
-    if (WINDOW_ENABLED() && content && file.kind === 'code') {
-      toPut.push(...largeSymbolWindows(content, symbols));
-    }
-    if (toPut.length > 0) {
-      store.putChunks(file.path, file.hash, toPut);
-      chunks = store.chunksForFile(file.path);
-    }
-  } else if (summary) {
-    // Prepend a summary chunk for docs so the file-level gist is searchable too.
-    store.putChunks(file.path, file.hash, [
-      { kind: 'summary', lineStart: 1, lineEnd: 1, text: summary },
-      ...chunks.map((c) => ({
-        kind: 'section',
-        lineStart: c.lineStart,
-        lineEnd: c.lineEnd,
-        text: c.text,
-      })),
-    ]);
-    chunks = store.chunksForFile(file.path);
-  }
+  const chunks = ensureEmbeddableChunks(store, file, summary, content);
 
   // 3. Embed chunks → vec_text.
   if (chunks.length > 0 && store.vecAvailable) {

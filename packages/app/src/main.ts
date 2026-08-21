@@ -1288,6 +1288,20 @@ ipcMain.handle('gezel:backup:choose-open-path', async (event): Promise<{ path?: 
   return { path: picked.filePaths[0] };
 });
 
+// Knowledge catalog install: the renderer only asks where the .gezk lives;
+// the daemon reads, verifies, and extracts it — the archive never travels
+// through the renderer (the backup-file pattern).
+ipcMain.handle('gezel:knowledge:choose-archive', async (event): Promise<{ path?: string }> => {
+  const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+  const picked = await dialog.showOpenDialog(win as Electron.BrowserWindow, {
+    title: 'Install knowledge catalog',
+    properties: ['openFile'],
+    filters: [{ name: 'Knowledge catalog', extensions: ['gezk'] }],
+  });
+  if (picked.canceled || picked.filePaths.length === 0) return {};
+  return { path: picked.filePaths[0] };
+});
+
 ipcMain.handle(
   'gezel:show-reference-in-folder',
   async (_event, value: unknown): Promise<{ ok: true } | { ok: false; error: string }> => {

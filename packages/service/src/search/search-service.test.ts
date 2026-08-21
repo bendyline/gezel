@@ -13,7 +13,7 @@ import type { ContentIndex } from '../index-store/content-index.js';
 import type { GlobalIndex, SessionSearchHit } from '../index-store/global-index.js';
 import type { MemoryManager } from '../memory/manager.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
-import { SearchService, fuzzyScore } from './search-service.js';
+import { MERGE_WEIGHTS, SearchService, fuzzyScore } from './search-service.js';
 
 function makeService(
   opts: {
@@ -22,18 +22,30 @@ function makeService(
     documents?: Array<{ name: string; path: string; isDirectory: boolean }>;
     files?: Record<string, Array<{ path: string; size: number; mtimeMs: number }>>;
     code?: ContentIndex['searchCode'];
+    docHits?: Array<{ sourcePath: string; lineStart: number; lineEnd?: number; snippet: string }>;
+    symbolHits?: Array<{ name: string; kind: string; path: string; lineStart: number }>;
     sessionHits?: SessionSearchHit[];
     documentHits?: Array<{ path: string; lineStart: number; snippet: string }>;
+    libraryHits?: Array<{
+      path: string;
+      lineStart: number;
+      lineEnd?: number;
+      snippet: string;
+      score?: number;
+    }>;
     artifactFiles?: Record<string, string[]>;
     artifactHits?: Array<{ path: string; lineStart: number; snippet: string }>;
+    areaHits?: Array<{ areaPath: string; summary: string; score: number }>;
     /** Vector-memory rows returned for every scope the fan-out asks about. */
     memoryHits?: Array<{ text: string; score: number; day: string }>;
+    memorySearch?: MemoryManager['searchVector'];
   } = {},
 ) {
   const store = {
     listProjects: vi.fn(async () => opts.projects ?? []),
     listGezels: vi.fn(async () => opts.gezels ?? []),
     listDocumentsRecursive: vi.fn(async () => opts.documents ?? []),
+    sharedProjectId: vi.fn(async () => 'shared'),
   } as unknown as Store;
 
   const contentIndex = {
@@ -41,7 +53,7 @@ function makeService(
       opts.code ??
       vi.fn(async () => ({ results: [], engine: 'unavailable' as const, truncated: false })),
     searchDocs: vi.fn(async () => ({
-      results: [],
+      results: opts.docHits ?? [],
       engine: 'unavailable' as const,
       truncated: false,
     })),
@@ -51,14 +63,19 @@ function makeService(
     })),
     listArtifactIndexFiles: vi.fn(async (id: string) => opts.artifactFiles?.[id] ?? []),
     findSymbol: vi.fn(async () => ({
-      matches: [],
+      matches: opts.symbolHits ?? [],
       truncated: false,
       engine: 'unavailable' as const,
+    })),
+    searchAreaSummaries: vi.fn(async () => opts.areaHits ?? []),
+    searchLibrary: vi.fn(async () => ({
+      results: opts.libraryHits ?? [],
+      engine: 'hybrid' as const,
     })),
   } as unknown as ContentIndex;
 
   const memory = {
-    searchVector: vi.fn(async () => opts.memoryHits ?? []),
+    searchVector: opts.memorySearch ?? vi.fn(async () => opts.memoryHits ?? []),
   } as unknown as MemoryManager;
 
   const indexManager = {
@@ -160,6 +177,39 @@ describe('SearchService.quickOpen', () => {
     });
     const results = await svc.quickOpen('klerk');
     expect(results.map((r) => r.title)).toEqual(['Klerk', 'Bram']);
+  });
+
+  it('finds mail by subject and by sender, opening as an artifact file', async () => {
+    const svc = makeService({ projects: [{ id: 'p1', name: 'Inbox Project' }] });
+    svc.setExtraCatalogs({
+      mailEntries: async () => [
+        {
+          projectId: 'p1',
+          path: 'data/work-mail/inbox/2026-08-19--quarterly-report--abcd1234/001--2026-08-19T14-32--from-alice--deadbeef.md',
+          subject: 'quarterly report',
+          from: 'alice',
+          date: '2026-08-19 14:32',
+        },
+      ],
+    });
+
+    const bySubject = await svc.quickOpen('quarterly report');
+    expect(bySubject[0]).toMatchObject({
+      kind: 'mail',
+      title: 'quarterly report',
+      subtitle: 'alice · 2026-08-19 14:32',
+      projectId: 'p1',
+      source: 'artifacts',
+    });
+    expect(bySubject[0]?.path).toContain('quarterly-report');
+
+    // Sender reachable via keywords (at the usual keyword discount).
+    const bySender = await svc.quickOpen('alice');
+    expect(bySender.some((r) => r.kind === 'mail')).toBe(true);
+
+    // Personal mail outranks catalog kinds but never a typed task title.
+    expect(MERGE_WEIGHTS.mail).toBeGreaterThan(MERGE_WEIGHTS.craftbook);
+    expect(MERGE_WEIGHTS.mail).toBeLessThan(MERGE_WEIGHTS.task);
   });
 
   it('invalidateCatalog forces a rebuild so new entities are found immediately', async () => {
@@ -355,5 +405,242 @@ describe('SearchService.search (full)', () => {
       projectId: 'p1',
       path: record,
     });
+  });
+});
+
+describe('SearchService.searchProject', () => {
+  it('stays inside the authorized project and current gezel while including shared documents', async () => {
+    const code = vi.fn(async (projectId: string) => ({
+      results: [
+        {
+          path: `src/${projectId}.ts`,
+          lineStart: 10,
+          lineEnd: 24,
+          kind: 'chunk',
+          snippet: `${projectId} vehicle physics`,
+          score: 0.9,
+          source: 'vector' as const,
+        },
+      ],
+      engine: 'semantic' as const,
+      truncated: false,
+    })) as unknown as ContentIndex['searchCode'];
+    const memorySearch = vi.fn(async (scope: string, id: string) => [
+      { text: `${scope}:${id}:physics decision`, score: 0.84, day: '2026-08-19' },
+    ]) as unknown as MemoryManager['searchVector'];
+    const svc = makeService({
+      projects: [
+        { id: 'p1', name: 'Driving Game' },
+        { id: 'p2', name: 'Unrelated App' },
+      ],
+      gezels: [
+        { id: 'g1', name: 'Ada' },
+        { id: 'g2', name: 'Bram' },
+      ],
+      code,
+      memorySearch,
+      libraryHits: [
+        {
+          path: 'guides/vehicle-physics.md',
+          lineStart: 4,
+          lineEnd: 18,
+          snippet: 'shared vehicle physics conventions',
+          score: 0.8,
+        },
+      ],
+      areaHits: [
+        {
+          areaPath: '::project',
+          summary: 'The driving model separates tire grip, suspension, and input response.',
+          score: 0.75,
+        },
+      ],
+      sessionHits: [
+        {
+          sessionId: 'unrelated-session',
+          gezelId: 'g2',
+          projectId: 'p2',
+          title: 'Must not leak',
+          snippet: 'private transcript',
+          messageStart: 1,
+          lastActivityAt: '2026-08-19T00:00:00Z',
+          archived: false,
+        },
+      ],
+    });
+
+    const { results } = await svc.searchProject('improve vehicle physics', {
+      projectIds: ['p1'],
+      gezelId: 'g1',
+    });
+
+    expect(code as unknown as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1);
+    expect((code as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]).toBe('p1');
+    expect(memorySearch as unknown as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(
+      'project',
+      'p1',
+      expect.any(Array),
+      expect.any(Number),
+    );
+    expect(memorySearch as unknown as ReturnType<typeof vi.fn>).toHaveBeenCalledWith(
+      'gezel',
+      'g1',
+      expect.any(Array),
+      expect.any(Number),
+    );
+    expect(results.some((result) => result.projectId === 'p2')).toBe(false);
+    expect(results.some((result) => result.kind === 'session')).toBe(false);
+    expect(new Set(results.map((result) => result.retrievalSource))).toEqual(
+      new Set(['workspace', 'project-memory', 'gezel-memory', 'shared']),
+    );
+    expect(results.find((result) => result.id === 'overview:p1:::project')).toMatchObject({
+      title: 'Driving Game overview',
+      retrievalSource: 'workspace',
+    });
+    expect(results.find((result) => result.retrievalSource === 'shared')).toMatchObject({
+      path: 'guides/vehicle-physics.md',
+      line: 4,
+      lineEnd: 18,
+    });
+  });
+
+  it('honors corpus filters without disabling the generic search surface', async () => {
+    const code = vi.fn(async () => ({
+      results: [],
+      engine: 'fts',
+      truncated: false,
+    })) as unknown as ContentIndex['searchCode'];
+    const svc = makeService({
+      projects: [{ id: 'p1', name: 'Driving Game' }],
+      code,
+      libraryHits: [{ path: 'guides/physics.md', lineStart: 1, snippet: 'physics', score: 0.9 }],
+    });
+
+    const { results } = await svc.searchProject('physics', {
+      projectIds: ['p1'],
+      sources: ['shared'],
+    });
+    expect(code as unknown as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+    expect(results.map((result) => result.retrievalSource)).toEqual(['shared']);
+  });
+});
+
+describe('cross-corpus merge ordering (scoring tripwire)', () => {
+  // Pins the exact merged order the weighted merge produces across every
+  // scoring path — catalog fuzzy, hybrid code scores, FTS pseudo-relevance,
+  // symbol fuzzy + fallback, area lexical, memory cosine, session, library.
+  // Any ranking change must update this test DELIBERATELY, with the diff
+  // explained; the relevance/tier calibration refactor is expected to keep
+  // this order except where a comment below says otherwise.
+  it('merges every corpus in the pinned order', async () => {
+    const code = vi.fn(async () => ({
+      engine: 'hybrid' as const,
+      truncated: false,
+      results: [
+        {
+          path: 'src/engine.ts',
+          name: 'engine',
+          lineStart: 3,
+          lineEnd: 9,
+          snippet: 'rocket engine thrust curve',
+          score: 0.9,
+          source: 'vector' as const,
+        },
+        {
+          path: 'src/hud.ts',
+          name: 'hud',
+          lineStart: 1,
+          lineEnd: 4,
+          snippet: 'hud shows thrust readout',
+          score: 0.5,
+          source: 'fts' as const,
+        },
+      ],
+    })) as unknown as ContentIndex['searchCode'];
+    const memorySearch = vi.fn(async (scope: string) =>
+      scope === 'project'
+        ? [{ text: 'Thrust tuning lives in engine.ts', score: 0.8, day: '2026-08-01' }]
+        : [{ text: 'User prefers metric units', score: 0.5, day: '2026-08-02' }],
+    ) as unknown as MemoryManager['searchVector'];
+
+    const svc = makeService({
+      projects: [{ id: 'p1', name: 'Thrust Lab' }],
+      gezels: [{ id: 'g1', name: 'Rem' }],
+      code,
+      memorySearch,
+      docHits: [
+        { sourcePath: 'docs/thrust.docx', lineStart: 2, snippet: 'thrust doc one' },
+        { sourcePath: 'docs/nozzle.docx', lineStart: 5, snippet: 'thrust doc two' },
+      ],
+      artifactHits: [{ path: 'reports/thrust.md', lineStart: 1, snippet: 'thrust artifact' }],
+      symbolHits: [
+        { name: 'thrustVector', kind: 'function', path: 'src/engine.ts', lineStart: 3 },
+        { name: 'applyForce', kind: 'function', path: 'src/engine.ts', lineStart: 40 },
+      ],
+      areaHits: [{ areaPath: 'src', summary: 'Engine and HUD code.', score: 0.7 }],
+      sessionHits: [
+        {
+          sessionId: 's1',
+          gezelId: 'g1',
+          projectId: 'p1',
+          title: 'Thrust chat',
+          snippet: 'we discussed thrust',
+          messageStart: 1,
+          lastActivityAt: '2026-08-19T00:00:00Z',
+          archived: false,
+        },
+      ],
+      libraryHits: [
+        { path: 'guides/thrust.md', lineStart: 4, snippet: 'thrust guide', score: 0.9 },
+        { path: 'guides/nozzles.md', lineStart: 9, snippet: 'nozzle guide' },
+      ],
+    });
+
+    const { results } = await svc.search('thrust', { mode: 'full' });
+    // Deliberate ranking history: FTS-only corpora carried a FLAT 0.6
+    // pseudo-relevance until the calibration refactor replaced it with
+    // rank-decayed pseudo-relevance (ftsRankRelevance: rank 0 = 0.6
+    // bit-identical, rank 1 ≈ 0.55, …). The only rows that moved were
+    // rank-1 FTS rows: the unscored library hit (0.6→0.55 × 680: 408→374,
+    // now below the 0.9-scored code hit at 378) and the second docs hit
+    // (252→231, now below the rank-0 session at 240). Every rank-0 and
+    // every real-scored row is in its pre-refactor position.
+    // Memory ids end in a content hash the test cannot precompute — read the
+    // suffix off the live rows and pin the deterministic prefix around it.
+    const projectMemoryHash = results
+      .find((r) => r.retrievalSource === 'project-memory')!
+      .id.split(':')
+      .at(-1);
+    const gezelMemoryHash = results
+      .find((r) => r.retrievalSource === 'gezel-memory')!
+      .id.split(':')
+      .at(-1);
+    expect(results.map((r) => r.id)).toEqual([
+      'project:p1', // project name prefix match: 0.95 × 1000
+      'document:guides/thrust.md', // library, real hybrid score 0.9 × 680
+      'symbol:p1:src/engine.ts:thrustVector', // symbol prefix fuzzy 0.95 × 520
+      'content:p1:src/engine.ts:3', // code hybrid 0.9 × 420
+      'document:guides/nozzles.md', // library, no score → FTS rank-1 pseudo-relevance × 680
+      'overview:p1:src', // area lexical 0.7 × 420
+      `memory:project:p1:2026-08-01:${projectMemoryHash}`, // project memory 0.8 × 360
+      'content:p1:docs/thrust.docx:2', // docs FTS rank 0 (0.6 × 420, bit-identical)
+      'content:p1:artifacts:reports/thrust.md:1', // artifacts FTS rank 0
+      'session:s1', // session FTS rank 0 (0.6 × 400)
+      'content:p1:docs/nozzle.docx:5', // docs FTS rank 1 (decayed)
+      'content:p1:src/hud.ts:1', // code hybrid 0.5 × 420
+      'symbol:p1:src/engine.ts:applyForce', // symbol fallback 0.4 × 520
+      `memory:gezel:g1:2026-08-02:${gezelMemoryHash}`, // gezel memory 0.5 × 360
+    ]);
+
+    // Calibration invariants: every row carries a 0–1 relevance, tier derives
+    // from the single strong-tier constant, and score = relevance × weight.
+    for (const r of results) {
+      expect(r.relevance).toBeGreaterThanOrEqual(0);
+      expect(r.relevance).toBeLessThanOrEqual(1);
+      expect(r.tier).toBe(r.relevance! >= 0.6 ? 'strong' : 'weak');
+      expect(r.score).toBeCloseTo(r.relevance! * MERGE_WEIGHTS[r.kind], 10);
+    }
+    expect(results.find((r) => r.id === 'content:p1:src/engine.ts:3')?.tier).toBe('strong');
+    expect(results.find((r) => r.id === 'content:p1:src/hud.ts:1')?.tier).toBe('weak');
   });
 });

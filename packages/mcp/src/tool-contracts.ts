@@ -29,6 +29,23 @@ const SearchMatchSchema = z
   })
   .catchall(z.unknown());
 
+const SearchCraftbookSuggestionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  source: z.enum(['bundled', 'local', 'project']),
+  version: z.string().optional(),
+  stepCount: z.number().int().nonnegative(),
+  score: z.number(),
+  invocation: z.object({
+    tool: z.literal('invoke_craftbook'),
+    arguments: z.object({
+      craftbookId: z.string(),
+      description: z.string(),
+    }),
+  }),
+});
+
 const ListItemSchema = z
   .object({
     id: z.string().optional(),
@@ -53,6 +70,8 @@ export const SearchToolOutputSchema = ToolResultSummarySchema.extend({
   mode: z.string().optional(),
   nextCursor: z.number().int().nonnegative().optional(),
   truncationReason: z.string().optional(),
+  /** Present only on omni-search; omitted by narrower compatibility tools. */
+  craftbooks: z.array(SearchCraftbookSuggestionSchema).optional(),
 });
 
 export const ListToolOutputSchema = ToolResultSummarySchema.extend({
@@ -166,10 +185,16 @@ export const VideoToolOutputSchema = z.object({
 export type ToolOutputSchema = z.ZodType;
 
 const TOOL_OUTPUT_SCHEMAS = {
+  search: SearchToolOutputSchema,
   search_memory: SearchToolOutputSchema,
   save_memory: MemorySaveToolOutputSchema,
   list_memories: MemoryListToolOutputSchema,
   search_documents: SearchToolOutputSchema,
+  search_history: SearchToolOutputSchema,
+  search_sessions: SearchToolOutputSchema,
+  search_docs: SearchToolOutputSchema,
+  search_images: SearchToolOutputSchema,
+  find_entity: SearchToolOutputSchema,
   grep_files: SearchToolOutputSchema,
   find_files: SearchToolOutputSchema,
   search_code: SearchToolOutputSchema,
@@ -287,6 +312,7 @@ export function errorResult(message: string, options: ToolErrorOptions = {}): Ca
  * hints, never an authorization boundary.
  */
 const READ_ONLY_TOOLS = new Set<CanonicalToolName>([
+  'search',
   'search_memory',
   'list_memories',
   'list_dir',

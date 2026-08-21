@@ -3,6 +3,7 @@ export { gildeDataDir, gildePackageRoot } from './gilde-data.js';
 export { BundledSource, type BundledSourceOptions, type CatalogSource } from './source.js';
 export { CommunitySource } from './community-source.js';
 export { LocalCatalogSource } from './local-source.js';
+export { InstalledAiAppsSource } from './installed-ai-apps-source.js';
 export { categorizeToolset } from './categorize.js';
 export {
   BUILTIN_TOOL_TO_GROUP,

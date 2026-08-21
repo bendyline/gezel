@@ -298,8 +298,12 @@ Each OpenAI or Mock session that has `mcpServer` set spawns the `@bendyline/geze
 
 Tool categories (`packages/mcp/src/server.ts`):
 
+- **Search**: `search` (scoped hybrid retrieval across the active project,
+  artifacts, project/gezel memory, and shared documents); `grep_files` remains
+  the exact-string/regex surface. `search_code` and `search_documents` are
+  compatibility aliases.
 - **Memory**: `search_memory`, `save_memory`, `list_memories`
-- **Workspace** (read-write, mirrors Node `fs`): `readdir`, `readFile`, `stat`, `writeFile`, `rm`, `mkdir`, `rename`
+- **Workspace** (read-write, mirrors Node `fs`): `readdir`, `readFile`, `stat`, `writeFile`, `rm`, `mkdir`, `rename`. Direct project links appear through the same tools as virtual `../<project-id>/...` paths; they are one-way, non-transitive, file-only grants, and the target project's write policy remains authoritative.
 - **Artifacts** (read-write, project-scoped): `list_artifacts`, `read_artifact`, `write_artifact`
 - **Documents** (shared library): `list_documents`, `read_document`, `write_document`, `delete_document`
 - **Execution**: `run_nodejs_script`, `run_playwright_script`, `npm_install`, `list_packages`

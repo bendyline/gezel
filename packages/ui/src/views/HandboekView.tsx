@@ -11,7 +11,10 @@ import { getDocPlaybackDuration } from '@bendyline/squisq/schemas';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AreaIcon } from '../components/AreaIcon.js';
-import { gezelChatTheme } from '../components/chat-theme.js';
+import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from '../components/chat-theme.js';
+import { consumeOpenHandboek } from '../components/pending-open-handboek.js';
+import { useEffectiveTheme } from '../theme.js';
+import '../styles/handbook.css';
 import {
   createHandboekMediaProvider,
   inlineBundledAssets,
@@ -53,6 +56,24 @@ export function HandboekView() {
   const [narrationLoading, setNarrationLoading] = useState(false);
   const [collapsedAreas, setCollapsedAreas] = useState<Set<string>>(() => new Set());
   const [expandedSubcategories, setExpandedSubcategories] = useState<Set<string>>(() => new Set());
+  // TOC filter: the manual was the least findable content in the app — the
+  // titlebar search now lists articles too, and this covers "I'm already
+  // here, just find it" without leaving the view.
+  const [tocFilter, setTocFilter] = useState('');
+  const filteredEntries = useMemo(() => {
+    const q = tocFilter.trim().toLowerCase();
+    if (!q || !toc) return [];
+    return toc.areas
+      .flatMap((area) => area.entries)
+      .filter(
+        (entry) =>
+          entry.title.toLowerCase().includes(q) || (entry.summary ?? '').toLowerCase().includes(q),
+      );
+  }, [toc, tocFilter]);
+  // The gezellig theme's native pages are dark. Overlay the shared warm-paper
+  // surface in light mode, matching the Home screen's embedded Handboek article.
+  const effectiveTheme = useEffectiveTheme();
+  const surface = effectiveTheme === 'light' ? GEZEL_LIGHT_SURFACE : undefined;
 
   useEffect(() => {
     let alive = true;
@@ -67,6 +88,10 @@ export function HandboekView() {
 
   useEffect(() => {
     let alive = true;
+    // A titlebar search pick queued before this view mounted wins the
+    // initial selection (same mailbox contract as pending-open-file).
+    const intent = consumeOpenHandboek();
+    if (intent) setSelectedId(intent.articleId);
     api
       .getHandboekToc()
       .then((t) => {
@@ -82,6 +107,17 @@ export function HandboekView() {
     return () => {
       alive = false;
     };
+  }, []);
+
+  // Live path — the Handboek area is already open when a search result asks
+  // for one of its articles.
+  useEffect(() => {
+    const onOpenArticle = (e: Event) => {
+      const detail = (e as CustomEvent<{ articleId?: string }>).detail;
+      if (detail?.articleId) setSelectedId(detail.articleId);
+    };
+    window.addEventListener('gezel:open-handboek-article', onOpenArticle);
+    return () => window.removeEventListener('gezel:open-handboek-article', onOpenArticle);
   }, []);
 
   useEffect(() => {
@@ -319,63 +355,81 @@ export function HandboekView() {
           <AreaIcon area="handboek" size={16} />
           <span>Handboek</span>
         </div>
+        <input
+          type="search"
+          className="handboek-toc-filter"
+          placeholder="Find an article…"
+          aria-label="Filter Handboek articles"
+          value={tocFilter}
+          onChange={(e) => setTocFilter(e.target.value)}
+        />
         {!toc && !error && <div className="handboek-toc-loading">Loading contents…</div>}
-        {toc?.areas.map((area) => {
-          const collapsed = collapsedAreas.has(area.area);
-          const panelId = `handboek-area-${area.area}`;
-          const { ungrouped, subcategories } = organizeTocArea(area);
-          return (
-            <section key={area.area} className="handboek-toc-area">
-              <h3 className="handboek-toc-area-title">
-                <button
-                  type="button"
-                  className="handboek-toc-disclosure handboek-toc-area-toggle"
-                  aria-expanded={!collapsed}
-                  aria-controls={panelId}
-                  onClick={() => toggleArea(area.area)}
-                >
-                  <span className="handboek-toc-caret" aria-hidden="true">
-                    &rsaquo;
-                  </span>
-                  <span>{area.title}</span>
-                </button>
-              </h3>
-              {!collapsed && (
-                <div id={panelId} className="handboek-toc-area-contents">
-                  {ungrouped.length > 0 && renderEntries(ungrouped)}
-                  {subcategories.map((subcategory) => {
-                    const key = subcategoryKey(area.area, subcategory.id);
-                    const expanded = expandedSubcategories.has(key);
-                    const subcategoryPanelId = `handboek-subcategory-${area.area}-${subcategory.id}`;
-                    return (
-                      <section key={subcategory.id} className="handboek-toc-subcategory">
-                        <h4 className="handboek-toc-subcategory-title">
-                          <button
-                            type="button"
-                            className="handboek-toc-disclosure handboek-toc-subcategory-toggle"
-                            aria-expanded={expanded}
-                            aria-controls={subcategoryPanelId}
-                            onClick={() => toggleSubcategory(key)}
-                          >
-                            <span className="handboek-toc-caret" aria-hidden="true">
-                              &rsaquo;
-                            </span>
-                            <span>{subcategory.title}</span>
-                          </button>
-                        </h4>
-                        {expanded && (
-                          <div id={subcategoryPanelId}>
-                            {renderEntries(subcategory.entries, true)}
-                          </div>
-                        )}
-                      </section>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-          );
-        })}
+        {tocFilter.trim() ? (
+          <section className="handboek-toc-area">
+            {filteredEntries.length > 0 ? (
+              renderEntries(filteredEntries)
+            ) : (
+              <div className="handboek-toc-loading">No articles match.</div>
+            )}
+          </section>
+        ) : null}
+        {!tocFilter.trim() &&
+          toc?.areas.map((area) => {
+            const collapsed = collapsedAreas.has(area.area);
+            const panelId = `handboek-area-${area.area}`;
+            const { ungrouped, subcategories } = organizeTocArea(area);
+            return (
+              <section key={area.area} className="handboek-toc-area">
+                <h3 className="handboek-toc-area-title">
+                  <button
+                    type="button"
+                    className="handboek-toc-disclosure handboek-toc-area-toggle"
+                    aria-expanded={!collapsed}
+                    aria-controls={panelId}
+                    onClick={() => toggleArea(area.area)}
+                  >
+                    <span className="handboek-toc-caret" aria-hidden="true">
+                      &rsaquo;
+                    </span>
+                    <span>{area.title}</span>
+                  </button>
+                </h3>
+                {!collapsed && (
+                  <div id={panelId} className="handboek-toc-area-contents">
+                    {ungrouped.length > 0 && renderEntries(ungrouped)}
+                    {subcategories.map((subcategory) => {
+                      const key = subcategoryKey(area.area, subcategory.id);
+                      const expanded = expandedSubcategories.has(key);
+                      const subcategoryPanelId = `handboek-subcategory-${area.area}-${subcategory.id}`;
+                      return (
+                        <section key={subcategory.id} className="handboek-toc-subcategory">
+                          <h4 className="handboek-toc-subcategory-title">
+                            <button
+                              type="button"
+                              className="handboek-toc-disclosure handboek-toc-subcategory-toggle"
+                              aria-expanded={expanded}
+                              aria-controls={subcategoryPanelId}
+                              onClick={() => toggleSubcategory(key)}
+                            >
+                              <span className="handboek-toc-caret" aria-hidden="true">
+                                &rsaquo;
+                              </span>
+                              <span>{subcategory.title}</span>
+                            </button>
+                          </h4>
+                          {expanded && (
+                            <div id={subcategoryPanelId}>
+                              {renderEntries(subcategory.entries, true)}
+                            </div>
+                          )}
+                        </section>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            );
+          })}
       </nav>
       <div className="handboek-pane">
         <header className="handboek-pane-header">
@@ -448,6 +502,7 @@ export function HandboekView() {
                   doc={doc}
                   className="gezel-article-view"
                   theme={gezelChatTheme}
+                  surface={surface}
                   imageDisplayMode="inline"
                   showCover={false}
                 />
@@ -458,6 +513,7 @@ export function HandboekView() {
                   key={narratedDoc ? 'narrated' : 'synthetic'}
                   doc={narratedDoc ?? syntheticDoc ?? doc}
                   theme={gezelChatTheme}
+                  surface={surface}
                   displayMode="video"
                   audioMode={narratedDoc ? 'media' : 'synthetic'}
                   captionsEnabled

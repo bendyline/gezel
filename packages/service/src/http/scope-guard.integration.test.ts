@@ -64,6 +64,15 @@ function get(path: string, token: string): Promise<Response> {
   return httpFetch(`${baseUrl}${path}`, { headers: { Authorization: `Bearer ${token}` } });
 }
 
+function linkedGet(path: string, token: string, sourceProjectId: string): Promise<Response> {
+  return httpFetch(`${baseUrl}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'x-gezel-linked-from': sourceProjectId,
+    },
+  });
+}
+
 describe('token scope guard (integration)', () => {
   it('confines a worker session to its project; team + root reach any project', async () => {
     const worker = svc.context.tokenStore.issueSession({
@@ -92,6 +101,129 @@ describe('token scope guard (integration)', () => {
     expect((await get('/api/projects/proj-b/tasks', coord.token)).status).not.toBe(403);
     // Root token → any project: allowed (unchanged behavior).
     expect((await get('/api/projects/proj-b/tasks', svc.context.token)).status).not.toBe(403);
+  });
+
+  it('grants direct linked-project file access without widening other project capabilities', async () => {
+    const source = await svc.context.store.createProject({ name: 'Source' });
+    const target = await svc.context.store.createProject({ name: 'Linked target' });
+    const unrelated = await svc.context.store.createProject({ name: 'Unrelated' });
+    await svc.context.store.updateProject(source.id, { linkedProjectIds: [target.id] });
+    await svc.context.store.writeProjectWorkspaceFile(
+      target.id,
+      'physics/tuning.ts',
+      'export const grip = 1;',
+    );
+
+    const worker = svc.context.tokenStore.issueSession({
+      appId: 'session:linked-worker',
+      projectId: source.id,
+      gezelId: 'gz-linked',
+      team: false,
+    });
+    const targetReadPath = `/api/projects/${target.id}/workspace/read?path=physics%2Ftuning.ts`;
+
+    // A direct A → B link and the explicit virtual-workspace provenance header
+    // admit B's file-only surface.
+    const read = await linkedGet(targetReadPath, worker.token, source.id);
+    expect(read.status).toBe(200);
+    expect((await read.json()) as { content: string }).toMatchObject({
+      content: 'export const grip = 1;',
+    });
+
+    const write = await httpFetch(`${baseUrl}/api/projects/${target.id}/workspace/file`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${worker.token}`,
+        'content-type': 'application/json',
+        'x-gezel-linked-from': source.id,
+      },
+      body: JSON.stringify({
+        path: 'physics/tuning.ts',
+        content: 'export const grip = 2;',
+        gezelId: 'gz-linked',
+        sessionId: 'linked-worker',
+      }),
+    });
+    expect(write.status).toBe(200);
+    expect(await svc.context.store.readProjectWorkspaceFile(target.id, 'physics/tuning.ts')).toBe(
+      'export const grip = 2;',
+    );
+
+    // No provenance header, a non-linked target, and the reverse B → A
+    // direction remain outside the session scope.
+    expect((await get(targetReadPath, worker.token)).status).toBe(403);
+    expect(
+      (
+        await linkedGet(
+          `/api/projects/${unrelated.id}/workspace/read?path=physics%2Ftuning.ts`,
+          worker.token,
+          source.id,
+        )
+      ).status,
+    ).toBe(403);
+    const reverseWorker = svc.context.tokenStore.issueSession({
+      appId: 'session:reverse-linked-worker',
+      projectId: target.id,
+      gezelId: 'gz-reverse',
+      team: false,
+    });
+    expect(
+      (
+        await linkedGet(
+          `/api/projects/${source.id}/workspace/read?path=anything.txt`,
+          reverseWorker.token,
+          target.id,
+        )
+      ).status,
+    ).toBe(403);
+
+    // Linking is not a general cross-project capability grant.
+    expect(
+      (await linkedGet(`/api/projects/${target.id}/artifacts`, worker.token, source.id)).status,
+    ).toBe(403);
+    expect(
+      (await linkedGet(`/api/projects/${target.id}/tasks`, worker.token, source.id)).status,
+    ).toBe(403);
+    expect(
+      (
+        await linkedGet(
+          `/api/projects/${target.id}/workspace/read?path=physics%2Ftuning.ts&raw=1`,
+          worker.token,
+          source.id,
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await httpFetch(`${baseUrl}/api/projects/${target.id}/workspace/raw?path=blocked.bin`, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${worker.token}`,
+            'content-type': 'application/octet-stream',
+            'x-gezel-linked-from': source.id,
+          },
+          body: new Uint8Array([1, 2, 3]),
+        })
+      ).status,
+    ).toBe(403);
+
+    // B's own managed-workspace policy remains authoritative for mutations.
+    await svc.context.store.updateProject(target.id, { managedWorkspaceWritePolicy: 'deny' });
+    const policyDenied = await httpFetch(`${baseUrl}/api/projects/${target.id}/workspace/file`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${worker.token}`,
+        'content-type': 'application/json',
+        'x-gezel-linked-from': source.id,
+      },
+      body: JSON.stringify({
+        path: 'physics/tuning.ts',
+        content: 'export const grip = 3;',
+        gezelId: 'gz-linked',
+        sessionId: 'linked-worker',
+      }),
+    });
+    expect(policyDenied.status).toBe(403);
   });
 
   it('gates team/orchestration routes for a worker, not for team/root', async () => {

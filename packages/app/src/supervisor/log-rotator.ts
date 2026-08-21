@@ -11,7 +11,8 @@ export interface LogRotatorOptions {
 }
 
 /**
- * Append-only log writer for the spawned gezeld child's stdout/stderr.
+ * Append-only log writer for the spawned gezeld child's stdout/stderr and
+ * Electron supervisor diagnostics that must survive an unattended failure.
  *
  * - Files live at `<dir>/service-YYYY-MM-DD.log`.
  * - Rolls to `-1.log`, `-2.log`, … when the active file exceeds `maxBytes`.

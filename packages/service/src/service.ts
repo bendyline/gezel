@@ -34,7 +34,7 @@ import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
 import { createCodexSetupManager } from './codex-setup/manager.js';
 import { ConnectorActionManager } from './connectors/actions.js';
 import { ProjectLocks } from './connectors/lock.js';
-import { ConnectorManager } from './connectors/manager.js';
+import { ConnectorManager, corpusDirFor } from './connectors/manager.js';
 import { registerBlueskyAdapters } from './connectors/natives/bluesky-posts.js';
 import { registerCalendarAdapters } from './connectors/natives/calendar-google.js';
 import { registerGitHubPullsAdapters } from './connectors/natives/github-pulls.js';
@@ -47,7 +47,10 @@ import { ConnectorSyncManager } from './connectors/sync-manager.js';
 import { runConnectorTaskPrep } from './connectors/task-prep.js';
 import { listApplicableCraftbooks, projectCraftbookSummaries } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
-import { clearCraftbookSuggestVectorCache } from './craftbook/suggest.js';
+import {
+  clearCraftbookSuggestVectorCache,
+  listGlobalCraftbookCandidates,
+} from './craftbook/suggest.js';
 import { DebugFlag } from './debug/flag.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { reuseVerifiedElectronNativeBinaries } from './engines/electron-native-reuse.js';
@@ -101,9 +104,12 @@ import { readImageStaticMeta } from './index-store/image-meta.js';
 import { IndexingJobControl, ensureIndexingJobTask } from './index-store/indexing-job.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
+import { KnowledgeManager } from './knowledge/manager.js';
+import { createWorkerCatalogHost } from './knowledge/worker-host.js';
 import { createLocalHarnessModelSource } from './local-harness/model-source.js';
 import { startMachineEngineBridge } from './machine-engine/bridge.js';
 import { registerMailAdapters } from './mail/registry.js';
+import { mailCatalogEntries } from './mail/search-catalog.js';
 import { ensureNightShiftOversightTask } from './meester/night-shift-oversight.js';
 import { MeesterStatusGenerator } from './meester/status-generator.js';
 import { MemoryCompactor } from './memory/compaction.js';
@@ -146,7 +152,11 @@ import { ImageRenderer } from './rendering/image-renderer.js';
 import { ReportActionManager } from './report-actions/report-action-manager.js';
 import { type RuntimeLock, acquireSingleInstanceLock } from './runtime-lock.js';
 import { ScriptRunner } from './scripts/runner.js';
-import { CATALOG_RELEVANT_HISTORY_KINDS, SearchService } from './search/search-service.js';
+import {
+  CATALOG_RELEVANT_HISTORY_KINDS,
+  type ExtraSearchCatalogs,
+  SearchService,
+} from './search/search-service.js';
 import { openSecretStore } from './secrets/index.js';
 import { seedSecretsFromEnvFile } from './secrets/seed.js';
 import { runSystemBootstrap } from './system-toolsets/bootstrap.js';
@@ -481,7 +491,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       // daemon's credential retains the first-party product API scopes.
       scopes:
         serviceRole === 'machine-engine'
-          ? ['remote-inference', 'machine-models']
+          ? ['remote-inference', 'machine-models', 'machine-knowledge-assets']
           : ['ui', 'openai'],
       token: clientToken,
     },
@@ -1014,6 +1024,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         chat.listInflight().some((entry) => entry.sessionId === sessionId),
       resolveProviderName: (gezelId, opts) => chat.providerForGezel(gezelId, opts),
       getProvider: (name) => chat.getProviderIfReady(name),
+      ensureProvider: (name) =>
+        name === 'remote' ? Promise.resolve(null) : chat.getProvider(name),
     },
     isNightShiftActive: () => nightShift.isActive(),
     isNightShiftPending: (task) => nightShift.isPendingToday(task),
@@ -1931,6 +1943,28 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   history.setRewriteBackend(() => globalIndexManager.rebuildHistoryMirror());
   // Cross-project unified search (titlebar quick-open + content fan-out).
   const search = new SearchService(store, contentIndex, memory, workspaceIndex, globalIndex);
+  chat.setSearchService(search);
+  // Knowledge catalogs: registry + mounts + install jobs + the search arm.
+  // SQLite work lives on the knowledge worker thread (in-process fallback).
+  // User daemons only — the machine broker installs shared bytes but never
+  // mounts, searches, or holds a per-user registry.
+  const knowledge =
+    serviceRole === 'machine-engine'
+      ? undefined
+      : new KnowledgeManager({
+          home,
+          host: createWorkerCatalogHost(),
+          projectPolicy: async (projectId) => {
+            const project = await store.getProject(projectId);
+            return project?.knowledgeCatalogs ?? null;
+          },
+        });
+  if (knowledge) {
+    await knowledge.start();
+    search.setKnowledgeSearch({
+      search: (query, opts) => knowledge.searchUnified(query, opts),
+    });
+  }
   // Drop the cached name catalog when a project/gezel/document is
   // created/renamed/deleted, so a just-created entity is quick-openable
   // immediately instead of after the catalog's TTL. The audit log is the
@@ -1974,7 +2008,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
             result.ocrText ? `Text in the image:\n\n${result.ocrText}` : null,
           ].filter((s): s is string => Boolean(s?.trim()));
           if (parts.length === 0) return null;
-          return { body: parts.join('\n\n'), model: result.modelId };
+          // The recognition stack is llama.cpp mtmd in every non-test
+          // configuration (local supervised or a pointed-at server).
+          return { body: parts.join('\n\n'), model: result.modelId, provider: 'llama-cpp' };
         } catch {
           return null;
         }
@@ -1988,7 +2024,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
             audio: { data: bytes, mimeType: mimeTypeForFilename(absPath) },
           });
           const text = out.text.trim();
-          return text ? { body: text } : null;
+          return text
+            ? {
+                body: text,
+                ...(out.model ? { model: out.model } : {}),
+                provider: 'whisper-cpp',
+              }
+            : null;
         } catch {
           return null;
         }
@@ -1996,6 +2038,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     },
   });
   indexEnrichmentRef = indexEnrichment;
+  // Scan-complete → immediate embed drain: the moment a workspace scan
+  // enrolls files, the always-on local embed tiers start filling vectors —
+  // no 3-minute OS-idle wait, no Boekwachter. This is what makes semantic
+  // search real minutes after a fresh install points gezel at a folder.
+  workspaceIndex.setOnScanComplete((projectId) => {
+    indexEnrichment.drainEmbedOnly(projectId);
+  });
   // FS watcher for the MRU-top workspaces — turns an on-disk change into a
   // near-immediate refresh instead of waiting for the polling tick.
   const workspaceWatch = new WorkspaceWatchManager({
@@ -2331,6 +2380,46 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     catalog,
     device: createDaemonDeviceInfo({ store, chat }),
   });
+  // Late-boot name-catalog arms for the titlebar search: Handboek articles
+  // (previously the least findable content in the app) plus globally
+  // invokable craftbooks. Tasks ride the Store directly inside SearchService.
+  search.setExtraCatalogs({
+    handboekEntries: async () => {
+      const toc = await handboek.toc();
+      return toc.areas.flatMap((area) =>
+        area.entries.map((entry) => ({
+          id: entry.id,
+          title: entry.title,
+          keywords: [area.title, ...(entry.summary ? [entry.summary] : [])],
+        })),
+      );
+    },
+    craftbookEntries: async () =>
+      (await listGlobalCraftbookCandidates({ catalog, store, git })).map((c) => ({
+        id: c.id,
+        name: c.name,
+        source: c.source,
+      })),
+    // Mail messages by subject/sender: derived entirely from the connector
+    // corpus paths in the artifacts index — zero file reads. Bodies are
+    // already searchable through the artifacts content arm; this is the
+    // mail-shaped quick-open layer on top.
+    mailEntries: async () => {
+      const projects = await store.listProjects().catch(() => []);
+      const all: Awaited<ReturnType<NonNullable<ExtraSearchCatalogs['mailEntries']>>> = [];
+      for (const summary of projects) {
+        const project = await store.getProject(summary.id).catch(() => null);
+        const bindings = project?.connectors ?? [];
+        const corpusDirs = bindings
+          .filter((b) => b.type.startsWith('mail-'))
+          .map((b) => corpusDirFor(bindings, b));
+        if (corpusDirs.length === 0) continue;
+        const paths = await contentIndex.listArtifactIndexFiles(summary.id).catch(() => []);
+        all.push(...mailCatalogEntries(summary.id, corpusDirs, paths));
+      }
+      return all;
+    },
+  });
 
   // Ask once, at boot, whether this process may create children at all —
   // before any feature discovers the answer the expensive way. A denied
@@ -2360,6 +2449,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     scriptRunner,
     catalog,
     gildeUpdates,
+    ...(knowledge ? { knowledge } : {}),
     handboek,
     secrets,
     git,
@@ -2950,13 +3040,18 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       memoryCompactor.stop();
       digestGenerator.stop();
       gildeUpdates.stop();
+      await knowledge?.stop();
       keurmeesterDigest.stop();
       meesterStatus.stop();
       ambientDashboard.stop();
       await activityTracker.stop();
-      workspaceIndex.stop();
+      if (libraryRefreshTimer) {
+        clearTimeout(libraryRefreshTimer);
+        libraryRefreshTimer = null;
+      }
+      await workspaceIndex.stop();
       workspaceWatch.stop();
-      indexEnrichment.stop();
+      await indexEnrichment.stop();
       globalIndexManager.stop();
       // An open document-edit window would otherwise lose its audit event.
       await store.flushDocumentAudit().catch(() => {});

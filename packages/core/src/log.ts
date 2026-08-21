@@ -12,12 +12,15 @@
  * comma-separated allow-list (`GEZEL_LOG_DEBUG=chat,mcp-bridge`). A
  * single `*` enables debug everywhere.
  *
- * Output goes to `stderr` for `warn`/`error`, `stdout` for `info`/`debug`,
- * matching Node's defaults so log aggregators that split streams keep
- * working.
+ * Output normally goes to `stderr` for `warn`/`error` and `stdout` for
+ * `info`/`debug`, matching Node's defaults so log aggregators that split
+ * streams keep working. Result-oriented commands can temporarily select the
+ * `stderr` destination so their stdout remains a machine-readable data
+ * channel.
  */
 
 export type LogLevel = 'silent' | 'error' | 'warn' | 'info' | 'debug';
+export type LogOutput = 'split' | 'stderr';
 
 export interface Logger {
   readonly name: string;
@@ -66,6 +69,7 @@ function parseNamespaceAllowList(raw: string | undefined): Set<string> | '*' | n
 
 let currentLevel: LogLevel = parseLevel(process.env.GEZEL_LOG_LEVEL) ?? 'info';
 let debugAllow: Set<string> | '*' | null = parseNamespaceAllowList(process.env.GEZEL_LOG_DEBUG);
+let currentOutput: LogOutput = 'split';
 
 export function getLogLevel(): LogLevel {
   return currentLevel;
@@ -73,6 +77,22 @@ export function getLogLevel(): LogLevel {
 
 export function setLogLevel(level: LogLevel): void {
   currentLevel = level;
+}
+
+export function getLogOutput(): LogOutput {
+  return currentOutput;
+}
+
+/**
+ * Select where structured log records are written.
+ *
+ * `split` preserves the process default: info/debug on stdout and
+ * warn/error on stderr. `stderr` keeps stdout available for command results.
+ * Callers that override this process-wide setting must restore the previous
+ * value when their scoped operation completes.
+ */
+export function setLogOutput(output: LogOutput): void {
+  currentOutput = output;
 }
 
 /**
@@ -148,7 +168,8 @@ function emit(
 ): void {
   if (!shouldEmit(level, name)) return;
   const line = format(level, name, message);
-  const stream = level === 'warn' || level === 'error' ? process.stderr : process.stdout;
+  const useStderr = currentOutput === 'stderr' || level === 'warn' || level === 'error';
+  const stream = useStderr ? process.stderr : process.stdout;
   if (rest.length === 0) {
     writeProcessOutput(stream, `${line}\n`);
     return;
@@ -157,7 +178,7 @@ function emit(
   // objects/errors uniformly. Write the prefix line first to keep ordering
   // tight when the stream is line-buffered.
   writeProcessOutput(stream, `${line}\n`);
-  const sink = level === 'warn' || level === 'error' ? console.error : console.log;
+  const sink = useStderr ? console.error : console.log;
   sink(...rest);
 }
 

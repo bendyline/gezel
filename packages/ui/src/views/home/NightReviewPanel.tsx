@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../api.js';
 import { gezelChatTheme } from '../../components/chat-theme.js';
 import { makeReportActionFenceRenderers } from '../../components/report-actions/ReportActionFence.js';
+import { formatAbsoluteTime } from '../../relative-time.js';
 import { timeAgo } from './utils.js';
 
 /**
@@ -113,7 +114,7 @@ export function NightReviewPanel({ review }: { review: NightShiftReviewResponse 
         </div>
       )}
       <div className="home-workshop-status-foot">
-        <span className="home-workshop-status-meta">
+        <span className="home-workshop-status-meta" title={formatAbsoluteTime(review.windowEnd)}>
           Night window ended {timeAgo(review.windowEnd)}
         </span>
       </div>

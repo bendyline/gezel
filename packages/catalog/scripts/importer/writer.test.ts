@@ -68,18 +68,44 @@ describe('writeToolset', () => {
     expect(out.identityPath).toContain(join('toolsets', 'ac', 'acme-widget'));
   });
 
-  it('preserves editorial fields and unions yankedVersions on re-import', async () => {
-    // Pre-seed an existing identity manifest with a hand-edited name.
+  it('refreshes registry metadata and unions yankedVersions on re-import', async () => {
+    // Pre-seed an identity from an older upstream release. `logo` is a
+    // local-only field that the registry mapper does not emit.
     const itemDir = join(root, 'toolsets', 'ac', 'acme-widget');
     await writeJsonAtomic(
       join(itemDir, 'manifest.json'),
-      identity({ name: 'Widget (Curated)', tags: ['handpicked'], yankedVersions: ['0.9.0'] }),
+      identity({
+        name: 'Widget (Old)',
+        description: 'Facts from the old release.',
+        tags: ['old'],
+        category: 'other',
+        logo: 'logo.svg',
+        yankedVersions: ['0.9.0'],
+      }),
     );
-    const out = await writeToolset(identity({ yankedVersions: ['1.2.3'] }), version(), { root });
+    const out = await writeToolset(
+      identity({
+        name: 'Widget Live',
+        description: 'Current registry facts.',
+        tags: [],
+        category: 'productivity',
+        yankedVersions: ['1.2.3'],
+      }),
+      version(),
+      { root },
+    );
     expect(out.kind).toBe('updated');
+    if (out.kind === 'updated') {
+      expect(out.mergedFields).toEqual(
+        expect.arrayContaining(['name', 'description', 'tags', 'category', 'yankedVersions']),
+      );
+    }
     const merged = JSON.parse(await readFile(out.identityPath, 'utf8'));
-    expect(merged.name).toBe('Widget (Curated)');
-    expect(merged.tags).toEqual(['handpicked']);
+    expect(merged.name).toBe('Widget Live');
+    expect(merged.description).toBe('Current registry facts.');
+    expect(merged.tags).toEqual([]);
+    expect(merged.category).toBe('productivity');
+    expect(merged.logo).toBe('logo.svg');
     expect(merged.yankedVersions.sort()).toEqual(['0.9.0', '1.2.3']);
   });
 

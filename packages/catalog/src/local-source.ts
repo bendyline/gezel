@@ -7,7 +7,7 @@ import type {
 import { BundledSource } from './source.js';
 
 /**
- * User-local catalog tier — reads `.gzl`-imported / user-installed catalog
+ * User-local catalog tier — reads manually authored / user-installed catalog
  * items from under a GEZEL_HOME, laid out exactly like the bundled catalog
  * (`{home}/project-types/{shard}/{id}/…`, `{home}/gezel-templates/…`).
  *

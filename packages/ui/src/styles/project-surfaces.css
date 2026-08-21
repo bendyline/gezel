@@ -1,0 +1,2720 @@
+/* ---------- Output pane (persistent workspace preview) ---------- */
+
+/* Toggle that sits to the left of the project tabs and shows/hides the
+   output pane. Mirrors the muted→accent treatment of the active
+   project-list row. */
+.output-toggle {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  padding: 0.25rem 0.4rem;
+  margin: 0 0.25rem 1px 4px; /* nudged right, and clear of the tab underline */
+  border-radius: 4px;
+  cursor: pointer;
+}
+.output-toggle:hover {
+  background: rgba(127, 127, 127, 0.1);
+  color: var(--text);
+}
+/* Active: the toggle becomes a tab fused to the output pane it reveals.
+   It takes the pane toolbar's fill (--panel), grows to the row height,
+   and drops its bottom border while overlapping the tab row's divider by
+   1px — so there's no seam between the tab and the toolbar directly below
+   it, only the left/top/right frame that reads as tab-y. */
+.output-toggle.is-active {
+  align-self: stretch;
+  background: var(--panel);
+  color: var(--accent);
+  border-color: var(--border);
+  border-bottom-color: transparent;
+  border-radius: 4px 4px 0 0;
+  margin-bottom: -1px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Split below the tab row: output pane on the left, the active tab's
+   content on the right, with a draggable grip between. Tabs span the
+   full width above both, so the output pane persists across tab
+   switches. The grip + fraction reuse the chat-rail mechanism. */
+.project-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.project-body.has-output {
+  --project-output-width: 42%;
+  display: grid;
+  grid-template-columns:
+    minmax(12rem, var(--project-output-width))
+    6px
+    minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+}
+.project-body-content {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.project-output-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+}
+/* Compact (narrow / mobile): the output pane is the active 'output'
+   tab, so it fills the body like any other tab's content. */
+.project-body-compact {
+  display: flex;
+}
+.project-body-compact .project-output-pane {
+  flex: 1 1 auto;
+}
+.project-output-pane-body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Thin "launch target" toolbar at the top of the pane — file picker +
+   refresh / open / maximize controls. The picker is the first launch
+   target (HTML projects); richer targets plug in here later. */
+.project-output-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+  /* Match the height of the chat's pill row to its right so the two bars
+     read as one continuous toolbar band across the split. */
+  min-height: var(--chat-toolbar-band-height);
+  padding: 0.3rem 0.5rem;
+  padding-left: calc(0.5rem + 5px);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.project-output-picker {
+  font-size: var(--text-xs);
+  max-width: 18rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* A selected path may be much wider than the output pane. Keep the value on
+   one line and let it surrender space to the caret and trailing actions. */
+.project-output-picker > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The action buttons already collapse at OUTPUT_TOOLBAR_COMPACT_PX. At the
+   same breakpoint, replace the selected path with a page glyph so the picker
+   stays recognizable without taking over the toolbar. The Select primitive
+   supplies the adjacent caret. */
+.project-output-picker.is-compact {
+  flex: 0 0 auto;
+  max-width: none;
+  padding: 0.25rem;
+  gap: 0.25rem;
+}
+
+.project-output-picker-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.project-output-toolbar-spacer {
+  flex: 1 1 auto;
+}
+.project-output-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.project-output-btn:hover:not(:disabled) {
+  background: rgba(127, 127, 127, 0.1);
+  color: var(--text);
+}
+.project-output-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Overflow ("⋯") menu: when the toolbar is too narrow to show the action
+   buttons inline (see OUTPUT_TOOLBAR_COMPACT_PX) they collapse into this
+   dropdown, so the file picker keeps its room. The trigger reuses
+   .project-output-btn so it matches the inline buttons it replaces. */
+.project-output-menu {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+.project-output-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  min-width: 180px;
+  background: var(--surface, var(--panel));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  padding: 0.3rem;
+  /* Above the preview iframe; below the maximize layer (500) and
+     dialog/select portals (1000+). */
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.project-output-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: 5px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.project-output-menu-item:hover:not(:disabled) {
+  background: rgba(127, 127, 127, 0.12);
+}
+.project-output-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.project-output-menu-item-glyph {
+  display: inline-flex;
+  justify-content: center;
+  width: 1.1rem;
+  color: var(--text-muted);
+}
+.project-output-iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--preview-frame-bg);
+}
+
+/* Thin "debug tools" strip pinned to the bottom of the pane. Controls are
+   right-aligned (spacer pushes them over) so they sit against the chat
+   that abuts the pane on the right — making "drop a debug frame into the
+   conversation" a short reach. It also hosts the debug-only script-error
+   copy action when a page invoke fails. */
+.project-output-debugbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+  padding: 0.3rem 0.5rem;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+}
+.project-output-debugbar-error {
+  color: var(--danger, #d9534f);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-output-script-error-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--warning);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.project-output-script-error-copy {
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-xs);
+  line-height: 1;
+  cursor: pointer;
+}
+.project-output-script-error-copy:hover {
+  background: var(--surface);
+}
+.project-output-empty {
+  padding: 1rem;
+}
+
+/* Maximize: the SAME .project-output-pane <aside> goes full-window via
+   fixed positioning — no portal, so the iframe is never remounted and
+   the running app keeps its state. The app body's z-index: 0 stacking
+   context keeps the persistent titlebar above this pane; dialog/select
+   portals (1000–1100) remain above it too. The titlebar Restore button,
+   Esc, or F5 exits this state. */
+.project-output-pane-maximized {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  /* Override the inline-column constraints so it fills the viewport. */
+  min-width: 0;
+  max-width: none;
+  background: var(--bg);
+  border-right: none;
+}
+
+/* The persistent app titlebar normally covers this strip while maximized.
+   Keep it draggable as a fallback for shells/layouts that expose any of it,
+   with interactive children opting out. */
+.project-output-pane-maximized .project-output-toolbar {
+  -webkit-app-region: drag;
+}
+.project-output-pane-maximized .project-output-toolbar button,
+.project-output-pane-maximized .project-output-toolbar .gz-select-trigger {
+  -webkit-app-region: no-drag;
+}
+
+/* Inset past the native window controls so the picker doesn't hide
+   under them — same offsets as .app-header (macOS traffic lights at the
+   left; the Windows/Linux overlay buttons at the right). The platform
+   attribute is set on <html> in App.tsx. */
+:root[data-platform="darwin"] .project-output-pane-maximized .project-output-toolbar {
+  padding-left: 83px;
+}
+:root[data-platform="win32"] .project-output-pane-maximized .project-output-toolbar,
+:root[data-platform="linux"] .project-output-pane-maximized .project-output-toolbar {
+  padding-right: 140px;
+}
+
+/* In compact mode, suppress the project-list sidebar even when the
+   user previously hit the collapse toggle to expand it on a wider
+   window. `detail-only` already hides the sidebar via JSX, but the
+   non-detail variant could still appear on a too-narrow desktop
+   window. The flex/grid swap here keeps the main column on its
+   own row. */
+.two-col.is-compact:not(.detail-only) > aside.side {
+  display: none;
+}
+.two-col.is-compact:not(.detail-only) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.gz-tabs-trigger {
+  padding: 0.4rem 0.9rem;
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  border-bottom: 2px solid transparent;
+  /* Flat bottom edge so the active-state `border-bottom` renders as a
+     straight bar — without this, the browser-default rounded-button
+     `border-radius` lets the underline arc up at the corners. */
+  border-radius: 0;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-family: inherit;
+  margin-bottom: -1px;
+}
+
+.gz-tabs-trigger:hover {
+  color: var(--text);
+}
+
+.gz-tabs-trigger[data-state="active"] {
+  color: var(--text);
+  border-bottom-color: var(--accent, #b0724c);
+}
+
+/* Compact project tab bar: icon-only triggers (word labels swapped for
+   ProjectTabIcon + a native tooltip) so every tab fits without a
+   horizontal scroller. Square-ish padding centers the glyph; the SVG
+   inherits the trigger's muted → active color via currentColor. */
+.gz-tabs-trigger.gz-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem 0.55rem;
+}
+.gz-tabs-trigger.gz-tab-icon svg {
+  display: block;
+}
+
+.gz-tabs-trigger:focus-visible {
+  outline: 2px solid var(--accent, #b0724c);
+  /* Tab lists scroll horizontally, so an outward focus ring is clipped at
+     the scrollport's top edge. Draw it inward to keep all four sides visible. */
+  outline-offset: -2px;
+  border-radius: 3px;
+}
+
+.gz-tabs-content {
+  padding-top: 0.75rem;
+}
+
+.gz-tabs-content:focus-visible {
+  outline: none;
+}
+
+/* Tooltip — Radix-backed replacement for native `title` attributes.
+   Used by catalog tag glossary and anywhere else we need fast, reliably-
+   visible hover explanations. */
+.gz-tooltip-content {
+  max-width: 18rem;
+  padding: 0.45rem 0.65rem;
+  background: #1c1c1f;
+  color: #f3ede0;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  user-select: none;
+  z-index: 50;
+}
+
+.gz-tooltip-arrow {
+  fill: #1c1c1f;
+}
+
+/* ── Pending question card (in-chat + Home pane) ──────────────── */
+
+.pending-question {
+  margin-top: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pending-question-context {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface, #fff) 92%, transparent);
+}
+
+.pending-question-context-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.pending-question-context-title {
+  font-weight: 500;
+}
+
+.pending-question-context-status {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* Worn by both a real external <a> (View on npm) and the in-app <button>
+   navigators (Open task / Open document), so the button-neutralizing
+   declarations sit here rather than in a second class. Explicit
+   `font-family` over `font: inherit` — the shorthand would drag in a serif
+   from any display-font ancestor (see docs/ux.md, "Links stay sans"). */
+.pending-question-context-link {
+  margin-left: auto;
+  font-size: 0.8rem;
+  font-family: var(--font-ui);
+  color: var(--accent);
+  text-decoration: none;
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed currentColor;
+  padding: 0;
+  cursor: pointer;
+}
+
+.pending-question-document-preview {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 0.7rem 0.9rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface, #fff) 96%, transparent);
+  font-size: 0.85rem;
+}
+
+.pending-question-document-expand {
+  align-self: flex-start;
+  font-size: 0.75rem;
+}
+
+/* ── Attached-document split ──────────────────────────────────────
+   A question that carries a document (a night-shift report, a plan)
+   lifts it out of the card's context strip into its own column, so a
+   report reads as a portrait page that scrolls on its own instead of a
+   ten-line letterbox above the answer keys. The wrapper is the query
+   container: the card lives in a chat bubble, a sidebar dialog, and the
+   full-width questions overlay, and only the last two are reliably wide
+   enough for two columns. */
+.pending-question-splitwrap {
+  container: question-card / inline-size;
+}
+
+.pending-question-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0.75rem;
+}
+
+/* 680px is deliberately low: the overlay's container is the window width
+   minus its padding, and an ~800px window still deserves two columns.
+   The document takes the larger share — it's what the user is here to
+   read; the card beside it is a prompt and two keys. */
+@container question-card (min-width: 680px) {
+  .pending-question-split {
+    grid-template-columns: minmax(0, 1fr) minmax(20rem, 1.15fr);
+  }
+}
+
+.pending-question-split-main {
+  min-width: 0;
+}
+
+/* The panel is a fixed portrait window, not a column that grows with the
+   document — min and max are deliberately the same height. Without the
+   cap the panel stretches to the document's full length and the *host
+   surface* scrolls instead, which is the letterbox problem again in a
+   taller costume. */
+.pending-question-document-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+  min-height: 18rem;
+  max-height: 28rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--surface, #fff) 92%, transparent);
+}
+
+/* Both question surfaces are viewport-anchored, so the panel can claim
+   real height there; inside a chat bubble it keeps the modest default. */
+.app-questions-overlay .pending-question-document-panel,
+.project-questions-dialog .pending-question-document-panel {
+  min-height: min(62vh, 44rem);
+  max-height: min(62vh, 44rem);
+}
+
+/* The panel reads as a page, not a snippet, so it gets page margins —
+   generous enough that a long report's body text never runs into the
+   panel's own border. */
+.pending-question-document-panel .pending-question-document-preview {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  padding: 1rem 1.15rem;
+}
+
+/* The document is a preview, not this surface's own heading hierarchy —
+   a report's `# Title` set at page scale dwarfs the question it belongs
+   to. Pull the top two levels back toward panel scale. */
+.pending-question-document-panel .pending-question-document-preview :is(h1, h2) {
+  font-size: var(--text-xl);
+  margin-top: 0.4rem;
+}
+
+.pending-question-document-panel .pending-question-document-preview :is(h3, h4, h5, h6) {
+  font-size: var(--text-lg);
+}
+
+.pending-question-prompt {
+  font-size: 0.95rem;
+}
+
+/* A question body is embedded UI, not a standalone reading page. Squisq's
+   linear presentation deliberately centers its readable measure; inside a
+   notification card that leaves the prompt floating away from the task strip
+   and response controls. Keep Squisq's bounded measure, but anchor it to the
+   card's leading edge like the rest of the notification. */
+.pending-question-prompt .squisq-page-section-inner {
+  margin-inline: 0 !important;
+}
+
+/* Long question bodies must not push the choices, note field, and submit
+   controls below the Updates drawer's viewport. Scroll only the rendered
+   Squisq body there; the surrounding alert context and controls stay visible.
+   The dialog itself remains scrollable as a fallback for unusually tall
+   non-Squisq controls or very short windows. */
+.app-questions-overlay .pending-question-prompt:has(> .squisq-linear) {
+  min-height: 0;
+  max-height: min(48vh, 30rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 0.25rem;
+}
+
+.pending-question-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* Answer chips are keys-in-trays aliases. The shared recipe lives in
+   controls-handbook-and-admin.css, which loads later in the cascade. */
+
+.pending-question-write-in {
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface, #fff) 96%, transparent);
+  font: inherit;
+  resize: vertical;
+}
+
+.pending-question-error {
+  color: #c0392b;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.pending-question-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.pending-question-submit {
+  padding: 0.4rem 1rem;
+  border-radius: 6px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.pending-question-submit:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* Answered (collapsed) variant. */
+.pending-question-answered {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.pending-question-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pending-question-summary {
+  font-size: 0.9rem;
+}
+
+/* ── Home "Needs your input" pane ──────────────────────────────── */
+
+.home-needs-input {
+  margin: 1.25rem 0;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.home-needs-input header h3 {
+  margin: 0 0 0.2rem 0;
+}
+
+.home-needs-input-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.6rem 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.home-needs-input-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.home-needs-input-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.home-needs-input-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0.6rem 0 0.8rem 0;
+}
+
+.home-needs-input-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.home-needs-input-tab:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.home-needs-input-tab-active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.home-needs-input-tab-active:hover {
+  background: var(--accent);
+}
+
+/* Inline prev/next arrows sitting on either side of the pill row. */
+.home-needs-input-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.home-needs-input-nav-btn:hover:not([disabled]) {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-color: var(--accent);
+}
+
+.home-needs-input-nav-btn[disabled] {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ── Top-bar Home tab badge ──────────────────────────────────── */
+
+.app-nav-badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0 6px;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.engagement-mode-panel {
+  margin-bottom: 2rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  /* Keep the card aligned with the settings prose measure rather than spanning
+     the full window width. */
+  max-width: 640px;
+}
+
+.engagement-mode-panel h3 {
+  margin-top: 0;
+  margin-bottom: 0.35rem;
+  font-size: 1.15rem;
+}
+
+.engagement-mode-switch {
+  margin: 0.75rem 0;
+}
+
+/* The mode buttons are gz-keys (see the keys-in-trays block at the end of
+   this file). "Off" is the hard stop — its latched key goes danger-red. */
+.engagement-mode-off .gz-key-active {
+  background: linear-gradient(to bottom, #a83326, #c0392b);
+  border-color: #7f2820;
+  color: #fff2ef;
+}
+
+/* Security posture: the latched key wears the posture's meaning — sealed
+   green for Super Lockdown, open amber for Unrestricted. Lockdown and
+   Custom keep the standard accent latch. Same idea as the "Off" emergency
+   red above: only the extremes of the spectrum recolor, so the state
+   reads at a glance without turning the tray into a rainbow. Fixed inks
+   (not vars) because these fills hold on both themes, like the red. */
+.engagement-mode-super-lockdown .gz-key-active {
+  background: linear-gradient(to bottom, #48603f, #55724c);
+  border-color: #3a5233;
+  color: #edf3e6;
+}
+
+.engagement-mode-free .gz-key-active {
+  background: linear-gradient(to bottom, #a87e22, #bb9132);
+  border-color: #8a671b;
+  color: #2b2007;
+}
+
+/* Blank lines in a posture/mode description are paragraph breaks — the copy
+   lives in one string (security-levels.ts) shared by first-run and Settings. */
+.engagement-mode-description {
+  margin: 0.5rem 0 0;
+  color: var(--muted, #888);
+  font-size: 0.9rem;
+  white-space: pre-line;
+}
+
+.engagement-mode-banner {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  background: rgba(192, 57, 43, 0.12);
+  border: 1px solid rgba(192, 57, 43, 0.45);
+  color: #c0392b;
+  border-radius: 8px;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.workshop-tempo {
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px dashed var(--border);
+}
+
+.workshop-tempo-heading {
+  margin: 0 0 0.1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.workshop-tempo-switch {
+  margin: 0.5rem 0 0.5rem;
+}
+
+.workshop-tempo-pill-label {
+  font-weight: 600;
+}
+
+.workshop-tempo-pill-hint {
+  font-size: 0.72rem;
+  opacity: 0.72;
+  font-style: italic;
+}
+
+/* Header AI-engagement and maximized-output controls. The pill-style
+   `.engagement-badge` moved to a mode-glyph dropdown trigger; the Output
+   restore button joins it only while that pane is maximized. Both mirror
+   `.app-nav-hamburger`'s transparent square with a hover halo so the cluster
+   reads as one unified control row. Restore gets a 36×36 escape hit target
+   that fills nearly the whole titlebar. Off mode tints play/pause red so the
+   user can spot at a glance that AI is fully paused. */
+.app-engagement-trigger,
+.app-output-restore {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.82;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s, color 0.15s;
+}
+.app-engagement-trigger:hover,
+.app-output-restore:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.08);
+}
+.app-output-restore {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+  opacity: 1;
+}
+.app-output-restore:hover,
+.app-output-restore:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(243, 237, 224, 0.34);
+}
+.app-output-restore > svg {
+  pointer-events: none;
+}
+.app-engagement-trigger[data-state="open"] {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.12);
+}
+.app-engagement-trigger-off {
+  color: #e6776a;
+}
+.app-engagement-trigger-off:hover {
+  background: rgba(192, 57, 43, 0.25);
+}
+
+/* Night Shift trigger — same cream-on-sage chrome as the other titlebar
+   controls. A running shift gets quiet sky motion without giving this one
+   control a separate blue accent or hover halo. */
+.app-nightshift-trigger {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  /* Horizontal only. `align-self: center` already handles the vertical
+     placement, so a vertical margin here bought nothing and instead grew
+     the whole titlebar past the native overlay height — the tallest child
+     sets the band, and the extra 8px surfaced as wood-grain peeking out
+     below the window-control patch. */
+  margin: 0 2px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s, color 0.15s;
+}
+.app-nightshift-trigger:hover,
+.app-nightshift-trigger[data-state="open"] {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.08);
+}
+.app-nightshift-trigger-active {
+  opacity: 1;
+  color: var(--titlebar-ink);
+}
+.app-nightshift-glyph {
+  display: block;
+  overflow: hidden;
+}
+.app-nightshift-moon {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.app-nightshift-moon.is-active {
+  animation: app-nightshift-moon-glow 4.8s ease-in-out infinite;
+}
+.app-nightshift-cloud {
+  opacity: 0;
+  will-change: transform, opacity;
+  animation-name: app-nightshift-cloud-cross;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.app-nightshift-cloud-far {
+  opacity: 0.28;
+  animation-duration: 10.8s;
+  animation-delay: -7.1s;
+}
+.app-nightshift-cloud-near {
+  opacity: 0.52;
+  animation-duration: 8.2s;
+  animation-delay: -2.4s;
+}
+@keyframes app-nightshift-cloud-cross {
+  from {
+    transform: translate3d(34px, 0, 0);
+  }
+  to {
+    transform: translate3d(-16px, 0, 0);
+  }
+}
+@keyframes app-nightshift-moon-glow {
+  0%,
+  100% {
+    opacity: 0.88;
+    scale: 0.98;
+  }
+  50% {
+    opacity: 1;
+    scale: 1.02;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-nightshift-cloud {
+    display: none;
+  }
+
+  .app-nightshift-moon.is-active {
+    animation: none;
+  }
+}
+.app-nightshift-status {
+  padding: 0.35rem 0.6rem 0.45rem;
+  font-size: 0.74rem;
+  opacity: 0.7;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 0.25rem;
+}
+
+/* When the period started and when it ends — the second line of the status
+   strip, above any quota-hold explanation. */
+.app-nightshift-period {
+  display: block;
+  margin-top: 0.2rem;
+  max-width: 18rem;
+  color: var(--text-muted);
+}
+
+/* Second line of the status strip while the cloud quota reserve is holding
+   queued night work — explains why "queued" isn't moving. */
+.app-nightshift-quota-hold {
+  display: block;
+  margin-top: 0.2rem;
+  max-width: 18rem;
+  color: var(--text-muted);
+}
+
+/* What the shift got through, counted over the period the status strip
+   names. Chips rather than a table: most nights only a few counters are
+   non-zero, and the row should shrink to them. */
+.app-nightshift-tally {
+  padding: 0.1rem 0.2rem 0.35rem;
+  max-width: 18rem;
+}
+.app-nightshift-tally-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.1rem 0.5rem;
+}
+.app-nightshift-tally-item {
+  padding: 0.12rem 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.app-nightshift-tally-count {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* "What the shift is doing" panel: working-on + up-next task lists, shown
+   between the status line and the start/stop action while a shift runs. */
+.app-nightshift-tasks {
+  padding: 0.1rem 0.2rem 0.35rem;
+  max-width: 18rem;
+}
+.app-nightshift-task-group + .app-nightshift-task-group {
+  margin-top: 0.3rem;
+}
+.app-nightshift-task-heading {
+  padding: 0.1rem 0.5rem;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.55;
+}
+.app-nightshift-task {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  padding: 0.22rem 0.5rem;
+}
+.app-nightshift-task-dot {
+  flex: 0 0 auto;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-top: 0.32rem;
+  border-radius: 50%;
+  background: var(--border, rgba(255, 255, 255, 0.25));
+}
+.app-nightshift-task-dot.is-active {
+  background: var(--accent);
+  animation: project-index-pulse 1.4s ease-in-out infinite;
+}
+.app-nightshift-task-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+.app-nightshift-task-title {
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-nightshift-task-meta {
+  font-size: 0.7rem;
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-nightshift-empty {
+  max-width: 18rem;
+  padding: 0.25rem 0.7rem 0.55rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* The start/stop command is the menu's one primary action. Set it into the
+   same shallow tray as the engine pill's health controls so it reads as a
+   raised key instead of another line of menu copy. */
+.app-nightshift-action-tray.gz-tray {
+  display: flex;
+  margin: 0.2rem;
+  padding: 0.25rem;
+}
+.app-nightshift-action.gz-key {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 0.65rem;
+  font-size: var(--text-md);
+}
+.app-nightshift-action[data-highlighted],
+.app-nightshift-action:hover {
+  background: var(--key-bg-hover);
+}
+.app-nightshift-action .app-engagement-menu-hint {
+  margin-left: 0;
+}
+
+/* Two-line menu items: label on top, secondary hint below. The base
+   `.app-nav-menu-item` is single-line; we widen padding and let the
+   hint flow underneath via flex-direction. */
+.app-nav-menu-item:has(.app-engagement-menu-hint) {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+.app-engagement-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+}
+.app-engagement-menu-icon {
+  flex: 0 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  opacity: 0.82;
+}
+.app-engagement-mode-icon {
+  display: block;
+}
+.app-engagement-menu-check {
+  flex: 0 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: auto;
+  border-radius: var(--radius-sm);
+}
+.app-nav-menu-item.active .app-engagement-menu-check {
+  color: var(--accent-selection-ink);
+  background: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 72%, var(--text));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--success) 45%, transparent);
+}
+.app-engagement-menu-label {
+  font-weight: 500;
+}
+.app-engagement-menu-hint {
+  font-size: 0.78em;
+  opacity: 0.72;
+  line-height: 1.3;
+  /* align under the label, clearing the mode-glyph column */
+  margin-left: calc(18px + 0.4rem);
+}
+
+.chat-composer-disabled-banner {
+  margin-bottom: 0.5rem;
+  padding: 0.55rem 0.8rem;
+  background: rgba(192, 57, 43, 0.12);
+  border: 1px solid rgba(192, 57, 43, 0.45);
+  color: #c0392b;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.chat-composer-disabled-banner button {
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  padding: 0.25rem 0.55rem;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+/* ── GitHub sign-in chip + device-code modal ────────────────────── */
+
+.gz-new-project-github-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.gz-npd-field {
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.gz-npd-field > .gz-github-repo-combobox {
+  margin-top: 0.25rem;
+}
+
+/* ── New Project dialog v2 ─────────────────────────────────────────
+   Category rail | type gallery | detail pane. The gallery + rail take
+   ~2/3 of the width; the pane holds the selected type's hero, "what
+   you get", and the create form. Atmosphere stays a whisper: two
+   radial paper glows (terracotta + sage) on the gallery, one small
+   glow behind the hero art. */
+.gz-dialog.gz-npd {
+  display: flex;
+  flex-direction: column;
+  width: min(72rem, calc(100vw - 2.5rem));
+  height: min(46rem, 86vh);
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+
+.gz-npd-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  flex: none;
+  padding: 1.05rem 1.4rem 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.gz-npd-header-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.gz-npd-header h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+}
+
+.gz-npd-header-sub {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.gz-npd-search {
+  width: min(16rem, 34%);
+  flex: none;
+}
+
+.gz-npd-search input[type="search"] {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.42rem 0.9rem;
+  background: var(--bg, #141414);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.gz-npd-body {
+  display: grid;
+  grid-template-columns: 14rem minmax(0, 1fr) minmax(19rem, 27%);
+  flex: 1;
+  min-height: 0;
+}
+
+/* — Category rail — */
+.gz-npd-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.9rem 0.6rem;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  overflow-y: auto;
+}
+
+.gz-npd-rail-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease-out, color 120ms ease-out, border-color 120ms ease-out;
+}
+
+.gz-npd-rail-item:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.gz-npd-rail-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.gz-npd-rail-item.active {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel));
+  color: var(--text);
+}
+
+.gz-npd-rail-item svg {
+  flex: none;
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.gz-npd-rail-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gz-npd-rail-count {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* — Type gallery — */
+.gz-npd-gallery {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 1rem 1.2rem 1.4rem;
+  background: radial-gradient(
+      56rem 26rem at 88% -12%,
+      color-mix(in srgb, var(--accent) 6%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      40rem 22rem at -10% 108%,
+      color-mix(in srgb, var(--titlebar) 7%, transparent),
+      transparent 60%
+    );
+}
+
+.gz-npd-section + .gz-npd-section {
+  margin-top: 1.3rem;
+}
+
+.gz-npd-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-bottom: 0.55rem;
+}
+
+.gz-npd-section-title {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.gz-npd-section-tagline {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.gz-npd-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr));
+  gap: 0.6rem;
+}
+
+@keyframes gz-npd-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.gz-npd-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+  min-height: 7.5rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease-out, background 140ms ease-out, box-shadow 140ms ease-out,
+    transform 140ms ease-out;
+  animation: gz-npd-card-in 160ms ease-out backwards;
+  animation-delay: calc(var(--card-i, 0) * 16ms);
+}
+
+.gz-npd-card:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 74%, var(--border));
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.14);
+  transform: translateY(-2px);
+}
+
+.gz-npd-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.gz-npd-card.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+
+.gz-npd-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.gz-npd-card-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel));
+  color: var(--accent);
+  overflow: hidden;
+}
+
+.gz-npd-card-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gz-npd-card-mark-svg {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 0.45rem;
+}
+
+.gz-npd-card-mark img.gz-npd-card-mark-svg {
+  object-fit: contain;
+}
+
+.gz-npd-card-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.gz-npd-card-description {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* "Soon" — the workshop rubber-stamp idiom, dialed small. */
+.gz-npd-card-badge {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  padding: 2px 7px;
+  border: 1.5px solid color-mix(in srgb, var(--accent) 70%, var(--border));
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  color: var(--accent);
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transform: rotate(-2deg);
+}
+
+.gz-npd-empty {
+  margin: 2rem 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  text-align: center;
+}
+
+/* — Detail pane — */
+.gz-npd-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+}
+
+@keyframes gz-npd-pane-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.gz-npd-pane-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1.1rem 1.2rem;
+  animation: gz-npd-pane-in 120ms ease-out;
+}
+
+.gz-npd-pane-footer {
+  flex: none;
+  padding: 0.75rem 1.2rem;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 40%, var(--panel));
+}
+
+.gz-npd-pane-footer .gz-dialog-actions {
+  margin-top: 0;
+}
+
+.gz-npd-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.gz-npd-hero-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.6rem;
+  height: 3.6rem;
+  margin-bottom: 0.35rem;
+  border-radius: 12px;
+  background: radial-gradient(
+      2.6rem 2.6rem at 50% 42%,
+      color-mix(in srgb, var(--accent) 18%, transparent),
+      transparent 75%
+    ), color-mix(in srgb, var(--accent) 10%, var(--panel));
+  color: var(--accent);
+  overflow: hidden;
+}
+
+.gz-npd-hero-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gz-npd-hero-art-svg {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 0.55rem;
+}
+
+.gz-npd-hero-art img.gz-npd-hero-art-svg {
+  object-fit: contain;
+}
+
+.gz-npd-hero-eyebrow {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.gz-npd-hero-name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.gz-npd-hero-description {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.gz-npd-give {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+
+.gz-npd-give-eyebrow {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.gz-npd-crew {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.gz-npd-crew-member {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0;
+}
+
+/* Round portrait frame. The poppetje SVG paints with `overflow: visible`
+   (the full figure exists under every crop), so the frame's overflow
+   clip is what actually produces the head-and-shoulders portrait. */
+.gz-npd-crew-figure {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  overflow: hidden;
+}
+
+.gz-npd-crew-figure svg {
+  margin-top: 0.15rem;
+}
+
+.gz-npd-crew-member figcaption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  color: var(--text);
+  font-size: 0.68rem;
+  text-align: center;
+}
+
+.gz-npd-crew-voorman {
+  color: var(--accent);
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.gz-npd-give-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gz-npd-give-rows li {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.gz-npd-give-rows li svg {
+  flex: none;
+  color: var(--accent);
+  opacity: 0.8;
+}
+
+.gz-npd-pane-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.gz-npd-pane-form label {
+  margin-bottom: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gz-npd-card,
+  .gz-npd-pane-scroll {
+    animation: none;
+  }
+
+  .gz-npd-card:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .gz-dialog.gz-npd {
+    width: calc(100vw - 1.5rem);
+    height: min(92vh, 100%);
+  }
+
+  .gz-npd-body {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .gz-npd-rail {
+    flex: none;
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 0.5rem 0.9rem;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .gz-npd-rail-item {
+    white-space: nowrap;
+  }
+
+  .gz-npd-gallery {
+    flex: none;
+    max-height: 38vh;
+  }
+
+  .gz-npd-pane {
+    flex: none;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
+  .gz-npd-pane-scroll {
+    overflow: visible;
+  }
+}
+
+@media (max-width: 560px) {
+  .gz-npd-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .gz-npd-search {
+    width: 100%;
+  }
+
+  .gz-npd-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── New Task dialog (gz-ntd) ──────────────────────────────────────────
+   Reuses the New Project dialog's gallery skeleton (the `gz-npd-*`
+   blocks above — the canonical gallery-dialog layout). This block only
+   adds what tasks need: the recommended-card accent, the recipe steps
+   preview, the toolset-setup box, and the pane footnote. The ember
+   accent is `--terra` — the same color the draft badge and fire button
+   carry, so "recommended → create → fire" reads as one thread. */
+
+.gz-ntd-card-suggested .gz-npd-card-mark {
+  background: color-mix(in srgb, var(--terra, #c9722e) 16%, var(--panel));
+  color: var(--terra, #c9722e);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--terra, #c9722e) 35%, transparent);
+}
+
+/* Craftbook manifests carry paragraph-length descriptions; clamp the hero
+   so the recipe + properties stay above the fold. */
+.gz-ntd .gz-npd-hero-description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+}
+
+.gz-ntd-based-on {
+  margin: 0.1rem 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.gz-ntd-based-on a {
+  color: var(--accent);
+  font-family: var(--font-ui);
+  font-weight: 600;
+}
+
+/* Field selects sit under their label at full width, like the inputs. */
+.gz-ntd .gz-npd-pane-form label > .gz-select-trigger {
+  display: flex;
+  width: 100%;
+  box-sizing: border-box;
+  justify-content: space-between;
+  margin-top: 0.25rem;
+}
+
+.gz-ntd-show-all {
+  margin-top: 0.7rem;
+  padding: 0.35rem 0.75rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: color 120ms ease-out, border-color 120ms ease-out;
+}
+
+.gz-ntd-show-all:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+/* The selected craftbook's recipe, previewed in the pane hero. */
+.gz-ntd-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.3rem;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+
+.gz-ntd-steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0 0 0 1.15rem;
+}
+
+.gz-ntd-steps-list li {
+  padding-left: 0.15rem;
+  color: var(--text);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.gz-ntd-steps-list li::marker {
+  color: var(--terra, #c9722e);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.gz-ntd-step-role {
+  margin-left: 0.4rem;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+}
+
+/* Missing-toolset setup, inlined into the pane before Create unlocks. */
+.gz-ntd-needs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--warning, #e8c34a) 45%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--warning, #e8c34a) 6%, transparent);
+}
+
+.gz-ntd-schedule {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.gz-ntd-schedule label {
+  display: block;
+  margin-top: 0.4rem;
+}
+
+.gz-ntd-footnote {
+  margin: 0 0 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+/* Takes the footnote's slot on failure, so the reason sits against the
+   button that produced it. Wraps rather than clips — a connector prep
+   error is a whole sentence naming the fix. */
+.gz-ntd-submit-error {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+/* A launch we can already tell will not resolve its subject. Not an error
+   yet — the user can still type the missing value — so it warns in the
+   footnote's slot rather than shouting. */
+.gz-ntd-launch-hint {
+  color: color-mix(in srgb, var(--warning, #e8c34a) 80%, var(--text));
+  line-height: 1.35;
+}
+
+/* Compact radio chips used by secondary pickers inside the dialog. */
+.gz-type-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.gz-type-field-label {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+/* Type pickers + chips are keys-in-trays aliases (see the block at the end
+   of this file). */
+.gz-type-chip-soon {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: 4px;
+  padding: 0 0.25rem;
+}
+
+/* New Project dialog: Folder picker row + IMAP config rows. */
+.gz-folder-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+.gz-folder-row input {
+  flex: 1;
+}
+.gz-folder-browse {
+  white-space: nowrap;
+}
+.gz-imap-row {
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-end;
+}
+.gz-imap-port {
+  flex: 1;
+}
+.gz-imap-tls {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+/* Project Mail tab. */
+.gz-mail-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1rem;
+  max-width: 38rem;
+}
+.gz-mail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.gz-mail-header h3 {
+  margin: 0;
+}
+.gz-mail-accounts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.gz-mail-account {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.gz-mail-connect {
+  align-self: flex-start;
+}
+.gz-mail-link-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.gz-mail-link-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+/* Connector bin — the same compact, selectable gallery language used by
+   New Project and New Task, adapted to an inline settings tray. */
+.gz-connector-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--panel) 70%, var(--surface));
+}
+
+.gz-connector-picker-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.gz-connector-picker-heading p {
+  margin: 0.2rem 0 0;
+}
+
+.gz-connector-picker-count {
+  flex: 0 0 auto;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1.3;
+}
+
+.gz-connector-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10.25rem, 1fr));
+  gap: 0.55rem;
+}
+
+.gz-npd-card.gz-connector-card {
+  min-width: 0;
+  min-height: 7rem;
+  gap: 0.35rem;
+  padding: 0.7rem 0.75rem;
+  border-radius: var(--radius-md);
+}
+
+.gz-connector-card .gz-npd-card-mark {
+  width: 2.3rem;
+  height: 2.3rem;
+  border-radius: var(--radius-md);
+}
+
+.gz-connector-card .gz-npd-card-name {
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gz-connector-card .gz-npd-card-description {
+  width: 100%;
+}
+
+.gz-connector-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  width: 100%;
+  margin-top: auto;
+  padding-top: 0.2rem;
+}
+
+.gz-connector-card-meta > span {
+  padding: 1px 4px;
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 4%, var(--panel));
+  color: var(--text-muted);
+  font-size: 0.62rem;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.gz-connector-card.active .gz-connector-card-meta > span {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: color-mix(in srgb, var(--accent) 72%, var(--text));
+}
+
+.gz-connector-picker-empty {
+  display: grid;
+  min-height: 6rem;
+  place-items: center;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.gz-mail-link-form.gz-connector-config {
+  gap: 0.75rem;
+  padding: 0.8rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 3%, var(--surface));
+  animation: gz-npd-card-in 160ms ease-out;
+}
+
+.gz-connector-config-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.gz-connector-config-mark {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 2.3rem;
+  height: 2.3rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 13%, var(--panel));
+  color: var(--accent);
+  overflow: hidden;
+}
+
+.gz-connector-config-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gz-connector-config-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  max-width: 48rem;
+}
+
+.gz-connector-setup-instructions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  max-width: 48rem;
+  padding: 0.65rem 0.75rem;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 65%, var(--border));
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.gz-connector-setup-instructions strong {
+  color: var(--text);
+  font-size: var(--text-md);
+}
+
+.gz-connector-setup-instructions p,
+.gz-connector-setup-instructions ol {
+  margin: 0;
+}
+
+.gz-connector-setup-instructions ol {
+  padding-left: 1.15rem;
+}
+
+.gz-connector-setup-instructions a,
+.gz-connector-field-help a {
+  font-family: var(--font-ui);
+}
+
+.gz-connector-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.gz-connector-field-group + .gz-connector-field-group {
+  padding-top: 0.8rem;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.gz-connector-field-group-heading {
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+/* Every connector uses one ledger-like name → control alignment. Keeping the
+   label column stable avoids the staggered baselines produced by auto-flowing
+   two-column cards when helper text and checkboxes have different heights. */
+.gz-connector-field {
+  display: grid;
+  grid-template-columns: minmax(11rem, 16rem) minmax(0, 1fr);
+  gap: 0.35rem 0.85rem;
+  align-items: start;
+}
+
+.gz-connector-field-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.4rem;
+  min-width: 0;
+  padding-top: calc(0.42rem - 3px);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+}
+
+.gz-connector-field-requirement {
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  color: color-mix(in srgb, var(--accent) 80%, var(--text));
+}
+
+.gz-connector-field-control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.gz-connector-field-control > input:not([type="checkbox"]) {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+.gz-connector-field-control > input[type="checkbox"] {
+  width: auto;
+  margin: 0.5rem 0 0;
+}
+
+.gz-connector-field-help {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
+.gz-connector-oauth-note {
+  grid-column: 1 / -1;
+  margin: 0.15rem 0 0;
+}
+
+/* Bring-your-own OAuth app: the setup panel inside the connector config
+   tray. A quiet bordered surface; the redirect URI reads as a copyable
+   code row because providers like X match it character-for-character. */
+.gz-oauth-app {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: var(--text-sm);
+}
+
+.gz-oauth-app p {
+  margin: 0;
+}
+
+.gz-oauth-app-heading {
+  font-size: var(--text-md);
+}
+
+.gz-oauth-app-summary {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.gz-oauth-app-summary-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+.gz-oauth-app-summary-text code {
+  overflow: hidden;
+  max-width: 16rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.gz-oauth-app-summary > button {
+  flex: 0 0 auto;
+}
+
+.gz-oauth-app-docs {
+  align-self: flex-start;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+}
+
+.gz-oauth-app-steps {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.gz-oauth-app-steps li::marker {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.gz-oauth-app-redirect {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: var(--text-muted);
+}
+
+.gz-oauth-app-redirect-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.gz-oauth-app-redirect-row code {
+  flex: 0 1 auto;
+  overflow-x: auto;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--panel) 70%, var(--surface));
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.gz-oauth-app-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.7rem 0.9rem;
+  align-items: start;
+}
+
+.gz-oauth-app-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.gz-oauth-app-fields label > input {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+.gz-oauth-app-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.gz-connector-picker-actions {
+  padding-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+}
+
+@media (max-width: 700px) {
+  .gz-connector-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gz-connector-field {
+    grid-template-columns: 1fr;
+  }
+
+  .gz-connector-field-label {
+    padding-top: 0;
+  }
+
+  .gz-connector-picker-heading {
+    align-items: center;
+  }
+}
+
+.gz-github-repo-combobox {
+  position: relative;
+}
+
+.gz-github-repo-input-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  background: var(--bg, #141414);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.gz-github-repo-input-row:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.gz-github-repo-prefix {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.45rem 0 0.45rem 0.6rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Borderless input nested in the bordered row so the github.com/ prefix
+   reads as part of one field. Specificity bumped past the generic
+   `.gz-dialog input` rule with the extra combobox class. */
+.gz-github-repo-combobox .gz-github-repo-input-row > input {
+  flex: 1;
+  width: 100%;
+  padding-left: 0.1rem;
+  padding-right: 2rem;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.gz-github-repo-combobox .gz-github-repo-input-row > input:focus-visible {
+  outline: none;
+}
+
+.gz-npd-repo-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-family: var(--font-ui);
+}
+
+.gz-npd-repo-progress > .gezel-icon {
+  flex: 0 0 auto;
+}
+
+.gz-npd-repo-progress-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+button.gz-npd-repo-cancel {
+  flex: 0 0 auto;
+  padding: 0.25rem 0.45rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  line-height: 1.2;
+}
+
+.gz-github-repo-chevron {
+  position: absolute;
+  right: 0.25rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.gz-github-repo-chevron:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(243, 237, 224, 0.06);
+}
+
+.gz-github-repo-chevron:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.gz-github-repo-suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  margin: 0;
+  padding: 0.25rem 0;
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.gz-github-repo-suggestion {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.35rem 0.7rem;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.gz-github-repo-suggestion:hover,
+.gz-github-repo-suggestion:focus-visible {
+  background: rgba(243, 237, 224, 0.06);
+  outline: none;
+}
+
+.gz-github-repo-suggestion-name {
+  font-weight: 500;
+}
+
+.gz-github-repo-suggestion-desc {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.gz-github-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  border-radius: var(--radius-sm);
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  position: relative;
+}
+
+.gz-github-chip.compact {
+  font-size: 0.72rem;
+  padding: 0.1rem 0.45rem;
+}
+
+.gz-github-chip.signed-out {
+  cursor: pointer;
+  color: var(--accent, #b0724c);
+  border-color: rgba(176, 114, 76, 0.4);
+}
+
+.gz-github-chip.signed-out:hover {
+  background: rgba(176, 114, 76, 0.08);
+}
+
+.gz-github-chip.signed-in {
+  color: inherit;
+}
+
+.gz-github-chip-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+.gz-github-chip-avatar {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.gz-github-chip-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg, #2b2b2b);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+}
+
+.gz-github-chip-menu button {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.gz-github-chip-menu button:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.gz-github-device-code {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.75rem 0;
+}
+
+.gz-github-device-code code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.4rem;
+  letter-spacing: 0.18em;
+  font-weight: 600;
+  padding: 0.4rem 0.75rem;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.gz-github-device-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.5rem 0 0.25rem;
+}

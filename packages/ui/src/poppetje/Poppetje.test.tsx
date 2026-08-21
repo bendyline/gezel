@@ -48,6 +48,37 @@ describe('Poppetje', () => {
     expect(fullVb).toBe('0 0 80 175');
   });
 
+  it('widens the headshot crop for a hat so a clipping frame keeps the brim', () => {
+    const bare = poppetjeFromSeed(7, { key: 'imara', name: 'Imara' });
+    const hatless = { ...bare, hat: null } as PoppetjeStruct;
+    const hatted = { ...bare, hat: 'straw' } as PoppetjeStruct;
+    const vb = (p: PoppetjeStruct) => {
+      const values = render(<Poppetje poppetje={p} variant="headshot" />)
+        .container.querySelector('svg')!
+        .getAttribute('viewBox')!
+        .split(' ')
+        .map(Number);
+      const [x, y, width, height] = values;
+      if (
+        x === undefined ||
+        y === undefined ||
+        width === undefined ||
+        height === undefined ||
+        values.length !== 4
+      ) {
+        throw new Error(`Expected a four-part viewBox, received: ${values.join(' ')}`);
+      }
+      return [x, y, width, height] as const;
+    };
+    const [bx, by, bw] = vb(hatless);
+    const [hx, hy, hw] = vb(hatted);
+    // The straw brim reaches 29 head-units either side of centre and the
+    // crown climbs above the head ellipse — both must land inside the crop.
+    expect(hw).toBeGreaterThan(bw);
+    expect(hx).toBeLessThan(bx);
+    expect(hy).toBeLessThan(by);
+  });
+
   it('produces identical DOM for the same poppetje (wood-grain stability)', () => {
     const p = poppetjeFromSeed(42, { key: 'imara', name: 'Imara' });
     const first = render(<Poppetje poppetje={p} />);

@@ -13,10 +13,6 @@
  *      (e.g. "Processing prompt (47% · 6,144 tokens)", "Generating",
  *      "Loading model") surfaced live from the SSE stream.
  *
- * While a turn decodes, the busy label carries a live tok/s estimate
- * measured from the start of the generating phase — for engines that
- * don't already publish an exact rate in their own phase detail.
- *
  * Click opens a dropdown with richer telemetry — per-turn tokens
  * in/out, generation tokens/sec, a rolling average over the last
  * minute, a per-model speed table for the life of the page, and the
@@ -62,7 +58,8 @@ import {
   formatBytes,
   formatTokensPerSec,
 } from './engine-pill-stats.js';
-import { providerLabel } from './provider-label.js';
+import { useHeaderDensity } from './header-density.js';
+import { deviceLabel, providerLabel } from './provider-label.js';
 import { type LiveTurnState, useOnDeviceLiveTurns } from './useOnDeviceLiveTurns.js';
 import { useStableHeaderPopoverPosition } from './useStableHeaderPopoverPosition.js';
 
@@ -848,10 +845,10 @@ function EngineStatusPillForProvider({
     liveTokensPerSec !== null && liveTokensPerSec !== undefined
       ? `${rateIsExact ? '' : '≈'}${formatTokensPerSec(liveTokensPerSec)}`
       : '';
-  const liveRateTooltip =
-    liveTokensPerSec !== null && liveTokensPerSec !== undefined
-      ? ` · ${rateIsExact ? '' : 'about '}${formatTokensPerSec(liveTokensPerSec)}`
-      : '';
+  // Performance belongs in the detail dropdown, not in the compact header.
+  // Most engines publish the rate as structured telemetry, but tolerate an
+  // older engine that still includes it in the human-readable phase detail.
+  const pillBusyLabel = stripTokenRate(busyLabel);
   // Strip catalog qualifiers like " (MLX, 4-bit)" from the displayed
   // model name. The engine pill already conveys "this Mac / on-device"
   // context — repeating the runtime + quantization in the pill is
@@ -949,11 +946,13 @@ function EngineStatusPillForProvider({
     .filter(Boolean)
     .join(' ');
 
-  // Shared provider naming keeps a secondary llama.cpp pill distinct from
-  // DwarfStar on macOS ("On-device" vs. "DwarfStar").
+  // Shared provider naming keeps a secondary DwarfStar pill distinct from
+  // the machine-named engines ("DwarfStar" vs. "This Mac"). With no chat
+  // provider resolved the pill is here for media work only, so it names
+  // the machine rather than an engine.
   const chatPillLabel = onDeviceProvider
     ? providerLabel(onDeviceProvider, window.__GEZEL__?.platform)
-    : 'On-device';
+    : deviceLabel(window.__GEZEL__?.platform);
   // While a media engine runs, the pill's headline is the engine, not the
   // (paused) chat host — "Video" / "Image" instead of "This Mac".
   const platformPillLabel = activeMedia
@@ -961,6 +960,19 @@ function EngineStatusPillForProvider({
       ? 'Video'
       : 'Image'
     : chatPillLabel;
+  // Crowded titlebar: shed words rather than run off the bar. The machine
+  // name is the first to go — every local engine wears the same one, so it
+  // stops distinguishing anything the moment a second pill appears, and the
+  // model name below already tells the two apart. A named engine
+  // ("DwarfStar", "Video", "Image") is not a machine name and stays.
+  const density = useHeaderDensity();
+  const kindNamesTheMachine =
+    !activeMedia &&
+    (!onDeviceProvider || onDeviceProvider === 'llama-cpp' || onDeviceProvider === 'mlx');
+  const showKind = density === 'full' || !kindNamesTheMachine;
+  // Tighter still: the gezel's name goes, leaving engine + phase + model.
+  // Both stay in the pill's tooltip and in the popover's Status row.
+  const showActor = density !== 'tight';
 
   return (
     <div className="engine-pill-root" ref={rootRef}>
@@ -980,7 +992,7 @@ function EngineStatusPillForProvider({
         aria-expanded={open}
         title={
           busy
-            ? `${platformPillLabel}${tooltipModelSuffix} — ${activeGezelName ? `${activeGezelName} · ` : ''}${busyLabel}${liveOutputTokens !== null ? ` · ${tokensAreExact ? '' : 'about '}${liveOutputTokens.toLocaleString('en-US')} output tokens` : ''}${liveRateTooltip}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''}`
+            ? `${platformPillLabel}${tooltipModelSuffix} — ${activeGezelName ? `${activeGezelName} · ` : ''}${pillBusyLabel}${liveOutputTokens !== null ? ` · ${tokensAreExact ? '' : 'about '}${liveOutputTokens.toLocaleString('en-US')} output tokens` : ''}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''}`
             : `${platformPillLabel}${tooltipModelSuffix}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''} — click for details`
         }
       >
@@ -991,14 +1003,20 @@ function EngineStatusPillForProvider({
               {/* Keep the concrete engine visible beside live progress.
                   This is essential when a gezel override runs llama.cpp
                   alongside an idle default DwarfStar engine: two anonymous
-                  progress bars would recreate the same ambiguity. */}
-              <span className="engine-pill-kind">{platformPillLabel}</span>
-              {activeGezelName && <span className="engine-pill-actor">{activeGezelName} · </span>}
+                  progress bars would recreate the same ambiguity. On a
+                  crowded bar the machine name drops out (see `showKind`)
+                  and the model name below takes over that duty — which it
+                  can, because two pills wearing "This Mac" were never told
+                  apart by the name in the first place. */}
+              {showKind && <span className="engine-pill-kind">{platformPillLabel}</span>}
+              {showActor && activeGezelName && (
+                <span className="engine-pill-actor">{activeGezelName} · </span>
+              )}
               {showProgress ? (
                 <span
                   className="engine-pill-progress"
-                  title={busyLabel}
-                  aria-label={busyLabel}
+                  title={pillBusyLabel}
+                  aria-label={pillBusyLabel}
                   role="progressbar"
                   aria-valuenow={progressPct}
                   aria-valuemin={0}
@@ -1011,17 +1029,16 @@ function EngineStatusPillForProvider({
                   />
                 </span>
               ) : (
-                busyLabel
-              )}
-              {liveRateLabel && (
-                <span className="engine-pill-live-rate">{` · ${liveRateLabel}`}</span>
+                pillBusyLabel
               )}
             </>
           ) : (
-            platformPillLabel
+            showKind && platformPillLabel
           )}
           {displayModelName && (
-            <span className="engine-pill-model">{` · ${displayModelName}`}</span>
+            // The separator belongs to whatever precedes the model name, so
+            // a compacted idle pill reads "Qwen 3.8", not "· Qwen 3.8".
+            <span className="engine-pill-model">{`${busy || showKind ? ' · ' : ''}${displayModelName}`}</span>
           )}
           {healthPresentation?.inline && (
             <>
@@ -1338,6 +1355,14 @@ function phaseLabelIncludesTokenCount(label: string): boolean {
 
 function phaseLabelIncludesTokenRate(label: string): boolean {
   return /\btok\/s\b/i.test(label);
+}
+
+function stripTokenRate(label: string): string {
+  return label
+    .replace(/\s*(?:[·—–-]\s*)?(?:about\s+|~|≈)?\d+(?:\.\d+)?\s*tok\/s\b/gi, '')
+    .replace(/\(\s*\)/g, '')
+    .replace(/\s*[·—–-]\s*$/, '')
+    .trim();
 }
 
 /** One in-flight local media-engine job (image / video / recognition). */

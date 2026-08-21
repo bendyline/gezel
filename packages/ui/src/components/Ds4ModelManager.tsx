@@ -321,7 +321,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
   if (error) {
     return (
       <div className="new-row" style={{ alignItems: 'center', gap: '0.6rem' }}>
-        <span className="home-status-pill home-status-warn">Couldn't load models: {error}</span>
+        <span className="gz-status-pill gz-status-pill--warn">Couldn't load models: {error}</span>
         <button type="button" onClick={() => void loadCatalog()}>
           Retry
         </button>
@@ -389,14 +389,14 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
           const fitPill = resident ? (
             fitsRecommendedCache ? (
               <span
-                className="home-status-pill home-status-ok"
+                className="gz-status-pill gz-status-pill--ok"
                 title={`Uses SSD streaming with a target memory working set of about ${fmtGb(resident)}.`}
               >
                 {isLightest ? 'recommended on this device' : 'fits with SSD streaming'}
               </span>
             ) : canRunSafely ? (
               <span
-                className="home-status-pill home-status-warn"
+                className="gz-status-pill gz-status-pill--warn"
                 title={`Gezel will reduce this model's expert cache below its ${fmtGb(
                   resident,
                 )} target to preserve 32 GB for the system and other apps. It should run, but will read from SSD more often.`}
@@ -405,7 +405,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
               </span>
             ) : (
               <span
-                className="home-status-pill home-status-warn"
+                className="gz-status-pill gz-status-pill--warn"
                 title="The model's fixed memory requirement leaves too little room for the system, even with the expert cache reduced."
               >
                 needs more memory
@@ -526,7 +526,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                   {job ? (
                     job.error ? (
                       <>
-                        <span className="home-status-pill home-status-warn">{job.error}</span>
+                        <span className="gz-status-pill gz-status-pill--warn">{job.error}</span>
                         <button type="button" onClick={() => startInstall(m.id)}>
                           Retry
                         </button>
@@ -555,7 +555,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                     <>
                       {updateAvailable && (
                         <span
-                          className="home-status-pill home-status-warn"
+                          className="gz-status-pill gz-status-pill--warn"
                           title={
                             installedRow?.updateReason ??
                             (installedRow?.availableVersion
@@ -566,7 +566,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                           update available
                         </span>
                       )}
-                      <span className="home-status-pill home-status-ok">on device</span>
+                      <span className="gz-status-pill gz-status-pill--ok">on device</span>
                       {readOnlyIds.has(m.id) && (
                         <span
                           className="muted small"

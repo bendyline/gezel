@@ -3,25 +3,42 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
+/**
+ * Fans each pushed envelope out to every consumer, the way the real
+ * `streamSharedProjectChatEvents` does. `ProjectTimeline` subscribes
+ * twice — once for the transcript, once for the active-task queue cards
+ * — and a single-consumer queue would let whichever generator happened
+ * to be parked first swallow the envelope the other one is asserting on.
+ */
 const stream = vi.hoisted(() => {
-  const pending: ChatEventEnvelope[] = [];
-  let wake: (() => void) | null = null;
+  interface Subscriber {
+    queue: ChatEventEnvelope[];
+    wake?: (() => void) | undefined;
+  }
+  const subscribers = new Set<Subscriber>();
   return {
     push(env: ChatEventEnvelope) {
-      pending.push(env);
-      wake?.();
-      wake = null;
+      for (const sub of subscribers) {
+        sub.queue.push(env);
+        sub.wake?.();
+        sub.wake = undefined;
+      }
     },
     reset() {
-      pending.length = 0;
-      wake = null;
+      subscribers.clear();
     },
     async *consume(): AsyncGenerator<ChatEventEnvelope> {
-      while (true) {
-        while (pending.length > 0) yield pending.shift() as ChatEventEnvelope;
-        await new Promise<void>((resolve) => {
-          wake = resolve;
-        });
+      const sub: Subscriber = { queue: [] };
+      subscribers.add(sub);
+      try {
+        while (true) {
+          while (sub.queue.length > 0) yield sub.queue.shift() as ChatEventEnvelope;
+          await new Promise<void>((resolve) => {
+            sub.wake = resolve;
+          });
+        }
+      } finally {
+        subscribers.delete(sub);
       }
     },
   };

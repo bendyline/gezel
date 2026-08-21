@@ -345,14 +345,7 @@ function sidebar(areas: HandboekTocArea[], entry: HandboekTocEntry, depth: numbe
         : isCurrent
           ? dedupeById([...area.entries.filter((e) => e.id === areaLanding(area)), entry])
           : [];
-    const list = items.length
-      ? `<ul>\n${items
-          .map((e) => {
-            const current = e.id === entry.id ? ' class="hb-current" aria-current="page"' : '';
-            return `<li><a${current} href="${up(depth)}${esc(e.id)}/">${esc(e.title)}</a></li>`;
-          })
-          .join('\n')}\n</ul>`
-      : '';
+    const list = items.length ? sidebarEntryList(items, entry.id, depth) : '';
     const more =
       isCurrent && area.entries.length > NAV_INLINE_MAX
         ? `<p class="hb-more"><a href="${up(depth)}${esc(areaLanding(area))}/">All ${area.entries.length} ${esc(area.title.toLowerCase())}</a></p>`
@@ -367,6 +360,44 @@ function sidebar(areas: HandboekTocArea[], entry: HandboekTocEntry, depth: numbe
 ${sections.join('\n')}
 </nav>
 </aside>`;
+}
+
+function sidebarEntryList(entries: HandboekTocEntry[], currentId: string, depth: number): string {
+  const ungrouped: HandboekTocEntry[] = [];
+  const grouped = new Map<
+    string,
+    { id: string; title: string; order: number; entries: HandboekTocEntry[] }
+  >();
+  for (const entry of entries) {
+    if (!entry.subcategory) {
+      ungrouped.push(entry);
+      continue;
+    }
+    const existing = grouped.get(entry.subcategory.id);
+    if (existing) {
+      existing.entries.push(entry);
+    } else {
+      grouped.set(entry.subcategory.id, { ...entry.subcategory, entries: [entry] });
+    }
+  }
+
+  const items = ungrouped.map((entry) => sidebarEntryLink(entry, currentId, depth));
+  for (const group of [...grouped.values()].sort(
+    (a, b) => a.order - b.order || a.title.localeCompare(b.title),
+  )) {
+    items.push(`<li class="hb-sidebar-subcategory">
+<h3 class="hb-sidebar-subcategory-title">${esc(group.title)}</h3>
+<ul>
+${group.entries.map((entry) => sidebarEntryLink(entry, currentId, depth)).join('\n')}
+</ul>
+</li>`);
+  }
+  return `<ul class="hb-sidebar-entries">\n${items.join('\n')}\n</ul>`;
+}
+
+function sidebarEntryLink(entry: HandboekTocEntry, currentId: string, depth: number): string {
+  const current = entry.id === currentId ? ' class="hb-current" aria-current="page"' : '';
+  return `<li><a${current} href="${up(depth)}${esc(entry.id)}/">${esc(entry.title)}</a></li>`;
 }
 
 function dedupeById(list: HandboekTocEntry[]): HandboekTocEntry[] {

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -52,6 +52,19 @@ describe('TaskManager', () => {
     expect(a.ref).toBe('website/1');
     expect(b.num).toBe(2);
     expect(b.ref).toBe('website/2');
+  });
+
+  it('stamps artifactDir and pre-creates the task artifact folder', async () => {
+    const t = await tasks.create('website', {
+      title: 'Foldered',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Main' }],
+    });
+    expect(t.artifactDir).toBe(`tasks/${t.num}`);
+    const onDisk = await stat(
+      join(home, 'projects', 'website', 'artifacts', 'tasks', String(t.num)),
+    );
+    expect(onDisk.isDirectory()).toBe(true);
   });
 
   it('concurrent creates never collide', async () => {
@@ -804,6 +817,50 @@ describe('TaskManager', () => {
     });
     expect(await tasks.updateStep('website', t.num, 'nope', { prompt: 'x' })).toBeNull();
   });
+
+  it('addStep interpolates {{task.dir}} into a late-added step (prompt, advanceWhen, gate)', async () => {
+    // create() interpolates the original recipe; a step added later must get
+    // the same walk or an unresolved {{…}} in its gate hard-fails at
+    // evaluation time as an infrastructure error (step-gate.ts guard).
+    const t = await tasks.create('website', {
+      title: 'Late steps',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Main' }],
+    });
+    const updated = await tasks.addStep('website', t.num, {
+      name: 'Report for {{task.ref}}',
+      prompt: 'Write {{task.dir}}/report.md with write_artifact.',
+      advanceWhen: { file: '{{task.dir}}/report.md', artifact: true, minBytes: 10 },
+    });
+    const added = updated.craftbook.steps.at(-1)!;
+    expect(added.name).toBe(`Report for website/${t.num}`);
+    expect(added.prompt).toBe(`Write tasks/${t.num}/report.md with write_artifact.`);
+    expect(added.advanceWhen?.file).toBe(`tasks/${t.num}/report.md`);
+    expect(JSON.stringify(added)).not.toContain('{{');
+  });
+
+  it('updateStep interpolates {{task.dir}} in patched fields only', async () => {
+    const t = await tasks.create('website', {
+      title: 'Patchable',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Build' }],
+    });
+    const id = t.craftbook.steps[0]!.id;
+    const updated = await tasks.updateStep('website', t.num, id, {
+      prompt: 'Deliver {{task.dir}}/out.md',
+      gate: {
+        at: 'completion',
+        checks: [{ kind: 'minBytes', file: '{{task.dir}}/out.md', bytes: 5, artifact: true }],
+        onReject: id,
+        maxAttempts: 2,
+      },
+    });
+    const step = updated!.craftbook.steps[0]!;
+    expect(step.prompt).toBe(`Deliver tasks/${t.num}/out.md`);
+    expect((step.gate as { checks?: { file?: string }[] }).checks?.[0]?.file).toBe(
+      `tasks/${t.num}/out.md`,
+    );
+  });
 });
 
 describe('TaskManager spawn craftbooks & children', () => {
@@ -933,6 +990,21 @@ describe('TaskManager spawn craftbooks & children', () => {
       depth: 'thorough',
       includeMetrics: 'true',
     });
+  });
+
+  it('spawnChild inherits the host artifact folder — shards share one namespace', async () => {
+    // The host's collect-barrier gates were interpolated with the HOST's
+    // number; a per-child folder would leave them watching an empty dir.
+    const parent = await tasks.create('website', {
+      title: 'Sharded',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Wait' }],
+      spawnsSteps: [{ name: 'Shard', suggestedGezelId: 'ada' }],
+      cron: { expression: '0 9 * * *' },
+    });
+    expect(parent.artifactDir).toBe(`tasks/${parent.num}`);
+    const child = await tasks.spawnChild(parent.ref);
+    expect(child.artifactDir).toBe(parent.artifactDir);
   });
 
   it('spawnChild binds the child entry step to a gezel so it can dispatch', async () => {
@@ -1449,6 +1521,97 @@ describe('TaskManager craftbookParams interpolation', () => {
     expect(overridden.craftbookParams).toEqual({ reviewId: 'release-candidate' });
   });
 
+  it('rejects a launch when every declared source alternative is empty', async () => {
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            ...bookWithPlaceholders,
+            id,
+            paramSchema: {
+              type: 'object',
+              properties: {
+                sourcePath: { type: 'string', default: '' },
+                topic: { type: 'string', default: '' },
+                content: { type: 'string', default: '' },
+              },
+              anyOf: [
+                {
+                  required: ['sourcePath'],
+                  properties: { sourcePath: { type: 'string', minLength: 1 } },
+                },
+                {
+                  required: ['topic'],
+                  properties: { topic: { type: 'string', minLength: 1 } },
+                },
+                {
+                  required: ['content'],
+                  properties: { content: { type: 'string', minLength: 1 } },
+                },
+              ],
+            },
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+    await expect(
+      tasks.create('website', {
+        title: 'Empty deck',
+        craftbookId: 'powerpoint-deck',
+        assignee: { kind: 'user' },
+      }),
+    ).rejects.toThrow(
+      'requires at least one non-empty invocation parameter: sourcePath, topic, content',
+    );
+    await expect(tasks.list({ projectId: 'website' })).resolves.toEqual([]);
+  });
+
+  it('accepts a launch when one declared source alternative is non-empty', async () => {
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            ...bookWithPlaceholders,
+            id,
+            paramSchema: {
+              type: 'object',
+              properties: {
+                sourcePath: { type: 'string', default: '' },
+                topic: { type: 'string', default: '' },
+                content: { type: 'string', default: '' },
+              },
+              anyOf: [
+                {
+                  required: ['sourcePath'],
+                  properties: { sourcePath: { type: 'string', minLength: 1 } },
+                },
+                {
+                  required: ['topic'],
+                  properties: { topic: { type: 'string', minLength: 1 } },
+                },
+                {
+                  required: ['content'],
+                  properties: { content: { type: 'string', minLength: 1 } },
+                },
+              ],
+            },
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+
+    const task = await tasks.create('website', {
+      title: 'Ireland deck',
+      craftbookId: 'powerpoint-deck',
+      craftbookParams: { topic: 'Ireland' },
+      assignee: { kind: 'user' },
+    });
+    expect(task.craftbookParams).toMatchObject({ topic: 'Ireland' });
+  });
+
   it('provides per-task runtime placeholders and expands only declared defaults', async () => {
     tasks.setCraftbookResolver({
       async resolve(id) {
@@ -1530,6 +1693,49 @@ describe('TaskManager craftbookParams interpolation', () => {
     );
     expect(nextTask.craftbookParams?.outputPath).toBe(`powerpoint/task-${nextTask.num}/deck.pptx`);
     expect(nextTask.craftbookParams?.workPath).not.toBe(task.craftbookParams?.workPath);
+  });
+
+  it('resolves {{task.dir}} in defaults and steps; a spoofed task.dir param never wins', async () => {
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            ...bookWithPlaceholders,
+            id,
+            paramSchema: {
+              type: 'object',
+              properties: {
+                workPath: { type: 'string', default: '{{task.dir}}' },
+              },
+            },
+            steps: [
+              {
+                id: 'scope',
+                name: 'Scope',
+                prompt: 'Write {{workPath}}/scope.md and cite {{task.dir}}/sources.md.',
+                advanceWhen: { file: '{{workPath}}/scope.md', artifact: true, minBytes: 40 },
+                terminal: true,
+              },
+            ],
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+    const task = await tasks.create('website', {
+      title: 'Standard folder',
+      craftbookId: 'spec-doc',
+      assignee: { kind: 'user' },
+      // Reserved runtime tokens win over a caller-supplied param of the
+      // same name — the folder cannot be spoofed out from under the task.
+      craftbookParams: { 'task.dir': 'somewhere/else' },
+    });
+    const dir = `tasks/${task.num}`;
+    const step = task.craftbook.steps[0]!;
+    expect(task.artifactDir).toBe(dir);
+    expect(task.craftbookParams?.workPath).toBe(dir);
+    expect(step.prompt).toBe(`Write ${dir}/scope.md and cite ${dir}/sources.md.`);
+    expect(step.advanceWhen?.file).toBe(`${dir}/scope.md`);
   });
 
   it('leaves the snapshot byte-identical when no params are given', async () => {

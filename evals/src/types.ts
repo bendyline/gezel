@@ -149,6 +149,13 @@ export interface EvalScenario {
   /** Sent verbatim to the Meester as the kickoff message. */
   prompt: string;
   /**
+   * Opt into the local embedding pipeline for scenarios whose asserted
+   * behavior is semantic retrieval itself. Ordinary task trials keep it off
+   * so first-use model loading cannot consume the chat watchdog or silently
+   * change the prompt under test through auto-recall.
+   */
+  requiresEmbeddings?: boolean;
+  /**
    * Grader-lint contract: for every signal the scenario's grader hard-
    * REQUIRES, the pattern that must be satisfiable from the prompt text
    * itself. `grader-lint.test.ts` asserts `pattern.test(prompt)` for each

@@ -84,6 +84,7 @@ const ctx = vi.hoisted(() => ({
     nativeBinDir: '/mock/native-bin',
     reason: 'verified Electron native release test',
   } as { reused: boolean; nativeBinDir?: string; reason: string },
+  logLines: [] as string[],
 }));
 
 vi.mock('./extract-pnpm.js', () => ({
@@ -172,7 +173,9 @@ vi.mock('./system-service.js', () => ({
 }));
 vi.mock('./log-rotator.js', () => ({
   LogRotator: class {
-    write = vi.fn().mockResolvedValue(undefined);
+    write = vi.fn(async (line: string) => {
+      ctx.logLines.push(line);
+    });
     close = vi.fn().mockResolvedValue(undefined);
   },
 }));
@@ -291,6 +294,7 @@ beforeEach(async () => {
     nativeBinDir: ctx.nativeRoot,
     reason: 'verified Electron native release test',
   };
+  ctx.logLines = [];
   // "We can't read our own bundle version" is the default, which makes every
   // version check a no-op. Reset explicitly: `vi.clearAllMocks()` clears call
   // records but leaves implementations in place, so a test that stubs a
@@ -315,6 +319,7 @@ afterEach(async () => {
  */
 function makeFakeChild(): ChildProcess {
   const ee = new EventEmitter() as EventEmitter & {
+    pid: number;
     stdout: EventEmitter;
     stderr: EventEmitter;
     stdin: null;
@@ -323,6 +328,7 @@ function makeFakeChild(): ChildProcess {
     signalCode: NodeJS.Signals | null;
     kill: (sig?: NodeJS.Signals) => boolean;
   };
+  ee.pid = 12345;
   ee.stdout = new EventEmitter();
   ee.stderr = new EventEmitter();
   ee.stdin = null;
@@ -1557,6 +1563,72 @@ describe('mode-aware restart', () => {
 });
 
 describe('health lifecycle', () => {
+  it('persists the health failure cause and endpoint without logging the token', async () => {
+    const logger = baseOpts().logger;
+    const svc = new SupervisedService(
+      'local-spawn-dev',
+      'https://127.0.0.1:44481',
+      'never-log-this-token',
+      'CERT',
+      baseOpts({ devSpawn: true, logger }),
+    );
+    svc.attachSpawned(makeFakeChild());
+    ctx.health = () =>
+      Promise.reject(
+        new TypeError('fetch failed', {
+          cause: Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:44481'), {
+            code: 'ECONNREFUSED',
+          }),
+        }),
+      );
+
+    await (svc as unknown as { tick: () => Promise<void> }).tick();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /health-check failure 1\/3.*endpoint=https:\/\/127\.0\.0\.1:44481.*ECONNREFUSED/,
+      ),
+    );
+    expect(ctx.logLines.join('\n')).toMatch(/health-check failure 1\/3.*ECONNREFUSED/);
+    expect(ctx.logLines.join('\n')).not.toContain('never-log-this-token');
+    await svc.shutdown();
+  });
+
+  it('carries health, shutdown, reprobe, and child-state evidence into a fatal restart', async () => {
+    const svc = new SupervisedService(
+      'local-spawn-dev',
+      'https://127.0.0.1:44481',
+      'token',
+      'CERT',
+      baseOpts({ devSpawn: true }),
+    );
+    svc.attachSpawned(makeFakeChild());
+    ctx.health = () =>
+      Promise.reject(
+        new TypeError('fetch failed', {
+          cause: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }),
+        }),
+      );
+    vi.mocked(stopOwnedDaemon).mockRejectedValueOnce(new Error('shutdown pipe stalled'));
+    const internal = svc as unknown as {
+      tick: () => Promise<void>;
+      consecutiveHealthFailures: number;
+    };
+    internal.consecutiveHealthFailures = 2;
+
+    await internal.tick();
+
+    expect(svc.state).toBe('failed');
+    expect(svc.failure?.message).toContain('stopError=Error: shutdown pipe stalled');
+    expect(svc.failure?.message).toContain('reprobeError=TypeError: fetch failed');
+    expect(svc.failure?.message).toContain('ECONNRESET');
+    expect(svc.failure?.message).toContain('pid=12345');
+    expect(svc.failure?.message).toContain('preceding health failure');
+    expect(ctx.logLines.join('\n')).toContain('health restart threshold reached');
+    expect(ctx.logLines.join('\n')).toContain('fatal restart failure');
+    await svc.shutdown();
+  });
+
   it('clears the machine-engine notice after the user daemon reconnects to it', async () => {
     const svc = new SupervisedService(
       'local-spawn-packaged',

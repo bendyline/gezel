@@ -49,6 +49,14 @@ class SeedPlan(NamedTuple):
     all_tokens: List[int]
     reused: int
     mode: str
+    # Diagnostics for the modes that reuse NOTHING. `lcp` is where the new
+    # prompt stopped matching the cached tokens and `cached_len` is how many
+    # were held — together they say whether a full re-prefill was caused by
+    # early prompt churn (lcp near 0) or by a snapshot boundary cut too far
+    # forward (lcp near cached_len). Those need opposite fixes, and without
+    # the pair in the log the failure is indistinguishable between them.
+    lcp: int = 0
+    cached_len: int = 0
 
 
 class SnapshotSegmentPlan(NamedTuple):
@@ -231,7 +239,7 @@ def seed_from_state(state: Any, prompt_tokens: Sequence[int]) -> SeedPlan:
         # feed the decode step that produces the first new token.
         lcp = len(full) - 1
     if lcp <= 0:
-        return SeedPlan(full, None, [], 0, "fresh-no-overlap")
+        return SeedPlan(full, None, [], 0, "fresh-no-overlap", lcp, n)
 
     if lcp == n:
         if not _offsets_consistent(layers, n):
@@ -239,11 +247,11 @@ def seed_from_state(state: Any, prompt_tokens: Sequence[int]) -> SeedPlan:
         return SeedPlan(full[n:], list(layers), cached, n, "extension")
 
     if not _offsets_consistent(layers, n):
-        return SeedPlan(full, None, [], 0, "fresh-inconsistent")
+        return SeedPlan(full, None, [], 0, "fresh-inconsistent", lcp, n)
     if trim_layers(layers, n - lcp):
         state.token_ids = cached[:lcp]
-        return SeedPlan(full[lcp:], list(layers), cached[:lcp], lcp, "trimmed")
-    return SeedPlan(full, None, [], 0, "fresh-untrimmable")
+        return SeedPlan(full[lcp:], list(layers), cached[:lcp], lcp, "trimmed", lcp, n)
+    return SeedPlan(full, None, [], 0, "fresh-untrimmable", lcp, n)
 
 
 def probe_needs_prompt_snapshot(model: Any) -> bool:

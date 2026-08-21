@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { rgPath as bundledRipgrepPath } from '@vscode/ripgrep';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -70,8 +70,21 @@ function target(overrides: Partial<ResolvedSearchTarget> = {}): ResolvedSearchTa
 async function withFakeRipgrep<T>(source: string, run: () => Promise<T>): Promise<T> {
   const fakeBin = join(outsideDir, 'fake-bin');
   const executable = join(fakeBin, process.platform === 'win32' ? 'rg.cmd' : 'rg');
+  const fixture = join(fakeBin, 'fixture.mjs');
   await mkdir(fakeBin, { recursive: true });
-  await writeFile(executable, `#!${process.execPath}\n${source}\n`);
+  await writeFile(fixture, `${source}\n`);
+  if (process.platform === 'win32') {
+    await writeFile(
+      executable,
+      `@echo off\r\nif "%~1"=="--version" (\r\n  echo ripgrep 99.0.0\r\n  exit /b 0\r\n)\r\n"${process.execPath}" "${fixture}" %*\r\n`,
+    );
+  } else {
+    const shellQuote = (value: string) => `'${value.replaceAll("'", `'\\''`)}'`;
+    await writeFile(
+      executable,
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then\n  echo "ripgrep 99.0.0"\n  exit 0\nfi\nexec ${shellQuote(process.execPath)} ${shellQuote(fixture)} "$@"\n`,
+    );
+  }
   if (process.platform !== 'win32') await chmod(executable, 0o755);
   const priorPath = process.env.PATH;
   process.env.PATH = fakeBin;
@@ -331,6 +344,31 @@ describe.runIf(HAS_RIPGREP)('grepWorkspace ripgrep engine', () => {
     }
   });
 
+  it('trusts only the package-provided binary when the app reviews its own checkout', async () => {
+    const priorPath = process.env.PATH;
+    process.env.PATH = '';
+    try {
+      // @vscode/ripgrep exports <package>/bin/rg(.exe). Making that package
+      // root the workspace reproduces self-hosted Gezel development: the old
+      // general executable check rejected the bundle merely for being inside
+      // the reviewed checkout.
+      const packageRoot = dirname(dirname(bundledRipgrepPath));
+      const result = await grepWorkspace({
+        workspaceDir: packageRoot,
+        engine: 'ripgrep',
+        path: 'package.json',
+        pattern: '"name"',
+        literal: true,
+      });
+
+      expect(result.engine).toBe('ripgrep');
+      expect(result.matches.some((match) => match.path === 'package.json')).toBe(true);
+    } finally {
+      if (priorPath === undefined) delete process.env.PATH;
+      else process.env.PATH = priorPath;
+    }
+  });
+
   it('treats an option-looking pattern as data and reports invalid regexes', async () => {
     await writeFile(join(workspaceDir, 'src', 'options.txt'), '--pre=echo-owned\n');
 
@@ -462,7 +500,7 @@ describe.runIf(process.platform !== 'win32')('grepWorkspace ripgrep process cont
           engine: 'ripgrep',
           pattern: 'needle',
           literal: true,
-          timeoutMs: 100,
+          timeoutMs: 1_000,
         }),
       ),
     ).rejects.toMatchObject({ status: 504, code: 'timeout' });

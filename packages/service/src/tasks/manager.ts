@@ -240,6 +240,70 @@ function craftbookParamDefaults(paramSchema: Craftbook['paramSchema']): Record<s
 }
 
 /**
+ * Enforce the launch-time input constraints craftbooks use to prevent an
+ * active worker from receiving an impossible first step. The catalog schema
+ * is intentionally permissive JSON Schema, so this focuses on the two
+ * declarative constraints task creation can report cleanly: top-level
+ * `required`, and `anyOf` branches made from required non-empty strings.
+ */
+function assertCraftbookParamRequirements(
+  craftbookId: string,
+  paramSchema: Craftbook['paramSchema'],
+  params: Record<string, string>,
+): void {
+  if (!paramSchema || typeof paramSchema !== 'object') return;
+  const schema = paramSchema as {
+    required?: unknown;
+    anyOf?: unknown;
+  };
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((key): key is string => typeof key === 'string')
+    : [];
+  const missing = required.filter((key) => !Object.prototype.hasOwnProperty.call(params, key));
+  if (missing.length > 0) {
+    throw new Error(
+      `Craftbook "${craftbookId}" requires invocation parameter${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}`,
+    );
+  }
+
+  if (!Array.isArray(schema.anyOf) || schema.anyOf.length === 0) return;
+  const alternatives = schema.anyOf.flatMap((rawBranch) => {
+    if (!rawBranch || typeof rawBranch !== 'object' || Array.isArray(rawBranch)) return [];
+    const branch = rawBranch as { required?: unknown; properties?: unknown };
+    if (!Array.isArray(branch.required) || branch.required.length === 0) return [];
+    const keys = branch.required.filter((key): key is string => typeof key === 'string');
+    if (keys.length !== branch.required.length) return [];
+    const properties =
+      branch.properties &&
+      typeof branch.properties === 'object' &&
+      !Array.isArray(branch.properties)
+        ? (branch.properties as Record<string, unknown>)
+        : {};
+    const requirements = keys.map((key) => {
+      const property = properties[key];
+      const minLength =
+        property && typeof property === 'object' && !Array.isArray(property)
+          ? (property as { minLength?: unknown }).minLength
+          : undefined;
+      return { key, minLength: typeof minLength === 'number' ? minLength : 0 };
+    });
+    // Only enforce branches that explicitly express non-empty string input;
+    // other JSON-Schema anyOf uses remain outside this focused validator.
+    return requirements.every(({ minLength }) => minLength >= 1) ? [requirements] : [];
+  });
+  if (alternatives.length !== schema.anyOf.length) return;
+  const satisfied = alternatives.some((branch) =>
+    branch.every(({ key, minLength }) => (params[key]?.trim().length ?? 0) >= minLength),
+  );
+  if (satisfied) return;
+
+  const choices = [...new Set(alternatives.flatMap((branch) => branch.map(({ key }) => key)))];
+  throw new Error(
+    `Craftbook "${craftbookId}" requires at least one non-empty invocation parameter: ${choices.join(', ')}`,
+  );
+}
+
+/**
  * Resolve placeholders inside declared string defaults against explicit launch
  * params plus the task's reserved runtime context. Only defaults are expanded:
  * user-supplied values can legitimately contain `{{…}}` (inline templates,
@@ -357,6 +421,26 @@ function interpolateStepsContext(
     if (step.onEnter) step.onEnter = interpolateContextDeep(step.onEnter, context);
     if (step.onExit) step.onExit = interpolateContextDeep(step.onExit, context);
   }
+}
+
+/**
+ * The interpolation context for steps added or patched AFTER create().
+ * `create()` interpolates the whole recipe once; a step that arrives later
+ * (add_task_step, set_step_deliverable's patch) skipped that walk, so a
+ * `{{task.dir}}` in its gate would reach `step-gate.ts`'s unresolved-
+ * placeholder guard and hard-fail as an infrastructure error. Persisted
+ * `craftbookParams` are already fully resolved (reserved runtime values
+ * never land there), so spreading them first and the runtime values last
+ * preserves create()'s reserved-wins semantics.
+ */
+function taskInterpolationContext(task: Task): Record<string, string> {
+  return {
+    ...(task.craftbookParams ?? {}),
+    'task.num': String(task.num),
+    'task.ref': task.ref,
+    'task.projectId': task.projectId,
+    'task.dir': task.artifactDir ?? `tasks/${task.num}`,
+  };
 }
 
 /**
@@ -1064,10 +1148,12 @@ export class TaskManager {
         connectorPrepNote = prep.note;
       }
     }
+    const artifactDir = `tasks/${num}`;
     const runtimeCraftbookContext = {
       'task.num': String(num),
       'task.ref': buildTaskRef(projectId, num),
       'task.projectId': projectId,
+      'task.dir': artifactDir,
     };
     effectiveCraftbookParams = {
       ...resolveCraftbookParamDefaults(
@@ -1077,6 +1163,11 @@ export class TaskManager {
       ),
       ...craftbookParamOverrides,
     };
+    assertCraftbookParamRequirements(
+      input.craftbookId ?? mainBook.id,
+      mainBook.paramSchema,
+      effectiveCraftbookParams,
+    );
     const craftbookInterpolationContext = {
       ...effectiveCraftbookParams,
       // Reserved runtime values win if a caller tries to spoof one as a
@@ -1168,6 +1259,7 @@ export class TaskManager {
         : {}),
       activeStepId,
       ...(input.parentTaskRef ? { parentTaskRef: input.parentTaskRef } : {}),
+      artifactDir,
       ...(extras?.origin ? { origin: extras.origin } : {}),
       ...(cron ? { cron } : {}),
       ...(nightShift ? { nightShift } : {}),
@@ -1181,6 +1273,12 @@ export class TaskManager {
     };
 
     await this.store.writeTask(task);
+    // Pre-create the task's artifact folder so it shows in the artifacts
+    // browser from minute one. Purely a UX affordance — `write_artifact`
+    // mkdir -p's on its own — so a failure must never block the task.
+    await this.store
+      .createProjectArtifactFolder(projectId, artifactDir)
+      .catch((err) => log.warn('[tasks] could not pre-create task artifact folder:', err));
     // New work on the project — wake it if it had gone stable.
     await this.reactivateProject(projectId);
 
@@ -1589,6 +1687,10 @@ export class TaskManager {
       ? expandStepDeliverable({ ...base, id }, input.deliverable)
       : { ...base, id };
     const newStep: TaskCraftbookStep = { ...expanded, createdAt: nowIso() };
+    // create() interpolated the original recipe; late-added steps get the
+    // same treatment (after deliverable expansion, so the expanded gate is
+    // covered) or their `{{task.dir}}`/param tokens hard-fail at the gate.
+    interpolateStepsContext([newStep], taskInterpolationContext(task));
     const steps = [...task.craftbook.steps];
     steps.splice(stepInsertionIndex(steps, pos), 0, newStep);
     assertCraftbookGraph({ steps, entryStepId: task.craftbook.entryStepId });
@@ -1628,8 +1730,27 @@ export class TaskManager {
     const idx = task.craftbook.steps.findIndex((s) => s.id === stepId);
     if (idx < 0) return null;
     const current = task.craftbook.steps[idx] as TaskCraftbookStep;
+    // Interpolate the incoming fields only — untouched step text keeps
+    // whatever create() (or a previous patch) resolved. `null` means
+    // "clear" and passes through untouched.
+    const ctx = taskInterpolationContext(task);
+    const resolvedPatch: UpdateTaskStepRequest = {
+      ...patch,
+      ...(typeof patch.name === 'string' ? { name: interpolateContext(patch.name, ctx) } : {}),
+      ...(typeof patch.description === 'string'
+        ? { description: interpolateContext(patch.description, ctx) }
+        : {}),
+      ...(typeof patch.prompt === 'string'
+        ? { prompt: interpolateContext(patch.prompt, ctx) }
+        : {}),
+      ...(patch.consumes ? { consumes: interpolateContextDeep(patch.consumes, ctx) } : {}),
+      ...(patch.advanceWhen ? { advanceWhen: interpolateContextDeep(patch.advanceWhen, ctx) } : {}),
+      ...(patch.gate ? { gate: interpolateContextDeep(patch.gate, ctx) } : {}),
+      ...(patch.onEnter ? { onEnter: interpolateContextDeep(patch.onEnter, ctx) } : {}),
+      ...(patch.onExit ? { onExit: interpolateContextDeep(patch.onExit, ctx) } : {}),
+    };
     // Shared field-merge semantics (preserves lifecycle fields via the generic).
-    const updated: TaskCraftbookStep = applyStepPatch(current, patch);
+    const updated: TaskCraftbookStep = applyStepPatch(current, resolvedPatch);
     const steps = [...task.craftbook.steps];
     steps[idx] = updated;
     // Edits that touch edges must keep the graph resolvable.
@@ -3802,6 +3923,10 @@ export class TaskManager {
       ...(parent.nightShift?.enabled ? { nightShift: { enabled: true } } : {}),
       activeStepId,
       parentTaskRef: parent.ref,
+      // Shards share the HOST's folder: the host's collect-barrier gates
+      // were interpolated with the host's number, and per-child files are
+      // already namespaced by the variation context ({{batchNumber}}, …).
+      artifactDir: parent.artifactDir ?? `tasks/${parent.num}`,
       ...(parent.roleBasedNameOnlyMode !== undefined
         ? { roleBasedNameOnlyMode: parent.roleBasedNameOnlyMode }
         : {}),

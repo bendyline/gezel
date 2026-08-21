@@ -68,10 +68,10 @@ describe('declarative per-item fanout (invoice-run)', () => {
     const detail = await svc.context.catalog.get('craftbook-template', 'invoice-run');
     expect(detail?.manifest.kind).toBe('craftbook-template');
     if (detail?.manifest.kind !== 'craftbook-template') throw new Error('wrong kind');
-    expect(detail.manifest.spawn?.overFile).toBe('notes/billables.json');
-    if (process.env.GEZEL_GILDE_DATA_DIR) {
-      expect(detail.manifest.spawn?.overArtifact).toBe(true);
-    }
+    // Catalog manifests retain their launch-time placeholders. Task creation
+    // resolves workPath to the concrete per-task artifact folder.
+    expect(detail.manifest.spawn?.overFile).toBe('{{workPath}}/billables.json');
+    expect(detail.manifest.spawn?.overArtifact).toBe(true);
     expect(detail.manifest.spawn?.steps.length).toBeGreaterThan(0);
   });
 
@@ -84,14 +84,6 @@ describe('declarative per-item fanout (invoice-run)', () => {
       throw new Error('invoice-run has no spawn block');
     }
     const spawn = detail.manifest.spawn;
-
-    // Seed the machine list the scope step would normally produce.
-    const billables = JSON.stringify(BILLABLES, null, 2);
-    if (spawn.overArtifact) {
-      await store.writeProjectArtifact(project.id, spawn.overFile, billables);
-    } else {
-      await store.writeProjectWorkspaceFile(project.id, spawn.overFile, billables);
-    }
 
     // Create the spawn host the way the HTTP create route / MCP
     // invoke_craftbook / eval harness do: by craftbookId ALONE, with NO
@@ -106,11 +98,25 @@ describe('declarative per-item fanout (invoice-run)', () => {
     });
 
     // Invoker builds a spawn host: spawnsCraftbook present AND the main
-    // snapshot carries the spawn config the runtime reads at fanout time.
+    // snapshot carries the resolved spawn config the runtime reads at fanout
+    // time. The catalog template itself remains untouched above.
     expect(task.spawnsCraftbook).toBeDefined();
-    expect(task.craftbook.spawn?.overFile).toBe('notes/billables.json');
+    expect(task.craftbookParams?.workPath).toBe(task.artifactDir);
+    expect(task.craftbook.spawn?.overFile).toBe(`${task.artifactDir}/billables.json`);
     expect(task.craftbook.spawn?.overArtifact).toBe(spawn.overArtifact);
     expect(task.activeStepId).toBe('scope');
+
+    // Seed the machine list at the concrete path the scope step would
+    // normally produce. Seeding the raw catalog path would create a literal
+    // `{{workPath}}` directory and leave the runtime's resolved path empty.
+    const resolvedSpawn = task.craftbook.spawn;
+    if (!resolvedSpawn) throw new Error('spawn host snapshot has no spawn block');
+    const billables = JSON.stringify(BILLABLES, null, 2);
+    if (resolvedSpawn.overArtifact) {
+      await store.writeProjectArtifact(project.id, resolvedSpawn.overFile, billables);
+    } else {
+      await store.writeProjectWorkspaceFile(project.id, resolvedSpawn.overFile, billables);
+    }
 
     // Advance scope -> draft (force past scope's gate). Activating the
     // spawnFanout `draft` step fires the runtime fanout.
@@ -137,9 +143,10 @@ describe('declarative per-item fanout (invoice-run)', () => {
 
     // The runtime stamped the step's advanceWhen deliverable and advanced.
     const draftStep = task.craftbook.steps.find((step) => step.id === 'draft');
-    const draftManifest = draftStep?.advanceWhen?.artifact
-      ? await store.readProjectArtifact(project.id, 'notes/draft.md')
-      : await store.readProjectWorkspaceFile(project.id, 'notes/draft.md');
+    if (!draftStep?.advanceWhen) throw new Error('draft step has no deliverable');
+    const draftManifest = draftStep.advanceWhen.artifact
+      ? await store.readProjectArtifact(project.id, draftStep.advanceWhen.file)
+      : await store.readProjectWorkspaceFile(project.id, draftStep.advanceWhen.file);
     expect(draftManifest).toBeTruthy();
 
     // Idempotency: re-activating the draft step must not double-spawn. The

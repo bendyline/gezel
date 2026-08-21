@@ -66,7 +66,15 @@ const W_TOKEN = 0.3;
 const DEFAULT_TOP_K = 5;
 // Blended-score floor: drops clearly-irrelevant books but stays low so a
 // modest-but-best match still surfaces. The shortlist is small either way.
-const DEFAULT_MIN_SCORE = 0.15;
+// The embedding component rides the embedder's cosine scale: under
+// bge-small-en-v1.5 an UNRELATED query→passage pair scores ~0.32 median
+// (`evals/src/bin/embed-calibration.ts`, 2026-08-19), so 0.7×cosine alone
+// put the MiniLM-era 0.15 floor below pure noise. 0.25 keeps it below the
+// weakest genuine match band (relevant pairs start ~0.56 → blend ~0.39)
+// with margin for the craftbook-description genre; measured floors here are
+// derived from memory-shaped fixtures, so if suggestions regress the fix is
+// a craftbook-domain fixture set for the harness, not a guess.
+const DEFAULT_MIN_SCORE = 0.25;
 // Lexical-only floor for embeddings-less mode. The lexical token-overlap
 // scale tops out far lower than the blended scale: calibrated
 // against the 203-book catalog, correct top-1 matches for obvious build
@@ -77,6 +85,14 @@ const DEFAULT_MIN_SCORE = 0.15;
 // a no-op and left every kickoff task gate-less (wild-caught: zero gate
 // firings across two full 56-trial eval baselines).
 const DEFAULT_MIN_SCORE_LEXICAL = 0.04;
+// Omni-search suggestions should be rarer than a dedicated craftbook lookup:
+// the user asked for knowledge, so a merely-best procedure is distracting.
+// An exact lexical signal can independently qualify a book when embeddings
+// are absent or unhelpful. 0.32 clears the bge unrelated band's blended
+// ceiling (0.7×0.429 ≈ 0.30 — same calibration run as DEFAULT_MIN_SCORE).
+const SEARCH_MIN_BLEND_SCORE = 0.32;
+const SEARCH_MIN_LEXICAL_SCORE = 0.08;
+const SEARCH_MAX_SUGGESTIONS = 2;
 
 /**
  * Production vector cache keyed by `id@version`. Bundled books bump their
@@ -222,6 +238,36 @@ export async function suggestCraftbooks(
     ...(opts.topK !== undefined ? { topK: opts.topK } : {}),
     ...(opts.minScore !== undefined ? { minScore: opts.minScore } : {}),
   });
+}
+
+/**
+ * Keep only high-confidence craftbook matches suitable for attaching to a
+ * general project search response. The dedicated suggester intentionally uses
+ * a lower floor because its caller explicitly asked for a procedure shortlist.
+ */
+export function usefulCraftbooksForSearch(
+  suggestions: CraftbookSuggestion[],
+  limit = SEARCH_MAX_SUGGESTIONS,
+): CraftbookSuggestion[] {
+  return suggestions
+    .filter(
+      (suggestion) =>
+        suggestion.lexical >= SEARCH_MIN_LEXICAL_SCORE ||
+        (suggestion.semantic !== undefined && suggestion.score >= SEARCH_MIN_BLEND_SCORE),
+    )
+    .slice(0, limit);
+}
+
+/**
+ * Every craftbook reachable from anywhere — bundled (Gilde) + user-local.
+ * Project-local books are deliberately excluded: they are only invokable
+ * from their own project, so a global name catalog listing them would offer
+ * procedures the picker can't actually run.
+ */
+export async function listGlobalCraftbookCandidates(
+  deps: CraftbookSuggestionDeps,
+): Promise<CraftbookCandidate[]> {
+  return gatherCandidates(deps);
 }
 
 async function gatherCandidates(

@@ -1,0 +1,1760 @@
+/* ── Document Export — DocBlocks-style toolbar button + shared primitives ── */
+
+.gezel-export-trigger.squisq-toolbar-button {
+  width: auto;
+  min-width: 5.25rem;
+  gap: 0.4rem;
+  padding: 2px 0.65rem 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+}
+
+.gezel-export-trigger.squisq-toolbar-button svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+}
+
+.gezel-export-trigger.squisq-toolbar-button[aria-expanded="true"] {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 16%, transparent);
+}
+
+.gezel-export-menu.app-nav-menu {
+  min-width: 16rem;
+  z-index: 1100;
+}
+
+.gezel-export-menu .app-nav-menu-item {
+  font-size: var(--text-md);
+  white-space: nowrap;
+}
+
+.gezel-export-menu .app-nav-menu-item[data-disabled] {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.gezel-export-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0.25rem 0;
+}
+
+.gezel-export-dialog.gz-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.gezel-export-dialog form {
+  display: flex;
+  min-height: 0;
+  max-height: 85vh;
+  flex-direction: column;
+}
+
+.gezel-export-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1.1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.gezel-export-dialog-close {
+  width: 1.8rem;
+  height: 1.8rem;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-xl);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.gezel-export-dialog-close:hover {
+  background: var(--key-bg-hover);
+  color: var(--text);
+}
+
+.gezel-export-dialog-body {
+  display: flex;
+  min-height: 0;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+}
+
+.gezel-export-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.gezel-export-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.gezel-export-hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.gezel-export-choice-tray.gz-tray {
+  width: 100%;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.gezel-export-choice-tray .gz-key {
+  position: relative;
+}
+
+.gezel-export-choice-radio {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.gezel-export-choice-tray .gz-key:has(.gezel-export-choice-radio:focus-visible) {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.gezel-export-select {
+  background: var(--panel);
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.4rem 0.5rem;
+  font: inherit;
+  font-size: var(--text-md);
+}
+
+.gezel-export-dialog .gz-dialog-actions {
+  margin: 0;
+  padding: 0.8rem 1.1rem;
+  border-top: 1px solid var(--border);
+}
+
+.gezel-export-loading-dialog.gz-dialog {
+  width: min(28rem, calc(100vw - 2rem));
+  min-width: 0;
+}
+
+.placeholder {
+  color: #888;
+}
+
+.project-loading {
+  padding-inline-start: 1rem;
+}
+
+.error {
+  color: #c0392b;
+}
+
+.log {
+  background: #111;
+  color: #eaeaea;
+  padding: 0.75rem;
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 0.8rem;
+  border-radius: 6px;
+  min-height: 160px;
+  white-space: pre-wrap;
+}
+
+.tasks-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 1.25rem;
+  height: 100%;
+}
+
+.task-form label {
+  display: block;
+  margin-bottom: 0.75rem;
+}
+
+.task-form select,
+.task-form textarea {
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  background: var(--panel);
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  margin-top: 0.25rem;
+}
+
+.usage-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.usage-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.usage-card-wide {
+  grid-column: 1 / -1;
+}
+
+.usage-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #888;
+  margin-bottom: 0.35rem;
+}
+
+.usage-value {
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+.usage-detail {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: #999;
+  margin-top: 0.25rem;
+}
+
+.usage-bar-track {
+  height: 8px;
+  background: rgba(127, 127, 127, 0.2);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 0.5rem 0 0.35rem;
+}
+
+.usage-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.usage-bar-warn {
+  background: #e67e22;
+}
+
+.usage-overage {
+  font-size: 0.8rem;
+  color: #c0392b;
+  margin-top: 0.25rem;
+}
+
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 92%;
+  /* Flex children default to `min-width: auto`, which is the intrinsic
+     content width. That lets long unbroken content (URLs, code lines)
+     blow past `max-width` and push the chat-timeline into a horizontal
+     scroll. Explicit `min-width: 0` makes `max-width` actually stick. */
+  min-width: 0;
+  /* Anchor for `.msg-actions` — the floating per-message toolbar that
+     reveals on hover in the empty 8% gutter. */
+  position: relative;
+}
+
+/* Per-message hover toolbar — floats in the gutter alongside the
+   bubble. Appears on `.msg:hover` (or focus-within so keyboard nav
+   surfaces it). Buttons stack vertically; today there's just Copy,
+   but the layout admits more without restructuring.
+
+   Two-part structure: `.msg-actions-anchor` is the absolutely-
+   positioned full-height column in the bubble's gutter; `.msg-actions`
+   is the inner sticky toolbar that pins to the scroll viewport so
+   the button stays reachable on tall bubbles whose top has scrolled
+   offscreen. The anchor's height bound keeps the toolbar from
+   ghosting past the bubble's bottom. */
+.msg-actions-anchor {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  /* Visual offset from the bubble's top — applied as padding so the
+     sticky toolbar's natural position lines up with the first row of
+     bubble content. */
+  padding-top: 0.4rem;
+  /* `pointer-events: auto` on the anchor (default) so the gap between
+     the bubble edge and the button stays hoverable — without it the
+     mouse "falls through" the anchor's padding to the chat-timeline,
+     `.msg:hover` flips false, and the toolbar disappears just as the
+     user is reaching for it. The anchor sits in the bubble's empty
+     gutter so capturing pointer events there is safe (nothing else
+     lives in that strip). The width is determined by the toolbar's
+     intrinsic size, so the hoverable column is just wide enough to
+     reach the button. */
+}
+.msg-actions-anchor-right {
+  left: 100%;
+  padding-left: 0.5rem;
+}
+.msg-actions-anchor-left {
+  right: 100%;
+  padding-right: 0.5rem;
+}
+.msg-actions {
+  position: sticky;
+  /* Stickiness offset from the chat-timeline scroll viewport top. */
+  top: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.msg:hover .msg-actions,
+.msg-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+.msg-action-button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.msg-action-button:hover {
+  background: var(--accent);
+  color: var(--titlebar-ink, #fff);
+  border-color: var(--accent);
+}
+
+/* Debug-only "copy debug bundle" button — same shape as the regular
+   copy button but with a distinct dashed border so engineers can tell
+   the two apart at a glance, and a slightly muted resting state since
+   it's an opt-in surface (only visible when `config.debugMode` is on). */
+.msg-action-button-debug {
+  border-style: dashed;
+  font-size: 0.75rem;
+}
+
+.msg-role {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #888;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.msg-body {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  /* Anywhere-break for unbroken strings (long URLs, slugs, hashes).
+     `break-word` keeps normal words unbroken but lets the browser snap
+     mid-word when nothing else fits. `overflow-wrap: anywhere` adds
+     fallback for strings with no natural break opportunities. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  padding: 0.7rem 0.9rem;
+  border-radius: 12px;
+  background: var(--chat-bubble-bg, var(--panel));
+  border: 1px solid var(--border);
+  line-height: 1.45;
+  /* Bubble never grows past its flex parent (the .msg wrapper already
+     caps that at 92% of the timeline). */
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* When the body wraps rendered Squisq output, shrink the bubble to fit
+   its content rather than stretching across the flex-column cross-axis.
+   Also tame Squisq's outer wrapper — its `height: 100%` + `overflow-y`
+   would otherwise force the bubble to size off its parent instead of
+   its own content, producing a tall empty box for short replies. */
+.msg-body-rendered {
+  align-self: flex-start;
+  padding: 0.45rem 0.65rem;
+  max-width: 100%;
+  min-width: 0;
+  /* Match the Squisq reading surface (`GEZEL_LIGHT_SURFACE` in
+     chat-theme.ts) through the shared light-mode token, so the outer
+     bubble and rendered interior read as one continuous shade. */
+  background: var(--chat-bubble-bg, var(--panel));
+}
+
+/* AI bubbles fill the wrapper's full width so they stay aligned with
+   their sticky context-header and don't visibly resize as tokens stream
+   in. */
+.msg-assistant > .msg-body,
+.msg-assistant > .msg-body-rendered,
+.msg-from-gezel > .msg-body,
+.msg-from-gezel > .msg-body-rendered {
+  align-self: stretch;
+}
+
+/* Streaming bubble segment wrapper. The first segment renders
+   flush at the top; subsequent ones get a gap so a thinking-pause
+   between text bursts shows as a visible paragraph break, not one
+   wall of text. The threshold for inserting a fresh segment lives
+   in `ChatTimelineView`'s delta handler (currently 5s of idle). */
+.msg-stream-segment {
+  /* During a tool-only phase `.msg-thinking .msg-body` is a column
+     flexbox with left-aligned children. Without this explicit stretch,
+     the segment's automatic width becomes the max-content width of a
+     long tool-argument summary. The list and row below then size their
+     `100%` against that already-too-wide wrapper, bypassing all of their
+     own ellipsis/min-width guards. Constrain the React segment wrapper
+     itself so every descendant resolves percentages against the bubble. */
+  align-self: stretch;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.msg-stream-segment + .msg-stream-segment {
+  margin-top: 0.7rem;
+  /* Subtle horizontal divider so the eye catches the break even
+     when the burst is a single short sentence. */
+  padding-top: 0.6rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+/* Phase-announcement label rendered from Copilot's
+   `report_intent` tool, the Claude CLI per-turn breadcrumbs, and the
+   tool-permission flow. Left-aligned small-caps text, no rule. Used both
+   in streaming bubbles (via IntentDivider in a msg-stream-segment)
+   and completed bubbles (spliced inline between text slices). */
+.msg-intent-divider {
+  margin: 1rem 0 0.35rem;
+  text-align: left;
+  line-height: 1;
+}
+.msg-intent-divider-label {
+  display: inline-block;
+  color: var(--muted, rgba(255, 255, 255, 0.55));
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+/* When the divider is the first thing in the bubble body (intent
+   fired before any text arrived), tighten the top margin so it
+   doesn't leave awkward whitespace under the author header. */
+.msg-body-rendered > .msg-intent-divider:first-child,
+.msg-stream-segment:first-child .msg-intent-divider {
+  margin-top: 0.35rem;
+}
+/* A trailing divider (intent was the last thing in the turn) leans
+   lower on the bubble; trim the bottom margin so it hugs the edge. */
+.msg-body-rendered > .msg-intent-divider:last-child,
+.msg-stream-segment:last-child .msg-intent-divider {
+  margin-bottom: 0.35rem;
+}
+/* The intent divider is already a visual section break — a following
+   stream segment shouldn't pile on its own dashed separator + padding
+   on top of the divider's bottom margin. Collapse the decorations
+   when the previous segment's last child was an intent divider. */
+.msg-stream-segment:has(> .msg-intent-divider:last-child) + .msg-stream-segment {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* Code blocks inside chat bubbles can easily run several hundred
+   characters. Let them scroll within the bubble rather than stretching
+   the bubble wider than the chat column. `<code>` inline spans stay
+   wrapped via the body-level `word-break`. */
+.msg-body pre,
+.msg-body-rendered pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* Tables can also overflow. Scroll horizontally inside the bubble. */
+.msg-body-rendered table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* Images should never outsize the bubble. */
+.msg-body img,
+.msg-body-rendered img {
+  max-width: 100%;
+  height: auto;
+}
+.msg-body-rendered .squisq-linear {
+  height: auto;
+  overflow: visible;
+}
+
+/* Per-gezel font size adjustment. Squisq's LinearDocView hard-codes a
+   16px font-size inline on its content; override with !important so chat
+   prose stays at the quieter 15px conversation size and a font's `scale`
+   factor can normalize visual size across typefaces.
+
+   The font-family override keeps the chat register consistent: plain
+   `.msg-body` text is the editorial serif, but LinearDocView inlines a
+   system-ui stack on its content, flipping rendered assistant prose to
+   sans. `--gezel-chat-font` (set inline by the bubble when the gezel has
+   a custom chat font) still wins through the fallback chain. */
+.msg-body-rendered .squisq-linear-content {
+  font-size: calc(15px * var(--gezel-font-scale, 1)) !important;
+  font-family: var(--gezel-chat-font, var(--font-display)) !important;
+  line-height: 1.5 !important;
+}
+
+/* Squisq's page prose resets itself to 1.05rem (16.8px), bypassing the
+   chat size above. Keep prose relative to the chat container instead. */
+.msg-body-rendered .squisq-page-prose {
+  font-size: 1em;
+}
+
+/* `thinMargins` removes horizontal page padding but retains 1.5rem above
+   and below every page section. That document rhythm is too loose inside
+   a bubble; the bubble itself already supplies the needed inset. */
+.msg-body-rendered .squisq-page--thin .squisq-page-section {
+  padding-block: 0.15rem;
+}
+
+/* Chat replies are a conversation, not a centered document: Squisq's
+   page layout gives each section an auto-centered 740px reading measure,
+   which floats short replies ~150px off the bubble's left edge. Keep the
+   measure, drop the centering, so text aligns with the author row. */
+.msg-body-rendered .squisq-page-section-inner {
+  margin-inline: 0 !important;
+}
+
+.msg-user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.msg-user .msg-body {
+  background: rgba(176, 114, 76, 0.18);
+  border-color: rgba(176, 114, 76, 0.35);
+}
+
+/* User bubbles hold a squisq LinearDocView so prompts get the same complete
+   Markdown treatment as replies (links, lists, code, image refs, and
+   mention chips). Its root declares `container: squisq-page /
+   inline-size`. Size containment means the squisq tree contributes ZERO
+   intrinsic width — inside a content-sized bubble the whole message
+   collapses into a ~1ch-wide, thousands-of-px-tall pill (the empty-pill
+   incident). Give user bubbles a narrower definite width so the container
+   remains reliable without turning every prompt into a full-row panel. */
+.msg-user:has(.msg-body-rendered) {
+  align-self: flex-end;
+  width: min(82%, 64rem);
+  max-width: 82%;
+}
+
+.msg-user .msg-body-rendered {
+  width: 100%;
+}
+
+/* LinearDocView paints both its outer scroller and inner page. Inside a
+   chat bubble those nested canvases read as an inset rectangle—especially
+   in dark mode. Let every bubble's own fill remain the single surface. */
+.msg-body-rendered .squisq-linear,
+.msg-body-rendered .squisq-page {
+  background: transparent !important;
+}
+
+.msg-assistant {
+  /* Stretch (not flex-start) so the wrapper fills the timeline's cross
+      axis up to its own `max-width: 92%` cap — the bubble width then
+      stays put as text streams in instead of breathing with content,
+      and lines up with the sticky context-header above it. */
+  align-self: stretch;
+  max-width: 92%;
+}
+
+/* Inter-gezel message: when one gezel pings another via `message_gezel`,
+   the resulting bubble lives in the receiver's session but was authored
+   by another gezel. Stylistically distinct from both user (right-aligned
+   composer turn) and assistant (left-aligned model reply) — left-aligned
+   with a dashed handoff accent on the border so the thread-of-conversation
+   shape reads as "one gezel speaking to another." */
+.msg-from-gezel {
+  align-self: stretch;
+  max-width: 92%;
+}
+
+.msg-from-gezel .msg-body {
+  background: var(--chat-handoff-bg, rgba(176, 114, 76, 0.08));
+  border: 1px dashed var(--chat-handoff-border, rgba(176, 114, 76, 0.45));
+}
+
+.msg-role-handoff {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.78rem;
+  color: #7a4a2a;
+}
+
+.msg-handoff-sender,
+.msg-handoff-receiver {
+  font-weight: 600;
+  color: var(--text, inherit);
+}
+
+.msg-handoff-arrow {
+  color: #b0724c;
+  font-weight: 600;
+}
+
+.msg-handoff-project {
+  color: #888;
+  font-style: italic;
+}
+
+.msg-streaming .msg-body::after {
+  content: "▍";
+  display: inline-block;
+  margin-left: 2px;
+  animation: blink 1s steps(2) infinite;
+  color: #888;
+}
+
+/* Referenced-artifacts chip row — rendered under assistant bubbles
+   when the server's parser resolved mentioned filenames against the
+   project's artifact tree. Clicking a chip opens the file in the
+   References pane. */
+.msg-refs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.4rem 0 0.1rem;
+  font-size: 0.82rem;
+}
+
+/* "Consulted N indexed sources" — collapsed provenance row under a user
+   turn that received proactive indexed context. Reads as quiet diligence:
+   muted summary line, chip rows only when expanded. */
+.msg-retrieval {
+  margin: 0.3rem 0 0.1rem;
+  font-size: 0.78rem;
+}
+
+.msg-retrieval-summary {
+  color: var(--muted, #888);
+  cursor: pointer;
+  user-select: none;
+}
+
+.msg-retrieval-summary:hover {
+  color: inherit;
+}
+
+.msg-retrieval-list {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.msg-retrieval-item {
+  color: var(--muted, #888);
+}
+
+.msg-refs-label {
+  color: var(--muted, #888);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  margin-right: 0.1rem;
+}
+
+.msg-ref-chip {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--surface, transparent);
+  color: var(--text);
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--radius-sm);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.msg-ref-chip:hover {
+  border-color: var(--accent);
+  background: var(--surface-hover, var(--surface, transparent));
+}
+
+/* Inline code spans that the parser promoted to `#artifact:` / `#workspace:`
+   links. Keeps the code-span visual weight (monospace + subtle surface)
+   while tagging them as clickable with the accent underline. Both schemes
+   render identically on purpose: which store a file lives in is the
+   viewer's business, not something to weigh at click time. */
+.msg-body-rendered a[href^="#artifact:"],
+.msg-body-rendered a[href^="#workspace:"] {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.92em;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-radius: 4px;
+  padding: 0 4px;
+  text-decoration: none;
+  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  cursor: pointer;
+}
+
+.msg-body-rendered a[href^="#artifact:"]:hover,
+.msg-body-rendered a[href^="#workspace:"]:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-bottom-style: solid;
+}
+
+/* Inline @-mention chip in rendered chat bubbles. Squisq's MarkdownRenderer
+   emits `.squisq-md-mention.mention`; we style it here so it picks up the
+   chat-area accent palette. */
+.msg-body-rendered .squisq-md-mention {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 10px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+@keyframes blink {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* Gezel detail screen. The header + tab row stay pinned; the active
+   tab panel fills the remaining height. The chat tab additionally
+   bounds itself so only its message list scrolls (see below) — other
+   tabs (About/Appearance/Growth) keep their natural page-scrolling
+   flow, so `.gezel-detail` only becomes a height-filling flex child
+   when the chat tab is active. */
+.gezel-detail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.gezel-detail > .detail-header,
+.gezel-detail > .entity-tabs-row {
+  flex-shrink: 0;
+}
+
+.gezel-detail-chat {
+  /* `flex: 1` fills the height when the parent is a flex column (the
+     Gezels-area `.two-col > section`); `height: 100%` covers the
+     promoted-standalone-tab path where the parent `.app-main` is a
+     block with a definite height. */
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+}
+
+/* Gezel screen → Chat tab. The ProjectTimeline + ChatComposer fill the
+   tab body; the project dropdown is a slim header row above them.
+   `flex: 1` + `min-height: 0` (rather than `height: 100%`) lets the
+   composer sit at the bottom while the inner `.chat-timeline` scrolls. */
+.gezel-chat-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  min-height: 0;
+}
+
+.gezel-chat-project-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.25rem 0;
+}
+
+.gezel-chat-project-select {
+  min-width: 240px;
+}
+
+/* Same self-contained compose surface project chat and Home already use:
+   a warm header band grouping recipient + thread picker + toolbar above the
+   lighter draft, inside one rounded frame. The horizontal inset matches the
+   timeline's content gutter so the frame lines up with the bubbles above it.
+   Unlike project chat there are no attached @/> mode tabs here, so all four
+   corners stay rounded. */
+.gezel-chat-tab .chat-composer {
+  --compose-frame-bg: var(--chat-compose-header-bg);
+  --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
+  --compose-toolbar-bg: var(--chat-compose-header-bg);
+  margin: 0 0.75rem 0.25rem;
+  border: 1px solid var(--compose-frame-border);
+  border-radius: var(--radius-md);
+  background: var(--compose-frame-bg);
+}
+
+.chat-composer {
+  padding: 0.5rem 0.25rem 0.25rem;
+}
+
+/* "To: {GezelName}" pill above the editor — small, muted, left-aligned.
+   Makes the active recipient explicit so users aren't guessing whose
+   inbox the next Send drops into. */
+.chat-composer-to {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0.25rem 0.25rem;
+  padding: 0.15rem 0.55rem;
+  font-size: var(--text-2xs);
+  background: var(--surface-2, rgba(0, 0, 0, 0.04));
+  border-radius: var(--radius-md);
+  line-height: 1.4;
+}
+
+.chat-composer-to-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chat-composer-to-text {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.chat-composer-to-name {
+  font-weight: 500;
+}
+
+.chat-composer-to-role {
+  overflow: hidden;
+  max-width: 12rem;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-composer-to-recipient {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding-left: 0.45rem;
+  border-left: 1px solid var(--border);
+}
+
+.chat-composer-recipient-trigger,
+.chat-composer-recipient-remove,
+.chat-recipient-add {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: var(--text);
+  background: var(--key-bg);
+  border: 1px solid var(--key-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--key-shadow);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-weight: 600;
+  line-height: 1;
+}
+
+.chat-composer-recipient-trigger {
+  width: 1.65rem;
+  height: 1.65rem;
+  margin-left: auto;
+  padding: 0;
+  font-size: var(--text-lg);
+  transform: translateY(-2px);
+}
+
+.chat-composer-recipient-remove {
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  box-shadow: none;
+}
+
+.chat-composer-recipient-trigger:hover,
+.chat-composer-recipient-remove:hover,
+.chat-recipient-add:hover {
+  color: var(--accent);
+  background: var(--key-bg-hover);
+  border-color: var(--accent);
+}
+
+.chat-composer-to-mention {
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: rgba(176, 114, 76, 0.14);
+  color: #b0724c;
+  border: 1px solid rgba(176, 114, 76, 0.35);
+}
+
+.gz-popover.chat-recipient-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: min(21rem, calc(100vw - 1.5rem));
+  padding: 0.5rem;
+}
+
+.chat-recipient-popover-label {
+  padding: 0 0.15rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.chat-recipient-search {
+  width: 100%;
+  padding: 0.3rem 0.45rem;
+  font-size: var(--text-sm);
+}
+
+.chat-recipient-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: 20rem;
+  overflow-y: auto;
+}
+
+.chat-recipient-option {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 0.25rem;
+}
+
+.chat-recipient-select {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.3rem 0.5rem;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.chat-recipient-select:hover,
+.chat-recipient-option-primary .chat-recipient-select {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: var(--accent);
+}
+
+.chat-recipient-option-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  line-height: 1.2;
+}
+
+.chat-recipient-option-name {
+  overflow: hidden;
+  max-width: 100%;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-recipient-option-role {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-recipient-add {
+  width: 2rem;
+  min-height: 2rem;
+  padding: 0;
+  font-size: var(--text-lg);
+}
+
+.chat-recipient-plus-glyph {
+  display: block;
+  line-height: 1;
+  transform: translateY(-1px);
+}
+
+.chat-recipient-option-state {
+  display: grid;
+  place-items: center;
+  min-width: 2.5rem;
+  padding: 0 0.35rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+}
+
+.chat-recipient-empty {
+  margin: 0;
+  padding: 0.35rem 0.15rem;
+}
+
+/* Override Squisq's default `@`-mention popover sizing AND palette.
+   The library ships max-width 320 / max-height 240 + an indigo accent
+   on hover/select — fine for a flat name list, tight for our project-
+   scoped roster where labels read "Leo re: Atari Adventure Game",
+   and the cool indigo highlight clashes with the gezellig terracotta
+   used everywhere else in the chat surface. Bump both axes so most
+   queries fit without scrolling, and reskin in cream + terracotta to
+   match the composer chrome. The popover is portaled to <body>, so
+   the override has to be global — there's no ancestor to scope it
+   by. */
+.squisq-mention-popover {
+  /* `!important` because Squisq's lib CSS ships its own
+     max-height/min-width and Vite's dedupe order isn't guaranteed
+     across module graph permutations — without this the lib's 240px
+     cap can win and the popover overflows the viewport without a
+     visible scrollbar. */
+  min-width: 280px !important;
+  max-width: 480px !important;
+  max-height: 60vh !important;
+  /* Force the scrollbar gutter to render even on macOS where overlay
+     scrollbars hide until interaction — we want users to *see* there's
+     more content when the project-scoped roster overflows the cap. */
+  overflow-y: scroll !important;
+  background: #f9f1e3;
+  border-color: rgba(176, 114, 76, 0.32);
+  color: #2b2420;
+  box-shadow: 0 8px 24px rgba(110, 64, 36, 0.18);
+}
+.squisq-mention-popover .squisq-mention-item.is-selected,
+.squisq-mention-popover .squisq-mention-item:hover {
+  background: rgba(176, 114, 76, 0.18);
+  color: #6e4024;
+}
+.squisq-mention-popover .squisq-mention-desc {
+  color: rgba(43, 36, 32, 0.6);
+}
+[data-theme="dark"] .squisq-mention-popover {
+  background: #2b2420;
+  border-color: rgba(224, 184, 151, 0.28);
+  color: #f3ede0;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+}
+[data-theme="dark"] .squisq-mention-popover .squisq-mention-item.is-selected,
+[data-theme="dark"] .squisq-mention-popover .squisq-mention-item:hover {
+  background: rgba(224, 184, 151, 0.22);
+  color: #f3ede0;
+}
+[data-theme="dark"] .squisq-mention-popover .squisq-mention-desc {
+  color: rgba(243, 237, 224, 0.62);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .squisq-mention-popover {
+    background: #2b2420;
+    border-color: rgba(224, 184, 151, 0.28);
+    color: #f3ede0;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  }
+  :root:not([data-theme="light"]) .squisq-mention-popover .squisq-mention-item.is-selected,
+  :root:not([data-theme="light"]) .squisq-mention-popover .squisq-mention-item:hover {
+    background: rgba(224, 184, 151, 0.22);
+    color: #f3ede0;
+  }
+  :root:not([data-theme="light"]) .squisq-mention-popover .squisq-mention-desc {
+    color: rgba(243, 237, 224, 0.62);
+  }
+}
+[data-theme="dark"] .chat-composer-to-mention {
+  background: rgba(224, 184, 151, 0.18);
+  color: #e0b897;
+  border-color: rgba(224, 184, 151, 0.35);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .chat-composer-to-mention {
+    background: rgba(224, 184, 151, 0.18);
+    color: #e0b897;
+    border-color: rgba(224, 184, 151, 0.35);
+  }
+}
+
+.chat-editor-wrap {
+  /* Keep editor-owned overlays (mentions and Monaco suggestions) free to
+     escape the compose surface. Internal clipping belongs to Squisq's
+     content panes, not this host wrapper. */
+}
+
+/* Local `/open` command suggestions. The tray sits inside the compose frame
+   and follows the editor's width instead of using a body portal, so it remains
+   anchored in compact/embedded chat hosts as well as the desktop project view. */
+.chat-open-command-menu {
+  margin: 0.25rem 1px 0.35rem;
+  padding: 0.35rem;
+  background: color-mix(in srgb, var(--surface) 88%, var(--accent) 12%);
+  border: 1px solid color-mix(in srgb, var(--border) 76%, var(--accent) 24%);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 5px 16px color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.chat-open-command-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.1rem 0.3rem 0.35rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.chat-open-command-heading code {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.chat-open-command-items {
+  display: grid;
+  gap: 0.2rem;
+  max-height: 15rem;
+  overflow-y: auto;
+}
+
+.chat-open-command-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.38rem 0.5rem;
+  color: var(--text);
+  background: var(--key-bg);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  text-align: left;
+}
+
+.chat-open-command-item:hover,
+.chat-open-command-item:focus-visible {
+  background: var(--key-bg-hover);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.chat-open-command-item code,
+.chat-open-command-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-open-command-item code {
+  font-size: var(--text-sm);
+}
+
+.chat-open-command-item span {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.chat-open-command-empty {
+  margin: 0;
+  padding: 0.35rem 0.5rem;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* EditorShell sets overflow:hidden inline to contain document-sized editor
+   surfaces. Chat embeds need their mention/autocomplete overlays to escape
+   that shell. The inner editor content still owns its own scrolling, so let
+   only chat shells expose those overlays. `!important` is required to beat
+   EditorShell's inline overflow declaration. */
+.chat-editor-wrap .squisq-editor-shell[data-host-mode="chat"] {
+  overflow: visible !important;
+  background: transparent;
+}
+
+/* Squisq chat mode intentionally keeps the toolbar as a host-action rail,
+   retains the Insert menu, and omits its document-formatting controls. These
+   child/overflow selectors are a compatibility brace for Squisq 2.5.0; newer
+   linked builds express the split through `showFormattingControls` and
+   `showInsertControls`. Keeping the actions lane leaves Insert on the left
+   and Send pinned at the right. */
+.chat-editor-wrap .squisq-toolbar-actions > :not(:has(button[aria-label="Insert"])),
+.chat-editor-wrap .squisq-toolbar-overflow {
+  display: none;
+}
+
+.chat-editor-wrap
+  .squisq-toolbar-actions
+  > :has(button[aria-label="Insert"])
+  .squisq-toolbar-separator {
+  display: none;
+}
+
+/* Squisq 2.5.0 always places its body-portaled Insert menu below the trigger,
+   which sends a bottom-docked chat composer's menu out of the viewport. Anchor
+   that compatibility build above the active chat Insert button. Newer Squisq
+   builds detect viewport collisions themselves, so this remains a harmless
+   host-side brace until the pinned package catches up. */
+.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"] {
+  anchor-name: --chat-insert-trigger;
+}
+
+body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
+  > .squisq-insert-menu {
+  top: auto !important;
+  bottom: anchor(--chat-insert-trigger top);
+  max-height: calc(anchor(--chat-insert-trigger top) - 8px);
+  margin-bottom: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The composer toolbar is supporting chrome, not the main event. Set it one
+   pixel inside the thematic compose frame and pull its fill almost all the
+   way back to paper while preserving the rail, its Send/Stop slot, and the
+   seam above the draft. */
+.chat-editor-wrap .squisq-editor-shell[data-host-mode="chat"] .squisq-editor-header {
+  margin-inline: 1px;
+  background: transparent;
+  border-bottom-color: color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+.chat-editor-wrap .squisq-editor-shell[data-host-mode="chat"] .squisq-toolbar {
+  background: var(--compose-toolbar-bg) !important;
+  padding-inline-end: 0;
+}
+
+/* Squisq's `.squisq-editor-content` has `overflow: hidden` — when the
+   user types `@` near the top of the MD (Monaco) view, the completion
+   popup tries to render above the cursor and gets clipped at the
+   editor's top edge, looking like it's obscured by the toolbar. Squisq
+   doesn't expose `fixedOverflowWidgets` for the underlying Monaco
+   instance, so we let the content area's overflow show through and
+   bump the suggest widget's z-index above any toolbar chrome. Scoped
+   to the chat composer so other Squisq surfaces in the app keep their
+   default clipping. */
+.chat-editor-wrap .squisq-editor-content {
+  overflow: visible;
+}
+.chat-editor-wrap .monaco-editor .suggest-widget {
+  z-index: 1000;
+}
+
+/* Themed placeholder for the chat composer. Squisq's default is a
+   neutral gray (#9ca3af); swap it for the workshop accent so the
+   "what would you like to make?" prompt reads as part of the gezel
+   palette instead of a generic input hint. Scoped to .chat-editor-wrap
+   so other Squisq surfaces (document editor, artifact viewer) keep
+   the neutral default. */
+.chat-editor-wrap .squisq-wysiwyg-editor p.is-editor-empty:first-child::before {
+  color: var(--accent);
+  opacity: 0.7;
+}
+
+/* Gezellig palette applied to every Squisq editor chrome in the app
+   (chat composer, artifact/workspace file viewer, project docs,
+   documents library, gezel about). Squisq's built-in `data-theme='dark'`
+   styles use hardcoded blues/grays — we override the specific selectors
+   to warm orange-tinted dark. Every call site passes
+   `colorScheme={useEffectiveTheme()}` (the EditorShell prop that drives its
+   `data-theme` attribute), so the editor's `data-theme='dark'` is only set
+   when the app is in dark mode; these rules correctly stay dormant in light
+   mode without needing a media query. */
+.squisq-editor-shell[data-theme="dark"] {
+  background: transparent;
+  color: #f3ede0;
+}
+.squisq-editor-shell[data-theme="dark"] .squisq-editor-header {
+  background: #2b2420;
+  border-bottom-color: rgba(176, 114, 76, 0.28);
+}
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar {
+  background: rgba(176, 114, 76, 0.08);
+}
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tabs {
+  background: #1f1a17;
+  border-right-color: rgba(176, 114, 76, 0.28);
+}
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tab,
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-button {
+  color: #d6c9b8;
+}
+
+/* Force a flat bottom edge on the view tabs so the active state's
+   `border-bottom` renders as a straight orange bar instead of a
+   browser-default rounded-button arc. Also suppress the default
+   focus-visible outline, which the browser draws as a rounded
+   rectangle whose visible lower arc reads as a parabolic underline. */
+.squisq-editor-shell .squisq-toolbar-view-tab {
+  border-radius: 0;
+}
+.squisq-editor-shell .squisq-toolbar-view-tab:focus,
+.squisq-editor-shell .squisq-toolbar-view-tab:focus-visible {
+  outline: none;
+}
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tab:hover,
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-button:hover {
+  color: #f3ede0;
+  background: rgba(176, 114, 76, 0.14);
+}
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tab--active {
+  color: #e0b897;
+  border-bottom-color: #b0724c;
+}
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-button--active {
+  color: #e0b897;
+  background: rgba(176, 114, 76, 0.18);
+}
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-button--active:hover {
+  color: #f3ede0;
+  background: rgba(176, 114, 76, 0.26);
+}
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-separator {
+  background: rgba(176, 114, 76, 0.28);
+}
+
+/* The WYSIWYG typing surface uses a neutral dark gray so it reads as a
+   plain text area against the warm composer chrome above it. */
+.squisq-editor-shell[data-theme="dark"] .squisq-wysiwyg-editor {
+  background: #242424;
+  color: #e8e8e8;
+  box-shadow: none;
+}
+.chat-editor-wrap
+  .squisq-editor-shell[data-theme="dark"]
+  .squisq-wysiwyg-editor
+  p.is-editor-empty:first-child::before {
+  color: #888;
+}
+
+/* Light-mode WYSIWYG surface — squisq's stock skin paints
+   `.squisq-wysiwyg-editor` bright `#fff` over a `.squisq-wysiwyg-container`
+   gray `#dcd8d0`. Both clash with the gezellig cream palette and read as
+   a stark white slab dropped into the warm composer. Keep the typing surface
+   on light draft paper, soften the container to the panel cream, and trade the
+   heavy 14px shadow for a subtle 1px settle that doesn't compete with the
+   toolbar's warm header band. */
+.squisq-editor-shell[data-theme="light"] .squisq-wysiwyg-editor,
+[data-theme="light"] .squisq-wysiwyg-editor {
+  background: #f6f1e7;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.squisq-editor-shell[data-theme="light"] .squisq-wysiwyg-container,
+[data-theme="light"] .squisq-wysiwyg-container {
+  background: var(--panel, #f3eddf);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .squisq-wysiwyg-editor {
+    background: #f6f1e7;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+  :root:not([data-theme="dark"]) .squisq-wysiwyg-container {
+    background: var(--panel, #f3eddf);
+  }
+}
+
+/* Overflow popup ("···" menu). Squisq's built-in dark skin paints this
+   cool-gray / blue-accent, which clashes with the gezellig palette. Warm
+   it up with the same terracotta + cream used by the rest of the
+   composer chrome. */
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-overflow-menu {
+  background: #2b2420;
+  border-color: rgba(176, 114, 76, 0.35);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-overflow-menu--up {
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.45);
+}
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-overflow-item {
+  color: #d6c9b8;
+}
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-overflow-item:hover {
+  color: #f3ede0;
+  background: rgba(176, 114, 76, 0.18);
+}
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-overflow-item--active {
+  color: #e0b897;
+  background: rgba(176, 114, 76, 0.22);
+}
+
+/* Light-mode overrides — Squisq's stock light skin paints active states
+   in flat blue (`#2563eb`/`#1d4ed8`/`#dbeafe`), which clashes with the
+   gezellig sage + cream palette. Swap to a saturated sage that reads
+   unambiguously green against the cream toolbar.
+
+   Selector strategy: match on the document root's `data-theme="light"`
+   (set by `applyThemePref` in [theme.ts](src/theme.ts)) AS WELL AS the
+   shell-level attribute (passed via `colorScheme={editorTheme}` to
+   `EditorShell`). The shell-level path is the canonical mirror of the
+   dark-mode block above; the root-level path is a belt-and-suspenders
+   fallback in case the shell is rendered without a theme prop in some
+   call site. The system-mode media-query branch covers the case where
+   the user hasn't explicitly chosen a theme — `<html>` has no
+   `data-theme` attribute then, so we match on `prefers-color-scheme`
+   instead. Mirrors the dark-mode block above. */
+/* Toolbar row background — squisq's base paints `.squisq-toolbar` with
+   `rgba(0, 0, 0, 0.07)` which reads as a cool gray-blue against the warm
+   cream gezel chrome. Replace with a clearly-saturated sage wash that
+   matches the active-tab indicator (`#588a3f`); a desaturated sage at
+   low opacity reads gray, so we use the brighter sage at ~25% opacity
+   for a visible-but-not-overwhelming green tint. The view-tabs strip's
+   own solid-white inset (squisq base `#ffffff`) is dropped to
+   transparent so the sage wash flows under the active-tab indicator
+   instead of being interrupted by a cool-white block. */
+.squisq-editor-shell[data-theme="light"] .squisq-toolbar,
+[data-theme="light"] .squisq-toolbar {
+  background: rgba(88, 138, 63, 0.22) !important;
+  --squisq-toolbar-icon: var(--toolbar-icon-ink);
+}
+.squisq-editor-shell[data-theme="light"] .squisq-toolbar-view-tabs,
+[data-theme="light"] .squisq-toolbar-view-tabs {
+  background: transparent !important;
+  border-right-color: rgba(88, 138, 63, 0.32) !important;
+}
+.squisq-editor-shell[data-theme="light"] .squisq-toolbar-separator,
+[data-theme="light"] .squisq-toolbar-separator {
+  background: rgba(88, 138, 63, 0.36) !important;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .squisq-toolbar {
+    background: rgba(88, 138, 63, 0.22) !important;
+    --squisq-toolbar-icon: var(--toolbar-icon-ink);
+  }
+  :root:not([data-theme="dark"]) .squisq-toolbar-view-tabs {
+    background: transparent !important;
+    border-right-color: rgba(88, 138, 63, 0.32) !important;
+  }
+  :root:not([data-theme="dark"]) .squisq-toolbar-separator {
+    background: rgba(88, 138, 63, 0.36) !important;
+  }
+}
+
+/* Squisq renders formatting symbols in two ways: Font Awesome icons consume
+   `--squisq-toolbar-icon`, while text glyphs such as H1/H2 inherit the
+   button ink. Keep both families in the same warm brown at rest and on
+   hover; active controls remain sage through the more-specific rules below. */
+.squisq-editor-shell[data-theme="light"]
+  .squisq-toolbar-button:not(.squisq-toolbar-button--active):not(.squisq-toolbar-button--danger),
+[data-theme="light"]
+  .squisq-toolbar-button:not(.squisq-toolbar-button--active):not(.squisq-toolbar-button--danger),
+.squisq-editor-shell[data-theme="light"]
+  .squisq-toolbar-overflow-item:not(.squisq-toolbar-overflow-item--active):not(
+    .squisq-toolbar-overflow-item--danger
+  ),
+[data-theme="light"]
+  .squisq-toolbar-overflow-item:not(.squisq-toolbar-overflow-item--active):not(
+    .squisq-toolbar-overflow-item--danger
+  ) {
+  color: var(--toolbar-icon-ink);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"])
+    .squisq-toolbar-button:not(.squisq-toolbar-button--active):not(.squisq-toolbar-button--danger),
+  :root:not([data-theme="dark"])
+    .squisq-toolbar-overflow-item:not(.squisq-toolbar-overflow-item--active):not(
+      .squisq-toolbar-overflow-item--danger
+    ) {
+    color: var(--toolbar-icon-ink);
+  }
+}
+
+.squisq-editor-shell[data-theme="light"] .squisq-toolbar-view-tab--active,
+[data-theme="light"] .squisq-toolbar-view-tab--active {
+  color: #588a3f !important;
+  border-bottom-color: #588a3f !important;
+}
+.squisq-editor-shell[data-theme="light"] .squisq-toolbar-button--active,
+[data-theme="light"] .squisq-toolbar-button--active {
+  color: #588a3f !important;
+  background: rgba(88, 138, 63, 0.16) !important;
+}
+.squisq-editor-shell[data-theme="light"] .squisq-toolbar-button--active:hover,
+[data-theme="light"] .squisq-toolbar-button--active:hover {
+  color: #436a2e !important;
+  background: rgba(88, 138, 63, 0.26) !important;
+}
+.squisq-editor-shell[data-theme="light"] .squisq-toolbar-overflow-item--active,
+[data-theme="light"] .squisq-toolbar-overflow-item--active {
+  color: #588a3f !important;
+  background: rgba(88, 138, 63, 0.16) !important;
+}
+.squisq-editor-shell[data-theme="light"] .squisq-view-tab--active,
+[data-theme="light"] .squisq-view-tab--active {
+  color: #588a3f !important;
+  border-bottom-color: #588a3f !important;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .squisq-toolbar-view-tab--active,
+  :root:not([data-theme="dark"]) .squisq-view-tab--active {
+    color: #588a3f !important;
+    border-bottom-color: #588a3f !important;
+  }
+  :root:not([data-theme="dark"]) .squisq-toolbar-button--active,
+  :root:not([data-theme="dark"]) .squisq-toolbar-overflow-item--active {
+    color: #588a3f !important;
+    background: rgba(88, 138, 63, 0.16) !important;
+  }
+  :root:not([data-theme="dark"]) .squisq-toolbar-button--active:hover {
+    color: #436a2e !important;
+    background: rgba(88, 138, 63, 0.26) !important;
+  }
+}
+
+.chat-send-btn {
+  margin: 1px;
+  border: 1px solid color-mix(in srgb, var(--accent) 82%, var(--text));
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--accent) 86%, var(--surface)),
+    var(--accent)
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 42%, transparent), 0 1px 2px
+    color-mix(in srgb, var(--text) 24%, transparent);
+  transition: background 120ms ease-out, border-color 120ms ease-out, box-shadow 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.chat-send-btn:hover:not(:disabled) {
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--accent) 80%, var(--surface)),
+    color-mix(in srgb, var(--accent) 94%, var(--surface))
+  );
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface) 52%, transparent), 0 2px 3px
+    color-mix(in srgb, var(--text) 28%, transparent);
+}
+
+.chat-send-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--text) 30%, transparent);
+}
+
+/* Mid-turn composer controls. Nudge reuses .chat-send-btn so terracotta
+   stays on the single primary; Stop and Interrupt take a quiet
+   secondary recipe (Stop previously inherited the filled global button
+   default and read as a second primary next to Send). */
+.chat-stop-btn,
+.chat-interrupt-btn {
+  margin: 1px 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-muted);
+  transition: border-color 120ms ease-out, color 120ms ease-out, background 120ms ease-out;
+}
+
+.chat-stop-btn:hover,
+.chat-interrupt-btn:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--text);
+}
+
+.chat-nudge-btn {
+  margin: 1px 2px 1px calc(0.5rem + 2px);
+}
+
+.msg-body-rich {
+  padding: 0.5rem 0.9rem;
+}
+
+.msg-body-rich h1,
+.msg-body-rich h2,
+.msg-body-rich h3 {
+  margin: 0.5em 0 0.25em;
+}
+
+.msg-body-rich h1:first-child,
+.msg-body-rich h2:first-child,
+.msg-body-rich h3:first-child {
+  margin-top: 0;
+}
+
+.msg-body-rich p {
+  margin: 0.4em 0;
+}
+
+.msg-body-rich ul,
+.msg-body-rich ol {
+  margin: 0.3em 0;
+  padding-left: 1.5em;
+}
+
+.msg-body-rich pre {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 0.85em;
+}
+
+.msg-body-rich code {
+  background: rgba(0, 0, 0, 0.2);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.msg-body-rich pre code {
+  background: none;
+  padding: 0;
+}
+
+.msg-body-rich table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  width: 100%;
+}
+
+.msg-body-rich th,
+.msg-body-rich td {
+  border: 1px solid var(--border);
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+}
+
+.msg-body-rich blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 0.5em 0;
+  padding: 0.25em 0.75em;
+  color: #aaa;
+}
+
+.gz-dialog label {
+  display: block;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+  color: #888;
+}
+
+.gz-dialog label input,
+.gz-dialog label textarea {
+  display: block;
+  width: 100%;
+  margin-top: 0.25rem;
+}
+
+.new-path-input-row {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  margin-top: 0.25rem;
+  overflow: hidden;
+  background: var(--bg, var(--panel));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.new-path-input-row:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.gz-dialog label .new-path-input-row > input {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.gz-dialog label .new-path-input-row > input:focus-visible {
+  outline: none;
+}
+
+.new-path-input-suffix {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 0 0.65rem;
+  color: var(--text-muted);
+  background: var(--key-bg);
+  border-left: 1px solid var(--border);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  user-select: none;
+}
+
+.name-row {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}
+
+.name-row input {
+  flex: 1;
+  margin-top: 0;
+}
+
+.dice-btn {
+  flex-shrink: 0;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 1.1rem;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+}
+
+.dice-btn:hover {
+  border-color: var(--accent);
+}

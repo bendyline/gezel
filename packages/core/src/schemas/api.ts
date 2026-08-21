@@ -105,6 +105,8 @@ import {
 import { ChannelsConfigSchema } from './channels.js';
 import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeCompatSchema, CodexPermissionModeSchema } from './codex.js';
+import { CraftbookSuggestionSchema } from './craftbook.js';
+import { EntityIdSchema } from './entity-id.js';
 import { FileReviewIssueSeveritySchema, FileReviewWireSchema } from './file-review.js';
 import {
   ChatMessageSchema,
@@ -115,6 +117,7 @@ import {
   ProviderNameSchema,
 } from './gezel.js';
 import { GezelGrowthStateSchema } from './growth.js';
+import { ProjectKnowledgeCatalogsSchema } from './knowledge.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { NativeEngineNameSchema } from './native-engines.js';
 import {
@@ -134,6 +137,7 @@ import {
 } from './project.js';
 import { NpmInstallApprovalDecisionSchema, QuestionSchema } from './question.js';
 import { RecognitionModeSchema } from './recognition.js';
+import { RetrievalPolicySchema, RetrievalSourceSchema } from './retrieval.js';
 import { ExpectedDeliverableSchema, ExternalRequestDiagnosticsSchema } from './session.js';
 import { TaskRefSchema } from './task.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
@@ -152,9 +156,24 @@ export * from './api/git.js';
 export const ServiceRoleSchema = z.enum(['user', 'machine-engine', 'legacy-full']);
 export type ServiceRole = z.infer<typeof ServiceRoleSchema>;
 
+/**
+ * Process-wide semantic-search (embedding pipeline) health. `disabled` is
+ * sticky for the daemon's lifetime (model unloadable, kill switch);
+ * `unavailable` is a transient load failure behind a retry cooldown —
+ * "retrying automatically" is honest copy for it. Returned by `/api/health`
+ * and attached to every project's `/index/status`.
+ */
+export const EmbeddingsHealthSchema = z.object({
+  status: z.enum(['cold', 'warming', 'ready', 'disabled', 'unavailable']),
+  reason: z.string().optional(),
+});
+export type EmbeddingsHealth = z.infer<typeof EmbeddingsHealthSchema>;
+
 export const HealthResponseSchema = z.object({
   ok: z.literal(true),
   version: z.string(),
+  /** Semantic-search pipeline health for this daemon process. */
+  embeddings: EmbeddingsHealthSchema.optional(),
   serviceRole: ServiceRoleSchema.optional(),
   /** Present on user daemons that can route native work to the shared broker. */
   machineEngineConnected: z.boolean().optional(),
@@ -284,7 +303,7 @@ export const GpuProcessOwnerSchema = z.enum([
 ]);
 export type GpuProcessOwner = z.infer<typeof GpuProcessOwnerSchema>;
 
-/** Windows driver accounting for one process holding dedicated GPU memory. */
+/** Driver accounting for one process holding dedicated GPU memory. */
 export const GpuProcessMemorySchema = z.object({
   pid: z.number().int().positive(),
   name: z.string().optional(),
@@ -314,7 +333,8 @@ export type LocalEngineLifecycle = z.infer<typeof LocalEngineLifecycleSchema>;
  * On macOS, `gezelBytesObserved` is the combined physical footprint of gezeld
  * and same-home engine processes — the metric Activity Monitor uses, including
  * Metal-backed allocations. On Windows, the bundled device-health helper uses
- * the OS GPU Process Memory counters to attribute dedicated VRAM to processes.
+ * the OS GPU Process Memory counters; on NVIDIA Linux it uses NVML process
+ * accounting to attribute dedicated VRAM to supervised engine PIDs.
  *
  * `engineReservedBytes` stays separate: it is capacity planning, not observed
  * use, and it is NOT a quantity of this pool. Attributing it to the pool once
@@ -1899,6 +1919,11 @@ export const GezelConfigSchema = z.object({
     })
     .optional(),
   /**
+   * Proactive project grounding on each substantive turn. When absent, the
+   * balanced preset is used (subject to the legacy autoRecall enabled flag).
+   */
+  retrieval: RetrievalPolicySchema.optional(),
+  /**
    * Auto-summarize: distill a session into project memory when it's
    * archived or has been idle past `idleHours`. The summarization itself
    * runs through the provider/model specified here; falls back to the
@@ -1988,6 +2013,34 @@ export const GezelConfigSchema = z.object({
   gildeUpdates: z
     .object({
       enabled: z.boolean().optional(),
+    })
+    .optional(),
+  /**
+   * Face recognition (person correlation across photos) — an explicit
+   * biometric opt-in, default OFF. Enabling downloads the pinned local face
+   * models (~261 MB) and lets the indexer cluster faces into anonymous
+   * "Person N" entities the user can name. All processing is on-device; the
+   * wipe endpoint (`POST /api/people/wipe`) is the data-erasure path and
+   * flips this back off.
+   */
+  faceRecognition: z
+    .object({
+      enabled: z.boolean().optional(),
+    })
+    .optional(),
+  /**
+   * Knowledge catalogs (.gezk) — user-global defaults. The authoritative
+   * per-catalog state (exact refs, enablement) lives in
+   * `~/.gezel/knowledge/registry.json`; this holds only the preferences the
+   * Settings page edits. Network operations honor the security policy's
+   * `allowAppNetwork` like every other registry check.
+   */
+  knowledge: z
+    .object({
+      /** Check the signed registry for catalog updates (default off). */
+      autoUpdate: z.boolean().optional(),
+      /** Override the signed Qualla registry URL (operators/tests). */
+      registryUrl: z.string().optional(),
     })
     .optional(),
   /**
@@ -2603,6 +2656,8 @@ export const RecentTabAreaSchema = z.enum([
   'benchmarks',
   // Built-in documentation (TOC + articles, served by /api/handboek).
   'handboek',
+  // Knowledge catalog browser (appears once the user registers ≥1 catalog).
+  'knowledge',
 ]);
 export type RecentTabArea = z.infer<typeof RecentTabAreaSchema>;
 
@@ -2836,6 +2891,8 @@ export const UpdateGezelSettingsRequestSchema = z.object({
   numCtx: z.number().int().positive().nullable().optional(),
   /** `null` inherits the global autoRecall default. */
   autoRecall: z.boolean().nullable().optional(),
+  /** `null` clears the per-gezel indexed-context policy. */
+  retrieval: RetrievalPolicySchema.nullable().optional(),
   /** `null` clears the chat bubble font override. */
   font: z.string().nullable().optional(),
   /** `null` inherits the install-level `GezelConfig.sandboxCopilot`. */
@@ -3810,10 +3867,18 @@ export const UpdateProjectRequestSchema = z.object({
   workingDir: z.string().nullable().optional(),
   /** null clears the voorman. */
   voormanGezelId: z.string().nullable().optional(),
+  /**
+   * Replace this project's one-way links. An empty array removes every link.
+   * The service rejects self-links, missing projects, duplicates, and the
+   * implicit shared-library project.
+   */
+  linkedProjectIds: z.array(EntityIdSchema).max(32).optional(),
   /** When passed, written to documents/about.md inside the project. */
   about: z.string().optional(),
   /** When passed, written to documents/missionObjectives.md inside the project. */
   missionObjectives: z.string().optional(),
+  /** Which of the user's knowledge catalogs are in scope for this project. */
+  knowledgeCatalogs: ProjectKnowledgeCatalogsSchema.optional(),
   /** Patch the github association. `null` unlinks. Pass an object with `url`
    *  to link or change the repo, or with only `branch` to switch the
    *  tracked branch. `checkoutDir` and `lastSyncedAt` are managed by the
@@ -4694,6 +4759,7 @@ export const SearchDocsResponseSchema = z.object({
       /** Converted markdown path under .gezel/files/…_files/. */
       markdownPath: z.string(),
       lineStart: z.number().int().positive(),
+      lineEnd: z.number().int().positive(),
       snippet: z.string(),
     }),
   ),
@@ -4945,6 +5011,21 @@ export const UNIFIED_SEARCH_RESULT_KINDS = [
   'symbol',
   'memory',
   'session',
+  // Product objects reachable by name from the titlebar (name catalog only —
+  // the model-scoped project search never emits these kinds):
+  'task',
+  'craftbook',
+  // Built-in documentation articles — previously the least findable content
+  // in the app (no result kind, no search box in the Handboek view).
+  'handboek',
+  // Mail messages by subject/sender (name catalog only) — the message BODY
+  // is already reachable through the artifacts content arm; this kind is
+  // the subject-line quick-open a body search can't provide. Hits navigate
+  // as artifact files (mail syncs into the project artifacts tree).
+  'mail',
+  // Knowledge catalog hits (.gezk read-only reference corpora). Carry the
+  // knowledge provenance fields below and a `knowledge://` citation URI.
+  'knowledge',
 ] as const;
 
 export const UnifiedSearchResultKindSchema = z.enum(UNIFIED_SEARCH_RESULT_KINDS);
@@ -4968,12 +5049,39 @@ export const UnifiedSearchResultSchema = z.object({
   path: z.string().optional(),
   /** Which file root `path` lives in — drives how the UI opens it. */
   source: z.enum(['workspace', 'artifacts']).optional(),
+  /** Corpus provenance for model-facing retrieval and audit telemetry. */
+  retrievalSource: RetrievalSourceSchema.optional(),
   /** 1-based line for content/symbol hits. */
   line: z.number().int().positive().optional(),
+  /** Inclusive end line when the underlying index provides a span. */
+  lineEnd: z.number().int().positive().optional(),
   /** Owning gezel for session hits — lets the palette navigate without parsing ids. */
   gezelId: z.string().optional(),
-  /** Merged relevance score (higher = better). */
+  /**
+   * Merged ordering key: 0–1 relevance × per-kind merge weight (0–1000 scale).
+   * Comparable across kinds for RANKING only — it is not a calibrated
+   * confidence; use `relevance`/`tier` for that.
+   */
   score: z.number(),
+  /**
+   * Calibrated 0–1 within-corpus relevance, before the kind weight. Uniform
+   * scale across corpora: floors and confidence tiers are defined on this,
+   * never on `score`.
+   */
+  relevance: z.number().min(0).max(1).optional(),
+  /** Coarse confidence derived from `relevance` — render hints, early-stop cues. */
+  tier: z.enum(['strong', 'weak']).optional(),
+  // ── knowledge provenance (kind 'knowledge' only) ────────────────────────
+  /** Catalog the hit came from, plus the exact installed version. */
+  catalogId: z.string().optional(),
+  catalogVersion: z.string().optional(),
+  documentId: z.string().optional(),
+  /** Root→leaf topic names for display ("Physics › Mechanics"). */
+  topicPath: z.array(z.string()).optional(),
+  /** Stable `knowledge://` citation URI (readable via read_document). */
+  uri: z.string().optional(),
+  sourceUrl: z.string().optional(),
+  attribution: z.string().optional(),
 });
 export type UnifiedSearchResult = z.infer<typeof UnifiedSearchResultSchema>;
 
@@ -4989,8 +5097,73 @@ export const UnifiedSearchResponseSchema = z.object({
   results: z.array(UnifiedSearchResultSchema),
   /** True when the content fan-out hit its cap or a source errored/timed out. */
   truncated: z.boolean(),
+  /**
+   * True only when a source scope blew its per-scope budget (timed out), so
+   * the results genuinely under-represent what exists. Distinct from
+   * `truncated`, which also fires on ordinary caps/dedupe — the UI shows a
+   * "results may be partial" note for this flag, never for plain caps.
+   */
+  sourcesIncomplete: z.boolean().optional(),
 });
 export type UnifiedSearchResponse = z.infer<typeof UnifiedSearchResponseSchema>;
+
+/** Body of POST /api/memory/search — previously an untyped cast in the route. */
+export const MemorySearchRequestSchema = z.object({
+  gezelId: z.string().min(1),
+  projectId: z.string().min(1),
+  query: z.string().min(1).max(400),
+  topK: z.number().int().positive().max(50).optional(),
+});
+export type MemorySearchRequest = z.infer<typeof MemorySearchRequestSchema>;
+
+/** Project-bound form used by the model-facing generic `search` tool. */
+export const ProjectSearchRequestSchema = z.object({
+  query: z.string().min(1).max(400),
+  maxResults: z.number().int().positive().max(100).optional(),
+  /**
+   * Skip this many merged results before returning `maxResults` — the tool
+   * cursor. Narrowing only; the project scope stays server-derived.
+   */
+  offset: z.number().int().nonnegative().max(10_000).optional(),
+  /**
+   * Keep only results whose path starts with this prefix (forward-slashed,
+   * relative). Pathless results (memories, area overviews) are excluded when
+   * set — a path filter asks for files. Narrowing only.
+   */
+  pathPrefix: z.string().min(1).max(500).optional(),
+  /** Current gezel id enables its private-memory arm. */
+  gezelId: z.string().min(1).optional(),
+  /** Shared documents are included by default. */
+  includeShared: z.boolean().optional(),
+  sources: z.array(RetrievalSourceSchema).min(1).optional(),
+});
+export type ProjectSearchRequest = z.infer<typeof ProjectSearchRequestSchema>;
+export const ProjectSearchCraftbookSuggestionSchema = CraftbookSuggestionSchema.pick({
+  id: true,
+  name: true,
+  description: true,
+  source: true,
+  version: true,
+  stepCount: true,
+  score: true,
+}).extend({
+  /** A compact, directly executable recipe for models that have this tool. */
+  invocation: z.object({
+    tool: z.literal('invoke_craftbook'),
+    arguments: z.object({
+      craftbookId: z.string().min(1),
+      description: z.string().min(1),
+    }),
+  }),
+});
+export type ProjectSearchCraftbookSuggestion = z.infer<
+  typeof ProjectSearchCraftbookSuggestionSchema
+>;
+export const ProjectSearchResponseSchema = UnifiedSearchResponseSchema.extend({
+  /** Strong, applicable Gilde or local procedures that may help execute the query. */
+  craftbooks: z.array(ProjectSearchCraftbookSuggestionSchema),
+});
+export type ProjectSearchResponse = z.infer<typeof ProjectSearchResponseSchema>;
 
 // ── global index search (sessions + documents) ──────────────────────────────
 
@@ -5031,6 +5204,7 @@ export type SearchDocumentsRequest = z.infer<typeof SearchDocumentsRequestSchema
 export const DocumentSearchResultSchema = z.object({
   path: z.string(),
   lineStart: z.number().int().positive(),
+  lineEnd: z.number().int().positive().optional(),
   snippet: z.string(),
   /** 0..1 relevance. Optional: older services returned unranked hits. */
   score: z.number().optional(),
@@ -5139,14 +5313,66 @@ export const ListEntityMentionsRequestSchema = z.object({
 });
 export type ListEntityMentionsRequest = z.infer<typeof ListEntityMentionsRequestSchema>;
 
+/** Pixel-space rectangle within a source image (face regions, crops). */
+export const ImageRegionSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+  w: z.number(),
+  h: z.number(),
+});
+export type ImageRegion = z.infer<typeof ImageRegionSchema>;
+
 export const ListEntityMentionsResponseSchema = z.object({
   found: z.boolean(),
   entity: z.object({ kind: z.string(), label: z.string() }).optional(),
   mentions: z.array(
-    z.object({ path: z.string(), line: z.number().int().optional(), date: z.string().optional() }),
+    z.object({
+      path: z.string(),
+      line: z.number().int().optional(),
+      date: z.string().optional(),
+      /** Face-lane mentions carry the region within the image. */
+      region: ImageRegionSchema.optional(),
+      confidence: z.number().optional(),
+    }),
   ),
 });
 export type ListEntityMentionsResponse = z.infer<typeof ListEntityMentionsResponseSchema>;
+
+// ── People (face lane, biometric opt-in) ────────────────────────────────────
+
+export const PersonSampleSchema = z.object({
+  path: z.string(),
+  region: ImageRegionSchema.optional(),
+});
+export type PersonSample = z.infer<typeof PersonSampleSchema>;
+
+export const PersonSummarySchema = z.object({
+  entityId: z.number().int(),
+  label: z.string(),
+  clusterId: z.string(),
+  count: z.number().int(),
+  exemplar: PersonSampleSchema.optional(),
+  samples: z.array(PersonSampleSchema),
+});
+export type PersonSummary = z.infer<typeof PersonSummarySchema>;
+
+export const ListPeopleResponseSchema = z.object({
+  people: z.array(PersonSummarySchema),
+  /** False when face recognition is disabled or the index is unavailable. */
+  available: z.boolean(),
+});
+export type ListPeopleResponse = z.infer<typeof ListPeopleResponseSchema>;
+
+export const RenamePersonRequestSchema = z.object({
+  label: z.string().min(1).max(120),
+});
+export type RenamePersonRequest = z.infer<typeof RenamePersonRequestSchema>;
+
+export const WipeFaceDataResponseSchema = z.object({
+  projects: z.number().int(),
+  disabled: z.boolean(),
+});
+export type WipeFaceDataResponse = z.infer<typeof WipeFaceDataResponseSchema>;
 
 export const DiffFilesRequestSchema = z
   .object({
@@ -5497,6 +5723,12 @@ export const WorkspaceIndexStatusSchema = z.object({
    *   - `disabled` — this project explicitly opted out of workspace indexing
    */
   state: z.enum(['fresh', 'stale', 'indexing', 'never', 'disabled']),
+  /**
+   * Semantic-search health, attached in EVERY state (unlike `enrichment`,
+   * which needs a fresh index) — a dead embedder must be distinguishable
+   * from an index that simply hasn't finished building.
+   */
+  embeddings: EmbeddingsHealthSchema.optional(),
   meta: WorkspaceIndexMetaSchema.optional(),
   /**
    * True when the structural index is fresh but the background AI scan
@@ -5523,6 +5755,13 @@ export const WorkspaceIndexStatusSchema = z.object({
       eligible: z.number().int().nonnegative(),
       summarized: z.number().int().nonnegative(),
       embedded: z.number().int().nonnegative(),
+      /**
+       * Files reachable by semantic search through EITHER the full
+       * enrichment pass or the always-on embed-only tier. The honest
+       * numerator for "N of M files searchable" — `embedded` alone counts
+       * only the roster-gated pass and under-reports unstaffed projects.
+       */
+      searchReady: z.number().int().nonnegative().optional(),
       pending: z.number().int().nonnegative(),
       /**
        * Files whose summarize failed MAX_ENRICH_ATTEMPTS times for the
@@ -5537,8 +5776,21 @@ export const WorkspaceIndexStatusSchema = z.object({
        * while `summarized` sits still — surface it, or the scan looks stuck.
        */
       shadowsPending: z.number().int().nonnegative().optional(),
+      /**
+       * Files awaiting the always-on embed-only tier (vectors without any
+       * LLM). Zero means semantic search is ready even with no Boekwachter
+       * on the roster; the summarize/review counters above track the
+       * roster-gated tiers separately.
+       */
+      embedOnlyPending: z.number().int().nonnegative().optional(),
       /** The embedding model that built these vectors (index `meta` stamp). */
       embedModel: z.string().optional(),
+      /**
+       * False when the sqlite-vec extension failed to load for this index —
+       * vectors can't be stored and hybrid search silently runs keyword-only.
+       * Distinct from the process-wide `embeddings` health below.
+       */
+      vectorsAvailable: z.boolean().optional(),
       /**
        * Review-pass coverage. Deliberately NOT folded into `aiScanPending`:
        * the amber pill means "search not ready", and reviews lag summaries by
@@ -5631,7 +5883,14 @@ export const DriveIndexEnrichmentResponseSchema = z.object({
   /** Job mode only: a drive was started (or was already running). */
   started: z.boolean().optional(),
   alreadyRunning: z.boolean().optional(),
-  mode: z.enum(['background', 'full']).optional(),
+  /**
+   * `embed-only`: no Boekwachter on the crew, so only the always-on local
+   * embed tiers ran (semantic search still gets refreshed) — the LLM tiers
+   * need the roster opt-in. Callers surface `hint` and the add-Boekwachter
+   * affordance instead of treating this as a failure.
+   */
+  mode: z.enum(['background', 'full', 'embed-only']).optional(),
+  hint: z.string().optional(),
 });
 export type DriveIndexEnrichmentResponse = z.infer<typeof DriveIndexEnrichmentResponseSchema>;
 

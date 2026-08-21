@@ -46,13 +46,18 @@ describe('suggestSlashCommands', () => {
   it('wordwheels by case-insensitive prefix', () => {
     expect(suggestSlashCommands('/C').map((command) => command.name)).toEqual([
       'continue',
+      'connect',
       'cli',
       'chat',
       'clear',
     ]);
     expect(suggestSlashCommands('/pro').map((command) => command.name)).toEqual(['project']);
     expect(suggestSlashCommands('/a').map((command) => command.name)).toEqual(['allow']);
-    expect(suggestSlashCommands('/d').map((command) => command.name)).toEqual(['disallow', 'do']);
+    expect(suggestSlashCommands('/d').map((command) => command.name)).toEqual([
+      'disallow',
+      'do',
+      'disconnect',
+    ]);
     expect(suggestSlashCommands('/m').map((command) => command.name)).toEqual(['mode', 'model']);
     expect(suggestSlashCommands('/th').map((command) => command.name)).toEqual(['thread']);
     expect(suggestSlashCommands('/st')).toEqual([]);
@@ -91,6 +96,24 @@ describe('suggestSlashWordwheel', () => {
       '/nightshift list',
     ]);
     expect(suggestSlashWordwheel('/nightshift l', CRAFTBOOKS)[0]?.submit).toBe('/nightshift list');
+  });
+
+  it('offers managed app targets for connect and disconnect', () => {
+    expect(suggestSlashWordwheel('/connect ', CRAFTBOOKS).map((item) => item.submit)).toEqual([
+      '/connect vscode',
+      '/connect pi',
+      '/connect opencode',
+      '/connect codex',
+    ]);
+    expect(suggestSlashWordwheel('/connect open', CRAFTBOOKS)).toEqual([
+      expect.objectContaining({
+        submit: '/connect opencode',
+        description: 'add Gezel settings and the managed OpenCode plugin',
+      }),
+    ]);
+    expect(suggestSlashWordwheel('/disconnect vs', CRAFTBOOKS)).toEqual([
+      expect.objectContaining({ submit: '/disconnect vscode' }),
+    ]);
   });
 
   it('offers the four engagement modes after /mode', () => {

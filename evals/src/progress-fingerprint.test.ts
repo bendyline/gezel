@@ -98,6 +98,7 @@ describe('telemetryToActivityCounters', () => {
     projectId: 'p1',
     inflight: false,
     turnsStarted: 0,
+    providerRequestsStarted: 0,
     deltaChunks: 0,
     streamedContentChars: 0,
     wirePulses: 0,

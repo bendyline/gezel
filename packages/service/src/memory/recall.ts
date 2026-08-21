@@ -23,10 +23,22 @@ export interface RecallHit {
 }
 
 const DEFAULT_TOP_K = 4;
-const DEFAULT_MIN_SCORE = 0.35;
+/**
+ * Raw cosine floor on memory vector hits (query→passage). Calibrated for
+ * bge-small-en-v1.5 with `evals/src/bin/embed-calibration.ts` (2026-08-19):
+ * unrelated pairs top out at 0.429, relevant ones start at 0.561. Re-measure
+ * on any embedder change — this scale is model-specific.
+ */
+const DEFAULT_MIN_SCORE = 0.45;
 /** Tighter budget for ollama — their default num_ctx is small. */
 const OLLAMA_TOP_K = 3;
-/** Cap + floor for index-derived code hits appended after the memory hits. */
+/**
+ * Cap + floor for index-derived code hits appended after the memory hits.
+ * NOTE: this floor (and LIBRARY_MIN_SCORE below) filters the hybrid
+ * rank-fusion score from searchCode/searchLibrary — rank-based and therefore
+ * embedder-independent, unlike the raw-cosine DEFAULT_MIN_SCORE above. It
+ * does not move when the embedding model changes.
+ */
 const CODE_TOP_K = 3;
 const CODE_MIN_SCORE = 0.45;
 /**
@@ -101,6 +113,10 @@ interface RecallArgs {
   libraryProjectId?: string | null;
   /** Injectable embedder (tests). Defaults to the real local model. */
   embedQuery?: (query: string) => Promise<number[]>;
+  /** Interactive first-turn budget. Omit for non-interactive callers/tests. */
+  interactiveDeadlineMs?: number;
+  /** Cancels the wait; the worker may finish warming in the background. */
+  signal?: AbortSignal;
   gezelOptIn?: boolean;
   /** Optional process-wide debug flag. */
   debug?: { isEnabled(): boolean };
@@ -123,6 +139,7 @@ interface RecallArgs {
  *   3. Global `config.autoRecall.enabled` (defaults to true).
  */
 export async function runAutoRecall(args: RecallArgs): Promise<RecallHit[] | null> {
+  if (args.signal?.aborted) return null;
   if (args.gezelOptIn === false) return null;
   const globalEnabled = args.config.autoRecall?.enabled !== false;
   if (!globalEnabled && args.gezelOptIn !== true) return null;
@@ -156,14 +173,43 @@ export async function runAutoRecall(args: RecallArgs): Promise<RecallHit[] | nul
     const codeAvailable = (await args.contentIndex?.hasIndex?.(args.projectId)) ?? false;
     if (!codeAvailable) return null;
   }
+  if (args.signal?.aborted) return null;
+
+  // The on-device embedder can take tens of seconds (and, under memory
+  // pressure, minutes) to load. Auto-recall is optional augmentation; it must
+  // never hold the user's first chat turn hostage. When the real manager says
+  // the pipeline is cold, start warming with this useful query and return
+  // immediately. A later session gets semantic recall once readiness flips.
+  const embeddingStatus = args.memory.embeddingStatus?.();
+  if (
+    args.interactiveDeadlineMs !== undefined &&
+    (embeddingStatus === 'cold' || embeddingStatus === 'warming')
+  ) {
+    if (embeddingStatus === 'cold') {
+      void embedFn(args.query).catch(() => {
+        // The ordinary embedding host records supported disabled/unavailable
+        // states. Auto-recall stays fail-open either way.
+      });
+    }
+    log.debug(`[recall] skipped interactive wait while embeddings are ${embeddingStatus}`);
+    return null;
+  }
   let vector: number[];
   try {
-    vector = await embedFn(args.query);
+    const embedded = await embedWithinBudget(
+      embedFn,
+      args.query,
+      args.interactiveDeadlineMs,
+      args.signal,
+    );
+    if (!embedded) return null;
+    vector = embedded;
   } catch (err) {
     if (err instanceof EmbeddingsDisabledError) return null;
     log.warn('[recall] embed failed:', err instanceof Error ? err.message : err);
     return null;
   }
+  if (args.signal?.aborted) return null;
 
   const fetchK = Math.max(topK * 2, topK);
   const [gezelResults, projectResults] = await Promise.all([
@@ -171,6 +217,7 @@ export async function runAutoRecall(args: RecallArgs): Promise<RecallHit[] | nul
     args.memory.searchVector('project', args.projectId, vector, fetchK).catch(() => []),
   ]);
   const results = [...gezelResults, ...projectResults];
+  if (args.signal?.aborted) return null;
 
   const ranked = results
     .map((r) => ({
@@ -269,6 +316,42 @@ export async function runAutoRecall(args: RecallArgs): Promise<RecallHit[] | nul
     }
   }
   return hits;
+}
+
+async function embedWithinBudget(
+  embedFn: (query: string) => Promise<number[]>,
+  query: string,
+  deadlineMs: number | undefined,
+  signal: AbortSignal | undefined,
+): Promise<number[] | null> {
+  if (signal?.aborted) return null;
+  if (deadlineMs === undefined) return embedFn(query);
+
+  const task = embedFn(query);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const interrupted = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), Math.max(1, deadlineMs));
+    timer.unref?.();
+    if (signal) {
+      onAbort = () => resolve(null);
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+  });
+  try {
+    const result = await Promise.race([task, interrupted]);
+    if (result === null) {
+      log.debug(
+        signal?.aborted
+          ? '[recall] cancelled before embedding completed'
+          : `[recall] embedding exceeded interactive budget (${deadlineMs}ms); continuing without recall`,
+      );
+    }
+    return result;
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+  }
 }
 
 function agePhrase(ageDays: number): string {

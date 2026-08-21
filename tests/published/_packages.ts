@@ -68,6 +68,7 @@ const PUBLISHED: ReadonlyArray<{ dir: string; typed: boolean }> = [
   { dir: 'app-sdk', typed: true },
   { dir: 'plugin-sdk', typed: true },
   { dir: 'catalog', typed: true },
+  { dir: 'knowledge', typed: true },
   { dir: 'mcp', typed: true },
   { dir: 'service', typed: true },
   // Spawn-only: the service resolves `run-action` and executes it as a

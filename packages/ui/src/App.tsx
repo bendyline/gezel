@@ -9,7 +9,7 @@ import type {
 } from '@bendyline/gezel';
 import type { NightShiftStatusResponse, QuotaBucket, UsageResponse } from '@bendyline/gezel-client';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from './api.js';
 import logotypeUrl from './assets/gezellogotype.png';
 import woodtexUrl from './assets/woodtex.png';
@@ -22,11 +22,13 @@ import { MacUninstallDialog } from './components/MacUninstallDialog.js';
 import { ModelBundleImportController } from './components/ModelBundleControls.js';
 import { NeedsInputPanel } from './components/NeedsInputPanel.js';
 import { QueueMeter } from './components/QueueMeter.js';
+import { SearchResultsOverlay } from './components/SearchResultsOverlay.js';
 import { Sidebar } from './components/Sidebar.js';
 import { StorageCleanupDialog } from './components/StorageCleanupDialog.js';
 import { TabContent } from './components/TabContent.js';
 import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
+import { HeaderDensityContext, useHeaderDensityMeasurement } from './components/header-density.js';
 import { NIGHT_SHIFT_MOON_PATH } from './components/night-shift-glyph.js';
 import {
   OUTPUT_PANE_MAXIMIZED_EVENT,
@@ -39,7 +41,10 @@ import { requestSettingsSection } from './settings-nav.js';
 import { streamSharedAllChatEvents } from './shared-chat-events.js';
 import { syncSidebarSideFromConfig } from './sidebar-side.js';
 import { syncThemeFromConfig } from './theme.js';
-import { HomeView } from './views/HomeView.js';
+
+const HomeView = lazy(() =>
+  import('./views/HomeView.js').then(({ HomeView }) => ({ default: HomeView })),
+);
 
 // Navigation is a single `selection` driven by the left Sidebar:
 //   - `null`         → the Meester home / dashboard view
@@ -54,6 +59,7 @@ const AREA_NAMES: RecentTabArea[] = [
   'craftbooks',
   'scripts',
   'history',
+  'knowledge',
   'handboek',
   'benchmarks',
   'settings',
@@ -212,6 +218,14 @@ function FullApp() {
   useEffect(() => {
     selectionRef.current = selection;
   }, [selection]);
+
+  // The titlebar's status cluster grows with the number of busy engines and
+  // queued chats, and `.app-header-right` never shrinks — so the pills shed
+  // words instead of running off the bar. One density for the whole cluster,
+  // measured here and shared through context. See components/header-density.ts.
+  const headerRef = useRef<HTMLElement | null>(null);
+  const headerClusterRef = useRef<HTMLDivElement | null>(null);
+  const headerDensity = useHeaderDensityMeasurement(headerRef, headerClusterRef);
 
   // ProjectOutputPane reports its local maximize state through a window
   // event so the persistent titlebar can provide the restore affordance
@@ -670,76 +684,82 @@ function FullApp() {
           region + native window-control reservations via CSS padding). The
           brand mark routes to the Meester home; navigation lives in the
           left Sidebar. */}
-      <header
-        className="app-header"
-        data-testid="app-header"
-        style={
-          {
-            ['--titlebar-bg-url' as string]: `url(${woodtexUrl})`,
-            ['--titlebar-bg-pos-y' as string]: `${titlebarBgPosY}px`,
-          } as React.CSSProperties
-        }
-      >
-        <button
-          type="button"
-          className={`app-header-brand${selection === null ? ' active' : ''}`}
-          onClick={() => commitSelection(null)}
-          title="Meester"
-          aria-label="Meester home"
+      <HeaderDensityContext.Provider value={headerDensity}>
+        <header
+          ref={headerRef}
+          className="app-header"
+          data-testid="app-header"
+          style={
+            {
+              ['--titlebar-bg-url' as string]: `url(${woodtexUrl})`,
+              ['--titlebar-bg-pos-y' as string]: `${titlebarBgPosY}px`,
+            } as React.CSSProperties
+          }
         >
-          <span
-            className="app-nav-home-logotype"
-            role="img"
-            aria-label="gezel"
-            style={{ ['--gezel-logo-url' as string]: `url(${logotypeUrl})` } as React.CSSProperties}
-          />
-        </button>
-        {pendingQuestionCount > 0 && (
           <button
             type="button"
-            className={
-              questionsOpen
-                ? 'nav active app-nav-questions app-header-questions'
-                : 'nav app-nav-questions app-header-questions'
-            }
-            onClick={() => setQuestionsOpen((o) => !o)}
-            title={`${pendingQuestionCount} update${pendingQuestionCount === 1 ? '' : 's'} needing your input`}
-            aria-expanded={questionsOpen}
+            className={`app-header-brand${selection === null ? ' active' : ''}`}
+            onClick={() => commitSelection(null)}
+            title="Meester"
+            aria-label="Meester home"
           >
-            Updates
-            <span className="app-nav-badge">{pendingQuestionCount}</span>
-            <span aria-hidden="true"> {questionsOpen ? '▴' : '▾'}</span>
+            <span
+              className="app-nav-home-logotype"
+              role="img"
+              aria-label="gezel"
+              style={
+                { ['--gezel-logo-url' as string]: `url(${logotypeUrl})` } as React.CSSProperties
+              }
+            />
           </button>
-        )}
-        {/* Unified search is anchored near the brand so changing status-pill
+          {pendingQuestionCount > 0 && (
+            <button
+              type="button"
+              className={
+                questionsOpen
+                  ? 'nav active app-nav-questions app-header-questions'
+                  : 'nav app-nav-questions app-header-questions'
+              }
+              onClick={() => setQuestionsOpen((o) => !o)}
+              title={`${pendingQuestionCount} update${pendingQuestionCount === 1 ? '' : 's'} needing your input`}
+              aria-expanded={questionsOpen}
+            >
+              Updates
+              <span className="app-nav-badge">{pendingQuestionCount}</span>
+              <span aria-hidden="true"> {questionsOpen ? '▴' : '▾'}</span>
+            </button>
+          )}
+          {/* Unified search is anchored near the brand so changing status-pill
             widths do not recenter it. It stays shrinkable in the flex row, so
             crowded titlebars still give the pills room without overlap. */}
-        <TitlebarSearch />
-        {/* The empty stretch between the brand and the status cluster is the
+          <TitlebarSearch />
+          <SearchResultsOverlay />
+          {/* The empty stretch between the brand and the status cluster is the
             primary OS drag target — `.app-header-right`'s `margin-left: auto`
             pushes the pills right, leaving the remaining gap (and the
             reserved window-control padding) as draggable titlebar. */}
-        <div className="app-header-right">
-          <QueueMeter />
-          <BoekwachterPill />
-          <EngineStatusPill />
-          <ClaudeCliPoolPill />
-          <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
-          <NightShiftMenu state={nightShift} onChange={setNightShift} />
-          <EngagementMenu mode={engagementMode} />
-          {outputPaneMaximized && (
-            <button
-              type="button"
-              className="app-output-restore"
-              onClick={requestOutputPaneRestore}
-              title="Restore output pane (F5)"
-              aria-label="Restore output pane"
-            >
-              <OutputPaneRestoreIcon />
-            </button>
-          )}
-        </div>
-      </header>
+          <div className="app-header-right" ref={headerClusterRef}>
+            <QueueMeter />
+            <BoekwachterPill />
+            <EngineStatusPill />
+            <ClaudeCliPoolPill />
+            <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
+            <NightShiftMenu state={nightShift} onChange={setNightShift} />
+            <EngagementMenu mode={engagementMode} />
+            {outputPaneMaximized && (
+              <button
+                type="button"
+                className="app-output-restore"
+                onClick={requestOutputPaneRestore}
+                title="Restore output pane (F5)"
+                aria-label="Restore output pane"
+              >
+                <OutputPaneRestoreIcon />
+              </button>
+            )}
+          </div>
+        </header>
+      </HeaderDensityContext.Provider>
       {questionsOpen && (
         <>
           {/* Scrim is a real <button> so keyboard users can close the
@@ -791,23 +811,25 @@ function FullApp() {
           poisonedProjects={poisonedProjects}
         />
         <main className="app-main">
-          {selection === null ? (
-            <HomeView
-              platform={window.__GEZEL__?.platform}
-              onNavigate={(v) => {
-                if (v === 'home') commitSelection(null);
-                else openArea(v);
-              }}
-            />
-          ) : (
-            <TabErrorBoundary key={tabKey(selection)} resetKey={tabKey(selection)}>
-              <TabContent
-                tab={selection}
-                activeProjectsByGezel={activeProjectsByGezel}
-                activeTurnsReady={activeTurnsReady}
+          <Suspense fallback={<div className="placeholder">Loading view…</div>}>
+            {selection === null ? (
+              <HomeView
+                platform={window.__GEZEL__?.platform}
+                onNavigate={(v) => {
+                  if (v === 'home') commitSelection(null);
+                  else openArea(v);
+                }}
               />
-            </TabErrorBoundary>
-          )}
+            ) : (
+              <TabErrorBoundary key={tabKey(selection)} resetKey={tabKey(selection)}>
+                <TabContent
+                  tab={selection}
+                  activeProjectsByGezel={activeProjectsByGezel}
+                  activeTurnsReady={activeTurnsReady}
+                />
+              </TabErrorBoundary>
+            )}
+          </Suspense>
         </main>
       </div>
     </div>

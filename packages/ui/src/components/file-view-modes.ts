@@ -1,4 +1,5 @@
 import type { BoekwachterIssue, FileReviewIssueSeverity } from '@bendyline/gezel';
+import { formatRelativeTime } from '../relative-time.js';
 import type { FileEntry, TreeNode } from './FileTree.js';
 
 /**
@@ -40,13 +41,7 @@ export const DOCUMENT_VIEW_MODES: readonly FileViewMode[] = ARTIFACT_VIEW_MODES;
 
 /** Relative mtime for a file row: seconds granularity while a write is fresh. */
 export function formatRelativeFileTime(iso: string): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return iso;
-  const deltaSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
-  if (deltaSec < 60) return `${deltaSec}s ago`;
-  if (deltaSec < 3600) return `${Math.floor(deltaSec / 60)}m ago`;
-  if (deltaSec < 86_400) return `${Math.floor(deltaSec / 3600)}h ago`;
-  return `${Math.floor(deltaSec / 86_400)}d ago`;
+  return formatRelativeTime(iso, { seconds: true, fallback: iso });
 }
 
 /**

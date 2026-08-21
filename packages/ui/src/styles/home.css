@@ -1,0 +1,384 @@
+/* Shared article, provider/status, session, and settings recipes. */
+
+/* Handboek uses the same editorial-sized artisan mark as the Home intro. */
+.handboek-doc img[alt="gezel-mark"] {
+  width: 150px;
+  height: auto;
+  display: block;
+}
+
+.handboek-doc .squisq-page-media-frame:has(> img[alt="gezel-mark"]) {
+  width: fit-content;
+  margin-inline: auto;
+}
+
+/* Article reading scale. Squisq's page renderer assigns fixed rem sizes to
+   each content pattern, so changing only the inherited root size leaves prose,
+   feature splits, and headings mismatched. Keep one host class on every
+   scrolling article view and reduce the common editorial roles together.
+   Presentation/video mode deliberately retains Squisq's full display scale. */
+.gezel-article-view .squisq-linear-content {
+  font-size: var(--text-md) !important;
+}
+
+.gezel-article-view .squisq-page-prose,
+.gezel-article-view .squisq-page-feature-body,
+.gezel-article-view .squisq-page-items li,
+.gezel-article-view .squisq-page-table {
+  font-size: 0.95rem;
+}
+
+.gezel-article-view .squisq-page-feature-title {
+  font-size: 1.55rem;
+}
+
+.gezel-article-view .squisq-page-prose h1 {
+  font-size: 1.9rem;
+}
+
+.gezel-article-view .squisq-page-prose h2 {
+  font-size: 1.5rem;
+}
+
+.gezel-article-view .squisq-page-prose h3 {
+  font-size: 1.2rem;
+}
+
+.gezel-article-view .squisq-page-prose :is(h4, h5, h6) {
+  font-size: 1.05rem;
+}
+
+.gezel-article-view
+  .squisq-page
+  :is(.squisq-page-cards-title, .squisq-page-items-title, .squisq-page-table-title) {
+  font-size: 1.7rem;
+}
+
+.gezel-article-view .squisq-page-callout-title {
+  font-size: 1.2rem;
+}
+
+.gezel-article-view .squisq-page-card-title {
+  font-size: 1.15rem;
+}
+
+/* Gezel roster — one card per companion: poppetje, name, role, and what
+   that role does. The Handboek's `::handboek-gezel-roster` macro expands
+   to a list whose items lead with a figure, and that shape is the hook:
+   squisq's markdown carries block attributes on headings only, so a
+   macro cannot put a class on the list it expands into. Any article list
+   written figure-first wants this treatment anyway. */
+.gezel-article-view .squisq-md-ul:has(> li > p > .squisq-md-image:first-child) {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+  gap: 0.7rem;
+  padding: 0;
+  margin: 1rem 0;
+}
+
+.gezel-article-view .squisq-md-ul:has(> li > p > .squisq-md-image:first-child) > li {
+  margin: 0;
+  padding: 0.9rem 0.7rem 1rem;
+  border: 1px solid var(--squisq-page-divider-color);
+  border-radius: var(--squisq-page-radius);
+  background: var(--squisq-page-bg-alt);
+}
+
+/* Stacking the item's inline runs is what turns it into a card. The role
+   summary is a bare text node — an anonymous flex item — so its type is
+   set here on the container and the name/role override it. */
+.gezel-article-view .squisq-md-ul:has(> li > p > .squisq-md-image:first-child) > li > p {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  text-align: center;
+  font-size: 0.82em;
+  line-height: 1.4;
+  color: var(--squisq-page-text-muted);
+}
+
+.gezel-article-view .squisq-md-ul:has(> li > p > .squisq-md-image:first-child) .squisq-md-image {
+  width: 88px;
+  height: auto;
+  margin-bottom: 0.2rem;
+}
+
+.gezel-article-view .squisq-md-ul:has(> li > p > .squisq-md-image:first-child) .squisq-md-strong {
+  font-size: 1.05em;
+  font-weight: 600;
+  color: var(--squisq-page-text);
+}
+
+.gezel-article-view .squisq-md-ul:has(> li > p > .squisq-md-image:first-child) .squisq-md-em {
+  font-style: normal;
+  font-size: 0.95em;
+  color: var(--squisq-page-accent);
+}
+
+.home-copilot-recommended {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--accent, #b0724c);
+  color: #fff;
+  padding: 0.08rem 0.45rem;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.home-copilot-cmd {
+  margin: 0;
+  padding: 0.55rem 3rem 0.55rem 0.75rem;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow-x: auto;
+  position: relative;
+}
+
+.home-copilot-cmd code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  background: none;
+  padding: 0;
+}
+
+.home-copilot-cmd-copy {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.home-copilot-cmd-copy:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.home-copilot-login {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.home-copilot-login-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.home-copilot-login-output {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  max-height: 12rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.home-probe {
+  font-size: 0.85rem;
+}
+
+.home-probe-ok {
+  color: #6ad38f;
+  font-weight: 500;
+}
+
+.home-probe-fail {
+  color: #ff9b9b;
+}
+
+.home-env-checks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.home-env-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-right: 0.25rem;
+}
+
+/* Debug-mode toggle in Settings → General. */
+.debug-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.debug-toggle input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
+/* Session switcher header — thin row sandwiched between the timeline
+   above and the composer below. Shows the active session for the
+   current (gezel, project) and offers + New / Archive. The divider
+   sits below the controls so the recipient and thread read as one
+   context header above the editor. */
+.gezel-chat-session-header {
+  display: flex;
+  align-items: stretch;
+  gap: 0.4rem;
+  padding: 0.4rem 0.6rem 0.4rem 0.25rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  flex-shrink: 0;
+}
+
+.gezel-chat-session-select {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.gz-select-trigger.gezel-chat-session-select {
+  background: var(--chat-thread-bg, var(--bg));
+  text-align: left;
+}
+
+.gz-select-content.gezel-chat-session-menu {
+  background: var(--chat-thread-menu-bg, var(--surface));
+}
+
+/* Radix Select.Value renders as a span inside the trigger. Force
+ * single-line + ellipsis so long session titles ("[Message from
+ * Kenji]: New project …") truncate cleanly instead of wrapping
+ * to two lines and pushing the New / Archive buttons off-center. */
+.gezel-chat-session-select > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Thread-picker rows (SessionSwitcher): render `@mention`s as compact
+   accent pills instead of raw `@[Label](gezel:id)` markdown, and mute the
+   trailing "· time · provider" meta so the title leads. Pill styling
+   mirrors `.squisq-md-mention` so chat surfaces read consistently. */
+.session-mention {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 9px;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.session-row-meta {
+  color: var(--text-muted);
+}
+
+.gezel-chat-session-menu .gz-select-item[data-highlighted] {
+  color: var(--accent-selection-ink);
+}
+
+.gezel-chat-session-menu .gz-select-item[data-highlighted] .session-row-meta {
+  color: inherit;
+}
+
+.gezel-chat-session-btn {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.gezel-chat-session-btn:hover:not([disabled]) {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.gezel-chat-session-btn[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.external-conversation-panel {
+  flex-shrink: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  overflow: hidden;
+}
+
+.external-conversation-notice {
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+  padding: 0.65rem 0.8rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.external-conversation-label {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ── Meester new-gezel form ── */
+
+.meester-new-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(79, 125, 255, 0.06);
+  max-width: 32rem;
+}
+
+.meester-new-form input {
+  padding: 0.4rem 0.55rem;
+  background: var(--bg, #141414);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.meester-new-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.meester-new-form .primary {
+  background: var(--accent, #b0724c);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 0.35rem 0.85rem;
+  cursor: pointer;
+}

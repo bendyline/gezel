@@ -238,6 +238,48 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
     });
   });
 
+  it('keeps stdout reply-only when run owns an in-process service', async () => {
+    const runHome = await mkdtemp(join(tmpdir(), 'gezel-cli-run-output-'));
+    const runCwd = await mkdtemp(join(tmpdir(), 'gezel-cli-run-workspace-'));
+    const prompt = 'Reply exactly with: cli-stdout-only';
+    try {
+      const result = await execFileAsync(
+        process.execPath,
+        [cliEntry, '--home', runHome, '--standalone', 'run', prompt],
+        {
+          // This case verifies the CLI's stdout/stderr boundary, not workspace
+          // retrieval. Keep the empty project cwd separate from the service
+          // home so the indexer cannot ingest state the daemon is still writing.
+          cwd: runCwd,
+          env: {
+            ...process.env,
+            GEZEL_HOME: runHome,
+            GEZEL_MOCK_PROVIDER: '1',
+            GEZEL_DISABLE_MACHINE_ENGINE: '1',
+            GEZEL_SKIP_SYSTEM_BOOTSTRAP: '1',
+            GEZEL_SECRETS_BACKEND: 'file',
+            GEZEL_LOG_LEVEL: 'info',
+          },
+          // Cold service startup and shutdown contend with the other
+          // integration workers in a full package run. Keep the child
+          // deadline below the test deadline so failures surface from the
+          // command itself and the finally block still has time to clean up.
+          timeout: 75_000,
+        },
+      );
+
+      expect(result.stdout).toBe(`Mock reply: ${prompt}\n`);
+      expect(result.stderr).toContain('INFO ');
+      expect(result.stderr).toContain('[service]');
+      expect(await readRuntime(runHome)).toBeNull();
+    } finally {
+      const runtime = await readRuntime(runHome).catch(() => null);
+      if (runtime && isProcessAlive(runtime.pid)) await stopProcessByPid(runtime.pid);
+      await rm(runHome, { recursive: true, force: true });
+      await rm(runCwd, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   it('starts a craftbook from the do subcommand', async () => {
     const result = await runCli('do', 'security-architecture-review');
     expect(result.stderr).toBe('');

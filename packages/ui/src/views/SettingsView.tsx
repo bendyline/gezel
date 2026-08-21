@@ -21,10 +21,12 @@ import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ConnectedAppsPanel } from '../components/ConnectedAppsPanel.js';
 import { CopilotInstallCard } from '../components/CopilotInstallCard.js';
 import { CopilotLoginCommand } from '../components/CopilotLoginCommand.js';
+import { FaceRecognitionCard } from '../components/FaceRecognitionCard.js';
 import { GezelIcon } from '../components/GezelIcon.js';
 import { GildeUpdatesCard } from '../components/GildeUpdatesCard.js';
 import { HealthStrip } from '../components/HealthStrip.js';
 import { InstallModelTuningEditor } from '../components/InstallModelTuningEditor.js';
+import { KnowledgeCatalogsCard } from '../components/KnowledgeCatalogsCard.js';
 import { requestMacUninstall } from '../components/MacUninstallDialog.js';
 import { EffortPicker, EffortTray, ModelPicker } from '../components/ModelPicker.js';
 import { RemoteServersPanel } from '../components/RemoteServersPanel.js';
@@ -55,10 +57,18 @@ import { SecurityComplianceSettings } from './SecurityComplianceSettings.js';
 import { VideoEngineSettings } from './VideoEngineSettings.js';
 import { detectDs4Availability } from './ds4-availability.js';
 import { localEngineSettingsLabel } from './local-engine-label.js';
+import {
+  type WebSearchProviderSetting,
+  visibleWebSearchProviderSetting,
+  webSearchProviderOptions,
+} from './web-search-provider-options.js';
 
 type CodexCliReasoningEffort = NonNullable<
   NonNullable<ConfigResponse['codexCli']>['defaultReasoningEffort']
 >;
+
+const INCLUDE_TESTING_WEB_SEARCH_PROVIDER = import.meta.env.DEV;
+const WEB_SEARCH_PROVIDER_OPTIONS = webSearchProviderOptions(INCLUDE_TESTING_WEB_SEARCH_PROVIDER);
 
 const CLAUDE_PERMISSION_CHOICES: ReadonlyArray<{
   id: ClaudePermissionMode;
@@ -114,6 +124,7 @@ type SectionId =
   | 'connectedApps'
   | 'remoteServers'
   | 'toolsets'
+  | 'knowledge'
   | 'securityCompliance'
   | 'about'
   | 'benchmarks';
@@ -170,6 +181,7 @@ function buildSections(platform: string | undefined): SettingsSection[] {
     { id: 'imageRecognition', label: 'Image recognition', group: 'workloads' },
     { id: 'audio', label: 'Audio', group: 'workloads' },
     { id: 'webSearch', label: 'Web search', group: 'workloads' },
+    { id: 'knowledge', label: 'Knowledge', group: 'workloads' },
     { id: 'channels', label: 'Channels' },
     { id: 'connectedApps', label: 'Connected Apps' },
     { id: 'remoteServers', label: 'Remote Servers' },
@@ -329,6 +341,7 @@ export function SettingsView() {
       'webSearch',
       'channels',
       'toolsets',
+      'knowledge',
       'securityCompliance',
       'about',
     ]);
@@ -858,7 +871,7 @@ export function SettingsView() {
   }, []);
 
   const saveWebSearchProvider = useCallback(
-    async (next: 'brave' | 'wikipedia' | 'mock' | 'unset') => {
+    async (next: WebSearchProviderSetting) => {
       setStatus('saving…');
       try {
         const provider = next === 'unset' ? undefined : next;
@@ -900,6 +913,7 @@ export function SettingsView() {
         | 'anthropic-cli'
         | 'codex-cli'
         | 'ollama'
+        | 'llama-cpp'
         | 'mlx'
         | 'ds4',
       value: string | undefined,
@@ -1088,15 +1102,24 @@ export function SettingsView() {
     [],
   );
 
-  const setAutoRecall = useCallback(
-    async (patch: Partial<NonNullable<ConfigResponse['autoRecall']>>) => {
+  const setRetrieval = useCallback(
+    async (
+      patch: Omit<Partial<NonNullable<ConfigResponse['retrieval']>>, 'maxTokens'> & {
+        maxTokens?: number | null;
+      },
+    ) => {
       setStatus('saving…');
       try {
-        const res = await api.updateConfig({
-          autoRecall: { ...(config?.autoRecall ?? {}), ...patch },
-        });
+        const current = config?.retrieval ?? { mode: 'balanced' as const };
+        const { maxTokens: _currentMaxTokens, ...withoutMaxTokens } = current;
+        const { maxTokens, ...rest } = patch;
+        const retrieval =
+          maxTokens === null
+            ? { ...withoutMaxTokens, ...rest }
+            : { ...current, ...rest, ...(maxTokens === undefined ? {} : { maxTokens }) };
+        const res = await api.updateConfig({ retrieval });
         setConfig(res);
-        setStatus('recall settings saved');
+        setStatus('indexed context settings saved');
       } catch (err) {
         setStatus(`save failed: ${(err as Error).message}`);
       }
@@ -2344,7 +2367,7 @@ export function SettingsView() {
                 </>
               )}
 
-              {provider === 'mlx' && (
+              {(provider === 'llama-cpp' || provider === 'mlx') && (
                 <div
                   className="new-row"
                   style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
@@ -2353,9 +2376,9 @@ export function SettingsView() {
                     Default model
                   </label>
                   <ModelPicker
-                    provider="mlx"
-                    value={config?.defaultModel?.mlx}
-                    onChange={(v) => void saveDefaultModel('mlx', v)}
+                    provider={provider}
+                    value={config?.defaultModel?.[provider]}
+                    onChange={(v) => void saveDefaultModel(provider, v)}
                     placeholder="First local model"
                   />
                 </div>
@@ -2366,7 +2389,7 @@ export function SettingsView() {
                   Download models and tune advanced settings in the{' '}
                   <button
                     type="button"
-                    className="home-link"
+                    className="gz-link-button"
                     onClick={() => setSection(provider === 'mlx' ? 'mlx' : 'llamaCpp')}
                     style={{ padding: 0 }}
                   >
@@ -2396,7 +2419,7 @@ export function SettingsView() {
                     Download DwarfStar models and tune SSD streaming in the{' '}
                     <button
                       type="button"
-                      className="home-link"
+                      className="gz-link-button"
                       onClick={() => setSection('ds4')}
                       style={{ padding: 0 }}
                     >
@@ -2422,7 +2445,9 @@ export function SettingsView() {
                 <h4 style={{ margin: '0 0 0.35rem' }}>Night Shift model</h4>
                 <p className="muted" style={{ margin: '0 0 0.75rem' }}>
                   Night Shift inherits the default provider and model unless you choose a separate,
-                  hands-off model here. Individual gezel overrides still take priority.
+                  hands-off model here. For example, you might want to use a larger (but slower)
+                  model during the night shift for more careful thinking overnight. Individual gezel
+                  overrides still take priority.
                 </p>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <input
@@ -2529,7 +2554,7 @@ export function SettingsView() {
 
             <MemorySection
               config={config}
-              onAutoRecallChange={setAutoRecall}
+              onRetrievalChange={setRetrieval}
               onSummarizationChange={setSummarization}
             />
           </>
@@ -2579,7 +2604,7 @@ export function SettingsView() {
                     </h4>
                     <button
                       type="button"
-                      className="home-link"
+                      className="gz-link-button"
                       onClick={() => setShowCliHelp((s) => !s)}
                       style={{ marginLeft: 'auto' }}
                     >
@@ -2635,7 +2660,7 @@ export function SettingsView() {
                 {!hasGithubToken && !showPatForm && (
                   <button
                     type="button"
-                    className="home-link"
+                    className="gz-link-button"
                     onClick={() => setShowPatForm(true)}
                     style={{ marginLeft: '0.5rem' }}
                   >
@@ -3372,9 +3397,12 @@ export function SettingsView() {
         )}
 
         {section === 'imageRecognition' && (
-          <section>
-            <ImageRecognitionSettings />
-          </section>
+          <>
+            <section>
+              <ImageRecognitionSettings />
+            </section>
+            <FaceRecognitionCard />
+          </>
         )}
 
         {section === 'audio' && (
@@ -3387,25 +3415,27 @@ export function SettingsView() {
           <section className="provider-card">
             <h3>Web search</h3>
             <p className="muted" style={{ marginTop: 0 }}>
-              Powers the <code>web_search</code> MCP tool that gezellen use to discover URLs. Picks
-              one search backend; configure a key only for the providers you choose.
+              Powers the web search tools that gezellen use to discover content on the internet.
+              Picks one search backend; configure a key only for the providers you choose.
             </p>
             <div className="new-row" style={{ alignItems: 'center', marginTop: '0.5rem' }}>
               <label className="muted" style={{ fontSize: '0.9rem' }}>
                 Provider
               </label>
               <select
-                value={config?.webSearch?.provider ?? 'unset'}
+                value={visibleWebSearchProviderSetting(
+                  config?.webSearch?.provider,
+                  INCLUDE_TESTING_WEB_SEARCH_PROVIDER,
+                )}
                 onChange={(e) =>
-                  void saveWebSearchProvider(
-                    e.target.value as 'brave' | 'wikipedia' | 'mock' | 'unset',
-                  )
+                  void saveWebSearchProvider(e.target.value as WebSearchProviderSetting)
                 }
               >
-                <option value="unset">Default (Wikipedia, no key)</option>
-                <option value="wikipedia">Wikipedia (no key)</option>
-                <option value="brave">Brave Search (requires key)</option>
-                <option value="mock">Mock (testing)</option>
+                {WEB_SEARCH_PROVIDER_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="new-row" style={{ alignItems: 'center', marginTop: '0.5rem' }}>
@@ -3475,6 +3505,8 @@ export function SettingsView() {
         {section === 'connectedApps' && <ConnectedAppsPanel />}
         {section === 'remoteServers' && <RemoteServersPanel />}
 
+        {section === 'knowledge' && <KnowledgeCatalogsCard />}
+
         {section === 'toolsets' && (
           <section>
             <h3>Shared Toolsets</h3>
@@ -3508,7 +3540,7 @@ export function SettingsView() {
               <p className="muted small" style={{ marginTop: '0.75rem' }}>
                 Something not working right?{' '}
                 <ReportErrorLink
-                  className="home-link"
+                  className="gz-link-button"
                   label="Report a problem on GitHub"
                   report={{ surface: 'settings-about', message: '' }}
                 />
@@ -3851,7 +3883,7 @@ function SystemNoticeNote({ notice }: { notice: SystemNotice }) {
       )}
       {notice.reportable && (
         <ReportErrorLink
-          className="home-link"
+          className="gz-link-button"
           report={{
             surface: 'install-health',
             message: notice.title,
@@ -4361,52 +4393,67 @@ function SidebarSidePicker() {
 
 interface MemorySectionProps {
   config: ConfigResponse | null;
-  onAutoRecallChange: (patch: Partial<NonNullable<ConfigResponse['autoRecall']>>) => Promise<void>;
+  onRetrievalChange: (
+    patch: Omit<Partial<NonNullable<ConfigResponse['retrieval']>>, 'maxTokens'> & {
+      maxTokens?: number | null;
+    },
+  ) => Promise<void>;
   onSummarizationChange: (
     patch: Partial<NonNullable<ConfigResponse['summarization']>>,
   ) => Promise<void>;
 }
 
-function MemorySection({ config, onAutoRecallChange, onSummarizationChange }: MemorySectionProps) {
-  const recallEnabled = config?.autoRecall?.enabled !== false;
+function MemorySection({ config, onRetrievalChange, onSummarizationChange }: MemorySectionProps) {
+  const retrievalMode =
+    config?.retrieval?.mode ?? (config?.autoRecall?.enabled === false ? 'off' : 'balanced');
   const summarizeEnabled = config?.summarization?.enabled !== false;
-  const topK = config?.autoRecall?.topK ?? 4;
+  const retrievalBudget = config?.retrieval?.maxTokens;
   const minUserTurns = config?.summarization?.minUserTurns ?? 2;
   const idleHours = config?.summarization?.idleHours ?? 24;
   return (
     <section style={{ marginTop: '2rem' }}>
-      <h3>Memory</h3>
+      <h3>Project knowledge &amp; memory</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        Cross-thread context: pull relevant memories into new threads, and distill finished threads
-        into the project memory bank so the next gezel can pick up where you left off.
+        Ground relevant turns in indexed project files, artifacts, memories, and shared documents.
+        Finished threads can also be distilled into project memory for future work.
       </p>
 
       <div style={{ marginBottom: '1.25rem' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <input
-            type="checkbox"
-            checked={recallEnabled}
-            onChange={(e) => void onAutoRecallChange({ enabled: e.target.checked })}
-          />
-          <strong>Recall memories at the start of each new thread.</strong>
-        </label>
-        <p className="muted small" style={{ margin: '0.25rem 0 0 1.5rem' }}>
-          Before the first reply, look through project and gezel memories for the most relevant
-          notes and hand them to the model.
+        <strong>Indexed context per turn</strong>
+        <p className="muted small" style={{ margin: '0.25rem 0 0' }}>
+          Higher settings provide more direct evidence. Lower settings preserve context space on
+          memory-constrained models. The gezel can still call <code>search</code> when this is Off.
         </p>
-        <div className="new-row" style={{ marginTop: '0.5rem', alignItems: 'center' }}>
-          <label className="muted small">Memories to recall</label>
+        <div className="provider-switch" style={{ marginTop: '0.5rem' }}>
+          {(['off', 'lean', 'balanced', 'deep'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className={`provider-pill${retrievalMode === mode ? ' provider-pill-active' : ''}`}
+              onClick={() => void onRetrievalChange({ mode })}
+            >
+              {mode[0]!.toUpperCase() + mode.slice(1)}
+            </button>
+          ))}
+        </div>
+        <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
+          <label className="muted small">Optional token cap</label>
           <input
             type="number"
-            min={1}
-            max={20}
-            value={topK}
+            min={0}
+            max={16000}
+            value={retrievalBudget ?? ''}
+            placeholder="Mode default"
             onChange={(e) => {
+              if (e.target.value === '') {
+                void onRetrievalChange({ maxTokens: null });
+                return;
+              }
               const v = Number.parseInt(e.target.value, 10);
-              if (Number.isFinite(v) && v > 0) void onAutoRecallChange({ topK: v });
+              if (Number.isFinite(v) && v >= 0) void onRetrievalChange({ maxTokens: v });
             }}
-            style={{ width: '5rem' }}
-            disabled={!recallEnabled}
+            style={{ width: '8rem' }}
+            disabled={retrievalMode === 'off'}
           />
         </div>
       </div>

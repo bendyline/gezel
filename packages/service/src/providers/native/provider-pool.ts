@@ -500,7 +500,10 @@ export class ProviderPool {
       draining: false,
       recentHits: [at],
     });
-    log.info(`spawned ${key} (${residentBytes} bytes)`);
+    // Registration is lazy: most providers do not launch their native child
+    // until the first request. Calling this "spawned" made preflight logs
+    // claim an engine existed when only a pool entry had been installed.
+    log.info(`registered provider ${key} (${residentBytes} bytes)`);
     this.fireChange();
   }
 

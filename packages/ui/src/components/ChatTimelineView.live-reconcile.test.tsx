@@ -63,7 +63,10 @@ const assistantMessage = message({
 });
 const streamUrl = () => 'https://example.invalid/events/chat/project?project=p1';
 
-function renderTimeline(loadTimeline: (opts: { limit: number }) => Promise<ListTimelineResponse>) {
+function renderTimeline(
+  loadTimeline: (opts: { limit: number }) => Promise<ListTimelineResponse>,
+  onArtifactSeen?: (path: string, projectId?: string) => void,
+) {
   render(
     <ChatTimelineView
       scopeKey="project:p1"
@@ -71,6 +74,7 @@ function renderTimeline(loadTimeline: (opts: { limit: number }) => Promise<ListT
       loadTimeline={loadTimeline}
       streamUrl={streamUrl}
       inflightScope={{ projectId: 'p1' }}
+      onArtifactSeen={onArtifactSeen}
     />,
   );
 }
@@ -104,6 +108,28 @@ describe('ChatTimelineView — canonical completion reconciliation', () => {
 
     await screen.findByText('The playable space war game is ready.');
     expect(loadTimeline).toHaveBeenCalledTimes(2);
+  });
+
+  it('registers a persisted file once across canonical timeline reconciliations', async () => {
+    const onArtifactSeen = vi.fn();
+    const referencedReply = message({
+      role: 'assistant',
+      content: 'The report is ready.',
+      at: '2026-08-05T10:11:00.000Z',
+      referencedFiles: [{ kind: 'artifact', path: 'reports/status.md' }],
+    });
+    const loadTimeline = vi.fn(
+      async (): Promise<ListTimelineResponse> =>
+        ({ messages: [userMessage, referencedReply], hasMore: false }) as ListTimelineResponse,
+    );
+
+    renderTimeline(loadTimeline, onArtifactSeen);
+
+    await waitFor(() => {
+      expect(loadTimeline).toHaveBeenCalledTimes(2);
+      expect(onArtifactSeen).toHaveBeenCalledTimes(1);
+    });
+    expect(onArtifactSeen).toHaveBeenCalledWith('reports/status.md', 'p1');
   });
 
   it('refreshes the durable row on done when the complete envelope was missed', async () => {

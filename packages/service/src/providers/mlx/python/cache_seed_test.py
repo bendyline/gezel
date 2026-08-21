@@ -287,4 +287,68 @@ check(
     cs.serial_reset_needed([1, 2, 3], wrapped, []),
 )
 
+# --- seed diagnostics -------------------------------------------------
+# A full re-prefill is the single most expensive cache outcome, and the
+# ONLY numbers that say why are the divergence point and how much was
+# held. They were computed and discarded until 2026-08-19, which is why
+# 59 untrimmable turns across a 15-trial arm could not be attributed to
+# either prompt churn or an over-far snapshot boundary.
+
+
+class _Untrimmable:
+    """Stands in for ArraysCache: qwen3.8 builds one per linear-attention
+    layer (48 of its 64), and a recurrent state cannot be rewound.
+
+    `offset` must match the cached token count or seed_from_state reports
+    `fresh-inconsistent` before it ever reaches the trim decision.
+    """
+
+    def __init__(self, offset=4):
+        self.offset = offset
+
+    def is_trimmable(self):
+        return False
+
+
+class _State:
+    def __init__(self, tokens, layers):
+        self.token_ids = list(tokens)
+        self.cache = list(layers)
+
+
+_plan = cs.seed_from_state(_State([1, 2, 3, 4], [_Untrimmable()]), [1, 2, 9, 9, 9])
+check("untrimmable divergence reports mode", _plan.mode == "fresh-untrimmable")
+check("untrimmable divergence reports lcp", _plan.lcp == 2)
+check("untrimmable divergence reports cached length", _plan.cached_len == 4)
+check("untrimmable divergence still reuses nothing", _plan.reused == 0)
+
+# --- snapshot boundary vs an untrimmable tail ------------------------
+# Relocating the reasoning preamble took the divergence point from token 3
+# to 6,830 of a 6,857-token cache (99.6% match) and still reused NOTHING,
+# because an untrimmable cache needs lcp == n exactly. Saving at the last
+# invariant position is what converts that 99.6% into an extension.
+
+_stable = cs.stable_snapshot_boundary([1, 2, 3, 4, 5, 6], [1, 2, 3, 4, 9, 9], margin=0)
+check("boundary is the divergence point of the two renders", _stable == 4)
+check(
+    "margin backs the boundary off",
+    cs.stable_snapshot_boundary([1, 2, 3, 4, 5, 6], [1, 2, 3, 4, 9, 9], margin=2) == 2,
+)
+check(
+    "no shared prefix disables capture (0, not negative)",
+    cs.stable_snapshot_boundary([7, 8], [1, 2], margin=2) == 0,
+)
+
+# A state saved AT the stable boundary extends cleanly next turn; a state
+# saved past it does not, and on an untrimmable stack that costs everything.
+_at = cs.seed_from_state(_State([1, 2, 3, 4], [_Untrimmable()]), [1, 2, 3, 4, 9, 9])
+check("state saved at the boundary extends", _at.mode == "extension")
+check("state saved at the boundary reuses all of it", _at.reused == 4)
+
+_past = cs.seed_from_state(
+    _State([1, 2, 3, 4, 5], [_Untrimmable(offset=5)]), [1, 2, 3, 4, 9, 9]
+)
+check("state saved one token past the boundary reuses NOTHING", _past.reused == 0)
+check("...and reports why", _past.mode == "fresh-untrimmable")
+
 print("all cache_seed tests passed")

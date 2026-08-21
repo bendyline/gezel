@@ -199,6 +199,33 @@ describe('Sidebar', () => {
     expect(await screen.findByTestId('sidebar-area-scripts')).toBeInTheDocument();
   });
 
+  it('hides the Knowledge area link until a catalog is registered', async () => {
+    render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+    await screen.findByTestId('sidebar-area-tasks');
+    expect(screen.queryByTestId('sidebar-area-knowledge')).not.toBeInTheDocument();
+  });
+
+  it('shows the Knowledge area link the moment ≥1 catalog is registered', async () => {
+    vi.mocked(api.listKnowledgeCatalogs).mockResolvedValue({
+      catalogs: [
+        {
+          ref: {
+            publisherId: 'p',
+            catalogId: 'c',
+            version: '1.0.0',
+            contentDigest: 'a'.repeat(64),
+            storageScope: 'user',
+          },
+          enabled: true,
+          addedAt: '2026-01-01T00:00:00.000Z',
+          mounted: true,
+        },
+      ],
+    } as never);
+    render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+    expect(await screen.findByTestId('sidebar-area-knowledge')).toBeInTheDocument();
+  });
+
   it('hides the built-in "Default" project from the list', async () => {
     vi.mocked(api.listProjects).mockResolvedValue({
       projects: [{ id: 'default', name: 'Default' } as Project, ...PROJECTS],
