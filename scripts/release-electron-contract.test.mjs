@@ -57,12 +57,30 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   assert.match(main, /bundled Node runtime did not pass integrity verification and install/);
   assert.match(main, /bundled pnpm runtime did not pass integrity verification and install/);
   assert.equal(
-    workflow.match(/- name: Smoke-test packaged (?:Windows|macOS|Linux) app/g)?.length,
+    workflow.match(/- name: Smoke-test (?:installed Windows|packaged (?:macOS|Linux)) app/g)
+      ?.length,
     3,
-    'every packaged desktop platform must execute its final unpacked app',
+    'every packaged desktop platform must execute its final installed app',
   );
-  const windowsSmokeStart = workflow.indexOf('- name: Smoke-test packaged Windows app');
+  const windowsInstallerSmokeStart = workflow.indexOf(
+    '- name: Smoke-test packaged Windows installer',
+  );
+  const windowsSmokeStart = workflow.indexOf('- name: Smoke-test installed Windows app');
   const windowsSmokeEnd = workflow.indexOf('- name: Verify Windows signatures', windowsSmokeStart);
+  assert.notEqual(
+    windowsInstallerSmokeStart,
+    -1,
+    'Windows release must execute the signed NSIS artifact',
+  );
+  assert.ok(
+    windowsInstallerSmokeStart < windowsSmokeStart,
+    'the installed app smoke must run after the NSIS installer smoke',
+  );
+  const windowsInstallerSmoke = workflow.slice(windowsInstallerSmokeStart, windowsSmokeStart);
+  assert.match(windowsInstallerSmoke, /Start-Process .* -ArgumentList '\/S' -Wait -PassThru/);
+  assert.match(windowsInstallerSmoke, /MachineServiceInstalled/);
+  assert.match(windowsInstallerSmoke, /Get-Service -Name GezelService/);
+  assert.match(windowsInstallerSmoke, /serviceRole -ne 'machine-engine'/);
   const windowsSmoke = workflow.slice(windowsSmokeStart, windowsSmokeEnd);
   assert.match(windowsSmoke, /WaitForExit\(900000\)/);
   assert.match(windowsSmoke, /RedirectStandardOutput/);

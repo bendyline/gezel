@@ -152,6 +152,25 @@ describe('Windows machine-service installer security', () => {
     );
   });
 
+  it('runs elevated maintenance through bundled Node rather than Electron', () => {
+    const customInstallStart = position('!macro customInstall');
+    const customInstallEnd = hook.indexOf('!macroend', customInstallStart);
+    const customInstall = hook.slice(customInstallStart, customInstallEnd);
+
+    expect(hook).toContain(
+      '!define GEZEL_INTERPRETER "$INSTDIR\\resources\\app.asar.unpacked\\dist\\node-bundle\\node.exe"',
+    );
+    expect(customInstall).toContain('${IfNot} ${FileExists} "${GEZEL_INTERPRETER}"');
+    expect(customInstall).toContain(
+      'nsExec::ExecToLog \'"${GEZEL_INTERPRETER}" "${GEZEL_MIGRATE_SHARED_CLI}"',
+    );
+    expect(customInstall).toContain(
+      'nsExec::ExecToLog \'"${GEZEL_INTERPRETER}" "${GEZEL_EXTRACT_CLI}"',
+    );
+    expect(customInstall).not.toContain('SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE"');
+    expect(customInstall).not.toContain('"$INSTDIR\\Gezel.exe"');
+  });
+
   it('applies every load-bearing ACL to the container itself, not by recursion', () => {
     // A recursive icacls pass fails as a unit — one MAX_PATH entry inside a
     // preserved GEZEL_HOME (uv venvs, cloned repos, sandbox node_modules) is

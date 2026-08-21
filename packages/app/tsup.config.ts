@@ -7,9 +7,9 @@ export default defineConfig({
   entry: {
     main: 'src/main.ts',
     // Install-time CLI invoked by per-platform installers (NSIS / PKG
-    // postinstall / deb-rpm afterInstall) via `ELECTRON_RUN_AS_NODE=1` on
-    // the bundled Electron exe. Bundled as a sibling to main.js so the
-    // installer can reference it at a stable path.
+    // postinstall / deb-rpm afterInstall). Windows uses the bundled Node
+    // runtime; Unix installers currently use Electron's RUN_AS_NODE mode.
+    // Bundled as a sibling to main.js so every installer has a stable path.
     'extract-service-bundle': 'src/extract-service-bundle.ts',
     'migrate-legacy-shared': 'src/migrate-legacy-shared.ts',
   },

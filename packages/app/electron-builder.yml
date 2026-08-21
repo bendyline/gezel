@@ -124,11 +124,11 @@ files:
 # `fs.readFile` (it runs as a child Node process, not inside Electron's
 # patched fs). Same reason the loose tree was unpacked before.
 #
-# `extract-service-bundle.js` is also asar-unpacked because the NSIS
-# install hook invokes it through `Gezel.exe` with ELECTRON_RUN_AS_NODE=1.
-# RUN_AS_NODE mode strips Electron's fs patches, so a path inside `app.asar`
-# would fail to resolve. Keeping the CLI as a real file on disk sidesteps
-# every "does asar work here?" question.
+# `extract-service-bundle.js` is also asar-unpacked because installers invoke
+# it in a plain Node environment (the bundled node.exe on Windows, and
+# ELECTRON_RUN_AS_NODE on macOS/Linux). Neither path has Electron's patched fs,
+# so a path inside `app.asar` would fail to resolve. Keeping the CLI as a real
+# file on disk sidesteps every "does asar work here?" question.
 asarUnpack:
   # main.js, preload.cjs, and package.json are asar-unpacked to work
   # around an electron-builder 26.x packing bug that drops the first ~13

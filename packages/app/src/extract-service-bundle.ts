@@ -3,10 +3,9 @@
  * (NSIS on Windows, PKG postinstall on macOS, deb/rpm afterInstall on Linux)
  * to extract the shipped service bundle into the system-scope service home.
  *
- * Invoked through `ELECTRON_RUN_AS_NODE=1 <Electron exe> <this file's
- * dist/extract-service-bundle.js> --tarball=… --meta=… --dest=… [--force]`.
- * Running through the bundled Electron exe avoids requiring a system Node
- * during install (same trick we use for the daemon itself).
+ * Windows invokes this through the separately bundled Node runtime. macOS and
+ * Linux currently use `ELECTRON_RUN_AS_NODE=1 <Electron exe>`. Both paths avoid
+ * requiring a system Node during install.
  *
  * Exit codes:
  *   0 — extraction succeeded (fresh-install, upgraded, forced, or up-to-date)

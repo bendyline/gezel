@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  PREVIEW_FRAME_INDETERMINATE,
+  type PreviewFrameLike,
   daemonEntrypointArgument,
   isAllowedPreviewNavigation,
   isAllowedPreviewResourceRequest,
@@ -7,7 +9,13 @@ import {
   isExactApprovedPath,
   isExternalRendererNetworkRequest,
   isPreviewDocumentUrl,
+  normalizedDocumentUrl,
+  previewExternalServicesForFrame,
 } from './electron-boundaries.js';
+
+function previewFrame(url: string, parent: PreviewFrameLike | null = null): PreviewFrameLike {
+  return { isDestroyed: () => false, url, parent };
+}
 
 describe('daemon-entrypoint launch guard', () => {
   it('recognizes the daemon entrypoint on both path separators', () => {
@@ -64,6 +72,75 @@ describe('Electron boundary policies', () => {
     expect(isPreviewDocumentUrl('https://127.0.0.1.evil.test:4312/preview/cap/x', origin)).toBe(
       false,
     );
+  });
+
+  it('resolves a preview permission through descendant frames and normalized fragments', () => {
+    const origin = 'https://127.0.0.1:4312';
+    const preview = `${origin}/preview/cap/workspace/default/site/index.html`;
+    const key = normalizedDocumentUrl(preview);
+    expect(key).not.toBeNull();
+    const permissions = new Map([[key!, true]]);
+    const child = previewFrame('about:blank', previewFrame(`${preview}#section`, null));
+
+    expect(previewExternalServicesForFrame(child, origin, permissions)).toBe(true);
+  });
+
+  it('fails closed when a preview has no trusted response permission', () => {
+    const origin = 'https://127.0.0.1:4312';
+    const preview = previewFrame(`${origin}/preview/cap/workspace/default/site/index.html`);
+
+    expect(previewExternalServicesForFrame(preview, origin, new Map())).toBe(false);
+  });
+
+  it('keeps ordinary and absent frames outside preview policy', () => {
+    const origin = 'https://127.0.0.1:4312';
+    const permissions = new Map<string, boolean>();
+
+    expect(previewExternalServicesForFrame(null, origin, permissions)).toBeNull();
+    expect(
+      previewExternalServicesForFrame(previewFrame(`${origin}/settings`), origin, permissions),
+    ).toBeNull();
+  });
+
+  it('fails closed before reading properties from a destroyed frame', () => {
+    const destroyed = {
+      isDestroyed: () => true,
+      get url(): string {
+        throw new Error('disposed url must not be read');
+      },
+      get parent(): PreviewFrameLike | null {
+        throw new Error('disposed parent must not be read');
+      },
+    } satisfies PreviewFrameLike;
+
+    expect(previewExternalServicesForFrame(destroyed, 'https://127.0.0.1:4312', new Map())).toBe(
+      PREVIEW_FRAME_INDETERMINATE,
+    );
+  });
+
+  it('fails closed when Electron disposes a frame during property access', () => {
+    const throwingUrl = {
+      isDestroyed: () => false,
+      get url(): string {
+        throw new Error('Render frame was disposed before WebFrameMain could be accessed');
+      },
+      parent: null,
+    } satisfies PreviewFrameLike;
+    const throwingParent = {
+      isDestroyed: () => false,
+      url: 'about:blank',
+      get parent(): PreviewFrameLike | null {
+        throw new Error('Render frame was disposed before WebFrameMain could be accessed');
+      },
+    } satisfies PreviewFrameLike;
+    const permissions = new Map<string, boolean>();
+
+    expect(
+      previewExternalServicesForFrame(throwingUrl, 'https://127.0.0.1:4312', permissions),
+    ).toBe(PREVIEW_FRAME_INDETERMINATE);
+    expect(
+      previewExternalServicesForFrame(throwingParent, 'https://127.0.0.1:4312', permissions),
+    ).toBe(PREVIEW_FRAME_INDETERMINATE);
   });
 
   it('keeps preview navigation capability-pinned in every policy mode', () => {
