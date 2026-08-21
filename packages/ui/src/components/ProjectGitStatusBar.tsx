@@ -144,6 +144,99 @@ function EditsLockIcon({ unlocked = false }: { unlocked?: boolean }) {
 }
 
 /**
+ * Working indicator for the static file scan: a ledger page with an accent
+ * read-line sweeping down it, the clerk taking stock shelf by shelf. Motion
+ * lives in CSS (`.project-index-scanline`) so reduced-motion can still it.
+ */
+function FileScanSpinner() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+      <rect
+        x="3"
+        y="1.75"
+        width="10"
+        height="12.5"
+        rx="1.5"
+        stroke="currentColor"
+        strokeWidth="1.1"
+      />
+      <line
+        x1="5.2"
+        y1="5"
+        x2="10.8"
+        y2="5"
+        stroke="currentColor"
+        strokeWidth="1"
+        strokeLinecap="round"
+        opacity="0.35"
+      />
+      <line
+        x1="5.2"
+        y1="7.5"
+        x2="10.8"
+        y2="7.5"
+        stroke="currentColor"
+        strokeWidth="1"
+        strokeLinecap="round"
+        opacity="0.35"
+      />
+      <line
+        x1="5.2"
+        y1="10"
+        x2="9.4"
+        y2="10"
+        stroke="currentColor"
+        strokeWidth="1"
+        strokeLinecap="round"
+        opacity="0.35"
+      />
+      <line
+        className="project-index-scanline"
+        x1="4.4"
+        y1="4.2"
+        x2="11.6"
+        y2="4.2"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/**
+ * Working indicator for the AI tiers: the Boekwachter's quill writing a line
+ * that draws itself in and lifts, over and over. A different figure from the
+ * file-scan sweep so the two phases read apart at a glance.
+ */
+function AiScanSpinner() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+      <g className="project-index-quill-feather">
+        <path
+          d="M13 2.5C10.2 3.4 7.4 5.7 6 8.7L5.1 10.9L7.3 10C10.3 8.6 12.1 5.4 13 2.5Z"
+          stroke="currentColor"
+          strokeWidth="1.1"
+          strokeLinejoin="round"
+        />
+        <path d="M11.6 3.9L6.6 9.4" stroke="currentColor" strokeWidth="0.9" opacity="0.45" />
+        <path
+          d="M5.1 10.9L4.2 12.1"
+          stroke="currentColor"
+          strokeWidth="1.1"
+          strokeLinecap="round"
+        />
+      </g>
+      <path
+        className="project-index-quill-line"
+        d="M3.4 13.9H12.4"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/**
  * Secondary project controls moved behind an ellipsis by the status bar's
  * container query. The trigger stays mounted so CSS—not viewport guessing—
  * decides when the bar is genuinely too narrow for its inline controls.
@@ -329,6 +422,7 @@ export function ProjectGitStatusBar({
   const [indexRefreshBusy, setIndexRefreshBusy] = useState(false);
   const [indexRefreshError, setIndexRefreshError] = useState<string | null>(null);
   const [fullScanState, setFullScanState] = useState<'idle' | 'starting' | 'running'>('idle');
+  const [stopScanState, setStopScanState] = useState<'idle' | 'requesting' | 'stopping'>('idle');
   const [fullScanError, setFullScanError] = useState<{
     code?: string;
     message: string;
@@ -424,12 +518,11 @@ export function ProjectGitStatusBar({
     setIndexRefreshError(null);
     try {
       await api.refreshProjectIndex(projectId);
-      // Optimistic: flip the chip to "indexing" until the next poll
-      // returns fresh meta.
-      setIndexStatus((prev) => ({
-        state: 'indexing',
-        ...(prev?.meta ? { meta: prev.meta } : {}),
-      }));
+      // Optimistic: flip the chip to "indexing" until the next poll returns
+      // fresh meta. Everything else (enrichment counts, drive state,
+      // embeddings health) is kept so the popover holds its full form
+      // instead of collapsing to the bare file-scan rows.
+      setIndexStatus((prev) => (prev ? { ...prev, state: 'indexing' } : { state: 'indexing' }));
       // Quick re-poll so the chip updates without waiting 30s.
       window.setTimeout(() => void refreshIndex(), 800);
     } catch {
@@ -486,6 +579,23 @@ export function ProjectGitStatusBar({
     }
   }, [fullScanState, indexStatus, projectId, refreshIndex]);
 
+  // Ask the server to stop a running AI drive at its next batch boundary.
+  // The drive may finish its current batch first, so the button reads
+  // "Stopping…" until `/index/status` stops reporting the drive.
+  const onStopScan = useCallback(async () => {
+    if (stopScanState !== 'idle') return;
+    setStopScanState('requesting');
+    setFullScanError(null);
+    try {
+      await api.stopIndexEnrichment(projectId);
+      setStopScanState('stopping');
+      window.setTimeout(() => void refreshIndex(), 800);
+    } catch {
+      setStopScanState('idle');
+      setFullScanError({ message: 'Couldn’t stop the scan. Try again.' });
+    }
+  }, [stopScanState, projectId, refreshIndex]);
+
   const addBoekwachter = useCallback(async () => {
     if (!onAddBoekwachter || boekwachterAddBusy) return;
     setBoekwachterAddBusy(true);
@@ -515,6 +625,13 @@ export function ProjectGitStatusBar({
       setFullScanState('idle');
     }
   }, [fullScanState, indexStatus]);
+
+  // Re-arm the stop control once the server reports the drive gone.
+  useEffect(() => {
+    if (stopScanState !== 'idle' && indexStatus !== null && indexStatus.aiDrive == null) {
+      setStopScanState('idle');
+    }
+  }, [stopScanState, indexStatus]);
 
   // Outside-click dismisses the branch dropdown.
   useEffect(() => {
@@ -874,6 +991,25 @@ export function ProjectGitStatusBar({
                   aria-hidden
                 />
                 <strong>{indexHeadline}</strong>
+                {indexState === 'indexing' || indexRefreshBusy ? (
+                  <span
+                    className="project-index-phase-spinner"
+                    role="img"
+                    aria-label="File scan running"
+                    title="Reading the workspace file by file"
+                  >
+                    <FileScanSpinner />
+                  </span>
+                ) : serverDrive !== null || fullScanState === 'running' ? (
+                  <span
+                    className="project-index-phase-spinner"
+                    role="img"
+                    aria-label="AI scan running"
+                    title="Studying files — summaries, reviews, and media"
+                  >
+                    <AiScanSpinner />
+                  </span>
+                ) : null}
               </div>
 
               {semanticSearchDown && (
@@ -1011,7 +1147,7 @@ export function ProjectGitStatusBar({
                       >
                         Set up Night Shift
                       </button>{' '}
-                      or use “Full AI scan now” to finish sooner.
+                      or use “Start full AI scan” to finish sooner.
                     </>
                   ) : aiScanPending ? (
                     'AI indexing continues while the app is idle.'
@@ -1020,16 +1156,28 @@ export function ProjectGitStatusBar({
                   )}
                 </span>
                 <div className="project-index-panel-actions">
-                  <button
-                    type="button"
-                    className="project-index-update-button"
-                    disabled={indexUpdateDisabled}
-                    onClick={() => void onUpdateIndex()}
-                  >
-                    {indexState === 'indexing' || indexRefreshBusy
-                      ? 'Updating index…'
-                      : 'Update index now'}
-                  </button>
+                  {serverDrive !== null || fullScanState === 'running' ? (
+                    <button
+                      type="button"
+                      className="project-index-update-button"
+                      disabled={stopScanState !== 'idle'}
+                      onClick={() => void onStopScan()}
+                      title="Stop the running scan at its next step. Everything indexed so far is kept."
+                    >
+                      {stopScanState === 'idle' ? 'Stop updating index' : 'Stopping…'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="project-index-update-button"
+                      disabled={indexUpdateDisabled}
+                      onClick={() => void onUpdateIndex()}
+                    >
+                      {indexState === 'indexing' || indexRefreshBusy
+                        ? 'Updating index…'
+                        : 'Update index'}
+                    </button>
+                  )}
                   {indexState !== 'disabled' && (
                     <button
                       type="button"
@@ -1046,7 +1194,7 @@ export function ProjectGitStatusBar({
                           ? 'Full scan running…'
                           : serverDrive === 'background'
                             ? 'Background scan running…'
-                            : 'Full AI scan now'}
+                            : 'Start full AI scan'}
                     </button>
                   )}
                 </div>

@@ -554,7 +554,13 @@ link that lands on the same article.
 **Loading states.** Prefer inline `muted` text ("loading models…",
 "generating…") over blocking spinners. A pulsing icon (see
 `.gezel-icon--pulse`) is the canonical "this thing is working in the
-background" signal.
+background" signal. When a surface needs to tell two working *phases* apart,
+it may use a small themed glyph per phase — a quiet 16px figure on the
+muted ink with a single moving accent stroke, animation stilled under
+reduced motion. The index popover's phase spinners
+(`.project-index-phase-spinner`: a ledger page with a sweeping read-line
+for the file scan, a quill writing a line for the AI tiers) are the
+reference; don't reach for a generic rotating ring.
 
 **A search box answers the keystroke, not the query.** The results surface
 mounts as soon as there is something to search for — never on the response —

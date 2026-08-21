@@ -696,6 +696,15 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     return c.json({ ok: true, status });
   });
 
+  // Ask a running on-demand drive to stop at its next batch boundary.
+  // Completed work stays in the index; `stopping: false` means no drive
+  // was running (already drained, or never started).
+  app.post('/:id/index/enrich/stop', (c) => {
+    const id = c.req.param('id');
+    const stopping = ctx.indexEnrichment.stopDrive(id);
+    return c.json({ ok: true as const, stopping });
+  });
+
   // On-demand enrichment drive ("study now"): ONE bounded pass per request,
   // the caller loops until `drained`. Mini-batches of 2 keep the worst-case
   // overshoot to ~2 summarizer calls past the budget, so the response stays

@@ -555,6 +555,29 @@ describe('on-demand drives + night catch-up', () => {
     expect(mgr.driveMode('p1')).toBeNull();
   });
 
+  it('stopDrive halts a running drive at the next batch boundary and clears with the drive', async () => {
+    const { mgr, calls, enrich } = makeDriveFixture();
+    enrich.mockReset().mockImplementation(async () => {
+      calls.push('enrich');
+      mgr.stopDrive('p1');
+      return { files: 1, summarized: 1, embedded: 1 };
+    });
+    // No drive running yet — nothing to stop.
+    expect(mgr.stopDrive('p1')).toBe(false);
+    mgr.drive('p1', { intensity: 'full' });
+    await vi.waitFor(() => expect(mgr.isDriving()).toBe(false));
+    // The stop landed between batches: one enrich call, then the loop halted
+    // before the deep passes.
+    expect(enrich).toHaveBeenCalledTimes(1);
+    expect(calls).not.toContain('areas');
+    expect(calls).not.toContain('review');
+    expect(mgr.driveMode('p1')).toBeNull();
+    // The stop request died with the drive — a new drive runs again.
+    mgr.drive('p1', { intensity: 'full' });
+    await vi.waitFor(() => expect(mgr.isDriving()).toBe(false));
+    expect(enrich).toHaveBeenCalledTimes(2);
+  });
+
   it('the background loop stands down while a drive runs', async () => {
     const { mgr, enrich } = makeDriveFixture();
     mgr.drive('p1', { intensity: 'full' });

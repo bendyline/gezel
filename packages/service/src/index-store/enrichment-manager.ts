@@ -135,6 +135,8 @@ export class IndexEnrichmentManager {
   private readonly refreshStatic: ((projectId: string) => Promise<unknown>) | undefined;
   /** In-flight on-demand drives, one per project (joiners get the same run). */
   private readonly drives = new Map<string, { mode: DriveIntensity; run: Promise<void> }>();
+  /** Projects whose running drive was asked to stop; checked between batches. */
+  private readonly driveStops = new Set<string>();
   /** In-flight immediate embed drains (drainEmbedOnly), one per project. */
   private readonly embedDrains = new Map<string, Promise<void>>();
   /** Nonzero while a night-shift catch-up sweep is holding task dispatch. */
@@ -256,6 +258,22 @@ export class IndexEnrichmentManager {
   }
 
   /**
+   * Ask a running drive to stop at its next batch boundary. Already-completed
+   * work stays in the index; the remainder is picked up by the next tick or
+   * drive. Returns false when no drive is running for the project.
+   */
+  stopDrive(projectId: string): boolean {
+    if (!this.drives.has(projectId)) return false;
+    this.driveStops.add(projectId);
+    return true;
+  }
+
+  /** Batch-boundary halt check shared by every drive loop. */
+  private async driveHalted(projectId: string): Promise<boolean> {
+    return this.driveStops.has(projectId) || (await this.isPaused());
+  }
+
+  /**
    * Start an on-demand drive for one project: static refresh first, then the
    * AI tiers (shadows → summaries → areas → reviews) to drain. Returns
    * immediately; progress flows over the usual `index_progress` events and
@@ -266,7 +284,10 @@ export class IndexEnrichmentManager {
     if (this.drives.has(projectId)) return { started: false, alreadyRunning: true };
     const run = this.runDrive(projectId, opts)
       .catch((err) => log.warn(`[enrich] drive ${projectId} failed: ${describe(err)}`))
-      .finally(() => this.drives.delete(projectId));
+      .finally(() => {
+        this.drives.delete(projectId);
+        this.driveStops.delete(projectId);
+      });
     this.drives.set(projectId, { mode: opts.intensity, run });
     return { started: true, alreadyRunning: false };
   }
@@ -294,9 +315,10 @@ export class IndexEnrichmentManager {
           await existing.run.catch(() => {});
           continue;
         }
-        const run = this.runDrive(p.id, { intensity: 'full' }).finally(() =>
-          this.drives.delete(p.id),
-        );
+        const run = this.runDrive(p.id, { intensity: 'full' }).finally(() => {
+          this.drives.delete(p.id);
+          this.driveStops.delete(p.id);
+        });
         this.drives.set(p.id, { mode: 'full', run });
         await run.catch((err) => log.warn(`[enrich] catch-up ${p.id} failed: ${describe(err)}`));
       }
@@ -350,7 +372,7 @@ export class IndexEnrichmentManager {
     const imageBatch = opts.night ? IMAGE_EMBED_NIGHT_BATCH : IMAGE_EMBED_BATCH;
     if (!embeddingsDisabledReason()) {
       for (;;) {
-        if (await this.isPaused()) return 'paused';
+        if (await this.driveHalted(projectId)) return 'paused';
         if (opts.yieldToChat && this.chat.isAnyActive()) return 'yielded';
         const r = await this.contentIndex.embedOnly(projectId, textBatch).catch(() => null);
         if (!r || r.files === 0) break;
@@ -362,7 +384,7 @@ export class IndexEnrichmentManager {
     }
     if (imageEmbedAvailability().ok) {
       for (;;) {
-        if (await this.isPaused()) return 'paused';
+        if (await this.driveHalted(projectId)) return 'paused';
         if (opts.yieldToChat && this.chat.isAnyActive()) return 'yielded';
         const r = await this.contentIndex.embedImages(projectId, imageBatch).catch(() => null);
         if (!r || r.files === 0 || r.unavailable) break;
@@ -400,7 +422,7 @@ export class IndexEnrichmentManager {
     // tick, night shift, manual drive) inherits it.
     const libraryScope = await this.isSharedLibrary(projectId);
     const reviews = opts.reviews !== false && !libraryScope;
-    if (await this.isPaused()) return;
+    if (await this.driveHalted(projectId)) return;
     if (!(await this.store.projectIndexingEnabled(projectId).catch(() => true))) return;
     const label = (state: 'started' | 'ended', detail: string) =>
       this.events?.publishGlobalEvent({
@@ -435,7 +457,7 @@ export class IndexEnrichmentManager {
         (await this.contentIndex.ensureFaceModelsInstalled().catch(() => false))
       ) {
         for (;;) {
-          if (await this.isPaused()) return;
+          if (await this.driveHalted(projectId)) return;
           const r = await this.contentIndex.faceIndex(projectId, FACE_BATCH).catch(() => null);
           if (!r || r.files === 0 || r.unavailable) break;
           if (r.faces > 0) {
@@ -470,7 +492,7 @@ export class IndexEnrichmentManager {
           ? {
               ...drivePool,
               drain: {
-                shouldStop: () => this.isPaused(),
+                shouldStop: () => this.driveHalted(projectId),
                 onProgress: ({ files }: { files: number }) =>
                   this.events?.publishGlobalEvent({
                     type: 'index_progress',
@@ -490,7 +512,7 @@ export class IndexEnrichmentManager {
 
       if (this.shadowProducers) {
         for (;;) {
-          if (await this.isPaused()) return;
+          if (await this.driveHalted(projectId)) return;
           const sh = await this.contentIndex
             .aiShadows(
               projectId,
@@ -513,7 +535,7 @@ export class IndexEnrichmentManager {
         }
       }
       for (;;) {
-        if (await this.isPaused()) return;
+        if (await this.driveHalted(projectId)) return;
         const r = await this.contentIndex
           .enrich(projectId, deps, batch, driveOpts('enrich'))
           .catch(() => null);
@@ -531,7 +553,7 @@ export class IndexEnrichmentManager {
       if (rubrics.size > 0) {
         let stored = 0;
         for (;;) {
-          if (await this.isPaused()) return;
+          if (await this.driveHalted(projectId)) return;
           const r = await this.contentIndex
             .review(projectId, deps, batch, rubrics, driveOpts('review'))
             .catch(() => null);

@@ -6535,6 +6535,15 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/index/enrich`, body);
   }
 
+  /**
+   * Ask a running enrichment drive to stop at its next batch boundary.
+   * Completed work stays in the index; `stopping: false` means no drive was
+   * running. The drive is gone once `/index/status` stops reporting `aiDrive`.
+   */
+  stopIndexEnrichment(id: string): Promise<{ ok: true; stopping: boolean }> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/index/enrich/stop`);
+  }
+
   /** Read the discovered-skills index for a project. */
   getProjectSkills(id: string): Promise<WorkspaceSkillIndex> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/index/skills`);

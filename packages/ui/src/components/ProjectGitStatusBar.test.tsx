@@ -127,7 +127,7 @@ describe('ProjectGitStatusBar', () => {
     await userEvent.click(trigger);
     expect(api.refreshProjectIndex).not.toHaveBeenCalled();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Update index now' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Update index' }));
     await waitFor(() => {
       expect(api.refreshProjectIndex).toHaveBeenCalledWith('pj-1');
     });
@@ -142,9 +142,9 @@ describe('ProjectGitStatusBar', () => {
     });
 
     await userEvent.click(trigger);
-    expect(screen.getByRole('button', { name: 'Update index now' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Update index' })).toBeDisabled();
     // No full-bore offer either — opting out means no AI drive of any kind.
-    expect(screen.queryByRole('button', { name: 'Full AI scan now' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Start full AI scan' })).toBeNull();
     expect(api.refreshProjectIndex).not.toHaveBeenCalled();
   });
 
@@ -167,14 +167,64 @@ describe('ProjectGitStatusBar', () => {
     const trigger = await screen.findByRole('button', { name: /Workspace index is ready/ });
     await userEvent.click(trigger);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Full AI scan now' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Start full AI scan' }));
     await waitFor(() => {
       expect(api.driveIndexEnrichment).toHaveBeenCalledWith('pj-1', { intensity: 'full' });
     });
     const running = await screen.findByRole('button', { name: 'Full scan running…' });
     expect(running).toBeDisabled();
-    // The polite refresh stays independently available.
-    expect(screen.getByRole('button', { name: 'Update index now' })).toBeEnabled();
+    // The polite refresh gives way to the stop control while the drive runs.
+    expect(screen.getByRole('button', { name: 'Stop updating index' })).toBeEnabled();
+  });
+
+  it('shows the phase spinner for the running phase: file scan beats AI drive', async () => {
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
+      state: 'indexing',
+      aiDrive: 'full',
+    } as never);
+
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /Scanning workspace/ });
+    await userEvent.click(trigger);
+
+    // The static scan is the current activity even inside a drive.
+    expect(screen.getByRole('img', { name: 'File scan running' })).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'AI scan running' })).toBeNull();
+  });
+
+  it('shows the quill spinner while only the AI drive runs', async () => {
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
+      state: 'fresh',
+      aiDrive: 'background',
+    } as never);
+
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /Workspace index is ready/ });
+    await userEvent.click(trigger);
+
+    expect(screen.getByRole('img', { name: 'AI scan running' })).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'File scan running' })).toBeNull();
+  });
+
+  it('swaps the update button for a stop control while a drive runs', async () => {
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
+      state: 'fresh',
+      aiDrive: 'full',
+    } as never);
+    vi.mocked(api.stopIndexEnrichment).mockResolvedValue({ ok: true, stopping: true } as never);
+
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /Workspace index is ready/ });
+    await userEvent.click(trigger);
+
+    // The polite refresh is replaced, not merely disabled — stopping is the
+    // one meaningful action while the server drives the scan.
+    expect(screen.queryByRole('button', { name: 'Update index' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Stop updating index' }));
+    await waitFor(() => {
+      expect(api.stopIndexEnrichment).toHaveBeenCalledWith('pj-1');
+    });
+    expect(screen.getByRole('button', { name: 'Stopping…' })).toBeDisabled();
   });
 
   it('offers to add the Boekwachter when the full scan cannot start without one', async () => {
@@ -192,13 +242,13 @@ describe('ProjectGitStatusBar', () => {
     const trigger = await screen.findByRole('button', { name: /Workspace index is ready/ });
     await userEvent.click(trigger);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Full AI scan now' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Start full AI scan' }));
     const addLink = await screen.findByRole('button', {
       name: 'Add a Boekwachter to this project crew',
     });
     expect(addLink).toHaveClass('project-index-panel-error-link');
     // A refused start is not a running drive — the button re-arms.
-    expect(screen.getByRole('button', { name: 'Full AI scan now' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Start full AI scan' })).toBeEnabled();
 
     await userEvent.click(addLink);
     await waitFor(() => expect(onAddBoekwachter).toHaveBeenCalledTimes(1));
