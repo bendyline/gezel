@@ -47,9 +47,11 @@ You can also read it before installing, at:
 
 4. Third-party components Gezel downloads
 
-On first run, Gezel downloads additional third-party software onto your computer so that its features work without further setup. That software is not part of Gezel and is not redistributed by Bendyline LLC - Gezel downloads it and other system components from the public npm registry into your own Gezel home folder. Each such component is governed by its own license as published by its author, not by the MIT License above, and it is not covered by the bundled inventory described in section 3.
+On first boot, Gezel downloads the Playwright MCP server (Apache-2.0) from the public npm registry into your own Gezel home folder. Playwright also downloads a Chromium build of about 281 MB from its own servers, under Chromium's BSD-3-Clause license.
 
-The two current examples are the GitHub Copilot CLI (proprietary, under the free-of-charge GitHub Copilot CLI License) and the Playwright MCP server (Apache-2.0). Gezel also downloads a Chromium build of about 281 MB from Playwright's own servers, under Chromium's BSD-3-Clause license.
+GitHub Copilot support is optional and is not downloaded on first boot. If you choose it and do not already have a compatible Copilot CLI, Gezel can install the GitHub Copilot SDK and CLI into your Gezel home on demand. The CLI is proprietary, under the free-of-charge GitHub Copilot CLI License. Gezel can instead use a compatible Copilot CLI you already installed or explicitly configured.
+
+This downloaded software is not part of Gezel and is not redistributed by Bendyline LLC. Each component is governed by its own license as published by its author, not by the MIT License above, and it is not covered by the bundled inventory described in section 3.
 
 Model weights work the same way: anything you download through Gezel comes from its upstream source under its own license. See the "Catalog models" section of NOTICE.md before relying on any model commercially.
 
