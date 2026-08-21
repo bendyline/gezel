@@ -384,6 +384,10 @@ function EngineStatusPillForProvider({
   emergencyStopNotice: string | null;
   onEmergencyStopRequest: () => void;
 }) {
+  // Read context before any provider-dependent early return. The first render
+  // commonly has no provider until getConfig resolves; calling this hook only
+  // after that transition changes the component's hook order.
+  const density = useHeaderDensity();
   // Models actually present on disk for the active on-device provider.
   // Polled on the same 10s cadence as config so the pill reflects an
   // install finishing (or being deleted) without needing a page reload.
@@ -965,7 +969,6 @@ function EngineStatusPillForProvider({
   // stops distinguishing anything the moment a second pill appears, and the
   // model name below already tells the two apart. A named engine
   // ("DwarfStar", "Video", "Image") is not a machine name and stays.
-  const density = useHeaderDensity();
   const kindNamesTheMachine =
     !activeMedia &&
     (!onDeviceProvider || onDeviceProvider === 'llama-cpp' || onDeviceProvider === 'mlx');

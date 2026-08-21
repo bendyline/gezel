@@ -673,8 +673,26 @@ jobs:
               throw "Windows uninstaller smoke failed with exit code $($process.ExitCode)"
             }
           }
-          if (Get-Service -Name GezelService -ErrorAction SilentlyContinue) {
-            throw 'GezelService remained registered after uninstall smoke'
+
+          # SCM deletion is asynchronous when the stopped service process or a
+          # short-lived observer still owns a service handle. Poll with freshly
+          # disposed ServiceController objects so this verification cannot pin
+          # the very registration it is waiting to disappear.
+          $deadline = (Get-Date).AddSeconds(30)
+          $remainingService = $null
+          do {
+            $remainingService = Get-Service -Name GezelService -ErrorAction SilentlyContinue
+            if (-not $remainingService) { break }
+            $lastStatus = $remainingService.Status
+            $remainingService.Dispose()
+            Start-Sleep -Milliseconds 500
+          } while ((Get-Date) -lt $deadline)
+          if ($remainingService) {
+            Write-Host '::group::GezelService after failed uninstall'
+            & sc.exe queryex GezelService 2>&1 | Write-Host
+            & sc.exe qc GezelService 2>&1 | Write-Host
+            Write-Host '::endgroup::'
+            throw "GezelService remained registered after uninstall smoke (last status: $lastStatus)"
           }
 
   # ── macOS ─────────────────────────────────────────────────────────────

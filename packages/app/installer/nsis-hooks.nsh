@@ -61,6 +61,15 @@
 ; install takes ownership of the service lifecycle it is cleared.
 Var GezelServiceStoppedForInstall
 
+; The first-party service host gives gezeld 10 seconds to exit cleanly and
+; then waits up to 2 more seconds after killing its job. Keep this budget
+; comfortably above that complete ladder. A shorter installer wait can call
+; `sc delete` while the service is still STOP_PENDING, which only marks the
+; registration for later deletion and races an immediate reinstall/uninstall
+; verification.
+!define GEZEL_SERVICE_STOP_POLL_ATTEMPTS 40
+!define GEZEL_SERVICE_STOP_POLL_INTERVAL_MS 500
+
 ; Gracefully stop a registered service and wait (bounded) for STOPPED.
 ; `sc stop` only REQUESTS the stop; returning immediately used to leave the
 ; host running while electron-builder killed app processes and replaced
@@ -68,7 +77,7 @@ Var GezelServiceStoppedForInstall
 ; a service that was actually healthy. `find` on the query output is the
 ; least-fragile completion check available to NSIS: sc.exe state tokens
 ; (STOPPED) are unlocalized. Callers must query first so a missing service
-; never burns this macro's full ten-second budget.
+; never burns this macro's full twenty-second budget.
 !macro WaitGezelServiceStopped
   StrCpy $8 0
   ${Do}
@@ -78,10 +87,10 @@ Var GezelServiceStoppedForInstall
       ${ExitDo}
     ${EndIf}
     IntOp $8 $8 + 1
-    ${If} $8 >= 20
+    ${If} $8 >= ${GEZEL_SERVICE_STOP_POLL_ATTEMPTS}
       ${ExitDo}
     ${EndIf}
-    Sleep 500
+    Sleep ${GEZEL_SERVICE_STOP_POLL_INTERVAL_MS}
   ${Loop}
 !macroend
 
