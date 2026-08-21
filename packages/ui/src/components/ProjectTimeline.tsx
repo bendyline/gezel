@@ -156,12 +156,20 @@ export function ProjectTimeline({
   // Debounce the refetch: a handoff session mid-turn emits a delta per
   // token, and every one of them misses the allowlist until the refetch
   // lands. Without this guard that's a fetch per token.
-  const refetchPendingRef = useRef(false);
+  const refetchTimerRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (refetchTimerRef.current !== null) {
+        window.clearTimeout(refetchTimerRef.current);
+        refetchTimerRef.current = null;
+      }
+    },
+    [],
+  );
   const onUnknownSession = useCallback(() => {
-    if (refetchPendingRef.current) return;
-    refetchPendingRef.current = true;
-    setTimeout(() => {
-      refetchPendingRef.current = false;
+    if (refetchTimerRef.current !== null) return;
+    refetchTimerRef.current = window.setTimeout(() => {
+      refetchTimerRef.current = null;
       setSessionsRefreshKey((k) => k + 1);
     }, 500);
   }, []);
