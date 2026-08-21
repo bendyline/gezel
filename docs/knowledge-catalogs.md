@@ -647,7 +647,7 @@ gezel knowledge init <folder>
 gezel knowledge build <folder> --out <catalog.gezk> [--install]
 gezel knowledge validate <catalog.gezk> [--deep]
 gezel knowledge inspect <catalog.gezk>
-gezel knowledge install <catalog.gezk|url|registry-id> [--user]
+gezel knowledge install <catalog.gezk|url|registry-id> [--sha256 <digest>] [--user]
 gezel knowledge list [--scope user|machine|all]
 gezel knowledge search <query> [--catalog <id>]
 gezel knowledge remove <id>
@@ -662,6 +662,10 @@ always reports `Shared on this device`, `Only for you`, or `Shared store
 
 unavailable; installed only for you` rather than requiring users to infer scope
 from a path.
+
+Arbitrary URL installs require `--sha256` with the expected 64-character digest,
+obtained separately from the download URL. This pins the artifact the user chose
+to trust and lets the daemon reject altered downloads before extraction.
 
 `knowledge init` writes a `knowledge.json` descriptor. For Markdown input:
 

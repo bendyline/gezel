@@ -7,6 +7,7 @@ function repositoryFile(relativeUrl: string): string {
 }
 
 const windowsHost = repositoryFile('../../../native/helpers/service-host/src/main.cpp');
+const windowsInstaller = repositoryFile('../installer/nsis-hooks.nsh');
 const macLaunchDaemon = repositoryFile('../installer/com.bendyline.gezeld.plist');
 const linuxSystemd = repositoryFile('../installer/gezeld.service');
 const signingPolicy = repositoryFile('../scripts/third-party-binaries.cjs');
@@ -18,6 +19,25 @@ describe('bundled pnpm runtime contract', () => {
     expect(windowsHost).toContain('dist\\\\pnpm-bundle\\\\bin\\\\pnpm.mjs');
     expect(windowsHost).toContain('dist\\\\node-bundle\\\\node.exe');
     expect(windowsHost).not.toContain('dist\\\\pnpm-bundle\\\\pnpm.exe');
+  });
+
+  it('exercises the installed Windows service in the release job', () => {
+    const packageStep = releaseWorkflow.indexOf('- name: Package Windows installer');
+    const installStep = releaseWorkflow.indexOf('- name: Smoke-test packaged Windows installer');
+    const appStep = releaseWorkflow.indexOf('- name: Smoke-test installed Windows app');
+
+    expect(packageStep).toBeGreaterThanOrEqual(0);
+    expect(packageStep).toBeLessThan(installStep);
+    expect(installStep).toBeLessThan(appStep);
+    expect(releaseWorkflow).toContain("-ArgumentList '/S' -Wait -PassThru");
+    expect(releaseWorkflow).toContain('Get-Service -Name GezelService -ErrorAction Stop');
+    expect(releaseWorkflow).toContain('MachineServiceInstalled');
+    expect(releaseWorkflow).toContain('https://127.0.0.1:$port/api/health');
+    expect(releaseWorkflow).toContain("$health.serviceRole -ne 'machine-engine'");
+    expect(releaseWorkflow).toContain('- name: Uninstall Windows installer smoke');
+    expect(windowsInstaller).toContain(
+      '$INSTDIR\\resources\\app.asar.unpacked\\dist\\node-bundle\\node.exe',
+    );
   });
 
   it('uses the ordinary pnpm JavaScript entrypoint on macOS', () => {

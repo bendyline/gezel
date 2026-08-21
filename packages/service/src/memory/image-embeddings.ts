@@ -65,7 +65,9 @@ function disabledByEnv(): boolean {
 }
 
 export function imageEmbeddingsDisabledReason(): string | null {
-  return disabledByEnv() ? ENV_DISABLED_REASON : (disabledReason ?? currentUnavailableReason());
+  return disabledByEnv()
+    ? ENV_DISABLED_REASON
+    : (disabledReason ?? workerFailureReason ?? currentUnavailableReason());
 }
 
 /**
@@ -80,7 +82,7 @@ export function imageEmbedAvailability(): { ok: boolean; reason?: string } {
 
 /** Face-lane availability for callers (config opt-in is checked elsewhere). */
 export function faceEmbedAvailability(): { ok: boolean; reason?: string } {
-  const reason = faceDisabledReason ?? currentFaceUnavailableReason();
+  const reason = faceDisabledReason ?? workerFailureReason ?? currentFaceUnavailableReason();
   return reason ? { ok: false, reason } : { ok: true };
 }
 
@@ -105,6 +107,8 @@ interface WorkerReply {
 
 let worker: Worker | null = null;
 let workerUsable = true;
+const allowTestFallback = Boolean(process.env.VITEST);
+let workerFailureReason: string | null = null;
 let crashCount = 0;
 let nextId = 1;
 const pending = new Map<number, Pending>();
@@ -120,6 +124,7 @@ function ensureWorker(): Worker | null {
   const entry = workerEntry();
   if (!entry) {
     workerUsable = false;
+    if (!allowTestFallback) workerFailureReason = 'image-embedding worker entry is missing';
     return null;
   }
   try {
@@ -134,9 +139,10 @@ function ensureWorker(): Worker | null {
     return w;
   } catch (err) {
     log.warn(
-      `[memory] image-embed worker failed to start; using in-process inference: ${describe(err)}`,
+      `[memory] image-embed worker failed to start; image analysis is disabled: ${describe(err)}`,
     );
     workerUsable = false;
+    workerFailureReason = `image-embedding worker failed to start: ${describe(err)}`;
     return null;
   }
 }
@@ -179,8 +185,9 @@ function onWorkerDown(reason: string): void {
   crashCount++;
   if (crashCount >= 3) {
     workerUsable = false;
+    workerFailureReason = `image-embedding worker crashed ${crashCount} times (last: ${reason})`;
     log.warn(
-      `[memory] image-embed worker crashed ${crashCount}×; falling back to in-process inference. Last: ${reason}`,
+      `[memory] image-embed worker crashed ${crashCount} times; image analysis is disabled until restart. Last: ${reason}`,
     );
   }
 }
@@ -292,12 +299,14 @@ function describe(err: unknown): string {
 
 /**
  * Embed a batch of image files (absolute path + content hash) into per-image
- * outcomes, preferring the worker and degrading to in-process.
+ * outcomes. Production never retries untrusted image decoding in-process;
+ * the direct path exists only because vitest has no built worker artifact.
  */
 export async function embedImageFiles(images: ImageEmbedJob[]): Promise<ImageEmbedOutcome[]> {
   if (images.length === 0) return [];
   if (disabledByEnv()) throw new ImageEmbeddingsDisabledError(ENV_DISABLED_REASON);
   if (disabledReason) throw new ImageEmbeddingsDisabledError(disabledReason);
+  if (workerFailureReason) throw new ImageEmbeddingsUnavailableError(workerFailureReason);
   const temporaryReason = currentUnavailableReason();
   if (temporaryReason) throw new ImageEmbeddingsUnavailableError(temporaryReason);
   const w = ensureWorker();
@@ -307,8 +316,17 @@ export async function embedImageFiles(images: ImageEmbedJob[]): Promise<ImageEmb
     } catch (err) {
       if (err instanceof ImageEmbeddingsUnavailableError) throw err;
       if (disabledReason) throw new ImageEmbeddingsDisabledError(disabledReason);
-      log.warn(`[memory] image embed via worker failed; retrying in-process: ${describe(err)}`);
+      if (!allowTestFallback) {
+        throw new ImageEmbeddingsUnavailableError(
+          `image-embedding worker stopped: ${describe(err)}`,
+        );
+      }
     }
+  }
+  if (!allowTestFallback) {
+    throw new ImageEmbeddingsUnavailableError(
+      workerFailureReason ?? 'image-embedding worker is unavailable',
+    );
   }
   return embedInProcess(images);
 }
@@ -316,7 +334,7 @@ export async function embedImageFiles(images: ImageEmbedJob[]): Promise<ImageEmb
 /**
  * Detect + embed faces in a batch of image files (lane B). Model files are
  * already on disk (the catalog downloads host-side); this routes to the
- * shared worker or falls back in-process. Failure state is face-scoped.
+ * shared worker. The direct path is test-only. Failure state is face-scoped.
  */
 export async function detectFaces(
   images: ImageEmbedJob[],
@@ -324,6 +342,7 @@ export async function detectFaces(
 ): Promise<FaceDetectOutcome[]> {
   if (images.length === 0) return [];
   if (faceDisabledReason) throw new ImageEmbeddingsDisabledError(faceDisabledReason);
+  if (workerFailureReason) throw new ImageEmbeddingsUnavailableError(workerFailureReason);
   const temporaryReason = currentFaceUnavailableReason();
   if (temporaryReason) throw new ImageEmbeddingsUnavailableError(temporaryReason);
   const w = ensureWorker();
@@ -333,8 +352,17 @@ export async function detectFaces(
     } catch (err) {
       if (err instanceof ImageEmbeddingsUnavailableError) throw err;
       if (faceDisabledReason) throw new ImageEmbeddingsDisabledError(faceDisabledReason);
-      log.warn(`[memory] face detect via worker failed; retrying in-process: ${describe(err)}`);
+      if (!allowTestFallback) {
+        throw new ImageEmbeddingsUnavailableError(
+          `image-embedding worker stopped: ${describe(err)}`,
+        );
+      }
     }
+  }
+  if (!allowTestFallback) {
+    throw new ImageEmbeddingsUnavailableError(
+      workerFailureReason ?? 'image-embedding worker is unavailable',
+    );
   }
   try {
     return await runFaceDetect(images, models);

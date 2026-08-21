@@ -5,6 +5,7 @@
  * search carries cited knowledge results without disturbing project arms.
  */
 
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { type Server, createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -134,7 +135,11 @@ describe('knowledge routes', () => {
     try {
       await client.removeKnowledgeCatalog('test-notes').catch(() => {});
       const { jobId } = await client.installKnowledgeCatalog({
-        source: { kind: 'url', url: `http://127.0.0.1:${port}/test-notes.gezk` },
+        source: {
+          kind: 'url',
+          url: `http://127.0.0.1:${port}/test-notes.gezk`,
+          expectedSha256: createHash('sha256').update(bytes).digest('hex'),
+        },
       });
       const job = await waitForJob(jobId);
       expect(job.error, JSON.stringify(job)).toBeUndefined();

@@ -3964,7 +3964,24 @@ export class ChatManager {
     projectId = projectId ?? DEFAULT_PROJECT_ID;
 
     const target = await this.resolveGezel(args.toGezelIdOrName, projectId);
-    if (!target) throw new Error(`gezel "${args.toGezelIdOrName}" not found`);
+    if (!target) {
+      // Name the real roster in the miss, the way `resolveProjectId` does.
+      // `resolveGezel` matches an id, name, or roleBasedName — never a bare
+      // role word — so the common miss is a model reaching for "writer" or
+      // "developer" and getting a bare "not found" it cannot act on.
+      const roster = await this.store.listGezels().catch(() => []);
+      const known = roster
+        .slice(0, 20)
+        .map((g) => `${g.id}${g.name && g.name !== g.id ? ` ("${g.name}")` : ''}`)
+        .join(', ');
+      throw new Error(
+        `gezel "${args.toGezelIdOrName}" not found — that must be a gezel id or display name, not a role word. ${
+          known
+            ? `Known gezels: ${known}${roster.length > 20 ? `, +${roster.length - 20} more` : ''}.`
+            : 'No gezels exist yet.'
+        } Use ensure_gezel({ jobTitle }) to create the specialist you need, then message the id it returns.`,
+      );
+    }
     if (target.id === args.fromGezelId) {
       throw new Error('cannot message yourself');
     }
@@ -5091,6 +5108,36 @@ export class ChatManager {
         log.error('[chat] handoff-failure notice delivery failed:', err);
       }),
     );
+  }
+
+  /**
+   * Attach a freshly-created question to the assistant bubble that asked
+   * it, on disk AND on the live turn record.
+   *
+   * The disk half alone is not enough for the case it exists for: an
+   * `ask_user_question` tool call happens *mid-turn*, so the record
+   * ChatManager is about to write at turn end is a long-lived in-memory
+   * object that never saw the stamp — its wholesale write erases it, and
+   * the in-chat card silently degrades to dropdown-only. Mirroring onto
+   * the same bubble in the live record keeps the stamp through that
+   * write. Both halves target the last assistant message, which mid-turn
+   * is the same bubble: the in-flight one has not been pushed yet.
+   */
+  async stampPendingQuestion(
+    gezelId: string,
+    sessionId: string,
+    questionId: string,
+  ): Promise<void> {
+    const live = this.states.get(sessionId)?.record;
+    if (live) {
+      for (let i = live.messages.length - 1; i >= 0; i--) {
+        const m = live.messages[i];
+        if (!m || m.role !== 'assistant') continue;
+        m.pendingQuestionId = questionId;
+        break;
+      }
+    }
+    await this.store.stampPendingQuestionOnLastAssistant(gezelId, sessionId, questionId);
   }
 
   /**
@@ -8085,19 +8132,18 @@ export class ChatManager {
                 live.record.extractedUpTo = Math.min(messagesAtTime, live.record.messages.length);
               }
               // Persist the cursor so the cadence survives restart.
-              // Re-read the session from disk rather than writing
-              // `snap` back — a concurrent write (user answering a
-              // question, stamping pendingQuestionId, compaction,
-              // etc.) while extraction was running would otherwise be
-              // clobbered by the stale snapshot. Use messagesAtTime
-              // rather than the current length since we shouldn't
-              // claim to have extracted messages that hadn't arrived
-              // when extraction started.
+              // `mutateSession` rather than writing `snap` back — a
+              // concurrent read-modify-write (user answering a
+              // question, stamping pendingQuestionId, compaction, etc.)
+              // must not lose either edit, and re-reading alone only
+              // orders us against writes that already landed. Use
+              // messagesAtTime rather than the current length since we
+              // shouldn't claim to have extracted messages that hadn't
+              // arrived when extraction started.
               try {
-                const fresh = await this.store.getSession(snap.gezelId, snap.id);
-                if (!fresh) return;
-                fresh.extractedUpTo = Math.min(messagesAtTime, fresh.messages.length);
-                await this.store.writeSession(fresh);
+                await this.store.mutateSession(snap.gezelId, snap.id, (fresh) => {
+                  fresh.extractedUpTo = Math.min(messagesAtTime, fresh.messages.length);
+                });
               } catch (err) {
                 memLog.warn(
                   `extractedUpTo persist failed: ${err instanceof Error ? err.message : err}`,
@@ -10401,20 +10447,19 @@ export class ChatManager {
                 projectId: snap.projectId,
                 debug: this.debug,
               });
-              const fresh = await this.store.getSession(snap.gezelId, snap.id);
-              if (fresh) {
+              await this.store.mutateSession(snap.gezelId, snap.id, (fresh) => {
                 const freshFingerprint = createHash('sha256')
                   .update(JSON.stringify(fresh.messages.slice(0, messagesAtTime)))
                   .digest('hex');
-                if (freshFingerprint === transcriptFingerprint) {
-                  fresh.extractedUpTo = Math.min(messagesAtTime, fresh.messages.length);
-                  await this.store.writeSession(fresh);
-                } else {
+                if (freshFingerprint !== transcriptFingerprint) {
                   // Pi branched or retried while extraction was running. Do
                   // not advance the cursor over a suffix we did not inspect.
                   marker.rerunRequested = true;
+                  return false;
                 }
-              }
+                fresh.extractedUpTo = Math.min(messagesAtTime, fresh.messages.length);
+                return true;
+              });
             } catch (err) {
               memLog.warn(
                 `external extraction failed for ${sessionId}: ${err instanceof Error ? err.message : String(err)}`,

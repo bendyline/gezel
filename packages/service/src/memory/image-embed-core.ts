@@ -18,7 +18,6 @@
  *     brute-force ranking) assumes unit vectors.
  */
 
-import { readFile } from 'node:fs/promises';
 import { createLogger } from '@bendyline/gezel';
 import {
   HF_CACHE_DIR_ENV,
@@ -34,6 +33,7 @@ import {
   centerCrop,
   decodeImage,
   normalizeToCHW,
+  readBoundedImageFile,
   resizeBilinear,
   resizeShortestSide,
   rgbaToRgb,
@@ -185,14 +185,8 @@ export async function runImageEmbed(jobs: ImageEmbedJob[]): Promise<ImageEmbedOu
   const size = imageEmbedSize();
   const out: ImageEmbedOutcome[] = [];
   for (const job of jobs) {
-    let buf: Buffer;
     try {
-      buf = await readFile(job.path);
-    } catch (err) {
-      out.push({ hash: job.hash, error: err instanceof Error ? err.message : String(err) });
-      continue;
-    }
-    try {
+      const buf = await readBoundedImageFile(job.path);
       const chw = preprocess(buf, size);
       const result = await model({ pixel_values: makeTensor(chw, [1, 3, size, size]) });
       const embeds = result.image_embeds ?? result.pooler_output;

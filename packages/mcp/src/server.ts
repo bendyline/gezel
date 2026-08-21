@@ -6016,13 +6016,31 @@ server.tool(
     });
     if (repoGuard) return repoGuard;
     const normalizedMessage = normalizeFileHandoffMessage(message, expectedDeliverable);
-    const res = await api.messageGezel(gezel, {
-      fromGezelId: gezelId,
-      ...(sessionId ? { fromSessionId: sessionId } : {}),
-      projectId: resolvedProject,
-      text: normalizedMessage,
-      ...(expectedDeliverable ? { expectedDeliverable } : {}),
-    });
+    let res: Awaited<ReturnType<typeof api.messageGezel>>;
+    try {
+      res = await api.messageGezel(gezel, {
+        fromGezelId: gezelId,
+        ...(sessionId ? { fromSessionId: sessionId } : {}),
+        projectId: resolvedProject,
+        text: normalizedMessage,
+        ...(expectedDeliverable ? { expectedDeliverable } : {}),
+      });
+    } catch (err) {
+      // Every reason this route rejects — unknown target, self-message, a
+      // handoff the target's role cannot fulfil — arrives as a 400 whose
+      // body carries the actual sentence. Without the unwrap the model
+      // reads only "Gezel API error 400 on POST /api/gezels/<x>/message"
+      // and has nothing to correct. Wild-caught on the night-shift
+      // oversight loop: the Meester addressed `gezel: "writer"` (a role
+      // word, which `resolveGezel` never matches — it takes an id, name,
+      // or roleBasedName), read the generic line as "the gezel API is
+      // down", wrote that conclusion into the task notes, and six later
+      // attempts inherited the phantom outage.
+      return errorResult(`message_gezel failed: ${unwrapApiError(err)}`, {
+        retryable: true,
+        hint: '`gezel` must be an id or display name, not a role word. Call `list_gezels` for the real roster, or `ensure_gezel({ jobTitle: "..." })` to create the specialist and use the id it returns.',
+      });
+    }
     const deliverableText =
       expectedDeliverable?.kind === 'file'
         ? ` They have been asked to write ${expectedDeliverable.filePath ? `\`${expectedDeliverable.filePath}\`` : 'the file'} before replying.`

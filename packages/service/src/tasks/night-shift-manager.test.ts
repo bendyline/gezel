@@ -176,6 +176,45 @@ describe('NightShiftManager', () => {
     expect(activations).toBe(2);
   });
 
+  // Queue-admission consumers re-read `isActive()` and need no signal. Work
+  // the ACTIVATION callback started does — the index catch-up sweep ran 40
+  // minutes past `endHour` on 2026-08-21 because nothing told it to stop.
+  it('signals stand-down exactly once when a shift transitions off', async () => {
+    await addNightTask();
+    clock = localMs(2026, 6, 20, 23, 0);
+    const m = makeManager();
+    let deactivations = 0;
+    m.setOnDeactivated(async () => {
+      deactivations++;
+    });
+
+    await m.tick(); // → ON (inside window, work pending)
+    expect(deactivations).toBe(0);
+
+    clock = localMs(2026, 6, 21, 12, 0);
+    await m.tick(); // → OFF (window closed)
+    expect(deactivations).toBe(1);
+
+    // Still off: no second signal for a shift that never restarted.
+    await m.tick();
+    expect(deactivations).toBe(1);
+  });
+
+  it('fires stand-down on a manual stop too', async () => {
+    await addNightTask();
+    clock = localMs(2026, 6, 20, 12, 0); // daytime — manual shift only
+    const m = makeManager();
+    let deactivations = 0;
+    m.setOnDeactivated(async () => {
+      deactivations++;
+    });
+
+    await m.startManual();
+    expect(deactivations).toBe(0);
+    await m.stopManual();
+    expect(deactivations).toBe(1);
+  });
+
   it('listPendingTasks surfaces the active night-shift tasks pending now', async () => {
     await addNightTask();
     clock = localMs(2026, 6, 20, 23, 0); // inside the window

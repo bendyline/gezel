@@ -73,6 +73,9 @@ export interface DownloadOptions {
    * progress denominator when the server doesn't return
    * Content-Length (e.g. some HF mirrors). */
   approxSizeBytes: number;
+  /** Hard transfer ceiling. Unlike approxSizeBytes, this is enforced against
+   * Content-Length and streamed bytes and is suitable for untrusted URLs. */
+  maxBytes?: number;
   fetchImpl?: typeof fetch;
   /** Give up after this many CONSECUTIVE failed attempts that made no
    * forward progress. 1 = no retry. Progressing attempts refund the budget,
@@ -113,6 +116,15 @@ export async function* downloadWithRetry(
   const maxAttempts = opts.maxRetries ?? DEFAULT_MAX_RETRIES;
   const chunkTimeoutMs = opts.chunkTimeoutMs ?? DEFAULT_CHUNK_TIMEOUT_MS;
 
+  if (opts.maxBytes !== undefined && existingPartialSize(partialPath) > opts.maxBytes) {
+    return {
+      kind: 'error',
+      error: `Download exceeds the ${opts.maxBytes} byte limit`,
+      attemptsMade: 0,
+      bytesWritten: existingPartialSize(partialPath),
+    };
+  }
+
   const budget = new DownloadRetryBudget(maxAttempts, existingPartialSize(partialPath));
   let lastFriendlyError = 'download failed';
   while (budget.canAttempt()) {
@@ -134,12 +146,21 @@ export async function* downloadWithRetry(
       chunkTimeoutMs,
       resumeFrom,
       signal: opts.signal,
+      maxBytes: opts.maxBytes,
     });
 
     if (attemptResult.kind === 'xet') {
       // HuggingFace serves this file via Xet content-addressed storage; the
       // reconstruction downloader speaks that protocol and drives its own
       // retry/resume from here.
+      if (opts.maxBytes !== undefined) {
+        return {
+          kind: 'error',
+          error: 'Bounded downloads cannot use the Xet reconstruction path',
+          attemptsMade: budget.attemptsMade,
+          bytesWritten: existingPartialSize(partialPath),
+        };
+      }
       return yield* downloadXet({
         detection: attemptResult.detection,
         destPath: opts.destPath,
@@ -247,8 +268,18 @@ async function* runSingleAttempt(opts: {
   chunkTimeoutMs: number;
   resumeFrom: number;
   signal: AbortSignal | undefined;
+  maxBytes: number | undefined;
 }): AsyncGenerator<DownloadEvent, AttemptResult, void> {
-  const { url, partialPath, approxSizeBytes, fetchImpl, chunkTimeoutMs, resumeFrom, signal } = opts;
+  const {
+    url,
+    partialPath,
+    approxSizeBytes,
+    fetchImpl,
+    chunkTimeoutMs,
+    resumeFrom,
+    signal,
+    maxBytes,
+  } = opts;
 
   // Build per-attempt AbortController so a stalled chunk can cancel the
   // fetch without losing the caller's signal.
@@ -388,6 +419,15 @@ async function* runSingleAttempt(opts: {
     }
   }
   const totalBytes = serverTotal ?? approxSizeBytes;
+  if (maxBytes !== undefined && serverTotal !== null && serverTotal > maxBytes) {
+    await res.body.cancel().catch(() => {});
+    signal?.removeEventListener('abort', abortFromCaller);
+    return {
+      kind: 'fatal',
+      friendlyError: `Download exceeds the ${maxBytes} byte limit`,
+      bytesWritten: resumeFrom,
+    };
+  }
 
   // Append-mode stream so a resumed download just keeps writing.
   const fileStream = createWriteStream(partialPath, {
@@ -485,6 +525,15 @@ async function* runSingleAttempt(opts: {
         // (the exact failure that stranded a download in "Checking…" forever).
         // Only enforced when the server gave us an authoritative total.
         let chunk: Uint8Array = value;
+        if (maxBytes !== undefined && bytesWritten + chunk.byteLength > maxBytes) {
+          await closeStream();
+          signal?.removeEventListener('abort', abortFromCaller);
+          return {
+            kind: 'fatal',
+            friendlyError: `Download exceeds the ${maxBytes} byte limit`,
+            bytesWritten,
+          };
+        }
         if (serverTotal != null && bytesWritten + chunk.byteLength > serverTotal) {
           chunk = chunk.subarray(0, Math.max(0, serverTotal - bytesWritten));
         }

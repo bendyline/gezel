@@ -2625,9 +2625,10 @@ export function SettingsView() {
                   !(copilotProbe.kind === 'ok' && copilotLogin && !hasGithubToken)) && (
                   <>
                     <p className="muted small">
-                      Gezel bundles the Copilot CLI and a Node runtime — click below and the login
-                      runs in-app. It opens a browser to sign in to GitHub and lands the credential
-                      in <code>~/.copilot</code>; status above refreshes automatically.
+                      Gezel bundles the Node runtime. The Copilot CLI can be installed into your
+                      Gezel home, or Gezel can use a compatible CLI you already have. Click below to
+                      sign in through GitHub; the credential lands in <code>~/.copilot</code> and
+                      the status above refreshes automatically.
                     </p>
                     <CopilotLoginCommand
                       installDir={config?.copilotCliInstallDir}

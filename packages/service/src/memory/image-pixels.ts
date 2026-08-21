@@ -17,6 +17,7 @@
  * fixtures and exact expected floats.
  */
 
+import { open } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { readImageMeta, readImageStaticMeta } from '../index-store/image-meta.js';
 
@@ -66,6 +67,46 @@ export class ImageDecodeError extends Error {
   ) {
     super(message);
     this.name = 'ImageDecodeError';
+  }
+}
+
+/**
+ * Read at most MAX_IMAGE_BYTES from one already-open file descriptor. The
+ * fstat gate avoids allocating for an obviously oversized file, while the
+ * one-byte probe catches growth between fstat and read without ever allowing
+ * an unbounded readFile allocation.
+ */
+export async function readBoundedImageFile(path: string): Promise<Buffer> {
+  const handle = await open(path, 'r');
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) {
+      throw new ImageDecodeError('image path is not a regular file', 'decode-failed');
+    }
+    if (info.size > MAX_IMAGE_BYTES) {
+      throw new ImageDecodeError(
+        `image is ${info.size} bytes (cap ${MAX_IMAGE_BYTES})`,
+        'too-large',
+      );
+    }
+
+    const capacity = Math.min(MAX_IMAGE_BYTES + 1, Math.max(1, info.size + 1));
+    const bytes = Buffer.allocUnsafe(capacity);
+    let offset = 0;
+    while (offset < capacity) {
+      const read = await handle.read(bytes, offset, capacity - offset, offset);
+      if (read.bytesRead === 0) break;
+      offset += read.bytesRead;
+    }
+    if (offset > MAX_IMAGE_BYTES) {
+      throw new ImageDecodeError(
+        `image grew past the ${MAX_IMAGE_BYTES} byte cap while being read`,
+        'too-large',
+      );
+    }
+    return bytes.subarray(0, offset);
+  } finally {
+    await handle.close();
   }
 }
 

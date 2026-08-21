@@ -54,6 +54,7 @@ import {
   MODEL_HASH_READ_BUFFER_BYTES,
   type ModelStorageRoots,
   type UnrecognizedModelInfo,
+  assertModelStorePathSafe,
   findModelRoot,
   hashModelPayloadFiles,
   inspectModelDirectory,
@@ -591,7 +592,7 @@ export class LlamaCppModelManager {
     if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
       throw readOnlyModelError(id);
     }
-    await removeModelDir(join(this.modelsRoot, id));
+    await removeModelDir(join(this.modelsRoot, id), this.modelsRoot);
   }
 
   /** Provider-owned snapshot used by the streaming `.gezmodel` exporter. */
@@ -760,7 +761,10 @@ export class LlamaCppModelManager {
       return;
     }
     const itemDir = join(this.modelsRoot, catalogId);
+    await mkdir(this.modelsRoot, { recursive: true });
+    await assertModelStorePathSafe(this.modelsRoot, itemDir);
     await mkdir(itemDir, { recursive: true });
+    await assertModelStorePathSafe(this.modelsRoot, itemDir);
 
     const plan = planDownloads(src, includeMmproj);
     if (plan.length === 0) {

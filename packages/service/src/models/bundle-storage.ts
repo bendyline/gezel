@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
 import { safeJoin } from '../fs/safe-paths.js';
+import { assertModelStorePathSafe } from './storage-roots.js';
 
 /** Provider-owned view of an installed model used by the bundle exporter. */
 export interface ModelBundleSource {
@@ -65,6 +66,7 @@ export async function publishStagedModel(opts: {
   await mkdir(opts.modelsRoot, { recursive: true });
   const target = safeJoin(opts.modelsRoot, opts.id);
   if (!target) throw new Error(`unsafe model id: ${opts.id}`);
+  await assertModelStorePathSafe(opts.modelsRoot, target);
 
   let exists = false;
   try {
@@ -78,9 +80,13 @@ export async function publishStagedModel(opts: {
 
   const backup = join(dirname(target), `.${opts.id}.gezmodel-backup-${randomUUID()}`);
   if (exists) await rename(target, backup);
+  let published = false;
   try {
     await rename(opts.stagedModelDir, target);
+    published = true;
+    await assertModelStorePathSafe(opts.modelsRoot, target);
   } catch (err) {
+    if (published) await rm(target, { recursive: true, force: true }).catch(() => {});
     if (exists) await rename(backup, target).catch(() => {});
     throw err;
   }

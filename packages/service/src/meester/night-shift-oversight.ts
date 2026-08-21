@@ -1,3 +1,4 @@
+import type { StepGate } from '@bendyline/gezel';
 import { REPORT_ACTION_AUTHORING_GUIDE, createLogger } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { TaskManager } from '../tasks/manager.js';
@@ -11,6 +12,35 @@ const log = createLogger('night-shift');
 const OVERSIGHT_TITLE = 'Night-shift oversight: project review';
 const OVERSIGHT_STEP_ID = 'oversight';
 const OVERSIGHT_REPORT_PATH = 'night-shift-report.md';
+
+/**
+ * `advanceWhen` alone drives the auto-advance watcher; it is not consulted
+ * when the assignee calls `advance_task_step` itself, and `completeStep`
+ * only rejects a step that carries a real `gate`. Without one, a run that
+ * never wrote the report advanced anyway and re-armed for the next night —
+ * observed at attempt 7 on a Meester whose roster had no write channel
+ * (see the orchestration-clamp fix in chat/session-tool-surface.ts), which
+ * talked itself into "the report was already written in a prior attempt".
+ *
+ * The floor is deliberately existence + substance. There is no
+ * freshness check kind, so this cannot tell tonight's report from last
+ * night's; `advanceWhen.requireChange` covers that for the watcher path
+ * only. Catching the absent deliverable is what closes the observed hole.
+ */
+const OVERSIGHT_GATE: StepGate = {
+  at: 'completion',
+  checks: [
+    {
+      kind: 'minBytes',
+      file: OVERSIGHT_REPORT_PATH,
+      bytes: 200,
+      artifact: true,
+    },
+  ],
+  // A perpetual nightly task should fail visibly and cheaply rather than
+  // spend the night looping: exhausting the budget pauses it for the user.
+  maxAttempts: 3,
+};
 
 const OVERSIGHT_PROMPT = `You are running the nightly **Meester oversight** review. The machine is idle and this is low-priority background work — be thorough but do not kick any project back into action.
 
@@ -78,6 +108,8 @@ export async function ensureNightShiftOversightTask(
           // Deliverable declaration: feeds the morning review's report
           // discovery AND lets the run self-advance on the written file.
           advanceWhen: { file: OVERSIGHT_REPORT_PATH, artifact: true, requireChange: true },
+          // Enforced on `advance_task_step`, unlike `advanceWhen` above.
+          gate: OVERSIGHT_GATE,
           // Self-loop: completing the step re-activates it, re-arming for
           // the next night. The `onceADay` guard (lastRunDay) holds it
           // from re-dispatching until tomorrow.
@@ -112,7 +144,11 @@ async function migrateOversightTask(store: Store, num: number): Promise<void> {
   const promptCurrent = step.prompt === OVERSIGHT_PROMPT;
   const advanceCurrent =
     step.advanceWhen?.file === OVERSIGHT_REPORT_PATH && step.advanceWhen?.artifact === true;
-  if (promptCurrent && advanceCurrent) return;
+  // Installs that predate the completion gate carry a step that advances on
+  // an unwritten report; stamping it is the whole point of the in-place
+  // migration existing.
+  const gateCurrent = JSON.stringify(step.gate) === JSON.stringify(OVERSIGHT_GATE);
+  if (promptCurrent && advanceCurrent && gateCurrent) return;
   const steps = task.craftbook.steps.map((s) =>
     s.id === OVERSIGHT_STEP_ID
       ? {
@@ -123,6 +159,7 @@ async function migrateOversightTask(store: Store, num: number): Promise<void> {
             artifact: true,
             requireChange: true,
           },
+          gate: OVERSIGHT_GATE,
         }
       : s,
   );

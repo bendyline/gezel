@@ -2,8 +2,8 @@
  * Worker-backed KnowledgeCatalogHost — the daemon's production host. Spawns
  * the knowledge search-worker (embed-worker spawn pattern: long-lived,
  * unref'd, id-correlated request/response, reject-in-flight on death, crash
- * cap → permanent in-process fallback). Under vitest there is no dist
- * build, so the in-process host is used directly.
+ * cap → fail closed). Under vitest there is no dist build, so the explicitly
+ * test-only in-process host is used directly.
  */
 
 import { Worker } from 'node:worker_threads';
@@ -22,7 +22,8 @@ interface Pending {
 
 export function createWorkerCatalogHost(): KnowledgeCatalogHost {
   let worker: Worker | null = null;
-  let workerUsable = !process.env.VITEST;
+  const allowTestFallback = Boolean(process.env.VITEST);
+  let workerUsable = !allowTestFallback;
   let crashCount = 0;
   let nextId = 1;
   const pending = new Map<number, Pending>();
@@ -31,6 +32,11 @@ export function createWorkerCatalogHost(): KnowledgeCatalogHost {
   const mounts = new Map<string, unknown>();
 
   const fallback = (): Promise<KnowledgeCatalogHost> => {
+    if (!allowTestFallback) {
+      return Promise.reject(
+        new Error('knowledge worker is unavailable; refusing in-process catalog operations'),
+      );
+    }
     fallbackPromise ??= (async () => {
       const host = await createInProcessCatalogHost();
       for (const spec of mounts.values()) {
@@ -54,7 +60,9 @@ export function createWorkerCatalogHost(): KnowledgeCatalogHost {
     crashCount++;
     if (crashCount >= CRASH_CAP) {
       workerUsable = false;
-      log.warn(`knowledge worker crashed ${crashCount} times; catalog queries run in-process now`);
+      log.warn(
+        `knowledge worker crashed ${crashCount} times; catalog operations are disabled until restart`,
+      );
     }
   };
 
@@ -89,7 +97,7 @@ export function createWorkerCatalogHost(): KnowledgeCatalogHost {
       return w;
     } catch (err) {
       log.warn(
-        `knowledge worker failed to start; using in-process host: ${err instanceof Error ? err.message : String(err)}`,
+        `knowledge worker failed to start; catalog operations are disabled: ${err instanceof Error ? err.message : String(err)}`,
       );
       workerUsable = false;
       return null;

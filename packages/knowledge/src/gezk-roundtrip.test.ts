@@ -10,7 +10,13 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { GezkArchiveError, extractGezkVerified, readGezkManifest } from './archive/read.js';
+import {
+  GezkArchiveError,
+  extractGezkVerified,
+  inspectGezkArchive,
+  readGezkManifest,
+} from './archive/read.js';
+import { writeGezkArchive } from './archive/write.js';
 import type { CompileReport } from './compiler/compile.js';
 import { compileKnowledgeCatalog } from './compiler/compile.js';
 import { CatalogHandle } from './reader/catalog-handle.js';
@@ -112,6 +118,44 @@ describe('archive + manifest', () => {
     await expect(
       extractGezkVerified(tamperedPath, join(dir, 'tampered-out')),
     ).rejects.toBeInstanceOf(GezkArchiveError);
+  });
+
+  it('reconciles declared sizes with ZIP metadata before extraction', async () => {
+    const dishonestPath = join(dir, 'dishonest-size.gezk');
+    const manifest = structuredClone(report.manifest);
+    manifest.files[0]!.sizeBytes += 1;
+    await writeGezkArchive(dishonestPath, [
+      { path: 'manifest.json', content: Buffer.from(`${JSON.stringify(manifest)}\n`) },
+      ...report.manifest.files.map((file) => ({
+        path: file.path,
+        absPath: join(extractedDir, file.path),
+      })),
+    ]);
+
+    await expect(inspectGezkArchive(dishonestPath)).rejects.toMatchObject({
+      reason: 'hash-mismatch',
+    });
+    await expect(
+      extractGezkVerified(dishonestPath, join(dir, 'dishonest-out')),
+    ).rejects.toMatchObject({ reason: 'hash-mismatch' });
+  });
+
+  it('rejects a path-capable catalog version before any extraction', async () => {
+    const traversalPath = join(dir, 'traversal-version.gezk');
+    const manifest = structuredClone(report.manifest);
+    manifest.version = '../../../../../escaped/extensions';
+    await writeGezkArchive(traversalPath, [
+      { path: 'manifest.json', content: Buffer.from(`${JSON.stringify(manifest)}\n`) },
+      ...report.manifest.files.map((file) => ({
+        path: file.path,
+        absPath: join(extractedDir, file.path),
+      })),
+    ]);
+
+    await expect(readGezkManifest(traversalPath)).rejects.toMatchObject({ reason: 'manifest' });
+    await expect(
+      extractGezkVerified(traversalPath, join(dir, 'traversal-out')),
+    ).rejects.toMatchObject({ reason: 'manifest' });
   });
 });
 

@@ -240,10 +240,14 @@ export class WorkspaceIndexManager {
     // must be distinguishable from an index that hasn't finished building,
     // and it's process-local (no sqlite open, unlike enrichment below).
     const withEmbeddings: WorkspaceIndexStatus = { ...base, embeddings: embeddingsHealth() };
-    // The AI-scan flag only colours the pill once the structural index is
-    // fresh: a missing/stale index already reads as "out of date" and
-    // `indexing` has its own state, so skip the sqlite open in those cases.
-    if (base.state !== 'fresh' || !this.contentIndex) return withEmbeddings;
+    // Enrichment counts ride along whenever a content index exists on disk —
+    // including `indexing` and `stale`, so the status popover keeps its
+    // progress rows through a manual re-scan instead of collapsing to the
+    // bare file-scan form. Only the states with no index at all skip the
+    // sqlite open.
+    if (base.state === 'never' || base.state === 'disabled' || !this.contentIndex) {
+      return withEmbeddings;
+    }
     const enrichment = await this.contentIndex.enrichmentCounts(projectId).catch(() => null);
     if (!enrichment) return withEmbeddings;
     // Review coverage rides along but deliberately does NOT colour
@@ -252,7 +256,10 @@ export class WorkspaceIndexManager {
     const reviews = await this.contentIndex.reviewCounts(projectId).catch(() => null);
     return {
       ...withEmbeddings,
-      aiScanPending: enrichment.pending > 0,
+      // The AI-scan flag only colours the pill once the structural index is
+      // fresh: a missing/stale index already reads as "out of date" and
+      // `indexing` has its own state.
+      ...(base.state === 'fresh' ? { aiScanPending: enrichment.pending > 0 } : {}),
       enrichment: { ...enrichment, ...(reviews ? { reviews } : {}) },
     };
   }

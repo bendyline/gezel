@@ -1958,6 +1958,34 @@ async function waitForCondition(
 }
 
 describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
+  // `resolveGezel` matches an id, a name, or a roleBasedName — never a bare
+  // role word. A model reaching for `gezel: "writer"` used to get a flat
+  // `gezel "writer" not found`, which the route turns into a 400 and the
+  // client into "Gezel API error 400 on POST /api/gezels/writer/message";
+  // one Meester read that as a service outage and narrated it for six
+  // attempts. The miss has to name the real roster and the way out.
+  it('names the real roster when the target does not resolve', async () => {
+    await store.createGezel({ name: 'Maya', role: 'Voorman' });
+    const adaSession = await manager.createSession({ gezelId: 'ada' });
+
+    const err = await manager
+      .messageGezel({
+        fromGezelId: 'ada',
+        fromSessionId: adaSession.id,
+        toGezelIdOrName: 'writer',
+        text: 'Write the report.',
+      })
+      .then(
+        () => null,
+        (e: unknown) => (e instanceof Error ? e.message : String(e)),
+      );
+
+    expect(err).toContain('"writer" not found');
+    expect(err).toContain('not a role word');
+    expect(err).toContain('maya');
+    expect(err).toContain('ensure_gezel');
+  });
+
   it('rejects a text-file handoff to a pure-delegation role before queueing it', async () => {
     await store.createGezel({ name: 'Maya', role: 'Planner' });
     const adaSession = await manager.createSession({ gezelId: 'ada' });

@@ -152,6 +152,25 @@ describe('Windows machine-service installer security', () => {
     );
   });
 
+  it('runs elevated maintenance through bundled Node rather than Electron', () => {
+    const customInstallStart = position('!macro customInstall');
+    const customInstallEnd = hook.indexOf('!macroend', customInstallStart);
+    const customInstall = hook.slice(customInstallStart, customInstallEnd);
+
+    expect(hook).toContain(
+      '!define GEZEL_INTERPRETER "$INSTDIR\\resources\\app.asar.unpacked\\dist\\node-bundle\\node.exe"',
+    );
+    expect(customInstall).toContain('${IfNot} ${FileExists} "${GEZEL_INTERPRETER}"');
+    expect(customInstall).toContain(
+      'nsExec::ExecToLog \'"${GEZEL_INTERPRETER}" "${GEZEL_MIGRATE_SHARED_CLI}"',
+    );
+    expect(customInstall).toContain(
+      'nsExec::ExecToLog \'"${GEZEL_INTERPRETER}" "${GEZEL_EXTRACT_CLI}"',
+    );
+    expect(customInstall).not.toContain('SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE"');
+    expect(customInstall).not.toContain('"$INSTDIR\\Gezel.exe"');
+  });
+
   it('applies every load-bearing ACL to the container itself, not by recursion', () => {
     // A recursive icacls pass fails as a unit — one MAX_PATH entry inside a
     // preserved GEZEL_HOME (uv venvs, cloned repos, sandbox node_modules) is
@@ -473,8 +492,35 @@ describe('Windows machine-service installer security', () => {
     expect(hook).toContain(
       '!insertmacro RejectReparseDescendants "${GEZEL_SERVICE_TREE}" "Gezel service tree"',
     );
+    expect(hook).toContain(
+      '!insertmacro RejectReparseDescendants "${GEZEL_DATA_DIR}\\assets" "Gezel shared asset store"',
+    );
     expect(position('RejectReparsePoint "${GEZEL_SERVICE_TREE}"')).toBeLessThan(
       position('--dest="${GEZEL_SERVICE_TREE}" --force'),
+    );
+  });
+
+  it('rejects descendant asset-store reparse points before recursive ACL work and startup', () => {
+    const assetGuard =
+      '!insertmacro RejectReparseDescendants "${GEZEL_DATA_DIR}\\assets" "Gezel shared asset store"';
+    const guards = [
+      ...hook.matchAll(new RegExp(assetGuard.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')),
+    ].map((match) => match.index ?? -1);
+
+    // Install preflight, pre-start recheck, and uninstall permission repair.
+    expect(guards).toHaveLength(3);
+    expect(guards[0]).toBeLessThan(
+      position('!insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}\\assets"'),
+    );
+    expect(guards[1]).toBeGreaterThan(
+      position('NT SERVICE\\${GEZEL_SERVICE_NAME}:(OI)(CI)(IO)(F)'),
+    );
+    expect(guards[1]).toBeLessThan(position('config ${GEZEL_SERVICE_NAME} start= auto'));
+
+    const uninstallStart = position('!macro customUnInstall');
+    const uninstall = hook.slice(uninstallStart, hook.indexOf('!macroend', uninstallStart));
+    expect(uninstall.indexOf(assetGuard)).toBeLessThan(
+      uninstall.indexOf('!insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}\\assets"'),
     );
   });
 

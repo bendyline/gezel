@@ -34,7 +34,13 @@
 ; publish attempt so a failed one can never be covered by a stale record.
 !define GEZEL_PUBLISHED_TREE_VALUE "SharedServiceTreeSha"
 !define GEZEL_SERVICE_TREE "${GEZEL_DATA_DIR}\service"
-!define GEZEL_INTERPRETER "$INSTDIR\Gezel.exe"
+; Install-time maintenance is plain JavaScript and does not need Chromium.
+; Use the independently signed Node runtime that already ships with the app
+; instead of booting the Electron executable through ELECTRON_RUN_AS_NODE.
+; Besides being smaller, this keeps Windows installer work outside Electron's
+; sandbox/ICU startup path, whose process-level failures surface only as
+; STATUS_BREAKPOINT (0x80000003) and previously forced a shared-engine fallback.
+!define GEZEL_INTERPRETER "$INSTDIR\resources\app.asar.unpacked\dist\node-bundle\node.exe"
 !define GEZEL_EXTRACT_CLI "$INSTDIR\resources\app.asar.unpacked\dist\extract-service-bundle.js"
 !define GEZEL_MIGRATE_SHARED_CLI "$INSTDIR\resources\app.asar.unpacked\dist\migrate-legacy-shared.js"
 !define GEZEL_BUNDLE_TARBALL "$INSTDIR\resources\app.asar.unpacked\dist\service-bundle.tar.gz"
@@ -482,6 +488,12 @@ FunctionEnd
     Goto SkipNssm
   ${EndIf}
 
+  ${IfNot} ${FileExists} "${GEZEL_INTERPRETER}"
+    DetailPrint "ERROR: bundled node.exe is missing; shared-engine maintenance cannot run."
+    MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel was built without its bundled Node.js runtime. The shared model engine will not be installed; Gezel will use an account-local model engine." /SD IDOK
+    Goto SkipNssm
+  ${EndIf}
+
   ; Upgrades over NSSM-era installs leave the old wrapper behind (its
   ; service registration was already removed above; the files are unlocked).
   Delete "${GEZEL_NSSM}"
@@ -530,10 +542,8 @@ FunctionEnd
   ${EndIf}
   !insertmacro RejectReparsePoint "${GEZEL_SHARED_DIR}" "Gezel machine-shared data directory" SkipNssm
   DetailPrint "Migrating legacy machine-wide projects and gezels..."
-  System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t "1")i'
   nsExec::ExecToLog '"${GEZEL_INTERPRETER}" "${GEZEL_MIGRATE_SHARED_CLI}" --source="${GEZEL_DATA_DIR}" --dest="${GEZEL_SHARED_DIR}"'
   Pop $0
-  System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", i 0)i'
   ${If} $0 != 0
     DetailPrint "ERROR: legacy shared-data migration failed (exit $0)."
     MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not safely migrate existing machine-wide projects (exit $0). Nothing was overwritten; the shared model engine will not be replaced until the migration can complete." /SD IDOK
@@ -581,6 +591,11 @@ FunctionEnd
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\runtime" "Gezel runtime directory" SkipNssm
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\assets" "Gezel public asset directory" SkipNssm
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\assets\models" "Gezel shared model directory" SkipNssm
+  ; Exact-path checks are not enough for a preserved asset tree. A planted
+  ; descendant junction would make the elevated ownership/ACL sweep below
+  ; operate outside ProgramData even though the assets container itself is a
+  ; normal directory. Refuse the machine broker before any recursive icacls.
+  !insertmacro RejectReparseDescendants "${GEZEL_DATA_DIR}\assets" "Gezel shared asset store" SkipNssm
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\logs" "Gezel logs directory" SkipNssm
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\tmp" "Gezel temporary directory" SkipNssm
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\appdata" "Gezel roaming application-data directory" SkipNssm
@@ -622,10 +637,8 @@ FunctionEnd
   !insertmacro RejectReparsePoint "${GEZEL_SERVICE_TREE}" "Gezel service tree" SkipNssm
   !insertmacro RejectReparseDescendants "${GEZEL_SERVICE_TREE}" "Gezel service tree" SkipNssm
   DetailPrint "Extracting service bundle..."
-  System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", t "1")i'
   nsExec::ExecToLog '"${GEZEL_INTERPRETER}" "${GEZEL_EXTRACT_CLI}" --tarball="${GEZEL_BUNDLE_TARBALL}" --meta="${GEZEL_BUNDLE_META}" --dest="${GEZEL_SERVICE_TREE}" --force'
   Pop $0
-  System::Call 'Kernel32::SetEnvironmentVariable(t "ELECTRON_RUN_AS_NODE", i 0)i'
   ${If} $0 != 0
     DetailPrint "ERROR: service bundle extraction failed (exit $0)."
     MessageBox MB_ICONEXCLAMATION|MB_OK "Gezel could not extract its shared-engine bundle (exit code $0). The shared model engine will not be installed; Gezel will use an account-local model engine." /SD IDOK
@@ -769,7 +782,10 @@ FunctionEnd
 
   ; Enabling autostart is deliberately the LAST mutating step: the service
   ; becomes startable only after every account/SID/privilege/ACL control
-  ; above succeeded.
+  ; above succeeded. Re-check the complete writable asset boundary here too:
+  ; this closes the interval between the pre-sanitize check and startup, and
+  ; prevents a descendant reparse point from ever becoming broker-writable.
+  !insertmacro RejectReparseDescendants "${GEZEL_DATA_DIR}\assets" "Gezel shared asset store" RemoveUnsafeGezelService
   nsExec::ExecToLog '"$SYSDIR\sc.exe" config ${GEZEL_SERVICE_NAME} start= auto'
   Pop $0
   ${If} $0 != 0
@@ -825,6 +841,10 @@ FunctionEnd
   SetRegView 32
   Goto DoneNssm
 
+  RemoveUnsafeGezelService:
+  !insertmacro RemoveGezelService
+  Goto SkipNssm
+
   SkipNssm:
   ; Record that this install fell back to the per-user daemon.
   ;
@@ -875,6 +895,7 @@ FunctionEnd
   ${If} ${FileExists} "${GEZEL_DATA_DIR}\assets\*.*"
     !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\assets" "Gezel public asset directory" SkipUninstallRuntimeCleanup
     !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\assets\models" "Gezel shared model directory" SkipUninstallRuntimeCleanup
+    !insertmacro RejectReparseDescendants "${GEZEL_DATA_DIR}\assets" "Gezel shared asset store" SkipUninstallRuntimeCleanup
     !insertmacro TakeTrustedOwnership "${GEZEL_DATA_DIR}\assets" "its preserved shared model store" SkipUninstallRuntimeCleanup
     !insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}\assets" "preserved shared model"
     nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(RX)" /remove:g "*S-1-5-11" "*S-1-1-0" "*S-1-5-19" /L'

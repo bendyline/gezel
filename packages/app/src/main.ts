@@ -46,6 +46,7 @@ import {
 import { autostart } from './autostart/index.js';
 import { resolveAutostartNodePath, resolveAutostartPnpmPath } from './autostart/runtime.js';
 import {
+  PREVIEW_FRAME_INDETERMINATE,
   daemonEntrypointArgument,
   isAllowedPreviewNavigation,
   isAllowedPreviewResourceRequest,
@@ -53,6 +54,8 @@ import {
   isExactApprovedPath,
   isExternalRendererNetworkRequest,
   isPreviewDocumentUrl,
+  normalizedDocumentUrl,
+  previewExternalServicesForFrame,
 } from './electron-boundaries.js';
 import { mainProcessIssueUrl } from './main-process-errors.js';
 import {
@@ -447,16 +450,6 @@ function responseHeaderValue(
   return entry?.[1]?.[0]?.trim().toLowerCase() ?? null;
 }
 
-function normalizedDocumentUrl(candidate: string): string | null {
-  try {
-    const parsed = new URL(candidate);
-    parsed.hash = '';
-    return parsed.href;
-  } catch {
-    return null;
-  }
-}
-
 function rememberPreviewDocument(candidate: string, allowExternalServices: boolean): void {
   const key = normalizedDocumentUrl(candidate);
   if (!key) return;
@@ -468,26 +461,6 @@ function rememberPreviewDocument(candidate: string, allowExternalServices: boole
     if (!oldest) break;
     previewDocumentExternalServices.delete(oldest);
   }
-}
-
-/**
- * Resolve whether a request comes from a preview frame (or one of its
- * descendants) and, if so, the document's External services permission.
- * Seeing a preview URL without the trusted response signal fails closed.
- */
-function previewExternalServicesForFrame(
-  frame: Electron.WebFrameMain | null | undefined,
-  allowedOrigin: string | null,
-): boolean | null {
-  let current = frame ?? null;
-  while (current) {
-    if (isPreviewDocumentUrl(current.url, allowedOrigin)) {
-      const key = normalizedDocumentUrl(current.url);
-      return key ? (previewDocumentExternalServices.get(key) ?? false) : false;
-    }
-    current = current.parent;
-  }
-  return null;
 }
 
 /**
@@ -646,8 +619,16 @@ async function createWindow(): Promise<void> {
     if (details.isMainFrame) return;
     const allowedOrigin = connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null;
     const originatesInPreview =
-      previewExternalServicesForFrame(details.frame, allowedOrigin) !== null ||
-      previewExternalServicesForFrame(details.initiator, allowedOrigin) !== null;
+      previewExternalServicesForFrame(
+        details.frame,
+        allowedOrigin,
+        previewDocumentExternalServices,
+      ) !== null ||
+      previewExternalServicesForFrame(
+        details.initiator,
+        allowedOrigin,
+        previewDocumentExternalServices,
+      ) !== null;
     if (!originatesInPreview || isAllowedPreviewNavigation(details.url, allowedOrigin)) return;
     details.preventDefault();
   };
@@ -2812,9 +2793,28 @@ app.whenReady().then(async () => {
   // renderer frame may emit off-daemon HTTP(S)/WebSocket traffic unless both
   // External services and App network are enabled. Preview leases add a
   // second, document-specific permission; navigation stays capability-pinned.
+  const requestSplashPath = splashPath();
+  const requestSplashUrl = requestSplashPath ? pathToFileURL(requestSplashPath).href : null;
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
     const allowedOrigin = connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null;
-    const allowExternalServices = previewExternalServicesForFrame(details.frame, allowedOrigin);
+    const allowExternalServices = previewExternalServicesForFrame(
+      details.frame,
+      allowedOrigin,
+      previewDocumentExternalServices,
+    );
+
+    // A disposed WebFrameMain is not safely inspectable. Deny every preview or
+    // subresource-shaped request. The one useful exception is a top-level
+    // navigation that independently passes the same exact daemon/splash
+    // allowlist enforced by `will-navigate`; this keeps startup functional
+    // when Chromium disposes the old main frame during the handoff.
+    if (allowExternalServices === PREVIEW_FRAME_INDETERMINATE) {
+      const allowedTopLevelRequest =
+        details.resourceType === 'mainFrame' &&
+        isAllowedTopLevelNavigation(details.url, allowedOrigin, requestSplashUrl);
+      callback(allowedTopLevelRequest ? {} : { cancel: true });
+      return;
+    }
 
     if (allowExternalServices !== null && details.resourceType === 'subFrame') {
       callback(isAllowedPreviewNavigation(details.url, allowedOrigin) ? {} : { cancel: true });

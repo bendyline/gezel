@@ -53,6 +53,7 @@ import {
   MODEL_HASH_READ_BUFFER_BYTES,
   type ModelStorageRoots,
   type UnrecognizedModelInfo,
+  assertModelStorePathSafe,
   findModelRoot,
   hashModelPayloadFiles,
   inspectModelDirectory,
@@ -492,7 +493,7 @@ export class MlxModelManager {
     if (await modelExistsOnlyReadOnly(this.storageRoots, id)) {
       throw readOnlyModelError(id);
     }
-    await removeModelDir(join(this.modelsRoot, id));
+    await removeModelDir(join(this.modelsRoot, id), this.modelsRoot);
   }
 
   /** Provider-owned snapshot used by the streaming `.gezmodel` exporter. */
@@ -634,7 +635,10 @@ export class MlxModelManager {
         /* host owns setup errors */
       }
       const itemDir = join(this.modelsRoot, catalogId);
+      await mkdir(this.modelsRoot, { recursive: true });
+      await assertModelStorePathSafe(this.modelsRoot, itemDir);
       await mkdir(itemDir, { recursive: true });
+      await assertModelStorePathSafe(this.modelsRoot, itemDir);
 
       const files = src.files.filter((f): f is NonNullable<typeof f> => f != null);
       const fileCount = files.length;

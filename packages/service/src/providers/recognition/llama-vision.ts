@@ -29,6 +29,7 @@ import { readImageStaticMeta } from '../../index-store/image-meta.js';
 import { resolveModelDirectory } from '../../models/model-id.js';
 import {
   type ModelStorageRoots,
+  assertModelStorePathSafe,
   findModelRoot,
   hashModelPayloadFiles,
   listOverlayModelIds,
@@ -233,7 +234,10 @@ export class LlamaVisionProvider implements RecognitionProvider {
 
   async *pullModel(id: string, spec: RecognitionPullSpec): AsyncIterable<RecognitionPullEvent> {
     const itemDir = join(this.modelsRoot, id);
+    await mkdir(this.modelsRoot, { recursive: true });
+    await assertModelStorePathSafe(this.modelsRoot, itemDir);
     await mkdir(itemDir, { recursive: true });
+    await assertModelStorePathSafe(this.modelsRoot, itemDir);
     const totalAllBytes = spec.files.reduce((n, f) => n + f.approxSizeBytes, 0);
     let writtenAll = 0;
     const verifiedDigests: Record<string, string> = {};

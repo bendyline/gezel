@@ -11,10 +11,11 @@ each production package to the exact text shipped for it.
 
 ## Runtime dependencies
 
-These ship in the Electron app or the `gezeld` daemon. Two further components
-— the GitHub Copilot CLI and the Playwright MCP server — are deliberately
-*not* among them; Gezel downloads them on first run instead. See
-**Downloaded on first run** below.
+These ship in the Electron app or the `gezeld` daemon. The Playwright MCP
+server and its Chromium browser are deliberately *not* among them; Gezel
+downloads those on first boot. The GitHub Copilot CLI is also not bundled: it
+is optional, installed on demand only when needed, and an existing compatible
+CLI can be used instead. See **Downloaded on first boot or on demand** below.
 
 | Package | License | Homepage |
 |---|---|---|
@@ -255,13 +256,19 @@ weights are third-party and carry their own licenses.
 
 ---
 
-## Downloaded on first run
+## Downloaded on first boot or on demand
 
 These third-party components are **not** bundled into any installer. Gezel
-downloads them on first run, from the public npm registry into the user's own
-Gezel home (`system-toolsets/`), using the bundled pnpm and a
-version+integrity set pinned in
+downloads the Playwright MCP server on first boot from the public npm registry
+into the user's own Gezel home (`system-toolsets/`), using the bundled pnpm and
+a version+integrity set pinned in
 [`packages/service/src/system-toolsets/locks.ts`](packages/service/src/system-toolsets/locks.ts).
+
+GitHub Copilot support is optional and is not part of the first-boot download.
+When the user chooses Copilot, Gezel can install the pinned Copilot SDK and CLI
+into `system-toolsets/` on demand. If a compatible Copilot CLI is already on
+`PATH` or explicitly configured through `COPILOT_CLI_PATH`, Gezel uses it
+instead of installing another managed CLI copy.
 
 Gezel does **not** redistribute these packages — they are fetched from npm on
 the user's own machine, and each is governed by its own license as published
@@ -422,9 +429,10 @@ components are redistributed:
 Separately, the **GitHub Copilot CLI** (`@github/copilot` and its
 platform-specific binary siblings, pulled in transitively by
 `@github/copilot-sdk`) is proprietary, under the free-of-charge **GitHub
-Copilot CLI License**. Gezel does not redistribute it: it is downloaded from
-npm into the user's own Gezel home on first run — see **Downloaded on first
-run** above.
+Copilot CLI License**. Gezel does not redistribute it: when Copilot is selected,
+Gezel can install it from npm into the user's own Gezel home on demand or use a
+compatible CLI that is already installed — see **Downloaded on first boot or
+on demand** above.
 
 Some **catalog models** likewise ship under non-OSI licenses with
 acceptable-use or commercial restrictions (Llama Community License,

@@ -1,7 +1,17 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { chmod, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { createLogger } from '@bendyline/gezel';
@@ -75,6 +85,55 @@ export function modelStorageRoots(opts: ModelStorageRootOptions): ModelStorageRo
 }
 
 /**
+ * Fail closed when an existing model-store component resolves through a
+ * symlink/junction or outside the configured root. On Windows, Node reports
+ * directory junctions as symbolic links and `realpath` resolves the final
+ * filesystem target, so this protects both recursive ACL work and ordinary
+ * publish/delete operations from descendant reparse redirection.
+ *
+ * Missing trailing components are allowed so callers can validate a publish
+ * target before creating it. Every existing ancestor, including `root`, is
+ * still checked.
+ */
+export async function assertModelStorePathSafe(root: string, target: string): Promise<void> {
+  const resolvedRoot = resolve(root);
+  const resolvedTarget = resolve(target);
+  const rel = relative(resolvedRoot, resolvedTarget);
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`refusing a model-store path outside its root: ${resolvedTarget}`);
+  }
+
+  const components = rel ? rel.split(sep).filter(Boolean) : [];
+  let cursor = resolvedRoot;
+  let deepestExisting = resolvedRoot;
+  for (let index = -1; index < components.length; index += 1) {
+    if (index >= 0) cursor = join(cursor, components[index]!);
+    let info: Awaited<ReturnType<typeof lstat>>;
+    try {
+      info = await lstat(cursor);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') break;
+      throw error;
+    }
+    if (!info.isDirectory() || info.isSymbolicLink()) {
+      throw new Error(`refusing a linked or non-directory model-store path: ${cursor}`);
+    }
+    deepestExisting = cursor;
+  }
+
+  const [canonicalRoot, canonicalExisting] = await Promise.all([
+    realpath(resolvedRoot),
+    realpath(deepestExisting),
+  ]);
+  const canonicalRel = relative(canonicalRoot, canonicalExisting);
+  if (canonicalRel.startsWith('..') || isAbsolute(canonicalRel)) {
+    throw new Error(
+      `refusing a model-store path whose final target escapes its root: ${resolvedTarget}`,
+    );
+  }
+}
+
+/**
  * One-shot upgrade bridge for machine services that downloaded models into
  * the formerly-private `<home>/engines/<engine>/models` tree. Both locations are on
  * the same machine volume in supported installers, so directory renames are
@@ -93,11 +152,13 @@ export async function migrateLegacySystemModels(
     if (resolve(legacyRoot) === resolve(roots.writableRoot)) continue;
     const entries = await readdir(legacyRoot, { withFileTypes: true }).catch(() => null);
     await mkdir(roots.writableRoot, { recursive: true });
+    await assertModelStorePathSafe(roots.writableRoot, roots.writableRoot);
     if (entries) {
       for (const entry of entries) {
         if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
         const source = join(legacyRoot, entry.name);
         const target = join(roots.writableRoot, entry.name);
+        await assertModelStorePathSafe(roots.writableRoot, target);
         try {
           await lstat(target);
           continue;
@@ -269,7 +330,11 @@ export function readOnlyModelError(id: string): Error {
  * actionable message rather than the raw `EBUSY`/`EPERM` so the UI can tell
  * the user to switch models first, instead of the delete looking like a no-op.
  */
-export async function removeModelDir(itemDir: string): Promise<void> {
+export async function removeModelDir(
+  itemDir: string,
+  writableRoot: string = dirname(itemDir),
+): Promise<void> {
+  await assertModelStorePathSafe(writableRoot, itemDir);
   const maxAttempts = 4;
   for (let attempt = 1; ; attempt++) {
     try {
@@ -358,7 +423,15 @@ export async function verifyReadOnlyModelPayload(
   expected: Record<string, string> | undefined,
   onReject?: (reason: string) => void,
 ): Promise<boolean> {
-  if (resolve(modelRoot) === resolve(roots.writableRoot)) return true;
+  if (resolve(modelRoot) === resolve(roots.writableRoot)) {
+    try {
+      await assertModelStorePathSafe(roots.writableRoot, join(modelRoot, id));
+      return true;
+    } catch (error) {
+      onReject?.(error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  }
 
   const key = readOnlyVerificationKey(roots, modelRoot, id, expected);
   let verification = readOnlyVerificationInFlight.get(key);
@@ -489,6 +562,9 @@ export async function makeSharedModelReadable(
     throw new Error(`refusing to publish model outside the shared asset store: ${target}`);
   }
 
+  // This must precede chmodTree and icacls /T: discovering a junction after a
+  // recursive permission rewrite is already too late.
+  await assertModelStorePathSafe(sharedModels, target);
   await chmodTree(target);
   if (process.platform === 'win32') {
     await resetWindowsAclToInherited(target);
@@ -595,6 +671,7 @@ export async function reclaimAbandonedModelDownloads(opts: {
     try {
       const info = await lstat(dir);
       if (!info.isDirectory() || info.isSymbolicLink()) continue;
+      await assertModelStorePathSafe(opts.writableRoot, dir);
       const scan = await scanAbandonedCandidate(dir);
       if (!scan || !scan.hasPartial || now - scan.newestMtimeMs < ttlMs) continue;
       await rm(dir, { recursive: true, force: true });

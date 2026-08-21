@@ -42,6 +42,60 @@ export function isPreviewDocumentUrl(candidate: string, allowedOrigin: string | 
   }
 }
 
+/** The lifecycle surface used from Electron's WebFrameMain without importing its runtime module. */
+export interface PreviewFrameLike {
+  isDestroyed(): boolean;
+  readonly url: string;
+  readonly parent: PreviewFrameLike | null;
+}
+
+/** A non-null Electron frame whose native backing object can no longer be inspected. */
+export const PREVIEW_FRAME_INDETERMINATE = 'indeterminate' as const;
+
+export type PreviewFrameExternalServices = boolean | null | typeof PREVIEW_FRAME_INDETERMINATE;
+
+/** Strip a document fragment so one preview lease covers same-document navigation. */
+export function normalizedDocumentUrl(candidate: string): string | null {
+  try {
+    const parsed = new URL(candidate);
+    parsed.hash = '';
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve a preview frame's External services permission.
+ *
+ * Electron can hand a webRequest/navigation listener a non-null WebFrameMain
+ * whose backing render frame has already navigated or been destroyed. Native
+ * `url` and `parent` getters then throw. Preserve that indeterminate state so
+ * callers can fail closed without mistaking the app's own destroyed top-level
+ * frame for a preview document.
+ */
+export function previewExternalServicesForFrame(
+  frame: PreviewFrameLike | null | undefined,
+  allowedOrigin: string | null,
+  permissions: ReadonlyMap<string, boolean>,
+): PreviewFrameExternalServices {
+  let current = frame ?? null;
+  while (current) {
+    try {
+      if (current.isDestroyed()) return PREVIEW_FRAME_INDETERMINATE;
+      const currentUrl = current.url;
+      if (isPreviewDocumentUrl(currentUrl, allowedOrigin)) {
+        const key = normalizedDocumentUrl(currentUrl);
+        return key ? (permissions.get(key) ?? false) : false;
+      }
+      current = current.parent;
+    } catch {
+      return PREVIEW_FRAME_INDETERMINATE;
+    }
+  }
+  return null;
+}
+
 /**
  * Preview frames may link between files covered by their capability, but may
  * never replace themselves with an external document. External services is a

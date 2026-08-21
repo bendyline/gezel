@@ -261,6 +261,26 @@ export class NightShiftManager {
   private onActivated?: () => Promise<void>;
 
   /**
+   * Register the ON → OFF counterpart. Queue-admission consumers need no
+   * such signal — they re-read `isActive()` on their next tick — but work
+   * the activation callback *started* keeps running on its own until told
+   * otherwise, and a long sweep can outlive the window by a wide margin.
+   * The index catch-up sweep is the case that motivated this: kicked at
+   * activation, it walked project after project for 40 minutes past
+   * `endHour`, dispatching night-model one-shots the whole way, because
+   * nothing ever told it the night was over.
+   *
+   * Fires on every ON → OFF edge, including a quota park — a shift that
+   * parks has stopped, and re-activation runs `onActivated` again. Awaited,
+   * so `stopManual()` returns with the stand-down already signalled;
+   * callees must therefore signal rather than drain.
+   */
+  setOnDeactivated(fn: () => Promise<void>): void {
+    this.onDeactivated = fn;
+  }
+  private onDeactivated?: () => Promise<void>;
+
+  /**
    * Whether `task` still has night-shift work to do today — false for a
    * `onceADay` task whose `lastRunDay` is today's window-start date. Used
    * by the runner to hold a daily task after its single run. Uses the
@@ -388,10 +408,16 @@ export class NightShiftManager {
 
     this.keepAwake = active && ns.keepAwakeWhileRunning === true;
     const activating = active && !this.active;
+    const deactivating = !active && this.active;
     this.setActive(active, src);
     if (activating && this.onActivated) {
       await this.onActivated().catch((err) => {
         log.warn(`[night-shift] activation callback failed: ${String(err)}`);
+      });
+    }
+    if (deactivating && this.onDeactivated) {
+      await this.onDeactivated().catch((err) => {
+        log.warn(`[night-shift] deactivation callback failed: ${String(err)}`);
       });
     }
 

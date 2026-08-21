@@ -19,7 +19,7 @@
 
 import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
-import { readFile, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { brotliCompressSync, constants as zlibConstants } from 'node:zlib';
 import type {
@@ -41,10 +41,12 @@ import {
   GEZK_FORMAT_VERSION,
   GEZK_INDEX_SCHEMA_VERSION,
   MANIFEST_PATH,
+  MAX_KNOWLEDGE_DOCUMENT_BYTES,
   ROUTER_DB_PATH,
   SHARD_TARGET_CHUNKS,
 } from '../format/constants.js';
 import { ROUTER_DDL, SHARD_DDL, vecChunksDdl } from '../format/ddl.js';
+import { hashFileStreaming } from '../format/file-hash.js';
 import { chunkContentHash, chunkUid, documentSlug } from '../format/ids.js';
 import { DatabaseSync } from '../format/node-sqlite.js';
 import { l2Normalize, quantizeBinary, quantizeInt8 } from '../format/quantize.js';
@@ -271,6 +273,11 @@ export async function compileKnowledgeCatalog(
       );
       for (const p of prepared) {
         const body = Buffer.from(normalizeMarkdown(p.doc.markdown), 'utf8');
+        if (body.byteLength > MAX_KNOWLEDGE_DOCUMENT_BYTES) {
+          throw new Error(
+            `document ${p.doc.id} exceeds the ${MAX_KNOWLEDGE_DOCUMENT_BYTES} byte body limit`,
+          );
+        }
         const useBrotli = body.length >= BODY_CODEC_MIN_BYTES;
         const blob = useBrotli
           ? brotliCompressSync(body, {
@@ -496,9 +503,8 @@ export async function compileKnowledgeCatalog(
     const files: KnowledgeCatalogManifest['files'] = [];
     const routerShardStats: KnowledgeCatalogManifest['router']['shards'] = [];
     for (const f of vacuumed) {
-      const bytes = await readFile(f.absPath);
-      const sha256 = createHash('sha256').update(bytes).digest('hex');
-      files.push({ path: f.archivePath, sizeBytes: bytes.length, sha256 });
+      const { sha256, sizeBytes } = await hashFileStreaming(f.absPath);
+      files.push({ path: f.archivePath, sizeBytes, sha256 });
       const idMatch = /(\d+)\.db$/.exec(f.archivePath);
       const shardId = f.archivePath === ROUTER_DB_PATH ? 0 : Number(idMatch?.[1] ?? -1);
       if (f.archivePath !== ROUTER_DB_PATH || embedded) {

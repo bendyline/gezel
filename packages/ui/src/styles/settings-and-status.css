@@ -1470,6 +1470,95 @@
   background: var(--text-muted);
 }
 
+/* Phase spinners in the popover heading — the workshop's version of a
+   spinner. The static file scan is a ledger page with an accent read-line
+   sweeping down it; the AI tiers are the Boekwachter's quill writing a line
+   that draws in and lifts. One quiet glyph on the heading ink, one moving
+   accent stroke each, so the two phases read apart at a glance. */
+.project-index-phase-spinner {
+  display: inline-flex;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.project-index-phase-spinner svg {
+  width: 100%;
+  height: 100%;
+}
+
+.project-index-scanline {
+  stroke: var(--accent);
+  animation: project-index-scan-sweep 1.9s ease-in-out infinite;
+}
+
+@keyframes project-index-scan-sweep {
+  0% {
+    transform: translateY(0);
+    opacity: 0.2;
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(7px);
+    opacity: 0.2;
+  }
+}
+
+.project-index-quill-feather {
+  transform-origin: 5px 11px;
+  animation: project-index-quill-rock 2.4s ease-in-out infinite;
+}
+
+@keyframes project-index-quill-rock {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  55% {
+    transform: rotate(-4deg);
+  }
+}
+
+.project-index-quill-line {
+  stroke: var(--accent);
+  stroke-dasharray: 9;
+  animation: project-index-quill-write 2.4s ease-in-out infinite;
+}
+
+@keyframes project-index-quill-write {
+  0% {
+    stroke-dashoffset: 9;
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  70% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-index-scanline,
+  .project-index-quill-feather,
+  .project-index-quill-line,
+  .project-index-panel-dot-indexing {
+    animation: none;
+  }
+}
+
 .project-index-panel-progress {
   display: flex;
   flex-direction: column;

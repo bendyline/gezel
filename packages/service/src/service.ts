@@ -1045,6 +1045,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     await taskRunner.rehydrateFromStore({ nightShiftOnly: true });
     await taskRunner.wake();
   });
+  nightShift.setOnDeactivated(async () => {
+    // Queued night tasks stop themselves — the runner re-reads `isActive()`
+    // at admission. The catch-up sweep cannot: it is a loop the activation
+    // callback started, so the window closing has to reach it explicitly or
+    // it keeps enqueuing night-model one-shots long past `endHour`.
+    indexEnrichmentRef?.cancelCatchUp();
+  });
   // A model-owned completion-gate loop keeps repairing inside its existing
   // turn; TaskManager therefore does not enqueue a replacement handoff. Move
   // TaskRunner's live dispatch to the new activation timestamp immediately so

@@ -16,8 +16,10 @@ import { dirname, join, resolve } from 'node:path';
 import type { KnowledgeCatalogRef } from '@bendyline/gezel';
 import { createLogger } from '@bendyline/gezel';
 import {
+  type CatalogValidationReport,
+  GEZK_ARCHIVE_LIMITS,
   extractGezkVerified,
-  readGezkManifest,
+  inspectGezkArchive,
   validateExtractedCatalog,
 } from '@bendyline/gezel-knowledge';
 import {
@@ -25,6 +27,7 @@ import {
   knowledgeCatalogsDir,
   knowledgeDownloadsDir,
 } from '@bendyline/gezel/paths';
+import { isPathInside, realpathContained } from '../fs/safe-paths.js';
 import { checkDiskSpace, describeDiskShortfall } from '../utils/disk-space.js';
 import { downloadWithRetry } from '../utils/download-with-retry.js';
 import type { KnowledgeRegistry } from './registry.js';
@@ -45,7 +48,7 @@ export type KnowledgeInstallEvent =
 
 export type KnowledgeInstallSource =
   | { kind: 'file'; path: string }
-  | { kind: 'url'; url: string; expectedSha256?: string };
+  | { kind: 'url'; url: string; expectedSha256: string };
 
 export interface KnowledgeInstallOptions {
   home: string;
@@ -53,7 +56,12 @@ export interface KnowledgeInstallOptions {
   registry: KnowledgeRegistry;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
+  /** Production supplies the worker-backed validator so untrusted SQLite is
+   * never opened on the daemon event-loop thread. */
+  validateCatalog?: (rootDir: string, deep: boolean) => Promise<CatalogValidationReport>;
 }
+
+const MAX_GEZK_ARCHIVE_BYTES = GEZK_ARCHIVE_LIMITS.maxTotalBytes + 512 * 1024 * 1024;
 
 export async function* installKnowledgeCatalog(
   opts: KnowledgeInstallOptions,
@@ -92,6 +100,7 @@ export async function* installKnowledgeCatalog(
       approxSizeBytes: 0,
       ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
+      maxBytes: MAX_GEZK_ARCHIVE_BYTES,
     });
     let final: { bytesWritten: number; sha256?: string } | null = null;
     while (true) {
@@ -127,7 +136,7 @@ export async function* installKnowledgeCatalog(
   try {
     yield { type: 'verifying' };
     if (!archiveSha) archiveSha = await hashFile(archivePath);
-    if (opts.source.kind === 'url' && opts.source.expectedSha256) {
+    if (opts.source.kind === 'url') {
       const expected = opts.source.expectedSha256.toLowerCase();
       if (archiveSha !== expected) {
         yield {
@@ -138,7 +147,8 @@ export async function* installKnowledgeCatalog(
       }
     }
 
-    const manifest = await readGezkManifest(archivePath);
+    const inspection = await inspectGezkArchive(archivePath);
+    const manifest = inspection.manifest;
     const ref: KnowledgeCatalogRef = {
       publisherId: manifest.publisher.id,
       catalogId: manifest.id,
@@ -154,6 +164,9 @@ export async function* installKnowledgeCatalog(
       ref.version,
       ref.contentDigest,
     );
+    const catalogsRoot = knowledgeCatalogsDir(opts.home);
+    await mkdir(catalogsRoot, { recursive: true });
+    await assertKnowledgePathContained(catalogsRoot, targetDir);
     const existing = await stat(join(targetDir, 'manifest.json')).catch(() => null);
     if (existing) {
       // Bytes already on disk — just (re)point the registry.
@@ -163,7 +176,7 @@ export async function* installKnowledgeCatalog(
     }
 
     const archiveBytes = (await stat(archivePath)).size;
-    const disk = await checkDiskSpace(dirname(targetDir), archiveBytes * 2);
+    const disk = await checkDiskSpace(dirname(targetDir), inspection.totalUncompressedBytes);
     if (!disk.ok) {
       yield { type: 'error', error: describeDiskShortfall(disk, 'the catalog install') };
       return;
@@ -174,12 +187,20 @@ export async function* installKnowledgeCatalog(
     const staging = `${targetDir}.staging-${process.pid}-${randomUUID()}`;
     try {
       await mkdir(dirname(targetDir), { recursive: true });
-      yield { type: 'progress', phase: 'extract', bytesDone: 0, bytesTotal: archiveBytes };
+      await assertKnowledgePathContained(catalogsRoot, targetDir);
+      yield {
+        type: 'progress',
+        phase: 'extract',
+        bytesDone: 0,
+        bytesTotal: inspection.totalUncompressedBytes,
+      };
       await extractGezkVerified(archivePath, staging);
 
-      // Open + count validation in staging (per-file hashes already checked
-      // by the verified extract; deep vector checks run on first mount).
-      const report = await validateExtractedCatalog(staging, { deep: false });
+      // Full integrity validation happens before publish. Production injects
+      // the worker-backed host; direct callers use the library validator.
+      const report = opts.validateCatalog
+        ? await opts.validateCatalog(staging, true)
+        : await validateExtractedCatalog(staging, { deep: true });
       if (!report.ok) {
         const failed = report.checks.filter((c) => !c.ok);
         yield {
@@ -189,6 +210,7 @@ export async function* installKnowledgeCatalog(
         return;
       }
 
+      await assertKnowledgePathContained(catalogsRoot, targetDir);
       await rm(targetDir, { recursive: true, force: true });
       await rename(staging, targetDir);
     } catch (err) {
@@ -208,7 +230,9 @@ export async function* installKnowledgeCatalog(
 
 /** Remove every installed version of this catalog except the active ref. */
 async function pruneOtherVersions(home: string, ref: KnowledgeCatalogRef): Promise<void> {
-  const catalogDir = join(knowledgeCatalogsDir(home), ref.publisherId, ref.catalogId);
+  const catalogsRoot = knowledgeCatalogsDir(home);
+  const catalogDir = join(catalogsRoot, ref.publisherId, ref.catalogId);
+  await assertKnowledgePathContained(catalogsRoot, catalogDir);
   const keepVersion = ref.version;
   const keepDigest = ref.contentDigest.slice(0, 16);
   let versions: string[];
@@ -222,16 +246,32 @@ async function pruneOtherVersions(home: string, ref: KnowledgeCatalogRef): Promi
       const digests = await readdir(join(catalogDir, version)).catch(() => []);
       for (const digest of digests) {
         if (digest !== keepDigest) {
-          await rm(join(catalogDir, version, digest), { recursive: true, force: true }).catch(
-            () => {},
-          );
+          const target = join(catalogDir, version, digest);
+          if (await isKnowledgePathContained(catalogsRoot, target)) {
+            await rm(target, { recursive: true, force: true }).catch(() => {});
+          }
         }
       }
       continue;
     }
-    await rm(join(catalogDir, version), { recursive: true, force: true }).catch((err) => {
+    const target = join(catalogDir, version);
+    if (!(await isKnowledgePathContained(catalogsRoot, target))) {
+      log.warn(`refusing to prune catalog path outside the knowledge root: ${target}`);
+      continue;
+    }
+    await rm(target, { recursive: true, force: true }).catch((err) => {
       log.warn(`prune of ${ref.catalogId}@${version} failed: ${err}`);
     });
+  }
+}
+
+async function isKnowledgePathContained(root: string, target: string): Promise<boolean> {
+  return isPathInside(target, root) && (await realpathContained(root, target));
+}
+
+async function assertKnowledgePathContained(root: string, target: string): Promise<void> {
+  if (!(await isKnowledgePathContained(root, target))) {
+    throw new Error(`refusing a catalog path outside the knowledge root: ${target}`);
   }
 }
 

@@ -28,6 +28,7 @@ import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
   MODEL_HASH_READ_BUFFER_BYTES,
   type ModelStorageRoots,
+  assertModelStorePathSafe,
   findModelRoot,
   hashModelPayloadFiles,
   listOverlayModelIds,
@@ -219,7 +220,10 @@ export class VideoModelManager {
       const manifest = detail.manifest;
       const src = manifest.source;
       const itemDir = join(this.modelsRoot, catalogId);
+      await mkdir(this.modelsRoot, { recursive: true });
+      await assertModelStorePathSafe(this.modelsRoot, itemDir);
       await mkdir(itemDir, { recursive: true });
+      await assertModelStorePathSafe(this.modelsRoot, itemDir);
 
       const files = src.files.filter((f): f is NonNullable<typeof f> => f != null);
       const fileCount = files.length;

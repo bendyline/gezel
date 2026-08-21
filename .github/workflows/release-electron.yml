@@ -402,14 +402,88 @@ jobs:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
 
-      - name: Smoke-test packaged Windows app
+      # Exercise the artifact users actually run, including the elevated NSIS
+      # hook, bundled-Node migration/extraction, ProgramData ACLs, SCM
+      # registration, LocalService startup, and the install breadcrumb. The
+      # previous win-unpacked smoke started only the app and could pass while
+      # every real install fell back before GezelService was registered.
+      - name: Smoke-test packaged Windows installer
+        shell: pwsh
+        env:
+          GEZEL_EXPECTED_VERSION: ${{ needs.release-preflight.outputs.version }}
+        run: |
+          $installer = Get-ChildItem 'packages/app/dist/installers/*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'No Windows installer produced' }
+          $process = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Windows installer smoke failed with exit code $($process.ExitCode)"
+          }
+
+          $installRoot = Join-Path $env:ProgramFiles 'gezel'
+          foreach ($required in @(
+            (Join-Path $installRoot 'gezel.exe'),
+            (Join-Path $installRoot 'gezel-service-host.exe'),
+            (Join-Path $installRoot 'resources/app.asar.unpacked/dist/node-bundle/node.exe'),
+            (Join-Path $installRoot 'resources/app.asar.unpacked/dist/extract-service-bundle.js')
+          )) {
+            if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
+              throw "Installed Windows payload is missing $required"
+            }
+          }
+
+          $installed = Get-ItemPropertyValue `
+            -LiteralPath 'HKLM:\Software\Bendyline\Gezel' `
+            -Name MachineServiceInstalled `
+            -ErrorAction Stop
+          if ($installed -ne 1) {
+            throw "Installer reported MachineServiceInstalled=$installed instead of 1"
+          }
+          $service = Get-Service -Name GezelService -ErrorAction Stop
+          if ($service.Status -ne 'Running') {
+            throw "GezelService is $($service.Status), expected Running"
+          }
+
+          $runtime = 'C:\ProgramData\Gezel\runtime'
+          $deadline = (Get-Date).AddSeconds(90)
+          $health = $null
+          do {
+            $portFile = Join-Path $runtime 'port'
+            $cert = Join-Path $runtime 'cert.pem'
+            if ((Test-Path -LiteralPath $portFile) -and (Test-Path -LiteralPath $cert)) {
+              $port = (Get-Content -LiteralPath $portFile -Raw).Trim()
+              if ($port -match '^\d+$') {
+                $json = & curl.exe `
+                  --fail `
+                  --silent `
+                  --show-error `
+                  --connect-timeout 2 `
+                  --max-time 5 `
+                  --cacert $cert `
+                  "https://127.0.0.1:$port/api/health" 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                  try { $health = $json | ConvertFrom-Json } catch { $health = $null }
+                }
+              }
+            }
+            if (-not $health) { Start-Sleep -Seconds 1 }
+          } while (-not $health -and (Get-Date) -lt $deadline)
+          if (-not $health) { throw 'Installed GezelService did not publish a healthy TLS runtime' }
+          if ($health.ok -ne $true -or $health.serviceRole -ne 'machine-engine') {
+            throw "Unexpected installed service health: $($health | ConvertTo-Json -Compress)"
+          }
+          if ($health.version -ne $env:GEZEL_EXPECTED_VERSION) {
+            throw "Installed service version $($health.version) does not match $env:GEZEL_EXPECTED_VERSION"
+          }
+          Write-Host '[installer-smoke] signed NSIS install exposed a healthy machine-engine service'
+
+      - name: Smoke-test installed Windows app
         shell: pwsh
         env:
           GEZEL_PACKAGED_SMOKE: '1'
           GEZEL_EXPECTED_VERSION: ${{ needs.release-preflight.outputs.version }}
           GEZEL_HOME: ${{ runner.temp }}\gezel-packaged-smoke
         run: |
-          $exe = Get-Item 'packages/app/dist/installers/win-unpacked/gezel.exe' -ErrorAction Stop
+          $exe = Get-Item "$env:ProgramFiles\gezel\gezel.exe" -ErrorAction Stop
           $stdout = Join-Path $env:RUNNER_TEMP 'gezel-packaged-smoke.stdout.log'
           $stderr = Join-Path $env:RUNNER_TEMP 'gezel-packaged-smoke.stderr.log'
           Remove-Item -LiteralPath $stdout, $stderr -Force -ErrorAction SilentlyContinue
@@ -455,10 +529,36 @@ jobs:
           }
           Write-Host "[packaged-smoke] Windows app imported and reached ready"
 
+      - name: Collect Windows installer-smoke diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          $diagnostics = Join-Path $env:RUNNER_TEMP 'gezel-installer-smoke-diagnostics'
+          New-Item -ItemType Directory -Path $diagnostics -Force | Out-Null
+          & sc.exe queryex GezelService 2>&1 | Out-File (Join-Path $diagnostics 'service-query.txt')
+          & sc.exe qc GezelService 2>&1 | Out-File (Join-Path $diagnostics 'service-config.txt')
+          & reg.exe query 'HKLM\Software\Bendyline\Gezel' /s 2>&1 |
+            Out-File (Join-Path $diagnostics 'installer-registry.txt')
+          foreach ($path in @("$env:ProgramFiles\gezel", 'C:\ProgramData\Gezel')) {
+            & icacls.exe $path 2>&1 |
+              Out-File (Join-Path $diagnostics "acl-$((Split-Path $path -Leaf)).txt")
+          }
+          Get-WinEvent -FilterHashtable @{
+            LogName = 'Application'
+            StartTime = (Get-Date).AddMinutes(-30)
+          } -ErrorAction SilentlyContinue |
+            Where-Object { $_.Message -match 'gezel(?:\.exe|-service-host)' } |
+            Select-Object TimeCreated, Id, LevelDisplayName, ProviderName, Message |
+            Format-List |
+            Out-File (Join-Path $diagnostics 'application-events.txt')
+          if (Test-Path -LiteralPath 'C:\ProgramData\Gezel\logs') {
+            Copy-Item -LiteralPath 'C:\ProgramData\Gezel\logs' -Destination $diagnostics -Recurse -Force
+          }
+
       # The normal Windows artifact upload is skipped after a smoke failure.
-      # Preserve both sides of the archive boundary so the next failure can be
-      # classified without guessing: the shipped tarball plus the dependency
-      # directories produced by extraction on the runner.
+      # Preserve both sides of the archive boundary plus installer/SCM/Event
+      # Log evidence so the next machine-specific startup failure is
+      # classifiable without guessing.
       - name: Preserve Windows packaged-smoke diagnostics
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -467,6 +567,7 @@ jobs:
           path: |
             ${{ runner.temp }}/gezel-packaged-smoke.stdout.log
             ${{ runner.temp }}/gezel-packaged-smoke.stderr.log
+            ${{ runner.temp }}/gezel-installer-smoke-diagnostics
             ${{ runner.temp }}/gezel-packaged-smoke/service/node_modules/entities
             ${{ runner.temp }}/gezel-packaged-smoke/service/node_modules/parse5
             packages/app/dist/service-bundle.tar.gz
@@ -560,6 +661,21 @@ jobs:
             packages/app/dist/installers/latest.yml
           if-no-files-found: error
           retention-days: 7
+
+      - name: Uninstall Windows installer smoke
+        if: always()
+        shell: pwsh
+        run: |
+          $uninstaller = "$env:ProgramFiles\gezel\Uninstall gezel.exe"
+          if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
+            $process = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+            if ($process.ExitCode -ne 0) {
+              throw "Windows uninstaller smoke failed with exit code $($process.ExitCode)"
+            }
+          }
+          if (Get-Service -Name GezelService -ErrorAction SilentlyContinue) {
+            throw 'GezelService remained registered after uninstall smoke'
+          }
 
   # ── macOS ─────────────────────────────────────────────────────────────
   # Apple Silicon (arm64) only. We dropped Intel Mac (macos-13 / x64)

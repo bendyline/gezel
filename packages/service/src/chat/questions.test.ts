@@ -123,6 +123,50 @@ describe('Store — question persistence', () => {
     expect(lastAssistant?.pendingQuestionId).toBe('q-foo');
   });
 
+  it('a stamp survives a concurrent read-modify-write on the same session', async () => {
+    // The stamp and the background memory-extraction cursor persist are
+    // both read-modify-write cycles on the same file. Un-serialized,
+    // whichever renames last drops the other's edit — extraction reading
+    // before the stamp and writing after it silently un-stamped the
+    // bubble, which is how this suite flaked under full-suite load.
+    // `mutateSession` holds one lock across each whole cycle.
+    const session = await manager.createSession({ gezelId: 'leo' });
+    mock.script('hello, working on it now');
+    await manager.send(session.id, 'kick off');
+
+    const slowCursorWrite = store.mutateSession('leo', session.id, async (s) => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      s.extractedUpTo = 1;
+    });
+    await store.stampPendingQuestionOnLastAssistant('leo', session.id, 'q-race');
+    await slowCursorWrite;
+
+    const after = await store.getSession('leo', session.id);
+    const lastAssistant = [...(after?.messages ?? [])]
+      .reverse()
+      .find((m) => m.role === 'assistant');
+    expect(lastAssistant?.pendingQuestionId).toBe('q-race');
+    expect(after?.extractedUpTo).toBe(1);
+  });
+
+  it('a mid-turn stamp survives the next turn-end write of the live record', async () => {
+    // `ask_user_question` fires mid-turn, so the record ChatManager
+    // writes at turn end is an in-memory object that never saw the disk
+    // stamp — writing it wholesale erased the stamp and the in-chat card
+    // degraded to dropdown-only. `ChatManager.stampPendingQuestion`
+    // mirrors onto the live record as well.
+    const session = await manager.createSession({ gezelId: 'leo' });
+    mock.script('first reply');
+    await manager.send(session.id, 'hello');
+    await manager.stampPendingQuestion('leo', session.id, 'q-live');
+    mock.script('second reply');
+    await manager.send(session.id, 'again');
+
+    const after = await store.getSession('leo', session.id);
+    const stamped = (after?.messages ?? []).filter((m) => m.pendingQuestionId === 'q-live');
+    expect(stamped).toHaveLength(1);
+  });
+
   it('end-of-turn stamps mid-turn approval questions onto the just-committed bubble', async () => {
     // Mid-turn approval intents (npm-install / command / tool-permission /
     // image-generation) are synthesized server-side BEFORE the in-flight

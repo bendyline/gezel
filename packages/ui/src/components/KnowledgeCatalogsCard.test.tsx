@@ -72,12 +72,27 @@ describe('KnowledgeCatalogsCard', () => {
     render(<KnowledgeCatalogsCard />);
     const input = await screen.findByLabelText('Catalog file path or URL');
     fireEvent.change(input, { target: { value: 'https://example.test/notes.gezk' } });
+    fireEvent.change(screen.getByLabelText('Catalog SHA-256 digest'), {
+      target: { value: 'b'.repeat(64) },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Install' }));
     await waitFor(() =>
       expect(api.installKnowledgeCatalog).toHaveBeenCalledWith({
-        source: { kind: 'url', url: 'https://example.test/notes.gezk' },
+        source: {
+          kind: 'url',
+          url: 'https://example.test/notes.gezk',
+          expectedSha256: 'b'.repeat(64),
+        },
       }),
     );
+  });
+
+  it('requires a publisher digest for URL installs', async () => {
+    render(<KnowledgeCatalogsCard />);
+    const input = await screen.findByLabelText('Catalog file path or URL');
+    fireEvent.change(input, { target: { value: 'https://example.test/notes.gezk' } });
+    expect(screen.getByRole('button', { name: 'Install' })).toBeDisabled();
+    expect(screen.getByText(/installed only when their bytes match/i)).toBeInTheDocument();
   });
 
   it('disable saves through the API', async () => {

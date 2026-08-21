@@ -10,6 +10,14 @@ import type { ChatManager } from '../chat/manager.js';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { shadowDocFilesPaths } from './docs.js';
+import {
+  type EnrichBudget,
+  REVIEW_BUDGET,
+  SUMMARIZE_BUDGET,
+  enrichTimeoutMs,
+  logEnrichBudget,
+  resolveEnrichThroughput,
+} from './enrich-budget.js';
 import { parseFrontmatter } from './frontmatter.js';
 import {
   type FileRecord,
@@ -38,8 +46,6 @@ const log = createLogger('enrich');
 // normal instruct-profile output allowance: the 2-3 sentence prompt is the
 // length control, not an artificially small max-token override.
 const INDEX_TUNING_PROFILE = 'instruct';
-const SUMMARIZE_TIMEOUT_MS = 120_000;
-const REVIEW_TIMEOUT_MS = 180_000;
 
 export interface EnrichDeps {
   summarize: (prompt: string, activity?: string) => Promise<EnrichCompletionResult>;
@@ -296,21 +302,45 @@ export async function buildEnrichDeps(
   // Copilot-family CLIs take 30-90s on a cold first call. Instruct mode above
   // bounds the expensive failure mode without relying on a brittle 30s wall.
   const local = ENRICH_LOCAL_PROVIDERS.includes(providerName);
+  // Deadlines are sized per call from the target's measured speed and the
+  // actual prompt (see enrich-budget.ts) — a constant wall is only correct
+  // for the model class it was written against, and the enrich target now
+  // ranges from a 2.6B local model to a 284B MoE.
+  const cfg = await store.readConfig().catch(() => null);
+  const throughputCache = new Map<string, ReturnType<typeof resolveEnrichThroughput>>();
+  const throughputFor = (target: { providerName: ProviderName; model: string }) => {
+    const key = `${target.providerName}:${target.model}`;
+    let hit = throughputCache.get(key);
+    if (!hit) {
+      hit = resolveEnrichThroughput(cfg, target.providerName, target.model);
+      throughputCache.set(key, hit);
+    }
+    return hit;
+  };
+  const primaryThroughput = throughputFor({ providerName, model });
   const gezelOpts = opts.boekwachter
     ? { gezelId: opts.boekwachter.id, useGezelPersona: true, actorLabel: opts.boekwachter.name }
     : { actorLabel: 'Boekwachter' };
   const oneShot =
-    (target: { providerName: ProviderName; model: string }, timeoutMs: number, jobLabel: string) =>
+    (
+      target: { providerName: ProviderName; model: string },
+      budget: EnrichBudget,
+      jobLabel: string,
+    ) =>
     async (prompt: string, activity?: string): Promise<EnrichCompletion> => ({
-      text: await chat.oneShotCompletion(prompt, timeoutMs, {
-        providerName: target.providerName,
-        model: target.model,
-        ...gezelOpts,
-        ...(opts.projectId ? { projectId: opts.projectId } : {}),
-        jobLabel: activity?.trim() || jobLabel,
-        tuningProfileId: INDEX_TUNING_PROFILE,
-        ...(opts.ambient ? { ambient: true } : {}),
-      }),
+      text: await chat.oneShotCompletion(
+        prompt,
+        enrichTimeoutMs(prompt.length, throughputFor(target), budget),
+        {
+          providerName: target.providerName,
+          model: target.model,
+          ...gezelOpts,
+          ...(opts.projectId ? { projectId: opts.projectId } : {}),
+          jobLabel: activity?.trim() || jobLabel,
+          tuningProfileId: INDEX_TUNING_PROFILE,
+          ...(opts.ambient ? { ambient: true } : {}),
+        },
+      ),
       model: target.model,
       provenance: provenanceFor(target.providerName),
     });
@@ -357,20 +387,26 @@ export async function buildEnrichDeps(
       }
     };
   const summarize = withPolicyFallback(
-    oneShot({ providerName, model }, SUMMARIZE_TIMEOUT_MS, 'index enrichment'),
+    oneShot({ providerName, model }, SUMMARIZE_BUDGET, 'index enrichment'),
     fallbackTarget
-      ? oneShot(fallbackTarget, SUMMARIZE_TIMEOUT_MS, 'index enrichment (blocked-content fallback)')
+      ? oneShot(fallbackTarget, SUMMARIZE_BUDGET, 'index enrichment (blocked-content fallback)')
       : null,
     'summarize',
   );
   const review = withPolicyFallback(
-    oneShot({ providerName, model }, REVIEW_TIMEOUT_MS, 'index review'),
+    oneShot({ providerName, model }, REVIEW_BUDGET, 'index review'),
     fallbackTarget
-      ? oneShot(fallbackTarget, REVIEW_TIMEOUT_MS, 'index review (blocked-content fallback)')
+      ? oneShot(fallbackTarget, REVIEW_BUDGET, 'index review (blocked-content fallback)')
       : null,
     'review',
   );
   // Guarded for test fakes that stub ChatManager structurally.
+  logEnrichBudget(
+    providerName,
+    model,
+    primaryThroughput,
+    enrichTimeoutMs(PROMPT_CONTENT_CAP, primaryThroughput, SUMMARIZE_BUDGET),
+  );
   const oneShotWidth =
     typeof chat.oneShotQueueWidth === 'function'
       ? () => chat.oneShotQueueWidth(providerName)
