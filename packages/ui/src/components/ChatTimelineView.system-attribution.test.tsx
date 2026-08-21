@@ -1,4 +1,4 @@
-import type { TimelineMessage } from '@bendyline/gezel';
+import type { GezelSummary, TimelineMessage } from '@bendyline/gezel';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -27,7 +27,7 @@ function message(overrides: Partial<TimelineMessage>): TimelineMessage {
   } as TimelineMessage;
 }
 
-function renderSticky(userMsg: TimelineMessage) {
+function renderSticky(userMsg: TimelineMessage, gezels?: Map<string, GezelSummary>) {
   return render(
     <ChatStickyHeader
       payload={{
@@ -37,7 +37,7 @@ function renderSticky(userMsg: TimelineMessage) {
           msg: message({ role: 'assistant', content: 'on it', at: '2026-08-04T05:00:30.000Z' }),
         },
       }}
-      gezels={new Map()}
+      gezels={gezels ?? new Map()}
     />,
   );
 }
@@ -56,6 +56,27 @@ describe('ChatStickyHeader author attribution', () => {
       }),
     );
     expect(screen.getByText('SYSTEM')).toBeInTheDocument();
+    expect(screen.queryByText('YOU')).toBeNull();
+  });
+
+  /**
+   * A dispatch seed the card parser recognises gets the same condensed line
+   * the bubble shows. The old header pinned the raw paragraph, which the
+   * one-line clamp cut mid-word ("Follow the step instructions already in
+   * your prompt — m…") under a SYSTEM tag.
+   */
+  it('condenses a recognised hand-off to its one sentence', () => {
+    renderSticky(
+      message({
+        origin: 'system',
+        content:
+          'Liesel has handed step `review` of task default/11 to you. Follow the step instructions already in your prompt — make the first tool call they name this turn.',
+      }),
+      new Map([['g1', { id: 'g1', name: 'Koray' } as GezelSummary]]),
+    );
+
+    expect(screen.getByText('HAND-OFF')).toBeInTheDocument();
+    expect(screen.getByText('Liesel passed the review step to Koray.')).toBeInTheDocument();
     expect(screen.queryByText('YOU')).toBeNull();
   });
 

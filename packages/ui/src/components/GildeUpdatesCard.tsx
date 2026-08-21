@@ -1,6 +1,7 @@
 import type { GildeUpdateCheckResult, GildeUpdateStatusResponse } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 
 /**
  * Settings → About → "Catalog content": the opt-in toggle for live gilde
@@ -20,12 +21,12 @@ function contentSourceLabel(status: GildeUpdateStatusResponse): string {
 }
 
 function lastCheckLabel(check: GildeUpdateCheckResult): string {
-  const when = new Date(check.at).toLocaleString();
+  const when = formatRelativeTime(check.at);
   switch (check.outcome) {
     case 'up-to-date':
       return `checked ${when} — up to date`;
     case 'updated':
-      return `updated to ${check.version ?? '?'} on ${when}`;
+      return `updated to ${check.version ?? '?'} ${when}`;
     case 'incompatible':
       return `checked ${when} — ${check.version ?? 'a newer version'} needs an app update first`;
     case 'error':
@@ -132,7 +133,10 @@ export function GildeUpdatesCard() {
           gap: '0.5rem',
         }}
       >
-        <span className="muted small">
+        <span
+          className="muted small"
+          title={status?.lastCheck ? formatAbsoluteTime(status.lastCheck.at) : undefined}
+        >
           {status ? contentSourceLabel(status) : 'loading…'}
           {status?.updateInProgress
             ? ' · checking…'

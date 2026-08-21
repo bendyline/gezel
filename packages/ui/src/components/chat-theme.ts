@@ -19,7 +19,7 @@ export const GEZEL_CHAT_THEME_ID = 'gezellig';
 
 // Light-mode reading surface: a pale mushroom beige from the shared Gezel
 // paper family. It stays warm without taking on a yellow cast. `background` must stay
-// matched to the light `--chat-bubble-bg` token in styles/00-foundation.css
+// matched to the light `--chat-bubble-bg` token in styles/foundation.css
 // so the Squisq interior and its outer bubble remain one continuous surface.
 // `backgroundLight` is the slightly deeper inset tone used for code blocks.
 // Text colors carry over from `LIGHT_SURFACE`. Shared by chat bubbles and the

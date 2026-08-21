@@ -122,6 +122,7 @@ import { useShowWorkInProgressFeatures } from '../components/useShowWorkInProgre
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { crewLeadLabel, crewLeadLabelLower } from '../labels.js';
 import { Select, Tabs } from '../primitives/index.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { useEffectiveTheme } from '../theme.js';
 import { FileMapView } from './FileMapView.js';
 import { HistoryView } from './HistoryView.js';
@@ -970,7 +971,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     }
     let cancelled = false;
     api
-      .listProjectIndexFilesDetail(selectedProjectId)
+      .listProjectIndexFilesDetail(selectedProjectId, { hidden: showWorkspaceHidden })
       .then((res) => {
         if (!cancelled) setWorkspaceIndexFiles(res.files);
       })
@@ -980,7 +981,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     return () => {
       cancelled = true;
     };
-  }, [fileTab, workspaceViewMode, selectedProjectId, indexScannedAt]);
+  }, [fileTab, workspaceViewMode, selectedProjectId, indexScannedAt, showWorkspaceHidden]);
 
   const workspaceReviewPath =
     fileTab === 'workspace' && openFile?.source === 'workspace' ? openFile.path : null;
@@ -1875,7 +1876,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       emptyMessage: 'No files yet.',
       trailingForEntry: (entry) =>
         entry.mtimeMs !== undefined ? (
-          <span className="file-flat-time">
+          <span className="file-flat-time" title={formatAbsoluteTime(new Date(entry.mtimeMs))}>
             {formatRelativeFileTime(new Date(entry.mtimeMs).toISOString())}
           </span>
         ) : null,
@@ -2922,7 +2923,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                     {entry.gezelId && (
                                       <span className="muted small"> · by {entry.gezelId}</span>
                                     )}
-                                    <span className="muted small">
+                                    <span
+                                      className="muted small"
+                                      title={formatAbsoluteTime(entry.at)}
+                                    >
                                       {' '}
                                       · {formatRelativeTime(entry.at)}
                                     </span>
@@ -4063,14 +4067,4 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatRelativeTime(iso: string): string {
-  const then = Date.parse(iso);
-  if (Number.isNaN(then)) return iso;
-  const deltaSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
-  if (deltaSec < 60) return `${deltaSec}s ago`;
-  if (deltaSec < 3600) return `${Math.floor(deltaSec / 60)}m ago`;
-  if (deltaSec < 86_400) return `${Math.floor(deltaSec / 3600)}h ago`;
-  return `${Math.floor(deltaSec / 86_400)}d ago`;
 }

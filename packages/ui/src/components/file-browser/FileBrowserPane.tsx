@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { formatAbsoluteTime } from '../../relative-time.js';
 import { FileFlatList } from '../FileFlatList.js';
 import { type FileEntry, FileTree, type FileTreeAction } from '../FileTree.js';
 import { FileHiddenKey, FileRevealKey, FileViewModeKeys } from '../FileViewModeKeys.js';
@@ -343,7 +344,10 @@ export function FileBrowserPane({
                 onSelect={onSelect}
                 trailingForEntry={(entry) =>
                   entry.mtimeMs !== undefined ? (
-                    <span className="file-flat-time">
+                    <span
+                      className="file-flat-time"
+                      title={formatAbsoluteTime(new Date(entry.mtimeMs))}
+                    >
                       {formatRelativeFileTime(new Date(entry.mtimeMs).toISOString())}
                     </span>
                   ) : null

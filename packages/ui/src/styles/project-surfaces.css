@@ -560,6 +560,29 @@
   font-size: 0.95rem;
 }
 
+/* A question body is embedded UI, not a standalone reading page. Squisq's
+   linear presentation deliberately centers its readable measure; inside a
+   notification card that leaves the prompt floating away from the task strip
+   and response controls. Keep Squisq's bounded measure, but anchor it to the
+   card's leading edge like the rest of the notification. */
+.pending-question-prompt .squisq-page-section-inner {
+  margin-inline: 0 !important;
+}
+
+/* Long question bodies must not push the choices, note field, and submit
+   controls below the Updates drawer's viewport. Scroll only the rendered
+   Squisq body there; the surrounding alert context and controls stay visible.
+   The dialog itself remains scrollable as a fallback for unusually tall
+   non-Squisq controls or very short windows. */
+.app-questions-overlay .pending-question-prompt:has(> .squisq-linear) {
+  min-height: 0;
+  max-height: min(48vh, 30rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 0.25rem;
+}
+
 .pending-question-choices {
   display: flex;
   flex-wrap: wrap;
@@ -567,7 +590,7 @@
 }
 
 /* Answer chips are keys-in-trays aliases. The shared recipe lives in
-   16-controls-handbook-and-admin.css, which loads later in the cascade. */
+   controls-handbook-and-admin.css, which loads later in the cascade. */
 
 .pending-question-write-in {
   width: 100%;

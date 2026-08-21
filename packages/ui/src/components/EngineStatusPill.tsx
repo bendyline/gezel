@@ -58,7 +58,7 @@ import {
   formatBytes,
   formatTokensPerSec,
 } from './engine-pill-stats.js';
-import { providerLabel } from './provider-label.js';
+import { deviceLabel, providerLabel } from './provider-label.js';
 import { type LiveTurnState, useOnDeviceLiveTurns } from './useOnDeviceLiveTurns.js';
 import { useStableHeaderPopoverPosition } from './useStableHeaderPopoverPosition.js';
 
@@ -945,11 +945,13 @@ function EngineStatusPillForProvider({
     .filter(Boolean)
     .join(' ');
 
-  // Shared provider naming keeps a secondary llama.cpp pill distinct from
-  // DwarfStar on macOS ("On-device" vs. "DwarfStar").
+  // Shared provider naming keeps a secondary DwarfStar pill distinct from
+  // the machine-named engines ("DwarfStar" vs. "This Mac"). With no chat
+  // provider resolved the pill is here for media work only, so it names
+  // the machine rather than an engine.
   const chatPillLabel = onDeviceProvider
     ? providerLabel(onDeviceProvider, window.__GEZEL__?.platform)
-    : 'On-device';
+    : deviceLabel(window.__GEZEL__?.platform);
   // While a media engine runs, the pill's headline is the engine, not the
   // (paused) chat host — "Video" / "Image" instead of "This Mac".
   const platformPillLabel = activeMedia

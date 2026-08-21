@@ -156,8 +156,9 @@ export function FileViewModeKeys({
 /**
  * "Show hidden files" — a latching key in its own tray beside the view-mode
  * switch. Separate tray because it is a toggle, not a member of the mode
- * radiogroup. In the Workspace it reveals dotfiles and vendor folders; in
- * Artifacts it additionally reveals the reserved `shadow/` cache.
+ * radiogroup. In every file panel it also reveals Office lock files; in the
+ * Workspace it reveals dotfiles and vendor folders, and in Artifacts it
+ * additionally reveals the reserved `shadow/` cache.
  */
 export function FileHiddenKey({
   kind,
@@ -172,10 +173,10 @@ export function FileHiddenKey({
   const hint = value
     ? 'Hide hidden files again.'
     : kind === 'workspace'
-      ? 'Show hidden files — dot-files and folders like node_modules.'
+      ? 'Show hidden files — Office lock files, dot-files, and folders like node_modules.'
       : kind === 'artifacts'
-        ? 'Show hidden files — dot-files and the generated shadow folder.'
-        : 'Show hidden files — dot-files and companion folders.';
+        ? 'Show hidden files — Office lock files, dot-files, and the generated shadow folder.'
+        : 'Show hidden files — Office lock files, dot-files, and companion folders.';
   return (
     <div className="gz-tray file-hidden-tray">
       <button

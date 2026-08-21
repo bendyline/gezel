@@ -27,7 +27,7 @@ const EXACT_NAMES = new Set([
 const SUFFIXES = ['.tmp', '.temp', '.partial', '.crdownload', '.download', '.lnk'];
 
 /** Office/LibreOffice owner-lock files: `~$doc.docx`, `.~lock.doc.odt#`. */
-function isOfficeLock(name: string): boolean {
+export function isOfficeLockName(name: string): boolean {
   return name.startsWith('~$') || (name.startsWith('.~lock.') && name.endsWith('#'));
 }
 
@@ -37,7 +37,7 @@ const SYNC_STAGING_DIRS = new Set(['.tmp.drivedownload', '.tmp.driveupload', '.d
 /** True when this single path segment is sync/app droppings. */
 export function isSyncJunkName(name: string): boolean {
   if (EXACT_NAMES.has(name) || SYNC_STAGING_DIRS.has(name)) return true;
-  if (isOfficeLock(name)) return true;
+  if (isOfficeLockName(name)) return true;
   const lower = name.toLowerCase();
   return SUFFIXES.some((suffix) => lower.endsWith(suffix));
 }

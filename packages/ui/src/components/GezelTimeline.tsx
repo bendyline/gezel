@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react';
 import { api } from '../api.js';
 import { ChatTimelineView } from './ChatTimelineView.js';
 import type { ToolActivity } from './chat-bubbles.js';
+import type { OpenChatReference } from './chat-open-command.js';
 
 /**
  * Per-gezel chat timeline. Loads + tails every session for one gezel
@@ -19,6 +20,7 @@ export function GezelTimeline({
   onArtifactSeen,
   onWorkspaceReference,
   onWorkspaceSeen,
+  onOpenReference,
   onTaskReference,
   emptyPlaceholder,
 }: {
@@ -30,6 +32,7 @@ export function GezelTimeline({
   onArtifactSeen?: (path: string, projectId?: string) => void;
   onWorkspaceReference?: (path: string, projectId?: string) => void;
   onWorkspaceSeen?: (path: string, projectId?: string) => void;
+  onOpenReference?: (reference: OpenChatReference) => void;
   onTaskReference?: (ref: string, opts?: { scoped?: boolean }) => void;
   emptyPlaceholder?: string;
 }) {
@@ -50,6 +53,7 @@ export function GezelTimeline({
       onArtifactSeen={onArtifactSeen}
       onWorkspaceReference={onWorkspaceReference}
       onWorkspaceSeen={onWorkspaceSeen}
+      onOpenReference={onOpenReference}
       {...(onTaskReference ? { onTaskReference } : {})}
       emptyPlaceholder={emptyPlaceholder}
       loadTimeline={loadTimeline}

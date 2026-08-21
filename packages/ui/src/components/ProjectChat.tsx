@@ -445,6 +445,7 @@ function ProjectChatBody({
             onArtifactSeen={onArtifactSeen}
             onWorkspaceReference={onWorkspaceReference}
             onWorkspaceSeen={onWorkspaceSeen}
+            onOpenReference={onOpenReference}
             onTaskReference={onTaskReference}
             onTerminalWorkingDirChanged={(_threadId, next) => {
               // Display-only: keep the routing anchor stable so the

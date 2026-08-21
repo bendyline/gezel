@@ -21,6 +21,7 @@ import type { PairedRemote, RemotesRegistry } from '../remotes/registry.js';
 const log = createLogger('machine-engine');
 const MACHINE_REMOTE_ID = 'this-machine';
 const REFRESH_INTERVAL_MS = 5_000;
+const RETIREMENT_RETRY_INITIAL_MS = 250;
 
 /**
  * An expired broker leaf is an outage with a one-step fix (restart the
@@ -74,6 +75,8 @@ export async function startMachineEngineBridge(args: {
   let refreshInFlight: Promise<void> | null = null;
   let retirementComplete = false;
   let retirementInFlight: Promise<void> | null = null;
+  let retirementRetryTimer: NodeJS.Timeout | undefined;
+  let retirementRetryDelayMs = RETIREMENT_RETRY_INITIAL_MS;
 
   // Install routing before the first discovery pass. Once `current` is set,
   // every newly-started chat turn chooses the broker while old work drains.
@@ -87,12 +90,40 @@ export async function startMachineEngineBridge(args: {
     )
       .then(() => {
         retirementComplete = true;
+        retirementRetryDelayMs = RETIREMENT_RETRY_INITIAL_MS;
+        if (retirementRetryTimer) clearTimeout(retirementRetryTimer);
+        retirementRetryTimer = undefined;
       })
       .finally(() => {
         if (retirementInFlight === run) retirementInFlight = null;
       });
     retirementInFlight = run;
     return run;
+  };
+
+  const scheduleRetirementRetry = (): void => {
+    if (stopped || retirementComplete || retirementRetryTimer) return;
+    const delayMs = retirementRetryDelayMs;
+    retirementRetryDelayMs = Math.min(retirementRetryDelayMs * 2, REFRESH_INTERVAL_MS);
+    retirementRetryTimer = setTimeout(() => {
+      retirementRetryTimer = undefined;
+      if (stopped || retirementComplete || !current) return;
+      void attemptRetirement();
+    }, delayMs);
+    retirementRetryTimer.unref?.();
+  };
+
+  const attemptRetirement = async (): Promise<void> => {
+    try {
+      await retireLocalEngines();
+    } catch (error) {
+      // Routing is already broker-authoritative. Retry just the local drain
+      // promptly instead of waiting for another network discovery cycle.
+      log.warn(
+        `[machine-engine] local engine retirement failed; will retry: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      scheduleRetirementRetry();
+    }
   };
 
   const refresh = async (): Promise<void> => {
@@ -129,15 +160,7 @@ export async function startMachineEngineBridge(args: {
       machineOwnershipObserved = true;
       healthy = true;
       if (!retirementComplete) {
-        try {
-          await retireLocalEngines();
-        } catch (error) {
-          // Keep the verified broker route authoritative, but retry the local
-          // drain on the next discovery pass until the transaction completes.
-          log.warn(
-            `[machine-engine] local engine retirement failed; will retry: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
+        await attemptRetirement();
       }
       if (changed) {
         await closePairedRemoteFetches(args.remotes, MACHINE_REMOTE_ID);
@@ -226,6 +249,8 @@ export async function startMachineEngineBridge(args: {
       if (stopped) return;
       stopped = true;
       clearInterval(timer);
+      if (retirementRetryTimer) clearTimeout(retirementRetryTimer);
+      retirementRetryTimer = undefined;
       await refreshInFlight?.catch(() => undefined);
       await retirementInFlight?.catch(() => undefined);
       args.chat.setMachineEngineRemoteResolver(undefined);

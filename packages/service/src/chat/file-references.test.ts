@@ -62,6 +62,30 @@ describe('matchReferencedFilesInContent', () => {
     ).toEqual([artifact('styles/main.css')]);
   });
 
+  it('never falls a qualified missing path back to a same-basename root file', () => {
+    expect(
+      matchReferencedFilesInContent('Requested `powerpoint/task-11/deck.pptx`.', {
+        artifacts: ['deck.pptx'],
+      }),
+    ).toEqual([]);
+  });
+
+  it('resolves a qualified nested path exactly when root and nested names collide', () => {
+    expect(
+      matchReferencedFilesInContent('Wrote `powerpoint/task-11/deck.pptx`.', {
+        artifacts: ['deck.pptx', 'powerpoint/task-11/deck.pptx'],
+      }),
+    ).toEqual([artifact('powerpoint/task-11/deck.pptx')]);
+  });
+
+  it('treats a bare root filename as ambiguous when a nested file shares it', () => {
+    expect(
+      matchReferencedFilesInContent('Open `deck.pptx`.', {
+        artifacts: ['deck.pptx', 'powerpoint/task-11/deck.pptx'],
+      }),
+    ).toEqual([]);
+  });
+
   it('catches bare word-boundary mentions in prose (no backticks)', () => {
     expect(
       matchReferencedFilesInContent(

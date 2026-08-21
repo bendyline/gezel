@@ -2,20 +2,20 @@
  * Ordered startup stylesheet manifest. Keep imports in cascade order.
  * Lazy views import their surface-only CSS directly; see ./styles/README.md.
  */
-@import "./styles/00-foundation.css";
-@import "./styles/01-app-shell.css";
-@import "./styles/02-file-browser.css";
-@import "./styles/03-shared-content.css";
-@import "./styles/04-gezels.css";
-@import "./styles/05-settings-and-status.css";
-@import "./styles/06-history.css";
-@import "./styles/07-tasks.css";
-@import "./styles/08-home.css";
-@import "./styles/09-chat.css";
-@import "./styles/10-catalog-and-primitives.css";
-@import "./styles/11-project-surfaces.css";
-@import "./styles/12-terminal.css";
-@import "./styles/13-github-and-growth.css";
-@import "./styles/14-scripts-and-craftbooks.css";
-@import "./styles/15-village-and-overview.css";
-@import "./styles/16-controls-handbook-and-admin.css";
+@import "./styles/foundation.css";
+@import "./styles/app-shell.css";
+@import "./styles/file-browser.css";
+@import "./styles/shared-content.css";
+@import "./styles/gezels.css";
+@import "./styles/settings-and-status.css";
+@import "./styles/history.css";
+@import "./styles/tasks.css";
+@import "./styles/home.css";
+@import "./styles/chat.css";
+@import "./styles/catalog-and-primitives.css";
+@import "./styles/project-surfaces.css";
+@import "./styles/terminal.css";
+@import "./styles/github-and-growth.css";
+@import "./styles/scripts-and-craftbooks.css";
+@import "./styles/village-and-overview.css";
+@import "./styles/controls-handbook-and-admin.css";

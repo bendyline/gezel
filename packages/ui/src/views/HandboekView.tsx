@@ -14,7 +14,7 @@ import { AreaIcon } from '../components/AreaIcon.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from '../components/chat-theme.js';
 import { consumeOpenHandboek } from '../components/pending-open-handboek.js';
 import { useEffectiveTheme } from '../theme.js';
-import '../styles/16-handbook.css';
+import '../styles/handbook.css';
 import {
   createHandboekMediaProvider,
   inlineBundledAssets,

@@ -371,6 +371,15 @@ export const TaskSchema = z.object({
   activeStepId: z.string().optional(),
   parentTaskRef: z.string().optional(),
   /**
+   * This task's working folder inside the project's ARTIFACTS drawer
+   * (e.g. `tasks/12`). Stamped by the service at create time — never by
+   * callers — and inherited verbatim by fanout children: shards write
+   * into the host's folder so collect-barrier gates interpolated with
+   * the host's number keep resolving. Absent on tasks created before
+   * the convention existed; readers fall back to `tasks/<num>`.
+   */
+  artifactDir: z.string().optional(),
+  /**
    * Provenance for service-materialized tasks (today: project-type
    * schedule hosts). The dedup key that makes re-applying a type
    * idempotent — apply scans for a matching origin instead of creating a

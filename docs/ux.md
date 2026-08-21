@@ -39,7 +39,7 @@ pacing of a transition. If a first-time user can't quite put a finger on
 ## What that translates into
 
 - **Color** lives in
-  [styles/00-foundation.css](../packages/ui/src/styles/00-foundation.css).
+  [styles/foundation.css](../packages/ui/src/styles/foundation.css).
   The `--gezel-*` foundation palette is the authored source for paper, ink,
   sage, and terracotta tones; theme-resolving semantic aliases (`--bg`,
   `--surface`, `--panel`, `--border`, `--text`, `--text-muted`, `--accent`,
@@ -88,12 +88,12 @@ never through textures.
 Implementation lives in exactly two places:
 
 - **Tokens** in
-  [styles/00-foundation.css](../packages/ui/src/styles/00-foundation.css), in
+  [styles/foundation.css](../packages/ui/src/styles/foundation.css), in
   `:root` and the three theme-override blocks:
   `--tray-bg/-border/-shadow`, `--key-bg/-bg-hover/-border/-shadow`, and
   `--key-pressed-bg/-border/-ink/-shadow`.
 - **The "Keys in trays" block** in
-  [styles/16-controls-handbook-and-admin.css](../packages/ui/src/styles/16-controls-handbook-and-admin.css)
+  [styles/controls-handbook-and-admin.css](../packages/ui/src/styles/controls-handbook-and-admin.css)
   — the single CSS recipe. `.gz-tray` is the group; `.gz-key` is the option
   (`.gz-key--stacked` for label + hint); the latched state is
   `.gz-key-active` or `aria-checked="true"`.
@@ -187,7 +187,7 @@ Rules:
 The standard treatment for **continuous "how much may gezel take" ranges** —
 memory budgets, cache budgets, per-model context size. One CSS recipe
 (`.gz-budget-slider` in
-[styles/15-village-and-overview.css](../packages/ui/src/styles/15-village-and-overview.css)), one
+[styles/village-and-overview.css](../packages/ui/src/styles/village-and-overview.css)), one
 interaction contract, shared by every user (`EngineMemoryBudgetPanel`,
 `CacheControlsPanel`, `ModelContextSliderPanel`). Don't restyle a slider
 per-surface; if a surface needs something the recipe lacks, extend the recipe
@@ -222,7 +222,7 @@ The contract:
 Two typefaces, both bundled as woff2 (see
 [assets/fonts/fonts.css](../packages/ui/src/assets/fonts/fonts.css)) — no
 web-font CDN, no runtime fetch. They are exposed as CSS variables in
-[styles/00-foundation.css](../packages/ui/src/styles/00-foundation.css) `:root`
+[styles/foundation.css](../packages/ui/src/styles/foundation.css) `:root`
 and you should always
 reference the variable, never the family name:
 
@@ -273,7 +273,7 @@ deliberate exception — they set their own comfortable reading size (1rem+)
 and don't draw from this scale.
 
 **Reference implementation:** the `.settings-panel` typography block in
-[styles/05-settings-and-status.css](../packages/ui/src/styles/05-settings-and-status.css)
+[styles/settings-and-status.css](../packages/ui/src/styles/settings-and-status.css)
 is the canonical application —
 one scoped block that pins the panel's headings, body, controls, and links
 to the rules above so no single tab mixes a dozen font/size combos. New
@@ -296,7 +296,7 @@ What lives where:
 
 | Layer                               | Where                                                     |
 | ----------------------------------- | --------------------------------------------------------- |
-| Design tokens (colors, space, etc.) | [styles/00-foundation.css](../packages/ui/src/styles/00-foundation.css) `:root` |
+| Design tokens (colors, space, etc.) | [styles/foundation.css](../packages/ui/src/styles/foundation.css) `:root` |
 | Overlay, dialog, tabs, select CSS   | [`styles/` ownership map](../packages/ui/src/styles/README.md) `gz-*` blocks |
 | Headless primitives (JSX)           | [primitives/](../packages/ui/src/primitives/)             |
 | Shared behavior components          | [components/](../packages/ui/src/components/)             |
@@ -402,7 +402,7 @@ starting points (project types, craftbooks), use the shared gallery-dialog
 layout: header with title + search, a category rail on the left, a card
 gallery in the middle, and a right-hand pane holding the selection's hero
 + properties form + footer actions. The CSS skeleton is the `gz-npd-*`
-block in [styles/11-project-surfaces.css](../packages/ui/src/styles/11-project-surfaces.css)
+block in [styles/project-surfaces.css](../packages/ui/src/styles/project-surfaces.css)
 (named for the New Project dialog, its first tenant); New Task reuses it with a `gz-ntd`
 modifier for task-only pieces. New gallery surfaces should reuse the
 skeleton the same way — extend it rather than fork it. Lead the gallery
@@ -413,7 +413,7 @@ for the project's type) and keep the full catalog one rail-click away.
 document — a night-shift report, a draft plan — the document is not a
 ten-line teaser stacked above the answer keys. `PendingQuestionCard` lifts
 it into its own right-hand column (`.pending-question-split*` in
-[styles/11-project-surfaces.css](../packages/ui/src/styles/11-project-surfaces.css)):
+[styles/project-surfaces.css](../packages/ui/src/styles/project-surfaces.css)):
 the card and its actions on
 the left, the whole document as a portrait page on the right, scrolling in
 place. `.pending-question-splitwrap` is a named `question-card` query
@@ -455,10 +455,52 @@ the bubble: the sticky scroll header renders the same verdict, and a new
 one must too. Cross-gezel messages are a separate case already answered by
 `from` — they keep the "Aldric → Maya" handoff bubble.
 
+**Hand-offs are a card, not a paragraph.** The dispatch seed that opens a
+task thread is addressed to the model: it names the sender, the step and the
+task ref in its first sentence and then spends four more on tool-calling
+procedure ("call `advance_task_step` when the step is done"). Rendered
+verbatim that reads as machinery talking, and the sticky header clamped it
+mid-word. Any turn
+[`parseTaskHandoffNote`](../packages/core/src/task-handoff-note.ts)
+recognises renders instead as a small letter card, centred and dashed in the
+handoff accent so it reads as a transition between crew members rather than a
+message in either column: a kind eyebrow (Hand-off / New task / Next step /
+Resumed), **one sentence** — "Liesel passed the review step to Koray." — one
+action (the task chip), and the seed itself behind a closed "Full note"
+expando. The sticky header carries the same sentence and the same eyebrow.
+The rule generalises: when the machinery has to say something to a model in
+the transcript, the reader gets the fact and the instructions go to
+provenance. Keep the wrapper's `msg-user` class — the timeline pairs a reply
+with the turn it answers by that class.
+
+**Machine syntax never reaches a summary line.** A message body is not
+prose. It is markdown; it may carry reasoning the bubble hides; and when the
+salvage layer fails to promote a call it is literal tool-call markup.
+Rendered straight into a one-line summary, that produced a hand-off card
+reading `Sumarni, Si… · <toolcall <function=search…` — angle-bracket
+protocol syntax in a headline, and the sharpest break of plain shop talk on
+the surface. Every glanceable line built from a message body goes through
+[`humanMessagePreview`](../packages/ui/src/components/message-preview.ts),
+which keeps prose when there is any and otherwise **translates rather than
+hides**: a tool call becomes "Searching across files…", hidden reasoning
+becomes "Thinking…". Translation is the point — scrubbing to an empty line
+is just as clean and tells the reader nothing about a thread that did, in
+fact, do something. Reach for
+[`toolActivityPhrase`](../packages/ui/src/components/tool-display.ts)
+wherever a tool has to stand in for a message: a chat row may *label* a tool
+("Search across files") because a timestamp and an avatar frame it, but a
+summary line has no such frame and reads the same label as an instruction to
+the reader. And while a turn is open, the running tool outranks the stored
+preview — mid-turn that text is still the message which *started* the turn,
+so a pill reading "Working" beside the user's own question answers nothing
+they are waiting on. All of this is display-only: the stored transcript
+keeps what the model actually emitted, so the model can still see its own
+mistake.
+
 **Transformation dialog.** AI edits to user text never land silently. The
 editor toolbar's single transform button opens the transformation dialog
 (`TransformDialog`, `gz-transform-*` block in
-[styles/10-catalog-and-primitives.css](../packages/ui/src/styles/10-catalog-and-primitives.css)):
+[styles/catalog-and-primitives.css](../packages/ui/src/styles/catalog-and-primitives.css)):
 an instruction
 field, a "Transform with {Klerk}" row that shows the Klerk's poppetje
 pulsing plus a quiet live metacommentary feed while the model works, and a
@@ -557,6 +599,30 @@ who wants a colliding prefix. Full-length values still travel in the API
 and are what the code compares —
 [RemoteServersPanel](../packages/ui/src/components/RemoteServersPanel.tsx)
 is the reference.
+
+**Time is always relative, and the exact stamp lives on hover.** Every
+"when did this happen" label goes through the one formatter in
+[relative-time.ts](../packages/ui/src/relative-time.ts) —
+`formatRelativeTime` for the label, `formatAbsoluteTime` on the `title` of
+whatever element carries it. Never hand-roll a scale, and never let a
+relative label roll over into a calendar date once it gets old: a surface
+that shows "synced 7/24/2026" beside "17d ago" is asking the reader to hold
+two calendars at once. The scale runs `just now → 18m ago → 3h ago →
+yesterday → 4d ago → 2w ago → 3mo ago → 2y ago`; `{ style: 'long' }` spells
+the units out for prose lines and `{ seconds: true }` counts seconds under
+the first minute for rows that tick while you watch them (file mtimes,
+worker pools). Standalone labels use a `<time>` element with `dateTime` set.
+
+**Sage is chrome; `--success` is an event.** The workshop's green is sage —
+`--sage`, `--sage-deep`, `--sage-ink`, `--sage-soft` on `:root` in
+[foundation.css](../packages/ui/src/styles/foundation.css). Resting state
+that just says "this is fine" takes it: the System Health chips, engine
+readiness, "on device", every `.gz-status-pill--ok`. `--success` is the
+mint reserved for something that *changed* — a save landed, a diff line was
+added — and it is a near-miss of sage, so a resting chip painted with it
+reads as an off-token green sitting inches under the sage titlebar. If you
+find yourself writing `var(--sage, #somehex)`, pin the primitive
+(`--gezel-sage`) instead: a fallback is a token waiting to shift under you.
 
 **Status bars.** Ambient state that describes a whole surface — what branch
 it's on, whether the index is fresh, whether gezels may edit — belongs along

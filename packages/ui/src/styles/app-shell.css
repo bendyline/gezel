@@ -3004,6 +3004,10 @@ button.machine-memory-unload-button {
   width: 1.5rem;
   height: 1.5rem;
   color: var(--accent);
+  /* The 18px glyph is centered inside this 24px alignment box. Offset that
+     built-in 3px inset so the visible mark sits on the row's leading edge,
+     then lower it by the same amount for optical alignment with the label. */
+  transform: translate(-3px, 3px);
 }
 .project-rail-label {
   min-width: 0;

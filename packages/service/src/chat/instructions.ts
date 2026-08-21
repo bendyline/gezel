@@ -821,7 +821,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
         : 'No delegation tool is wired this turn; explain that the workspace change is blocked instead of inventing a handoff.';
     if (hasReadFile && hasWriteFile) {
       const artifactsLine = hasArtifactTools
-        ? `\n- **Artifacts** (${formatToolList(artifactTools)}) — a separate side drawer: plans, scratch automation, drafts, and handoff notes that are not workspace files. If a path appears in \`### Workspace files\`, use ${formatToolList([...workspaceReadTools, ...workspaceWriteTools])}; do not use artifact tools for it. Conventions: \`scripts/\` for re-runnable Playwright/Node scripts, \`tests/\` for *.spec.ts you own, \`reports/\`/\`drafts/\` for narrative.\n`
+        ? `\n- **Artifacts** (${formatToolList(artifactTools)}) — a separate side drawer: plans, scratch automation, drafts, and handoff notes that are not workspace files. If a path appears in \`### Workspace files\`, use ${formatToolList([...workspaceReadTools, ...workspaceWriteTools])}; do not use artifact tools for it. Conventions: \`tasks/<num>/\` for a task's working files, \`scripts/\` for re-runnable Playwright/Node scripts, \`tests/\` for *.spec.ts you own, \`reports/\`/\`drafts/\` for narrative.\n`
         : '\n';
       const decisionLine = hasWriteArtifact
         ? 'Decision test: would the user ship this file at release, or does it appear in `### Workspace files`? Yes → `write_file`. No → `write_artifact`. External `workingDir` projects: `write_file` touches the real directory.'
@@ -1062,6 +1062,16 @@ ${artifactsLine}
       `### Current task: ${t.ref} — "${t.title}"`,
       `Status: **${t.status}**. Assigned to: **${assigneeLabel}**.`,
     ];
+    // Fanout children advertise the HOST's folder (artifactDir is inherited
+    // at spawn) — shards share one namespace so collect gates resolve.
+    // Roster-gated: naming a tool the turn didn't wire is a documented
+    // failure class (ADR 0001).
+    const taskArtifactFolder = t.artifactDir ?? `tasks/${t.num}`;
+    if (availableTools === undefined || availableToolNameSet.has('write_artifact')) {
+      lines.push(
+        `Task artifact folder: \`${taskArtifactFolder}/\` in the **artifacts drawer** — store this task's working files (notes, drafts, reports, analysis) there, e.g. \`write_artifact({ path: ${JSON.stringify(`${taskArtifactFolder}/notes.md`)}, ... })\`, unless the step procedure names another path.`,
+      );
+    }
     if (t.craftbookParams && Object.keys(t.craftbookParams).length > 0) {
       const params = Object.entries(t.craftbookParams)
         .sort(([a], [b]) => a.localeCompare(b))

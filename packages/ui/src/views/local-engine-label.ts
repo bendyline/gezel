@@ -1,3 +1,5 @@
+import { deviceLabel } from '../components/provider-label.js';
+
 export type LocalEngineLabelKind = 'mlx' | 'llama-cpp' | 'ds4';
 
 /**
@@ -9,9 +11,9 @@ export function localEngineSettingsLabel(
   engine: LocalEngineLabelKind,
   platform: string | undefined,
 ): string {
-  if (engine === 'mlx') return 'This Mac (Apple MLX)';
+  if (engine === 'mlx') return `${deviceLabel('darwin')} (Apple MLX)`;
 
-  const device = platform === 'darwin' ? 'This Mac' : 'This PC';
+  const device = deviceLabel(platform);
   if (engine === 'llama-cpp') return `${device} (llama)`;
   return `${device} (DwarfStar - DS4)`;
 }

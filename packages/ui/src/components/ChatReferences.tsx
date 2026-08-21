@@ -618,7 +618,7 @@ export function ChatReferences({
       // so our `mousemove` / `mouseup` handlers stop firing and the
       // grip gets "stuck to" the cursor. The `chat-rail-resizing`
       // class on <body> disables pointer events on iframes for the
-      // duration of the drag (CSS in styles/09-chat.css), and blocks text
+      // duration of the drag (CSS in styles/chat.css), and blocks text
       // selection + sets the global cursor as a bonus.
       document.body.classList.add('chat-rail-resizing');
       document.body.style.cursor = 'col-resize';

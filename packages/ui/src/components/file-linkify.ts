@@ -90,11 +90,13 @@ function resolveCandidate(
   const cleaned = normalizeFileToken(raw);
   if (!cleaned) return null;
   const lower = cleaned.toLowerCase();
-  const full = byFullPath.get(lower);
-  if (full) return full;
   const lastSlash = lower.lastIndexOf('/');
-  const base = lastSlash >= 0 ? lower.slice(lastSlash + 1) : lower;
-  const candidates = byBasename.get(base);
+  const full = byFullPath.get(lower);
+  // A qualified label is an exact claim. Never turn
+  // `powerpoint/task-11/deck.pptx` into a link to an unrelated root-level
+  // `deck.pptx` just because the basename happens to be unique.
+  if (lastSlash >= 0) return full ?? null;
+  const candidates = byBasename.get(lower);
   return candidates && candidates.length === 1 ? candidates[0]! : null;
 }
 

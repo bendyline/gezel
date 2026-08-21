@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { ChatTimelineView } from './ChatTimelineView.js';
 import type { ToolActivity } from './chat-bubbles.js';
+import type { OpenChatReference } from './chat-open-command.js';
 
 /**
  * Project-scoped chat timeline. Loads + tails every session in the
@@ -30,6 +31,7 @@ export function ProjectTimeline({
   onArtifactSeen,
   onWorkspaceReference,
   onWorkspaceSeen,
+  onOpenReference,
   onTaskReference,
   emptyPlaceholder,
   onTerminalWorkingDirChanged,
@@ -48,6 +50,7 @@ export function ProjectTimeline({
   onArtifactSeen?: (path: string, projectId?: string) => void;
   onWorkspaceReference?: (path: string, projectId?: string) => void;
   onWorkspaceSeen?: (path: string, projectId?: string) => void;
+  onOpenReference?: (reference: OpenChatReference) => void;
   onTaskReference?: (ref: string, opts?: { scoped?: boolean }) => void;
   emptyPlaceholder?: string;
   onTerminalWorkingDirChanged?: (threadId: string, newWorkingDir: string) => void;
@@ -179,6 +182,7 @@ export function ProjectTimeline({
       onArtifactSeen={onArtifactSeen}
       onWorkspaceReference={onWorkspaceReference}
       onWorkspaceSeen={onWorkspaceSeen}
+      onOpenReference={onOpenReference}
       {...(onTaskReference ? { onTaskReference } : {})}
       emptyPlaceholder={emptyPlaceholder}
       loadTimeline={loadTimeline}

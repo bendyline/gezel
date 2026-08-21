@@ -384,6 +384,7 @@ function GezelChatBody({
             onArtifactSeen={onArtifactSeen}
             onWorkspaceReference={onWorkspaceReference}
             onWorkspaceSeen={onWorkspaceSeen}
+            onOpenReference={onOpenReference}
             onTaskReference={onTaskReference}
             emptyPlaceholder={emptyPlaceholder}
             sessionFocusRequest={sessionFocusRequest}
@@ -515,6 +516,7 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
             onArtifactSeen={onArtifactSeen}
             onWorkspaceReference={onWorkspaceReference}
             onWorkspaceSeen={onWorkspaceSeen}
+            onOpenReference={onOpenReference}
             onTaskReference={onTaskReference}
             emptyPlaceholder={emptyPlaceholder}
           />

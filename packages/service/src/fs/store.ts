@@ -155,6 +155,7 @@ import {
   type FileInventoryIndex,
   artifactPathsOf,
   buildFileInventoryIndex,
+  hasQualifiedReferenceMismatch,
   matchReferencedFilesWithIndex,
   referencedFilesFromArtifactPaths,
 } from '../chat/file-references.js';
@@ -5509,12 +5510,16 @@ export class Store {
     const projectFileIndex = new Map<string, FileInventoryIndex>();
     const uniqueProjects = new Set(sessions.map((s) => s.projectId));
     for (const pid of uniqueProjects) {
-      const hasUnparsedAssistant = sessions.some(
+      const needsReferenceResolution = sessions.some(
         (s) =>
           s.projectId === pid &&
-          s.messages.some((m) => m.role === 'assistant' && !m.referencedFiles),
+          s.messages.some(
+            (m) =>
+              m.role === 'assistant' &&
+              (!m.referencedFiles || hasQualifiedReferenceMismatch(m.content, m.referencedFiles)),
+          ),
       );
-      if (!hasUnparsedAssistant) continue;
+      if (!needsReferenceResolution) continue;
       const [artifacts, workspace] = await Promise.all([
         this.listProjectArtifactsRecursive(pid)
           .then((files) => files.filter((f) => !f.isDirectory).map((f) => f.path))
@@ -5567,10 +5572,12 @@ export class Store {
         // carrying only the legacy artifact-only field is recomputed rather
         // than widened, so existing history gains workspace references too.
         let refs = m.referencedFiles;
-        if (m.role === 'assistant' && !refs) {
+        const mismatchedQualifiedReference =
+          m.role === 'assistant' && !!refs && hasQualifiedReferenceMismatch(m.content, refs);
+        if (m.role === 'assistant' && (!refs || mismatchedQualifiedReference)) {
           const index = projectFileIndex.get(s.projectId);
           const computed = index ? matchReferencedFilesWithIndex(m.content, index) : [];
-          if (computed.length > 0) refs = computed;
+          if (computed.length > 0 || mismatchedQualifiedReference) refs = computed;
           else if (m.referencedArtifacts?.length) {
             refs = referencedFilesFromArtifactPaths(m.referencedArtifacts);
           }

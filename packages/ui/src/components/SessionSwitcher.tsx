@@ -3,14 +3,10 @@ import { parseTaskRef } from '@bendyline/gezel';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 import { providerLabel as resolveProviderLabel } from './provider-label.js';
-import {
-  MENTION_RE,
-  displayThreadTitle,
-  formatRelativeTime,
-  plainTitle,
-} from './session-labels.js';
+import { MENTION_RE, displayThreadTitle, plainTitle } from './session-labels.js';
 
 interface Props {
   gezelId: string;
@@ -364,7 +360,7 @@ function renderRow(s: ChatSessionSummary, engineLabel?: string | null): ReactNod
       <span className="session-row-title">
         {renderTitleWithMentions(displayThreadTitle(s.title))}
       </span>
-      <span className="session-row-meta">
+      <span className="session-row-meta" title={formatAbsoluteTime(s.lastActivityAt)}>
         {` · ${formatRelativeTime(s.lastActivityAt)} · ${engineSuffix(s, engineLabel)}`}
       </span>
     </span>

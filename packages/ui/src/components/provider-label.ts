@@ -4,11 +4,13 @@
  *
  * The wrinkle is `llama-cpp`: it's our cross-platform on-device engine,
  * but the *concept* the user reaches for ("the AI running on this
- * computer") reads better with a platform-specific name. On macOS it
- * coexists with MLX (which owns the "This Mac" slot already), so on
- * darwin we fall back to the technical name. Windows and Linux get
- * "This Windows PC" / "This Linux device" — names that mirror how the
- * Settings sidebar groups the provider's tab.
+ * computer") reads better with a platform-specific name — "This Mac",
+ * "This PC", "This Device". Every local engine uses that same name, so
+ * on macOS a llama.cpp pill reads "This Mac" exactly like an MLX one;
+ * when both are visible the model name in each pill's label and popover
+ * is what tells them apart. The alternative — one engine wearing the
+ * platform name and the other a technical one — made the second pill
+ * look like a different kind of thing rather than a second engine.
  *
  * Use this from any UI surface that renders a provider name. Don't
  * inline the switch — drift between the QueueMeter pill, the
@@ -18,7 +20,7 @@
  * Pass `platform` from `window.__GEZEL__?.platform` (process.platform
  * exposed via the preload bridge). Optional: callers in contexts
  * without bridge access (tests, plain web build) can omit it; the
- * llama-cpp branch falls through to the technical name in that case.
+ * machine-named branches fall back to the generic "This Device".
  */
 
 import type { ProviderName } from '@bendyline/gezel';
@@ -26,11 +28,10 @@ import type { ProviderName } from '@bendyline/gezel';
 export interface ProviderLabelOptions {
   /**
    * When true, return the most-abbreviated form that still identifies
-   * the provider: "Windows" / "Linux" / "Mac" instead of "This Windows
-   * PC" / "This Linux device" / "This Mac"; "Claude" instead of
-   * "Claude CLI"; "Codex" instead of "Codex CLI". Cloud providers
-   * with already-short names ("Copilot", "OpenAI", "Ollama") return
-   * unchanged.
+   * the provider: "Windows" / "Linux" / "Mac" instead of "This PC" /
+   * "This Device" / "This Mac"; "Claude" instead of "Claude CLI";
+   * "Codex" instead of "Codex CLI". Cloud providers with already-short
+   * names ("Copilot", "OpenAI", "Ollama") return unchanged.
    *
    * Used by the QueueMeter pill in the header where a long label
    * wraps to multiple lines on narrow titlebars (a user screenshot
@@ -38,6 +39,26 @@ export interface ProviderLabelOptions {
    * canonical everywhere else (Settings tabs, SessionSwitcher, etc.).
    */
   compact?: boolean;
+}
+
+/**
+ * "This Mac" / "This PC" / "This Device" — what the user calls the
+ * computer they are sitting at. Every surface that names the machine
+ * itself (rather than a specific engine) goes through here so the
+ * wording can't drift between the header pill, the Settings tabs and
+ * the model dropdowns.
+ *
+ * `platform` is `process.platform` as exposed by the preload bridge
+ * (`window.__GEZEL__?.platform`). With no bridge — plain web build,
+ * tests — we can't know the machine, so the generic "This Device"
+ * stands in; it's vague but never wrong.
+ */
+export function deviceLabel(platform?: string, opts: ProviderLabelOptions = {}): string {
+  const compact = opts.compact ?? false;
+  if (platform === 'darwin') return compact ? 'Mac' : 'This Mac';
+  if (platform === 'win32') return compact ? 'Windows' : 'This PC';
+  if (platform === 'linux') return compact ? 'Linux' : 'This Device';
+  return compact ? 'Local' : 'This Device';
 }
 
 export function providerLabel(
@@ -60,17 +81,13 @@ export function providerLabel(
     case 'ollama':
       return 'Ollama';
     case 'mlx':
-      return compact ? 'Mac' : 'This Mac';
+      // MLX is Apple-only, so the platform argument is redundant here;
+      // pinning darwin keeps the label right in the plain web build too.
+      return deviceLabel('darwin', { compact });
     case 'ds4':
       return compact ? 'ds4' : 'DwarfStar';
     case 'llama-cpp':
-      if (platform === 'win32') return compact ? 'Windows' : 'This Windows PC';
-      if (platform === 'linux') return compact ? 'Linux' : 'This Linux device';
-      // macOS fallback: MLX already owns "This Mac", so llama-cpp on
-      // darwin reads as the cross-platform engine — distinct enough
-      // that the two tabs don't collide. Web/tests with no platform
-      // info land here too; "On-device" is generic but not wrong.
-      return compact ? 'Local' : 'On-device';
+      return deviceLabel(platform, { compact });
     default:
       return provider;
   }

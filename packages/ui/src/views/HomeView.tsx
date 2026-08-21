@@ -13,7 +13,7 @@ import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { SECURITY_LEVEL_PRESETS } from '../security-levels.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useUpdateState } from '../update-state.js';
-import '../styles/08-home-view.css';
+import '../styles/home-view.css';
 import { HomeWorkshop } from './home/HomeWorkshop.js';
 import { IntroHandboekArticle } from './home/IntroHandboekArticle.js';
 import { FIRST_RUN_INTRO_ANCHOR_ID } from './home/first-run-intro-anchor.js';

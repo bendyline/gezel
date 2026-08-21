@@ -424,6 +424,26 @@ function interpolateStepsContext(
 }
 
 /**
+ * The interpolation context for steps added or patched AFTER create().
+ * `create()` interpolates the whole recipe once; a step that arrives later
+ * (add_task_step, set_step_deliverable's patch) skipped that walk, so a
+ * `{{task.dir}}` in its gate would reach `step-gate.ts`'s unresolved-
+ * placeholder guard and hard-fail as an infrastructure error. Persisted
+ * `craftbookParams` are already fully resolved (reserved runtime values
+ * never land there), so spreading them first and the runtime values last
+ * preserves create()'s reserved-wins semantics.
+ */
+function taskInterpolationContext(task: Task): Record<string, string> {
+  return {
+    ...(task.craftbookParams ?? {}),
+    'task.num': String(task.num),
+    'task.ref': task.ref,
+    'task.projectId': task.projectId,
+    'task.dir': task.artifactDir ?? `tasks/${task.num}`,
+  };
+}
+
+/**
  * The surface a step's gate rejection should speak to. Consults the gate
  * itself, not `advanceWhen` alone: a step can carry a gate without ever
  * declaring an `advanceWhen` deliverable, and reading only `advanceWhen`
@@ -1128,10 +1148,12 @@ export class TaskManager {
         connectorPrepNote = prep.note;
       }
     }
+    const artifactDir = `tasks/${num}`;
     const runtimeCraftbookContext = {
       'task.num': String(num),
       'task.ref': buildTaskRef(projectId, num),
       'task.projectId': projectId,
+      'task.dir': artifactDir,
     };
     effectiveCraftbookParams = {
       ...resolveCraftbookParamDefaults(
@@ -1237,6 +1259,7 @@ export class TaskManager {
         : {}),
       activeStepId,
       ...(input.parentTaskRef ? { parentTaskRef: input.parentTaskRef } : {}),
+      artifactDir,
       ...(extras?.origin ? { origin: extras.origin } : {}),
       ...(cron ? { cron } : {}),
       ...(nightShift ? { nightShift } : {}),
@@ -1250,6 +1273,12 @@ export class TaskManager {
     };
 
     await this.store.writeTask(task);
+    // Pre-create the task's artifact folder so it shows in the artifacts
+    // browser from minute one. Purely a UX affordance — `write_artifact`
+    // mkdir -p's on its own — so a failure must never block the task.
+    await this.store
+      .createProjectArtifactFolder(projectId, artifactDir)
+      .catch((err) => log.warn('[tasks] could not pre-create task artifact folder:', err));
     // New work on the project — wake it if it had gone stable.
     await this.reactivateProject(projectId);
 
@@ -1658,6 +1687,10 @@ export class TaskManager {
       ? expandStepDeliverable({ ...base, id }, input.deliverable)
       : { ...base, id };
     const newStep: TaskCraftbookStep = { ...expanded, createdAt: nowIso() };
+    // create() interpolated the original recipe; late-added steps get the
+    // same treatment (after deliverable expansion, so the expanded gate is
+    // covered) or their `{{task.dir}}`/param tokens hard-fail at the gate.
+    interpolateStepsContext([newStep], taskInterpolationContext(task));
     const steps = [...task.craftbook.steps];
     steps.splice(stepInsertionIndex(steps, pos), 0, newStep);
     assertCraftbookGraph({ steps, entryStepId: task.craftbook.entryStepId });
@@ -1697,8 +1730,27 @@ export class TaskManager {
     const idx = task.craftbook.steps.findIndex((s) => s.id === stepId);
     if (idx < 0) return null;
     const current = task.craftbook.steps[idx] as TaskCraftbookStep;
+    // Interpolate the incoming fields only — untouched step text keeps
+    // whatever create() (or a previous patch) resolved. `null` means
+    // "clear" and passes through untouched.
+    const ctx = taskInterpolationContext(task);
+    const resolvedPatch: UpdateTaskStepRequest = {
+      ...patch,
+      ...(typeof patch.name === 'string' ? { name: interpolateContext(patch.name, ctx) } : {}),
+      ...(typeof patch.description === 'string'
+        ? { description: interpolateContext(patch.description, ctx) }
+        : {}),
+      ...(typeof patch.prompt === 'string'
+        ? { prompt: interpolateContext(patch.prompt, ctx) }
+        : {}),
+      ...(patch.consumes ? { consumes: interpolateContextDeep(patch.consumes, ctx) } : {}),
+      ...(patch.advanceWhen ? { advanceWhen: interpolateContextDeep(patch.advanceWhen, ctx) } : {}),
+      ...(patch.gate ? { gate: interpolateContextDeep(patch.gate, ctx) } : {}),
+      ...(patch.onEnter ? { onEnter: interpolateContextDeep(patch.onEnter, ctx) } : {}),
+      ...(patch.onExit ? { onExit: interpolateContextDeep(patch.onExit, ctx) } : {}),
+    };
     // Shared field-merge semantics (preserves lifecycle fields via the generic).
-    const updated: TaskCraftbookStep = applyStepPatch(current, patch);
+    const updated: TaskCraftbookStep = applyStepPatch(current, resolvedPatch);
     const steps = [...task.craftbook.steps];
     steps[idx] = updated;
     // Edits that touch edges must keep the graph resolvable.
@@ -3871,6 +3923,10 @@ export class TaskManager {
       ...(parent.nightShift?.enabled ? { nightShift: { enabled: true } } : {}),
       activeStepId,
       parentTaskRef: parent.ref,
+      // Shards share the HOST's folder: the host's collect-barrier gates
+      // were interpolated with the host's number, and per-child files are
+      // already namespaced by the variation context ({{batchNumber}}, …).
+      artifactDir: parent.artifactDir ?? `tasks/${parent.num}`,
       ...(parent.roleBasedNameOnlyMode !== undefined
         ? { roleBasedNameOnlyMode: parent.roleBasedNameOnlyMode }
         : {}),

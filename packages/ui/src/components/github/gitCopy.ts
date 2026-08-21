@@ -10,6 +10,7 @@ import type {
   GitSyncResponse,
   GitWorkingChange,
 } from '@bendyline/gezel';
+import { formatRelativeTime } from '../../relative-time.js';
 
 export const GIT_COPY = {
   changesEmptyTitle: 'All changes saved ✓',
@@ -152,18 +153,11 @@ export function statusChipPhrase(args: {
   return bits.join(' · ');
 }
 
-/** "yesterday" / "3d ago" / a calendar date — Timeline-friendly dates. */
+/**
+ * "just now" / "3h ago" / "yesterday" / "3d ago" — Timeline-friendly dates.
+ * Kept as a named alias because the git surfaces read better with it, but
+ * the scale is the shared one so the Timeline and the status bar agree.
+ */
 export function friendlyDate(iso: string): string {
-  const then = Date.parse(iso);
-  if (!Number.isFinite(then)) return '';
-  const diffMs = Date.now() - then;
-  const min = Math.round(diffMs / 60_000);
-  if (min < 1) return 'just now';
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.round(hr / 24);
-  if (day === 1) return 'yesterday';
-  if (day < 7) return `${day}d ago`;
-  return new Date(then).toLocaleDateString();
+  return formatRelativeTime(iso);
 }

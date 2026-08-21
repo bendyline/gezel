@@ -307,6 +307,33 @@
   max-width: min(28rem, 100%);
 }
 
+/* Verified file paths inside tool summaries open in the conversation's
+ * References viewer. The button keeps the summary's monospace rhythm and
+ * reads as a quiet inline link rather than a second piece of chrome. */
+.thinking-tool-file-link {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+  text-underline-offset: 0.16em;
+}
+
+.thinking-tool-file-link:hover {
+  color: color-mix(in srgb, var(--accent) 78%, var(--text));
+  text-decoration-color: currentColor;
+}
+
+.thinking-tool-file-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 .thinking-tool-icon {
   color: #6ad38f;
   font-weight: 600;
@@ -1090,6 +1117,102 @@
   color: var(--text-muted);
 }
 
+/* ── Hand-off note card ──
+   A task dispatch seed is a letter between gezels, not a turn either party
+   typed: it opens a task thread, and the paragraph the model receives is
+   procedure ("call `advance_task_step` when the step is done"). The card
+   keeps the one sentence a reader wants and files the rest under "Full
+   note". Centred and narrow so it reads as a transition between crew
+   members rather than a message in either column, and dashed in the same
+   warm accent as the `.msg-from-gezel` handoff bubble. */
+.msg-handoff-note {
+  align-self: center;
+  align-items: stretch;
+  width: min(90%, 34rem);
+  max-width: 90%;
+}
+
+.msg-handoff-note-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.55rem 0.75rem;
+  border: 1px dashed var(--chat-handoff-border, rgba(176, 114, 76, 0.45));
+  border-radius: var(--radius-md);
+  background: var(--chat-handoff-bg, rgba(176, 114, 76, 0.08));
+}
+
+.msg-handoff-note-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.msg-handoff-note-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.msg-handoff-note-project {
+  font-style: italic;
+}
+
+.msg-handoff-note-headline {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.msg-handoff-note-context {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.msg-handoff-note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.15rem;
+  font-size: var(--text-xs);
+}
+
+.msg-handoff-note-ref {
+  color: var(--text-muted);
+}
+
+/* The instructions the model was actually sent — provenance, closed by
+   default, and deliberately the quietest thing in the card. */
+.msg-handoff-note-details > summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-muted);
+}
+
+.msg-handoff-note-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.msg-handoff-note-details > summary::before {
+  content: "▸ ";
+}
+
+.msg-handoff-note-details[open] > summary::before {
+  content: "▾ ";
+}
+
+.msg-handoff-note-full {
+  margin: 0.35rem 0 0;
+  white-space: pre-wrap;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
 /* Collapsible "tools that ran during this turn" expando at the top of a
    completed assistant bubble. Closed by default; clicking the summary
    reveals the same thinking-tool list the StreamingBubble uses live.
@@ -1291,8 +1414,8 @@
 /* Live tool-args block — the streaming counterpart to a tool row,
    shown while the model generates a structured call (long write_file).
    Same dimmed left-rule treatment as .msg-stream-reasoning; the body
-   is a short auto-scrolled tail of the raw args, monospace because
-   it's code/JSON mid-write, not prose. */
+   is a short auto-scrolled tail of the args decoded out of their JSON
+   encoding, monospace because it's file content mid-write, not prose. */
 .msg-stream-toolargs {
   align-self: flex-start;
   max-width: 100%;

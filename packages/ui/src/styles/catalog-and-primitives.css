@@ -31,10 +31,15 @@
   background: rgba(255, 255, 255, 0.03);
 }
 
+/* The resting "this is fine" chip — System Health, engine readiness, "on
+   device". It is chrome, not an event, so it takes the workshop's sage
+   rather than `--success`: the mint green read as a near-miss of the sage
+   titlebar sitting inches above it. `--success` is still the right token
+   for a state that just *changed* (a save landed, a diff line added). */
 .gz-status-pill--ok {
-  color: var(--success);
-  border-color: color-mix(in srgb, var(--success) 45%, transparent);
-  background: var(--success-bg);
+  color: var(--sage-ink);
+  border-color: color-mix(in srgb, var(--gezel-sage) 70%, transparent);
+  background: color-mix(in srgb, var(--gezel-sage) 20%, transparent);
 }
 
 .gz-status-pill--warn {
@@ -250,6 +255,16 @@
   align-items: center;
   border-radius: var(--radius-sm);
   line-height: 1.25;
+}
+
+/* Fitness results sit on the deeper model-table paper, where the generic
+   success green is too close in luminance to its translucent fill. Pull the
+   ink toward the theme text color and strengthen the outline while keeping
+   the badge recognizably green in both themes. */
+.model-fitness-badge.gz-status-pill--ok {
+  color: var(--sage-ink);
+  border-color: color-mix(in srgb, var(--gezel-sage) 85%, var(--text));
+  font-weight: 500;
 }
 
 .model-fitness-badge--probing {

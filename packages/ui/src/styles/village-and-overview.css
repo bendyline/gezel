@@ -707,7 +707,10 @@ button.linklike {
 .task-outcome-check {
   width: 1rem;
   text-align: center;
-  color: var(--sage, #6c8a52);
+  /* Pinned to the primitive, not `--sage`: this rule used to rely on the
+     fallback because `--sage` was scoped to `.home-workshop`, so promoting
+     the token to `:root` would have silently repainted the check. */
+  color: var(--gezel-sage);
 }
 .task-outcome-input {
   flex: 1;

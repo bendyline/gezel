@@ -821,9 +821,9 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     );
     expect(strip).toHaveAccessibleName(/2 leftover Gezel engine processes/i);
     expect(screen.getByText('Gezel 76.0 GB')).toBeInTheDocument();
-    expect(screen.getByText('Borrowed for cache 20.0 GB')).toBeInTheDocument();
+    expect(screen.getByText('Model & file cache 20.0 GB')).toBeInTheDocument();
     expect(strip).toHaveAccessibleName(
-      /borrowed for cache 20\.0 GB, reclaimable by the operating system/i,
+      /model and file cache 20\.0 GB, reclaimable by the operating system/i,
     );
     expect(
       screen.getByText(

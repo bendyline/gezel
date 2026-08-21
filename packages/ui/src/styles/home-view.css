@@ -33,11 +33,6 @@
   --ink-2: var(--gezel-ink-warm-muted);
   --ink-3: var(--gezel-ink-warm-quiet);
   --rule: color-mix(in srgb, var(--gezel-paper-inset) 82%, var(--gezel-terra));
-  /* Sage (structure) */
-  --sage: var(--gezel-sage-muted);
-  --sage-deep: var(--gezel-sage-deep);
-  --sage-ink: #2f3a23;
-  --sage-soft: var(--gezel-sage-soft);
   /* Terracotta (action / heat) */
   --terra: var(--gezel-terra-bright);
   --terra-deep: var(--gezel-terra-deep);
@@ -89,7 +84,6 @@
   --ink-2: #c8baa0;
   --ink-3: #8b7e6b;
   --rule: #4a4234;
-  --sage-soft: #3a4634;
   --home-card: #28241e;
   --home-surf2: #201d18;
   --home-border: #3a342b;
@@ -105,7 +99,6 @@
     --ink-2: #c8baa0;
     --ink-3: #8b7e6b;
     --rule: #4a4234;
-    --sage-soft: #3a4634;
     --home-card: #28241e;
     --home-surf2: #201d18;
     --home-border: #3a342b;

@@ -1,6 +1,7 @@
 import type { ProjectDetail } from '@bendyline/gezel';
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { ProjectGlyph, type ProjectGlyphId } from '../views/projects/new-project-meta.js';
 import { CatalogArtwork } from './CatalogArtwork.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
@@ -446,8 +447,8 @@ export function ProjectConnectionsTab({
                   {b.lastError ? (
                     <span className="error">Error: {b.lastError}</span>
                   ) : b.lastSyncedAt ? (
-                    <span className="muted">
-                      Last synced {new Date(b.lastSyncedAt).toLocaleString()}
+                    <span className="muted" title={formatAbsoluteTime(b.lastSyncedAt)}>
+                      Last synced {formatRelativeTime(b.lastSyncedAt)}
                     </span>
                   ) : (
                     <span className="muted">Not synced yet</span>

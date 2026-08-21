@@ -28,6 +28,7 @@ function run(input: {
   errored?: Array<[string, string]>;
   pinnedSessionId?: string;
   groupedTaskRefs?: string[];
+  liveTools?: Array<[string, string]>;
 }) {
   return selectThreadPills({
     sessions: input.sessions,
@@ -36,6 +37,7 @@ function run(input: {
     now: NOW,
     ...(input.pinnedSessionId ? { pinnedSessionId: input.pinnedSessionId } : {}),
     ...(input.groupedTaskRefs ? { groupedTaskRefs: new Set(input.groupedTaskRefs) } : {}),
+    ...(input.liveTools ? { liveTools: new Map(input.liveTools) } : {}),
   });
 }
 
@@ -204,5 +206,27 @@ describe('selectThreadPills titles', () => {
     });
     expect(pills[0]?.title).toBe('New thread');
     expect(pills[1]?.title).toBe('ask @Ada about it');
+  });
+});
+
+describe('selectThreadPills live tools', () => {
+  it('carries the running tool onto a streaming pill', () => {
+    const { pills } = run({
+      sessions: [session('s1', 0)],
+      inflight: ['s1'],
+      liveTools: [['s1', 'grep_files']],
+    });
+    expect(pills[0]?.liveToolName).toBe('grep_files');
+  });
+
+  // A stale entry outlives its turn whenever a `done` envelope is dropped —
+  // the 20s inflight reconcile is what heals that, so the pill must key off
+  // state rather than off the map still holding a name.
+  it('drops it once the turn is no longer in flight', () => {
+    const { pills } = run({
+      sessions: [session('s1', 0)],
+      liveTools: [['s1', 'grep_files']],
+    });
+    expect(pills[0]?.liveToolName).toBeUndefined();
   });
 });

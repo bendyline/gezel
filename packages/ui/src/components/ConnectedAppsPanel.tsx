@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { CodexSetupCard } from './CodexSetupCard.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { OpenCodeSetupCard } from './OpenCodeSetupCard.js';
@@ -57,11 +58,7 @@ interface ConnectedAppsResponse {
 
 function formatRelative(ms: number): string {
   if (!ms) return 'never';
-  const delta = Date.now() - ms;
-  if (delta < 60_000) return 'just now';
-  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
-  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
-  return `${Math.floor(delta / 86_400_000)}d ago`;
+  return formatRelativeTime(ms);
 }
 
 interface GezelOption {
@@ -528,9 +525,7 @@ export function ConnectedAppsPanel() {
                     <td data-label="Last used">
                       <span
                         className="connected-apps-last-used"
-                        title={
-                          app.lastUsedAt ? new Date(app.lastUsedAt).toLocaleString() : undefined
-                        }
+                        title={app.lastUsedAt ? formatAbsoluteTime(app.lastUsedAt) : undefined}
                       >
                         {formatRelative(app.lastUsedAt)}
                       </span>

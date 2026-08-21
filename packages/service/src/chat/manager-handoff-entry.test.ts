@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { parseTaskHandoffNote } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
@@ -154,6 +155,14 @@ describe('single-channel kickoff (D1)', () => {
     const seed = full?.messages[0]?.content ?? '';
     expect(seed).toContain("You've been assigned task");
     expect(seed).toContain('← your step');
+    // …and the transcript card can still read the task, step and craftbook
+    // back out of it (see `parseTaskHandoffNote`).
+    expect(parseTaskHandoffNote(seed)).toMatchObject({
+      kind: 'entry',
+      taskRef: task.ref,
+      stepId: task.craftbook.steps[0]?.id,
+      taskTitle: 'Build the landing page',
+    });
 
     // 4. Theme C floor routing fired for step 1 (developer → small → 8b).
     expect(full?.model).toBe('worker-8b');
@@ -229,6 +238,30 @@ describe('handoff seed wording', () => {
   it('falls back to the anonymous wording without a previous gezel', async () => {
     const seed = await seedFor({});
     expect(seed).toContain('The previous step has been completed and handed step `report`');
+  });
+
+  /**
+   * The transcript surfaces render these seeds as a short hand-off card and
+   * keep the tool-calling boilerplate in provenance — and they recover the
+   * sender/step/task by parsing this prose, because no structured form of it
+   * is persisted. Reword a seed above without teaching
+   * `parseTaskHandoffNote` the new wording and every hand-off silently
+   * reverts to the raw paragraph, which is what the card exists to replace.
+   */
+  it('stays readable by the hand-off card parser', async () => {
+    expect(
+      parseTaskHandoffNote(await seedFor({ fromGezelName: 'Koray', fromGezelId: 'koray' })),
+    ).toEqual({ kind: 'handoff', taskRef: 'p1/1', stepId: 'report', fromName: 'Koray' });
+
+    expect(parseTaskHandoffNote(await seedFor({}))).toEqual({
+      kind: 'handoff',
+      taskRef: 'p1/1',
+      stepId: 'report',
+    });
+
+    expect(
+      parseTaskHandoffNote(await seedFor({ fromGezelName: 'Worker', fromGezelId: 'worker' })),
+    ).toEqual({ kind: 'advance', taskRef: 'p1/1', stepId: 'report' });
   });
 
   it('continues the latest persisted task-step session after a service restart', async () => {

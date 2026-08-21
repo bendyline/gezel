@@ -3380,9 +3380,12 @@ const WORKSPACE_LIKELY_EXTENSIONS = new Set([
  * Paths under these prefixes are legitimate artifact territory even
  * when their extension looks code-like (scripts/*.ts, tests/*.spec.ts,
  * mocks/*.html, drafts/*.css). The decision-table in the system prompt
- * lists these as canonical artifact folders.
+ * lists these as canonical artifact folders. `tasks/` is the per-task
+ * working folder (tasks/<num>/…): everything under it is by-construction
+ * working material, so an html/css deliverable there must not be
+ * redirected into the workspace.
  */
-const ARTIFACT_SCRIPT_PREFIXES = ['scripts/', 'tests/', 'mocks/', 'drafts/'];
+const ARTIFACT_SCRIPT_PREFIXES = ['scripts/', 'tests/', 'mocks/', 'drafts/', 'tasks/'];
 
 function classifyArtifactPath(cleanPath: string): { ok: true } | { ok: false; extension: string } {
   const lower = cleanPath.toLowerCase();
@@ -3490,7 +3493,7 @@ async function listWorkspaceDeliverableFiles(projectId: string): Promise<string[
 
 server.tool(
   'list_artifacts',
-  'List files in the project artifacts folder, recursively across all subdirectories. Use this when handing work off between gezels — anything a teammate produced will show up here regardless of how deeply they nested it. Pass `path` to walk one subtree only (large drawers are capped, so scoping is how you see every file in a corpus); pass `recursive: false` for a one-level listing. Returned paths are relative to the artifacts root and can be read as-is — do NOT prefix with "artifacts/".',
+  'List files in the project artifacts folder, recursively across all subdirectories. Use this when handing work off between gezels — anything a teammate produced will show up here regardless of how deeply they nested it. A task\'s working files live under its own folder, `tasks/<num>/`. Pass `path` to walk one subtree only (large drawers are capped, so scoping is how you see every file in a corpus); pass `recursive: false` for a one-level listing. Returned paths are relative to the artifacts root and can be read as-is — do NOT prefix with "artifacts/".',
   {
     path: z
       .string()
@@ -3963,7 +3966,7 @@ server.tool(
 
 server.tool(
   'write_artifact',
-  "Create or update a file in the project's **artifacts** folder — the side drawer for supporting material (reports, plans, analysis, research, scratch notes). **NOT for the app's source code** — use `write_file` for that. Artifacts live in a separate folder so the user can distinguish your working notes from the code/content you ship. Calls that target an existing workspace path are refused unless `force: true` is set; source-code extensions (.tsx, .css, .html, .py, …) outside the canonical `scripts/`/`tests/`/`mocks/`/`drafts/` folders are automatically redirected into the workspace with `write_file` semantics.",
+  "Create or update a file in the project's **artifacts** folder — the side drawer for supporting material (reports, plans, analysis, research, scratch notes). **NOT for the app's source code** — use `write_file` for that. Artifacts live in a separate folder so the user can distinguish your working notes from the code/content you ship. When working a task, its working files belong in that task's folder, `tasks/<num>/` (e.g. `tasks/11/outline.md`). Calls that target an existing workspace path are refused unless `force: true` is set; source-code extensions (.tsx, .css, .html, .py, …) outside the canonical `tasks/`/`scripts/`/`tests/`/`mocks/`/`drafts/` folders are automatically redirected into the workspace with `write_file` semantics.",
   {
     path: z
       .string()

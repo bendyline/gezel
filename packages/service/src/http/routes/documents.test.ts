@@ -123,18 +123,21 @@ describe('GET /api/documents — listing', () => {
     expect(data.files.find((f) => f.path === 'stats')?.mtimeMs).toBeUndefined();
   });
 
-  it('surfaces dotfiles only under hidden=1', async () => {
+  it('surfaces dotfiles and Office lock files only under hidden=1', async () => {
     await api('PUT', '/api/documents/write', { path: '.private/secret.md', content: 's' });
+    await api('PUT', '/api/documents/write', { path: '~$deck.pptx', content: 'lock' });
 
     const plain = (await (await api('GET', '/api/documents?recursive=1')).json()) as {
       files: Array<{ path: string }>;
     };
     expect(plain.files.some((f) => f.path.startsWith('.private'))).toBe(false);
+    expect(plain.files.some((f) => f.path === '~$deck.pptx')).toBe(false);
 
     const hidden = (await (await api('GET', '/api/documents?recursive=1&hidden=1')).json()) as {
       files: Array<{ path: string }>;
     };
     expect(hidden.files.some((f) => f.path.startsWith('.private'))).toBe(true);
+    expect(hidden.files.some((f) => f.path === '~$deck.pptx')).toBe(true);
   });
 
   it('non-recursive list at a subpath returns only that folder', async () => {

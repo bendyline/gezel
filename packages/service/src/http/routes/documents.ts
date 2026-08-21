@@ -17,7 +17,8 @@ export function documentRoutes(ctx: ServiceContext): Hono {
     const recursive = c.req.query('recursive') === '1';
     // `stats=1` / `hidden=1` mirror the project file routes — the documents
     // library is browsed through the same file panel, which sorts by mtime and
-    // has a show-hidden key. Only meaningful with `recursive=1`.
+    // has a show-hidden key for dotfiles and Office lock files. Only meaningful
+    // with `recursive=1`.
     const withStats = c.req.query('stats') === '1';
     const includeHidden = c.req.query('hidden') === '1';
     if (recursive) {

@@ -94,6 +94,9 @@ Do not bake "the service is in-process" assumptions into new code — go through
 │       ├── finding-lifecycle.json  durable open/in-progress/resolved scanner findings
 │       ├── report-actions.json  fired/dismissed lifecycle of report-embedded action requests
 │       ├── artifacts/       read-write user/agent outputs
+│       │   └── tasks/{num}/ per-task working folder — auto-created at task
+│       │                    creation, shared by fanout children; craftbooks
+│       │                    address it via the {{task.dir}} token
 │       ├── workspace/       internal fallback when no external dir
 │       └── memories/        same structure as gezel memories
 ├── documents/               cross-project shared library (mission, guidelines) — the
@@ -231,7 +234,7 @@ Critical invariants from the maintained [poppetje rendering strategy](docs/poppe
 
 ### Project
 
-A scoped workspace. Always present: a `default` project that fills in when the user hasn't chosen one. A project can optionally point at an external `workingDir` — otherwise an internal fallback directory is used. Artifacts (reports, scripts, outputs the agent produces) live under the project and are separate from the codebase.
+A scoped workspace. Always present: a `default` project that fills in when the user hasn't chosen one. A project can optionally point at an external `workingDir` — otherwise an internal fallback directory is used. Artifacts (reports, scripts, outputs the agent produces) live under the project and are separate from the codebase. Each task gets its own working folder inside the drawer — `artifacts/tasks/<num>/`, auto-created at task creation, stamped on the task as `artifactDir`, and inherited by fanout children so batch shards share the host's namespace. Craftbooks reach it through the reserved `{{task.dir}}` interpolation token (conventionally via a `workPath` param defaulting to `{{task.dir}}`), and ad-hoc task sessions are told the folder in their injected task context. It joins `notes/`/`reviews/`/`reports/` in `ACCESSORY_ARTIFACT_PREFIXES` ([packages/catalog/src/artifact-surface.ts](packages/catalog/src/artifact-surface.ts)).
 
 **Every session belongs to a (gezel, project) pair.** There is no "gezel-only" session — the `default` project is the implicit bucket.
 

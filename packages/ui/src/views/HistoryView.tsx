@@ -13,6 +13,7 @@ import { api } from '../api.js';
 import { ToolDiffBlock } from '../components/ToolDiffBlock.js';
 import { openTabAction, runNavActions } from '../components/nav-actions.js';
 import { Select } from '../primitives/index.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 
 const KINDS: Array<{ value: string; label: string }> = [
   { value: '', label: 'All kinds' },
@@ -346,7 +347,13 @@ export function HistoryView({ projectId }: { projectId?: string } = {}) {
                   <span className="history-summary">
                     {gezelLabel(hit.gezelId) || hit.gezelId} · {hit.title || 'Untitled session'}
                   </span>
-                  <time className="history-time">{formatRelative(hit.lastActivityAt)}</time>
+                  <time
+                    className="history-time"
+                    dateTime={hit.lastActivityAt}
+                    title={formatAbsoluteTime(hit.lastActivityAt)}
+                  >
+                    {formatRelativeTime(hit.lastActivityAt)}
+                  </time>
                 </span>
                 <span className="history-meta">
                   <span className="history-kind">Transcript</span>
@@ -552,7 +559,8 @@ function HistoryEventDetail({
         </p>
         <h3>{entry.summary}</h3>
         <time dateTime={entry.at} className="history-detail-time">
-          {formatDateTime(entry.at)} <span>· {formatRelativeLong(entry.at)}</span>
+          {formatDateTime(entry.at)}{' '}
+          <span>· {formatRelativeTime(entry.at, { style: 'long' })}</span>
         </time>
       </header>
 
@@ -844,19 +852,6 @@ function formatBytes(bytes: number): string {
   return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)} ${unit}`;
 }
 
-function formatRelativeLong(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return '';
-  const diff = Math.max(0, Date.now() - then);
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
-  const days = Math.floor(hours / 24);
-  return `${days} ${days === 1 ? 'day' : 'days'} ago`;
-}
-
 /**
  * Human labels for event kinds. The raw dotted identifiers (`poppetje.
  * generated`) are for `search_history` and the JSONL on disk — as a row's
@@ -912,7 +907,9 @@ function HistoryEventRow({
     <>
       <span className="history-line">
         <span className="history-summary">{entry.summary}</span>
-        <time className="history-time">{formatRelative(entry.at)}</time>
+        <time className="history-time" dateTime={entry.at} title={formatAbsoluteTime(entry.at)}>
+          {formatRelativeTime(entry.at)}
+        </time>
       </span>
       <span className="history-meta">
         <span className="history-kind" title={entry.kind}>
@@ -942,7 +939,13 @@ function HistorySessionRow({
         <span className="history-summary">
           {gezelName || entry.gezelId} · {entry.title}
         </span>
-        <time className="history-time">{formatRelative(entry.lastActivityAt)}</time>
+        <time
+          className="history-time"
+          dateTime={entry.lastActivityAt}
+          title={formatAbsoluteTime(entry.lastActivityAt)}
+        >
+          {formatRelativeTime(entry.lastActivityAt)}
+        </time>
       </span>
       <span className="history-meta">
         <span className="history-kind">Thread</span>
@@ -953,21 +956,4 @@ function HistorySessionRow({
       </span>
     </>
   );
-}
-
-function formatRelative(iso: string): string {
-  try {
-    const then = new Date(iso).getTime();
-    const now = Date.now();
-    const diff = Math.max(0, now - then);
-    const mins = Math.floor(diff / 60_000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  } catch {
-    return '';
-  }
 }

@@ -8,6 +8,7 @@ import type {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { DropdownChevron, Popover, Select } from '../primitives/index.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { statusChipPhrase } from './github/gitCopy.js';
 import { GIT_CHANGED_EVENT, useGitSync } from './github/useGitSync.js';
 import type { ProjectClaudePermissionMode } from './project-ai-editability.js';
@@ -297,7 +298,7 @@ function ProjectControlsOverflow({
  * same actions.
  *
  * Everything that overlays out of this bar opens *upward*: the branch menu
- * and toast are hand-positioned (see styles/05-settings-and-status.css),
+ * and toast are hand-positioned (see styles/settings-and-status.css),
  * the Radix tooltip and overflow popover are told `side="top"`, and the
  * Radix selects flip on their own via collision detection.
  */
@@ -782,7 +783,10 @@ export function ProjectGitStatusBar({
               >
                 {chipPhrase}
                 {!chipAttention && lastSynced && (
-                  <span className="muted small"> · synced {formatRelative(lastSynced)}</span>
+                  <span className="muted small" title={formatAbsoluteTime(lastSynced)}>
+                    {' '}
+                    · synced {formatRelativeTime(lastSynced, { seconds: true })}
+                  </span>
                 )}
               </button>
             )}
@@ -919,8 +923,8 @@ export function ProjectGitStatusBar({
                     </div>
                     <div>
                       <dt>Last scan</dt>
-                      <dd>
-                        {formatRelative(indexStatus.meta.scannedAt)} ·{' '}
+                      <dd title={formatAbsoluteTime(indexStatus.meta.scannedAt)}>
+                        {formatRelativeTime(indexStatus.meta.scannedAt, { seconds: true })} ·{' '}
                         {formatDuration(indexStatus.meta.durationMs)}
                       </dd>
                     </div>
@@ -1231,24 +1235,6 @@ export function ProjectGitStatusBar({
       )}
     </div>
   );
-}
-
-/**
- * "5s ago" / "2m ago" / "3h ago" — short relative formatter for the
- * status bar's last-synced chip. Anything older than a day rolls into
- * a plain calendar date.
- */
-function formatRelative(iso: string): string {
-  const then = Date.parse(iso);
-  if (!Number.isFinite(then)) return 'recently';
-  const diffMs = Date.now() - then;
-  const sec = Math.max(1, Math.round(diffMs / 1000));
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.round(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.round(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  return new Date(then).toLocaleDateString();
 }
 
 function coveragePercent(complete: number, total: number): number | null {

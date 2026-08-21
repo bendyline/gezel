@@ -393,7 +393,7 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
         }`,
     cachedBytes === null
       ? null
-      : `borrowed for cache ${formatBytes(cachedBytes)}, reclaimable by the operating system`,
+      : `model and file cache ${formatBytes(cachedBytes)}, reclaimable by the operating system`,
     usage.freeBytes === null ? null : `free ${formatBytes(usage.freeBytes)}`,
   ]
     .filter(Boolean)
@@ -456,9 +456,9 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
             </span>
           )}
           {cachedBytes !== null && (
-            <span title="Reclaimable file cache available to apps">
+            <span title="Memory-mapped model files and other reclaimable file cache">
               <i className="machine-memory-swatch machine-memory-swatch-cached" aria-hidden />
-              Borrowed for cache {formatBytes(cachedBytes)}
+              Model &amp; file cache {formatBytes(cachedBytes)}
             </span>
           )}
           {usage.freeBytes !== null && (

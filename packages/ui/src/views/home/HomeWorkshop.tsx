@@ -93,9 +93,41 @@ export function HomeWorkshop({
   }, []);
 
   // Pending questions contribute to the greeting's "waiting on you" chip.
+  // Loaded once, then kept live off the SSE stream below: answering or
+  // dismissing a question anywhere else in the app (the titlebar Updates
+  // drawer, the sidebar intervene popup) has to drain this chip too, or
+  // the greeting keeps counting work the user already cleared.
   useEffect(() => {
     refreshQuestions();
   }, [refreshQuestions]);
+
+  // Jobs for the active project — reloads when the active project changes,
+  // and again on any task audit event (a job the user owned being finished
+  // elsewhere also drains the "waiting on you" chip).
+  const activeProjectIdRef = useRef(activeProjectId);
+  activeProjectIdRef.current = activeProjectId;
+  const refreshTasks = useCallback(() => {
+    const pid = activeProjectIdRef.current;
+    if (!pid) {
+      setTasks([]);
+      return;
+    }
+    api
+      .listProjectTasks(pid)
+      .then((r) => {
+        // A slower response for a project the user has already navigated
+        // away from must not clobber the current one's jobs.
+        if (activeProjectIdRef.current === pid) setTasks(r.tasks ?? []);
+      })
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!activeProjectId) {
+      setTasks([]);
+      return;
+    }
+    refreshTasks();
+  }, [activeProjectId, refreshTasks]);
 
   // The meester's status report: load once, then follow the global SSE
   // stream — `meester_status` events flip the "writing…" state and
@@ -121,6 +153,14 @@ export function HomeWorkshop({
           fetch: api.getFetch(),
         })) {
           const ev = (env as ChatEventEnvelope).event;
+          if (ev.type === 'question_asked' || ev.type === 'question_answered') {
+            refreshQuestions();
+            continue;
+          }
+          if (ev.type === 'task_event') {
+            refreshTasks();
+            continue;
+          }
           if (ev.type !== 'meester_status') continue;
           if (ev.state === 'started') {
             setStatusRunning(true);
@@ -134,7 +174,7 @@ export function HomeWorkshop({
       }
     })();
     return () => ctrl.abort();
-  }, [refreshStatus]);
+  }, [refreshStatus, refreshQuestions, refreshTasks]);
 
   // Staleness decay: an old report falls back to the plain time-of-day
   // greeting rather than greeting the user with last week's news.
@@ -164,24 +204,6 @@ export function HomeWorkshop({
     setStatusRunning(true);
     api.runMeesterStatus().catch(() => setStatusRunning(false));
   }, []);
-
-  // Jobs for the active project — reloads when the active project changes.
-  useEffect(() => {
-    let cancelled = false;
-    if (!activeProjectId) {
-      setTasks([]);
-      return;
-    }
-    api
-      .listProjectTasks(activeProjectId)
-      .then((r) => {
-        if (!cancelled) setTasks(r.tasks ?? []);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [activeProjectId]);
 
   const visibleTasks = useMemo(() => tasks.filter((t) => t.status !== 'canceled'), [tasks]);
 

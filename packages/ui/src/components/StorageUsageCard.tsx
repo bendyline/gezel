@@ -1,6 +1,7 @@
 import type { StorageCategory, StorageSummary } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { requestBackupRestore } from './BackupRestoreDialog.js';
 import { requestStorageCleanup } from './StorageCleanupDialog.js';
 import { formatBytes } from './model-memory-copy.js';
@@ -142,7 +143,11 @@ export function StorageUsageCard() {
         >
           {busy ? 'Measuring…' : 'Measure again'}
         </button>
-        {summary && !busy && ` · measured ${new Date(summary.measuredAt).toLocaleTimeString()}`}
+        {summary && !busy && (
+          <span title={formatAbsoluteTime(summary.measuredAt)}>
+            {` · measured ${formatRelativeTime(summary.measuredAt, { seconds: true })}`}
+          </span>
+        )}
       </p>
     </section>
   );

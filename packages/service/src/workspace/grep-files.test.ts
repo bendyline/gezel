@@ -500,8 +500,6 @@ describe.runIf(process.platform !== 'win32')('grepWorkspace ripgrep process cont
           engine: 'ripgrep',
           pattern: 'needle',
           literal: true,
-          // Leave enough headroom for the executable health probe on a busy
-          // CI host; the search process itself still has a short deadline.
           timeoutMs: 1_000,
         }),
       ),

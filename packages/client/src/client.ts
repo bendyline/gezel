@@ -6503,10 +6503,17 @@ export class GezelClient {
    * Complete flat workspace file list from the last static index scan
    * (`{path, size, mtimeMs}` per file, up to the indexer's cap). Empty for
    * never-indexed or indexing-disabled projects — read `/index/status` to
-   * tell those states apart.
+   * tell those states apart. `hidden` includes Office lock files.
    */
-  listProjectIndexFilesDetail(id: string): Promise<WorkspaceIndexFilesDetailResponse> {
-    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/index/files?detail=1`);
+  listProjectIndexFilesDetail(
+    id: string,
+    opts?: { hidden?: boolean },
+  ): Promise<WorkspaceIndexFilesDetailResponse> {
+    const hidden = opts?.hidden ? '&hidden=1' : '';
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/index/files?detail=1${hidden}`,
+    );
   }
 
   /** Force a re-scan. Returns immediately; poll status for completion. */

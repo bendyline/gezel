@@ -287,6 +287,37 @@ describe('Store session CRUD', () => {
         { kind: 'artifact', path: 'since-deleted.md' },
       ]);
     });
+
+    it('repairs a persisted qualified path that was misresolved to the project root', async () => {
+      await store.writeProjectArtifact('default', 'deck.pptx', 'old root deck');
+      await store.writeSession(
+        sessionFixture({
+          id: 'sess-misresolved-reference',
+          messages: [
+            {
+              role: 'assistant',
+              content: 'Requested output: `powerpoint/task-11/deck.pptx`.',
+              at: '2026-04-14T10:00:00Z',
+              referencedFiles: [{ kind: 'artifact', path: 'deck.pptx' }],
+              referencedArtifacts: ['deck.pptx'],
+            },
+          ],
+        }),
+      );
+
+      const beforeWrite = await store.listTimeline({ gezelId: 'ada', limit: 50 });
+      expect(beforeWrite.messages[0]?.referencedFiles).toBeUndefined();
+
+      await store.writeProjectArtifact(
+        'default',
+        'powerpoint/task-11/deck.pptx',
+        'actual nested deck',
+      );
+      const afterWrite = await store.listTimeline({ gezelId: 'ada', limit: 50 });
+      expect(afterWrite.messages[0]?.referencedFiles).toEqual([
+        { kind: 'artifact', path: 'powerpoint/task-11/deck.pptx' },
+      ]);
+    });
   });
 
   it('findSessionById locates across gezels', async () => {

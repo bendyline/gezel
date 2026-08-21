@@ -9,7 +9,14 @@ import type {
   ToolCallImage,
   ToolCallVideo,
 } from '@bendyline/gezel';
-import { promoteBareChannelNames } from '@bendyline/gezel';
+import type { TaskHandoffNote } from '@bendyline/gezel';
+import {
+  handoffContextLine,
+  handoffHeadline,
+  handoffKindLabel,
+  parseTaskHandoffNote,
+  promoteBareChannelNames,
+} from '@bendyline/gezel';
 import type { MediaProvider, SurfaceScheme } from '@bendyline/squisq';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
@@ -44,7 +51,9 @@ import { GezelIcon } from './GezelIcon.js';
 import { ImagePreview } from './ImagePreview.js';
 import { PendingQuestionCard } from './PendingQuestionCard.js';
 import { ReportErrorLink } from './ReportErrorLink.js';
+import { ToolArgsSummary } from './ToolArgsSummary.js';
 import { ToolDiffBlock } from './ToolDiffBlock.js';
+import type { OpenChatReference } from './chat-open-command.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from './chat-theme.js';
 import { formatElapsedClock } from './elapsed-time.js';
 import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
@@ -57,13 +66,14 @@ import {
   parsePendingToolCalls,
 } from './pending-tool-calls.js';
 import { stripVisibleToolCallMarkup } from './strip-tool-call-markup.js';
+import { renderToolArgsFragment } from './tool-args-fragment.js';
 import { formatDurationShort, toolDisplayName, toolErrorSummary } from './tool-display.js';
 
 /**
  * Build the inline style for a rendered bubble body: the gezel's font
  * family plus an optional `--gezel-font-scale` CSS variable (consumed by
  * `.msg-body-rendered .squisq-linear-content` in
- * styles/03-shared-content.css to size the font proportionally). Returns
+ * styles/shared-content.css to size the font proportionally). Returns
  * undefined when neither applies.
  */
 function bubbleBodyStyle(fontFamily?: string, fontScale?: number): CSSProperties | undefined {
@@ -257,6 +267,13 @@ export interface MessageBubbleProps {
    */
   onFileReference?: (file: ReferencedFile) => void;
   /**
+   * Opens a path carried by a successful file-tool row in the same
+   * References viewer as `/open`. Unlike `onFileReference`, this also
+   * supports shared-library documents, which never appear in the reply
+   * parser's `ReferencedFile` union.
+   */
+  onOpenReference?: (reference: OpenChatReference) => void;
+  /**
    * Called when a referenced-task chip is activated. Receives the full
    * `projectId/num` ref. Surfaces like the Meester's timeline can wire
    * this to dispatch a `gezel:open-tab` event with `kind: 'task'`.
@@ -408,6 +425,74 @@ export function RoleSuffix({ role }: { role?: string }) {
   );
 }
 
+/**
+ * A task hand-off, rendered as a short letter rather than the dispatch
+ * paragraph the model was actually sent. The seed's four sentences of
+ * tool-calling procedure are written for the model and read as noise in a
+ * transcript, so they move into the "Full note" expando — one line of
+ * provenance rather than the opening of the thread. `msg-user` stays on the
+ * wrapper because the timeline's sticky-header pass identifies the turn a
+ * reply belongs to by that class.
+ */
+function HandoffNoteCard({
+  note,
+  receiver,
+  full,
+  projectLabel,
+  timestampLabel,
+  extraClass,
+  dataMsgId,
+  dataSessionId,
+  onTaskReference,
+}: {
+  note: TaskHandoffNote;
+  receiver: string;
+  full: string;
+  projectLabel?: string;
+  timestampLabel?: string;
+  extraClass?: string;
+  dataMsgId?: string;
+  dataSessionId?: string;
+  onTaskReference?: (ref: string) => void;
+}) {
+  const context = handoffContextLine(note);
+  return (
+    <div
+      className={`msg msg-user msg-system msg-handoff-note${extraClass ? ` ${extraClass}` : ''}`}
+      data-msg-id={dataMsgId}
+      data-session-id={dataSessionId}
+    >
+      <div className="msg-handoff-note-card">
+        <div className="msg-handoff-note-head">
+          <span className="msg-handoff-note-kind">{handoffKindLabel(note)}</span>
+          {projectLabel && <span className="msg-handoff-note-project">· in {projectLabel}</span>}
+          {timestampLabel && <span className="msg-role-time">· {timestampLabel}</span>}
+        </div>
+        <p className="msg-handoff-note-headline">{handoffHeadline(note, receiver)}</p>
+        {context && <p className="msg-handoff-note-context">{context}</p>}
+        <div className="msg-handoff-note-actions">
+          {onTaskReference ? (
+            <button
+              type="button"
+              className="msg-ref-chip"
+              onClick={() => onTaskReference(note.taskRef)}
+              title="Open this task"
+            >
+              Task {note.taskRef}
+            </button>
+          ) : (
+            <span className="msg-handoff-note-ref">Task {note.taskRef}</span>
+          )}
+          <details className="msg-handoff-note-details">
+            <summary>Full note</summary>
+            <p className="msg-handoff-note-full">{full}</p>
+          </details>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function MessageBubble({
   role,
   content,
@@ -429,6 +514,7 @@ export function MessageBubble({
   referencedTasks,
   retrieval,
   onFileReference,
+  onOpenReference,
   onTaskReference,
   toolCalls,
   reasoning,
@@ -628,6 +714,30 @@ export function MessageBubble({
 
   const bodyStyle = bubbleBodyStyle(fontFamily, fontScale);
 
+  // A task dispatch seed is machinery addressed to the model, not prose
+  // addressed to the reader — it gets the hand-off card instead of the
+  // paragraph. Every other system-authored turn falls through to the
+  // plain System bubble below.
+  const handoffNote = useMemo(
+    () => (role === 'user' && origin === 'system' ? parseTaskHandoffNote(content) : null),
+    [role, origin, content],
+  );
+  if (handoffNote) {
+    return (
+      <HandoffNoteCard
+        note={handoffNote}
+        receiver={receiverLabel ?? authorLabel}
+        full={displayContent}
+        dataMsgId={dataMsgId}
+        dataSessionId={dataSessionId}
+        {...(projectLabel ? { projectLabel } : {})}
+        {...(timestampLabel ? { timestampLabel } : {})}
+        {...(extraClass ? { extraClass } : {})}
+        {...(onTaskReference ? { onTaskReference } : {})}
+      />
+    );
+  }
+
   if (from) {
     const body = stripFromPrefix(displayContent, from.gezelName);
     const cls = `msg msg-from-gezel${extraClass ? ` ${extraClass}` : ''}`;
@@ -708,7 +818,11 @@ export function MessageBubble({
         </div>
       )}
       {!isUser && toolCalls && toolCalls.length > 0 && (
-        <ToolHistoryExpando tools={toolCalls} projectId={projectId} />
+        <ToolHistoryExpando
+          tools={toolCalls}
+          projectId={projectId}
+          onOpenReference={onOpenReference}
+        />
       )}
       {!isUser && reasoning && reasoning.trim().length > 0 && (
         <ReasoningExpando reasoning={reasoning} durationMs={reasoningDurationMs} />
@@ -1201,6 +1315,8 @@ export interface StreamingBubbleProps {
    * into one `ToolActivityList` here.
    */
   segments: StreamingSegment[];
+  /** Opens a successful file-tool path in the conversation's References viewer. */
+  onOpenReference?: (reference: OpenChatReference) => void;
   startedAt: number | null;
   /** Extra classes applied to the wrapper (e.g. timeline grouping). */
   extraClass?: string;
@@ -1527,7 +1643,7 @@ export function StreamingStatusLine({
           "queued — 3 ahead") on narrow chat panels — the live dot,
           progress bar, and token/tool counts on either side stay
           visible as the load-bearing signals. See `msg-live-status-label`
-          rule in styles/09-chat.css. */}
+          rule in styles/chat.css. */}
       <span className="msg-live-status-label">{statusLabel}</span>
       {showProgress && (
         // Radix tooltip surfaces `thinkingDetail` (e.g. "4,096 / 7,880
@@ -1645,6 +1761,7 @@ export function StreamingBubble({
   driftLabel,
   localEngine,
   segments,
+  onOpenReference,
   startedAt,
   extraClass,
   fontFamily,
@@ -1996,7 +2113,7 @@ export function StreamingBubble({
               return (
                 <div className="msg-stream-segment" key={key}>
                   {seg.kind === 'tools' ? (
-                    <ToolActivityList tools={seg.tools} />
+                    <ToolActivityList tools={seg.tools} onOpenReference={onOpenReference} />
                   ) : seg.kind === 'intent' ? (
                     <IntentDivider label={seg.label} />
                   ) : (
@@ -2708,11 +2825,13 @@ function ToolDetailsBlock({
 function ToolActivityList({
   tools,
   suppressMedia = false,
+  onOpenReference,
 }: {
   tools: ToolActivity[];
   /** Skip inline image/video rows — used when a parent renders them in a
    *  visible strip above the (collapsed) step list to avoid duplication. */
   suppressMedia?: boolean;
+  onOpenReference?: (reference: OpenChatReference) => void;
 }) {
   return (
     <ul className="thinking-tools">
@@ -2725,8 +2844,7 @@ function ToolActivityList({
           <span className="thinking-tool-row">
             <span className="thinking-tool-icon">{t.success ? '✓' : '✗'}</span>
             <span className="thinking-tool-name">{toolDisplayName(t.name)}</span>
-            {t.argsSummary && <span className="thinking-tool-args">{t.argsSummary}</span>}
-            {t.path && !t.argsSummary && <span className="thinking-tool-path">{t.path}</span>}
+            <ToolArgsSummary tool={t} onOpenReference={onOpenReference} />
             {t.durationMs >= TOOL_DURATION_VISIBLE_MS && (
               <span className="thinking-tool-duration">{formatDurationShort(t.durationMs)}</span>
             )}
@@ -3128,9 +3246,11 @@ export function unresolvedToolFailures(
 export function ToolHistoryExpando({
   tools,
   projectId,
+  onOpenReference,
 }: {
   tools: ChatMessageToolCall[];
   projectId?: string;
+  onOpenReference?: (reference: OpenChatReference) => void;
 }) {
   if (tools.length === 0) return null;
   const total = tools.reduce((acc, t) => acc + t.durationMs, 0);
@@ -3180,7 +3300,7 @@ export function ToolHistoryExpando({
           <span className="msg-tool-history-total muted">· {formatDurationShort(total)} total</span>
           {failed > 0 && <span className="msg-tool-history-failed">· {failed} failed</span>}
         </summary>
-        <ToolActivityList tools={activities} suppressMedia />
+        <ToolActivityList tools={activities} suppressMedia onOpenReference={onOpenReference} />
       </details>
     </>
   );
@@ -3293,8 +3413,10 @@ function extractToolArgsPath(head: string): string | null {
  * and the only other signal is the climbing wire-pulse counter.
  * Same dimmed-live-block pattern as {@link LiveReasoning}: always
  * open, auto-scrolled to the tail, torn down when the real tool row
- * replaces it. Plain-text tail on purpose — a mid-stream JSON
- * fragment is never valid markdown.
+ * replaces it. The tail is decoded out of its JSON encoding first
+ * (see renderToolArgsFragment) so the user reads the file being
+ * written rather than `PASS\\n- Criterion 2: FAIL`. Still plain text,
+ * not markdown — a mid-stream fragment is routinely unbalanced.
  */
 function LiveToolArgs({
   args,
@@ -3302,11 +3424,12 @@ function LiveToolArgs({
   args: { name: string; chars: number; head: string; tail: string };
 }) {
   const bodyRef = useRef<HTMLPreElement>(null);
+  const body = renderToolArgsFragment(args.tail);
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-run to autoscroll as args stream in
   useEffect(() => {
     const el = bodyRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [args.tail]);
+  }, [body]);
   const verb = toolArgsVerb(args.name);
   const path = extractToolArgsPath(args.head);
   const target = path ?? (args.name.length > 0 ? args.name : null);
@@ -3326,7 +3449,7 @@ function LiveToolArgs({
         </span>
       </span>
       <pre className="msg-stream-toolargs-body" ref={bodyRef}>
-        {args.tail}
+        {body}
       </pre>
     </div>
   );

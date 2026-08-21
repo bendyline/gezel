@@ -139,6 +139,19 @@
      the original cream already pops). */
   --logo-active-fill: var(--gezel-sage-forest);
 
+  /* Sage (structure). The workshop's own green — the titlebar, the logo,
+     the home surfaces all sit on it. Promoted out of `.home-workshop`
+     because resting-state chrome outside Home (the System Health chips,
+     every "ready" status pill) was reaching for `--success` instead and
+     rendering a mint that reads as near-sage-but-not-it. `--success` stays
+     for genuine transitions — a save landed, a diff line was added.
+     `--sage-ink` is the text tone that sits legibly on a low-alpha sage
+     fill in each theme. */
+  --sage: var(--gezel-sage-muted);
+  --sage-deep: var(--gezel-sage-deep);
+  --sage-ink: #38512e;
+  --sage-soft: var(--gezel-sage-soft);
+
   /* Semantic colors */
   --success: #27ae60;
   --success-bg: rgba(39, 174, 96, 0.12);
@@ -233,6 +246,8 @@
     --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
     --sidebar-seam-shadow: rgba(0, 0, 0, 0.28);
     --titlebar-pane-shadow: rgba(0, 0, 0, 0.46);
+    --sage-ink: #a9c294;
+    --sage-soft: #3a4634;
     --success: #6ad38f;
     --success-bg: rgba(106, 211, 143, 0.15);
     --warning: #f0a04b;
@@ -297,6 +312,8 @@
   --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
   --sidebar-seam-shadow: rgba(0, 0, 0, 0.28);
   --titlebar-pane-shadow: rgba(0, 0, 0, 0.46);
+  --sage-ink: #a9c294;
+  --sage-soft: #3a4634;
   --success: #6ad38f;
   --success-bg: rgba(106, 211, 143, 0.15);
   --warning: #f0a04b;

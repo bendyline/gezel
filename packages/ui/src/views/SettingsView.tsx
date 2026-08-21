@@ -181,8 +181,8 @@ function buildSections(platform: string | undefined): SettingsSection[] {
     { id: 'imageRecognition', label: 'Image recognition', group: 'workloads' },
     { id: 'audio', label: 'Audio', group: 'workloads' },
     { id: 'webSearch', label: 'Web search', group: 'workloads' },
+    { id: 'knowledge', label: 'Knowledge', group: 'workloads' },
     { id: 'channels', label: 'Channels' },
-    { id: 'knowledge', label: 'Knowledge' },
     { id: 'connectedApps', label: 'Connected Apps' },
     { id: 'remoteServers', label: 'Remote Servers' },
     { id: 'toolsets', label: 'Shared Toolsets' },
@@ -913,6 +913,7 @@ export function SettingsView() {
         | 'anthropic-cli'
         | 'codex-cli'
         | 'ollama'
+        | 'llama-cpp'
         | 'mlx'
         | 'ds4',
       value: string | undefined,
@@ -2366,7 +2367,7 @@ export function SettingsView() {
                 </>
               )}
 
-              {provider === 'mlx' && (
+              {(provider === 'llama-cpp' || provider === 'mlx') && (
                 <div
                   className="new-row"
                   style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
@@ -2375,9 +2376,9 @@ export function SettingsView() {
                     Default model
                   </label>
                   <ModelPicker
-                    provider="mlx"
-                    value={config?.defaultModel?.mlx}
-                    onChange={(v) => void saveDefaultModel('mlx', v)}
+                    provider={provider}
+                    value={config?.defaultModel?.[provider]}
+                    onChange={(v) => void saveDefaultModel(provider, v)}
                     placeholder="First local model"
                   />
                 </div>
@@ -2444,7 +2445,9 @@ export function SettingsView() {
                 <h4 style={{ margin: '0 0 0.35rem' }}>Night Shift model</h4>
                 <p className="muted" style={{ margin: '0 0 0.75rem' }}>
                   Night Shift inherits the default provider and model unless you choose a separate,
-                  hands-off model here. Individual gezel overrides still take priority.
+                  hands-off model here. For example, you might want to use a larger (but slower)
+                  model during the night shift for more careful thinking overnight. Individual gezel
+                  overrides still take priority.
                 </p>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <input
@@ -3412,8 +3415,8 @@ export function SettingsView() {
           <section className="provider-card">
             <h3>Web search</h3>
             <p className="muted" style={{ marginTop: 0 }}>
-              Powers the <code>web_search</code> MCP tool that gezellen use to discover URLs. Picks
-              one search backend; configure a key only for the providers you choose.
+              Powers the web search tools that gezellen use to discover content on the internet.
+              Picks one search backend; configure a key only for the providers you choose.
             </p>
             <div className="new-row" style={{ alignItems: 'center', marginTop: '0.5rem' }}>
               <label className="muted" style={{ fontSize: '0.9rem' }}>

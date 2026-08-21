@@ -1,6 +1,7 @@
 import type { ProjectDetail } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import {
   MAIL_PROVIDERS,
   type MailProviderId,
@@ -168,8 +169,8 @@ export function ProjectMailTab({
                 {a.lastError ? (
                   <span className="error">Error: {a.lastError}</span>
                 ) : a.lastSyncedAt ? (
-                  <span className="muted">
-                    Last synced {new Date(a.lastSyncedAt).toLocaleString()}
+                  <span className="muted" title={formatAbsoluteTime(a.lastSyncedAt)}>
+                    Last synced {formatRelativeTime(a.lastSyncedAt)}
                   </span>
                 ) : (
                   <span className="muted">Not synced yet</span>

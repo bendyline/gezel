@@ -742,12 +742,19 @@ async function resolveRipgrepExecutable(
   const onPath = await resolveExecutableOnPath('rg', forbiddenRoot, timeoutMs);
   // Windows app aliases and stale package-manager shims can be ordinary files
   // that pass F_OK but still fail at process creation. Probe the exact launch
-  // contract before choosing PATH over the bundled binary.
-  if (onPath && (await canRunRipgrep(onPath, timeoutMs))) return onPath;
+  // contract before choosing PATH over the bundled binary. On POSIX, X_OK plus
+  // a direct spawn is the launch contract already: a separate health process
+  // can be starved under load and make us silently switch to a different rg.
+  if (onPath && (process.platform !== 'win32' || (await canRunRipgrep(onPath, timeoutMs)))) {
+    return onPath;
+  }
   try {
     const { rgPath } = await import('@vscode/ripgrep');
     const bundled = await validateTrustedBundledRipgrep(rgPath);
-    return bundled && (await canRunRipgrep(bundled, timeoutMs)) ? bundled : null;
+    if (!bundled) return null;
+    return process.platform !== 'win32' || (await canRunRipgrep(bundled, timeoutMs))
+      ? bundled
+      : null;
   } catch {
     return null;
   }

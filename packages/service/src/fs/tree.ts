@@ -3,6 +3,7 @@ import { lstat, readFile, readdir, stat } from 'node:fs/promises';
 import { join, normalize } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
 import { realpathContained, safeJoin } from './safe-paths.js';
+import { isOfficeLockName } from './sync-junk.js';
 
 export async function listDirEntries(
   base: string,
@@ -14,7 +15,11 @@ export async function listDirEntries(
   try {
     const entries = await readdir(safePath, { withFileTypes: true });
     return entries
-      .filter((e) => opts.includeHidden || !e.name.startsWith('.'))
+      .filter(
+        (e) =>
+          opts.includeHidden ||
+          (!e.name.startsWith('.') && (e.isDirectory() || !isOfficeLockName(e.name))),
+      )
       .map((e) => ({
         name: e.name,
         path: subpath ? `${subpath}/${e.name}` : e.name,
@@ -42,7 +47,8 @@ export type IgnorePathResolver = (paths: readonly string[]) => Promise<ReadonlyS
  * to its root-level siblings — the workspace's own `index.html` never
  * made it into the UI tree or the prompt listing. Bounded by `maxEntries`
  * and `maxDepth` so external workspaces cannot stall prompt construction.
- * Skips dotfiles, `node_modules`, and vendor/VCS metadata directories.
+ * Skips Office lock files, dotfiles, `node_modules`, and vendor/VCS metadata
+ * directories.
  *
  * Deliberately does not skip user-output dirs (`out`, `dist`, `build`):
  * gezels write deliverables wherever the task names them, and hiding those
@@ -64,11 +70,11 @@ export async function walkDirDetailed(
      */
     skipRootDirs?: ReadonlySet<string>;
     /**
-     * Surface what the walk normally hides: dotfiles, the vendor/VCS
-     * directories, and anything named by `skipRootDirs`. The vendor dirs are
-     * listed but never entered — one `node_modules` would swallow the whole
-     * entry budget and truncate the rest of the tree away, which is worse
-     * than showing the folder without its contents.
+     * Surface what the walk normally hides: Office lock files, dotfiles, the
+     * vendor/VCS directories, and anything named by `skipRootDirs`. The vendor
+     * dirs are listed but never entered — one `node_modules` would swallow the
+     * whole entry budget and truncate the rest of the tree away, which is
+     * worse than showing the folder without its contents.
      */
     includeHidden?: boolean;
   } = {},
@@ -94,6 +100,7 @@ export async function walkDirDetailed(
     for (const e of entries) {
       if (!includeHidden) {
         if (e.name.startsWith('.')) continue;
+        if (!e.isDirectory() && isOfficeLockName(e.name)) continue;
         if (skipDirs.has(e.name)) continue;
         if (item.depth === 0 && e.isDirectory() && opts.skipRootDirs?.has(e.name)) continue;
       }

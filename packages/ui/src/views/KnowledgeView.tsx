@@ -16,7 +16,7 @@ import { navigateToTab } from '../components/nav-actions.js';
 import { consumeOpenKnowledge } from '../components/pending-open-knowledge.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
-import '../styles/17-knowledge.css';
+import '../styles/knowledge.css';
 
 const CATALOG_KEY = 'gezel:knowledge:catalog';
 const DOCUMENT_KEY = 'gezel:knowledge:document';

@@ -1,7 +1,7 @@
 /*
  * Knowledge catalog browser (KnowledgeView) — imported by the lazy view
  * itself, deliberately absent from styles.css, so it ships in the same
- * chunk as the view (the 16-handbook.css precedent).
+ * chunk as the view (the handbook.css precedent).
  *
  * Three panes on one shared surface: catalog + topic rail, document list,
  * reader. The panel's own edges are the only edges — the reader draws no

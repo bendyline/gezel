@@ -24,6 +24,7 @@ import { TaskStepTracker } from '../components/TaskStepTracker.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { Select } from '../primitives/index.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { useEffectiveTheme } from '../theme.js';
 
 type CronOverlap = 'skip' | 'queue' | 'concurrent';
@@ -31,21 +32,6 @@ type CronOverlap = 'skip' | 'queue' | 'concurrent';
 /* A service-run job is only ever held or let run — it can't be marked done or
    canceled by hand, since the schedule decides when it next fires. */
 const SYSTEM_JOB_STATUS_VALUES: Array<Exclude<TaskStatus, 'draft'>> = ['active', 'paused'];
-
-function formatTimestamp(at: string): string {
-  const date = new Date(at);
-  if (Number.isNaN(date.getTime())) return at;
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const min = Math.floor(diffMs / 60_000);
-  if (min < 1) return 'just now';
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}d ago`;
-  return date.toLocaleDateString();
-}
 
 /**
  * Editor for a task's outcomes — the prose statements of what should be
@@ -728,8 +714,12 @@ export function TaskDetail({
                         )}
                         <span>{authorLabel}</span>
                       </span>
-                      <time className="task-note-time muted small" title={n.at}>
-                        {formatTimestamp(n.at)}
+                      <time
+                        className="task-note-time muted small"
+                        dateTime={n.at}
+                        title={formatAbsoluteTime(n.at, n.at)}
+                      >
+                        {formatRelativeTime(n.at, { fallback: n.at })}
                       </time>
                       {step && (
                         <span className="task-note-step muted small">step: {step.name}</span>

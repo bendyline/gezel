@@ -15,6 +15,7 @@ export * from './shared-project.js';
 export * from './growth-cosmetics.js';
 export * from './security/policy.js';
 export * from './gezel-display.js';
+export * from './task-handoff-note.js';
 export * from './external-gezel-model.js';
 export * from './github-urls.js';
 export * from './github-pr-selection.js';

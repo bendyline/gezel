@@ -1,6 +1,7 @@
 import type { GitCommitDetailResponse, GitLogEntry } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../api.js';
+import { formatAbsoluteTime } from '../../relative-time.js';
 import { GitDiffView } from './GitDiffView.js';
 import { splitMultiFileDiff } from './diffModel.js';
 import { GIT_COPY, friendlyDate, plural } from './gitCopy.js';
@@ -81,7 +82,7 @@ export function GitTimelineView({ projectId }: Props) {
                 onClick={() => setSelectedSha(c.sha)}
               >
                 <span className="gh-timeline-subject">{c.subject}</span>
-                <span className="muted small">
+                <span className="muted small" title={formatAbsoluteTime(c.date)}>
                   {c.author} saved {plural(c.filesChanged, 'file')} · {friendlyDate(c.date)}
                 </span>
               </button>
@@ -111,7 +112,7 @@ export function GitTimelineView({ projectId }: Props) {
           <>
             <div className="gh-timeline-detail-header">
               <strong>{detail.subject}</strong>
-              <span className="muted small">
+              <span className="muted small" title={formatAbsoluteTime(detail.date)}>
                 {detail.author} · {friendlyDate(detail.date)}
               </span>
             </div>

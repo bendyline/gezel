@@ -380,6 +380,21 @@ describe('McpBridge', () => {
     expect(missingArtifact).toContain('workspace file exists');
   });
 
+  it('keeps per-task folder writes in the artifacts drawer even with code-like extensions', async () => {
+    // tasks/<num>/ is by-construction working material: an html/css
+    // deliverable there must not be redirected into the workspace the way
+    // a bare index.html is (test above).
+    const written = await bridge.callTool('write_artifact', {
+      path: 'tasks/1/report.html',
+      content: '<!doctype html><html><body><h1>Task report</h1></body></html>',
+    });
+    expect(written).not.toMatch(/ERROR:/);
+    expect(written).not.toContain('project workspace');
+
+    const readBack = await bridge.callTool('read_artifact', { path: 'tasks/1/report.html' });
+    expect(readBack).toContain('<h1>Task report</h1>');
+  });
+
   it('redirects exact expected markdown deliverables from side drawers into the workspace', async () => {
     const expectedBridge = new McpBridge();
     await expectedBridge.start({

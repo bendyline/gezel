@@ -1,28 +1,49 @@
 import { describe, expect, it } from 'vitest';
-import { providerLabel } from './provider-label.js';
+import { deviceLabel, providerLabel } from './provider-label.js';
 
-describe('providerLabel', () => {
-  it('returns the platform-specific label for llama-cpp', () => {
-    // The point of this whole helper: don't show "On-device" on a
-    // Windows PC when we know it's a Windows PC.
-    expect(providerLabel('llama-cpp', 'win32')).toBe('This Windows PC');
-    expect(providerLabel('llama-cpp', 'linux')).toBe('This Linux device');
+describe('deviceLabel', () => {
+  it('names the machine the way its owner does', () => {
+    expect(deviceLabel('darwin')).toBe('This Mac');
+    expect(deviceLabel('win32')).toBe('This PC');
+    expect(deviceLabel('linux')).toBe('This Device');
   });
 
-  it('falls back to "On-device" for llama-cpp on darwin', () => {
-    // MLX owns the "This Mac" slot on Apple Silicon, so llama-cpp on
-    // darwin reads as the cross-platform fallback engine — distinct
-    // enough that the two tabs/pills don't collide. The technical
-    // wording ("On-device") is acceptable here precisely because MLX
-    // is the canonical answer for the platform-specific name.
-    expect(providerLabel('llama-cpp', 'darwin')).toBe('On-device');
-  });
-
-  it('falls back to "On-device" for llama-cpp without a platform hint', () => {
+  it('falls back to the generic name without a platform hint', () => {
     // Plain-web build / unit tests / contexts without the preload
     // bridge land here. Generic name beats wrong name.
-    expect(providerLabel('llama-cpp', undefined)).toBe('On-device');
-    expect(providerLabel('llama-cpp')).toBe('On-device');
+    expect(deviceLabel()).toBe('This Device');
+    expect(deviceLabel(undefined)).toBe('This Device');
+    expect(deviceLabel('freebsd')).toBe('This Device');
+  });
+
+  it('drops the "This" for the compact form', () => {
+    expect(deviceLabel('darwin', { compact: true })).toBe('Mac');
+    expect(deviceLabel('win32', { compact: true })).toBe('Windows');
+    expect(deviceLabel('linux', { compact: true })).toBe('Linux');
+    expect(deviceLabel(undefined, { compact: true })).toBe('Local');
+  });
+});
+
+describe('providerLabel', () => {
+  it('names the machine for llama-cpp', () => {
+    // The point of this whole helper: don't show "On-device" on a
+    // Windows PC when we know it's a Windows PC.
+    expect(providerLabel('llama-cpp', 'win32')).toBe('This PC');
+    expect(providerLabel('llama-cpp', 'linux')).toBe('This Device');
+  });
+
+  it('reads llama-cpp on darwin as "This Mac", same as MLX', () => {
+    // Both are the AI running on the user's Mac, so both wear the
+    // machine's name. When a gezel override puts a second pill in the
+    // header, the model name beside each one is what tells them apart.
+    expect(providerLabel('llama-cpp', 'darwin')).toBe('This Mac');
+  });
+
+  it('falls back to the generic name for llama-cpp without a platform hint', () => {
+    // Plain-web build / unit tests / contexts without the preload
+    // bridge land here. Generic name beats wrong name.
+    expect(providerLabel('llama-cpp', undefined)).toBe('This Device');
+    expect(providerLabel('llama-cpp')).toBe('This Device');
   });
 
   it('reads MLX as "This Mac" regardless of platform', () => {
@@ -56,7 +77,7 @@ describe('providerLabel', () => {
     it('returns just the platform word for llama-cpp', () => {
       expect(providerLabel('llama-cpp', 'win32', { compact: true })).toBe('Windows');
       expect(providerLabel('llama-cpp', 'linux', { compact: true })).toBe('Linux');
-      expect(providerLabel('llama-cpp', 'darwin', { compact: true })).toBe('Local');
+      expect(providerLabel('llama-cpp', 'darwin', { compact: true })).toBe('Mac');
       expect(providerLabel('llama-cpp', undefined, { compact: true })).toBe('Local');
     });
 
@@ -82,7 +103,7 @@ describe('providerLabel', () => {
     it('default (no opts) returns the full form (regression guard)', () => {
       // Existing call sites pass no opts and expect the canonical
       // long form. Pin that the default didn't shift.
-      expect(providerLabel('llama-cpp', 'win32')).toBe('This Windows PC');
+      expect(providerLabel('llama-cpp', 'win32')).toBe('This PC');
       expect(providerLabel('mlx', 'darwin')).toBe('This Mac');
       expect(providerLabel('anthropic-cli')).toBe('Claude CLI');
     });

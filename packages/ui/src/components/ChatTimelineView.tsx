@@ -15,6 +15,9 @@ import type {
 import {
   deriveThreadTitle,
   displayName,
+  handoffHeadline,
+  handoffKindLabel,
+  parseTaskHandoffNote,
   resolveGezelFontFamily,
   resolveGezelFontScale,
 } from '@bendyline/gezel';
@@ -22,6 +25,7 @@ import type { SseStreamOptions } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { isUserCancelledTurnError } from '../error-report.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 import { GezelIcon } from './GezelIcon.js';
 import { getReadonlyGezelMediaProvider } from './GezelMediaProvider.js';
@@ -38,6 +42,7 @@ import {
   type ToolActivity,
   useElapsedSeconds,
 } from './chat-bubbles.js';
+import type { OpenChatReference } from './chat-open-command.js';
 import {
   type OptimisticUserMessage,
   subscribeOptimisticUserMessages,
@@ -437,6 +442,8 @@ export interface ChatTimelineViewProps {
   onWorkspaceReference?: (path: string, projectId?: string) => void;
   /** Passively remembers parsed + tool-touched workspace paths for `/open` MRU suggestions. */
   onWorkspaceSeen?: (path: string, projectId?: string) => void;
+  /** Opens a file path rendered inside a tool row in the References viewer. */
+  onOpenReference?: (reference: OpenChatReference) => void;
   /**
    * Forwarded from {@link ChatReferences} so the right rail's "Task" tab
    * can surface the work context. The timeline feeds it two ways: every
@@ -587,6 +594,7 @@ export function ChatTimelineView({
   onArtifactSeen,
   onWorkspaceReference,
   onWorkspaceSeen,
+  onOpenReference,
   onTaskReference,
   emptyPlaceholder,
   emptyContent,
@@ -3173,6 +3181,7 @@ export function ChatTimelineView({
         {...(m.toolCalls && m.toolCalls.length > 0
           ? { toolCalls: m.toolCalls, projectId: m.projectId }
           : {})}
+        {...(onOpenReference ? { onOpenReference } : {})}
         {...(m.reasoning ? { reasoning: m.reasoning } : {})}
         {...(m.reasoningDurationMs !== undefined
           ? { reasoningDurationMs: m.reasoningDurationMs }
@@ -3244,6 +3253,7 @@ export function ChatTimelineView({
         })()}
         {...(!roleBasedNameOnlyMode && gezel?.role ? { authorRole: gezel.role } : {})}
         segments={slot.segments}
+        {...(onOpenReference ? { onOpenReference } : {})}
         startedAt={slot.startedAt}
         lastActivityAt={slot.lastActivityAt}
         hasProgress={slot.hasProgress}
@@ -3777,7 +3787,7 @@ function renderDivider(args: {
           name={gezelName}
           size={16}
         />
-        <span className="timeline-divider-meta">
+        <span className="timeline-divider-meta" title={formatAbsoluteTime(createdAt)}>
           {gezelName} · {activity}
           {project && <> · in {project.name}</>}
           {' · '}started {formatRelativeTime(createdAt)}
@@ -3807,7 +3817,7 @@ function renderDivider(args: {
         name={gezelName}
         size={16}
       />
-      <span className="timeline-divider-meta">
+      <span className="timeline-divider-meta" title={formatAbsoluteTime(createdAt)}>
         {continuing ? (
           <>
             ↩ continuing with {gezelName}
@@ -3869,7 +3879,7 @@ function renderTerminalSessionDivider(args: {
       <span className="terminal-folder-pill" title="Working folder">
         {folder}
       </span>
-      <span className="timeline-divider-meta">
+      <span className="timeline-divider-meta" title={formatAbsoluteTime(entry.at)}>
         terminal session · started {formatRelativeTime(entry.at)}
       </span>
     </div>
@@ -3956,7 +3966,6 @@ export function ChatStickyHeader({
   gezels: Map<string, GezelSummary>;
 }): React.ReactNode {
   const { userMsg, assistantInfo } = payload;
-  const userPreview = previewifyMarkdown(userMsg.content);
   // For the live-slot case we drive the same `THINKING · Ns · K
   // tools · ····` line the streaming bubble renders. For
   // completed-message case the bubble has no live status — just
@@ -3975,14 +3984,24 @@ export function ChatStickyHeader({
         roleBasedNameOnlyMode,
       )
     : 'Gezel';
+  // A task dispatch seed rides the user role but is the machinery talking —
+  // the bubble labels it System, and the sticky header has to agree or the
+  // attribution flips as the user scrolls. A seed the card parser recognises
+  // goes one better: the header carries the same one-line hand-off sentence
+  // the card shows, instead of the dispatch paragraph truncated mid-word.
+  const handoffNote = userMsg.origin === 'system' ? parseTaskHandoffNote(userMsg.content) : null;
+  const userPreview = handoffNote
+    ? handoffHeadline(handoffNote, assistantName)
+    : previewifyMarkdown(userMsg.content);
   return (
     <div className="chat-sticky-header" aria-live="polite">
       <div className="chat-sticky-header-user" title={userMsg.content}>
-        {/* A task dispatch seed rides the user role but is the machinery
-            talking — the bubble labels it System, and the sticky header
-            has to agree or the attribution flips as the user scrolls. */}
         <span className="chat-sticky-header-author">
-          {userMsg.origin === 'system' ? 'SYSTEM' : 'YOU'}
+          {handoffNote
+            ? handoffKindLabel(handoffNote).toUpperCase()
+            : userMsg.origin === 'system'
+              ? 'SYSTEM'
+              : 'YOU'}
         </span>
         <span className="chat-sticky-header-preview">{userPreview}</span>
       </div>
@@ -4021,23 +4040,6 @@ export function ChatStickyHeader({
       </div>
     </div>
   );
-}
-
-function formatRelativeTime(iso: string): string {
-  try {
-    const then = new Date(iso).getTime();
-    const now = Date.now();
-    const diff = Math.max(0, now - then);
-    const mins = Math.floor(diff / 60_000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  } catch {
-    return iso;
-  }
 }
 
 /**

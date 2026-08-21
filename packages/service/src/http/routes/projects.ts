@@ -54,6 +54,7 @@ import {
   safeJoin,
 } from '../../fs/safe-paths.js';
 import { ProjectDeleteError } from '../../fs/store.js';
+import { isOfficeLockName } from '../../fs/sync-junk.js';
 import { resolveProjectBoekwachter } from '../../gezels/autonomous-roles.js';
 import { GitError, runGit } from '../../git/git.js';
 import { buildEnrichDeps } from '../../index-store/enrich.js';
@@ -669,7 +670,11 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     if (c.req.query('detail') === '1') {
       const files = await ctx.workspaceIndex.readFiles(id);
-      return c.json({ files, total: files.length });
+      const visibleFiles =
+        c.req.query('hidden') === '1'
+          ? files
+          : files.filter((file) => !isOfficeLockName(file.path.split('/').at(-1) ?? ''));
+      return c.json({ files: visibleFiles, total: visibleFiles.length });
     }
     const prefix = c.req.query('prefix') ?? '';
     const paths = await ctx.workspaceIndex.searchWorkspaceFiles(id, prefix);
@@ -960,8 +965,8 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // `stats=1` opts into per-file mtimes; only meaningful with `recursive=1`
     // (the shallow listing has no stats path).
     const withStats = c.req.query('stats') === '1';
-    // `hidden=1` is the file panel's "show hidden files" toggle: dotfiles plus
-    // the reserved shadow/ cache.
+    // `hidden=1` is the file panel's "show hidden files" toggle: Office lock
+    // files, dotfiles, plus the reserved shadow/ cache.
     const includeHidden = c.req.query('hidden') === '1';
     if (recursive) {
       const detailed = await ctx.store.listProjectArtifactsRecursiveDetailed(id, {
@@ -1395,9 +1400,9 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // `stats=1` opts into per-file mtimes; only meaningful with `recursive=1`
     // (the shallow listing has no stats path).
     const withStats = c.req.query('stats') === '1';
-    // `hidden=1` is the file panel's "show hidden files" toggle: dotfiles plus
-    // the vendor directories (node_modules and friends), which are listed but
-    // still never walked into.
+    // `hidden=1` is the file panel's "show hidden files" toggle: Office lock
+    // files, dotfiles, plus vendor directories (node_modules and friends),
+    // which are listed but still never walked into.
     const includeHidden = c.req.query('hidden') === '1';
     try {
       if (recursive) {

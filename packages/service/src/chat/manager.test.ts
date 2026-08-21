@@ -1157,6 +1157,9 @@ describe('ChatManager — task context', () => {
     expect(sys).toContain('Iterate on marketing mocks');
     expect(sys).toContain('Active step:');
     expect(sys).toContain('Design');
+    // The per-task working folder is advertised so even ad-hoc sessions
+    // (no craftbook prompt naming paths) know where working files belong.
+    expect(sys).toContain(`Task artifact folder: \`tasks/${task.num}/\``);
   });
 
   it('injects predecessor-step notes into a newly created successor session', async () => {
@@ -1552,7 +1555,8 @@ describe('ChatManager — resume', () => {
   // empty context and couldn't recall anything the user had just said.
   // Both Ollama and llama-cpp are stateless on the server side (no
   // resume token), so both must seed priorMessages from the persisted
-  // transcript.
+  // transcript. Each case cold-starts, tears down, and rebuilds its MCP
+  // subprocess, so retain a wider budget under full-suite process pressure.
   for (const providerName of ['ollama', 'llama-cpp'] as const) {
     it(`seeds priorMessages on resume for stateless provider: ${providerName}`, async () => {
       const home = await mkdtemp(join(tmpdir(), `gezel-resume-${providerName}-`));
@@ -1608,7 +1612,7 @@ describe('ChatManager — resume', () => {
         await localMgr.shutdown();
         await rm(home, { recursive: true, force: true });
       }
-    });
+    }, 60_000);
   }
 
   it('strips `<think>` / `<|channel>` markup from assistant priorMessages before replay', async () => {

@@ -57,7 +57,7 @@ function getPlatformPillLabel(name: QueueProviderName): string {
 }
 // Short form ("Windows" / "Linux" / "Mac") used by the chip's
 // container-query fallback when the titlebar slot is too narrow for
-// the full label. CSS in styles/01-app-shell.css picks which of the two
+// the full label. CSS in styles/app-shell.css picks which of the two
 // spans is visible — see `.queue-meter-chip-label-full` / `-short` rules.
 function getCompactPillLabel(name: QueueProviderName): string {
   return providerLabel(name, window.__GEZEL__?.platform, { compact: true });
@@ -353,7 +353,7 @@ function QueueChipIdentity({
     <>
       <span className="queue-meter-chip-label">
         {/* Full + short labels rendered together; the chip's container
-            query in styles/01-app-shell.css shows whichever fits. The full
+            query in styles/app-shell.css shows whichever fits. The full
             provider label remains available on hover in compact mode. */}
         <span className="queue-meter-chip-label-full" title={getPlatformPillLabel(provider)}>
           {getPlatformPillLabel(provider)}

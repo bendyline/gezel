@@ -163,16 +163,19 @@ describe('MessageBubble nudge chip', () => {
 
 describe('MessageBubble system attribution', () => {
   /**
-   * Task dispatch seeds and step handoffs arrive as user-role messages, but
-   * the person never wrote them — attributing "call `advance_task_step` to
-   * hand off" to "You" reads as a bug on the app's flagship screen.
+   * Task dispatch seeds, step handoffs and page reactions arrive as user-role
+   * messages, but the person never wrote them — attributing "call
+   * `advance_task_step` to hand off" to "You" reads as a bug on the app's
+   * flagship screen. A recognised *dispatch seed* goes further and renders as
+   * the hand-off card (chat-bubbles.handoff-note.test.tsx); this is the
+   * fallback every other machine turn takes.
    */
   it('labels a machine-authored user turn System rather than You', () => {
     const { container } = render(
       // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.
       <MessageBubble
         role="user"
-        content="The previous step has been completed and handed step `oversight` to you."
+        content="The user just opened oversight.md in the workspace."
         authorLabel="You"
         authorIcon={null}
         origin="system"

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-import { ToolHistoryExpando, unresolvedToolFailures } from './chat-bubbles.js';
+import { describe, expect, it, vi } from 'vitest';
+import { StreamingBubble, ToolHistoryExpando, unresolvedToolFailures } from './chat-bubbles.js';
 
 describe('ToolHistoryExpando result details', () => {
   it('shows both the request and a short response in details', () => {
@@ -80,6 +80,81 @@ describe('ToolHistoryExpando result details', () => {
 
     fireEvent.mouseLeave(screen.getByRole('button', { name: 'details' }));
     expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+});
+
+describe('tool file links', () => {
+  it('opens a persisted artifact path in the References viewer', () => {
+    const onOpenReference = vi.fn();
+    render(
+      <ToolHistoryExpando
+        projectId="slides"
+        onOpenReference={onOpenReference}
+        tools={[
+          {
+            name: 'read_artifact',
+            durationMs: 42,
+            success: true,
+            path: 'powerpoint/task-11/sources.md',
+            argsSummary: 'Read a note (powerpoint/task-11/sources.md)',
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('1 step'));
+    fireEvent.click(screen.getByRole('button', { name: 'powerpoint/task-11/sources.md' }));
+
+    expect(onOpenReference).toHaveBeenCalledWith({
+      key: 'tool:artifact:slides:powerpoint/task-11/sources.md',
+      kind: 'artifact',
+      path: 'powerpoint/task-11/sources.md',
+      projectId: 'slides',
+    });
+  });
+
+  it('links successful live workspace paths without guessing at unrelated summaries', () => {
+    const onOpenReference = vi.fn();
+    render(
+      <StreamingBubble
+        authorLabel="Ada"
+        authorIcon={null}
+        startedAt={null}
+        onOpenReference={onOpenReference}
+        segments={[
+          {
+            kind: 'tool',
+            tool: {
+              name: 'read_file',
+              durationMs: 12,
+              success: true,
+              projectId: 'website',
+              path: 'src/index.ts',
+              argsSummary: 'Read src/index.ts',
+            },
+          },
+          {
+            kind: 'tool',
+            tool: {
+              name: 'message_gezel',
+              durationMs: 15,
+              success: true,
+              path: 'src/not-a-file-link.ts',
+              argsSummary: 'Asked Maya about src/not-a-file-link.ts',
+            },
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'src/index.ts' }));
+    expect(onOpenReference).toHaveBeenCalledWith({
+      key: 'tool:workspace:website:src/index.ts',
+      kind: 'workspace',
+      path: 'src/index.ts',
+      projectId: 'website',
+    });
+    expect(screen.queryByRole('button', { name: 'src/not-a-file-link.ts' })).toBeNull();
   });
 });
 
