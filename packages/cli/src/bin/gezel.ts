@@ -39,6 +39,7 @@ import {
   parseCliEngagementMode,
 } from '../engagement-mode.js';
 import { floatOpt, intOpt, resolvePromptText, saveArtifact } from '../generate.js';
+import { resolveKnowledgeInstallSource } from '../knowledge-install.js';
 import {
   formatNativeList,
   formatNativeStatus,
@@ -800,12 +801,12 @@ knowledge
 knowledge
   .command('install <source>')
   .description('Install a .gezk catalog into the running gezel (file path or URL)')
-  .action(async (source: string) => {
+  .option('--sha256 <digest>', 'expected SHA-256 digest (required for URL installs)')
+  .action(async (source: string, opts: { sha256?: string }) => {
+    const installSource = resolveKnowledgeInstallSource(source, opts.sha256);
     const client = await connectOwned(cliGlobals());
-    const isUrl = /^https?:\/\//i.test(source);
-    const { resolve: resolvePath } = await import('node:path');
     const { jobId } = await client.installKnowledgeCatalog({
-      source: isUrl ? { kind: 'url', url: source } : { kind: 'file', path: resolvePath(source) },
+      source: installSource,
     });
     for (;;) {
       const job = await client.getKnowledgeJob(jobId);
