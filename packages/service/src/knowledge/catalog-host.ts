@@ -4,7 +4,8 @@
  * (tests, and the fallback when the worker cannot boot) and the worker
  * host (worker-host.ts), which confines node:sqlite's synchronous scans to
  * a dedicated thread so a 100 ms shard scan never stalls the daemon loop
- * (gezk-format-v1.md §9).
+ * (gezk-format-v1.md §9). The in-process implementation is test/CLI-only;
+ * production fails closed if its worker becomes unavailable.
  */
 
 import type {

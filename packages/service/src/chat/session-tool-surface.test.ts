@@ -589,6 +589,105 @@ describe('resolveSessionToolSurface — Meester routing precedence', () => {
     expect(allowlist?.has('craftbook_read')).toBe(true);
     expect(allowlist?.has('craftbook_write')).toBe(true);
   });
+
+  // The clamp answers "a user asked a coordinator to BUILD something". A
+  // coordinator already assigned a craftbook step was routed by the step
+  // itself, and clamping there swaps its write channel for kickoff macros —
+  // leaving `message_gezel` as the only survivor, so the model tries to
+  // delegate work it was itself handed.
+  //
+  // Wild-caught on the bundled night-shift oversight step (ornith-9b-q4):
+  // the runtime's OWN handoff seed trips `asksForBuild` on "make" and
+  // `namesDeliverable` on "tool" — no user request involved. The roster went
+  // 10 → 5, `write_artifact` vanished while the step demanded
+  // `artifacts/night-shift-report.md`, the Meester invented a `writer` gezel
+  // to hand it to, 400'd twice, and advanced the step on a report that was
+  // never written.
+  it('does not clamp a coordinator executing a step that declares a deliverable', async () => {
+    const seed =
+      'The previous step has been completed and handed step `oversight` of task default/1 to ' +
+      'you. Follow the step instructions already in your prompt — make the first tool call they ' +
+      'name this turn. Append focused notes with `write_task_note` as you go so the next gezel ' +
+      'can pick up where you left off. When the step is done, call `advance_task_step` to hand ' +
+      "off to whoever's next.";
+    const clamps: string[] = [];
+
+    const { allowlist, projectOrchestrationConstrained } = await resolveSessionToolSurface({
+      surface: 'bridge',
+      session: {
+        id: 'night-shift-session',
+        gezelId: 'linnea',
+        projectId: 'default',
+        providerName: 'llama-cpp',
+        title: '',
+        messages: [],
+        taskRef: 'default/1',
+        stepId: 'oversight',
+        createdAt: '2026-08-21T00:00:00.000Z',
+        lastActivityAt: '2026-08-21T00:00:00.000Z',
+      } as unknown as ChatSession,
+      role: 'Meester',
+      mode: 'always',
+      provider: 'llama-cpp',
+      modelId: 'ornith-9b-q4',
+      parameterSize: '9B',
+      toolsetsGroupOverride: [],
+      githubLinked: false,
+      isGitRepo: false,
+      tier: 'small',
+      activeStep: {
+        id: 'oversight',
+        name: 'Review active projects',
+        prompt: 'write ONE consolidated report to artifacts/night-shift-report.md',
+        advanceWhen: { file: 'night-shift-report.md', artifact: true, requireChange: true },
+        next: 'oversight',
+      } as never,
+      latestUserMessage: seed,
+      onClamp: (kind) => clamps.push(kind),
+    });
+
+    expect(projectOrchestrationConstrained).toBe(false);
+    expect(clamps).not.toContain('project-orchestration');
+    // The drawer is this step's only write channel — the Meester has no
+    // workspace-fs-write group.
+    expect(allowlist?.has('write_artifact')).toBe(true);
+    expect(allowlist?.has('read_artifact')).toBe(true);
+    // Step progression survives, as it did before.
+    expect(allowlist?.has('advance_task_step')).toBe(true);
+    expect(allowlist?.has('write_task_note')).toBe(true);
+  });
+
+  // The exemption is scoped to step execution: ordinary coordinator chat
+  // must still route a build request instead of building it.
+  it('still clamps a genuine build request outside a step-scoped session', async () => {
+    const prompt = 'Build me a tetris game as an HTML app.';
+    const { allowlist, projectOrchestrationConstrained } = await resolveSessionToolSurface({
+      surface: 'bridge',
+      session: {
+        id: 'chat-session',
+        gezelId: 'linnea',
+        projectId: 'default',
+        providerName: 'llama-cpp',
+        title: prompt,
+        messages: [{ role: 'user', content: prompt, at: '2026-08-21T00:00:00.000Z' }],
+        createdAt: '2026-08-21T00:00:00.000Z',
+        lastActivityAt: '2026-08-21T00:00:00.000Z',
+      } as ChatSession,
+      role: 'Meester',
+      mode: 'always',
+      provider: 'llama-cpp',
+      modelId: 'ornith-9b-q4',
+      parameterSize: '9B',
+      toolsetsGroupOverride: [],
+      githubLinked: false,
+      isGitRepo: false,
+      tier: 'small',
+      latestUserMessage: prompt,
+    });
+
+    expect(projectOrchestrationConstrained).toBe(true);
+    expect(allowlist?.has('write_file')).toBe(false);
+  });
 });
 
 describe('resolveSessionToolSurface — project retrieval-first route', () => {

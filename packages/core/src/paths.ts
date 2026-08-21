@@ -2,6 +2,7 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { assertSafeEntityId } from './entity-id.js';
+import { KnowledgeIdSchema, KnowledgeVersionSchema } from './schemas/knowledge.js';
 
 /**
  * Marker written by the privileged installer after a legacy machine-home
@@ -629,11 +630,17 @@ export function knowledgeCatalogVersionDir(
   version: string,
   contentDigest: string,
 ): string {
+  const publisher = KnowledgeIdSchema.parse(publisherId);
+  const catalog = KnowledgeIdSchema.parse(catalogId);
+  const catalogVersion = KnowledgeVersionSchema.parse(version);
+  if (!/^[0-9a-f]{64}$/i.test(contentDigest)) {
+    throw new Error('knowledge catalog content digest must be a sha256');
+  }
   return join(
     knowledgeCatalogsDir(root),
-    publisherId,
-    catalogId,
-    version,
+    publisher,
+    catalog,
+    catalogVersion,
     contentDigest.slice(0, 16),
   );
 }

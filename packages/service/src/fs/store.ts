@@ -5244,6 +5244,58 @@ export class Store {
     this.notifySessionChange({ type: 'write', gezelId: session.gezelId, sessionId: session.id });
   }
 
+  /** Per-session chains serializing {@link mutateSession}'s read-modify-writes. */
+  private readonly sessionMutationChains = new Map<string, Promise<void>>();
+
+  /**
+   * Serialized read-modify-write on one session file.
+   *
+   * A bare `getSession` → mutate → `writeSession` is not safe against a
+   * concurrent one: both callers write a full replacement of the record,
+   * and whichever rename lands last silently drops the other's edit.
+   * Re-reading right before the write does NOT close this — it only
+   * protects against writes that landed *before* the read. Wild-caught as
+   * a full-suite-only flake in `questions.test.ts`: background memory
+   * extraction read the record, the question route stamped
+   * `pendingQuestionId` and wrote, then extraction's `extractedUpTo`
+   * write clobbered the stamp.
+   *
+   * Callers hold the lock for the whole cycle. `mutate` edits the record
+   * in place; returning exactly `false` skips the write (nothing to
+   * change, or the record moved out from under the caller). The return
+   * value reports whether anything was persisted. Note this serializes
+   * only mutations that go through here — a caller writing a long-lived
+   * in-memory record (ChatManager's live turn state) still overwrites
+   * wholesale.
+   */
+  async mutateSession(
+    gezelId: string,
+    sessionId: string,
+    mutate: (session: ChatSession) => unknown,
+  ): Promise<boolean> {
+    const key = `${gezelId}/${sessionId}`;
+    const prev = this.sessionMutationChains.get(key) ?? Promise.resolve();
+    const run = prev.then(async () => {
+      const session = await this.getSession(gezelId, sessionId);
+      if (!session) return false;
+      if ((await mutate(session)) === false) return false;
+      await this.writeSession(session);
+      return true;
+    });
+    // The chain tail must never carry a rejection — a failed mutation
+    // would otherwise poison every queued mutation behind it. The caller
+    // still sees the error through `run`.
+    const next = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.sessionMutationChains.set(key, next);
+    void next.then(() => {
+      if (this.sessionMutationChains.get(key) === next) this.sessionMutationChains.delete(key);
+    });
+    return run;
+  }
+
   /**
    * Read + JSON-parse + Zod-validate a session file. Returns null if the
    * file is missing (silent), and logs a warn before returning null when
@@ -6165,15 +6217,15 @@ export class Store {
     sessionId: string,
     questionId: string,
   ): Promise<void> {
-    const session = await this.getSession(gezelId, sessionId);
-    if (!session) return;
-    for (let i = session.messages.length - 1; i >= 0; i--) {
-      const m = session.messages[i];
-      if (!m || m.role !== 'assistant') continue;
-      m.pendingQuestionId = questionId;
-      await this.writeSession(session);
-      return;
-    }
+    await this.mutateSession(gezelId, sessionId, (session) => {
+      for (let i = session.messages.length - 1; i >= 0; i--) {
+        const m = session.messages[i];
+        if (!m || m.role !== 'assistant') continue;
+        m.pendingQuestionId = questionId;
+        return true;
+      }
+      return false;
+    });
   }
 
   async listTaskNotes(projectId: string, num: number, stepId?: string): Promise<TaskNote[]> {

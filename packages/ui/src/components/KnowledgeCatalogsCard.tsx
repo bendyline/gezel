@@ -34,6 +34,7 @@ interface InstallProgress {
 export function KnowledgeCatalogsCard() {
   const [catalogs, setCatalogs] = useState<KnowledgeCatalogStatus[] | null>(null);
   const [sourceDraft, setSourceDraft] = useState('');
+  const [digestDraft, setDigestDraft] = useState('');
   const [install, setInstall] = useState<InstallProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
@@ -82,6 +83,7 @@ export function KnowledgeCatalogsCard() {
             } else {
               setInstall(null);
               setSourceDraft('');
+              setDigestDraft('');
             }
             await refresh();
             notifyChanged();
@@ -106,9 +108,16 @@ export function KnowledgeCatalogsCard() {
       if (!trimmed) return;
       setError(null);
       const isUrl = /^https?:\/\//i.test(trimmed);
+      const expectedSha256 = digestDraft.trim().toLowerCase();
+      if (isUrl && !/^[a-f0-9]{64}$/.test(expectedSha256)) {
+        setError('Paste the publisher-provided SHA-256 digest before installing a URL.');
+        return;
+      }
       try {
         const { jobId } = await api.installKnowledgeCatalog({
-          source: isUrl ? { kind: 'url', url: trimmed } : { kind: 'file', path: trimmed },
+          source: isUrl
+            ? { kind: 'url', url: trimmed, expectedSha256 }
+            : { kind: 'file', path: trimmed },
         });
         setInstall({ jobId, phase: 'starting', pct: null, error: null });
         pollJob(jobId);
@@ -116,7 +125,7 @@ export function KnowledgeCatalogsCard() {
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [pollJob],
+    [digestDraft, pollJob],
   );
 
   const browseForArchive = useCallback(async () => {
@@ -188,12 +197,38 @@ export function KnowledgeCatalogsCard() {
           )}
           <button
             type="button"
-            disabled={!sourceDraft.trim() || (install !== null && !install.error)}
+            disabled={
+              !sourceDraft.trim() ||
+              (/^https?:\/\//i.test(sourceDraft.trim()) &&
+                !/^[a-fA-F0-9]{64}$/.test(digestDraft.trim())) ||
+              (install !== null && !install.error)
+            }
             onClick={() => void startInstall(sourceDraft)}
           >
             Install
           </button>
         </div>
+        {/^https?:\/\//i.test(sourceDraft.trim()) && (
+          <div style={{ marginTop: '0.5rem' }}>
+            <input
+              type="text"
+              style={{ width: '100%' }}
+              placeholder="Publisher SHA-256 digest (64 hexadecimal characters)"
+              aria-label="Catalog SHA-256 digest"
+              value={digestDraft}
+              spellCheck={false}
+              autoCapitalize="none"
+              onChange={(e) => setDigestDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void startInstall(sourceDraft);
+              }}
+            />
+            <p className="muted small" style={{ margin: '0.35rem 0 0' }}>
+              Remote catalogs are installed only when their bytes match a SHA-256 digest you
+              received from the publisher.
+            </p>
+          </div>
+        )}
         {install && !install.error && (
           <div className="ollama-pull" style={{ marginTop: '0.5rem' }}>
             <div className="ollama-pull-head">

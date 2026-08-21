@@ -6,6 +6,7 @@ import {
   gezelDir,
   gezelHome,
   gezelPaths,
+  knowledgeCatalogVersionDir,
   machineSharedHome,
   machineSharedMarkerFile,
   projectDir,
@@ -102,6 +103,23 @@ describe('projectDir', () => {
     (id) => {
       expect(() => projectDir(ROOT, id)).toThrow(/project id/);
       expect(() => projectPrivateDir(ROOT, id)).toThrow(/project id/);
+    },
+  );
+});
+
+describe('knowledgeCatalogVersionDir', () => {
+  it('keeps a valid immutable coordinate below the knowledge root', () => {
+    expect(knowledgeCatalogVersionDir(ROOT, 'publisher', 'catalog', '1.0.0', 'a'.repeat(64))).toBe(
+      join(ROOT, 'knowledge', 'catalogs', 'publisher', 'catalog', '1.0.0', 'a'.repeat(16)),
+    );
+  });
+
+  it.each(['../../outside', '..\\..\\outside', 'nested/version'])(
+    'rejects a traversal-shaped catalog version: %s',
+    (version) => {
+      expect(() =>
+        knowledgeCatalogVersionDir(ROOT, 'publisher', 'catalog', version, 'a'.repeat(64)),
+      ).toThrow();
     },
   );
 });

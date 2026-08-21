@@ -16,8 +16,17 @@ import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { KnowledgeMachineInventory, TrustedKnowledgeCoordinate } from '@bendyline/gezel';
-import { KnowledgeMachineInventorySchema, createLogger } from '@bendyline/gezel';
-import { extractGezkVerified, validateExtractedCatalog } from '@bendyline/gezel-knowledge';
+import {
+  KnowledgeMachineInventorySchema,
+  TrustedKnowledgeCoordinateSchema,
+  createLogger,
+} from '@bendyline/gezel';
+import {
+  extractGezkVerified,
+  readGezkManifest,
+  validateExtractedCatalog,
+} from '@bendyline/gezel-knowledge';
+import { isPathInside, realpathContained } from '../fs/safe-paths.js';
 import { SHARED_ASSETS_ENV } from '../models/storage-roots.js';
 
 const log = createLogger('knowledge-assets');
@@ -50,12 +59,13 @@ export function sharedKnowledgeVersionDir(
   root: string,
   coordinate: TrustedKnowledgeCoordinate,
 ): string {
+  const trusted = TrustedKnowledgeCoordinateSchema.parse(coordinate);
   return join(
     root,
-    coordinate.publisherId,
-    coordinate.catalogId,
-    coordinate.version,
-    coordinate.expectedDigest.slice(0, 16),
+    trusted.publisherId,
+    trusted.catalogId,
+    trusted.version,
+    trusted.expectedDigest.slice(0, 16),
   );
 }
 
@@ -110,7 +120,9 @@ export function createKnowledgeAssetsBroker(
   const ensureImpl = async (coordinate: TrustedKnowledgeCoordinate): Promise<EnsureOutcome> => {
     if (!root)
       return { status: 'error', code: 'unavailable', error: 'shared asset store not configured' };
+    await mkdir(root, { recursive: true });
     const target = sharedKnowledgeVersionDir(root, coordinate);
+    await assertKnowledgePathContained(root, target);
     if (await stat(join(target, 'manifest.json')).catch(() => null)) {
       return { status: 'ready', path: target };
     }
@@ -123,11 +135,26 @@ export function createKnowledgeAssetsBroker(
       };
     }
 
+    const manifest = await readGezkManifest(archive).catch(() => null);
+    if (
+      !manifest ||
+      manifest.publisher.id !== coordinate.publisherId ||
+      manifest.id !== coordinate.catalogId ||
+      manifest.version !== coordinate.version
+    ) {
+      return {
+        status: 'error',
+        code: 'invalid',
+        error: 'archive manifest identity does not match the trusted coordinate',
+      };
+    }
+
     const staging = `${target}.staging-${process.pid}-${randomUUID()}`;
     try {
       await mkdir(dirname(target), { recursive: true });
+      await assertKnowledgePathContained(root, target);
       await extractGezkVerified(archive, staging);
-      const report = await validateExtractedCatalog(staging, { deep: false });
+      const report = await validateExtractedCatalog(staging, { deep: true });
       if (!report.ok) {
         const failed = report.checks.find((c) => !c.ok);
         return {
@@ -136,6 +163,7 @@ export function createKnowledgeAssetsBroker(
           error: `catalog failed validation: ${failed?.name}${failed?.detail ? ` (${failed.detail})` : ''}`,
         };
       }
+      await assertKnowledgePathContained(root, target);
       await rm(target, { recursive: true, force: true });
       await rename(staging, target);
     } catch (err) {
@@ -174,32 +202,39 @@ export function createKnowledgeAssetsBroker(
   return {
     available: () => root !== null,
     ensure: (coordinate) => {
-      const key = `${coordinate.publisherId}/${coordinate.catalogId}/${coordinate.version}/${coordinate.expectedDigest}`;
+      const trusted = TrustedKnowledgeCoordinateSchema.parse(coordinate);
+      const key = `${trusted.publisherId}/${trusted.catalogId}/${trusted.version}/${trusted.expectedDigest}`;
       let promise = inFlight.get(key);
       if (!promise) {
-        promise = ensureImpl(coordinate).finally(() => inFlight.delete(key));
+        promise = ensureImpl(trusted).finally(() => inFlight.delete(key));
         inFlight.set(key, promise);
       }
       return promise;
     },
     status: async (coordinate) => {
       if (!root) return { installed: false };
-      const target = sharedKnowledgeVersionDir(root, coordinate);
+      const trusted = TrustedKnowledgeCoordinateSchema.parse(coordinate);
+      await mkdir(root, { recursive: true });
+      const target = sharedKnowledgeVersionDir(root, trusted);
+      await assertKnowledgePathContained(root, target);
       return { installed: Boolean(await stat(join(target, 'manifest.json')).catch(() => null)) };
     },
     inventory: readInventory,
     reclaim: async (coordinate) => {
       if (!root) return { removed: false };
-      const target = sharedKnowledgeVersionDir(root, coordinate);
+      const trusted = TrustedKnowledgeCoordinateSchema.parse(coordinate);
+      await mkdir(root, { recursive: true });
+      const target = sharedKnowledgeVersionDir(root, trusted);
+      await assertKnowledgePathContained(root, target);
       const existed = Boolean(await stat(target).catch(() => null));
       await rm(target, { recursive: true, force: true }).catch(() => {});
       const inventory = await readInventory();
       inventory.catalogs = inventory.catalogs.filter(
         (c) =>
           !(
-            c.publisherId === coordinate.publisherId &&
-            c.catalogId === coordinate.catalogId &&
-            c.version === coordinate.version
+            c.publisherId === trusted.publisherId &&
+            c.catalogId === trusted.catalogId &&
+            c.version === trusted.version
           ),
       );
       await writeInventory(inventory);
@@ -211,6 +246,9 @@ export function createKnowledgeAssetsBroker(
 /** chmod 0o644/0o755 through the tree + Windows inherited-ACL reset. */
 async function makeSharedKnowledgeReadable(target: string, env: NodeJS.ProcessEnv): Promise<void> {
   if (env.GEZEL_SYSTEM_SCOPE !== '1') return;
+  const root = sharedKnowledgeRoot(env);
+  if (!root) throw new Error('shared asset store not configured');
+  await assertKnowledgePathContained(root, target);
   const { chmod, lstat, readdir: readDir } = await import('node:fs/promises');
   const walk = async (dir: string): Promise<void> => {
     await chmod(dir, 0o755);
@@ -250,6 +288,12 @@ async function treeBytes(dir: string): Promise<number> {
   };
   await walk(dir);
   return total;
+}
+
+async function assertKnowledgePathContained(root: string, target: string): Promise<void> {
+  if (!isPathInside(target, root) || !(await realpathContained(root, target))) {
+    throw new Error(`refusing a catalog path outside the shared knowledge root: ${target}`);
+  }
 }
 
 async function hashFile(path: string): Promise<string> {

@@ -581,6 +581,11 @@ FunctionEnd
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\runtime" "Gezel runtime directory" SkipNssm
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\assets" "Gezel public asset directory" SkipNssm
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\assets\models" "Gezel shared model directory" SkipNssm
+  ; Exact-path checks are not enough for a preserved asset tree. A planted
+  ; descendant junction would make the elevated ownership/ACL sweep below
+  ; operate outside ProgramData even though the assets container itself is a
+  ; normal directory. Refuse the machine broker before any recursive icacls.
+  !insertmacro RejectReparseDescendants "${GEZEL_DATA_DIR}\assets" "Gezel shared asset store" SkipNssm
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\logs" "Gezel logs directory" SkipNssm
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\tmp" "Gezel temporary directory" SkipNssm
   !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\appdata" "Gezel roaming application-data directory" SkipNssm
@@ -769,7 +774,10 @@ FunctionEnd
 
   ; Enabling autostart is deliberately the LAST mutating step: the service
   ; becomes startable only after every account/SID/privilege/ACL control
-  ; above succeeded.
+  ; above succeeded. Re-check the complete writable asset boundary here too:
+  ; this closes the interval between the pre-sanitize check and startup, and
+  ; prevents a descendant reparse point from ever becoming broker-writable.
+  !insertmacro RejectReparseDescendants "${GEZEL_DATA_DIR}\assets" "Gezel shared asset store" RemoveUnsafeGezelService
   nsExec::ExecToLog '"$SYSDIR\sc.exe" config ${GEZEL_SERVICE_NAME} start= auto'
   Pop $0
   ${If} $0 != 0
@@ -825,6 +833,10 @@ FunctionEnd
   SetRegView 32
   Goto DoneNssm
 
+  RemoveUnsafeGezelService:
+  !insertmacro RemoveGezelService
+  Goto SkipNssm
+
   SkipNssm:
   ; Record that this install fell back to the per-user daemon.
   ;
@@ -875,6 +887,7 @@ FunctionEnd
   ${If} ${FileExists} "${GEZEL_DATA_DIR}\assets\*.*"
     !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\assets" "Gezel public asset directory" SkipUninstallRuntimeCleanup
     !insertmacro RejectReparsePoint "${GEZEL_DATA_DIR}\assets\models" "Gezel shared model directory" SkipUninstallRuntimeCleanup
+    !insertmacro RejectReparseDescendants "${GEZEL_DATA_DIR}\assets" "Gezel shared asset store" SkipUninstallRuntimeCleanup
     !insertmacro TakeTrustedOwnership "${GEZEL_DATA_DIR}\assets" "its preserved shared model store" SkipUninstallRuntimeCleanup
     !insertmacro SanitizeDescendants "${GEZEL_DATA_DIR}\assets" "preserved shared model"
     nsExec::ExecToLog '"$SYSDIR\icacls.exe" "${GEZEL_DATA_DIR}\assets" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-32-545:(OI)(CI)(RX)" /remove:g "*S-1-5-11" "*S-1-1-0" "*S-1-5-19" /L'

@@ -5,18 +5,23 @@
  * binary blobs in the repo.
  */
 
+import { mkdtemp, rm, truncate, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { describe, expect, it } from 'vitest';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   CLIP_MEAN,
   CLIP_STD,
   type ImageDecodeError,
+  MAX_IMAGE_BYTES,
   MAX_IMAGE_PIXELS,
   applyOrientation,
   centerCrop,
   decodeImage,
   normalizeToCHW,
   preprocessForClip,
+  readBoundedImageFile,
   resizeBilinear,
   resizeShortestSide,
   rgbaToRgb,
@@ -29,6 +34,11 @@ const UPNG = (() => {
   return mod.default ?? mod;
 })();
 const jpeg = cjsRequire('jpeg-js') as typeof import('jpeg-js');
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
 
 function pngOf(rgba: Uint8Array, width: number, height: number): Buffer {
   // cnum 0 = lossless truecolor.
@@ -106,6 +116,25 @@ describe('decodeImage', () => {
     // Some corruption survives inflate into garbage pixels — either outcome
     // is fine, but a thrown error must carry the terminal reason.
     if (caught) expect((caught as ImageDecodeError).reason).toBe('decode-failed');
+  });
+});
+
+describe('readBoundedImageFile', () => {
+  it('reads a normal file through its bounded descriptor path', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-image-read-'));
+    tempDirs.push(dir);
+    const path = join(dir, 'small.png');
+    await writeFile(path, Buffer.from('small'));
+    await expect(readBoundedImageFile(path)).resolves.toEqual(Buffer.from('small'));
+  });
+
+  it('rejects an oversized sparse file before allocating or reading its payload', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-image-read-'));
+    tempDirs.push(dir);
+    const path = join(dir, 'oversized.png');
+    await writeFile(path, Buffer.alloc(0));
+    await truncate(path, MAX_IMAGE_BYTES + 1);
+    await expect(readBoundedImageFile(path)).rejects.toMatchObject({ reason: 'too-large' });
   });
 });
 

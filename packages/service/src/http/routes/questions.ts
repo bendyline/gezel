@@ -73,8 +73,8 @@ export function questionRoutes(ctx: ServiceContext): Hono {
     // the chat UI can attach the card to the bubble that asked. Best
     // effort — the panel + badge surfaces still work without the
     // in-chat correlation.
-    await ctx.store
-      .stampPendingQuestionOnLastAssistant(question.gezelId, question.sessionId, question.id)
+    await ctx.chat
+      .stampPendingQuestion(question.gezelId, question.sessionId, question.id)
       .catch((err) => {
         log.warn('[questions] stamp pendingQuestionId failed:', err);
       });

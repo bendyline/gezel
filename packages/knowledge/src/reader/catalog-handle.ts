@@ -10,10 +10,11 @@
  * and tests call it directly.
  */
 
-import { dirname, join, normalize, resolve, sep } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { brotliDecompressSync } from 'node:zlib';
 import {
+  MAX_KNOWLEDGE_DOCUMENT_BYTES,
   RERANK_FINAL_K,
   ROUTER_DB_PATH,
   ROUTE_SHARDS_EXPLICIT,
@@ -101,20 +102,57 @@ export class CatalogHandle {
     this.connections.clear();
   }
 
+  /** Integrity check for the router connection, used by deep validation. */
+  routerQuickCheck(): string {
+    const row = this.router.db.prepare('PRAGMA quick_check').get() as {
+      quick_check?: string;
+    };
+    return row.quick_check ?? 'no result';
+  }
+
+  /** Metadata-only body profile; SQLite's length() does not materialize blobs. */
+  documentBodyProfile(): {
+    maxRawBytes: number;
+    maxCompressedBytes: number;
+    unknownCodecs: number;
+  } {
+    const row = this.router.db
+      .prepare(
+        `SELECT
+           COALESCE(MAX(CASE WHEN body_codec = 'none' THEN length(body_blob) ELSE 0 END), 0) AS max_raw,
+           COALESCE(MAX(CASE WHEN body_codec = 'br' THEN length(body_blob) ELSE 0 END), 0) AS max_br,
+           COALESCE(SUM(CASE WHEN body_codec IN ('none', 'br') THEN 0 ELSE 1 END), 0) AS unknown
+         FROM documents`,
+      )
+      .get() as { max_raw: number | bigint; max_br: number | bigint; unknown: number | bigint };
+    return {
+      maxRawBytes: Number(row.max_raw),
+      maxCompressedBytes: Number(row.max_br),
+      unknownCodecs: Number(row.unknown),
+    };
+  }
+
   private shardDb(shard: ShardInfo): DatabaseSync {
     let conn = this.connections.get(shard.path);
     if (!conn) {
       // Shard paths come from the catalog's own router.db, but confine them
       // to the catalog root anyway — defense in depth on a signed artifact.
-      const abs = resolve(this.rootDir, shard.path);
-      const rootWithSep = normalize(this.rootDir) + sep;
-      if (!abs.startsWith(rootWithSep) && normalize(abs) !== normalize(this.rootDir)) {
-        throw new CatalogOpenError(`shard path escapes catalog root: ${shard.path}`, 'corrupt');
-      }
+      const abs = this.resolveCatalogPath(shard.path);
       conn = openCatalogDatabase(abs);
       this.connections.set(shard.path, conn);
     }
     return conn.db;
+  }
+
+  /** Resolve a manifest/router path without allowing it to escape the catalog. */
+  resolveCatalogPath(path: string): string {
+    const root = resolve(this.rootDir);
+    const target = resolve(root, path);
+    const rel = relative(root, target);
+    if (rel.startsWith('..') || isAbsolute(rel)) {
+      throw new CatalogOpenError(`path escapes catalog root: ${path}`, 'corrupt');
+    }
+    return target;
   }
 
   // ── browsing (the shipped table of contents) ──────────────────────────────
@@ -180,10 +218,28 @@ export class CatalogHandle {
       .get(id) as Record<string, unknown> | undefined;
     if (!row) return null;
     const blob = row.body_blob as Uint8Array;
-    const markdown =
-      row.body_codec === 'br'
-        ? brotliDecompressSync(blob).toString('utf8')
-        : Buffer.from(blob).toString('utf8');
+    if (blob.byteLength > MAX_KNOWLEDGE_DOCUMENT_BYTES + 1024) {
+      throw new CatalogOpenError(`document body exceeds the stored-size limit: ${id}`, 'corrupt');
+    }
+    let body: Buffer;
+    if (row.body_codec === 'br') {
+      try {
+        body = brotliDecompressSync(blob, { maxOutputLength: MAX_KNOWLEDGE_DOCUMENT_BYTES });
+      } catch (error) {
+        throw new CatalogOpenError(
+          `document body is invalid or exceeds the decompression limit: ${id} (${error instanceof Error ? error.message : String(error)})`,
+          'corrupt',
+        );
+      }
+    } else if (row.body_codec === 'none') {
+      body = Buffer.from(blob);
+      if (body.byteLength > MAX_KNOWLEDGE_DOCUMENT_BYTES) {
+        throw new CatalogOpenError(`document body exceeds the size limit: ${id}`, 'corrupt');
+      }
+    } else {
+      throw new CatalogOpenError(`unknown document body codec for ${id}`, 'corrupt');
+    }
+    const markdown = body.toString('utf8');
     return { ...rowToDocumentMeta(row), markdown };
   }
 

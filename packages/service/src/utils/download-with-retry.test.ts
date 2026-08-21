@@ -117,6 +117,45 @@ describe('downloadWithRetry', () => {
     expect(events.every((e) => e.type !== 'retrying')).toBe(true);
   });
 
+  it('rejects a response whose declared size exceeds a hard transfer ceiling', async () => {
+    const payload = new Uint8Array(32);
+    const { fetchImpl } = makeFetchSequence([async () => bytesResponse(payload)]);
+    const destPath = join(workDir, 'bounded.bin');
+    const { result } = await runDownload(
+      downloadWithRetry({
+        url: 'https://example.test/catalog.gezk',
+        destPath,
+        approxSizeBytes: 0,
+        maxBytes: 16,
+        fetchImpl,
+      }),
+    );
+    expect(result).toMatchObject({ kind: 'error', error: expect.stringContaining('byte limit') });
+    expect(() => statSync(`${destPath}.partial`)).toThrow();
+  });
+
+  it('stops a chunked response before streamed bytes cross the hard ceiling', async () => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(8));
+        controller.close();
+      },
+    });
+    const { fetchImpl } = makeFetchSequence([async () => new Response(body, { status: 200 })]);
+    const destPath = join(workDir, 'chunked-bounded.bin');
+    const { result } = await runDownload(
+      downloadWithRetry({
+        url: 'https://example.test/catalog.gezk',
+        destPath,
+        approxSizeBytes: 0,
+        maxBytes: 4,
+        fetchImpl,
+      }),
+    );
+    expect(result).toMatchObject({ kind: 'error', error: expect.stringContaining('byte limit') });
+    expect(statSync(`${destPath}.partial`).size).toBe(0);
+  });
+
   it('retries on transient fetch failure and yields a retrying event before the next attempt', async () => {
     const payload = new Uint8Array([0xa, 0xb, 0xc, 0xd]);
     const { fetchImpl, callLog } = makeFetchSequence([

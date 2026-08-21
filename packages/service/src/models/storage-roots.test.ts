@@ -3,7 +3,9 @@ import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { publishStagedModel } from './bundle-storage.js';
 import {
+  assertModelStorePathSafe,
   findModelRoot,
   hashModelPayloadFiles,
   listIncompleteModelDownloads,
@@ -227,6 +229,45 @@ describe('model storage overlay', () => {
     expect(await listOverlayModelIds({ writableRoot: parent, readOnlyRoots: [] })).not.toContain(
       'gemma4-12b-q8',
     );
+  });
+
+  it('rejects a descendant link before recursive model-store operations', async () => {
+    const parent = await tempRoot();
+    const root = join(parent, 'models');
+    const outside = join(parent, 'outside');
+    await mkdir(root, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await symlink(outside, join(root, 'redirect'), 'dir');
+
+    await expect(assertModelStorePathSafe(root, join(root, 'redirect'))).rejects.toThrow(
+      /linked or non-directory model-store path/,
+    );
+    await expect(removeModelDir(join(root, 'redirect'), root)).rejects.toThrow(
+      /linked or non-directory model-store path/,
+    );
+  });
+
+  it('rejects a linked publish target before replacing any model bytes', async () => {
+    const parent = await tempRoot();
+    const root = join(parent, 'models');
+    const outside = join(parent, 'outside');
+    const staged = join(parent, 'staged');
+    await mkdir(root, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await mkdir(staged, { recursive: true });
+    await writeFile(join(outside, 'sentinel'), 'keep');
+    await writeFile(join(staged, 'weights.gguf'), 'new');
+    await symlink(outside, join(root, 'redirect'), 'dir');
+
+    await expect(
+      publishStagedModel({
+        modelsRoot: root,
+        id: 'redirect',
+        stagedModelDir: staged,
+        replace: true,
+      }),
+    ).rejects.toThrow(/linked or non-directory model-store path/);
+    await expect(readFile(join(outside, 'sentinel'), 'utf8')).resolves.toBe('keep');
   });
 
   it('prunes stale payload files not referenced by the new install, keeping manifest and partials', async () => {

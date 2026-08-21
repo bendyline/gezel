@@ -68,4 +68,20 @@ describe('image-embed import-graph containment', () => {
     // Sanity: the walk actually traversed the stack (not vacuously green).
     expect(visited.size).toBeGreaterThan(ENTRY_MODULES.length);
   });
+
+  it('keeps bounded file reads and in-process inference test-only', () => {
+    const pixels = readFileSync(resolve(srcRoot, 'memory/image-pixels.ts'), 'utf8');
+    const imageCore = readFileSync(resolve(srcRoot, 'memory/image-embed-core.ts'), 'utf8');
+    const faceCore = readFileSync(resolve(srcRoot, 'memory/face-embed-core.ts'), 'utf8');
+    const host = readFileSync(resolve(srcRoot, 'memory/image-embeddings.ts'), 'utf8');
+
+    expect(pixels).toContain('export async function readBoundedImageFile');
+    expect(imageCore).toContain('readBoundedImageFile(job.path)');
+    expect(faceCore).toContain('readBoundedImageFile(job.path)');
+    expect(imageCore).not.toMatch(/\breadFile\s*\(/);
+    expect(faceCore).not.toMatch(/\breadFile\s*\(/);
+    expect(host).toContain('const allowTestFallback = Boolean(process.env.VITEST)');
+    expect(host).toContain('if (!allowTestFallback)');
+    expect(host).not.toMatch(/falling back to in-process|retrying in-process/i);
+  });
 });

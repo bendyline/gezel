@@ -21,6 +21,22 @@ export const KNOWLEDGE_ID_PATTERN = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$/;
 
 export const KnowledgeIdSchema = z.string().regex(KNOWLEDGE_ID_PATTERN);
 
+/**
+ * Portable, single-directory catalog version. Versions are identities, not
+ * paths: separators, drive/ADS syntax, controls, dot segments, trailing dots
+ * or spaces, and Windows device names are all rejected on every platform.
+ */
+export const KNOWLEDGE_VERSION_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._+-]{0,126}[A-Za-z0-9])?$/;
+export const KnowledgeVersionSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(KNOWLEDGE_VERSION_PATTERN, 'catalog version must be one portable path segment')
+  .refine(
+    (value) => !/^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(value),
+    'catalog version must not use a reserved Windows device name',
+  );
+
 /** 1–256 Unicode scalars, NFC, no controls, trimmed. Wikipedia = decimal curid. */
 export const KnowledgeDocumentIdSchema = z
   .string()
@@ -107,7 +123,7 @@ export const KnowledgeCatalogManifestSchema = z.object({
   formatVersion: z.literal(1),
   indexSchemaVersion: z.literal(1),
   id: KnowledgeIdSchema,
-  version: z.string().min(1),
+  version: KnowledgeVersionSchema,
   name: z.string().min(1),
   description: z.string().optional(),
   language: z.string().min(2),
@@ -218,7 +234,7 @@ export type KnowledgeStorageScope = z.infer<typeof KnowledgeStorageScopeSchema>;
 export const KnowledgeCatalogRefSchema = z.object({
   publisherId: KnowledgeIdSchema,
   catalogId: KnowledgeIdSchema,
-  version: z.string().min(1),
+  version: KnowledgeVersionSchema,
   contentDigest: Sha256HexSchema,
   storageScope: KnowledgeStorageScopeSchema,
 });
@@ -253,7 +269,7 @@ export const KnowledgeMachineInventorySchema = z.object({
     z.object({
       publisherId: KnowledgeIdSchema,
       catalogId: KnowledgeIdSchema,
-      version: z.string().min(1),
+      version: KnowledgeVersionSchema,
       contentDigest: Sha256HexSchema,
       publishedAt: z.string(),
       bytes: z.number().int().nonnegative(),
@@ -266,7 +282,7 @@ export type KnowledgeMachineInventory = z.infer<typeof KnowledgeMachineInventory
 export const TrustedKnowledgeCoordinateSchema = z.object({
   publisherId: KnowledgeIdSchema,
   catalogId: KnowledgeIdSchema,
-  version: z.string().min(1),
+  version: KnowledgeVersionSchema,
   expectedDigest: Sha256HexSchema,
 });
 export type TrustedKnowledgeCoordinate = z.infer<typeof TrustedKnowledgeCoordinateSchema>;
@@ -365,10 +381,9 @@ export const KnowledgeInstallRequestSchema = z.object({
     z.object({
       kind: z.literal('url'),
       url: z.string().url(),
-      expectedSha256: z
-        .string()
-        .regex(/^[0-9a-fA-F]{64}$/)
-        .optional(),
+      /** Required out-of-band identity for remote imports. TLS protects the
+       * transfer; this digest pins the artifact the user intended to trust. */
+      expectedSha256: z.string().regex(/^[0-9a-fA-F]{64}$/),
     }),
   ]),
 });

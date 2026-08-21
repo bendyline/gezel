@@ -15,6 +15,8 @@ export const SHARD_MAX_CHUNKS = 250_000;
 
 /** Bodies below this ship uncompressed (`body_codec = 'none'`). */
 export const BODY_CODEC_MIN_BYTES = 512;
+/** Maximum decompressed Markdown body returned from one catalog document. */
+export const MAX_KNOWLEDGE_DOCUMENT_BYTES = 16 * 1024 * 1024;
 
 /** Routing (§3.3–3.4). */
 export const CENTROID_CHUNKS_PER = 12_500;

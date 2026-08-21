@@ -153,6 +153,23 @@ describe('machine-knowledge-assets boundary', () => {
     });
     expect(res.status).toBe(404);
   });
+
+  it('rejects archive bytes whose manifest identity differs from the trusted coordinate', async () => {
+    const token = await runtimeToken();
+    const res = await machineFetch(`${machineBase}/v1/remote/manage/knowledge/ensure`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        coordinate: { ...COORD(), catalogId: 'different-catalog' },
+      }),
+    });
+    expect(res.status).toBe(422);
+    await expect(res.json()).resolves.toMatchObject({
+      status: 'error',
+      code: 'invalid',
+      error: expect.stringContaining('identity'),
+    });
+  });
 });
 
 describe('two-user privacy', () => {

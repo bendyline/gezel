@@ -7,12 +7,17 @@
  * catalog; every failure is a named check, not an exception.
  */
 
-import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { KnowledgeCatalogManifest } from '@bendyline/gezel';
 import { KnowledgeCatalogManifestSchema } from '@bendyline/gezel';
-import { MANIFEST_PATH, ROUTER_DB_PATH } from '../format/constants.js';
+import { GEZK_ARCHIVE_LIMITS } from '../archive/read.js';
+import {
+  MANIFEST_PATH,
+  MAX_KNOWLEDGE_DOCUMENT_BYTES,
+  ROUTER_DB_PATH,
+} from '../format/constants.js';
+import { hashFileStreaming } from '../format/file-hash.js';
 import { CatalogHandle } from './catalog-handle.js';
 import { openCatalogDatabase } from './open.js';
 
@@ -63,15 +68,21 @@ export async function validateExtractedCatalog(
   // declared files: existence + sha256 + size
   for (const file of manifest.files) {
     try {
-      const bytes = await readFile(join(rootDir, file.path));
-      const sha = createHash('sha256').update(bytes).digest('hex');
-      if (sha !== file.sha256) {
-        check(`file:${file.path}`, false, `sha256 mismatch (expected ${file.sha256}, got ${sha})`);
-      } else if (bytes.length !== file.sizeBytes) {
+      const actual = await hashFileStreaming(
+        join(rootDir, file.path),
+        GEZK_ARCHIVE_LIMITS.maxEntryBytes,
+      );
+      if (actual.sha256 !== file.sha256) {
         check(
           `file:${file.path}`,
           false,
-          `size mismatch (expected ${file.sizeBytes}, got ${bytes.length})`,
+          `sha256 mismatch (expected ${file.sha256}, got ${actual.sha256})`,
+        );
+      } else if (actual.sizeBytes !== file.sizeBytes) {
+        check(
+          `file:${file.path}`,
+          false,
+          `size mismatch (expected ${file.sizeBytes}, got ${actual.sizeBytes})`,
         );
       } else {
         check(`file:${file.path}`, true);
@@ -127,10 +138,28 @@ export async function validateExtractedCatalog(
     );
 
     if (opts.deep) {
+      const routerQuick = handle.routerQuickCheck();
+      check('quick-check:index/router.db', routerQuick === 'ok', routerQuick);
+      const bodies = handle.documentBodyProfile();
+      check(
+        'document-body-codecs',
+        bodies.unknownCodecs === 0,
+        `${bodies.unknownCodecs} documents use an unknown body codec`,
+      );
+      check(
+        'document-body-raw-limit',
+        bodies.maxRawBytes <= MAX_KNOWLEDGE_DOCUMENT_BYTES,
+        `largest raw body is ${bodies.maxRawBytes} bytes`,
+      );
+      check(
+        'document-body-compressed-limit',
+        bodies.maxCompressedBytes <= MAX_KNOWLEDGE_DOCUMENT_BYTES + 1024,
+        `largest compressed body is ${bodies.maxCompressedBytes} bytes`,
+      );
       for (const shard of handle.shards) {
         // A dedicated read-only connection per shard (immutable files share
         // fine), closed here — the handle's own connections are its to close.
-        const conn = openCatalogDatabase(join(rootDir, shard.path));
+        const conn = openCatalogDatabase(handle.resolveCatalogPath(shard.path));
         const db = conn.db;
         try {
           const quick = db.prepare('PRAGMA quick_check').get() as { quick_check?: string };

@@ -25,6 +25,7 @@ import { resolveModelDirectory } from '../../models/model-id.js';
 import {
   MODEL_HASH_READ_BUFFER_BYTES,
   type ModelStorageRoots,
+  assertModelStorePathSafe,
   findModelRoot,
   hashModelPayloadFiles,
   listOverlayModelIds,
@@ -404,7 +405,10 @@ export class StableDiffusionCppProvider implements ImageProvider {
     signal?: AbortSignal,
   ): AsyncIterable<ImageModelPullEvent> {
     const itemDir = join(this.modelsRoot, id);
+    await mkdir(this.modelsRoot, { recursive: true });
+    await assertModelStorePathSafe(this.modelsRoot, itemDir);
     await mkdir(itemDir, { recursive: true });
+    await assertModelStorePathSafe(this.modelsRoot, itemDir);
 
     // Total bytes across the unet + every auxiliary file. Driving the UI
     // progress bar from this aggregate keeps multi-file pulls visually

@@ -162,10 +162,10 @@ export class KnowledgeManager {
     if (this.mountedByKey.has(key)) return;
     const rootDir = this.dirFor(ref);
 
-    // Verify before first mount: shallow validation covers manifest, per-file
-    // hashes, read-only opens, and count reconciliation. A failure is a
-    // quarantine, not an exception surface — the caller records the reason.
-    const report = await this.opts.host.validate(rootDir, false);
+    // Full verify before mount, including SQLite quick_check, vector-table
+    // alignment, self-KNN, and publisher smoke queries. This runs in the
+    // dedicated knowledge worker in production.
+    const report = await this.opts.host.validate(rootDir, true);
     if (!report.ok || !report.manifest) {
       const failed = report.checks.filter((c) => !c.ok);
       throw new Error(
@@ -278,6 +278,7 @@ export class KnowledgeManager {
         registry: this.registry,
         ...(this.opts.fetchImpl ? { fetchImpl: this.opts.fetchImpl } : {}),
         signal: entry.abort.signal,
+        validateCatalog: (rootDir, deep) => this.opts.host.validate(rootDir, deep),
       });
       for await (const event of run) {
         if (event.type === 'done') {

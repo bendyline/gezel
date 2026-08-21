@@ -10,9 +10,10 @@
 
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { dirname, join, normalize, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, normalize, relative, resolve } from 'node:path';
+import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { KnowledgeCatalogManifest } from '@bendyline/gezel';
 import { KnowledgeCatalogManifestSchema } from '@bendyline/gezel';
@@ -23,7 +24,7 @@ const nodeRequire = createRequire(import.meta.url);
 /** Catalog-specific limits — multi-GB archives are the point (draft §install). */
 export const GEZK_ARCHIVE_LIMITS = {
   maxEntries: 16_384,
-  maxManifestBytes: 64 * 1024 * 1024,
+  maxManifestBytes: 16 * 1024 * 1024,
   maxEntryBytes: 8 * 1024 * 1024 * 1024,
   maxTotalBytes: 32 * 1024 * 1024 * 1024,
   maxCompressionRatio: 400,
@@ -115,7 +116,9 @@ function assertSafeEntry(entry: YauzlEntry, seenLower: Set<string>): void {
 }
 
 /** Walk the archive collecting the safety-checked entry table. */
-async function inspectEntries(archivePath: string): Promise<Map<string, YauzlEntry>> {
+async function inspectEntries(
+  archivePath: string,
+): Promise<{ entries: Map<string, YauzlEntry>; totalUncompressedBytes: number }> {
   const zip = await openZip(archivePath);
   const entries = new Map<string, YauzlEntry>();
   const seenLower = new Set<string>();
@@ -140,7 +143,7 @@ async function inspectEntries(archivePath: string): Promise<Map<string, YauzlEnt
     });
     zip.on('end', () => {
       zip.close();
-      resolvePromise(entries);
+      resolvePromise({ entries, totalUncompressedBytes: total });
     });
     zip.on('error', (err) => {
       zip.close();
@@ -149,6 +152,51 @@ async function inspectEntries(archivePath: string): Promise<Map<string, YauzlEnt
     // lazyEntries: the walk only starts on the first explicit readEntry().
     zip.readEntry();
   });
+}
+
+function reconcileEntries(
+  manifest: KnowledgeCatalogManifest,
+  entries: Map<string, YauzlEntry>,
+): void {
+  const declared = new Map(manifest.files.map((file) => [file.path, file]));
+  for (const path of entries.keys()) {
+    if (path === MANIFEST_PATH) continue;
+    if (!declared.has(path)) {
+      throw new GezkArchiveError(`archive contains undeclared file: ${path}`, 'undeclared-file');
+    }
+  }
+  for (const [path, file] of declared) {
+    const entry = entries.get(path);
+    if (!entry) {
+      throw new GezkArchiveError(`archive is missing declared file: ${path}`, 'missing-file');
+    }
+    if (entry.uncompressedSize !== file.sizeBytes) {
+      throw new GezkArchiveError(
+        `declared size does not match ZIP metadata for ${path}: expected ${file.sizeBytes}, archive has ${entry.uncompressedSize}`,
+        'hash-mismatch',
+      );
+    }
+  }
+}
+
+export interface GezkArchiveInspection {
+  manifest: KnowledgeCatalogManifest;
+  entryCount: number;
+  totalUncompressedBytes: number;
+}
+
+/** Safety-check and reconcile the complete central directory without extracting. */
+export async function inspectGezkArchive(archivePath: string): Promise<GezkArchiveInspection> {
+  const [manifest, inspected] = await Promise.all([
+    readGezkManifest(archivePath),
+    inspectEntries(archivePath),
+  ]);
+  reconcileEntries(manifest, inspected.entries);
+  return {
+    manifest,
+    entryCount: inspected.entries.size,
+    totalUncompressedBytes: inspected.totalUncompressedBytes,
+  };
 }
 
 /** Read + parse manifest.json without extracting anything else. */
@@ -219,22 +267,11 @@ export async function extractGezkVerified(
   destDir: string,
 ): Promise<KnowledgeCatalogManifest> {
   const manifest = await readGezkManifest(archivePath);
-  const entries = await inspectEntries(archivePath);
+  const { entries } = await inspectEntries(archivePath);
+  reconcileEntries(manifest, entries);
+  const declared = new Map(manifest.files.map((file) => [file.path, file]));
 
-  const declared = new Map(manifest.files.map((f) => [f.path, f]));
-  for (const path of entries.keys()) {
-    if (path === MANIFEST_PATH) continue;
-    if (!declared.has(path)) {
-      throw new GezkArchiveError(`archive contains undeclared file: ${path}`, 'undeclared-file');
-    }
-  }
-  for (const path of declared.keys()) {
-    if (!entries.has(path)) {
-      throw new GezkArchiveError(`archive is missing declared file: ${path}`, 'missing-file');
-    }
-  }
-
-  const destRoot = normalize(resolve(destDir)) + sep;
+  const destRoot = normalize(resolve(destDir));
   const zip = await openZip(archivePath);
   await new Promise<void>((resolvePromise, reject) => {
     const next = () => zip.readEntry();
@@ -242,7 +279,8 @@ export async function extractGezkVerified(
       void (async () => {
         try {
           const target = resolve(destDir, entry.fileName);
-          if (!normalize(target).startsWith(destRoot.slice(0, -1))) {
+          const targetRel = relative(destRoot, normalize(target));
+          if (targetRel.startsWith('..') || isAbsolute(targetRel)) {
             throw new GezkArchiveError(
               `entry escapes destination: ${entry.fileName}`,
               'unsafe-entry',
@@ -255,7 +293,46 @@ export async function extractGezkVerified(
                 rej(new GezkArchiveError(`read failed: ${err?.message}`, 'io'));
                 return;
               }
-              pipeline(stream, createWriteStream(target)).then(res, rej);
+              const expected = declared.get(entry.fileName);
+              if (!expected) {
+                pipeline(stream, createWriteStream(target)).then(res, rej);
+                return;
+              }
+              const hasher = createHash('sha256');
+              let sizeBytes = 0;
+              const verify = new Transform({
+                transform(chunk: Buffer, _encoding, callback) {
+                  sizeBytes += chunk.byteLength;
+                  if (sizeBytes > expected.sizeBytes) {
+                    callback(
+                      new GezkArchiveError(
+                        `size mismatch for ${entry.fileName}: expected ${expected.sizeBytes}, got more data`,
+                        'hash-mismatch',
+                      ),
+                    );
+                    return;
+                  }
+                  hasher.update(chunk);
+                  callback(null, chunk);
+                },
+              });
+              pipeline(stream, verify, createWriteStream(target))
+                .then(() => {
+                  const actual = hasher.digest('hex');
+                  if (sizeBytes !== expected.sizeBytes) {
+                    throw new GezkArchiveError(
+                      `size mismatch for ${entry.fileName}: expected ${expected.sizeBytes}, got ${sizeBytes}`,
+                      'hash-mismatch',
+                    );
+                  }
+                  if (actual !== expected.sha256) {
+                    throw new GezkArchiveError(
+                      `sha256 mismatch for ${entry.fileName}: expected ${expected.sha256}, got ${actual}`,
+                      'hash-mismatch',
+                    );
+                  }
+                })
+                .then(res, rej);
             });
           });
           next();
@@ -282,23 +359,5 @@ export async function extractGezkVerified(
     });
     zip.readEntry();
   });
-
-  // Per-file hash verification against the manifest.
-  for (const file of manifest.files) {
-    const bytes = await readFile(join(destDir, file.path));
-    const actual = createHash('sha256').update(bytes).digest('hex');
-    if (actual !== file.sha256) {
-      throw new GezkArchiveError(
-        `sha256 mismatch for ${file.path}: expected ${file.sha256}, got ${actual}`,
-        'hash-mismatch',
-      );
-    }
-    if (bytes.length !== file.sizeBytes) {
-      throw new GezkArchiveError(
-        `size mismatch for ${file.path}: expected ${file.sizeBytes}, got ${bytes.length}`,
-        'hash-mismatch',
-      );
-    }
-  }
   return manifest;
 }

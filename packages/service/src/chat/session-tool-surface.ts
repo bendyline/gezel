@@ -4,6 +4,7 @@ import {
   type ProviderName,
   type ResolvedSecurityPolicy,
   type TaskCraftbookStep,
+  deliverableKindForStep,
   isLocalProvider,
   normalizeScriptRefs,
   resolveRoleId,
@@ -387,12 +388,42 @@ export async function resolveSessionToolSurface(
   }
   if (allowlist !== allowlistBeforeRetrievalFirst) opts.onClamp?.('project-retrieval-first');
 
-  const projectOrchestrationConstrained = projectOrchestrationConstraintActive({
-    record: opts.session,
-    role: opts.role,
-    provider: opts.provider,
-    latestUserMessage: opts.latestUserMessage,
-  });
+  // The orchestration clamp answers "the user asked a coordinator to BUILD
+  // something — route it instead". A coordinator executing a craftbook step
+  // that declares a deliverable was already routed: the step assigned the
+  // work to them, and the kit above is the surface that step needs. Clamping
+  // there replaces the assignee's only write channel with the kickoff
+  // macros, and `message_gezel` is the one survivor — so the model tries to
+  // delegate a step it was itself assigned.
+  //
+  // Wild-caught on the bundled night-shift oversight step (ornith-9b-q4,
+  // Meester assignee): the runtime's own handoff seed — "…make the first
+  // tool call they name this turn…" — trips `asksForBuild` on "make" and
+  // `namesDeliverable` on "tool", so a system-generated string that contains
+  // no user request at all clamped the roster from 10 tools to 5, stripping
+  // `write_artifact` while the step demanded `artifacts/night-shift-report.md`.
+  // The Meester then invented a `writer` gezel to delegate to, 400'd twice,
+  // and advanced the step on a report that was never written. Same principle
+  // as the step-completion restore below: a message-shaped clamp is
+  // subordinate to the persisted craftbook procedure.
+  //
+  // Read the step's own deliverable class rather than reusing `kit`: kit is
+  // a narrowing decision, gated on the toolset override and the D4 kill
+  // switch, and neither has any bearing on whether this session was routed.
+  const executingStepWithDeliverable = Boolean(
+    opts.session.taskRef &&
+      opts.session.stepId &&
+      opts.activeStep &&
+      deliverableKindForStep(opts.activeStep),
+  );
+  const projectOrchestrationConstrained =
+    !executingStepWithDeliverable &&
+    projectOrchestrationConstraintActive({
+      record: opts.session,
+      role: opts.role,
+      provider: opts.provider,
+      latestUserMessage: opts.latestUserMessage,
+    });
   if (projectOrchestrationConstrained) {
     allowlist = constrainAllowlistForProjectOrchestration(allowlist, {
       ...(opts.rolesAsTools ? { rolesAsTools: true } : {}),

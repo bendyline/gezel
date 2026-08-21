@@ -26,6 +26,7 @@ import { resolveModelDirectory } from '../../models/model-id.js';
 import {
   MODEL_HASH_READ_BUFFER_BYTES,
   type ModelStorageRoots,
+  assertModelStorePathSafe,
   findModelRoot,
   hashModelPayloadFiles,
   listOverlayModelIds,
@@ -248,7 +249,10 @@ export class WhisperCppProvider implements SpeechToTextProvider {
 
   async *pullModel(id: string, spec: AudioModelPullSpec): AsyncIterable<AudioModelPullEvent> {
     const itemDir = join(this.modelsRoot, id);
+    await mkdir(this.modelsRoot, { recursive: true });
+    await assertModelStorePathSafe(this.modelsRoot, itemDir);
     await mkdir(itemDir, { recursive: true });
+    await assertModelStorePathSafe(this.modelsRoot, itemDir);
 
     const totalAllBytes = spec.files.reduce((n, f) => n + f.approxSizeBytes, 0);
     let writtenAll = 0;

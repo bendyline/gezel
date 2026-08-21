@@ -16,7 +16,6 @@
  *     five-point-aligned ArcFace crop; output [1,512], L2-normalized here.
  */
 
-import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { ARCFACE_SIZE, alignToArcFace } from '../index-store/face/align.js';
 import { FACE_MIN_PX } from '../index-store/face/constants.js';
@@ -26,6 +25,7 @@ import {
   ImageDecodeError,
   type RgbImage,
   decodeImage,
+  readBoundedImageFile,
   resizeBilinear,
   rgbaToRgb,
 } from './image-pixels.js';
@@ -180,14 +180,8 @@ export async function runFaceDetect(
   const embedder = await loadSession(models.embedder);
   const out: FaceDetectOutcome[] = [];
   for (const job of jobs) {
-    let buf: Buffer;
     try {
-      buf = await readFile(job.path);
-    } catch (err) {
-      out.push({ hash: job.hash, error: err instanceof Error ? err.message : String(err) });
-      continue;
-    }
-    try {
+      const buf = await readBoundedImageFile(job.path);
       const rgb = rgbaToRgb(decodeImage(buf));
       const { chw, scale } = yunetInput(rgb);
       const detOut = await detector.run({
