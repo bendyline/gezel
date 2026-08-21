@@ -903,17 +903,30 @@ describe('EngineStatusPill — crowded titlebar', () => {
       </HeaderDensityContext.Provider>,
     );
     await waitFor(() => {
-      expect(container.querySelectorAll('.engine-pill')).toHaveLength(2);
+      const pills = container.querySelectorAll('.engine-pill');
+      expect(pills).toHaveLength(2);
+      expect(pills[0]).toHaveTextContent('DeepSeek V4 Flash');
+      expect(pills[1]).toHaveTextContent('Talkie 1930 13B');
     });
     const [dwarfStar, talkie] = Array.from(container.querySelectorAll<HTMLElement>('.engine-pill'));
     return { dwarfStar: dwarfStar as HTMLElement, talkie: talkie as HTMLElement };
   }
 
   it('keeps the machine name and the gezel at full density', async () => {
-    const { dwarfStar, talkie } = await pillsAt('full');
-    expect(dwarfStar).toHaveTextContent('DwarfStar · DeepSeek V4 Flash');
-    expect(talkie).toHaveTextContent(device);
-    expect(talkie).toHaveTextContent('Liesel');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { dwarfStar, talkie } = await pillsAt('full');
+      expect(dwarfStar).toHaveTextContent('DwarfStar · DeepSeek V4 Flash');
+      expect(talkie).toHaveTextContent(device);
+      expect(talkie).toHaveTextContent('Liesel');
+      expect(
+        consoleError.mock.calls.some(([message]) =>
+          String(message).includes('change in the order of Hooks'),
+        ),
+      ).toBe(false);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it('drops the machine name — but not a named engine — when compact', async () => {
