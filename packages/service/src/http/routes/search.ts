@@ -17,11 +17,18 @@ export function searchRoutes(ctx: ServiceContext): Hono {
 
   app.post('/', async (c) => {
     const body = UnifiedSearchRequestSchema.parse(await c.req.json());
-    const { results, truncated } = await ctx.search.search(body.query, {
+    const { results, truncated, sourcesIncomplete } = await ctx.search.search(body.query, {
       ...(body.mode ? { mode: body.mode } : {}),
       ...(body.maxResults ? { maxResults: body.maxResults } : {}),
     });
-    const response: UnifiedSearchResponse = { results, truncated };
+    // Passed through, not dropped: a scope that timed out means the list
+    // under-represents the corpus, and only this flag lets the palette say so
+    // instead of presenting a partial answer as a complete one.
+    const response: UnifiedSearchResponse = {
+      results,
+      truncated,
+      ...(sourcesIncomplete === undefined ? {} : { sourcesIncomplete }),
+    };
     return c.json(response);
   });
 

@@ -678,7 +678,12 @@
   overflow-wrap: anywhere;
 }
 
-.search-results-row mark {
+/* Query-term emphasis. One recipe for every surface that lists results —
+   the palette, the full overlay, and the Documents library — so the same
+   query never looks like two different matches. */
+.search-results-row mark,
+.search-option mark,
+.documents-search-snippet mark {
   background: color-mix(in srgb, var(--accent, #b58a3c) 30%, transparent);
   color: inherit;
   border-radius: 2px;
@@ -696,6 +701,30 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted, #6b7280);
+}
+
+/* Overflow marker under a capped group — quiet, aligned with the rows it
+   summarizes. Not an option row: it isn't in the keyboard flat list, so it
+   must not read as one. */
+.search-palette-group-more {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 2px 10px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--muted, #6b7280);
+  font-family: inherit;
+  font-size: 0.74rem;
+}
+
+button.search-palette-group-more {
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+button.search-palette-group-more:hover {
+  color: var(--text, inherit);
 }
 
 .search-option {

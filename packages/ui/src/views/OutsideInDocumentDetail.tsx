@@ -241,12 +241,13 @@ function OutsideInEditor({
       {!prepared.editingEnabled && (
         <output className="outside-in-readonly-banner">
           <span>
-            <strong>{layout.format.toUpperCase()} preview · read-only.</strong> The original stays
-            untouched until you enable outside-in editing.
+            <strong>{layout.format.toUpperCase()} preview · read-only.</strong> If you enable
+            editing via markdown, the structure of your {layout.format.toUpperCase()} will not be
+            fully preserved.
           </span>
           {enableError && <span className="error">Could not enable editing: {enableError}</span>}
           <button type="button" disabled={enabling} onClick={() => void onEnableEditing()}>
-            {enabling ? 'Preparing…' : 'Enable outside-in editing'}
+            {enabling ? 'Preparing…' : 'Enable editing'}
           </button>
         </output>
       )}

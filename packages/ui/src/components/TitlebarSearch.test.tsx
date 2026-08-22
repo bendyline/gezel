@@ -32,6 +32,14 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+/**
+ * Row text, reassembled. Matched query terms are split into `<mark>`, so a
+ * plain `getByText('Space Shooter')` no longer finds the title.
+ */
+function optionTexts(): string[] {
+  return screen.getAllByTestId('search-option').map((el) => el.textContent ?? '');
+}
+
 async function typeQuery(value: string) {
   const input = screen.getByTestId('titlebar-search-input');
   fireEvent.change(input, { target: { value } });
@@ -59,8 +67,24 @@ describe('TitlebarSearch', () => {
     await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy());
     expect(screen.getByText('Projects')).toBeTruthy();
     expect(screen.getByText('Files')).toBeTruthy();
-    expect(screen.getByText('Space Shooter')).toBeTruthy();
-    expect(screen.getByText('index.html')).toBeTruthy();
+    expect(optionTexts()).toEqual([
+      expect.stringContaining('Space Shooter'),
+      expect.stringContaining('index.html'),
+    ]);
+  });
+
+  it('marks the typed terms in the rows', async () => {
+    render(<TitlebarSearch />);
+    await typeQuery('space');
+    await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy());
+
+    // Both the title and the path-bearing subtitle carry "Space"; the mark
+    // belongs on the title, and the row still reads as one sentence.
+    const marks = screen.getAllByText('Space', { selector: 'mark' });
+    expect(marks.length).toBeGreaterThan(0);
+    expect(marks[0]?.closest('[data-testid="search-option"]')?.textContent).toContain(
+      'Space Shooter',
+    );
   });
 
   it('navigates with arrow keys and dispatches events on Enter', async () => {
@@ -154,15 +178,19 @@ describe('TitlebarSearch', () => {
     await typeQuery('space');
 
     // Phase one is on screen, and the row says more is still coming.
-    expect(screen.getByText('Space Shooter')).toBeInTheDocument();
-    expect(screen.queryByText('index.html')).toBeNull();
+    expect(optionTexts()).toEqual([expect.stringContaining('Space Shooter')]);
     expect(screen.getByText(/Searching your files and memories/)).toBeInTheDocument();
 
     await act(async () => {
       releaseFull?.({ results: RESULTS, truncated: false });
       await new Promise((r) => setTimeout(r, 50));
     });
-    await waitFor(() => expect(screen.getByText('index.html')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(optionTexts()).toEqual([
+        expect.stringContaining('Space Shooter'),
+        expect.stringContaining('index.html'),
+      ]),
+    );
     expect(screen.queryByText(/Searching your files and memories/)).toBeNull();
   });
 
@@ -175,6 +203,53 @@ describe('TitlebarSearch', () => {
 
     expect(screen.getByText(/Search isn't responding/)).toBeInTheDocument();
     expect(screen.queryByText('No results')).toBeNull();
+  });
+
+  it("anchors the palette to the search well's left edge, not its center", async () => {
+    // The well is the header's only shrinkable child, so a status pill
+    // expanding narrows it. Centered, the open palette slid sideways under
+    // the reader; the left edge is the coordinate that holds still.
+    render(<TitlebarSearch />);
+    await typeQuery('space');
+    await waitFor(() => expect(screen.getByTestId('search-palette')).toBeTruthy());
+
+    const content = screen.getByTestId('search-palette').closest('[data-align]');
+    expect(content?.getAttribute('data-align')).toBe('start');
+  });
+
+  it('caps a noisy group so a better-ranked kind stays on screen', async () => {
+    // The regression this guards: 25 identically-scored `SKILL.md` fuzzy
+    // matches filled the palette and pushed the top-ranked library document
+    // below the fold.
+    const noisy: UnifiedSearchResult[] = [
+      {
+        kind: 'document',
+        id: 'document:lesson.docx',
+        title: 'Lesson Plan.docx',
+        path: 'lesson.docx',
+        score: 680,
+      },
+      ...Array.from({ length: 9 }, (_, i) => ({
+        kind: 'file' as const,
+        id: `file:p1:skills/${i}/SKILL.md`,
+        title: 'SKILL.md',
+        projectId: 'p1',
+        path: `skills/${i}/SKILL.md`,
+        source: 'workspace' as const,
+        score: 285,
+      })),
+    ];
+    vi.mocked(api.quickOpen).mockResolvedValue({ results: noisy, truncated: false });
+    vi.mocked(api.search).mockResolvedValue({ results: noisy, truncated: false });
+
+    render(<TitlebarSearch />);
+    await typeQuery('kim');
+    await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy());
+
+    const options = screen.getAllByTestId('search-option');
+    expect(options).toHaveLength(6); // 1 document + 5 of 9 files
+    expect(options[0]?.textContent).toContain('Lesson Plan.docx');
+    expect(screen.getByText('+4 more')).toBeInTheDocument();
   });
 
   it('still reports an honest empty result when nothing matches', async () => {

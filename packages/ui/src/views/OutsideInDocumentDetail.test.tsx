@@ -142,7 +142,7 @@ describe('OutsideInDocumentDetail', () => {
 
     expect(await screen.findByTestId('editor-shell')).toHaveAttribute('data-readonly', 'true');
     expect(screen.getByText('DOCX preview · read-only.')).toBeInTheDocument();
-    screen.getByRole('button', { name: 'Enable outside-in editing' }).click();
+    screen.getByRole('button', { name: 'Enable editing' }).click();
 
     await waitFor(() => {
       expect(api.writeDocumentBinary).toHaveBeenCalledWith(

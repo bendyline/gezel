@@ -493,8 +493,13 @@ describe('DocumentsView', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('refunded within 30 days')).toBeInTheDocument();
+      // The typed term is wrapped in <mark>, so the snippet is spread across
+      // elements — match the row's assembled text.
+      expect(document.querySelector('.documents-search-snippet')).toHaveTextContent(
+        'refunded within 30 days',
+      );
     });
+    expect(screen.getByText('refund', { selector: 'mark' })).toBeInTheDocument();
     // The document's own name has to survive alongside the snippet: a result
     // that shows only matched prose is unattributable, and the trailing slot
     // (which never shrinks) used to squeeze the name out of the row entirely.

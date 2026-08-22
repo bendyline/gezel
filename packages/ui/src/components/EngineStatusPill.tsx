@@ -984,7 +984,12 @@ function EngineStatusPillForProvider({
   const showKind = density === 'full' || !kindNamesTheMachine;
   // Tighter still: the gezel's name goes, leaving engine + phase + model.
   // Both stay in the pill's tooltip and in the popover's Status row.
-  const showActor = density !== 'tight';
+  const showActor = density === 'full' || density === 'compact';
+  // Last of all the model name goes, leaving the phase and the clock. Held
+  // back until the label has something else to say: on an idle pill whose
+  // machine name already went, the model is the only word there is, and
+  // dropping it would leave a bare dot naming nothing.
+  const showModel = density !== 'minimal' || !(busy || showKind);
 
   return (
     <div className="engine-pill-root" ref={rootRef}>
@@ -1050,7 +1055,7 @@ function EngineStatusPillForProvider({
           ) : (
             showKind && platformPillLabel
           )}
-          {displayModelName && (
+          {displayModelName && showModel && (
             // The separator belongs to whatever precedes the model name, so
             // a compacted idle pill reads "Qwen 3.8", not "· Qwen 3.8".
             <span className="engine-pill-model">{`${busy || showKind ? ' · ' : ''}${displayModelName}`}</span>

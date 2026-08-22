@@ -20,6 +20,7 @@ import {
   type FileViewMode,
   coerceFileViewMode,
 } from '../components/file-view-modes.js';
+import { highlightTokens } from '../components/highlight-tokens.js';
 import { useEffectiveTheme } from '../theme.js';
 import { DocumentDetail } from './DocumentDetail.js';
 import { useDocumentSearch } from './useDocumentSearch.js';
@@ -236,7 +237,7 @@ export function DocumentsView() {
           return (
             <span className="documents-search-snippet">
               {hit.related && <span className="documents-search-related">related</span>}
-              {hit.snippet}
+              {highlightTokens(hit.snippet, search.matchedQuery)}
             </span>
           );
         },
@@ -247,12 +248,12 @@ export function DocumentsView() {
     <div className="documents-listing" data-testid="documents-view">
       <FileBrowserPane
         source={source}
-        headerExtra={
+        titleReplacement={
           <div className="documents-search">
             <input
               type="search"
               className="documents-search-input"
-              placeholder="Search documents…"
+              placeholder={`${source.title} - search`}
               aria-label="Search document contents"
               value={search.query}
               onChange={(e) => search.setQuery(e.target.value)}

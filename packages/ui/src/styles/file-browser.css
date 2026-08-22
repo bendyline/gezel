@@ -1342,11 +1342,10 @@ button.danger {
   gap: 0.35rem;
 }
 
-/* "Open in file manager" is a verb, not a view mode: it sits at the far end
-   of the toolbar so it never reads as part of the mode switch. */
-.file-reveal-tray {
-  margin-left: auto;
-}
+/* "Open in file manager" is a verb, not a view mode, but its own tray is
+   what says so — it needs no gap. Pushing it to the far end left it
+   stranded on the right of the wrapped second row in a narrow pane; the
+   trays now simply flow from the left on every row. */
 
 .file-flat-parent {
   margin-left: 0.4rem;
@@ -2583,4 +2582,120 @@ button.danger {
   background: var(--panel);
   color: var(--text-muted);
   font-size: var(--text-lg);
+}
+
+/* Squisq FolderView → gezel palette bridge. The folder landing page (shown
+   when a folder rather than a document is selected) ships hardcoded Tailwind
+   greys plus a full-width `#3b82f6` slab button — nothing in it reads tokens,
+   so on parchment it looks like a foreign product embedded in the app. Repaint
+   it with the gezel surfaces and turn the two actions into ordinary keys.
+
+   Squisq's stylesheet is bundled after ours, and its dark-theme rules carry
+   `[data-theme=dark]`, so every child rule here matches that attribute to win
+   on specificity rather than order — same seam idea as the editor-shell
+   bridges in app-shell.css. */
+.file-viewer-panel .squisq-folder-view {
+  height: 100%;
+  font-family: var(--font-ui);
+  color: var(--text);
+  background: var(--bg);
+}
+
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-header {
+  padding: 0.4rem 0.75rem;
+  background: color-mix(in srgb, var(--panel) 70%, var(--surface));
+  border-bottom: 1px solid var(--border);
+}
+
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-header-icon {
+  color: var(--accent);
+}
+
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-count {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-empty {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/* An empty folder is otherwise a top-aligned line of grey type over a large
+   blank slab; centering it in the body reads as a deliberate empty state. */
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-body:has(.squisq-folder-view-empty) {
+  display: grid;
+  place-items: center;
+}
+
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-item {
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+}
+
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-item:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-item-icon,
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-item-chevron {
+  color: var(--text-muted);
+}
+
+/* The actions row reads as a tray along the bottom seam: the two keys sit
+   side by side rather than stacked under a full-width primary slab. */
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-actions {
+  flex-direction: row;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: color-mix(in srgb, var(--panel) 70%, var(--surface));
+  border-top: 1px solid var(--border);
+}
+
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-new,
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-new-folder {
+  width: auto;
+  max-width: none;
+  padding: 0.35rem 0.85rem;
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.2;
+  border: 1px solid var(--key-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--key-shadow);
+  transition: box-shadow 140ms ease-out, transform 140ms ease-out, background 140ms ease-out;
+}
+
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-new {
+  color: var(--key-pressed-ink);
+  background: var(--key-pressed-bg);
+  border-color: var(--key-pressed-border);
+}
+
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-new:hover {
+  background: var(--accent-hover);
+}
+
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-new-folder {
+  color: var(--text);
+  background: var(--key-bg);
+}
+
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-new-folder:hover {
+  color: var(--text);
+  background: var(--key-bg-hover);
+}
+
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-new:active,
+.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-new-folder:active {
+  transform: translateY(1px);
+  box-shadow: var(--key-pressed-shadow);
 }

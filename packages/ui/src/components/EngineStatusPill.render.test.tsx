@@ -948,8 +948,11 @@ describe('EngineStatusPill — crowded titlebar', () => {
     await waitFor(() => {
       const pills = container.querySelectorAll('.engine-pill');
       expect(pills).toHaveLength(2);
-      expect(pills[0]).toHaveTextContent('DeepSeek V4 Flash');
-      expect(pills[1]).toHaveTextContent('Talkie 1930 13B');
+      // Settle on the tooltip, not the label: the label is what density
+      // strips, so waiting on it would let the densest case pass merely
+      // because the model list had not loaded yet.
+      expect(pills[0]?.getAttribute('title')).toContain('deepseek-v4-flash');
+      expect(pills[1]?.getAttribute('title')).toContain('talkie-1930-13b-q4');
     });
     const [dwarfStar, talkie] = Array.from(container.querySelectorAll<HTMLElement>('.engine-pill'));
     return { dwarfStar: dwarfStar as HTMLElement, talkie: talkie as HTMLElement };
@@ -991,5 +994,18 @@ describe('EngineStatusPill — crowded titlebar', () => {
     expect(talkie).toHaveTextContent('Generating');
     expect(talkie).toHaveTextContent('Talkie 1930');
     expect(talkie.getAttribute('title')).toContain('Liesel');
+  });
+
+  it('drops the model name when minimal, but only where the phase remains', async () => {
+    const { dwarfStar, talkie } = await pillsAt('minimal');
+    // Busy: the phase still names the pill, so the model can go.
+    expect(talkie).toHaveTextContent('Generating');
+    expect(talkie).not.toHaveTextContent('Talkie 1930');
+    expect(talkie.getAttribute('title')).toContain('talkie-1930-13b-q4');
+    // Idle and named by an engine rather than the machine — "DwarfStar"
+    // survives, so its model may go too.
+    expect(dwarfStar).toHaveTextContent('DwarfStar');
+    expect(dwarfStar).not.toHaveTextContent('DeepSeek V4 Flash');
+    expect(dwarfStar.getAttribute('title')).toContain('deepseek-v4-flash');
   });
 });

@@ -11,6 +11,14 @@ type SearchMode = 'search' | 'quick-open';
 
 const DEBOUNCE_MS = 150;
 
+/**
+ * Rows one kind may occupy in the dropdown. The palette is a glance surface —
+ * a corpus that matched twenty-five times has not earned twenty-five of the
+ * ~8 rows on screen, and the overflow stays one click away under "See all
+ * results".
+ */
+const PER_GROUP_LIMIT = 5;
+
 function quickOpenShortcutLabel(): string {
   const platform =
     window.__GEZEL__?.platform ??
@@ -32,12 +40,20 @@ export function TitlebarSearch() {
   const [failed, setFailed] = useState(false);
   const [sourcesIncomplete, setSourcesIncomplete] = useState(false);
   const [results, setResults] = useState<UnifiedSearchResult[]>([]);
+  // The query these results answer, which trails `query` by the debounce.
+  // Highlighting off the live box would blink the marks out for a moment on
+  // every keystroke, because the rows on screen don't contain the new letter
+  // yet.
+  const [resultsQuery, setResultsQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const modeRef = useRef<SearchMode>('search');
   const quickOpenShortcut = quickOpenShortcutLabel();
 
-  const groups: SearchGroup[] = useMemo(() => groupResults(results), [results]);
+  const groups: SearchGroup[] = useMemo(
+    () => groupResults(results, { perGroupLimit: PER_GROUP_LIMIT }),
+    [results],
+  );
   const flat = useMemo(() => flattenGroups(groups), [groups]);
 
   // Debounced fetch; abort the previous in-flight request on each keystroke.
@@ -51,6 +67,7 @@ export function TitlebarSearch() {
     const q = query.trim();
     if (!q) {
       setResults([]);
+      setResultsQuery('');
       setOpen(false);
       setLoading(false);
       setFailed(false);
@@ -72,12 +89,14 @@ export function TitlebarSearch() {
         const quick = await api.quickOpen(q, { signal: ctrl.signal });
         if (ctrl.signal.aborted) return;
         setResults(quick.results);
+        setResultsQuery(q);
         setActiveIndex(0);
         namesShown = true;
         if (modeRef.current === 'quick-open') return;
         const full = await api.search(q, { mode: 'full', signal: ctrl.signal });
         if (ctrl.signal.aborted) return;
         setResults(full.results);
+        setResultsQuery(q);
         setSourcesIncomplete(full.sourcesIncomplete === true);
         setActiveIndex(0);
       } catch {
@@ -191,13 +210,19 @@ export function TitlebarSearch() {
       {query.trim().length > 0 ? (
         <Popover.Content
           className="search-palette-popover"
-          align="center"
+          // Pinned to the well's left edge, never centered on it. The search
+          // well is the header's only shrinkable child, so every status pill
+          // that expands or collapses changes its width — and a centered
+          // palette slid sideways by half that delta while the user was
+          // reading it. The left edge is the one stable coordinate.
+          align="start"
           sideOffset={6}
           // Keep keyboard focus in the input while the user arrows the list.
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
           <SearchPalette
             groups={groups}
+            query={resultsQuery}
             activeIndex={activeIndex}
             loading={loading}
             failed={failed}

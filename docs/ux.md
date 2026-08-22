@@ -406,6 +406,17 @@ hosts are the contrast that makes the rule clear: a project's about/mission
 field or a gezel's `about.md` is a bordered card sitting *in* a form, and keeps
 its border.
 
+**Embedded Squisq surfaces get a palette bridge.** Squisq ships cool greys and
+a blue primary; anything of its chrome mounted inside gezel is repainted onto
+the gezel tokens rather than left in the vendor palette — the editor shell's
+status bar and outline rail, the schema form, and the folder landing page a
+file pane shows when a folder is selected (`.squisq-folder-view`, bridged in
+[styles/file-browser.css](../packages/ui/src/styles/file-browser.css)). That
+page's *New document* / *New folder* actions are ordinary keys, not a
+full-width primary slab. Squisq's stylesheet is bundled after ours, so a bridge
+rule wins by out-specifying the vendor rule (matching its `[data-theme]`), not
+by source order.
+
 **Forms.** Raw `<input>`, `<textarea>`, `<fieldset>` are fine — Radix
 doesn't ship form primitives and we don't need them. Schema-driven Squisq
 forms use the shared `GezelJsonEditor` wrapper. It keeps Squisq's built-in

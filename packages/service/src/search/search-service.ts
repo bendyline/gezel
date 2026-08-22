@@ -1044,7 +1044,13 @@ export function fuzzyScore(query: string, target: string): number | null {
   const span = lastPos - firstPos + 1;
   const compactness = q.length / span; // 1 = contiguous
   const earliness = 1 - firstPos / (t.length + 1);
-  return Math.max(0.1, 0.55 * compactness + 0.15 * earliness);
+  // Compactness counts quadratically, and a short query counts for less than
+  // a long one. A scattered subsequence is weak evidence in proportion to how
+  // easy it is to hit by accident: "kim" is a subsequence of "SKILL.md", and
+  // linearly-weighted it scored 0.41 — high enough for twenty-five skills
+  // fixtures to tie and bury the library document that actually said Kim.
+  const evidence = Math.min(1, q.length / 4);
+  return Math.max(0.05, (0.55 * compactness * compactness + 0.15 * earliness) * evidence);
 }
 
 /** Tiny non-cryptographic hash for stable ids over snippet text. */

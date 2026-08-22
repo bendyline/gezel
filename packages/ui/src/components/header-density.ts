@@ -20,6 +20,9 @@
  *            queue chip's activity phrase go
  *   tight    the gezel name in an engine pill goes too; the pill keeps
  *            the engine, the phase and the model
+ *   minimal  the model name goes as well, leaving the phase and the clock
+ *            — but only where something else remains to name the pill, so
+ *            an idle pill never shrinks to a bare dot
  *
  * Nothing is lost outright — every dropped string stays in the pill's
  * `title` and in its popover.
@@ -35,10 +38,15 @@
 
 import { type RefObject, createContext, useContext, useEffect, useRef, useState } from 'react';
 
-export type HeaderDensity = 'full' | 'compact' | 'tight';
+export type HeaderDensity = 'full' | 'compact' | 'tight' | 'minimal';
 
 /** Loosest to densest. Steps are taken one at a time, never skipped. */
-export const HEADER_DENSITY_ORDER: readonly HeaderDensity[] = ['full', 'compact', 'tight'];
+export const HEADER_DENSITY_ORDER: readonly HeaderDensity[] = [
+  'full',
+  'compact',
+  'tight',
+  'minimal',
+];
 
 /**
  * Width the search well is entitled to keep no matter how busy the right
