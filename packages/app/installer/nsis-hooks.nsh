@@ -70,6 +70,44 @@ Var GezelServiceStoppedForInstall
 !define GEZEL_SERVICE_STOP_POLL_ATTEMPTS 40
 !define GEZEL_SERVICE_STOP_POLL_INTERVAL_MS 500
 
+; electron-builder 26's PowerShell app-running probe ignores the executable
+; name and treats every process whose image lives below $INSTDIR as the app.
+; GezelService deliberately runs $INSTDIR\gezel-service-host.exe, so a silent
+; uninstall otherwise tries to kill that LocalService process before the
+; uninstaller elevates, gives up, and exits before customUnInstall can stop it.
+;
+; Replace that probe with an exact image-name check. The elevated
+; customUnInstall hook remains the sole owner of the service lifecycle.
+!macro FindGezelDesktopApp RETURN
+  nsExec::Exec `"$CmdPath" /D /C tasklist /FI "IMAGENAME eq ${APP_EXECUTABLE_FILENAME}" /FO CSV /NH | "$SYSDIR\findstr.exe" /B /I /C:"\"${APP_EXECUTABLE_FILENAME}\""`
+  Pop ${RETURN}
+!macroend
+
+!macro customCheckAppRunning
+  !insertmacro FindGezelDesktopApp $R0
+  ${If} $R0 == 0
+    MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "$(appRunning)" /SD IDOK IDOK GezelStopDesktopApp
+    Quit
+
+    GezelStopDesktopApp:
+    DetailPrint "$(appClosing)"
+    nsExec::ExecToLog `"$SYSDIR\taskkill.exe" /IM "${APP_EXECUTABLE_FILENAME}"`
+    Pop $R0
+    Sleep 1000
+    !insertmacro FindGezelDesktopApp $R0
+    ${If} $R0 == 0
+      nsExec::ExecToLog `"$SYSDIR\taskkill.exe" /F /IM "${APP_EXECUTABLE_FILENAME}"`
+      Pop $R0
+      Sleep 1000
+      !insertmacro FindGezelDesktopApp $R0
+      ${If} $R0 == 0
+        MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(appCannotBeClosed)" /SD IDCANCEL IDRETRY GezelStopDesktopApp
+        Quit
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 ; Gracefully stop a registered service and wait (bounded) for STOPPED.
 ; `sc stop` only REQUESTS the stop; returning immediately used to leave the
 ; host running while electron-builder killed app processes and replaced

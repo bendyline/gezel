@@ -476,6 +476,22 @@ describe('Windows machine-service installer security', () => {
     expect(waitMacro).toContain('"STOPPED"');
   });
 
+  it('does not mistake the colocated service host for a running desktop app', () => {
+    const checkStart = position('!macro customCheckAppRunning');
+    const check = hook.slice(checkStart, hook.indexOf('!macroend', checkStart));
+
+    // electron-builder 26's default PowerShell branch checks every process
+    // below $INSTDIR, which includes gezel-service-host.exe. The override must
+    // query and close the desktop image by exact name instead.
+    expect(hook).toContain('!macro FindGezelDesktopApp RETURN');
+    expect(hook).toContain('tasklist /FI "IMAGENAME eq ${APP_EXECUTABLE_FILENAME}"');
+    expect(check).toContain('!insertmacro FindGezelDesktopApp $R0');
+    expect(check).toContain('taskkill.exe" /IM "${APP_EXECUTABLE_FILENAME}"');
+    expect(check).toContain('taskkill.exe" /F /IM "${APP_EXECUTABLE_FILENAME}"');
+    expect(check).not.toContain('_CHECK_APP_RUNNING');
+    expect(check).not.toContain('gezel-service-host.exe');
+  });
+
   it('keeps restricted-service temporary files below the private root', () => {
     // The installer still creates + reparse-guards the redirect targets;
     // the env vars pointing the service at them are compiled into the
