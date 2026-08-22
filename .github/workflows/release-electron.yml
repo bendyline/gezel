@@ -359,7 +359,12 @@ jobs:
           # GEZEL_SERVICE_ROLE, so every Windows machine service ran the full
           # product API instead of the inference-only broker. The binary's own
           # --self-test cannot catch this (same stale source, same stale
-          # assertions) and it carries no version resource to compare.
+          # assertions). The host does carry a VERSIONINFO resource now
+          # (stamped with the native release version), but that names which
+          # release built it, not which env keys it compiles in — a stale pin
+          # still passes any version-shaped check. Grepping the compiled-in
+          # literals against this checkout's main.cpp is the comparison that
+          # actually proves the contract.
           node scripts/verify-service-host-contract.mjs $host_exe
           if ($LASTEXITCODE -ne 0) { throw '[service-host] launch contract mismatch — the pinned native release is stale' }
 
