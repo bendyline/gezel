@@ -67,8 +67,22 @@ jobs:
     # `pnpm validate` deliberately uses the same serialized unit pass as PR CI,
     # then repeats the UI, service, and interaction-heavy CLI TUI suites before
     # the full Electron/browser E2E suites. It was still progressing at the old
-    # 60 min ceiling on 2026-08-11; 90 min leaves headroom for runner variance.
-    timeout-minutes: 90
+    # 60 min ceiling on 2026-08-11, and blew the 90 min one on 2026-08-22.
+    #
+    # This ceiling is load-bearing in a way PR CI hides: quality.yml fans the
+    # same work across parallel jobs (unit 60 min, stability 50 min, published
+    # 30 min), so a change can pass every PR check and still make this job
+    # unrunnable — `validate` runs all of it serially under ONE cap. That is
+    # how `test:coverage` went from a seconds-long static pass to an
+    # instrumented vitest run over 16 package roots unnoticed; it had already
+    # forced quality.yml's unit job from 45 to 60 min, and here it pushed a
+    # 79 min gate past 90. It is deliberately no longer in `validate` — it
+    # re-runs suites test:ci already ran to completion, so it reports rather
+    # than gates, and PR CI still measures it on every pull request.
+    #
+    # 150 is headroom over the ~100 min the gate needs after that removal, not
+    # a target. If it is approached again, split this job rather than raise it.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
