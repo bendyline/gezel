@@ -3250,8 +3250,8 @@ export class ChatManager {
    * and kicks off its about.md + icon generation; if the configured provider
    * cannot answer — no credential, a cold cloud session — those one-shots sit
    * on their own 120s budget while this loop waits. Unbounded, that stalls
-   * `service.stop()`, and neither the Electron quit coordinator nor an
-   * embedded caller imposes a deadline of its own, so the window simply hangs.
+   * `service.stop()`. This method supplies the subsystem deadline; the
+   * Electron quit coordinator independently bounds the complete shutdown.
    * Wild-caught as an intermittent 60s teardown timeout in
    * `security-compliance.spec.ts` once its home stopped inheriting a
    * machine-shared roster and started genuinely provisioning a Meester.
@@ -9761,9 +9761,10 @@ export class ChatManager {
     await this.beginShutdown();
     this.telemetryGpuUnsub?.();
     this.telemetryGpuUnsub = null;
-    // Direct callers skip service.stop()'s earlier background drain. Await
-    // work that was already admitted, but do not start deferred housekeeping
-    // after beginShutdown() has closed the one-shot admission gate.
+    // This is the single owner of the bounded background drain for direct
+    // callers and service.stop(). Await work that was already admitted, but
+    // do not start deferred housekeeping after beginShutdown() has closed the
+    // one-shot admission gate.
     await this.drainBackground();
     this.discardDeferredExtractions();
     // Final service teardown must not re-arm injected providers, and must
