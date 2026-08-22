@@ -1584,14 +1584,15 @@
       "parameterSize": "35B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "core",
-      "performance": {
-        "prefillTokensPerSec": 1608,
-        "decodeTokensPerSec": 73.2,
-        "samples": 1
-      },
       "runtime": {
         "contextTokens": 65536,
-        "peakMemoryMb": 22718
+        "peakMemoryMb": 22718,
+        "kvCacheType": "q8_0"
+      },
+      "judge": {
+        "meanScore": 7.8,
+        "artifacts": 8,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -1681,6 +1682,11 @@
       "parameterSize": "284B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "core",
+      "judge": {
+        "meanScore": 7.8,
+        "artifacts": 7,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "tictactoe",
@@ -1769,14 +1775,15 @@
       "parameterSize": "8B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "core",
-      "performance": {
-        "prefillTokensPerSec": 4698,
-        "decodeTokensPerSec": 65.4,
-        "samples": 1
-      },
       "runtime": {
         "contextTokens": 131072,
-        "peakMemoryMb": 5877
+        "peakMemoryMb": 5877,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 6.2,
+        "artifacts": 3,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -1866,14 +1873,15 @@
       "parameterSize": "27B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "core",
-      "performance": {
-        "prefillTokensPerSec": 725,
-        "decodeTokensPerSec": 7.8,
-        "samples": 1
-      },
       "runtime": {
         "contextTokens": 262144,
-        "peakMemoryMb": 30047
+        "peakMemoryMb": 30047,
+        "kvCacheType": "q8_0"
+      },
+      "judge": {
+        "meanScore": 8.2,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -1963,14 +1971,15 @@
       "parameterSize": "27B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "core",
-      "performance": {
-        "prefillTokensPerSec": 706,
-        "decodeTokensPerSec": 12.1,
-        "samples": 1
-      },
       "runtime": {
         "contextTokens": 262144,
-        "peakMemoryMb": 18441
+        "peakMemoryMb": 18441,
+        "kvCacheType": "q8_0"
+      },
+      "judge": {
+        "meanScore": 8.2,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -2060,14 +2069,15 @@
       "parameterSize": "35B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "productivity",
-      "performance": {
-        "prefillTokensPerSec": 1608,
-        "decodeTokensPerSec": 73.2,
-        "samples": 1
-      },
       "runtime": {
         "contextTokens": 65536,
-        "peakMemoryMb": 4873
+        "peakMemoryMb": 4873,
+        "kvCacheType": "q8_0"
+      },
+      "judge": {
+        "meanScore": 6.7,
+        "artifacts": 27,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -2171,6 +2181,11 @@
       "parameterSize": "284B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "productivity",
+      "judge": {
+        "meanScore": 6.5,
+        "artifacts": 26,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "constrained-comms",
@@ -2273,14 +2288,15 @@
       "parameterSize": "8B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "productivity",
-      "performance": {
-        "prefillTokensPerSec": 4698,
-        "decodeTokensPerSec": 65.4,
-        "samples": 1
-      },
       "runtime": {
         "contextTokens": 131072,
-        "peakMemoryMb": 5233
+        "peakMemoryMb": 5233,
+        "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 5.2,
+        "artifacts": 26,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -2384,14 +2400,15 @@
       "parameterSize": "27B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "productivity",
-      "performance": {
-        "prefillTokensPerSec": 725,
-        "decodeTokensPerSec": 7.8,
-        "samples": 1
-      },
       "runtime": {
         "contextTokens": 262144,
-        "peakMemoryMb": 29928
+        "peakMemoryMb": 29928,
+        "kvCacheType": "q8_0"
+      },
+      "judge": {
+        "meanScore": 6.8,
+        "artifacts": 27,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -2495,14 +2512,15 @@
       "parameterSize": "27B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "productivity",
-      "performance": {
-        "prefillTokensPerSec": 706,
-        "decodeTokensPerSec": 12.1,
-        "samples": 1
-      },
       "runtime": {
         "contextTokens": 262144,
-        "peakMemoryMb": 5544
+        "peakMemoryMb": 5544,
+        "kvCacheType": "q8_0"
+      },
+      "judge": {
+        "meanScore": 7.2,
+        "artifacts": 27,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
