@@ -381,9 +381,12 @@ export const KnowledgeInstallRequestSchema = z.object({
     z.object({
       kind: z.literal('url'),
       url: z.string().url(),
-      /** Required out-of-band identity for remote imports. TLS protects the
-       * transfer; this digest pins the artifact the user intended to trust. */
-      expectedSha256: z.string().regex(/^[0-9a-fA-F]{64}$/),
+      /** Optional out-of-band identity for remote imports. When present, the
+       * daemon rejects bytes that do not match before extracting the archive. */
+      expectedSha256: z
+        .string()
+        .regex(/^[0-9a-fA-F]{64}$/)
+        .optional(),
     }),
   ]),
 });

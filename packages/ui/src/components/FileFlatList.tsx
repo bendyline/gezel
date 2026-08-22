@@ -10,6 +10,13 @@ export interface FileFlatListProps {
   iconFor?: (entry: FileEntry) => ReactNode;
   /** Read-only per-row status rendered after the label (time, badges, score). */
   trailingForEntry?: (entry: FileEntry) => ReactNode;
+  /**
+   * Per-row prose rendered *under* the name, turning the row into a card.
+   * Distinct from `trailingForEntry`, which shares the name's line and so
+   * cannot hold anything long: the trailing slot never shrinks, so a sentence
+   * put there squeezes the name out of the row entirely.
+   */
+  detailForEntry?: (entry: FileEntry) => ReactNode;
   emptyMessage?: ReactNode;
 }
 
@@ -25,6 +32,7 @@ export function FileFlatList({
   onSelect,
   iconFor = defaultIconFor,
   trailingForEntry,
+  detailForEntry,
   emptyMessage,
 }: FileFlatListProps) {
   if (entries.length === 0) {
@@ -35,16 +43,26 @@ export function FileFlatList({
       {entries.map((entry) => {
         const parent = parentDirOf(entry.path);
         const trailing = trailingForEntry?.(entry);
+        const detail = detailForEntry?.(entry);
         return (
           <div
             key={entry.path}
-            className={`tree-row${selectedPath === entry.path ? ' tree-row-selected' : ''}`}
+            className={`tree-row${selectedPath === entry.path ? ' tree-row-selected' : ''}${
+              detail ? ' file-flat-row-card' : ''
+            }`}
           >
             <span className="tree-toggle-spacer" />
-            <button type="button" className="tree-label" onClick={() => onSelect(entry)}>
-              {iconFor(entry)}
-              {entry.name}
-              {parent && <span className="file-flat-parent">{parent}</span>}
+            <button
+              type="button"
+              className={`tree-label${detail ? ' file-flat-card' : ''}`}
+              onClick={() => onSelect(entry)}
+            >
+              <span className="file-flat-card-name">
+                {iconFor(entry)}
+                {entry.name}
+                {parent && <span className="file-flat-parent">{parent}</span>}
+              </span>
+              {detail && <span className="file-flat-card-detail">{detail}</span>}
             </button>
             {trailing && <span className="tree-row-trailing">{trailing}</span>}
           </div>

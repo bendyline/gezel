@@ -2412,11 +2412,15 @@ export class LlamaCppProvider implements LLMProvider {
 
     // Dedupe against the last seen phase so a burst of `load_tensors:`
     // lines doesn't flood the event bus. Same phase + same detail =
-    // don't republish.
+    // don't republish. A counter-carrying line (ds4's decode ticker) has
+    // no detail at all, so the token count joins the key — otherwise
+    // every tick after the first would dedupe away and the live counter
+    // would freeze at its opening value.
     if (
       this.lastStartupPhase &&
       this.lastStartupPhase.phase === phase.phase &&
-      this.lastStartupPhase.detail === phase.detail
+      this.lastStartupPhase.detail === phase.detail &&
+      this.lastStartupPhase.outputTokens === phase.outputTokens
     ) {
       return;
     }
@@ -2425,6 +2429,8 @@ export class LlamaCppProvider implements LLMProvider {
       phase: phase.phase,
       ...(phase.detail ? { detail: phase.detail } : {}),
       ...(typeof phase.progress === 'number' ? { progress: phase.progress } : {}),
+      ...(typeof phase.outputTokens === 'number' ? { outputTokens: phase.outputTokens } : {}),
+      ...(typeof phase.tokensPerSec === 'number' ? { tokensPerSec: phase.tokensPerSec } : {}),
     };
     this.lastStartupPhase = phase.phase === 'ready' ? null : phaseEvent;
     for (const s of this.activeSessions) s.publishEnginePhase(phaseEvent);

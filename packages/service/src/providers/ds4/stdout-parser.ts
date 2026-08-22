@@ -112,10 +112,13 @@ export function classifyDs4Line(rawLine: string): StartupPhase | null {
   if (decodeMatch) {
     const gen = Number.parseInt(decodeMatch[1]!, 10);
     const avgTps = Number.parseFloat(decodeMatch[2]!);
-    const tpsText = Number.isFinite(avgTps) && avgTps > 0 ? ` · ${formatTps(avgTps)} tok/s` : '';
+    // Counters only — no `detail`. The UI names the phase itself and has
+    // its own row for the numbers; a prose copy here would just be
+    // scraped back apart on the other side.
     return {
       phase: 'generating',
-      detail: `${NUM(gen)} tokens${tpsText}`,
+      outputTokens: gen,
+      ...(Number.isFinite(avgTps) && avgTps > 0 ? { tokensPerSec: avgTps } : {}),
     };
   }
 

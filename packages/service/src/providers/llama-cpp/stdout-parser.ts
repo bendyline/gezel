@@ -39,6 +39,14 @@ export interface StartupPhase {
    * number for the UI. Absent on all other phase events.
    */
   bufferBytes?: number;
+  /**
+   * Exact decode counters when the line carries them. They travel as
+   * fields, never folded into `detail`: the UI already names the phase
+   * and renders its own counter row, and prose a consumer has to scrape
+   * back apart is not an interface.
+   */
+  outputTokens?: number;
+  tokensPerSec?: number;
 }
 
 /**

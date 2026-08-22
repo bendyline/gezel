@@ -801,7 +801,7 @@ knowledge
 knowledge
   .command('install <source>')
   .description('Install a .gezk catalog into the running gezel (file path or URL)')
-  .option('--sha256 <digest>', 'expected SHA-256 digest (required for URL installs)')
+  .option('--sha256 <digest>', 'optional expected SHA-256 digest for URL installs')
   .action(async (source: string, opts: { sha256?: string }) => {
     const installSource = resolveKnowledgeInstallSource(source, opts.sha256);
     const client = await connectOwned(cliGlobals());

@@ -1930,6 +1930,10 @@ export class ContentIndex {
           lineEnd: hit.lineEnd,
           snippet: hit.snippet,
           score: hit.score,
+          // Kept, not dropped: a vector-arm hit is a related document, not a
+          // document that says what the user typed, and only the arm knows.
+          source: hit.source,
+          kind: hit.kind,
           ...(shadow && isConvertibleDoc(hit.path.split('.').pop() ?? '')
             ? { markdownPath: `artifacts/${shadow.mdRel}` }
             : {}),

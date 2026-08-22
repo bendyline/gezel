@@ -26,16 +26,19 @@
 }
 
 .msg-failed .msg-live-status {
-  color: #ff9b9b;
+  color: var(--danger);
 }
 
+/* Themed through `--danger`, not a fixed salmon: the literal that used
+   to live here was picked against the dark surface and washed out to
+   near-invisible pink-on-pink once the light parchment theme landed. */
 .msg-failed-banner {
   margin-top: 0.25rem;
   padding: 0.4rem 0.6rem;
   border-radius: 4px;
-  color: #ff9b9b;
-  background: rgba(255, 155, 155, 0.08);
-  border: 1px solid rgba(255, 155, 155, 0.25);
+  color: var(--danger);
+  background: var(--danger-bg);
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
   font-size: 0.85rem;
 }
 
@@ -347,7 +350,7 @@
 }
 
 .thinking-tool-failed .thinking-tool-icon {
-  color: #ff9b9b;
+  color: var(--danger);
 }
 
 /* Pending mid-stream tool calls — markup detected in the streaming

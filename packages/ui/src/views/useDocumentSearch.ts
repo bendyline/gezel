@@ -15,6 +15,13 @@ export interface DocumentSearchHit {
   entry: FileEntry;
   snippet: string;
   line: number;
+  /**
+   * True when the only reason this document surfaced is embedding proximity —
+   * it does not contain the query. The snippet cannot show that on its own
+   * (the vector arm's excerpt is usually the file's generated summary), so
+   * the list has to say it.
+   */
+  related: boolean;
 }
 
 export interface DocumentSearchState {
@@ -62,6 +69,7 @@ export function useDocumentSearch(): DocumentSearchState {
               },
               snippet: r.snippet,
               line: r.lineStart,
+              related: r.source === 'vector',
             })),
           );
         })

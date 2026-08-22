@@ -62,6 +62,8 @@ function readStoredFileTreeCollapsed(): boolean {
 export interface FileBrowserCustomList {
   entries: FileEntry[];
   trailingForEntry?: (entry: FileEntry) => ReactNode;
+  /** Per-row prose under the name — see `FileFlatList.detailForEntry`. */
+  detailForEntry?: (entry: FileEntry) => ReactNode;
   emptyMessage: string;
   onSelect?: (entry: FileEntry) => void;
 }
@@ -316,6 +318,7 @@ export function FileBrowserPane({
                 selectedPath={selectedPath}
                 onSelect={customList.onSelect ?? onSelect}
                 trailingForEntry={customList.trailingForEntry}
+                detailForEntry={customList.detailForEntry}
                 emptyMessage={customList.emptyMessage}
               />
             ) : treeMode ? (

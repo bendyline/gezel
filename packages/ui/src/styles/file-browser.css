@@ -1968,6 +1968,38 @@ button.danger {
   flex: 0 0 auto;
 }
 
+/* ── Flat-list card rows ──
+   A row that carries prose under its name (search results: the document plus
+   the reason it surfaced). The trailing slot cannot hold that text — it is
+   `flex: 0 0 auto`, so a sentence there claims the full width and squeezes
+   the file name out of the row — so the detail goes inside the label button,
+   below the name, and the whole card is one click target. */
+.file-flat-row-card {
+  align-items: flex-start;
+}
+
+.file-flat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.35rem 0.1rem 0.45rem;
+  white-space: normal;
+}
+
+.file-flat-card-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-flat-card-detail {
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
 .workspace-tree-issue-count {
   min-width: 1.25rem;
   padding: 0.05rem 0.28rem;

@@ -354,12 +354,36 @@ an adapter with no `mkdir` gets no New folder key, one with `canWrite: false`
 (a workspace whose write policy says no) gets no mutations at all, and one with
 no `reveal` gets no Open button. Anything genuinely specific to a surface
 arrives as a slot — `headerExtra`, `notices`, `trailingForEntry`,
-`customList`, `extraPane` — which is how the Workspace hangs its index state,
+`detailForEntry`, `customList`, `extraPane` — which is how the Workspace hangs its index state,
 issue badges, triage lists, and Boekwachter pane off the shared panel without
 forking it. **Every file editor autosaves** through
 `useSerializedAutosave` with the dirty state in the status bar; a Save button
 in a file pane is a bug, because a mutation elsewhere in the panel flushes the
 lane rather than racing it.
+
+**A search result is a card: the document, then why it surfaced.** Matched
+prose does not fit on the name's line, and the row's trailing slot never
+shrinks — put a sentence there and it claims the full width, leaving the
+result unattributable to any file. So a result row stacks: the file name (with
+its muted parent folder) on top, the snippet clamped to two lines beneath,
+the whole card one click target. That is `detailForEntry` on the shared flat
+list; `trailingForEntry` stays what it is for — short, fixed-width status.
+A snippet is a signpost to the document, never a substitute for opening it,
+so it clamps rather than growing the row.
+
+**A search result also says how it was found.** Our search is hybrid: some
+hits contain the words the user typed, others are only the nearest thing the
+embedder had. Those two claims are not the same promise, and the reader
+cannot tell them apart from the snippet — a semantic hit's excerpt is
+usually the file's *generated summary*, so an unrelated document arrives
+wearing a confident description of itself. Any surface listing mixed-arm
+results marks the semantic ones with a small uppercase `related` badge
+(`--text-2xs`, `--radius-sm`, `--border` — the neutral badge recipe shared
+with chat's `automatic`), and never marks a keyword hit. Presenting the two
+identically is how document search came to read as "it just lists my
+library". The floor that keeps genuinely-unrelated neighbours out of the
+list in the first place is a service concern — `VECTOR_ARM_MIN_SIMILARITY`
+in [index-store.ts](../packages/service/src/index-store/index-store.ts).
 
 The rule generalises past file panes: **any long-form prose editor autosaves**,
 wherever it lives. A gezel's `about.md`, a project's about/mission, a document,

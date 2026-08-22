@@ -296,14 +296,32 @@
   white-space: nowrap;
 }
 
-/* One line of matched prose under the document name. Clamped: a search
-   result is a signpost to the document, not a substitute for opening it. */
+/* The matched prose under the document name. Wraps, but clamped to two
+   lines: a search result is a signpost to the document, not a substitute for
+   opening it, and an unclamped summary turns the list into a wall of text. */
 .documents-search-snippet {
-  display: block;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
   color: var(--text-muted);
   font-size: var(--text-xs);
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.4;
+}
+
+/* A hit the document earned by embedding proximity rather than by containing
+   the words the user typed. Neutral sibling of the chat `automatic` badge —
+   same `--text-2xs` / `--radius-sm` recipe — because the claim is "you might
+   also want this", not "this is what you asked for". */
+.documents-search-related {
+  display: inline-block;
+  margin-right: 0.35rem;
+  vertical-align: 1px;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }

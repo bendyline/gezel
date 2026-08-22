@@ -495,7 +495,47 @@ describe('DocumentsView', () => {
     await waitFor(() => {
       expect(screen.getByText('refunded within 30 days')).toBeInTheDocument();
     });
+    // The document's own name has to survive alongside the snippet: a result
+    // that shows only matched prose is unattributable, and the trailing slot
+    // (which never shrinks) used to squeeze the name out of the row entirely.
+    expect(screen.getByText('refunds.md')).toBeInTheDocument();
     expect(vi.mocked(api.searchDocuments)).toHaveBeenCalledWith({ q: 'refund' });
+  });
+
+  it('marks a hit the document only earned by semantic proximity', async () => {
+    // The vector arm's snippet is usually the file's generated summary, so a
+    // merely-nearby document is indistinguishable from a real match unless the
+    // list says which arm found it.
+    vi.mocked(api.searchDocuments).mockResolvedValue({
+      results: [
+        {
+          path: 'policies/refunds.md',
+          lineStart: 4,
+          snippet: 'refunded within 30 days',
+          source: 'fts',
+        },
+        {
+          path: 'policies/returns.md',
+          lineStart: 1,
+          snippet: 'Explains how returned goods are processed.',
+          source: 'vector',
+        },
+      ],
+      engine: 'hybrid',
+    } as never);
+    vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
+    render(<DocumentsView />);
+    await waitFor(() => expect(screen.getByTestId('file-tree')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('Search document contents'), {
+      target: { value: 'refund' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Explains how returned goods are processed.')).toBeInTheDocument();
+    });
+    // Exactly one badge: the keyword hit is a match, not a suggestion.
+    expect(screen.getAllByText('related')).toHaveLength(1);
   });
 
   it('says so plainly when nothing in the library matches', async () => {

@@ -7,13 +7,22 @@
 // content tree don't linger on the published site. A marker file records that
 // a directory is ours to wipe; anything else needs --force, so a mistyped
 // --out can't delete a directory we never wrote.
+//
+// The same run refreshes `releases.json` beside the site root — the download
+// listing index.html reads instead of calling the GitHub releases API from the
+// visitor's browser. It sits outside the wiped directory, alongside
+// handboek.css, so regenerating docs can never leave the landing page without
+// downloads.
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { DEFAULT_REPO, writeReleaseListing } from './latest-app-release.mjs';
+
 const MARKER = '.handboek-export.json';
+const RELEASES_FILE = 'releases.json';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptsDir, '..');
@@ -42,6 +51,9 @@ if (flag('--help') || flag('-h')) {
                  root (default: ${DEFAULT_CSS}). Repeatable; --no-css disables.
   --site-url <u> site URL behind the masthead wordmark (default: ${DEFAULT_SITE_URL});
                  --no-site-url omits the wordmark
+  --releases <f> download listing index.html reads (default: the site root beside
+                 --out, i.e. ../gezel-site/${RELEASES_FILE}); --no-releases skips it
+  --repo <o/n>   repository to read releases from (default: ${DEFAULT_REPO})
   --skip-build   reuse the current packages/cli/dist instead of rebuilding
   --force        wipe the output directory even without an export marker
 `);
@@ -51,6 +63,12 @@ if (flag('--help') || flag('-h')) {
 const out = resolve(repoRoot, value('--out') ?? join('..', 'gezel-site', 'docs'));
 const cssHrefs = flag('--no-css') ? [] : values('--css').length ? values('--css') : [DEFAULT_CSS];
 const siteUrl = flag('--no-site-url') ? null : (value('--site-url') ?? DEFAULT_SITE_URL);
+const releasesOut = flag('--no-releases')
+  ? null
+  : value('--releases')
+    ? resolve(repoRoot, value('--releases'))
+    : resolve(out, '..', RELEASES_FILE);
+const repo = value('--repo') ?? process.env.GH_REPO ?? DEFAULT_REPO;
 
 const run = (label, cmd, args) => {
   console.log(`[handboek-site] ${label}`);
@@ -117,7 +135,36 @@ await writeFile(
   'utf8',
 );
 
+let releasesFailure = null;
+if (releasesOut) {
+  console.log('[handboek-site] refreshing download listing');
+  try {
+    const listing = await writeReleaseListing(releasesOut, { repo });
+    console.log(
+      `[handboek-site] ${listing.tag} — ${listing.builds.length} builds → ${releasesOut}`,
+    );
+  } catch (err) {
+    releasesFailure = err.message;
+  }
+}
+
 console.log(`[handboek-site] done — ${out}`);
 console.log(
   `[handboek-site] preview: python3 -m http.server 8000 --directory ${resolve(out, '..')}`,
 );
+
+// A listing from the previous run still points at real installers, so a GitHub
+// blip must not block a docs publish. Having no listing at all is a different
+// thing: the download section degrades to the releases page, and that is worth
+// failing over.
+if (releasesFailure) {
+  const salvaged = existsSync(releasesOut);
+  console.error(`[handboek-site] download listing not refreshed — ${releasesFailure}`);
+  console.error(
+    salvaged
+      ? `[handboek-site] keeping the existing ${releasesOut}`
+      : `[handboek-site] no ${releasesOut} — the site will link the releases page instead`,
+  );
+  console.error('[handboek-site] retry on its own with: node scripts/latest-app-release.mjs');
+  if (!salvaged) process.exit(1);
+}

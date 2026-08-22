@@ -20,10 +20,11 @@ describe('resolveKnowledgeInstallSource', () => {
     });
   });
 
-  it('rejects an unpinned URL install', () => {
-    expect(() => resolveKnowledgeInstallSource('https://example.test/catalog.gezk')).toThrow(
-      'URL installs require --sha256 <64-hex-digest>.',
-    );
+  it('allows an unpinned URL install', () => {
+    expect(resolveKnowledgeInstallSource('https://example.test/catalog.gezk')).toEqual({
+      kind: 'url',
+      url: 'https://example.test/catalog.gezk',
+    });
   });
 
   it('rejects a malformed digest', () => {

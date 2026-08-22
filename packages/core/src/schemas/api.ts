@@ -5213,6 +5213,17 @@ export const DocumentSearchResultSchema = z.object({
    * The source path stays the identity — that is the file the user filed.
    */
   markdownPath: z.string().optional(),
+  /**
+   * Which retrieval arm produced the hit. `fts` means the document literally
+   * contains the query; `vector` means it was merely the nearest neighbour.
+   * A reader cannot tell those apart from the snippet — the vector arm's
+   * snippet is usually the file's generated summary — so the distinction has
+   * to survive onto the wire or a related document reads as a match.
+   * Optional: older services returned unlabelled hits.
+   */
+  source: z.enum(['vector', 'fts']).optional(),
+  /** Chunk class the snippet came from — `summary`, `doc`, `chunk`, … */
+  kind: z.string().optional(),
 });
 export type DocumentSearchResult = z.infer<typeof DocumentSearchResultSchema>;
 

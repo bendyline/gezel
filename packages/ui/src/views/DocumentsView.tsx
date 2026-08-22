@@ -228,9 +228,17 @@ export function DocumentsView() {
         emptyMessage: search.unavailable
           ? 'The library is still being indexed — search will work shortly.'
           : `Nothing in the library mentions “${search.query.trim()}”.`,
-        trailingForEntry: (entry: FileEntry) => {
+        // Under the name, not beside it: a match is a document plus the reason
+        // it surfaced, and the two don't fit on one line.
+        detailForEntry: (entry: FileEntry) => {
           const hit = search.hits?.find((h) => h.entry.path === entry.path);
-          return hit ? <span className="documents-search-snippet">{hit.snippet}</span> : null;
+          if (!hit) return null;
+          return (
+            <span className="documents-search-snippet">
+              {hit.related && <span className="documents-search-related">related</span>}
+              {hit.snippet}
+            </span>
+          );
         },
       }
     : null;

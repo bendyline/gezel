@@ -48,7 +48,7 @@ export type KnowledgeInstallEvent =
 
 export type KnowledgeInstallSource =
   | { kind: 'file'; path: string }
-  | { kind: 'url'; url: string; expectedSha256: string };
+  | { kind: 'url'; url: string; expectedSha256?: string };
 
 export interface KnowledgeInstallOptions {
   home: string;
@@ -136,7 +136,7 @@ export async function* installKnowledgeCatalog(
   try {
     yield { type: 'verifying' };
     if (!archiveSha) archiveSha = await hashFile(archivePath);
-    if (opts.source.kind === 'url') {
+    if (opts.source.kind === 'url' && opts.source.expectedSha256) {
       const expected = opts.source.expectedSha256.toLowerCase();
       if (archiveSha !== expected) {
         yield {

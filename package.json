@@ -110,6 +110,7 @@
     "audit:licenses": "node scripts/check-licenses.mjs",
     "check:docs": "node scripts/check-markdown-links.mjs",
     "docs:site": "node scripts/export-handboek-site.mjs",
+    "docs:releases": "node scripts/latest-app-release.mjs",
     "check:notice": "node scripts/check-notice.mjs",
     "stage:licenses": "node scripts/stage-third-party-licenses.mjs",
     "verify:licenses": "node scripts/verify-packaged-licenses.mjs packages/app/dist/licenses && pnpm verify:npm-licenses",
