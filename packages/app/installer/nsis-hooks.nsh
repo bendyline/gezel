@@ -72,14 +72,16 @@ Var GezelServiceStoppedForInstall
 
 ; electron-builder 26's PowerShell app-running probe ignores the executable
 ; name and treats every process whose image lives below $INSTDIR as the app.
-; GezelService deliberately runs $INSTDIR\gezel-service-host.exe, so a silent
-; uninstall otherwise tries to kill that LocalService process before the
-; uninstaller elevates, gives up, and exits before customUnInstall can stop it.
+; An exact image-name check is not sufficient either: GezelService launches
+; the same $INSTDIR\gezel.exe under ELECTRON_RUN_AS_NODE in Windows session 0.
+; A silent uninstall would keep finding (and unsuccessfully killing) that
+; supervised daemon, then exit before customUnInstall could stop the service.
 ;
-; Replace that probe with an exact image-name check. The elevated
-; customUnInstall hook remains the sole owner of the service lifecycle.
+; Desktop instances run in interactive sessions, so exclude session 0 from
+; both detection and termination. The elevated customUnInstall hook remains
+; the sole owner of the machine service lifecycle.
 !macro FindGezelDesktopApp RETURN
-  nsExec::Exec `"$CmdPath" /D /C tasklist /FI "IMAGENAME eq ${APP_EXECUTABLE_FILENAME}" /FO CSV /NH | "$SYSDIR\findstr.exe" /B /I /C:"\"${APP_EXECUTABLE_FILENAME}\""`
+  nsExec::Exec `"$CmdPath" /D /C tasklist /FI "IMAGENAME eq ${APP_EXECUTABLE_FILENAME}" /FI "SESSION ne 0" /FO CSV /NH | "$SYSDIR\findstr.exe" /B /I /C:"\"${APP_EXECUTABLE_FILENAME}\""`
   Pop ${RETURN}
 !macroend
 
@@ -91,12 +93,12 @@ Var GezelServiceStoppedForInstall
 
     GezelStopDesktopApp:
     DetailPrint "$(appClosing)"
-    nsExec::ExecToLog `"$SYSDIR\taskkill.exe" /IM "${APP_EXECUTABLE_FILENAME}"`
+    nsExec::ExecToLog `"$SYSDIR\taskkill.exe" /IM "${APP_EXECUTABLE_FILENAME}" /FI "SESSION ne 0"`
     Pop $R0
     Sleep 1000
     !insertmacro FindGezelDesktopApp $R0
     ${If} $R0 == 0
-      nsExec::ExecToLog `"$SYSDIR\taskkill.exe" /F /IM "${APP_EXECUTABLE_FILENAME}"`
+      nsExec::ExecToLog `"$SYSDIR\taskkill.exe" /F /IM "${APP_EXECUTABLE_FILENAME}" /FI "SESSION ne 0"`
       Pop $R0
       Sleep 1000
       !insertmacro FindGezelDesktopApp $R0
