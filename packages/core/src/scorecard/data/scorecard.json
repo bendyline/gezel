@@ -18,7 +18,10 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": ["core", "productivity"],
+      "suites": [
+        "core",
+        "productivity"
+      ],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -67,7 +70,10 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": ["core", "productivity"],
+      "suites": [
+        "core",
+        "productivity"
+      ],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -116,7 +122,10 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": ["core", "productivity"],
+      "suites": [
+        "core",
+        "productivity"
+      ],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -165,7 +174,10 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": ["core", "productivity"],
+      "suites": [
+        "core",
+        "productivity"
+      ],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -214,7 +226,10 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": ["core", "productivity"],
+      "suites": [
+        "core",
+        "productivity"
+      ],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -263,7 +278,10 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": ["core", "productivity"],
+      "suites": [
+        "core",
+        "productivity"
+      ],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -306,6 +324,11 @@
       "parameterSize": "30.7B",
       "runId": "2026-08-20-mac-apple-m4-max",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 196,
+        "decodeTokensPerSec": 22.1,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 46871,
@@ -404,6 +427,11 @@
       "parameterSize": "35B",
       "runId": "2026-08-20-mac-apple-m4-max",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 1156,
+        "decodeTokensPerSec": 75.6,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 25981,
@@ -502,6 +530,11 @@
       "parameterSize": "27B",
       "runId": "2026-08-20-mac-apple-m4-max",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 227,
+        "decodeTokensPerSec": 22.9,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 24728,
@@ -600,6 +633,11 @@
       "parameterSize": "27B",
       "runId": "2026-08-20-mac-apple-m4-max",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 227,
+        "decodeTokensPerSec": 22.9,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 27539,
@@ -698,6 +736,11 @@
       "parameterSize": "27B",
       "runId": "2026-08-20-mac-apple-m4-max",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 227,
+        "decodeTokensPerSec": 18.8,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 34001,
@@ -796,6 +839,11 @@
       "parameterSize": "27B",
       "runId": "2026-08-20-mac-apple-m4-max",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 219,
+        "decodeTokensPerSec": 13.4,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 39470,
@@ -894,6 +942,11 @@
       "parameterSize": "30.7B",
       "runId": "2026-08-20-mac-apple-m4-max",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 196,
+        "decodeTokensPerSec": 22.1,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 46845,
@@ -1006,6 +1059,11 @@
       "parameterSize": "35B",
       "runId": "2026-08-20-mac-apple-m4-max",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 1156,
+        "decodeTokensPerSec": 75.6,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 25689,
@@ -1118,6 +1176,11 @@
       "parameterSize": "27B",
       "runId": "2026-08-20-mac-apple-m4-max",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 227,
+        "decodeTokensPerSec": 22.9,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 23432,
@@ -1230,6 +1293,11 @@
       "parameterSize": "27B",
       "runId": "2026-08-20-mac-apple-m4-max",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 227,
+        "decodeTokensPerSec": 22.9,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 27765,
@@ -1342,6 +1410,11 @@
       "parameterSize": "27B",
       "runId": "2026-08-20-mac-apple-m4-max",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 227,
+        "decodeTokensPerSec": 18.8,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 33364,
@@ -1454,6 +1527,11 @@
       "parameterSize": "27B",
       "runId": "2026-08-20-mac-apple-m4-max",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 219,
+        "decodeTokensPerSec": 13.4,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 38472,
