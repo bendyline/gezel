@@ -44,7 +44,9 @@ try {
   });
   console.log(`[warm-ds4] ${modelId} OK`);
 } catch (err) {
-  console.error(`[warm-ds4] ${modelId} FAILED: ${err instanceof Error ? err.message : String(err)}`);
+  console.error(
+    `[warm-ds4] ${modelId} FAILED: ${err instanceof Error ? err.message : String(err)}`,
+  );
   process.exitCode = 1;
 } finally {
   await shutdownTrialDaemon(spawned);

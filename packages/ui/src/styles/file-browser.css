@@ -2629,7 +2629,9 @@ button.danger {
 
 /* An empty folder is otherwise a top-aligned line of grey type over a large
    blank slab; centering it in the body reads as a deliberate empty state. */
-.file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-body:has(.squisq-folder-view-empty) {
+.file-viewer-panel
+  .squisq-folder-view[data-theme]
+  .squisq-folder-view-body:has(.squisq-folder-view-empty) {
   display: grid;
   place-items: center;
 }
