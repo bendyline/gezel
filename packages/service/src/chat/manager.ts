@@ -9734,6 +9734,10 @@ export class ChatManager {
   async beginShutdown(): Promise<void> {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
+    // Deferred housekeeping must not turn into fresh provider work after the
+    // shutdown gate closes. The transcript cursor remains unchanged, so the
+    // next eligible turn can extract the same messages after restart.
+    this.discardDeferredExtractions();
     const activeOneShots = Array.from(this.activeOneShots.entries());
     for (const [controller] of activeOneShots) {
       controller.abort(serviceShutdownAbortError());
@@ -9748,26 +9752,20 @@ export class ChatManager {
     await Promise.allSettled(
       Array.from(this.inflight.keys()).map((sessionId) => this.cancelInflight(sessionId)),
     );
-    // Register deferred extraction work before service.stop drains background
-    // jobs and before providers are reset. shutdown() repeats this harmlessly
-    // for direct callers that do not use the two-phase service teardown.
-    this.flushDeferredExtractions();
+    // A turn that reached its post-send hook while cancellation was settling
+    // may have raced the first clear. Keep the shutdown boundary timer-free.
+    this.discardDeferredExtractions();
   }
 
   async shutdown(): Promise<void> {
     await this.beginShutdown();
     this.telemetryGpuUnsub?.();
     this.telemetryGpuUnsub = null;
-    // Fire any deferred memory extractions immediately so any
-    // mid-conversation work that was waiting on idle gets persisted
-    // before we tear down. Done first so the trackBackground registrations
-    // land before the drain, then await every tracked task before
-    // resetClient disconnects and removes its providers. Direct callers of
-    // shutdown() must get the same safe ordering as service.stop(); otherwise
-    // a half-finished one-shot can resume after its injected mock is removed
-    // and fall through to a real provider.
-    this.flushDeferredExtractions();
+    // Direct callers skip service.stop()'s earlier background drain. Await
+    // work that was already admitted, but do not start deferred housekeeping
+    // after beginShutdown() has closed the one-shot admission gate.
     await this.drainBackground();
+    this.discardDeferredExtractions();
     // Final service teardown must not re-arm injected providers, and must
     // take the engines with it — a pooled engine left running here outlives
     // gezeld as a PPID-1 orphan.
@@ -10445,9 +10443,11 @@ export class ChatManager {
    * cadence, ambient lane, cursor, and debounce policy as first-party chats.
    */
   private scheduleExternalMemoryExtraction(sessionId: string): void {
+    if (this.shuttingDown) return;
     const prepare = this.store
       .findSessionById(sessionId)
       .then((record) => {
+        if (this.shuttingDown) return;
         if (!record?.source || !this.shouldRunMemoryExtraction(record)) return;
         const fire = (): void => {
           const run = (async () => {
@@ -10589,6 +10589,7 @@ export class ChatManager {
    * instead of debouncing further.
    */
   private scheduleHeavyExtraction(sessionId: string, fire: () => void): void {
+    if (this.shuttingDown) return;
     const active = this.activeMemoryExtractions.get(sessionId);
     if (active) {
       active.rerunRequested = true;
@@ -10642,6 +10643,15 @@ export class ChatManager {
     for (const entry of pending) {
       if (entry.timer) clearTimeout(entry.timer);
       entry.fire();
+    }
+  }
+
+  /** Cancel deferred extraction timers without admitting new one-shot work. */
+  private discardDeferredExtractions(): void {
+    const pending = Array.from(this.pendingExtractions.values());
+    this.pendingExtractions.clear();
+    for (const entry of pending) {
+      if (entry.timer) clearTimeout(entry.timer);
     }
   }
 
