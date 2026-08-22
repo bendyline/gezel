@@ -54,6 +54,58 @@
       }
     },
     {
+      "id": "2026-08-19-gb10-spark",
+      "provenance": {
+        "startedAt": "2026-08-20T03:12:45.603Z",
+        "device": {
+          "label": "linux · unknown",
+          "platform": "linux",
+          "arch": "arm64",
+          "memoryGb": 122,
+          "osRelease": "linux 6.17.0-1029-nvidia",
+          "cpuModel": "unknown"
+        },
+        "harnessCommit": "2745e97",
+        "gildeVersion": "0.1.36",
+        "count": 3,
+        "judgeModelId": null
+      },
+      "suites": [
+        "core",
+        "productivity"
+      ],
+      "scenariosBySuite": {
+        "core": [
+          "tictactoe",
+          "petshop",
+          "tankcombat",
+          "schema-migration",
+          "failing-tests-spec",
+          "symptom-debug",
+          "data-wrangle",
+          "incident-postmortem",
+          "ops-runbook-anomaly",
+          "plan-and-estimate",
+          "conflict-synthesis"
+        ],
+        "productivity": [
+          "constrained-comms",
+          "craftbook-week-plan",
+          "craftbook-ab-test-readout",
+          "craftbook-annotated-bibliography",
+          "records-intake",
+          "plan-and-estimate",
+          "meeting-followup",
+          "craftbook-spreadsheet-model",
+          "conflict-synthesis",
+          "docblocks-theme-roundtrip",
+          "craftbook-research-to-document",
+          "craftbook-powerpoint-deck",
+          "wikipedia-research-brief"
+        ]
+      }
+    },
+    {
       "id": "2026-08-14-m4max-llamacpp",
       "provenance": {
         "startedAt": "2026-08-14T20:36:28.930Z",
@@ -1521,6 +1573,1028 @@
           "successes": 2,
           "nonModelFailures": 0,
           "medianDurationMs": 478871
+        }
+      ]
+    },
+    {
+      "modelId": "btl4-35b-q4",
+      "label": "btl4-35b-q4",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "35B",
+      "runId": "2026-08-19-gb10-spark",
+      "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 1608,
+        "decodeTokensPerSec": 73.2,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 22718
+      },
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 110344
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 2,
+          "medianDurationMs": 289960
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 176190
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 237588
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 106557
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 115474
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 206574
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 170871
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 110159
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 99724
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 455732
+        }
+      ]
+    },
+    {
+      "modelId": "deepseek-v4-flash-284b-q2",
+      "label": "deepseek-v4-flash-284b-q2",
+      "engine": "ds4",
+      "tier": "large",
+      "parameterSize": "284B",
+      "runId": "2026-08-19-gb10-spark",
+      "suiteId": "core",
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 209394
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 364859
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 377789
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 447922
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 133520
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 168114
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 339265
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 476804
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 243046
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 181985
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 253049
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-e4b-q4",
+      "label": "gemma4-e4b-q4",
+      "engine": "llama-cpp",
+      "tier": "small",
+      "parameterSize": "8B",
+      "runId": "2026-08-19-gb10-spark",
+      "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 4698,
+        "decodeTokensPerSec": 65.4,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 131072,
+        "peakMemoryMb": 5877
+      },
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 151376
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 207499
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 146308
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 600581
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 238301
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 304627
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 635305
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 130743
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 130992
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 110405
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 64762
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.6-27b-q8",
+      "label": "qwen3.6-27b-q8",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "runId": "2026-08-19-gb10-spark",
+      "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 725,
+        "decodeTokensPerSec": 7.8,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 30047
+      },
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 352525
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 2,
+          "medianDurationMs": 1642291
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 789765
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 423094
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 275527
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 278531
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 294332
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 581300
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 310630
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 233136
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 524022
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "qwen3.8-27b-q4",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "runId": "2026-08-19-gb10-spark",
+      "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 706,
+        "decodeTokensPerSec": 12.1,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 18441
+      },
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 289790
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 1,
+          "medianDurationMs": 1017595
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 438042
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 513776
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 127492
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 111212
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 293406
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 466812
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 207166
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 186691
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 431615
+        }
+      ]
+    },
+    {
+      "modelId": "btl4-35b-q4",
+      "label": "btl4-35b-q4",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "35B",
+      "runId": "2026-08-19-gb10-spark",
+      "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 1608,
+        "decodeTokensPerSec": 73.2,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 4873
+      },
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 95138
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 100435
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 237545
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 79919
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 66747
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 69866
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 105353
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 237088
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 936107
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 140595
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 135515
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1411975
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 125760
+        }
+      ]
+    },
+    {
+      "modelId": "deepseek-v4-flash-284b-q2",
+      "label": "deepseek-v4-flash-284b-q2",
+      "engine": "ds4",
+      "tier": "large",
+      "parameterSize": "284B",
+      "runId": "2026-08-19-gb10-spark",
+      "suiteId": "productivity",
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 295072
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 452973
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 360421
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 260000
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 197606
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 176853
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 162184
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 284123
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 314044
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 177309
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 141722
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2218396
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 481661
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-e4b-q4",
+      "label": "gemma4-e4b-q4",
+      "engine": "llama-cpp",
+      "tier": "small",
+      "parameterSize": "8B",
+      "runId": "2026-08-19-gb10-spark",
+      "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 4698,
+        "decodeTokensPerSec": 65.4,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 131072,
+        "peakMemoryMb": 5233
+      },
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 64458
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 192123
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 385678
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 80016
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 63753
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 79926
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 196743
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 420929
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 90027
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 176594
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 90393
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1205486
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 140938
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.6-27b-q8",
+      "label": "qwen3.6-27b-q8",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "runId": "2026-08-19-gb10-spark",
+      "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 725,
+        "decodeTokensPerSec": 7.8,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 29928
+      },
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 202701
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 366477
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 517787
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 327820
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 156529
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 203246
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 208316
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 604471
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 580634
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 141646
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 156451
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2904352
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 361334
+        }
+      ]
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "qwen3.8-27b-q4",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "runId": "2026-08-19-gb10-spark",
+      "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 706,
+        "decodeTokensPerSec": 12.1,
+        "samples": 1
+      },
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 5544
+      },
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 96226
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 424843
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 401541
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 238254
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 124878
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 156681
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 131531
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 325145
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 537954
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 110889
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 146839
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 3,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2845216
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0,
+          "medianDurationMs": 395766
         }
       ]
     },
