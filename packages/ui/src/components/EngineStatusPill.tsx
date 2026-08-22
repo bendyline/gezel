@@ -861,8 +861,7 @@ function EngineStatusPillForProvider({
   // empties the label, the phase names itself — same fallback the live-turn
   // hook applies to a detail-less event.
   const pillBusyLabel =
-    stripTurnTelemetry(busyLabel) ||
-    (busyLabel && current ? phaseBaseLabel(current.phase) : '');
+    stripTurnTelemetry(busyLabel) || (busyLabel && current ? phaseBaseLabel(current.phase) : '');
   // Strip catalog qualifiers like " (MLX, 4-bit)" from the displayed
   // model name. The engine pill already conveys "this Mac / on-device"
   // context — repeating the runtime + quantization in the pill is
