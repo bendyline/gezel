@@ -38,13 +38,19 @@ export type ExternalToolCallWire = z.infer<typeof ExternalToolCallWireSchema>;
 
 /** Prior transcript entry — mirrors `SessionOpts.priorMessages`. */
 export const PriorMessageWireSchema = z.union([
-  z.object({ role: z.enum(['user', 'assistant']), content: z.string() }),
+  // Keep the richer assistant variant FIRST. Zod unions return the first
+  // matching object and strip unknown fields; putting the plain assistant
+  // shape first silently erased `toolCalls` at B's request boundary. That
+  // left the broker with an orphaned role:tool result and made stateless
+  // continuations look like a fresh turn to small models.
   z.object({
     role: z.literal('assistant'),
     content: z.string(),
     toolCalls: z.array(ExternalToolCallWireSchema),
+    reasoning: z.string().optional(),
   }),
   z.object({ role: z.literal('tool'), content: z.string(), toolCallId: z.string() }),
+  z.object({ role: z.enum(['user', 'assistant']), content: z.string() }),
 ]);
 export type PriorMessageWire = z.infer<typeof PriorMessageWireSchema>;
 

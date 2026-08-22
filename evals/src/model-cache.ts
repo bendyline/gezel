@@ -306,6 +306,9 @@ interface InstallEvent {
   type: 'progress' | 'verifying' | 'extracting-metadata' | 'done' | 'error' | string;
   bytesWritten?: number;
   totalBytes?: number;
+  kind?: string;
+  id?: string;
+  name?: string;
   warning?: string;
   error?: string;
 }
@@ -333,8 +336,11 @@ export async function ensureWarmModel(opts: {
   llamaBin?: string;
   /** sd-server binary, required for sd-cpp warming. */
   sdBin?: string;
+  /** Abort the warm-up when the owning eval receives SIGINT/SIGTERM. */
+  signal?: AbortSignal;
   log: (line: string) => void;
 }): Promise<void> {
+  opts.signal?.throwIfAborted();
   if (opts.engine === 'llama-cpp' && !opts.llamaBin) {
     throw new Error('ensureWarmModel: llama-cpp engine requires llamaBin');
   }
@@ -400,6 +406,7 @@ export async function ensureWarmModel(opts: {
     }
 
     let lastPct = -1;
+    let lastCompanionBucket = -1;
     const handler = (event: InstallEvent) => {
       if (event.type === 'progress') {
         const pct = event.totalBytes
@@ -415,6 +422,21 @@ export async function ensureWarmModel(opts: {
         log(`[cache] ${engine}/${modelId} verifying`);
       } else if (event.type === 'extracting-metadata') {
         log(`[cache] ${engine}/${modelId} extracting metadata`);
+      } else if (event.type === 'companion') {
+        // Text-model eval warming explicitly suppresses companions below.
+        // Keep this visible if that service contract ever regresses instead
+        // of making another multi-GB pull look like a metadata-parser hang.
+        const pct = event.totalBytes
+          ? Math.floor(((event.bytesWritten ?? 0) / event.totalBytes) * 100)
+          : 0;
+        const bucket = Math.floor(pct / 5) * 5;
+        if (bucket !== lastCompanionBucket || event.error) {
+          const label = event.name ?? event.id ?? event.kind ?? 'unknown companion';
+          log(
+            `[cache] unexpected companion ${label}: ${pct}% (${event.bytesWritten ?? 0}/${event.totalBytes ?? 0}) despite skipCompanion${event.error ? ` — ${event.error}` : ''}`,
+          );
+          lastCompanionBucket = bucket;
+        }
       } else if (event.type === 'done') {
         log(
           `[cache] ${engine}/${modelId} install done${event.warning ? ` (warning: ${event.warning})` : ''}`,
@@ -425,9 +447,15 @@ export async function ensureWarmModel(opts: {
     };
 
     if (engine === 'llama-cpp') {
-      await spawned.client.installLlamaCppModel(modelId, handler);
+      // Evals warm exactly the model under test. The product install route
+      // normally adds a multi-GB image-recognition companion for text-only
+      // models and withholds `done` until that second pull finishes. That is
+      // useful product behavior, but unrelated and misleading here.
+      await spawned.client.installLlamaCppModel(modelId, handler, opts.signal, {
+        skipCompanion: true,
+      });
     } else {
-      await spawned.client.pullImageModel(modelId, handler);
+      await spawned.client.pullImageModel(modelId, handler, opts.signal);
     }
 
     if (!(await isModelInstalled(cacheRoot, engine, modelId))) {

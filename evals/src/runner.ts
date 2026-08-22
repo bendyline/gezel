@@ -283,6 +283,23 @@ export function localEvalDeviceSafetyConfig(
   };
 }
 
+/** Classify warm-up failures without leaving operator interrupts as infrastructure crashes. */
+export function modelWarmFailure(
+  error: unknown,
+  signal?: AbortSignal,
+): { reason: string; failureMode: 'interrupted' | 'spawn-error' } {
+  if (signal?.aborted) {
+    return {
+      reason: 'interrupted (SIGINT/SIGTERM); cleanup ran',
+      failureMode: 'interrupted',
+    };
+  }
+  return {
+    reason: `model warm failed: ${error instanceof Error ? error.message : String(error)}`,
+    failureMode: 'spawn-error',
+  };
+}
+
 /**
  * Run a single eval trial end-to-end. Always returns a `TrialResult` —
  * even on spawn errors, timeouts, or scenario failures — and always
@@ -490,6 +507,7 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
           engine: 'llama-cpp',
           modelId,
           llamaBin,
+          ...(opts.signal ? { signal: opts.signal } : {}),
           log,
         });
       }
@@ -553,12 +571,14 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
           modelId: imageModelId,
           ...(llamaBin ? { llamaBin } : {}),
           sdBin,
+          ...(opts.signal ? { signal: opts.signal } : {}),
           log,
         });
         imageModelHome = cacheRoot;
       }
     }
   } catch (err) {
+    const warmFailure = modelWarmFailure(err, opts.signal);
     return finalize({
       trialId,
       scenarioId: scenario.id,
@@ -568,8 +588,8 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
       startMonotonic,
       runDir,
       success: false,
-      reason: `model warm failed: ${err instanceof Error ? err.message : String(err)}`,
-      failureMode: 'spawn-error',
+      reason: warmFailure.reason,
+      failureMode: warmFailure.failureMode,
       logger,
       trialHome,
       client: null,

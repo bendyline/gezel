@@ -780,6 +780,80 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     ).toHaveLength(1);
   }, 30_000);
 
+  it('settles a successful deliverable write when a later tool-loop aborts the turn', async () => {
+    const project = await store.createProject({ name: 'Abort recovery' });
+    const task = await svc.context.tasks.create(project.id, {
+      title: 'Build the page',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      steps: [
+        {
+          name: 'Build',
+          prompt: 'Create `index.html` with `write_file`, then record the result.',
+          advanceWhen: {
+            file: 'index.html',
+            minBytes: 20,
+            requireChange: true,
+          },
+        },
+        { name: 'Evaluate', assignee: { kind: 'user' } },
+      ],
+    });
+    const entryStepId = task.activeStepId!;
+    const nextStepId = task.craftbook.steps[1]!.id;
+    manager.setTaskAdvancer(async (projectId, num, stepId, goto) => {
+      const outcome = await svc.context.tasks.completeStepChecked(projectId, num, stepId, goto, {
+        cause: 'auto',
+      });
+      return outcome.status === 'advanced'
+        ? { status: 'advanced' as const }
+        : {
+            status: 'held' as const,
+            message: outcome.gate.message,
+            messageFingerprint: outcome.gate.messageFingerprint,
+            attempt: outcome.gate.attempt,
+          };
+    });
+    const session = await manager.createSession({
+      gezelId: 'ada',
+      projectId: project.id,
+      taskRef: task.ref,
+      stepId: entryStepId,
+    });
+    mock.scriptToolCalls([
+      {
+        name: 'write_file',
+        arguments: {
+          path: 'index.html',
+          content: '<!doctype html><html><body><main>Ready</main></body></html>',
+        },
+      },
+      {
+        name: 'write_task_note',
+        arguments: { ref: task.ref, text: 'The page was written.' },
+      },
+    ]);
+    mock.scriptSendFailureAfterToolCalls(
+      '[mock] aborting — `write_task_note` repeated 5 times in a row this turn',
+    );
+
+    await expect(manager.send(session.id, 'Build it.')).rejects.toThrow(/write_task_note/);
+
+    await expect(store.readProjectWorkspaceFile(project.id, 'index.html')).resolves.toContain(
+      '<main>Ready</main>',
+    );
+    const updated = await store.readTask(project.id, task.num);
+    expect(updated!.activeStepId).toBe(nextStepId);
+    const disk = await store.getSession('ada', session.id);
+    const aborted = disk!.messages.at(-1)!;
+    expect(aborted.synthetic).toBe('turn-aborted');
+    expect(aborted.toolCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'write_file', success: true }),
+        expect.objectContaining({ name: 'write_task_note', success: true }),
+      ]),
+    );
+  }, 30_000);
+
   it('skips CLOSING_SUMMARY after validation repair writes so checks can rerun', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
 
