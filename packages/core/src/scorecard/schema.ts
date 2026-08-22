@@ -155,6 +155,18 @@ export const ScorecardRuntimeSchema = z
     contextTokens: z.number().int().positive(),
     /** Median peak resident memory of the daemon + engine tree, MB. */
     peakMemoryMb: z.number().int().positive(),
+    /**
+     * KV-cache precision the engine launched with (`f16` | `q8_0` | `q4_0`).
+     *
+     * Recorded because it is NOT uniform across a sweep and it moves both
+     * memory and speed: the Gemma family defaults to `f16` (a quantized KV
+     * corrupts its stored prompt tokens — wild-caught as garbled multilingual
+     * recall on gemma4-12b), while every other family runs `q8_0` at half the
+     * KV memory. Without this column a reader comparing a Gemma row's
+     * wall-clock against a Qwen row has no way to see that they were not
+     * measured under the same cache regime.
+     */
+    kvCacheType: z.string().min(1).optional(),
   })
   .strict();
 export type ScorecardRuntime = z.infer<typeof ScorecardRuntimeSchema>;

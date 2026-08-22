@@ -299,3 +299,74 @@ describe('readModelPerformance', () => {
     expect(readModelPerformance(root, 'qwen3.6-27b-q4', WINDOW)).toBeNull();
   });
 });
+
+describe('modelResultFromMatrix — kvCacheType', () => {
+  /**
+   * KV precision is not uniform across a sweep: the Gemma family launches
+   * f16 (a quantized KV garbles its stored prompt tokens) while every other
+   * family runs q8_0. A published table that omits it invites comparing a
+   * Gemma row's wall-clock against a Qwen row as if they were measured the
+   * same way — they were not.
+   */
+  const matrixFor = (root: string) => ({
+    modelId: 'qwen3.8-27b-q8',
+    label: 'Qwen 3.8',
+    engine: 'llama-cpp',
+    tier: 'medium',
+    suiteId: 'core',
+    matrixRoot: root,
+    matrix: {
+      scenarios: [
+        { scenarioId: 'tictactoe', summaryPath: 'tictactoe/batch.json', trials: 2, successes: 2 },
+      ],
+    } as never,
+  });
+
+  const seed = async (root: string, kvByTrial: Record<string, string>) => {
+    for (const [trialId, kv] of Object.entries(kvByTrial)) {
+      const dir = join(root, 'tictactoe', trialId);
+      await mkdir(dir, { recursive: true });
+      await writeFile(
+        join(dir, 'result.json'),
+        JSON.stringify({ engineContext: { grantedPerSlotTokens: 262144, kvCacheType: kv } }),
+      );
+      await writeFile(join(dir, 'metrics.json'), JSON.stringify({ process: { peakRssMb: 18270 } }));
+    }
+    const trialIds = Object.keys(kvByTrial);
+    await writeFile(
+      join(root, 'tictactoe', 'batch.json'),
+      JSON.stringify({
+        scenarioId: 'tictactoe',
+        trials: trialIds.length,
+        successes: trialIds.length,
+        trialIds,
+        perTrial: trialIds.map((trialId) => ({ trialId, success: true, durationMs: 1000 })),
+      }),
+    );
+  };
+
+  it('records the KV cache type every trial agreed on', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scorecard-kv-'));
+    try {
+      await seed(root, { t1: 'q8_0', t2: 'q8_0' });
+      const result = modelResultFromMatrix(matrixFor(root), 'run-1');
+      expect(result.runtime?.kvCacheType).toBe('q8_0');
+      expect(result.runtime?.contextTokens).toBe(262144);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('omits the KV type when trials disagree rather than picking a winner', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scorecard-kv-mixed-'));
+    try {
+      await seed(root, { t1: 'q8_0', t2: 'f16' });
+      const result = modelResultFromMatrix(matrixFor(root), 'run-1');
+      // A cell that mixed two cache regimes has no honest single label.
+      expect(result.runtime?.kvCacheType).toBeUndefined();
+      expect(result.runtime?.contextTokens).toBe(262144);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});

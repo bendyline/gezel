@@ -93,20 +93,22 @@ export function cellFromBatch(
   };
 }
 
-/** Context window + peak memory a single trial actually used. */
+/** Context window + peak memory + KV precision a single trial actually used. */
 function readTrialRuntime(
   matrixRoot: string,
   scenarioId: string,
   trialId: string,
-): { contextTokens?: number; peakMemoryMb?: number } {
+): { contextTokens?: number; peakMemoryMb?: number; kvCacheType?: string } {
   const dir = join(matrixRoot, scenarioId, trialId);
-  const out: { contextTokens?: number; peakMemoryMb?: number } = {};
+  const out: { contextTokens?: number; peakMemoryMb?: number; kvCacheType?: string } = {};
   try {
     const result = JSON.parse(readFileSync(join(dir, 'result.json'), 'utf8')) as {
-      engineContext?: { grantedPerSlotTokens?: number };
+      engineContext?: { grantedPerSlotTokens?: number; kvCacheType?: string };
     };
     const ctx = result.engineContext?.grantedPerSlotTokens;
     if (typeof ctx === 'number' && ctx > 0) out.contextTokens = ctx;
+    const kv = result.engineContext?.kvCacheType;
+    if (typeof kv === 'string' && kv) out.kvCacheType = kv;
   } catch {
     // absent or malformed — reported as unmeasured rather than guessed
   }
@@ -123,6 +125,13 @@ function readTrialRuntime(
 }
 
 /** Most frequent value; ties resolve to the largest. */
+/** The single value every sample agreed on, or undefined when they differ. */
+function uniform(values: string[]): string | undefined {
+  if (values.length === 0) return undefined;
+  const first = values[0]!;
+  return values.every((v) => v === first) ? first : undefined;
+}
+
 function mode(values: number[]): number | undefined {
   if (values.length === 0) return undefined;
   const counts = new Map<number, number>();
@@ -186,6 +195,7 @@ export function modelResultFromMatrix(
   const cells: ScorecardCell[] = [];
   const contexts: number[] = [];
   const memories: number[] = [];
+  const kvTypes: string[] = [];
   for (const scenario of input.matrix.scenarios) {
     const batchPath = join(input.matrixRoot, scenario.summaryPath);
     let batch: BatchSummary | null = null;
@@ -212,6 +222,7 @@ export function modelResultFromMatrix(
       const runtime = readTrialRuntime(input.matrixRoot, scenario.scenarioId, trialId);
       if (runtime.contextTokens) contexts.push(runtime.contextTokens);
       if (runtime.peakMemoryMb) memories.push(runtime.peakMemoryMb);
+      if (runtime.kvCacheType) kvTypes.push(runtime.kvCacheType);
     }
     cells.push(
       cellFromBatch(batch, (trialId) =>
@@ -238,8 +249,19 @@ export function modelResultFromMatrix(
     ...(() => {
       const contextTokens = mode(contexts);
       const peakMemoryMb = median(memories);
+      // KV precision is a launch constant, so the mode is the value every
+      // trial saw; it is reported only when the trials AGREE, because a
+      // split would mean the cell mixed two cache regimes and no single
+      // label is honest about it.
+      const kvCacheType = uniform(kvTypes);
       return contextTokens && peakMemoryMb
-        ? { runtime: { contextTokens, peakMemoryMb: Math.round(peakMemoryMb) } }
+        ? {
+            runtime: {
+              contextTokens,
+              peakMemoryMb: Math.round(peakMemoryMb),
+              ...(kvCacheType ? { kvCacheType } : {}),
+            },
+          }
         : {};
     })(),
   };
