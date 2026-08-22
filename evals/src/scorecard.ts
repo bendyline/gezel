@@ -9,7 +9,7 @@ import type {
   ScorecardModelResult,
   ScorecardRun,
 } from '@bendyline/gezel';
-import { ScorecardDatasetSchema } from '@bendyline/gezel';
+import { ScorecardDatasetSchema, inferredScorecardDeviceClass } from '@bendyline/gezel';
 import type { BatchSummary, FailureClass, MatrixSummary, TrialResult } from './types.ts';
 
 /**
@@ -93,20 +93,22 @@ export function cellFromBatch(
   };
 }
 
-/** Context window + peak memory a single trial actually used. */
+/** Context window + peak memory + KV precision a single trial actually used. */
 function readTrialRuntime(
   matrixRoot: string,
   scenarioId: string,
   trialId: string,
-): { contextTokens?: number; peakMemoryMb?: number } {
+): { contextTokens?: number; peakMemoryMb?: number; kvCacheType?: string } {
   const dir = join(matrixRoot, scenarioId, trialId);
-  const out: { contextTokens?: number; peakMemoryMb?: number } = {};
+  const out: { contextTokens?: number; peakMemoryMb?: number; kvCacheType?: string } = {};
   try {
     const result = JSON.parse(readFileSync(join(dir, 'result.json'), 'utf8')) as {
-      engineContext?: { grantedPerSlotTokens?: number };
+      engineContext?: { grantedPerSlotTokens?: number; kvCacheType?: string };
     };
     const ctx = result.engineContext?.grantedPerSlotTokens;
     if (typeof ctx === 'number' && ctx > 0) out.contextTokens = ctx;
+    const kv = result.engineContext?.kvCacheType;
+    if (typeof kv === 'string' && kv) out.kvCacheType = kv;
   } catch {
     // absent or malformed — reported as unmeasured rather than guessed
   }
@@ -123,6 +125,13 @@ function readTrialRuntime(
 }
 
 /** Most frequent value; ties resolve to the largest. */
+/** The single value every sample agreed on, or undefined when they differ. */
+function uniform(values: string[]): string | undefined {
+  if (values.length === 0) return undefined;
+  const first = values[0]!;
+  return values.every((v) => v === first) ? first : undefined;
+}
+
 function mode(values: number[]): number | undefined {
   if (values.length === 0) return undefined;
   const counts = new Map<number, number>();
@@ -186,6 +195,7 @@ export function modelResultFromMatrix(
   const cells: ScorecardCell[] = [];
   const contexts: number[] = [];
   const memories: number[] = [];
+  const kvTypes: string[] = [];
   for (const scenario of input.matrix.scenarios) {
     const batchPath = join(input.matrixRoot, scenario.summaryPath);
     let batch: BatchSummary | null = null;
@@ -212,6 +222,7 @@ export function modelResultFromMatrix(
       const runtime = readTrialRuntime(input.matrixRoot, scenario.scenarioId, trialId);
       if (runtime.contextTokens) contexts.push(runtime.contextTokens);
       if (runtime.peakMemoryMb) memories.push(runtime.peakMemoryMb);
+      if (runtime.kvCacheType) kvTypes.push(runtime.kvCacheType);
     }
     cells.push(
       cellFromBatch(batch, (trialId) =>
@@ -238,8 +249,19 @@ export function modelResultFromMatrix(
     ...(() => {
       const contextTokens = mode(contexts);
       const peakMemoryMb = median(memories);
+      // KV precision is a launch constant, so the mode is the value every
+      // trial saw; it is reported only when the trials AGREE, because a
+      // split would mean the cell mixed two cache regimes and no single
+      // label is honest about it.
+      const kvCacheType = uniform(kvTypes);
       return contextTokens && peakMemoryMb
-        ? { runtime: { contextTokens, peakMemoryMb: Math.round(peakMemoryMb) } }
+        ? {
+            runtime: {
+              contextTokens,
+              peakMemoryMb: Math.round(peakMemoryMb),
+              ...(kvCacheType ? { kvCacheType } : {}),
+            },
+          }
         : {};
     })(),
   };
@@ -249,16 +271,20 @@ export function modelResultFromMatrix(
 export function captureDevice(): ScorecardDevice {
   const cpu = cpus()[0]?.model?.trim();
   const memoryGb = Math.round(totalmem() / 1024 ** 3);
-  const label = cpu
+  const detectedLabel = cpu
     ? `${process.platform === 'darwin' ? 'Mac' : process.platform} · ${cpu}`
     : process.platform;
-  return {
-    label,
+  const device: ScorecardDevice = {
+    label: detectedLabel,
     platform: process.platform,
     arch: process.arch,
     memoryGb,
     osRelease: `${process.platform} ${release()}`,
     ...(cpu ? { cpuModel: cpu } : {}),
+  };
+  return {
+    ...device,
+    label: inferredScorecardDeviceClass(device) ?? detectedLabel,
   };
 }
 
@@ -475,10 +501,36 @@ export function nodeScorecardFs(): ScorecardFs {
  * a previous session describes a different machine state and must not be
  * published beside these results.
  */
+/**
+ * Resolve the `startedAt` a scorecard invocation should measure against.
+ *
+ * A fresh sweep starts now. But re-running against an EXISTING run id — an
+ * `--ingest-only` rebuild, or joining a late model to an earlier table — must
+ * reconstruct that run's own window: `readModelPerformance` bounds probes by
+ * `startedAt - 6h … finishedAt`, so anchoring on today silently drops
+ * throughput from every cell of an older run. Silently is the operative word:
+ * a missing measurement doesn't error, the column just stops rendering.
+ */
+export function resolveScorecardStartedAt(opts: {
+  dataset: Pick<ScorecardDataset, 'runs'>;
+  runId?: string | undefined;
+  explicitStartedAt?: string | undefined;
+  now: string;
+}): { startedAt: string; reusedFromRun: boolean } {
+  if (opts.explicitStartedAt) return { startedAt: opts.explicitStartedAt, reusedFromRun: false };
+  const prior = opts.runId
+    ? opts.dataset.runs.find((run) => run.id === opts.runId)?.provenance.startedAt
+    : undefined;
+  return prior
+    ? { startedAt: prior, reusedFromRun: true }
+    : { startedAt: opts.now, reusedFromRun: false };
+}
+
 export function readModelPerformance(
   preflightRoot: string,
   modelId: string,
   window: { fromIso: string; toIso: string },
+  engine?: string,
 ): { prefillTokensPerSec: number; decodeTokensPerSec: number; samples: number } | null {
   if (!existsSync(preflightRoot)) return null;
   const prefills: number[] = [];
@@ -487,7 +539,16 @@ export function readModelPerformance(
   // `preflight-qwen3-6-27b-q4-...`. Matching the raw id silently yielded no
   // performance for every dotted model id while the probes sat on disk, and
   // a missing measurement is invisible: the column just stops rendering.
-  const prefixes = [`preflight-${modelId}-`, `preflight-${modelId.replace(/\./g, '-')}-`];
+  // `makeTrialId` prefixes the provider for every engine EXCEPT the
+  // historical llama-cpp default, so a ds4/mlx probe lands as
+  // `preflight-ds4-<slug>-…`. Matching only the bare id dropped throughput
+  // for every non-llama-cpp model — the same silent-empty-column failure the
+  // dotted-id bug caused, one engine deeper.
+  const slugs = [modelId, modelId.replace(/\./g, '-')];
+  const prefixes = slugs.flatMap((slug) => [
+    `preflight-${slug}-`,
+    ...(engine && engine !== 'llama-cpp' ? [`preflight-${engine}-${slug}-`] : []),
+  ]);
   for (const name of readdirSync(preflightRoot)) {
     // `preflight-<modelId>-<iso>-<suffix>`; the model id may itself contain
     // dashes, so anchor on the prefix rather than splitting.

@@ -31,6 +31,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,6 +49,7 @@ import {
   readJudgeSummary,
   readModelPerformance,
   resolveModelEngine,
+  resolveScorecardStartedAt,
   resolvedGildeVersion,
   runIdFor,
 } from '../scorecard.ts';
@@ -85,6 +87,34 @@ const VERIFY_SUITE = 'productivity';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const publishedDatasetPath = join(repoRoot, 'packages/core/src/scorecard/data/scorecard.json');
+
+function writeDataset(path: string, dataset: ScorecardDataset): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(dataset, null, 2)}\n`);
+
+  // The published dataset is committed, so its generator must leave it in
+  // the same shape enforced by `pnpm lint`. JSON.stringify expands every
+  // array, while Biome keeps short arrays such as `suites` on one line.
+  // Scratch verify datasets live under ignored run output and need no pass.
+  if (path !== publishedDatasetPath) return;
+
+  const biomeCli = createRequire(import.meta.url).resolve('@biomejs/biome/bin/biome');
+  const formatted = spawnSync(
+    process.execPath,
+    [biomeCli, 'format', '--write', '--config-path', repoRoot, path],
+    {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    },
+  );
+  if (formatted.error) {
+    throw new Error(`[scorecard] failed to run Biome for ${path}: ${formatted.error.message}`);
+  }
+  if (formatted.status !== 0) {
+    const detail = formatted.stderr.trim() || formatted.stdout.trim();
+    throw new Error(`[scorecard] Biome could not format ${path}${detail ? `:\n${detail}` : ''}`);
+  }
+}
 
 function readDataset(path: string): ScorecardDataset {
   if (!existsSync(path)) {
@@ -160,15 +190,22 @@ function main(): void {
   }
 
   const device = captureDevice();
-  const startedAt = args.flags['started-at']
-    ? String(args.flags['started-at'])
-    : new Date().toISOString();
-  const runId = args.flags['run-id'] ? String(args.flags['run-id']) : runIdFor(startedAt, device);
-
   const suites = verify ? [VERIFY_SUITE] : [...SCORECARD_SUITES];
   const datasetPath = verify
     ? join(repoRoot, 'evals/runs/scorecard-verify/dataset.json')
     : publishedDatasetPath;
+
+  const explicitRunId = args.flags['run-id'] ? String(args.flags['run-id']) : undefined;
+  const { startedAt, reusedFromRun } = resolveScorecardStartedAt({
+    dataset: readDataset(datasetPath),
+    runId: explicitRunId,
+    explicitStartedAt: args.flags['started-at'] ? String(args.flags['started-at']) : undefined,
+    now: new Date().toISOString(),
+  });
+  if (reusedFromRun) {
+    console.log(`[scorecard] reusing recorded start ${startedAt} for run ${explicitRunId}`);
+  }
+  const runId = explicitRunId ?? runIdFor(startedAt, device);
   const perModelMinutes = verify
     ? VERIFY_SCENARIOS.reduce((sum, id) => {
         const scenario = suiteScenarios(VERIFY_SUITE).find((entry) => entry.id === id);
@@ -239,8 +276,7 @@ function main(): void {
   const persist = (): void => {
     if (results.length === 0) return;
     const merged = mergeScorecard(readDataset(datasetPath), buildRun(), results);
-    mkdirSync(dirname(datasetPath), { recursive: true });
-    writeFileSync(datasetPath, `${JSON.stringify(merged, null, 2)}\n`);
+    writeDataset(datasetPath, merged);
   };
 
   for (const model of models) {
@@ -316,10 +352,15 @@ function main(): void {
       // is the sweep itself plus a lead margin: same machine, same binary,
       // same model, therefore the same measurement. Probes from an older
       // session (a different binary) stay excluded.
-      const performance = readModelPerformance(join(repoRoot, 'evals/runs/preflight'), model.id, {
-        fromIso: new Date(Date.parse(startedAt) - 6 * 60 * 60_000).toISOString(),
-        toIso: matrix.finishedAt,
-      });
+      const performance = readModelPerformance(
+        join(repoRoot, 'evals/runs/preflight'),
+        model.id,
+        {
+          fromIso: new Date(Date.parse(startedAt) - 6 * 60 * 60_000).toISOString(),
+          toIso: matrix.finishedAt,
+        },
+        model.engine,
+      );
       const judge = readJudgeSummary(sweepRoot, model.id, suiteId);
       results.push(
         modelResultFromMatrix(

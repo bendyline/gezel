@@ -476,20 +476,28 @@ describe('Windows machine-service installer security', () => {
     expect(waitMacro).toContain('"STOPPED"');
   });
 
-  it('does not mistake the colocated service host for a running desktop app', () => {
+  it('excludes the session-0 service daemon from desktop app shutdown checks', () => {
     const checkStart = position('!macro customCheckAppRunning');
     const check = hook.slice(checkStart, hook.indexOf('!macroend', checkStart));
+    const findStart = position('!macro FindGezelDesktopApp RETURN');
+    const find = hook.slice(findStart, hook.indexOf('!macroend', findStart));
 
     // electron-builder 26's default PowerShell branch checks every process
-    // below $INSTDIR, which includes gezel-service-host.exe. The override must
-    // query and close the desktop image by exact name instead.
-    expect(hook).toContain('!macro FindGezelDesktopApp RETURN');
-    expect(hook).toContain('tasklist /FI "IMAGENAME eq ${APP_EXECUTABLE_FILENAME}"');
+    // below $INSTDIR. The service host also launches gezel.exe as its session-0
+    // daemon, so both the query and the close operations must ignore session 0.
+    expect(find).toContain(
+      'tasklist /FI "IMAGENAME eq ${APP_EXECUTABLE_FILENAME}" /FI "SESSION ne 0"',
+    );
     expect(check).toContain('!insertmacro FindGezelDesktopApp $R0');
-    expect(check).toContain('taskkill.exe" /IM "${APP_EXECUTABLE_FILENAME}"');
-    expect(check).toContain('taskkill.exe" /F /IM "${APP_EXECUTABLE_FILENAME}"');
+    const taskkillLines = check.split(/\r?\n/).filter((line) => line.includes('taskkill.exe'));
+    expect(taskkillLines).toHaveLength(2);
+    expect(taskkillLines[0]).toContain(
+      'taskkill.exe" /IM "${APP_EXECUTABLE_FILENAME}" /FI "SESSION ne 0"',
+    );
+    expect(taskkillLines[1]).toContain(
+      'taskkill.exe" /F /IM "${APP_EXECUTABLE_FILENAME}" /FI "SESSION ne 0"',
+    );
     expect(check).not.toContain('_CHECK_APP_RUNNING');
-    expect(check).not.toContain('gezel-service-host.exe');
   });
 
   it('keeps restricted-service temporary files below the private root', () => {

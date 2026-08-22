@@ -3,6 +3,7 @@ import {
   buildSuiteScoreboard,
   describeProvenance,
   formatPassClaim,
+  hardwareSummary,
   provenanceDifferences,
   scoreModel,
 } from './report.js';
@@ -204,6 +205,30 @@ describe('provenance', () => {
       'different gezel build',
       'different trial count',
     ]);
+  });
+
+  it('identifies an unknown high-memory Linux arm64 host as DGX Spark class', () => {
+    expect(
+      hardwareSummary({
+        label: 'linux · unknown',
+        platform: 'linux',
+        arch: 'arm64',
+        memoryGb: 122,
+        cpuModel: 'unknown',
+      }),
+    ).toBe('DGX Spark Class · 122 GB');
+  });
+
+  it('does not apply the DGX Spark class below the high-memory threshold', () => {
+    expect(
+      hardwareSummary({
+        label: 'linux · unknown',
+        platform: 'linux',
+        arch: 'arm64',
+        memoryGb: 100,
+        cpuModel: 'unknown',
+      }),
+    ).toBe('linux · unknown · 100 GB');
   });
 });
 

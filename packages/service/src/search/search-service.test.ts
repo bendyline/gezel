@@ -112,6 +112,19 @@ describe('fuzzyScore', () => {
     expect(substring).toBeGreaterThan(subseq);
     expect(fuzzyScore('xyz', 'game')).toBeNull();
   });
+
+  it('penalizes a scattered short subsequence below a genuine substring', () => {
+    // "kim" is a subsequence of "SKILL.md" by accident and a substring of
+    // "checkImageRefsResolve.ts" on purpose; linearly weighted the accident
+    // scored 0.41, enough for a wall of skills fixtures to outrank the
+    // library document that actually said Kim.
+    const accident = fuzzyScore('kim', 'SKILL.md')!;
+    const real = fuzzyScore('kim', 'checkImageRefsResolve.ts')!;
+    expect(accident).toBeLessThan(0.25);
+    expect(real).toBeGreaterThan(accident * 2);
+    // Compactness dominates: the same letters closer together score higher.
+    expect(fuzzyScore('kim', 'kinematics.ts')!).toBeGreaterThan(accident);
+  });
 });
 
 describe('SearchService.quickOpen', () => {

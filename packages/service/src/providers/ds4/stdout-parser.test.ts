@@ -49,13 +49,17 @@ describe('classifyDs4Line', () => {
     expect(phase?.detail).toBe('Restoring session context (41% · 3,200 / 7,880 tokens)');
   });
 
-  it('parses decode progress with sub-10 tok/s kept to one decimal', () => {
+  // Decode telemetry is fields, not prose — see live-progress.test.ts for
+  // why the UI must never be handed a number it has to scrape back out.
+  it('parses decode progress into exact counters', () => {
     const phase = classifyDs4Line(
       '[ds4-server] 0718 14:35:12 ds4-server: chat ctx=7880..8030:150 gen=150 TOOLS decoding chunk=5.20 t/s avg=5.35 t/s 28.846s',
     );
     expect(phase?.phase).toBe('generating');
     expect(phase?.progress).toBeUndefined();
-    expect(phase?.detail).toBe('150 tokens · 5.3 tok/s');
+    expect(phase?.outputTokens).toBe(150);
+    expect(phase?.tokensPerSec).toBeCloseTo(5.35, 2);
+    expect(phase?.detail).toBeUndefined();
   });
 
   it('parses decode progress with THINKING flag and large counts', () => {
@@ -63,7 +67,8 @@ describe('classifyDs4Line', () => {
       '0718 15:02:33 ds4-server: chat ctx=7880..9130:1250 gen=1250 TOOLS THINKING decoding chunk=4.98 t/s avg=5.02 t/s 249.0s',
     );
     expect(phase?.phase).toBe('generating');
-    expect(phase?.detail).toBe('1,250 tokens · 5.0 tok/s');
+    expect(phase?.outputTokens).toBe(1250);
+    expect(phase?.tokensPerSec).toBeCloseTo(5.02, 2);
   });
 
   it('recognizes the tensor-mapping ticker without bufferBytes', () => {

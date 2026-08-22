@@ -182,7 +182,9 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
       <section style={{ marginBottom: '2rem' }}>
         <h3>This Mac (Apple MLX)</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          On-device AI powered by Apple's MLX framework.
+          On-device AI powered by Apple's MLX framework, making the best use of the hardware you
+          already have — in many cases the best choice of engine for your Mac. Your conversations
+          stay on your computer: no account to set up, no data sent to the cloud.
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>

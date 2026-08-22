@@ -9,6 +9,7 @@ import {
   mergeScorecard,
   modelResultFromMatrix,
   readModelPerformance,
+  resolveScorecardStartedAt,
   runIdFor,
 } from './scorecard.ts';
 import type { BatchSummary, MatrixSummary } from './types.ts';
@@ -237,6 +238,44 @@ describe('runIdFor', () => {
   });
 });
 
+describe('resolveScorecardStartedAt', () => {
+  const NOW = '2026-09-01T12:00:00.000Z';
+  const dataset = {
+    runs: [{ id: '2026-08-19-gb10-spark', provenance: { startedAt: '2026-08-20T03:12:45.603Z' } }],
+  } as never;
+
+  it("reuses an existing run's recorded start when re-ingesting it", () => {
+    // Regression: defaulting to `now` moved the perf window off the run's own
+    // probes, so an --ingest-only rebuild silently dropped throughput from
+    // every cell. Nothing errored — the column just stopped rendering.
+    expect(
+      resolveScorecardStartedAt({ dataset, runId: '2026-08-19-gb10-spark', now: NOW }),
+    ).toEqual({ startedAt: '2026-08-20T03:12:45.603Z', reusedFromRun: true });
+  });
+
+  it('starts a fresh sweep at now for an unknown run id', () => {
+    expect(resolveScorecardStartedAt({ dataset, runId: '2026-09-01-new-box', now: NOW })).toEqual({
+      startedAt: NOW,
+      reusedFromRun: false,
+    });
+    expect(resolveScorecardStartedAt({ dataset, now: NOW })).toEqual({
+      startedAt: NOW,
+      reusedFromRun: false,
+    });
+  });
+
+  it('lets an explicit --started-at win over the recorded one', () => {
+    expect(
+      resolveScorecardStartedAt({
+        dataset,
+        runId: '2026-08-19-gb10-spark',
+        explicitStartedAt: '2026-08-15T00:00:00.000Z',
+        now: NOW,
+      }),
+    ).toEqual({ startedAt: '2026-08-15T00:00:00.000Z', reusedFromRun: false });
+  });
+});
+
 describe('readModelPerformance', () => {
   async function probe(
     preflightRoot: string,
@@ -252,6 +291,28 @@ describe('readModelPerformance', () => {
   }
 
   const WINDOW = { fromIso: '2026-08-11T00:00:00.000Z', toIso: '2026-08-13T00:00:00.000Z' };
+
+  it('finds a ds4 probe, whose directory carries the provider segment', async () => {
+    // Regression: `makeTrialId` omits the provider segment only for
+    // llama-cpp, so a ds4 probe is `preflight-ds4-<slug>-...`. Matching the
+    // bare id dropped throughput for every non-llama-cpp model, and — like
+    // the dotted-id bug below — the column just silently stopped rendering.
+    root = await mkdtemp(join(tmpdir(), 'gezel-scorecard-perf-'));
+    await probe(root, 'preflight-ds4-deepseek-v4-flash-284b-q2-2026-08-11T23-31-52-491Z-bosr', {
+      promptTokensPerSec: 679.8,
+      genTokensPerSec: 16.91,
+    });
+
+    // Rounded on read: prefill to whole tokens/sec, decode to one decimal.
+    expect(readModelPerformance(root, 'deepseek-v4-flash-284b-q2', WINDOW, 'ds4')).toEqual({
+      prefillTokensPerSec: 680,
+      decodeTokensPerSec: 16.9,
+      samples: 1,
+    });
+    // Without the engine the probe is invisible — proving the segment, not
+    // some looser match, is what finds it.
+    expect(readModelPerformance(root, 'deepseek-v4-flash-284b-q2', WINDOW)).toBeNull();
+  });
 
   it('finds probes for a dotted model id, whose directory slugifies the dot', async () => {
     // Regression: the probe directory for `qwen3.6-27b-q4` is written as
@@ -297,5 +358,76 @@ describe('readModelPerformance', () => {
     });
 
     expect(readModelPerformance(root, 'qwen3.6-27b-q4', WINDOW)).toBeNull();
+  });
+});
+
+describe('modelResultFromMatrix — kvCacheType', () => {
+  /**
+   * KV precision is not uniform across a sweep: the Gemma family launches
+   * f16 (a quantized KV garbles its stored prompt tokens) while every other
+   * family runs q8_0. A published table that omits it invites comparing a
+   * Gemma row's wall-clock against a Qwen row as if they were measured the
+   * same way — they were not.
+   */
+  const matrixFor = (root: string) => ({
+    modelId: 'qwen3.8-27b-q8',
+    label: 'Qwen 3.8',
+    engine: 'llama-cpp',
+    tier: 'medium',
+    suiteId: 'core',
+    matrixRoot: root,
+    matrix: {
+      scenarios: [
+        { scenarioId: 'tictactoe', summaryPath: 'tictactoe/batch.json', trials: 2, successes: 2 },
+      ],
+    } as never,
+  });
+
+  const seed = async (root: string, kvByTrial: Record<string, string>) => {
+    for (const [trialId, kv] of Object.entries(kvByTrial)) {
+      const dir = join(root, 'tictactoe', trialId);
+      await mkdir(dir, { recursive: true });
+      await writeFile(
+        join(dir, 'result.json'),
+        JSON.stringify({ engineContext: { grantedPerSlotTokens: 262144, kvCacheType: kv } }),
+      );
+      await writeFile(join(dir, 'metrics.json'), JSON.stringify({ process: { peakRssMb: 18270 } }));
+    }
+    const trialIds = Object.keys(kvByTrial);
+    await writeFile(
+      join(root, 'tictactoe', 'batch.json'),
+      JSON.stringify({
+        scenarioId: 'tictactoe',
+        trials: trialIds.length,
+        successes: trialIds.length,
+        trialIds,
+        perTrial: trialIds.map((trialId) => ({ trialId, success: true, durationMs: 1000 })),
+      }),
+    );
+  };
+
+  it('records the KV cache type every trial agreed on', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scorecard-kv-'));
+    try {
+      await seed(root, { t1: 'q8_0', t2: 'q8_0' });
+      const result = modelResultFromMatrix(matrixFor(root), 'run-1');
+      expect(result.runtime?.kvCacheType).toBe('q8_0');
+      expect(result.runtime?.contextTokens).toBe(262144);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('omits the KV type when trials disagree rather than picking a winner', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'scorecard-kv-mixed-'));
+    try {
+      await seed(root, { t1: 'q8_0', t2: 'f16' });
+      const result = modelResultFromMatrix(matrixFor(root), 'run-1');
+      // A cell that mixed two cache regimes has no honest single label.
+      expect(result.runtime?.kvCacheType).toBeUndefined();
+      expect(result.runtime?.contextTokens).toBe(262144);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

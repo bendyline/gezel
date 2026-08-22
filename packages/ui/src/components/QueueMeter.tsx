@@ -93,10 +93,10 @@ function isLocalEngineProvider(name: QueueProviderName): boolean {
  * What a live local-engine turn is doing, in words.
  *
  * Deliberately derived from the phase rather than the phase event's
- * `detail`: that string carries token counts and decode rates
- * ("300 tokens · 11 tok/s"), which are the engine pill's subject. This
- * panel answers who is working on what, so it stays qualitative and
- * leaves the width for the job phrase.
+ * `detail`: prefill still spells out its progress in tokens
+ * ("Processing prompt (47% · 6,144 / 12,000 tokens)"), which is the
+ * engine pill's subject. This panel answers who is working on what, so
+ * it stays qualitative and leaves the width for the job phrase.
  *
  * `generating` and `ready` produce nothing — a row that is listed as
  * running already says the engine is working.

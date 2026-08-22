@@ -20,6 +20,7 @@ import {
   type FileViewMode,
   coerceFileViewMode,
 } from '../components/file-view-modes.js';
+import { highlightTokens } from '../components/highlight-tokens.js';
 import { useEffectiveTheme } from '../theme.js';
 import { DocumentDetail } from './DocumentDetail.js';
 import { useDocumentSearch } from './useDocumentSearch.js';
@@ -228,9 +229,17 @@ export function DocumentsView() {
         emptyMessage: search.unavailable
           ? 'The library is still being indexed — search will work shortly.'
           : `Nothing in the library mentions “${search.query.trim()}”.`,
-        trailingForEntry: (entry: FileEntry) => {
+        // Under the name, not beside it: a match is a document plus the reason
+        // it surfaced, and the two don't fit on one line.
+        detailForEntry: (entry: FileEntry) => {
           const hit = search.hits?.find((h) => h.entry.path === entry.path);
-          return hit ? <span className="documents-search-snippet">{hit.snippet}</span> : null;
+          if (!hit) return null;
+          return (
+            <span className="documents-search-snippet">
+              {hit.related && <span className="documents-search-related">related</span>}
+              {highlightTokens(hit.snippet, search.matchedQuery)}
+            </span>
+          );
         },
       }
     : null;
@@ -239,12 +248,12 @@ export function DocumentsView() {
     <div className="documents-listing" data-testid="documents-view">
       <FileBrowserPane
         source={source}
-        headerExtra={
+        titleReplacement={
           <div className="documents-search">
             <input
               type="search"
               className="documents-search-input"
-              placeholder="Search documents…"
+              placeholder={`${source.title} - search`}
               aria-label="Search document contents"
               value={search.query}
               onChange={(e) => search.setQuery(e.target.value)}

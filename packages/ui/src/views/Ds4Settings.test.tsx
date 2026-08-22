@@ -7,6 +7,13 @@ vi.mock('../components/Ds4ModelManager.js', () => ({
   Ds4ModelManager: () => <div data-testid="ds4-model-manager">models</div>,
 }));
 
+const TWO_INSTALLED = {
+  models: [
+    { id: 'deepseek-v4-flash-iq2xxs', name: 'DeepSeek V4 Flash (IQ2_XXS)' },
+    { id: 'glm-5.2-754b-q2', name: 'GLM 5.2 (IQ2_XXS)' },
+  ],
+};
+
 const { detectDs4Availability } = vi.hoisted(() => ({
   detectDs4Availability: vi.fn(() => ({ status: 'available', backend: 'metal' })),
 }));
@@ -19,6 +26,8 @@ vi.mock('../api.js', () => ({
       path: '/tmp/ds4-server-2026-07-18.log',
       tail: '[ds4-server] --ssd-streaming enabled',
     }),
+    listDs4Models: vi.fn().mockResolvedValue({ models: [] }),
+    updateConfig: vi.fn().mockResolvedValue({ provider: 'ds4' }),
     getMemoryProfile: vi.fn().mockResolvedValue({
       platform: 'darwin',
       totalRamBytes: 128 * 1024 ** 3,
@@ -76,5 +85,39 @@ describe('Ds4Settings', () => {
         expect.objectContaining({ totalRamBytes: 128 * 1024 ** 3 }),
       ),
     );
+  });
+
+  // One installed model has no choice to make — the picker only earns its
+  // space once the user actually has two DwarfStar builds on disk.
+  it('hides the default-model picker until more than one model is installed', async () => {
+    const { api } = await import('../api.js');
+    render(
+      <Ds4Settings config={{ provider: 'ds4' } as ConfigResponse} onConfigChanged={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(api.listDs4Models).toHaveBeenCalled());
+    expect(screen.queryByRole('combobox', { name: 'Default model' })).not.toBeInTheDocument();
+  });
+
+  it('pins the chosen DwarfStar model as the provider default', async () => {
+    const { api } = await import('../api.js');
+    vi.mocked(api.listDs4Models).mockResolvedValueOnce(TWO_INSTALLED as never);
+    const onConfigChanged = vi.fn();
+    render(
+      <Ds4Settings
+        config={{ provider: 'ds4', defaultModel: { mlx: 'keep-me' } } as ConfigResponse}
+        onConfigChanged={onConfigChanged}
+      />,
+    );
+
+    const select = await screen.findByRole('combobox', { name: 'Default model' });
+    await userEvent.setup().selectOptions(select, 'glm-5.2-754b-q2');
+
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        defaultModel: { mlx: 'keep-me', ds4: 'glm-5.2-754b-q2' },
+      }),
+    );
+    expect(onConfigChanged).toHaveBeenCalled();
   });
 });

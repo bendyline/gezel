@@ -60,7 +60,11 @@ import {
 } from './engine-pill-stats.js';
 import { useHeaderDensity } from './header-density.js';
 import { deviceLabel, providerLabel } from './provider-label.js';
-import { type LiveTurnState, useOnDeviceLiveTurns } from './useOnDeviceLiveTurns.js';
+import {
+  type LiveTurnState,
+  phaseBaseLabel,
+  useOnDeviceLiveTurns,
+} from './useOnDeviceLiveTurns.js';
 import { useStableHeaderPopoverPosition } from './useStableHeaderPopoverPosition.js';
 
 type LiveTurn = LiveTurnState;
@@ -850,9 +854,14 @@ function EngineStatusPillForProvider({
       ? `${rateIsExact ? '' : '≈'}${formatTokensPerSec(liveTokensPerSec)}`
       : '';
   // Performance belongs in the detail dropdown, not in the compact header.
-  // Most engines publish the rate as structured telemetry, but tolerate an
-  // older engine that still includes it in the human-readable phase detail.
-  const pillBusyLabel = stripTokenRate(busyLabel);
+  // Our own engines now emit decode counters as fields and leave `detail`
+  // alone, so this is a backstop: a phase detail that still carries prose
+  // telemetry (an engine whose stdout wording drifts into it, a daemon
+  // older than this UI) gets it stripped rather than shown. If stripping
+  // empties the label, the phase names itself — same fallback the live-turn
+  // hook applies to a detail-less event.
+  const pillBusyLabel =
+    stripTurnTelemetry(busyLabel) || (busyLabel && current ? phaseBaseLabel(current.phase) : '');
   // Strip catalog qualifiers like " (MLX, 4-bit)" from the displayed
   // model name. The engine pill already conveys "this Mac / on-device"
   // context — repeating the runtime + quantization in the pill is
@@ -975,7 +984,12 @@ function EngineStatusPillForProvider({
   const showKind = density === 'full' || !kindNamesTheMachine;
   // Tighter still: the gezel's name goes, leaving engine + phase + model.
   // Both stay in the pill's tooltip and in the popover's Status row.
-  const showActor = density !== 'tight';
+  const showActor = density === 'full' || density === 'compact';
+  // Last of all the model name goes, leaving the phase and the clock. Held
+  // back until the label has something else to say: on an idle pill whose
+  // machine name already went, the model is the only word there is, and
+  // dropping it would leave a bare dot naming nothing.
+  const showModel = density !== 'minimal' || !(busy || showKind);
 
   return (
     <div className="engine-pill-root" ref={rootRef}>
@@ -1013,7 +1027,10 @@ function EngineStatusPillForProvider({
                   apart by the name in the first place. */}
               {showKind && <span className="engine-pill-kind">{platformPillLabel}</span>}
               {showActor && activeGezelName && (
-                <span className="engine-pill-actor">{activeGezelName} · </span>
+                <span className="engine-pill-actor">
+                  {activeGezelName}
+                  {showProgress || pillBusyLabel ? ' · ' : ''}
+                </span>
               )}
               {showProgress ? (
                 <span
@@ -1038,7 +1055,7 @@ function EngineStatusPillForProvider({
           ) : (
             showKind && platformPillLabel
           )}
-          {displayModelName && (
+          {displayModelName && showModel && (
             // The separator belongs to whatever precedes the model name, so
             // a compacted idle pill reads "Qwen 3.8", not "· Qwen 3.8".
             <span className="engine-pill-model">{`${busy || showKind ? ' · ' : ''}${displayModelName}`}</span>
@@ -1360,11 +1377,38 @@ function phaseLabelIncludesTokenRate(label: string): boolean {
   return /\btok\/s\b/i.test(label);
 }
 
-function stripTokenRate(label: string): string {
-  return label
-    .replace(/\s*(?:[·—–-]\s*)?(?:about\s+|~|≈)?\d+(?:\.\d+)?\s*tok\/s\b/gi, '')
-    .replace(/\(\s*\)/g, '')
-    .replace(/\s*[·—–-]\s*$/, '')
+/** A phase-detail fragment that carries only a token count or decode rate. */
+const TURN_TELEMETRY =
+  /(?:about\s+|~|≈)?\d[\d,]*(?:\.\d+)?\s*(?:\/\s*\d[\d,]*\s*)?(?:tokens?|tok\/s)\b/i;
+
+function dropTelemetrySegments(text: string): string {
+  return text
+    .split(/\s*·\s*/)
+    .filter((segment) => segment.trim() !== '' && !TURN_TELEMETRY.test(segment))
+    .join(' · ');
+}
+
+/**
+ * Strip per-turn telemetry from a phase detail. Engines bury it at
+ * different depths — llama.cpp nests it inside parentheses
+ * ("Processing prompt (47% · 6,144 / 12,000 tokens)"), MLX makes it the
+ * whole label — so whole separator-delimited segments go, inside
+ * parentheses first, and a dash-attached tail is handled on its own
+ * because an em dash also separates non-telemetry detail
+ * ("Generating video — step 12/40").
+ */
+function stripTurnTelemetry(label: string): string {
+  const withoutDashTail = label.replace(
+    /\s*[—–-]\s*(?:about\s+|~|≈)?\d[\d,]*(?:\.\d+)?\s*(?:\/\s*\d[\d,]*\s*)?(?:tokens?|tok\/s)\b/gi,
+    '',
+  );
+  const withoutParens = withoutDashTail.replace(/\(([^()]*)\)/g, (_whole, inner: string) => {
+    const kept = dropTelemetrySegments(inner);
+    return kept ? `(${kept})` : '';
+  });
+  return dropTelemetrySegments(withoutParens)
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^\s*[·—–-]\s*|\s*[·—–-]\s*$/g, '')
     .trim();
 }
 

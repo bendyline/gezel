@@ -1,9 +1,11 @@
 /**
- * Retrieval-arm liveness contract: every arm the unified search fans out to
- * must return at least one hit on a golden fixture. This is the regression
+ * Retrieval-arm contract, asserted in both directions: every arm the unified
+ * search fans out to must return at least one hit on a golden fixture, and no
+ * arm may answer a query the fixture does not contain. This is the regression
  * net for the fts_summaries class of failure — an arm that silently goes
  * write-only, or whose floor drifts off the embedder's scale — which
- * previously survived for months because nothing asserted arms end-to-end.
+ * previously survived for months because nothing asserted arms end-to-end,
+ * and for its mirror image, an unfloored KNN arm returning the whole corpus.
  *
  * Where a downstream consumer applies a floor (memory/recall.ts's
  * CODE_MIN_SCORE / LIBRARY_MIN_SCORE), the assertion is "clears the floor",
@@ -167,4 +169,27 @@ it('every retrieval arm returns a hit on the golden fixture, clearing its floor'
   // ── arm: AI-shadow text reaches search (vision caption → chunks) ────────
   const caption = await ci.searchDocs('c', 'lighthouse rocky coast');
   expect(caption.results.some((r) => r.sourcePath === 'photos.png')).toBe(true);
+
+  // ── the other direction: an arm that answers EVERYTHING is as broken as
+  //    one that answers nothing. KNN always returns its k nearest rows, so
+  //    without VECTOR_ARM_MIN_SIMILARITY a query matching no document still
+  //    returns the whole corpus — which reached users as "document search
+  //    just lists my library" (a four-document library answered every query
+  //    with four hits, the noise outranking genuine keyword matches because
+  //    rank fusion scores the vector arm's rank-0 hit at a flat 1.0). ─────
+  for (const nonsense of ['dough', 'zebra tessellation']) {
+    const empty = await ci.searchLibrary('c', nonsense);
+    expect(empty.results, `"${nonsense}" matches nothing in the fixture`).toEqual([]);
+  }
+
+  // The floor must not have swallowed genuine semantic recall along with it:
+  // this query shares no keyword with the document it should find.
+  const stillSemantic = await ci.searchLibrary('c', 'how do we limit API request rate?');
+  expect(stillSemantic.results.some((r) => r.path === 'src/throttle.ts')).toBe(true);
+
+  // ── the arm that produced each hit survives onto the wire, so the UI can
+  //    tell "this document says it" from "this document is merely near it" ─
+  const labelled = await ci.searchLibrary('c', 'suspension damping');
+  expect(labelled.results.length).toBeGreaterThan(0);
+  expect(labelled.results.every((r) => r.source === 'vector' || r.source === 'fts')).toBe(true);
 }, 120_000);

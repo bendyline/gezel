@@ -1,6 +1,7 @@
 import type { UnifiedSearchResult } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { highlightTokens } from './highlight-tokens.js';
 import { runNavActions } from './nav-actions.js';
 import { type SearchGroup, groupResults, resultToActions } from './search-nav.js';
 
@@ -19,28 +20,6 @@ const OPEN_EVENT = 'gezel:open-search-results';
 
 export function openSearchResults(query: string): void {
   window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: { query } }));
-}
-
-/** Wrap query-token matches in <mark> — client-side so the service snippets
- *  (which also feed model prompts) stay clean text. */
-export function highlightTokens(text: string, query: string): React.ReactNode {
-  const tokens = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}_]{2,}/gu) ?? [])];
-  if (tokens.length === 0) return text;
-  const pattern = new RegExp(
-    `(${tokens.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`,
-    'giu',
-  );
-  const parts = text.split(pattern);
-  if (parts.length === 1) return text;
-  return parts.map((part, i) =>
-    pattern.test(part) ? (
-      // biome-ignore lint/suspicious/noArrayIndexKey: static split of one string; order never changes
-      <mark key={i}>{part}</mark>
-    ) : (
-      // biome-ignore lint/suspicious/noArrayIndexKey: see above
-      <span key={i}>{part}</span>
-    ),
-  );
 }
 
 export function SearchResultsOverlay() {

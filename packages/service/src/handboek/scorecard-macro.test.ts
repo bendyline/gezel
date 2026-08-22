@@ -1,6 +1,6 @@
 import { type ScorecardDataset, ScorecardDatasetSchema } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { breakModelLabel, renderScorecardMarkdown } from './macros.js';
+import { breakModelLabel, renderScorecardMarkdown, renderScorecardRunsMarkdown } from './macros.js';
 
 function dataset(
   over: {
@@ -62,6 +62,48 @@ describe('::handboek-model-scorecard', () => {
   it('renders a rate once the sample supports it', () => {
     const md = renderScorecardMarkdown(dataset(), 'core', { includeTaskCount: true });
     expect(md).toContain('| Big 27B | 27B | 5/6 (83%) |');
+  });
+
+  it('shows output and prefill speed together and annotates a recorded KV cache', () => {
+    const md = renderScorecardMarkdown(
+      dataset({
+        results: [
+          {
+            modelId: 'qwen',
+            label: 'qwen3.8-27b-q4',
+            engine: 'llama-cpp',
+            tier: 'medium',
+            parameterSize: '27B',
+            runId: 'r2',
+            suiteId: 'core',
+            performance: {
+              prefillTokensPerSec: 1182,
+              decodeTokensPerSec: 78.5,
+              samples: 3,
+            },
+            runtime: {
+              contextTokens: 262144,
+              peakMemoryMb: 18432,
+              kvCacheType: 'q8_0',
+            },
+            cells: [{ scenarioId: 'tictactoe', trials: 3, successes: 3, nonModelFailures: 0 }],
+          },
+        ],
+      }),
+      'core',
+      { includeTaskCount: false, breakLabels: true },
+    );
+
+    expect(md).toContain('| Model | Size | Tasks passed | Performance | Context | Memory used |');
+    expect(md).toContain('qwen3.8-<br>27b-q4 (kv: q8_0)');
+    expect(md).toContain('78.5\u00a0tok/s output<br>1,182\u00a0tok/s prefill');
+  });
+
+  it('keeps the Performance column when an older round has no speed probe', () => {
+    const md = renderScorecardMarkdown(dataset(), 'core', { includeTaskCount: false });
+    expect(md).toContain('| Model | Size | Tasks passed | Performance |');
+    expect(md).toContain('| Big 27B | 27B | 5/6 (83%) | — |');
+    expect(md).not.toContain('(kv:');
   });
 
   it('prints a count, never a percentage, below three trials', () => {
@@ -157,6 +199,89 @@ describe('::handboek-model-scorecard', () => {
     expect(renderScorecardMarkdown(dataset(), 'core', { includeTaskCount: false })).not.toContain(
       'Tasks in this set',
     );
+  });
+
+  it('groups general and productivity tables beneath each shared run', () => {
+    const combined = ScorecardDatasetSchema.parse({
+      schemaVersion: 1,
+      runs: [
+        {
+          id: 'r2',
+          provenance: {
+            startedAt: '2026-08-09T00:00:00.000Z',
+            device: {
+              label: 'Mac Studio (M4 Max)',
+              platform: 'darwin',
+              arch: 'arm64',
+              memoryGb: 64,
+            },
+            harnessCommit: 'abc1234',
+            gildeVersion: '0.1.15',
+            count: 3,
+            judgeModelId: null,
+          },
+          suites: ['core', 'productivity'],
+          scenariosBySuite: { core: ['general-task'], productivity: ['office-task'] },
+        },
+        {
+          id: 'r1',
+          provenance: {
+            startedAt: '2026-07-01T00:00:00.000Z',
+            device: { label: 'Linux workstation', platform: 'linux', arch: 'x64' },
+            harnessCommit: 'old0000',
+            gildeVersion: '0.1.10',
+            count: 3,
+            judgeModelId: null,
+          },
+          suites: ['core', 'productivity'],
+          scenariosBySuite: { core: ['general-task'], productivity: ['office-task'] },
+        },
+      ],
+      results: [
+        ...['r2', 'r1'].flatMap((runId) => [
+          {
+            modelId: `general-${runId}`,
+            label: `General ${runId}`,
+            engine: 'llama-cpp',
+            tier: 'medium',
+            runId,
+            suiteId: 'core',
+            cells: [{ scenarioId: 'general-task', trials: 3, successes: 3, nonModelFailures: 0 }],
+          },
+          {
+            modelId: `office-${runId}`,
+            label: `Office ${runId}`,
+            engine: 'llama-cpp',
+            tier: 'medium',
+            runId,
+            suiteId: 'productivity',
+            cells: [{ scenarioId: 'office-task', trials: 3, successes: 2, nonModelFailures: 0 }],
+          },
+        ]),
+      ],
+    });
+
+    const md = renderScorecardRunsMarkdown(combined, ['core', 'productivity'], {
+      includeTaskCount: false,
+    });
+    const latest = md.indexOf('Latest round — 2026-08-09');
+    const latestGeneral = md.indexOf('#### General capability', latest);
+    const latestOffice = md.indexOf('#### Office and knowledge work', latest);
+    const earlier = md.indexOf('Earlier round — 2026-07-01');
+    const earlierGeneral = md.indexOf('#### General capability', earlier);
+    const earlierOffice = md.indexOf('#### Office and knowledge work', earlier);
+
+    expect(latest).toBeLessThan(latestGeneral);
+    expect(latestGeneral).toBeLessThan(latestOffice);
+    expect(latestOffice).toBeLessThan(earlier);
+    expect(earlier).toBeLessThan(earlierGeneral);
+    expect(earlierGeneral).toBeLessThan(earlierOffice);
+    expect(md.match(/gezel abc1234/g)).toHaveLength(1);
+    expect(md.match(/gezel old0000/g)).toHaveLength(1);
+    expect(md).toContain('| General r2 |');
+    expect(md).toContain('| Office r2 |');
+    expect(md).toContain('| General r1 |');
+    expect(md).toContain('| Office r1 |');
   });
 
   it('leaves model ids whole when nothing will render the break', () => {

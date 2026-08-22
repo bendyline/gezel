@@ -1,9 +1,12 @@
 import type { UnifiedSearchResult } from '@bendyline/gezel';
 import { useEffect, useRef } from 'react';
+import { highlightTokens } from './highlight-tokens.js';
 import type { SearchGroup } from './search-nav.js';
 
 interface SearchPaletteProps {
   groups: SearchGroup[];
+  /** What the user typed — its terms are marked in the rows. */
+  query: string;
   /** Index into the flattened (visual-order) list of the highlighted option. */
   activeIndex: number;
   loading: boolean;
@@ -26,12 +29,15 @@ interface SearchPaletteProps {
 }
 
 /**
- * Presentational results dropdown for the titlebar search. Renders fixed-order
- * groups; each option carries its index in the flattened visual order so
- * keyboard nav (owned by `TitlebarSearch`) and the rendering agree.
+ * Presentational results dropdown for the titlebar search. Renders the groups
+ * in the order it is handed them (best-scoring group first); each option
+ * carries its index in the flattened visual order so keyboard nav (owned by
+ * `TitlebarSearch`) and the rendering agree. A group the caller capped shows
+ * what it held back rather than dropping it silently.
  */
 export function SearchPalette({
   groups,
+  query,
   activeIndex,
   loading,
   failed = false,
@@ -115,16 +121,35 @@ export function SearchPalette({
                 }}
                 onMouseEnter={() => onHover(index)}
               >
-                <span className="search-option-title">{item.title}</span>
+                <span className="search-option-title">{highlightTokens(item.title, query)}</span>
                 {item.subtitle ? (
                   <span className="search-option-subtitle">{item.subtitle}</span>
                 ) : null}
                 {item.snippet ? (
-                  <span className="search-option-snippet">{item.snippet}</span>
+                  <span className="search-option-snippet">
+                    {highlightTokens(item.snippet, query)}
+                  </span>
                 ) : null}
               </button>
             );
           })}
+          {group.moreCount ? (
+            onSeeAll ? (
+              <button
+                type="button"
+                className="search-palette-group-more"
+                // mousedown + preventDefault, same reason as the option rows.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onSeeAll();
+                }}
+              >
+                +{group.moreCount} more
+              </button>
+            ) : (
+              <div className="search-palette-group-more">+{group.moreCount} more</div>
+            )
+          ) : null}
         </div>
       ))}
       {/* Names land first and content follows, so say the list is still

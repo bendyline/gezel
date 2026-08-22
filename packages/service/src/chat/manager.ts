@@ -390,6 +390,12 @@ function oneShotTimeoutError(timeoutMs: number): Error {
   return err;
 }
 
+function serviceShutdownAbortError(): Error {
+  const err = new Error('service shutting down');
+  err.name = 'AbortError';
+  return err;
+}
+
 /**
  * Bound setup stages that do not natively accept an AbortSignal. The original
  * promise remains observed after cancellation (so it cannot reject unhandled),
@@ -1157,6 +1163,13 @@ export class ChatManager {
   >();
   /** Set once {@link shutdown} starts so deferred watchdogs don't fire into a tearing-down manager. */
   private shuttingDown = false;
+  /**
+   * Ephemeral completions are not represented in `inflight` because they have
+   * no persisted chat session. Track their cancellation scopes separately so
+   * service shutdown cannot leave indexing, memory, or generation chores
+   * holding an embedded Electron process open.
+   */
+  private readonly activeOneShots = new Map<AbortController, Promise<string>>();
   /**
    * Tool calls captured during the current in-flight turn, keyed by
    * sessionId. The `onToolCall` bridge handler appends here while the
@@ -9721,6 +9734,15 @@ export class ChatManager {
   async beginShutdown(): Promise<void> {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
+    // Deferred housekeeping must not turn into fresh provider work after the
+    // shutdown gate closes. The transcript cursor remains unchanged, so the
+    // next eligible turn can extract the same messages after restart.
+    this.discardDeferredExtractions();
+    const activeOneShots = Array.from(this.activeOneShots.entries());
+    for (const [controller] of activeOneShots) {
+      controller.abort(serviceShutdownAbortError());
+    }
+    await Promise.allSettled(activeOneShots.map(([, pending]) => pending));
     // Parked handoffs must not dispatch as their sender unwinds.
     this.afterSessionIdle.clear();
     this.inflightFileHandoffs.clear();
@@ -9730,26 +9752,20 @@ export class ChatManager {
     await Promise.allSettled(
       Array.from(this.inflight.keys()).map((sessionId) => this.cancelInflight(sessionId)),
     );
-    // Register deferred extraction work before service.stop drains background
-    // jobs and before providers are reset. shutdown() repeats this harmlessly
-    // for direct callers that do not use the two-phase service teardown.
-    this.flushDeferredExtractions();
+    // A turn that reached its post-send hook while cancellation was settling
+    // may have raced the first clear. Keep the shutdown boundary timer-free.
+    this.discardDeferredExtractions();
   }
 
   async shutdown(): Promise<void> {
     await this.beginShutdown();
     this.telemetryGpuUnsub?.();
     this.telemetryGpuUnsub = null;
-    // Fire any deferred memory extractions immediately so any
-    // mid-conversation work that was waiting on idle gets persisted
-    // before we tear down. Done first so the trackBackground registrations
-    // land before the drain, then await every tracked task before
-    // resetClient disconnects and removes its providers. Direct callers of
-    // shutdown() must get the same safe ordering as service.stop(); otherwise
-    // a half-finished one-shot can resume after its injected mock is removed
-    // and fall through to a real provider.
-    this.flushDeferredExtractions();
+    // Direct callers skip service.stop()'s earlier background drain. Await
+    // work that was already admitted, but do not start deferred housekeeping
+    // after beginShutdown() has closed the one-shot admission gate.
     await this.drainBackground();
+    this.discardDeferredExtractions();
     // Final service teardown must not re-arm injected providers, and must
     // take the engines with it — a pooled engine left running here outlives
     // gezeld as a PPID-1 orphan.
@@ -9935,15 +9951,35 @@ export class ChatManager {
       signal?: AbortSignal;
     } = {},
   ): Promise<string> {
+    if (this.shuttingDown) throw serviceShutdownAbortError();
+    const shutdownController = new AbortController();
+    const pending = this.runOneShotCompletion(prompt, timeoutMs, opts, shutdownController.signal);
+    this.activeOneShots.set(shutdownController, pending);
+    try {
+      return await pending;
+    } finally {
+      this.activeOneShots.delete(shutdownController);
+    }
+  }
+
+  private async runOneShotCompletion(
+    prompt: string,
+    timeoutMs: number,
+    opts: NonNullable<Parameters<ChatManager['oneShotCompletion']>[2]>,
+    shutdownSignal: AbortSignal,
+  ): Promise<string> {
     oneShotLog.info(`requesting completion (${prompt.length} chars, ${timeoutMs}ms timeout)`);
     const deadlineAt = Date.now() + timeoutMs;
     const deadlineSignal = AbortSignal.timeout(Math.max(1, timeoutMs));
-    const oneShotSignal = opts.signal
-      ? AbortSignal.any([opts.signal, deadlineSignal])
-      : deadlineSignal;
+    const oneShotSignal = AbortSignal.any([
+      shutdownSignal,
+      deadlineSignal,
+      ...(opts.signal ? [opts.signal] : []),
+    ]);
     const abortError = () => {
       if (deadlineSignal.aborted) return oneShotTimeoutError(timeoutMs);
       if (opts.signal?.reason instanceof Error) return opts.signal.reason;
+      if (shutdownSignal.reason instanceof Error) return shutdownSignal.reason;
       const err = new Error('one-shot cancelled by caller');
       err.name = 'AbortError';
       return err;
@@ -10407,9 +10443,11 @@ export class ChatManager {
    * cadence, ambient lane, cursor, and debounce policy as first-party chats.
    */
   private scheduleExternalMemoryExtraction(sessionId: string): void {
+    if (this.shuttingDown) return;
     const prepare = this.store
       .findSessionById(sessionId)
       .then((record) => {
+        if (this.shuttingDown) return;
         if (!record?.source || !this.shouldRunMemoryExtraction(record)) return;
         const fire = (): void => {
           const run = (async () => {
@@ -10551,6 +10589,7 @@ export class ChatManager {
    * instead of debouncing further.
    */
   private scheduleHeavyExtraction(sessionId: string, fire: () => void): void {
+    if (this.shuttingDown) return;
     const active = this.activeMemoryExtractions.get(sessionId);
     if (active) {
       active.rerunRequested = true;
@@ -10604,6 +10643,15 @@ export class ChatManager {
     for (const entry of pending) {
       if (entry.timer) clearTimeout(entry.timer);
       entry.fire();
+    }
+  }
+
+  /** Cancel deferred extraction timers without admitting new one-shot work. */
+  private discardDeferredExtractions(): void {
+    const pending = Array.from(this.pendingExtractions.values());
+    this.pendingExtractions.clear();
+    for (const entry of pending) {
+      if (entry.timer) clearTimeout(entry.timer);
     }
   }
 

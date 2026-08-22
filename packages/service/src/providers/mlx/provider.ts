@@ -288,17 +288,6 @@ export function isSuccessfulAsyncFileHandoff(
   );
 }
 
-export function mlxGenerationPhaseDetail(
-  generationTps: number | undefined,
-  completionTokens: number | undefined,
-): string {
-  if (generationTps !== undefined && generationTps > 0 && completionTokens !== undefined) {
-    return `${formatTps(generationTps)} tok/s · ${completionTokens} tokens`;
-  }
-  if (completionTokens !== undefined) return `Generating · ${completionTokens} tokens`;
-  return 'Generating response';
-}
-
 function asyncFileHandoffClosing(count: number): string {
   return count === 1
     ? 'I sent the file handoff. The specialist has the project context and should write the deliverable to disk.'
@@ -2052,9 +2041,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 this.emitEnginePhase({
                   provider: 'mlx',
                   phase: 'generating',
-                  detail: mlxGenerationPhaseDetail(generationTps, completionTokens),
-                  // Same numbers the detail string carries, as fields the
-                  // UI can render without scraping prose out of the label.
+                  // No `detail`: the counters are the payload, and the
+                  // phase's own copy belongs to the UI. Composing them
+                  // into prose here only forced the pill to scrape them
+                  // back out — and the scrape left the header reading
+                  // "Koray · · 61 tokens".
                   ...(completionTokens !== undefined && completionTokens > 0
                     ? { outputTokens: completionTokens }
                     : {}),

@@ -30,30 +30,35 @@ function settle(
 
 describe('resolveHeaderDensity', () => {
   it('stays full when the cluster fits', () => {
-    const { state } = settle({ full: 500, compact: 400, tight: 300 }, 900);
+    const { state } = settle({ full: 500, compact: 400, tight: 300, minimal: 240 }, 900);
     expect(state.density).toBe('full');
   });
 
   it('drops one step at a time until the cluster fits', () => {
-    const { state } = settle({ full: 900, compact: 700, tight: 520 }, 750);
+    const { state } = settle({ full: 900, compact: 700, tight: 520, minimal: 420 }, 750);
     expect(state.density).toBe('compact');
   });
 
   it('reaches tight when even one compaction is not enough', () => {
-    const { state } = settle({ full: 900, compact: 700, tight: 520 }, 560);
+    const { state } = settle({ full: 900, compact: 700, tight: 520, minimal: 420 }, 560);
     expect(state.density).toBe('tight');
   });
 
-  it('stays at tight rather than overflowing further', () => {
-    const { state } = settle({ full: 900, compact: 700, tight: 520 }, 200);
-    expect(state.density).toBe('tight');
+  it('sheds the model name before it overflows', () => {
+    const { state } = settle({ full: 900, compact: 700, tight: 520, minimal: 420 }, 460);
+    expect(state.density).toBe('minimal');
+  });
+
+  it('stays at minimal rather than overflowing further', () => {
+    const { state } = settle({ full: 900, compact: 700, tight: 520, minimal: 420 }, 200);
+    expect(state.density).toBe('minimal');
   });
 
   // The loop's whole reason for existing: a compacted cluster always "fits",
   // so without the blocked record it would step back up, overflow, and
   // flicker between the two forever.
   it('does not re-expand into a width that already overflowed', () => {
-    const widths = { full: 900, compact: 700, tight: 520 };
+    const widths = { full: 900, compact: 700, tight: 520, minimal: 420 };
     const { state } = settle(widths, 750);
     expect(state.density).toBe('compact');
     expect(state.blocked.full).toBe(750);
@@ -61,7 +66,7 @@ describe('resolveHeaderDensity', () => {
   });
 
   it('re-expands once the window is wide enough to hold the looser form', () => {
-    const widths = { full: 900, compact: 700, tight: 520 };
+    const widths = { full: 900, compact: 700, tight: 520, minimal: 420 };
     const settled = settle(widths, 750).state;
     const wider = settle(widths, 750 + DENSITY_REENTRY_MARGIN_PX + 200, settled).state;
     expect(wider.density).toBe('full');
@@ -69,7 +74,7 @@ describe('resolveHeaderDensity', () => {
   });
 
   it('ignores a re-expansion that only just clears the failed width', () => {
-    const settled = settle({ full: 900, compact: 700, tight: 520 }, 750).state;
+    const settled = settle({ full: 900, compact: 700, tight: 520, minimal: 420 }, 750).state;
     const nudged = resolveHeaderDensity(settled, {
       clusterWidth: 700,
       availableWidth: 750 + DENSITY_REENTRY_MARGIN_PX,
@@ -78,11 +83,11 @@ describe('resolveHeaderDensity', () => {
   });
 
   it('re-expands after a pill goes away and the blocks are cleared', () => {
-    const settled = settle({ full: 900, compact: 700, tight: 520 }, 750).state;
+    const settled = settle({ full: 900, compact: 700, tight: 520, minimal: 420 }, 750).state;
     // Same titlebar, one engine fewer: the recorded budget describes a
     // cluster that no longer exists.
     const cleared = clearHeaderDensityBlocks(settled);
-    const { state } = settle({ full: 600, compact: 480, tight: 380 }, 750, cleared);
+    const { state } = settle({ full: 600, compact: 480, tight: 380, minimal: 300 }, 750, cleared);
     expect(state.density).toBe('full');
   });
 

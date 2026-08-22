@@ -116,12 +116,40 @@ describe('resultToActions', () => {
 });
 
 describe('groupResults / flattenGroups', () => {
+  it('leads with the best-scoring group, not a fixed kind order', () => {
+    // The regression: a library document that out-ranked every file landed
+    // below all of them because `file` was listed above `document`.
+    const groups = groupResults([
+      result({ kind: 'document', id: 'd1', score: 680 }),
+      result({ kind: 'file', id: 'f1', score: 548 }),
+      result({ kind: 'file', id: 'f2', score: 285 }),
+    ]);
+    expect(groups.map((g) => g.kind)).toEqual(['document', 'file']);
+    expect(flattenGroups(groups).map((r) => r.id)).toEqual(['d1', 'f1', 'f2']);
+  });
+
+  it('caps a group and reports what it held back', () => {
+    const files = Array.from({ length: 8 }, (_, i) =>
+      result({ kind: 'file', id: `f${i}`, score: 285 }),
+    );
+    const groups = groupResults([...files, result({ kind: 'document', id: 'd1', score: 680 })], {
+      perGroupLimit: 5,
+    });
+    const fileGroup = groups.find((g) => g.kind === 'file');
+    expect(fileGroup?.items).toHaveLength(5);
+    expect(fileGroup?.moreCount).toBe(3);
+    expect(groups.find((g) => g.kind === 'document')?.moreCount).toBeUndefined();
+    // Keyboard nav indexes the capped list, so it must agree with the render.
+    expect(flattenGroups(groups)).toHaveLength(6);
+  });
+
   it('buckets into fixed order and the flat list matches visual order', () => {
     const results: UnifiedSearchResult[] = [
       result({ kind: 'content', id: 'c1', title: 'c' }),
       result({ kind: 'project', id: 'p1', title: 'p', projectId: 'p1' }),
       result({ kind: 'file', id: 'f1', title: 'f' }),
     ];
+    // Equal scores — the fixed order is the tie-break, not the ranking.
     const groups = groupResults(results);
     expect(groups.map((g) => g.kind)).toEqual(['project', 'file', 'content']);
     expect(flattenGroups(groups).map((r) => r.id)).toEqual(['p1', 'f1', 'c1']);

@@ -21,7 +21,10 @@ vi.stubGlobal(
 );
 
 let mockLiveTurns = new Map<string, LiveTurnState>();
-vi.mock('./useOnDeviceLiveTurns.js', () => ({
+vi.mock('./useOnDeviceLiveTurns.js', async (importOriginal) => ({
+  // Only the hook is stubbed; `phaseBaseLabel` is a pure helper the pill
+  // shares with the hook so both name a detail-less phase the same way.
+  ...(await importOriginal<typeof import('./useOnDeviceLiveTurns.js')>()),
   useOnDeviceLiveTurns: () => mockLiveTurns,
 }));
 
@@ -286,6 +289,46 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(await screen.findByText('This turn')).toBeInTheDocument();
     expect(screen.getByText('≈100 tok')).toBeInTheDocument();
     expect(screen.getByText(/technical-writer · Generating · 24 tok\/s/)).toBeInTheDocument();
+  });
+
+  /**
+   * MLX's generating detail is telemetry end to end — "24 tok/s · 61
+   * tokens". Stripping only the rate used to leave the header reading
+   * "Liesel · · 61 tokens": a dangling separator plus the token counter
+   * the header is supposed to keep out.
+   */
+  it('names the phase when the engine detail is telemetry end to end', async () => {
+    mockLiveTurns = new Map([
+      [
+        'talkie-session',
+        {
+          provider: 'mlx',
+          phase: 'generating',
+          label: '24 tok/s · 61 tokens',
+          gezelId: 'liesel',
+          outputTokens: 61,
+          tokensPerSec: 24,
+          startedAt: Date.now(),
+          lastEventAt: Date.now(),
+        },
+      ],
+    ]);
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mlx',
+      defaultModel: { mlx: 'talkie-1930-13b-q4' },
+      deviceSafety: { mode: 'observe' },
+    } as ConfigResponse);
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [{ id: 'liesel', name: 'Liesel', updatedAt: '2026-08-13T00:00:00.000Z' }],
+    });
+
+    render(<EngineStatusPill />);
+
+    const pill = await screen.findByRole('button', { name: /Generating/i });
+    expect(pill).toHaveTextContent('Generating');
+    expect(pill).not.toHaveTextContent('tokens');
+    expect(pill).not.toHaveTextContent('tok/s');
+    expect(pill).not.toHaveTextContent('· ·');
   });
 
   /**
@@ -905,8 +948,11 @@ describe('EngineStatusPill — crowded titlebar', () => {
     await waitFor(() => {
       const pills = container.querySelectorAll('.engine-pill');
       expect(pills).toHaveLength(2);
-      expect(pills[0]).toHaveTextContent('DeepSeek V4 Flash');
-      expect(pills[1]).toHaveTextContent('Talkie 1930 13B');
+      // Settle on the tooltip, not the label: the label is what density
+      // strips, so waiting on it would let the densest case pass merely
+      // because the model list had not loaded yet.
+      expect(pills[0]?.getAttribute('title')).toContain('deepseek-v4-flash');
+      expect(pills[1]?.getAttribute('title')).toContain('talkie-1930-13b-q4');
     });
     const [dwarfStar, talkie] = Array.from(container.querySelectorAll<HTMLElement>('.engine-pill'));
     return { dwarfStar: dwarfStar as HTMLElement, talkie: talkie as HTMLElement };
@@ -948,5 +994,18 @@ describe('EngineStatusPill — crowded titlebar', () => {
     expect(talkie).toHaveTextContent('Generating');
     expect(talkie).toHaveTextContent('Talkie 1930');
     expect(talkie.getAttribute('title')).toContain('Liesel');
+  });
+
+  it('drops the model name when minimal, but only where the phase remains', async () => {
+    const { dwarfStar, talkie } = await pillsAt('minimal');
+    // Busy: the phase still names the pill, so the model can go.
+    expect(talkie).toHaveTextContent('Generating');
+    expect(talkie).not.toHaveTextContent('Talkie 1930');
+    expect(talkie.getAttribute('title')).toContain('talkie-1930-13b-q4');
+    // Idle and named by an engine rather than the machine — "DwarfStar"
+    // survives, so its model may go too.
+    expect(dwarfStar).toHaveTextContent('DwarfStar');
+    expect(dwarfStar).not.toHaveTextContent('DeepSeek V4 Flash');
+    expect(dwarfStar.getAttribute('title')).toContain('deepseek-v4-flash');
   });
 });

@@ -15,6 +15,13 @@ export interface DocumentSearchHit {
   entry: FileEntry;
   snippet: string;
   line: number;
+  /**
+   * True when the only reason this document surfaced is embedding proximity —
+   * it does not contain the query. The snippet cannot show that on its own
+   * (the vector arm's excerpt is usually the file's generated summary), so
+   * the list has to say it.
+   */
+  related: boolean;
 }
 
 export interface DocumentSearchState {
@@ -22,6 +29,12 @@ export interface DocumentSearchState {
   setQuery: (next: string) => void;
   /** Null when not searching; an array (possibly empty) once a query ran. */
   hits: DocumentSearchHit[] | null;
+  /**
+   * The query `hits` answer — behind `query` by the debounce. Highlighting
+   * reads this, so the marks don't blink out on every keystroke while the
+   * rows on screen still answer the previous one.
+   */
+  matchedQuery: string;
   searching: boolean;
   /** Set when the library has no content index yet — worth saying out loud. */
   unavailable: boolean;
@@ -34,6 +47,7 @@ const DEBOUNCE_MS = 200;
 export function useDocumentSearch(): DocumentSearchState {
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<DocumentSearchHit[] | null>(null);
+  const [matchedQuery, setMatchedQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
 
@@ -41,6 +55,7 @@ export function useDocumentSearch(): DocumentSearchState {
     const trimmed = query.trim();
     if (trimmed.length < MIN_QUERY_CHARS) {
       setHits(null);
+      setMatchedQuery('');
       setSearching(false);
       setUnavailable(false);
       return;
@@ -53,6 +68,7 @@ export function useDocumentSearch(): DocumentSearchState {
         .then((res) => {
           if (cancelled) return;
           setUnavailable(res.engine === 'unavailable');
+          setMatchedQuery(trimmed);
           setHits(
             res.results.map((r) => ({
               entry: {
@@ -62,11 +78,14 @@ export function useDocumentSearch(): DocumentSearchState {
               },
               snippet: r.snippet,
               line: r.lineStart,
+              related: r.source === 'vector',
             })),
           );
         })
         .catch(() => {
-          if (!cancelled) setHits([]);
+          if (cancelled) return;
+          setMatchedQuery(trimmed);
+          setHits([]);
         })
         .finally(() => {
           if (!cancelled) setSearching(false);
@@ -82,6 +101,7 @@ export function useDocumentSearch(): DocumentSearchState {
     query,
     setQuery,
     hits,
+    matchedQuery,
     searching,
     unavailable,
     clear: () => setQuery(''),

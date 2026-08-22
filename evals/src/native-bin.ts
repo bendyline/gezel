@@ -393,10 +393,22 @@ function pinWarnings(resolved: ResolvedBinary, source: string | null): string[] 
 
 /**
  * Resolve the `sd-server` binary. Single-variant engine, so we look
- * directly under `<root>/<platform>/sd-server[.exe]`. Returns null when
- * missing (image gen is optional for scenarios that don't need it).
+ * directly under `<root>/<platform>/sd-server[.exe]`. Honors
+ * GEZEL_SD_SERVER_BIN first — the same env var `spawnTrialDaemon` already
+ * hands the daemon — because the packaged-app fallback is macOS-only and
+ * `bin/scorecard.ts` spawns `eval:all` with no `--image-bin`. Without the
+ * env door a Linux box that has the engine installed still fails every
+ * image-gate scenario in 2ms with "no sd-server binary found", which reads
+ * as a model failure and silently zeroes petshop across a whole sweep.
+ * Returns null when missing (image gen is optional for scenarios that
+ * don't need it).
  */
 export function resolveSdBinary(): ResolvedBinary | null {
+  const envBin = process.env.GEZEL_SD_SERVER_BIN?.trim();
+  if (envBin) {
+    if (existsSync(envBin)) return { path: envBin, variant: 'env', build: null, warnings: [] };
+    throw new Error(`GEZEL_SD_SERVER_BIN is set to "${envBin}" but no file exists there.`);
+  }
   for (const root of lookupRoots()) {
     for (const exe of exeCandidates('sd-server')) {
       const path = join(root, platformKey(), exe);

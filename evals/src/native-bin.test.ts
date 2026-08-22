@@ -6,6 +6,7 @@ import {
   installedAppRoots,
   pinnedLlamaRevision,
   resolveLlamaBinary,
+  resolveSdBinary,
   shouldProbeLlamaBackend,
 } from './native-bin.ts';
 
@@ -189,4 +190,31 @@ describe('resolveLlamaBinary — GEZEL_LLAMA_SERVER_BIN override', () => {
       expect(resolved.build?.revision).toBe('1a064ab0');
     },
   );
+});
+
+describe('resolveSdBinary — GEZEL_SD_SERVER_BIN override', () => {
+  const prev = process.env.GEZEL_SD_SERVER_BIN;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.GEZEL_SD_SERVER_BIN;
+    else process.env.GEZEL_SD_SERVER_BIN = prev;
+  });
+
+  it('returns the env path verbatim when it exists, tagged variant=env', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gezel-sd-bin-'));
+    const fake = join(dir, 'sd-server');
+    writeFileSync(fake, '#!/bin/sh\n');
+    process.env.GEZEL_SD_SERVER_BIN = fake;
+
+    const resolved = resolveSdBinary();
+    expect(resolved?.path).toBe(fake);
+    expect(resolved?.variant).toBe('env');
+  });
+
+  it('throws a clear error when the env override is set but missing (likely a typo)', () => {
+    // Deliberately NOT null: a silent null here reads downstream as "this
+    // device has no image engine" and fails every image-gate scenario as if
+    // the model were at fault.
+    process.env.GEZEL_SD_SERVER_BIN = join(tmpdir(), 'definitely-not-a-real-sd-server-xyz');
+    expect(() => resolveSdBinary()).toThrowError(/GEZEL_SD_SERVER_BIN.*no file exists/s);
+  });
 });

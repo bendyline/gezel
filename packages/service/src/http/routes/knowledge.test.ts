@@ -100,8 +100,9 @@ describe('knowledge routes', () => {
     await client.updateKnowledgeCatalog('test-notes', { enabled: true });
   });
 
-  it('resumes an interrupted URL download from .partial', async () => {
+  it('supports pinned and unpinned URL installs while preserving resume', async () => {
     const bytes = await readFile(archivePath);
+    const digest = createHash('sha256').update(bytes).digest('hex');
     // First response sends half the file then destroys the socket; the
     // second honors Range and serves the rest.
     let requests = 0;
@@ -138,7 +139,7 @@ describe('knowledge routes', () => {
         source: {
           kind: 'url',
           url: `http://127.0.0.1:${port}/test-notes.gezk`,
-          expectedSha256: createHash('sha256').update(bytes).digest('hex'),
+          expectedSha256: digest,
         },
       });
       const job = await waitForJob(jobId);
@@ -146,6 +147,31 @@ describe('knowledge routes', () => {
       expect(requests).toBeGreaterThanOrEqual(2);
       const { catalogs } = await client.listKnowledgeCatalogs();
       expect(catalogs.find((c) => c.ref.catalogId === 'test-notes')?.mounted).toBe(true);
+
+      const { jobId: mismatchedJobId } = await client.installKnowledgeCatalog({
+        source: {
+          kind: 'url',
+          url: `http://127.0.0.1:${port}/test-notes.gezk`,
+          expectedSha256: '0'.repeat(64),
+        },
+      });
+      const mismatchedJob = await waitForJob(mismatchedJobId);
+      expect(mismatchedJob.error).toContain('archive sha256 mismatch');
+
+      // The pin is optional for arbitrary untrusted imports. The daemon still
+      // hashes the archive for its immutable identity and validates its contents.
+      await client.removeKnowledgeCatalog('test-notes');
+      const { jobId: unpinnedJobId } = await client.installKnowledgeCatalog({
+        source: { kind: 'url', url: `http://127.0.0.1:${port}/test-notes.gezk` },
+      });
+      const unpinnedJob = await waitForJob(unpinnedJobId);
+      expect(unpinnedJob.error, JSON.stringify(unpinnedJob)).toBeUndefined();
+      const { catalogs: unpinnedCatalogs } = await client.listKnowledgeCatalogs();
+      expect(
+        unpinnedCatalogs.find((catalog) => catalog.ref.catalogId === 'test-notes')?.ref
+          .contentDigest,
+      ).toBe(digest);
+
       // The staging download is gone once installed.
       const leftovers = await stat(knowledgeDownloadsDir(home)).catch(() => null);
       if (leftovers) {

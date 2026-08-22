@@ -245,6 +245,53 @@ describe('IndexStore', () => {
     store.close();
   });
 
+  it('floors the vector arm so a KNN with no relevant neighbour returns nothing', async () => {
+    const store = await openStore();
+    if (!store.vecAvailable) return store.close();
+    const dim = 384;
+    // Two unit vectors 60° apart (cosine 0.5) and one orthogonal to both.
+    const near = new Float32Array(dim);
+    near[0] = 1;
+    const halfway = new Float32Array(dim);
+    halfway[0] = 0.5;
+    halfway[1] = Math.sqrt(3) / 2;
+    const orthogonal = new Float32Array(dim);
+    orthogonal[2] = 1;
+
+    const ids = store.putChunks('src/a.ts', 'h1', [
+      { kind: 'summary', lineStart: 1, lineEnd: 1, text: 'related enough' },
+      { kind: 'summary', lineStart: 2, lineEnd: 2, text: 'unrelated' },
+    ]);
+    store.addTextVector(ids[0]!, halfway);
+    store.addTextVector(ids[1]!, orthogonal);
+
+    // Unfloored, KNN hands back everything it has — that is the bug.
+    expect(store.searchTextVectors(near, 10)).toHaveLength(2);
+
+    // Similarity is normalized off the declared metric, so the floor is
+    // comparable across installs whichever metric the table carries.
+    const floored = store.searchTextVectors(near, 10, { minSimilarity: 0.45 });
+    expect(floored).toHaveLength(1);
+    expect(floored[0]?.text).toBe('related enough');
+    expect(floored[0]?.similarity).toBeCloseTo(0.5, 5);
+
+    // Nothing clears a floor above the nearest neighbour: no hits, not the
+    // least-bad one.
+    expect(store.searchTextVectors(near, 10, { minSimilarity: 0.9 })).toEqual([]);
+    store.close();
+  });
+
+  it('keeps the arm that produced each hybrid hit', async () => {
+    const store = await openStore();
+    store.putChunks('docs/pastry.md', 'h1', [
+      { kind: 'doc', lineStart: 1, lineEnd: 3, text: 'Knead the dough until smooth.' },
+    ]);
+    const hits = store.searchCodeHybrid(null, 'dough', 10);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.source).toBe('fts');
+    expect(hits[0]?.path).toBe('docs/pastry.md');
+  });
+
   it('upserts and reads a summary', async () => {
     const store = await openStore();
     store.upsertSummary({

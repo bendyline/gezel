@@ -87,6 +87,24 @@ describe('runLargeContentCompletion', () => {
     expect(run.replies[0]!.raw).toBe('');
   });
 
+  it('propagates cancellation instead of continuing through later windows', async () => {
+    const abort = new Error('service shutting down');
+    abort.name = 'AbortError';
+    const complete = vi.fn(async () => {
+      throw abort;
+    });
+
+    await expect(
+      runLargeContentCompletion(
+        complete,
+        Array.from({ length: 20 }, (_, i) => `line ${i} ${'x'.repeat(30)}`).join('\n'),
+        (w) => w.text,
+        { budgetChars: 150, maxWindows: 10 },
+      ),
+    ).rejects.toBe(abort);
+    expect(complete).toHaveBeenCalledOnce();
+  });
+
   it('refuses content over the absolute ceiling without calling the model', async () => {
     const complete = vi.fn(async () => 'never');
     const run = await runLargeContentCompletion(

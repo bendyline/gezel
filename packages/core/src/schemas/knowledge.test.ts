@@ -46,12 +46,12 @@ describe('KnowledgeVersionSchema', () => {
 });
 
 describe('KnowledgeInstallRequestSchema', () => {
-  it('requires an out-of-band SHA-256 identity for remote catalogs', () => {
+  it('accepts an optional SHA-256 identity for remote catalogs', () => {
     expect(
       KnowledgeInstallRequestSchema.safeParse({
         source: { kind: 'url', url: 'https://example.test/catalog.gezk' },
       }).success,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       KnowledgeInstallRequestSchema.safeParse({
         source: {
@@ -61,5 +61,14 @@ describe('KnowledgeInstallRequestSchema', () => {
         },
       }).success,
     ).toBe(true);
+    expect(
+      KnowledgeInstallRequestSchema.safeParse({
+        source: {
+          kind: 'url',
+          url: 'https://example.test/catalog.gezk',
+          expectedSha256: 'not-a-digest',
+        },
+      }).success,
+    ).toBe(false);
   });
 });

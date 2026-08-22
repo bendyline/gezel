@@ -263,14 +263,13 @@
 }
 
 /* Library content search — the file tree answers "where did I file it", this
-   answers "which document says this". Sits in the browser pane's header, so
-   it takes the ordinary in-panel input treatment rather than the titlebar
-   search's carved-into-the-chrome one. */
+   answers "which document says this". It takes the title row's place and
+   names the pane in its placeholder ("Documents - search"), so the header
+   spends one row instead of two on saying where you are. */
 .documents-search {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  flex: 1;
   min-width: 0;
 }
 
@@ -279,7 +278,9 @@
   min-width: 0;
   padding: 0.3rem 0.45rem;
   color: inherit;
-  background: var(--panel);
+  /* Transparent, not `--panel`: standing in the title's place it should read
+     as part of the pane, whichever surface color the theme gives it. */
+  background: transparent;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   font-size: var(--text-xs);
@@ -296,14 +297,32 @@
   white-space: nowrap;
 }
 
-/* One line of matched prose under the document name. Clamped: a search
-   result is a signpost to the document, not a substitute for opening it. */
+/* The matched prose under the document name. Wraps, but clamped to two
+   lines: a search result is a signpost to the document, not a substitute for
+   opening it, and an unclamped summary turns the list into a wall of text. */
 .documents-search-snippet {
-  display: block;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
   color: var(--text-muted);
   font-size: var(--text-xs);
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.4;
+}
+
+/* A hit the document earned by embedding proximity rather than by containing
+   the words the user typed. Neutral sibling of the chat `automatic` badge —
+   same `--text-2xs` / `--radius-sm` recipe — because the claim is "you might
+   also want this", not "this is what you asked for". */
+.documents-search-related {
+  display: inline-block;
+  margin-right: 0.35rem;
+  vertical-align: 1px;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }

@@ -4054,6 +4054,26 @@ describe('ChatManager — one-shot attribution', () => {
     expect(forwarded?.aborted).toBe(true);
   });
 
+  it('cancels active one-shots and refuses replacements once shutdown begins', async () => {
+    mock.scriptStreamThenHang('partial background result');
+    const pending = manager.oneShotCompletion('index this workspace', 60_000, {
+      ambient: true,
+      jobLabel: 'Indexing src/app.ts',
+    });
+    await vi.waitFor(() => expect(mock.calls.some((call) => call.kind === 'send')).toBe(true));
+
+    await manager.beginShutdown();
+
+    await expect(pending).rejects.toMatchObject({
+      name: 'AbortError',
+      message: 'service shutting down',
+    });
+    await expect(manager.oneShotCompletion('start another chore')).rejects.toMatchObject({
+      name: 'AbortError',
+      message: 'service shutting down',
+    });
+  });
+
   it('applies the one-shot deadline to provider setup, before generation starts', async () => {
     const gate = mock.gateNextCreateSession();
     const pending = manager.oneShotCompletion('draft a persona', 30);

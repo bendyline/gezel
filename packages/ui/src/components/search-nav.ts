@@ -5,7 +5,15 @@ import type { OpenHandboekIntent } from './pending-open-handboek.js';
 import type { OpenKnowledgeIntent } from './pending-open-knowledge.js';
 import type { OpenSessionIntent } from './pending-open-session.js';
 
-/** Fixed display order + labels for the result groups in the palette. */
+/**
+ * Labels for the result groups, plus the tie-break order they fall back to.
+ *
+ * This is NOT the display order. The service already ranks every corpus
+ * against every other one (`MERGE_WEIGHTS` x calibrated relevance), and a
+ * fixed group order silently discards that: a library document that ranked
+ * first landed below twenty-six fuzzy filename matches purely because
+ * `file` was listed above `document` here.
+ */
 const GROUP_ORDER: Array<{ kind: UnifiedSearchResultKind; label: string }> = [
   { kind: 'project', label: 'Projects' },
   { kind: 'gezel', label: 'Gezellen' },
@@ -26,14 +34,39 @@ export interface SearchGroup {
   kind: UnifiedSearchResultKind;
   label: string;
   items: UnifiedSearchResult[];
+  /** Results of this kind the per-group cap held back, if any. */
+  moreCount?: number;
 }
 
-/** Bucket merged results into fixed-order, non-empty display groups. */
-export function groupResults(results: UnifiedSearchResult[]): SearchGroup[] {
-  return GROUP_ORDER.map((g) => ({
-    ...g,
-    items: results.filter((r) => r.kind === g.kind),
-  })).filter((g) => g.items.length > 0);
+/**
+ * Bucket merged results into non-empty display groups, best group first.
+ *
+ * Groups are ordered by their strongest member, so the ranking the service
+ * computed survives to the screen; `GROUP_ORDER` breaks ties so equally-
+ * scored kinds keep a stable, familiar order. `perGroupLimit` caps how many
+ * rows one kind may occupy — twenty-five identically-scored `SKILL.md`
+ * matches are one answer, not twenty-five, and they must not crowd out every
+ * other corpus in a palette the user has to scroll.
+ */
+export function groupResults(
+  results: UnifiedSearchResult[],
+  opts: { perGroupLimit?: number } = {},
+): SearchGroup[] {
+  const limit = opts.perGroupLimit;
+  return GROUP_ORDER.map((g, tieBreak) => {
+    const items = results.filter((r) => r.kind === g.kind);
+    return { ...g, tieBreak, items, best: Math.max(0, ...items.map((r) => r.score)) };
+  })
+    .filter((g) => g.items.length > 0)
+    .sort((a, b) => b.best - a.best || a.tieBreak - b.tieBreak)
+    .map(({ tieBreak: _tieBreak, best: _best, items, ...g }) => {
+      const shown = limit && limit > 0 ? items.slice(0, limit) : items;
+      return {
+        ...g,
+        items: shown,
+        ...(shown.length < items.length ? { moreCount: items.length - shown.length } : {}),
+      };
+    });
 }
 
 /** The visual top-to-bottom order — the flat list keyboard nav indexes into. */

@@ -731,7 +731,10 @@ function FullApp() {
           )}
           {/* Unified search is anchored near the brand so changing status-pill
             widths do not recenter it. It stays shrinkable in the flex row, so
-            crowded titlebars still give the pills room without overlap. */}
+            crowded titlebars still give the pills room without overlap — and
+            because only its right edge moves when it shrinks, the results
+            palette hangs off its left edge (`align="start"`) and holds still
+            while the pills breathe. */}
           <TitlebarSearch />
           <SearchResultsOverlay />
           {/* The empty stretch between the brand and the status cluster is the

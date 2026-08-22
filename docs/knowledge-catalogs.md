@@ -663,9 +663,11 @@ always reports `Shared on this device`, `Only for you`, or `Shared store
 unavailable; installed only for you` rather than requiring users to infer scope
 from a path.
 
-Arbitrary URL installs require `--sha256` with the expected 64-character digest,
-obtained separately from the download URL. This pins the artifact the user chose
-to trust and lets the daemon reject altered downloads before extraction.
+Arbitrary URL installs may include `--sha256` with an expected 64-character
+digest obtained separately from the download URL. When supplied, the daemon
+rejects altered downloads before extraction. Without a pin, it still hashes the
+archive for immutable local identity, validates the archive and extracted files,
+and keeps the catalog in the private, untrusted tier.
 
 `knowledge init` writes a `knowledge.json` descriptor. For Markdown input:
 

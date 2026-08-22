@@ -9,13 +9,14 @@ export function resolveKnowledgeInstallSource(
   expectedSha256?: string,
 ): KnowledgeInstallRequest['source'] {
   if (/^https?:\/\//i.test(source)) {
-    if (!expectedSha256) {
-      throw new CliError('URL installs require --sha256 <64-hex-digest>.');
-    }
-    if (!SHA256_PATTERN.test(expectedSha256)) {
+    if (expectedSha256 && !SHA256_PATTERN.test(expectedSha256)) {
       throw new CliError('--sha256 must be exactly 64 hexadecimal characters.');
     }
-    return { kind: 'url', url: source, expectedSha256: expectedSha256.toLowerCase() };
+    return {
+      kind: 'url',
+      url: source,
+      ...(expectedSha256 ? { expectedSha256: expectedSha256.toLowerCase() } : {}),
+    };
   }
 
   if (expectedSha256) {

@@ -247,6 +247,10 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function isAbortError(err: unknown): err is Error {
+  return err instanceof Error && err.name === 'AbortError';
+}
+
 /**
  * Resolve a summarizer (if one is configured) + the local embedder — shared
  * by the background enrichment loop and the on-demand drive route. During
@@ -363,6 +367,10 @@ export async function buildEnrichDeps(
       try {
         return await primary(prompt, activity);
       } catch (err) {
+        // Cancellation is lifecycle control, not a failed model attempt. Let
+        // it unwind the batch so quit/drive-stop never burns a file's retry
+        // budget or falls through to another engine during shutdown.
+        if (isAbortError(err)) throw err;
         const message = errorMessage(err);
         if (isPolicyBlockMessage(message)) {
           if (fallback && fallbackTarget) {
@@ -372,6 +380,7 @@ export async function buildEnrichDeps(
             try {
               return await fallback(prompt, activity);
             } catch (fallbackErr) {
+              if (isAbortError(fallbackErr)) throw fallbackErr;
               // Local-engine failure is transient (deferred, cold, busy) —
               // burn a normal retry attempt instead of giving up on the hash.
               log.warn(`blocked-content local fallback failed: ${errorMessage(fallbackErr)}`);
@@ -680,6 +689,7 @@ export async function enrichFile(
       );
       summary = completion.text.trim();
     } catch (err) {
+      if (isAbortError(err)) throw err;
       summary = '';
       if (err instanceof CompletionBlockedError) blockedByPolicy = true;
     }
@@ -725,7 +735,8 @@ export async function enrichFile(
             deps,
           );
           raw = completion.text;
-        } catch {
+        } catch (err) {
+          if (isAbortError(err)) throw err;
           raw = '';
         }
         const entries = parseSymbolSummaryJson(raw, new Set(picked.map((s) => s.name)));

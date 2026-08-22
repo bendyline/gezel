@@ -1,6 +1,6 @@
 import type { HealthResponse } from '@bendyline/gezel';
-import type { ConfigResponse } from '@bendyline/gezel-client';
-import { useCallback, useState } from 'react';
+import type { ConfigResponse, LlamaCppInstalledModel } from '@bendyline/gezel-client';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Ds4ModelManager } from '../components/Ds4ModelManager.js';
 import { useTotalRamBytes } from '../components/useTotalRamBytes.js';
@@ -29,8 +29,44 @@ interface Props {
  * service keeps SSD streaming on by default and rejects overrides that cannot
  * safely fit.
  */
-export function Ds4Settings({ config, health, title }: Props) {
+export function Ds4Settings({ config, onConfigChanged, health, title }: Props) {
   const totalRamBytes = useTotalRamBytes();
+  const [installed, setInstalled] = useState<LlamaCppInstalledModel[]>([]);
+  const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  const refreshInstalled = useCallback(async () => {
+    try {
+      const res = await api.listDs4Models();
+      setInstalled(res.models);
+    } catch {
+      /* ignore — the model-manager panel below surfaces its own errors */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshInstalled();
+  }, [refreshInstalled]);
+
+  const saveDefaultModel = useCallback(
+    async (value: string | undefined) => {
+      setSaving('saving');
+      try {
+        const next = await api.updateConfig({
+          defaultModel: {
+            ...config?.defaultModel,
+            ds4: value ?? undefined,
+          },
+        });
+        onConfigChanged(next);
+        setSaving('saved');
+        setTimeout(() => setSaving('idle'), 1200);
+      } catch {
+        setSaving('idle');
+      }
+    },
+    [config?.defaultModel, onConfigChanged],
+  );
+
   const availability = detectDs4Availability({
     externalBaseUrl: config?.ds4BaseUrl,
     totalRamBytes: totalRamBytes ?? undefined,
@@ -73,6 +109,7 @@ export function Ds4Settings({ config, health, title }: Props) {
           {availability.status === 'unavailable' && (
             <span className="gz-status-pill gz-status-pill--warn">unavailable on this device</span>
           )}
+          {saving === 'saved' && <span className="muted small">saved ✓</span>}
         </div>
         {availability.status === 'available' && (
           <p className="muted small" style={{ marginTop: '0.4rem' }}>
@@ -88,6 +125,32 @@ export function Ds4Settings({ config, health, title }: Props) {
         )}
       </section>
 
+      {/* ── Default model ── */}
+      {availability.status !== 'unavailable' &&
+        availability.status !== 'external' &&
+        installed.length > 1 && (
+          <section style={{ marginBottom: '2rem' }}>
+            <h4>Default model</h4>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              Which DwarfStar model new chat sessions use when a gezel doesn't pin one.
+            </p>
+            <div className="new-row" style={{ marginTop: '0.5rem' }}>
+              <select
+                aria-label="Default model"
+                value={config?.defaultModel?.ds4 ?? ''}
+                onChange={(e) => void saveDefaultModel(e.target.value || undefined)}
+              >
+                <option value="">First local model</option>
+                {installed.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} ({m.id})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </section>
+        )}
+
       {/* ── Catalog models ── */}
       {availability.status !== 'unavailable' && availability.status !== 'external' && (
         <section style={{ marginBottom: '2rem' }}>
@@ -98,7 +161,7 @@ export function Ds4Settings({ config, health, title }: Props) {
             working set. Check the size on each row before starting — these downloads run to
             hundreds of gigabytes.
           </p>
-          <Ds4ModelManager />
+          <Ds4ModelManager onModelsChanged={refreshInstalled} />
           <p className="muted small" style={{ marginTop: '1rem' }}>
             SSD streaming stays on automatically. Gezel uses the selected model's recommended expert
             cache and reduces it when necessary to preserve memory for the system and your other

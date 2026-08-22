@@ -215,19 +215,19 @@ describe('ChatManager — heavy-provider memory extraction debounce', () => {
   );
 
   it(
-    'shutdown flushes pending extractions so they run before teardown',
+    'shutdown discards pending extractions instead of starting new one-shot work',
     async () => {
       const session = await manager.createSession({ gezelId: 'ada' });
       await sendUntilCadenceMet(session.id);
       expect(backgroundSends()).toHaveLength(0);
 
-      // shutdown() calls flushDeferredExtractions internally, then we
-      // await drainBackground (in afterEach) to make the resulting
-      // promises resolve. Run shutdown explicitly here so we can assert
-      // afterward; afterEach's shutdown becomes a no-op.
+      // Shutdown closes one-shot admission and cancels housekeeping so a
+      // slow local extraction cannot hold the embedded app open. The durable
+      // cursor stays behind, allowing a later turn after restart to retry.
       await manager.shutdown();
+      await vi.advanceTimersByTimeAsync(15_000);
       await manager.drainBackground();
-      expect(backgroundSends()).toHaveLength(1);
+      expect(backgroundSends()).toHaveLength(0);
     },
     TEST_TIMEOUT_MS,
   );

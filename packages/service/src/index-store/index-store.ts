@@ -191,15 +191,50 @@ export interface VectorHit {
   lineEnd: number;
   text: string;
   /**
-   * Raw sqlite-vec distance — RANK ORDER ONLY. Never convert this to a
-   * similarity: fresh vec_text tables declare cosine, but tables created
-   * before the declaration report L2 until a re-embed migration recreates
-   * them, so the scale is not uniform across installs. (Rank order is
-   * identical either way on L2-normalized vectors, which is why the hybrid
-   * ranker consumes rank position and ignores this value.)
+   * Raw sqlite-vec distance — RANK ORDER ONLY, and not comparable across
+   * installs: fresh vec_text tables declare cosine, but tables created before
+   * the declaration report L2 until a re-embed migration recreates them. Read
+   * {@link VectorHit.similarity} instead of converting this by hand; it
+   * accounts for the declared metric.
    */
   distance: number;
+  /**
+   * Cosine similarity in 0..1-ish, normalized across both declared metrics
+   * (see {@link IndexStore.similarityForDistance}). This is the value a
+   * relevance floor may be compared against; `distance` is not.
+   */
+  similarity: number;
 }
+
+/**
+ * Relevance floor for the vector arm, as cosine similarity.
+ *
+ * A KNN query always returns its k nearest rows — nearest is not the same as
+ * relevant, so on a small corpus an unfiltered arm hands back the whole corpus
+ * ranked by whatever the embedder thought was closest. That reached users as
+ * "document search just lists my library": a four-document library answered
+ * every query with four hits, and because rank-fusion scores the vector arm's
+ * rank-0 hit at a flat 1.0, the noise outranked genuine keyword matches.
+ *
+ * Calibrated on the default embedder (bge-small-en-v1.5, query→passage) across
+ * two real corpora — a small document library and this repo's 83-file `docs/`
+ * tree — with off-topic queries ("sourdough recipe", "dentist appointment
+ * Tuesday") as the negatives:
+ *
+ *     corpus     genuine-match min   off-topic max
+ *     library          0.569             0.484
+ *     docs/            0.645             0.543
+ *
+ * bge-small's absolute scale is compressed and corpus-dependent — long
+ * technical prose floors around 0.50 against *anything* — so the usable window
+ * is narrow (0.543 … 0.569) and the margin above the noise ceiling is only
+ * ~0.007. That asymmetry is deliberate: the keyword arms are unfiltered, so a
+ * floor that is slightly too strict costs some extra semantic recall, while
+ * one that is slightly too loose puts unrelated documents in front of the user
+ * wearing a confident generated summary. Re-measure on any embedder change —
+ * this number does not travel.
+ */
+export const VECTOR_ARM_MIN_SIMILARITY = 0.55;
 
 /**
  * Who produced an LLM-written index row. Output-only bookkeeping — never an
@@ -1109,7 +1144,9 @@ export class IndexStore {
 
     if (queryVector && this.caps.vec) {
       addArm(
-        this.searchTextVectors(queryVector, limit).map((v) => ({
+        this.searchTextVectors(queryVector, limit, {
+          minSimilarity: VECTOR_ARM_MIN_SIMILARITY,
+        }).map((v) => ({
           path: v.filePath,
           lineStart: v.lineStart,
           lineEnd: v.lineEnd,
@@ -2526,8 +2563,54 @@ export class IndexStore {
       .run(BigInt(Math.trunc(chunkId)), vectorToBlob(embedding));
   }
 
-  /** KNN over text chunk vectors, joined back to chunk metadata. */
-  searchTextVectors(embedding: number[] | Float32Array, k = 10): VectorHit[] {
+  /** Resolved once per handle — the DDL cannot change underneath it. */
+  private vecMetric: 'cosine' | 'l2' | null = null;
+
+  /**
+   * The distance metric the on-disk `vec_text` table actually declares.
+   *
+   * `applySchema` creates it with `distance_metric=cosine`, but `IF NOT
+   * EXISTS` means a table created before that declaration (or on a sqlite-vec
+   * build that rejected the option) keeps L2 until the re-embed migration
+   * recreates it. The declaration is recoverable from the stored DDL, so read
+   * it rather than assuming.
+   */
+  private vecTextMetric(): 'cosine' | 'l2' {
+    if (!this.vecMetric) {
+      const sql =
+        this.db
+          .prepare("SELECT sql FROM sqlite_master WHERE name = 'vec_text'")
+          .get<{ sql: string | null }>()?.sql ?? '';
+      this.vecMetric = /distance_metric\s*=\s*cosine/i.test(sql) ? 'cosine' : 'l2';
+    }
+    return this.vecMetric;
+  }
+
+  /**
+   * sqlite-vec distance → cosine similarity, exact under either declared
+   * metric because every stored vector is unit-length (`runEmbed` always
+   * passes `normalize: true`): cosine distance is `1 - s`, and for unit
+   * vectors the L2 distance satisfies `d² = 2(1 - s)`. Without that guarantee
+   * the L2 branch would be nonsense — a change to the embed pipeline's
+   * normalization has to revisit this.
+   */
+  private similarityForDistance(distance: number): number {
+    return this.vecTextMetric() === 'cosine' ? 1 - distance : 1 - (distance * distance) / 2;
+  }
+
+  /**
+   * KNN over text chunk vectors, joined back to chunk metadata.
+   *
+   * `minSimilarity` cuts the tail: KNN has no notion of "no good answer", so
+   * every user-facing caller wants a floor (see
+   * {@link VECTOR_ARM_MIN_SIMILARITY}). Rows arrive nearest-first, so the
+   * first row under the floor ends the scan.
+   */
+  searchTextVectors(
+    embedding: number[] | Float32Array,
+    k = 10,
+    opts: { minSimilarity?: number } = {},
+  ): VectorHit[] {
     if (!this.caps.vec) return [];
     // Overfetch then join+filter by collection (vec_text has no collection col).
     const rows = this.db
@@ -2540,6 +2623,8 @@ export class IndexStore {
       'SELECT file_path, line_start, line_end, text FROM chunks WHERE id = ? AND collection_id = ?',
     );
     for (const r of rows) {
+      const similarity = this.similarityForDistance(r.distance);
+      if (opts.minSimilarity != null && similarity < opts.minSimilarity) break;
       const chunkId = Number(r.rowid);
       const c = get.get<{
         file_path: string;
@@ -2555,6 +2640,7 @@ export class IndexStore {
         lineEnd: c.line_end,
         text: c.text,
         distance: r.distance,
+        similarity,
       });
       if (hits.length >= k) break;
     }

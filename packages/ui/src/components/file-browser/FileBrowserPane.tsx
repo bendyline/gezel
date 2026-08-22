@@ -62,6 +62,8 @@ function readStoredFileTreeCollapsed(): boolean {
 export interface FileBrowserCustomList {
   entries: FileEntry[];
   trailingForEntry?: (entry: FileEntry) => ReactNode;
+  /** Per-row prose under the name — see `FileFlatList.detailForEntry`. */
+  detailForEntry?: (entry: FileEntry) => ReactNode;
   emptyMessage: string;
   onSelect?: (entry: FileEntry) => void;
 }
@@ -87,6 +89,8 @@ export interface FileBrowserPaneProps {
   extraPane?: ReactNode;
   /** Status/summary chip rendered in the tree header (index state). */
   headerExtra?: ReactNode;
+  /** Takes the title row's place — a search field that names the pane itself. */
+  titleReplacement?: ReactNode;
   /** Notices between the header and the list (index freshness). */
   notices?: ReactNode;
   trailingForEntry?: (entry: FileEntry) => ReactNode;
@@ -125,6 +129,7 @@ export function FileBrowserPane({
   viewer,
   extraPane,
   headerExtra,
+  titleReplacement,
   notices,
   trailingForEntry,
   actionsForEntry,
@@ -266,7 +271,7 @@ export function FileBrowserPane({
           {...mutations.dropZoneProps('tree', '')}
         >
           <div className="file-tree-header">
-            <span className="file-tree-title">{source.title}</span>
+            {titleReplacement ?? <span className="file-tree-title">{source.title}</span>}
             {/* Create actions ride the title row rather than the key toolbar:
                 at the pane's default width the workspace's five view-mode keys
                 already fill a row on their own. */}
@@ -316,6 +321,7 @@ export function FileBrowserPane({
                 selectedPath={selectedPath}
                 onSelect={customList.onSelect ?? onSelect}
                 trailingForEntry={customList.trailingForEntry}
+                detailForEntry={customList.detailForEntry}
                 emptyMessage={customList.emptyMessage}
               />
             ) : treeMode ? (

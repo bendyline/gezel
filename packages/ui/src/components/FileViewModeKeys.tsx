@@ -194,8 +194,8 @@ export function FileHiddenKey({
 }
 
 /**
- * "Open in file manager" — an action key at the end of the toolbar row. It is
- * a verb, not a mode, so it sits in its own tray with nothing latched
+ * "Open in file manager" — an action key in the toolbar row. It is a verb,
+ * not a mode, so it sits in its own tray with nothing latched
  * (docs/ux.md → "A tray may also hold actions").
  */
 export function FileRevealKey({ onReveal }: { onReveal: () => void }) {
