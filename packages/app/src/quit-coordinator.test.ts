@@ -53,4 +53,33 @@ describe('QuitCoordinator', () => {
     await vi.waitFor(() => expect(quitAgain).toHaveBeenCalledOnce());
     expect(onError).toHaveBeenCalledWith(error);
   });
+
+  it('allows the second quit when graceful shutdown never settles', async () => {
+    vi.useFakeTimers();
+    try {
+      const shutdown = vi.fn(() => new Promise<void>(() => {}));
+      const onError = vi.fn();
+      const quitAgain = vi.fn();
+      const coordinator = new QuitCoordinator({
+        shutdown,
+        quitAgain,
+        onError,
+        shutdownTimeoutMs: 25,
+      });
+
+      coordinator.handleBeforeQuit({ preventDefault: vi.fn() });
+      await vi.advanceTimersByTimeAsync(25);
+
+      expect(onError).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'graceful shutdown timed out after 25ms' }),
+      );
+      expect(quitAgain).toHaveBeenCalledOnce();
+
+      const finalQuit = { preventDefault: vi.fn() };
+      coordinator.handleBeforeQuit(finalQuit);
+      expect(finalQuit.preventDefault).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

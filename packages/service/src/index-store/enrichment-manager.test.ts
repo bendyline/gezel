@@ -221,6 +221,39 @@ describe('IndexEnrichmentManager idle gating', () => {
     await tick;
     expect(mgr.getActivity()).toBeNull();
   });
+
+  it('stop stands down an in-flight background tick and refuses new enrichment work', async () => {
+    const { mgr, enrich } = make({ active: false });
+    (mgr as unknown as { isNightShiftActive: () => boolean }).isNightShiftActive = () => true;
+    let release!: (value: { files: number; summarized: number; embedded: number }) => void;
+    enrich.mockReset().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    (
+      mgr as unknown as {
+        launchBackgroundTick(kind: 'startup' | 'periodic'): void;
+      }
+    ).launchBackgroundTick('periodic');
+    await vi.waitFor(() => expect(enrich).toHaveBeenCalledOnce());
+
+    const stopping = mgr.stop();
+    release({ files: 1, summarized: 1, embedded: 1 });
+    await stopping;
+
+    // Night mode would immediately request another batch without the stop
+    // latch. Once stopped, every public producer stays shut as well.
+    expect(enrich).toHaveBeenCalledOnce();
+    await mgr.tick();
+    expect(enrich).toHaveBeenCalledOnce();
+    expect(mgr.drive('p1', { intensity: 'full' })).toEqual({
+      started: false,
+      alreadyRunning: false,
+    });
+    expect(mgr.drainEmbedOnly('p1')).toEqual({ started: false, alreadyRunning: false });
+  });
 });
 
 describe('review tier scheduling', () => {

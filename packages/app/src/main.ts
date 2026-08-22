@@ -191,6 +191,10 @@ const quitCoordinator = new QuitCoordinator({
   },
   quitAgain: () => app.quit(),
   onError: (error) => console.warn('[app] service shutdown failed:', error),
+  // Embedded dev/fallback services share Electron's process, so they do not
+  // have the spawned daemon's bounded TERM/KILL ladder. Never let one wedged
+  // cleanup promise make every native Quit entry point inert forever.
+  shutdownTimeoutMs: 30_000,
 });
 const packagedSmoke =
   process.env.GEZEL_PACKAGED_SMOKE === '1' || process.argv.includes('--gezel-packaged-smoke');

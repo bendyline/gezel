@@ -9,8 +9,8 @@ import {
   mergeScorecard,
   modelResultFromMatrix,
   readModelPerformance,
-  runIdFor,
   resolveScorecardStartedAt,
+  runIdFor,
 } from './scorecard.ts';
 import type { BatchSummary, MatrixSummary } from './types.ts';
 
@@ -241,12 +241,10 @@ describe('runIdFor', () => {
 describe('resolveScorecardStartedAt', () => {
   const NOW = '2026-09-01T12:00:00.000Z';
   const dataset = {
-    runs: [
-      { id: '2026-08-19-gb10-spark', provenance: { startedAt: '2026-08-20T03:12:45.603Z' } },
-    ],
+    runs: [{ id: '2026-08-19-gb10-spark', provenance: { startedAt: '2026-08-20T03:12:45.603Z' } }],
   } as never;
 
-  it('reuses an existing run\'s recorded start when re-ingesting it', () => {
+  it("reuses an existing run's recorded start when re-ingesting it", () => {
     // Regression: defaulting to `now` moved the perf window off the run's own
     // probes, so an --ingest-only rebuild silently dropped throughput from
     // every cell. Nothing errored — the column just stopped rendering.

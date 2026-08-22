@@ -550,6 +550,8 @@ async function installedModels(_attrs: Record<string, string>, ctx: MacroContext
 
 /**
  * `::handboek-model-scorecard{suite=core}` — measured results for a suite.
+ * `::handboek-model-scorecard{suites=core,productivity}` — multiple suites
+ * grouped beneath each run's shared provenance.
  *
  * Renders the checked-in scorecard dataset rather than any live state, so
  * the shipped article shows the same numbers on every device: these are
@@ -565,6 +567,16 @@ async function installedModels(_attrs: Record<string, string>, ctx: MacroContext
  *   - trials lost to infrastructure are shown, not silently dropped.
  */
 async function modelScorecard(attrs: Record<string, string>, ctx: MacroContext): Promise<string> {
+  const suiteIds = attrs.suites
+    ?.split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (suiteIds && suiteIds.length > 0) {
+    return renderScorecardRunsMarkdown(SCORECARD, suiteIds, {
+      includeTaskCount: ctx.mode !== 'site',
+      breakLabels: ctx.mode !== 'agent',
+    });
+  }
   const suiteId = attrs.suite?.trim();
   if (!suiteId) return '';
   return renderScorecardMarkdown(SCORECARD, suiteId, {
@@ -655,6 +667,103 @@ export function renderScorecardMarkdown(
   return lines.join('\n');
 }
 
+const SCORECARD_SUITE_HEADINGS: Record<string, string> = {
+  core: 'General capability',
+  productivity: 'Office and knowledge work',
+};
+
+/**
+ * Render several suites run-first rather than suite-first.
+ *
+ * A run's machine, engines, date, and builds apply to every suite it covered,
+ * so printing that stamp once and keeping its tables together makes the real
+ * comparison boundary visible. Results from different runs remain separated.
+ */
+export function renderScorecardRunsMarkdown(
+  dataset: ScorecardDataset,
+  suiteIds: readonly string[],
+  opts: { includeTaskCount: boolean; breakLabels?: boolean },
+): string {
+  const wanted = [...new Set(suiteIds.filter(Boolean))];
+  const runs = [...dataset.runs]
+    .filter((run) => wanted.some((suiteId) => run.suites.includes(suiteId)))
+    .sort((a, b) => b.provenance.startedAt.localeCompare(a.provenance.startedAt))
+    .map((run) => ({
+      run,
+      suites: wanted
+        .map((suiteId) => {
+          const scores = dataset.results
+            .filter((result) => result.runId === run.id && result.suiteId === suiteId)
+            .map((result) => scoreModel(result, run.provenance.count))
+            .sort((a, b) => {
+              const ratioA = a.attributableTrials > 0 ? a.successes / a.attributableTrials : -1;
+              const ratioB = b.attributableTrials > 0 ? b.successes / b.attributableTrials : -1;
+              return (
+                ratioB - ratioA ||
+                b.successes - a.successes ||
+                a.result.label.localeCompare(b.result.label)
+              );
+            });
+          return { suiteId, scores };
+        })
+        .filter((suite) => suite.scores.length > 0),
+    }))
+    .filter((entry) => entry.suites.length > 0)
+    .slice(0, PRIOR_ROUNDS_SHOWN + 1);
+
+  if (runs.length === 0) {
+    return [
+      `No ${wanted.join(' or ')} results have been recorded yet.`,
+      '',
+      'Results appear here once a scorecard sweep has been run and checked in.',
+    ].join('\n');
+  }
+
+  const lines: string[] = [];
+  const headline = runs[0]!.run;
+  for (const [index, entry] of runs.entries()) {
+    if (index > 0) lines.push('');
+    lines.push(
+      `### ${index === 0 ? 'Latest round' : 'Earlier round'} — ${entry.run.provenance.startedAt.slice(0, 10)}`,
+    );
+    lines.push('');
+    const engines = entry.suites.flatMap((suite) =>
+      suite.scores.map((score) => score.result.engine),
+    );
+    const why = index === 0 ? [] : provenanceDifferences(headline, entry.run);
+    lines.push(
+      `**${describeProvenance(entry.run, engines)}**${why.length > 0 ? ` — ${why.join(', ')}` : ''}`,
+    );
+
+    for (const suite of entry.suites) {
+      const publishable = suite.scores.filter((score) => score.unmeasuredScenarios.length === 0);
+      const withheld = suite.scores.filter((score) => score.unmeasuredScenarios.length > 0);
+      lines.push('');
+      lines.push(`#### ${SCORECARD_SUITE_HEADINGS[suite.suiteId] ?? suite.suiteId}`);
+      lines.push('');
+      lines.push(...scoreTable(publishable, opts.breakLabels ?? false));
+
+      if (withheld.length > 0) {
+        lines.push('');
+        lines.push('Not published — some tasks could not be measured on this round:');
+        lines.push('');
+        for (const score of withheld) {
+          lines.push(
+            `- ${score.result.label}: ${score.unmeasuredScenarios.length} task(s) unmeasured`,
+          );
+        }
+      }
+
+      if (opts.includeTaskCount) {
+        lines.push('');
+        lines.push(`Tasks in this set: ${entry.run.scenariosBySuite[suite.suiteId]?.length ?? 0}.`);
+      }
+    }
+  }
+
+  return lines.join('\n');
+}
+
 /** How many previous rounds a published table shows before history is elided. */
 const PRIOR_ROUNDS_SHOWN = 2;
 
@@ -668,7 +777,7 @@ const NB = '\u00a0';
 /**
  * Split a model label between its family and its size/quantization, so the
  * Model column claims the width of `35b-a3b-q4` rather than the width of
- * `qwen3.6-35b-a3b-q4`. This table is eight columns of numbers inside the
+ * `qwen3.6-35b-a3b-q4`. This table is seven columns of numbers inside the
  * site's 42rem reading measure — the widest column decides how much room is
  * left for everything else.
  *
@@ -683,25 +792,25 @@ export function breakModelLabel(label: string): string {
 /**
  * One results table.
  *
- * Every optional column is omitted entirely when no model in the table
- * carries the measurement. An empty column reads as a missing value rather
- * than an absent metric — the confusion the old "Not measured" column
- * caused, which is why nothing here renders a placeholder dash for a whole
- * column.
+ * Judge and runtime columns are omitted when no model in the table carries
+ * the measurement. Performance is the deliberate exception: it is a standard
+ * scorecard dimension, and keeping its column visible lets an older round say
+ * honestly that its throughput probe was not recorded.
  */
 function scoreTable(scores: ReturnType<typeof scoreModel>[], breakLabels: boolean): string[] {
-  const anySpeed = scores.some((score) => !!score.result.performance);
   const anyRuntime = scores.some((score) => !!score.result.runtime);
   const anyJudge = scores.some((score) => !!score.result.judge);
 
   const cols = ['Model', 'Size', 'Tasks passed'];
   if (anyJudge) cols.push('Quality');
-  if (anySpeed) cols.push('Reads at', 'Writes at');
+  cols.push('Performance');
   if (anyRuntime) cols.push('Context', 'Memory used');
 
   const rows = scores.map((score) => {
+    const kvCacheType = score.result.runtime?.kvCacheType;
+    const modelLabel = `${score.result.label}${kvCacheType ? ` (kv: ${kvCacheType})` : ''}`;
     const cells = [
-      breakLabels ? breakModelLabel(score.result.label) : score.result.label,
+      breakLabels ? breakModelLabel(modelLabel) : modelLabel,
       score.result.parameterSize ?? score.result.tier,
       score.claim,
     ];
@@ -712,13 +821,12 @@ function scoreTable(scores: ReturnType<typeof scoreModel>[], breakLabels: boolea
       // on its successes alone.
       cells.push(judge ? `${judge.meanScore}/10 (${judge.artifacts}${NB}pieces)` : '—');
     }
-    if (anySpeed) {
-      const perf = score.result.performance;
-      cells.push(
-        perf ? `${perf.prefillTokensPerSec.toLocaleString()}${NB}tok/s` : '—',
-        perf ? `${perf.decodeTokensPerSec}${NB}tok/s` : '—',
-      );
-    }
+    const perf = score.result.performance;
+    cells.push(
+      perf
+        ? `${perf.decodeTokensPerSec}${NB}tok/s output${breakLabels ? '<br>' : ' · '}${perf.prefillTokensPerSec.toLocaleString()}${NB}tok/s prefill`
+        : '—',
+    );
     if (anyRuntime) {
       const runtime = score.result.runtime;
       cells.push(

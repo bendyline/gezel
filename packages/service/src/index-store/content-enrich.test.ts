@@ -371,6 +371,30 @@ describe('summary retry gate (markEnrichAttempt)', () => {
     expect(counts!.skipped).toBe(1);
   });
 
+  it('shutdown cancellation does not consume the file retry budget', async () => {
+    await seed();
+    const abort = new Error('service shutting down');
+    abort.name = 'AbortError';
+    const cancelled: EnrichDeps = {
+      summarize: async () => {
+        throw abort;
+      },
+      embed: fakeEmbed,
+      model: 'test-model',
+    };
+
+    for (let i = 0; i < 3; i++) {
+      await expect(ci.enrich('c', cancelled, 10)).rejects.toBe(abort);
+    }
+
+    const recovered = await ci.enrich(
+      'c',
+      { summarize: async () => 'Defines the number one.', embed: fakeEmbed, model: 'test-model' },
+      10,
+    );
+    expect(recovered).toMatchObject({ files: 1, summarized: 1 });
+  });
+
   it('a changed file re-queues after a policy-blocked skip', async () => {
     await seed();
     const blockedDeps: EnrichDeps = {

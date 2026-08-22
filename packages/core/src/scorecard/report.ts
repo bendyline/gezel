@@ -153,6 +153,24 @@ export interface SuiteScoreboard {
 }
 
 /**
+ * Best-effort class name for hardware whose OS does not expose a useful CPU
+ * model. DGX Spark reports its 128 GB unified pool as roughly 122 GB of total
+ * memory after platform reservations, so the scorecard has no separate VRAM
+ * figure to consult on this class of device.
+ */
+export function inferredScorecardDeviceClass(device: ScorecardDevice): string | null {
+  const rawLabel = device.label.trim();
+  const labelIsUnknown =
+    rawLabel.toLowerCase() === device.platform.toLowerCase() || /\bunknown\b/i.test(rawLabel);
+  return labelIsUnknown &&
+    device.platform === 'linux' &&
+    device.arch === 'arm64' &&
+    (device.memoryGb ?? 0) > 100
+    ? 'DGX Spark Class'
+    : null;
+}
+
+/**
  * Build one suite's scoreboard.
  *
  * Sorting is by successes-per-attributable-trial with the raw success
@@ -206,7 +224,11 @@ export function buildSuiteScoreboard(
  * the raw device label when the finer detail was not captured.
  */
 export function hardwareSummary(device: ScorecardDevice): string {
-  const chip = device.cpuModel?.replace(/^Apple\s+/, '') ?? null;
+  const reportedCpu = device.cpuModel?.trim();
+  const chip =
+    reportedCpu && !/^unknown$/i.test(reportedCpu)
+      ? reportedCpu.replace(/^Apple\s+/, '')
+      : inferredScorecardDeviceClass(device);
   const memory = device.memoryGb ? `${device.memoryGb} GB` : null;
   const parts = [chip ?? device.label, memory].filter(Boolean);
   return parts.join(' · ');

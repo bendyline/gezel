@@ -18,21 +18,17 @@ what these numbers do not tell you. The short version: each job is run three
 times, a job passes only when every requirement is met, and runs lost to
 machine trouble are set aside rather than blamed on the model.
 
-## General capability
+## Results by test round
 
-Writing a small working program, fixing a bug from its symptoms, following a
-procedure and stopping at a problem, turning several documents into one
-reconciled summary.
+Each round has two tables measured on the same machine and build. **General
+capability** covers writing a small working program, fixing a bug from its
+symptoms, following a procedure and stopping at a problem, and turning several
+documents into one reconciled summary. **Office and knowledge work** covers a
+customer notice under a hard word limit, a meeting turned into an action
+register, a cited research brief, an experiment read-out, a spreadsheet model,
+a slide deck, and a Word document.
 
-::handboek-model-scorecard{suite=core}
-
-## Office and knowledge work
-
-A customer notice under a hard word limit, a meeting turned into an action
-register, a cited research brief, an experiment read-out, a spreadsheet
-model, a slide deck, a Word document.
-
-::handboek-model-scorecard{suite=productivity}
+::handboek-model-scorecard{suites=core,productivity}
 
 ## Reading the table
 
@@ -50,19 +46,22 @@ successes alone — `6.5/10 (18 pieces)` is a weaker claim than `6.5/10 (26
 pieces)`. Treat it as colour next to the pass rate, never as a substitute
 for it.
 
-**Reads at / Writes at** are measured speeds on the machine named above:
-how fast the model takes in your documents, and how fast it writes its
-answer. Both matter for how a gezel *feels* — reading speed governs the
-pause before it starts, writing speed governs how fast text appears.
+**Performance** shows two measured speeds on the machine named above: output
+speed is how fast the model writes its answer, and prefill speed is how fast it
+takes in your prompt and documents. Both matter for how a gezel *feels* —
+prefill governs the pause before it starts, while output governs how fast text
+appears. A dash means that round did not record a throughput probe.
 
 **Context** is the working memory the model was given for these runs — how
 much it can hold at once. **Memory used** is the peak RAM the model and its
 engine actually occupied, which is the number to check against your own
-machine.
+machine. When the engine reported its KV-cache precision, it appears beside
+the model name — for example, `(kv: q8_0)`.
 
-**Earlier rounds** appear as separate tables below each set, with their own
-stamps. They are kept apart rather than merged because a change to gezel or
-to the task set can move a score without any model changing.
+Each **test round** keeps its General capability and Office and knowledge work
+tables together under one provenance stamp. Earlier rounds stay separate from
+the latest because a change to gezel or to the task set can move a score
+without any model changing.
 
 **Size** is the model's parameter count where we know it. Bigger is often but
 not always better: on office work in particular, some smaller models beat

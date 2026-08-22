@@ -161,6 +161,8 @@ export class IndexEnrichmentManager {
   private tickTimer: ReturnType<typeof setInterval> | null = null;
   private readonly backgroundTicks = new Set<Promise<void>>();
   private running = false;
+  /** Latched while service teardown stands every enrichment lane down. */
+  private stopping = false;
   private activity: IndexEnrichmentActivity | null = null;
 
   constructor(opts: IndexEnrichmentManagerOptions) {
@@ -183,6 +185,7 @@ export class IndexEnrichmentManager {
   }
 
   start(): void {
+    this.stopping = false;
     this.startupTimer = setTimeout(() => {
       this.startupTimer = null;
       this.launchBackgroundTick('startup');
@@ -195,14 +198,18 @@ export class IndexEnrichmentManager {
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
     if (this.startupTimer) clearTimeout(this.startupTimer);
     if (this.tickTimer) clearInterval(this.tickTimer);
     this.startupTimer = null;
     this.tickTimer = null;
+    for (const token of this.catchUpAborts) token.aborted = true;
+    for (const projectId of this.drives.keys()) this.driveStops.add(projectId);
     await Promise.allSettled([
       ...this.backgroundTicks,
       ...this.catchUps,
       ...[...this.drives.values()].map(({ run }) => run),
+      ...this.embedDrains.values(),
     ]);
   }
 
@@ -284,7 +291,7 @@ export class IndexEnrichmentManager {
 
   /** Batch-boundary halt check shared by every drive loop. */
   private async driveHalted(projectId: string): Promise<boolean> {
-    return this.driveStops.has(projectId) || (await this.isPaused());
+    return this.stopping || this.driveStops.has(projectId) || (await this.isPaused());
   }
 
   /**
@@ -295,6 +302,7 @@ export class IndexEnrichmentManager {
    * the running one.
    */
   drive(projectId: string, opts: DriveOptions): { started: boolean; alreadyRunning: boolean } {
+    if (this.stopping) return { started: false, alreadyRunning: false };
     if (this.drives.has(projectId)) return { started: false, alreadyRunning: true };
     const run = this.runDrive(projectId, opts)
       .catch((err) => log.warn(`[enrich] drive ${projectId} failed: ${describe(err)}`))
@@ -313,6 +321,7 @@ export class IndexEnrichmentManager {
    * awaited) and then wakes the TaskRunner still gets the dispatch hold.
    */
   catchUpAll(): Promise<void> {
+    if (this.stopping) return Promise.resolve();
     const token: CatchUpToken = { aborted: false };
     this.catchUpAborts.add(token);
     const run = this.runCatchUpAll(token).finally(() => {
@@ -351,7 +360,7 @@ export class IndexEnrichmentManager {
     try {
       const projects = await this.store.listProjects().catch(() => []);
       for (const p of projects) {
-        if (token.aborted) return;
+        if (this.stopping || token.aborted) return;
         if (p.indexingEnabled === false) continue;
         const existing = this.drives.get(p.id);
         if (existing) {
@@ -382,6 +391,7 @@ export class IndexEnrichmentManager {
    * of `POST /index/enrich`.
    */
   drainEmbedOnly(projectId: string): { started: boolean; alreadyRunning: boolean } {
+    if (this.stopping) return { started: false, alreadyRunning: false };
     // A full drive already covers this work; don't double-open the index.
     if (this.drives.has(projectId) || this.embedDrains.has(projectId)) {
       return { started: false, alreadyRunning: true };
@@ -531,6 +541,7 @@ export class IndexEnrichmentManager {
 
       const boekwachter = await this.resolveBoekwachter(projectId);
       if (!boekwachter) return; // static is current; AI needs the roster opt-in
+      if (await halt()) return;
       const buildDeps = (nightShift: boolean) =>
         buildEnrichDeps(this.store, this.chat, {
           nightShift,
@@ -648,7 +659,9 @@ export class IndexEnrichmentManager {
           ...gezel,
         });
       }
+      if (await halt()) return;
       await this.contentIndex.enrichAreas(projectId, deps).catch(() => null);
+      if (await halt()) return;
       if (rubrics.size > 0) {
         let stored = 0;
         for (;;) {
@@ -678,11 +691,13 @@ export class IndexEnrichmentManager {
 
   /** Exposed for tests: run one batch ignoring the timers (still idle-gated). */
   async tick(): Promise<void> {
+    if (this.stopping) return;
     if (this.running) return;
     // An on-demand drive is already the bulk consumer of the engine — the
     // background loop stands down until it finishes.
     if (this.drives.size > 0) return;
     if (await this.isPaused()) return;
+    if (this.stopping) return;
     if (!this.isIdle()) return;
     this.running = true;
     this.activity = {
@@ -697,6 +712,7 @@ export class IndexEnrichmentManager {
       const projects = await this.store.listProjects().catch(() => []);
       let didWork = false;
       for (const p of projects) {
+        if (this.stopping) return;
         // `indexingEnabled: false` is a full workspace-index opt-out, not
         // merely a request to skip the cheap structural pass. Do not consume
         // an older on-disk index if the project was disabled after a scan.
@@ -722,6 +738,7 @@ export class IndexEnrichmentManager {
             });
           }
         }
+        if (this.stopping) return;
         // Always-on image-embed tier (lane A), same pre-roster slot and the
         // same governance containment as the drive path: local worker only,
         // upstream of every model-routing seam.
@@ -741,6 +758,7 @@ export class IndexEnrichmentManager {
             });
           }
         }
+        if (this.stopping) return;
         // Face tier (lane B) — biometric opt-in, same local-only slot.
         if (
           (await this.faceRecognitionEnabled()) &&
@@ -764,6 +782,7 @@ export class IndexEnrichmentManager {
         // embed-only tier above run independently for every project.
         const boekwachter = await this.resolveBoekwachter(p.id);
         if (!boekwachter) continue;
+        if (this.stopping) return;
         this.activity = {
           id: 'index-enrichment',
           title: 'Workspace indexing',
@@ -813,6 +832,7 @@ export class IndexEnrichmentManager {
         }
         let drained = false;
         for (;;) {
+          if (this.stopping) return;
           if (this.chat.isAnyActive()) return; // yield to live work immediately
           const r = await this.contentIndex.enrich(p.id, deps, batch).catch(() => null);
           const files = r?.files ?? 0;
@@ -877,6 +897,7 @@ export class IndexEnrichmentManager {
             };
             let storedThisTick = 0;
             for (;;) {
+              if (this.stopping) return;
               if (this.chat.isAnyActive()) return; // yield to live work immediately
               const r = await this.contentIndex
                 .review(p.id, deps, batch, rubrics)

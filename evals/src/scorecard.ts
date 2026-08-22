@@ -9,7 +9,7 @@ import type {
   ScorecardModelResult,
   ScorecardRun,
 } from '@bendyline/gezel';
-import { ScorecardDatasetSchema } from '@bendyline/gezel';
+import { ScorecardDatasetSchema, inferredScorecardDeviceClass } from '@bendyline/gezel';
 import type { BatchSummary, FailureClass, MatrixSummary, TrialResult } from './types.ts';
 
 /**
@@ -271,16 +271,20 @@ export function modelResultFromMatrix(
 export function captureDevice(): ScorecardDevice {
   const cpu = cpus()[0]?.model?.trim();
   const memoryGb = Math.round(totalmem() / 1024 ** 3);
-  const label = cpu
+  const detectedLabel = cpu
     ? `${process.platform === 'darwin' ? 'Mac' : process.platform} · ${cpu}`
     : process.platform;
-  return {
-    label,
+  const device: ScorecardDevice = {
+    label: detectedLabel,
     platform: process.platform,
     arch: process.arch,
     memoryGb,
     osRelease: `${process.platform} ${release()}`,
     ...(cpu ? { cpuModel: cpu } : {}),
+  };
+  return {
+    ...device,
+    label: inferredScorecardDeviceClass(device) ?? detectedLabel,
   };
 }
 
@@ -517,7 +521,9 @@ export function resolveScorecardStartedAt(opts: {
   const prior = opts.runId
     ? opts.dataset.runs.find((run) => run.id === opts.runId)?.provenance.startedAt
     : undefined;
-  return prior ? { startedAt: prior, reusedFromRun: true } : { startedAt: opts.now, reusedFromRun: false };
+  return prior
+    ? { startedAt: prior, reusedFromRun: true }
+    : { startedAt: opts.now, reusedFromRun: false };
 }
 
 export function readModelPerformance(

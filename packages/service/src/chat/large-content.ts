@@ -150,6 +150,9 @@ export async function runLargeContentCompletion(
       // window would fail the same way, and an all-empty run would read as
       // "engine down, retry later" to the caller. Let it propagate.
       if (err instanceof CompletionBlockedError) throw err;
+      // Caller/shutdown cancellation has the same batch-level semantics: it
+      // must stop the remaining windows, not masquerade as empty model output.
+      if (err instanceof Error && err.name === 'AbortError') throw err;
       raw = '';
     }
     replies.push({ window, raw });

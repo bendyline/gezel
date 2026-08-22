@@ -390,6 +390,12 @@ function oneShotTimeoutError(timeoutMs: number): Error {
   return err;
 }
 
+function serviceShutdownAbortError(): Error {
+  const err = new Error('service shutting down');
+  err.name = 'AbortError';
+  return err;
+}
+
 /**
  * Bound setup stages that do not natively accept an AbortSignal. The original
  * promise remains observed after cancellation (so it cannot reject unhandled),
@@ -1157,6 +1163,13 @@ export class ChatManager {
   >();
   /** Set once {@link shutdown} starts so deferred watchdogs don't fire into a tearing-down manager. */
   private shuttingDown = false;
+  /**
+   * Ephemeral completions are not represented in `inflight` because they have
+   * no persisted chat session. Track their cancellation scopes separately so
+   * service shutdown cannot leave indexing, memory, or generation chores
+   * holding an embedded Electron process open.
+   */
+  private readonly activeOneShots = new Map<AbortController, Promise<string>>();
   /**
    * Tool calls captured during the current in-flight turn, keyed by
    * sessionId. The `onToolCall` bridge handler appends here while the
@@ -9721,6 +9734,11 @@ export class ChatManager {
   async beginShutdown(): Promise<void> {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
+    const activeOneShots = Array.from(this.activeOneShots.entries());
+    for (const [controller] of activeOneShots) {
+      controller.abort(serviceShutdownAbortError());
+    }
+    await Promise.allSettled(activeOneShots.map(([, pending]) => pending));
     // Parked handoffs must not dispatch as their sender unwinds.
     this.afterSessionIdle.clear();
     this.inflightFileHandoffs.clear();
@@ -9935,15 +9953,35 @@ export class ChatManager {
       signal?: AbortSignal;
     } = {},
   ): Promise<string> {
+    if (this.shuttingDown) throw serviceShutdownAbortError();
+    const shutdownController = new AbortController();
+    const pending = this.runOneShotCompletion(prompt, timeoutMs, opts, shutdownController.signal);
+    this.activeOneShots.set(shutdownController, pending);
+    try {
+      return await pending;
+    } finally {
+      this.activeOneShots.delete(shutdownController);
+    }
+  }
+
+  private async runOneShotCompletion(
+    prompt: string,
+    timeoutMs: number,
+    opts: NonNullable<Parameters<ChatManager['oneShotCompletion']>[2]>,
+    shutdownSignal: AbortSignal,
+  ): Promise<string> {
     oneShotLog.info(`requesting completion (${prompt.length} chars, ${timeoutMs}ms timeout)`);
     const deadlineAt = Date.now() + timeoutMs;
     const deadlineSignal = AbortSignal.timeout(Math.max(1, timeoutMs));
-    const oneShotSignal = opts.signal
-      ? AbortSignal.any([opts.signal, deadlineSignal])
-      : deadlineSignal;
+    const oneShotSignal = AbortSignal.any([
+      shutdownSignal,
+      deadlineSignal,
+      ...(opts.signal ? [opts.signal] : []),
+    ]);
     const abortError = () => {
       if (deadlineSignal.aborted) return oneShotTimeoutError(timeoutMs);
       if (opts.signal?.reason instanceof Error) return opts.signal.reason;
+      if (shutdownSignal.reason instanceof Error) return shutdownSignal.reason;
       const err = new Error('one-shot cancelled by caller');
       err.name = 'AbortError';
       return err;

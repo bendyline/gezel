@@ -18,10 +18,7 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": [
-        "core",
-        "productivity"
-      ],
+      "suites": ["core", "productivity"],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -70,10 +67,7 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": [
-        "core",
-        "productivity"
-      ],
+      "suites": ["core", "productivity"],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -122,10 +116,7 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": [
-        "core",
-        "productivity"
-      ],
+      "suites": ["core", "productivity"],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -174,10 +165,7 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": [
-        "core",
-        "productivity"
-      ],
+      "suites": ["core", "productivity"],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -226,10 +214,7 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": [
-        "core",
-        "productivity"
-      ],
+      "suites": ["core", "productivity"],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -278,10 +263,7 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": [
-        "core",
-        "productivity"
-      ],
+      "suites": ["core", "productivity"],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
