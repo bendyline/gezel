@@ -76,11 +76,17 @@ function suggestName(description: string): string {
 export function NewScriptDialog({
   open,
   projectId,
+  scope,
   onClose,
   onCreated,
 }: {
   open: boolean;
   projectId: string;
+  /**
+   * Where the script is stored. Absent = this project's `scripts/`;
+   * `'user'` = the shared library, which every project can run from.
+   */
+  scope?: 'user';
   onClose: () => void;
   /** Called with the new script's name after it exists on disk. */
   onCreated: (name: string) => void;
@@ -111,14 +117,21 @@ export function NewScriptDialog({
     setBusy(true);
     setError(null);
     try {
-      await api.createProjectScript(projectId, {
+      const body = {
         name: effectiveName,
         ...(description.trim() ? { description: description.trim() } : {}),
         // AI drafts start from the blank skeleton; the editor fills it in.
         template: withAiDraft ? 'blank' : template,
-      });
+      };
+      await (scope === 'user'
+        ? api.createUserScript(body)
+        : api.createProjectScript(projectId, body));
       if (withAiDraft && description.trim()) {
-        setPendingDraft(`${projectId}/${effectiveName}`, description.trim());
+        // Same key the editor derives from its own scope + tab payload.
+        setPendingDraft(
+          `${scope ? `${scope}:` : ''}${projectId}/${effectiveName}`,
+          description.trim(),
+        );
       }
       onCreated(effectiveName);
     } catch (err) {
@@ -144,67 +157,71 @@ export function NewScriptDialog({
           <Dialog.Description className="muted small">
             Scripts run automatically when task phases start or finish — or whenever you run them
             yourself.
+            {scope === 'user' &&
+              ' This one goes in the shared library, so every project can use it.'}
           </Dialog.Description>
 
-          <label className="new-script-field">
-            <span>Describe what it should do (optional)</span>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="When this phase starts, fetch the PR diff and post a one-paragraph summary…"
-              rows={3}
-              disabled={busy}
-            />
-          </label>
-          <div className="new-script-ai">
-            <button
-              type="button"
-              className="primary"
-              disabled={busy || !description.trim() || !nameValid}
-              onClick={() => void create(true)}
-            >
-              Draft it with AI
-            </button>
-            <span className="muted small">or pick a starting point:</span>
-          </div>
-
-          <div className="new-script-templates" aria-label="Starter template">
-            {TEMPLATES.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                aria-pressed={template === t.id}
-                className={`new-script-template${template === t.id ? ' active' : ''}`}
-                onClick={() => setTemplate(t.id)}
+          <div className="new-script-dialog__body">
+            <label className="new-script-field">
+              <span>Describe what it should do (optional)</span>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="When this phase starts, fetch the PR diff and post a one-paragraph summary…"
+                rows={3}
                 disabled={busy}
+              />
+            </label>
+            <div className="new-script-ai">
+              <button
+                type="button"
+                className="primary"
+                disabled={busy || !description.trim() || !nameValid}
+                onClick={() => void create(true)}
               >
-                <strong>{t.title}</strong>
-                <span className="muted small">{t.blurb}</span>
-                <CapabilityPills requires={t.requires} />
+                Draft it with AI
               </button>
-            ))}
+              <span className="muted small">or pick a starting point:</span>
+            </div>
+
+            <div className="new-script-templates" aria-label="Starter template">
+              {TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  aria-pressed={template === t.id}
+                  className={`new-script-template${template === t.id ? ' active' : ''}`}
+                  onClick={() => setTemplate(t.id)}
+                  disabled={busy}
+                >
+                  <strong>{t.title}</strong>
+                  <span className="muted small">{t.blurb}</span>
+                  <CapabilityPills requires={t.requires} />
+                </button>
+              ))}
+            </div>
+
+            <label className="new-script-field">
+              <span>Name</span>
+              <input
+                type="text"
+                value={effectiveName}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setNameTouched(true);
+                }}
+                placeholder="summarize-and-post"
+                disabled={busy}
+              />
+              {effectiveName && !nameValid && (
+                <span className="scripts-view__error small">
+                  Names start with a letter and use only letters, digits, dashes, underscores.
+                </span>
+              )}
+            </label>
+
+            {error && <p className="scripts-view__error">{error}</p>}
           </div>
-
-          <label className="new-script-field">
-            <span>Name</span>
-            <input
-              type="text"
-              value={effectiveName}
-              onChange={(e) => {
-                setName(e.target.value);
-                setNameTouched(true);
-              }}
-              placeholder="summarize-and-post"
-              disabled={busy}
-            />
-            {effectiveName && !nameValid && (
-              <span className="scripts-view__error small">
-                Names start with a letter and use only letters, digits, dashes, underscores.
-              </span>
-            )}
-          </label>
-
-          {error && <p className="scripts-view__error">{error}</p>}
 
           <Dialog.Actions>
             <button type="button" onClick={onClose} disabled={busy}>

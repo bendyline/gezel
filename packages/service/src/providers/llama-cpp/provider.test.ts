@@ -783,7 +783,9 @@ describe('LlamaCppProvider constructor', () => {
   });
 
   it('continues from a seeded tool result without appending an empty user turn', async () => {
-    let body: { messages?: Array<{ role: string; content?: string }> } = {};
+    let body: {
+      messages?: Array<{ role: string; content?: string; reasoning_content?: string }>;
+    } = {};
     globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
       body = JSON.parse(String(init?.body ?? '{}')) as typeof body;
       return sseResponse([
@@ -792,7 +794,10 @@ describe('LlamaCppProvider constructor', () => {
         '[DONE]',
       ]);
     }) as typeof fetch;
-    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const provider = new LlamaCppProvider({
+      baseUrl: 'http://llama.test',
+      replayReasoningContent: true,
+    });
     const session = await provider.createSession({
       systemMessage: 'system',
       priorMessages: [
@@ -801,6 +806,7 @@ describe('LlamaCppProvider constructor', () => {
           role: 'assistant',
           content: '',
           toolCalls: [{ id: 'note-1', name: 'write_task_note', arguments: '{"ref":"frogger/1"}' }],
+          reasoning: 'I should record the acceptance criteria once.',
         },
         { role: 'tool', content: 'Appended note.', toolCallId: 'note-1' },
       ],
@@ -809,6 +815,9 @@ describe('LlamaCppProvider constructor', () => {
     await session.sendAndWait('', { continueFromToolResult: true });
 
     expect(body.messages?.at(-1)).toMatchObject({ role: 'tool', content: 'Appended note.' });
+    expect(body.messages?.find((message) => message.role === 'assistant')).toMatchObject({
+      reasoning_content: 'I should record the acceptance criteria once.',
+    });
     expect(body.messages).not.toContainEqual({ role: 'user', content: '' });
   });
 

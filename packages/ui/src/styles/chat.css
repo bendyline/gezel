@@ -3610,27 +3610,42 @@ button.timeline-session-divider-continuing::before {
   margin-right: 0.25rem;
 }
 
-.chat-rail-task-steps {
-  margin: 0;
-  padding-left: 1.1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.8rem;
+/* Task progress at the top of the rail preview — the same chain-of-circles
+   tracker the task view uses, sized for a narrow column. It never wraps:
+   past the rail's width it scrolls horizontally (synthetic thumb above the
+   chain) with the current step held in the middle, so "where is this task"
+   reads at a glance however many steps the craftbook has. */
+.chat-rail-task-track {
+  min-width: 0;
+  margin: -0.25rem -0.25rem 0;
+  padding-bottom: 0.15rem;
+  border-bottom: 1px solid var(--border);
 }
 
-.chat-rail-task-step {
-  color: var(--muted);
+.chat-rail-task-track .step-tracker {
+  flex-wrap: nowrap;
+  width: max-content;
+  min-width: 100%;
+  justify-content: center;
+  padding: 0.4rem 0.25rem 0.3rem;
+  margin-bottom: 0;
 }
 
-.chat-rail-task-step.is-active {
-  color: var(--text);
-  font-weight: 600;
+.chat-rail-task-track .step-dot {
+  padding-inline: 0.4rem;
 }
 
-.chat-rail-task-step.is-done {
-  text-decoration: line-through;
-  opacity: 0.7;
+.chat-rail-task-track .step-dot-label {
+  max-width: 7rem;
+  font-size: 0.72rem;
+}
+
+.chat-rail-task-track .step-dot-connector {
+  flex-basis: 18px;
+}
+
+.chat-rail-task-track .bench-scrollbar {
+  margin: 0 0.25rem 0.1rem;
 }
 
 .chat-rail-task-open {

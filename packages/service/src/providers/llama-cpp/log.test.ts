@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -75,6 +75,18 @@ describe('native engine logs', () => {
     expect(raw).not.toContain('user prompt');
     expect(raw).not.toContain('sk-abcdefghijklmnopqrstuvwxyz123456');
     await log.close();
+  });
+
+  it('waits for asynchronous initialization when closed immediately', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-llama-log-'));
+    dirs.push(dir);
+    const log = new LlamaCppLogFile(dir);
+
+    await log.close();
+
+    const path = log.currentFile();
+    expect(path).not.toBeNull();
+    await expect(stat(path!)).resolves.toMatchObject({ size: 0 });
   });
 
   it('supports a DS4-specific basename', async () => {

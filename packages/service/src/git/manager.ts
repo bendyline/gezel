@@ -24,12 +24,7 @@ import { createPatch } from 'diff';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { AmbientGitHubAuth } from '../github/ambient.js';
-import {
-  authenticatedCloneUrl,
-  parseGitHubUrl,
-  sameGitHubRepo,
-  sharedCloneKey,
-} from '../github/url.js';
+import { parseGitHubUrl, sameGitHubRepo, sharedCloneKey } from '../github/url.js';
 import type { SecretStore } from '../secrets/types.js';
 import {
   EMPTY_TREE_SHA,
@@ -50,7 +45,6 @@ import {
 } from './changes.js';
 import {
   GitError,
-  cloneBare,
   isGitInstalled,
   runGit,
   worktreeAdd,
@@ -275,17 +269,19 @@ export class GitManager {
       }
       if (!(await isGitInstalled())) throw new GitNotInstalledError();
       const parsed = parseGitHubUrl(url);
-      // GitHub URLs flow through PAT auth + persisted-remote cleanup.
+      // GitHub URLs use a one-shot auth header that runGit relocates from
+      // its input args into environment-backed git config before spawn.
+      // The clean URL is therefore the only URL visible in argv or stored
+      // as origin, including when clone fails or is interrupted.
       // Non-github URLs (local paths, ssh-elsewhere, gitlab/gitea) just
       // get a vanilla `git clone --bare` — the schema accepts them and
       // the worktree mechanics work identically.
-      const pat = parsed ? await this.getToken() : null;
-      const cloneUrl = parsed ? authenticatedCloneUrl(parsed.cloneUrl, pat) : url;
+      const { baseArgs, redact } = parsed ? await this.patArgs() : { baseArgs: [], redact: [] };
+      const cloneUrl = parsed ? parsed.cloneUrl : url;
       await mkdir(dir, { recursive: true });
-      await cloneBare(cloneUrl, dir, { redact: pat ? [pat] : [] });
-      if (parsed && pat) {
-        await runGit(['remote', 'set-url', 'origin', parsed.cloneUrl], { cwd: dir });
-      }
+      await runGit([...baseArgs, 'clone', '--bare', '--filter=blob:none', cloneUrl, dir], {
+        redact,
+      });
       // Bare clones get no fetch refspec by default; install the standard
       // one so fetches maintain refs/remotes/origin/* for sync.
       await runGit(['config', 'remote.origin.fetch', '+refs/heads/*:refs/remotes/origin/*'], {
@@ -553,18 +549,12 @@ export class GitManager {
       if (!(await isGitInstalled())) throw new GitNotInstalledError();
       const parsed = parseGitHubUrl(project.github!.url);
       if (!parsed) throw new Error(`Could not parse GitHub URL: ${project.github!.url}`);
-      const pat = await this.getToken();
-      const cloneUrl = authenticatedCloneUrl(parsed.cloneUrl, pat);
+      const { baseArgs, redact } = await this.patArgs();
       await mkdir(resolved.dir, { recursive: true });
-      const args = ['clone'];
+      const args = [...baseArgs, 'clone'];
       if (project.github!.branch) args.push('--branch', project.github!.branch);
-      args.push(cloneUrl, resolved.dir);
-      await runGit(args, { redact: pat ? [pat] : [] });
-      // Strip any embedded PAT from the persisted remote so a re-fetch
-      // through `git fetch origin` doesn't surface it from `.git/config`.
-      if (pat) {
-        await runGit(['remote', 'set-url', 'origin', parsed.cloneUrl], { cwd: resolved.dir });
-      }
+      args.push(parsed.cloneUrl, resolved.dir);
+      await runGit(args, { redact });
       const branch = await this.currentBranch(resolved.dir);
       await this.persistCheckoutDir(project, resolved.dir, branch);
       return { checkoutDir: resolved.dir, branch, adopted: false };
@@ -1773,8 +1763,8 @@ export class GitManager {
   /**
    * Token auth (stored PAT or ambient gh/env credential) as one-shot
    * `-c http.extraheader` args + the matching redact list. Applied to
-   * every command that can talk to origin — including diff/log/show/merge,
-   * which lazily fetch blobs in partial clones.
+   * every command that can talk to origin — including clone and
+   * diff/log/show/merge, which can lazily fetch blobs in partial clones.
    */
   private async patArgs(): Promise<{ baseArgs: string[]; redact: string[] }> {
     const pat = await this.getToken();

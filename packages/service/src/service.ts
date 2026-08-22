@@ -159,6 +159,7 @@ import {
 } from './search/search-service.js';
 import { openSecretStore } from './secrets/index.js';
 import { seedSecretsFromEnvFile } from './secrets/seed.js';
+import { observeShutdownStep } from './shutdown-progress.js';
 import { runSystemBootstrap } from './system-toolsets/bootstrap.js';
 import { SystemToolsetInstallRegistry } from './system-toolsets/install-registry.js';
 import { SystemStatusBus } from './system-toolsets/status-bus.js';
@@ -3035,33 +3036,36 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     cert,
     webUiToken,
     async stop() {
+      const shutdownStep = <T>(name: string, action: () => T | Promise<T>) =>
+        observeShutdownStep(name, action, { warn: (message) => log.warn(message) });
+      log.info('[service] shutdown started');
       scheduler.stop();
       nightShift.stop();
       // Quiesce chat before tearing down any callback dependencies. In
       // particular, keep the HTTP listener alive while MCP subprocesses and
       // active provider turns unwind; otherwise their service callbacks fail
       // as the misleading transport error "fetch failed".
-      await chat.beginShutdown();
-      await taskRunner.stop();
+      await shutdownStep('chat begin', () => chat.beginShutdown());
+      await shutdownStep('task runner', () => taskRunner.stop());
       memoryHealth.stop();
       memoryCompactor.stop();
       digestGenerator.stop();
       gildeUpdates.stop();
-      await knowledge?.stop();
+      await shutdownStep('knowledge workers', async () => knowledge?.stop());
       keurmeesterDigest.stop();
       meesterStatus.stop();
       ambientDashboard.stop();
-      await activityTracker.stop();
+      await shutdownStep('activity tracker', () => activityTracker.stop());
       if (libraryRefreshTimer) {
         clearTimeout(libraryRefreshTimer);
         libraryRefreshTimer = null;
       }
-      await workspaceIndex.stop();
+      await shutdownStep('workspace index', () => workspaceIndex.stop());
       workspaceWatch.stop();
-      await indexEnrichment.stop();
+      await shutdownStep('index enrichment', () => indexEnrichment.stop());
       globalIndexManager.stop();
       // An open document-edit window would otherwise lose its audit event.
-      await store.flushDocumentAudit().catch(() => {});
+      await shutdownStep('document audit flush', () => store.flushDocumentAudit().catch(() => {}));
       connectorSync.stop();
       cacheController.stop();
       imagePulls.clear();
@@ -3071,37 +3075,43 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       videoPulls.clear();
       engineBinaries.clear();
       systemToolsetInstalls.clear();
-      await imageProvider.shutdown();
-      await videoProvider.shutdown();
-      await stt.shutdown();
-      await tts.shutdown();
+      await shutdownStep('image provider', () => imageProvider.shutdown());
+      await shutdownStep('video provider', () => videoProvider.shutdown());
+      await shutdownStep('speech recognition', () => stt.shutdown());
+      await shutdownStep('speech synthesis', () => tts.shutdown());
       if (idleSummarizerTimer) clearInterval(idleSummarizerTimer);
-      await channels.stop();
-      await remoteServing.stop();
-      await ollamaEmulation.stop();
-      await codexSetup.stop();
-      await opencodeSetup.stop();
-      await piSetup.stop();
-      await vscodeSetup.stop();
-      await machineEngine?.stop();
-      await closePairedRemoteFetches(remotes);
+      await shutdownStep('channels', () => channels.stop());
+      await shutdownStep('remote serving', () => remoteServing.stop());
+      await shutdownStep('Ollama emulation', () => ollamaEmulation.stop());
+      await shutdownStep('Codex setup', () => codexSetup.stop());
+      await shutdownStep('OpenCode setup', () => opencodeSetup.stop());
+      await shutdownStep('pi setup', () => piSetup.stop());
+      await shutdownStep('VS Code setup', () => vscodeSetup.stop());
+      await shutdownStep('machine engine', async () => machineEngine?.stop());
+      await shutdownStep('paired remote fetches', () => closePairedRemoteFetches(remotes));
       if (previewServer) {
-        await new Promise<void>((resolve) => {
-          let settled = false;
-          const finish = () => {
-            if (settled) return;
-            settled = true;
-            resolve();
-          };
-          previewServer?.close(() => finish());
-          const s = previewServer as unknown as { closeAllConnections?: () => void };
-          s.closeAllConnections?.();
-          setTimeout(finish, 2_000).unref();
-        });
+        await shutdownStep(
+          'preview server',
+          () =>
+            new Promise<void>((resolve) => {
+              let settled = false;
+              const finish = () => {
+                if (settled) return;
+                settled = true;
+                resolve();
+              };
+              previewServer?.close(() => finish());
+              const s = previewServer as unknown as { closeAllConnections?: () => void };
+              s.closeAllConnections?.();
+              setTimeout(finish, 2_000).unref();
+            }),
+        );
       }
-      await chat.drainBackground();
-      // Shut providers down while the service backchannel is still alive.
-      await chat.shutdown().catch(() => {});
+      // ChatManager.shutdown owns the one bounded background drain. Calling
+      // drainBackground separately here used to spend the same 15-second
+      // budget twice when one fire-and-forget task never settled, consuming
+      // Electron's complete 30-second graceful-quit window.
+      await shutdownStep('chat manager', () => chat.shutdown().catch(() => {}));
       // Initiate graceful close, but don't block forever waiting for
       // SSE streams to wind down. Active streams hold the server open
       // until each handler's keepalive loop notices the disconnect —
@@ -3109,40 +3119,45 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       // settle time can exceed Vitest's `afterAll` hook budget. Force
       // the issue: tell active HTTP/1 connections to close, destroy
       // any active HTTP/2 sessions, and cap the wait.
-      await new Promise<void>((resolve) => {
-        let settled = false;
-        const finish = () => {
-          if (settled) return;
-          settled = true;
-          resolve();
-        };
-        server.close(() => finish());
-        const s = server as unknown as {
-          closeAllConnections?: () => void;
-          closeIdleConnections?: () => void;
-        };
-        s.closeIdleConnections?.();
-        s.closeAllConnections?.();
-        // http2: there's no closeAllConnections; iterate active sessions.
-        const http2Server = server as unknown as { _sessions?: Set<{ destroy?: () => void }> };
-        for (const sess of http2Server._sessions ?? []) {
-          try {
-            sess.destroy?.();
-          } catch {
-            /* ignore */
-          }
-        }
-        // Hard cap — sockets will be released by GC / OS when the
-        // process exits or the next test starts.
-        setTimeout(finish, 2_000).unref();
-      });
+      await shutdownStep(
+        'HTTP server',
+        () =>
+          new Promise<void>((resolve) => {
+            let settled = false;
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              resolve();
+            };
+            server.close(() => finish());
+            const s = server as unknown as {
+              closeAllConnections?: () => void;
+              closeIdleConnections?: () => void;
+            };
+            s.closeIdleConnections?.();
+            s.closeAllConnections?.();
+            // http2: there's no closeAllConnections; iterate active sessions.
+            const http2Server = server as unknown as { _sessions?: Set<{ destroy?: () => void }> };
+            for (const sess of http2Server._sessions ?? []) {
+              try {
+                sess.destroy?.();
+              } catch {
+                /* ignore */
+              }
+            }
+            // Hard cap — sockets will be released by GC / OS when the
+            // process exits or the next test starts.
+            setTimeout(finish, 2_000).unref();
+          }),
+      );
       // Kill all persistent terminal shells. Without this, the bash
       // (or PowerShell) children spawned by the per-thread pool stay
       // resident past the daemon's exit until their idle timers
       // fire — same orphan pattern as the chat MlxProvider above.
-      await terminals.shutdown().catch(() => {});
-      await renderer.stop();
-      await runtimeLock.release();
+      await shutdownStep('terminal sessions', () => terminals.shutdown().catch(() => {}));
+      await shutdownStep('image renderer', () => renderer.stop());
+      await shutdownStep('runtime lock', () => runtimeLock.release());
+      log.info('[service] shutdown complete');
     },
   };
 }

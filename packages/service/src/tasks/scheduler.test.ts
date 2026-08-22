@@ -1526,6 +1526,8 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     expect(chat.delivered).toHaveLength(1);
     expect(chat.delivered[0]!.toGezelIdOrName).toBe('freja');
     expect(chat.delivered[0]!.text).toContain(entryStepId);
+    expect(chat.delivered[0]!.text).toContain("isn't there yet");
+    expect(chat.delivered[0]!.text).not.toContain('Continue from the existing file');
     expect(chat.delivered[0]!.text).toMatch(/advance_task_step/);
     expect(chat.delivered[0]!.taskRef).toBe(`cron/${num}`);
     expect(chat.delivered[0]!.stepId).toBe(entryStepId);
@@ -1570,6 +1572,39 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     expect(chat.delivered).toHaveLength(0);
     const rec = await store.readTask('cron', num);
     expect(rec!.activeStepId).toBe(nextStepId);
+  });
+
+  it('does not call an existing requireChange deliverable missing when re-driving', async () => {
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setProjectVoorman('leo');
+    const { num, entryStepId } = await makeStalledTask({ now, agoMs: 30 * 60_000 });
+    const rec = await store.readTask('cron', num);
+    await store.writeTask({
+      ...rec!,
+      craftbook: {
+        ...rec!.craftbook,
+        steps: rec!.craftbook.steps.map((step) =>
+          step.id === entryStepId
+            ? {
+                ...step,
+                advanceWhen: {
+                  ...step.advanceWhen!,
+                  requireChange: true,
+                },
+              }
+            : step,
+        ),
+      },
+    });
+    await store.writeProjectWorkspaceFile('cron', 'notes/scope.md', 'existing draft');
+
+    const chat = fakeChat();
+    await makeScheduler(chat, now).sweepStuckSteps();
+
+    expect(chat.delivered).toHaveLength(1);
+    expect(chat.delivered[0]!.text).toContain('exists, but it has not cleared');
+    expect(chat.delivered[0]!.text).toContain('Continue from the existing file');
+    expect(chat.delivered[0]!.text).not.toContain("isn't there yet");
   });
 
   it('fresh gate reject → no redrive; frozen deliverable on the next sweep → gate-aware redrive', async () => {

@@ -1,14 +1,22 @@
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   adoptHistoricalLlamaCppAlias,
   assertMlxSourceComplete,
+  ensureWarmModel,
   isModelInstalled,
   staleInstallReason,
 } from './model-cache.ts';
 import { _resetSourceIndexCache } from './model-sources.ts';
+
+const spawnMocks = vi.hoisted(() => ({
+  spawnTrialDaemon: vi.fn(),
+  shutdownTrialDaemon: vi.fn(),
+}));
+
+vi.mock('./spawn.ts', () => spawnMocks);
 
 function makeDir(files: string[]): string {
   const dir = mkdtempSync(join(tmpdir(), 'gezel-mlx-src-'));
@@ -53,11 +61,92 @@ function writeInstall(
 }
 
 afterEach(() => {
+  spawnMocks.spawnTrialDaemon.mockReset();
+  spawnMocks.shutdownTrialDaemon.mockReset();
   if (originalGildeDataDir === undefined) delete process.env.GEZEL_GILDE_DATA_DIR;
   else process.env.GEZEL_GILDE_DATA_DIR = originalGildeDataDir;
   _resetSourceIndexCache();
   if (syntheticDataDir) rmSync(syntheticDataDir, { recursive: true, force: true });
   syntheticDataDir = undefined;
+});
+
+describe('ensureWarmModel', () => {
+  it('forwards cancellation, suppresses product companions, and exposes any unexpected one', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'gezel-model-warm-'));
+    const modelId = 'warm-test-model';
+    const modelDir = join(root, 'engines', 'llama-cpp', 'models', modelId);
+    const controller = new AbortController();
+    const logs: string[] = [];
+    const install = vi.fn(
+      async (
+        _id: string,
+        onEvent: (event: Record<string, unknown>) => void,
+        _signal?: AbortSignal,
+        _options?: { skipCompanion?: boolean },
+      ) => {
+        onEvent({
+          type: 'companion',
+          kind: 'image-recognition',
+          id: 'vision-test',
+          name: 'Vision Test',
+          bytesWritten: 50,
+          totalBytes: 100,
+        });
+        mkdirSync(modelDir, { recursive: true });
+        writeFileSync(join(modelDir, 'weights.gguf'), 'weights');
+        writeFileSync(
+          join(modelDir, 'manifest.json'),
+          JSON.stringify({ weightsFilename: 'weights.gguf' }),
+        );
+        onEvent({ type: 'done', id: modelId });
+      },
+    );
+    spawnMocks.spawnTrialDaemon.mockResolvedValue({
+      client: {
+        updateConfig: vi.fn().mockResolvedValue(undefined),
+        installLlamaCppModel: install,
+      },
+    });
+    spawnMocks.shutdownTrialDaemon.mockResolvedValue(undefined);
+
+    try {
+      await ensureWarmModel({
+        cacheRoot: root,
+        engine: 'llama-cpp',
+        modelId,
+        llamaBin: 'fake-llama-server',
+        signal: controller.signal,
+        log: (line) => logs.push(line),
+      });
+
+      expect(install).toHaveBeenCalledWith(modelId, expect.any(Function), controller.signal, {
+        skipCompanion: true,
+      });
+      expect(logs.join('\n')).toContain(
+        'unexpected companion Vision Test: 50% (50/100) despite skipCompanion',
+      );
+      expect(spawnMocks.shutdownTrialDaemon).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not spawn a warm daemon when cancellation already fired', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      ensureWarmModel({
+        cacheRoot: join(tmpdir(), 'gezel-model-warm-aborted'),
+        engine: 'llama-cpp',
+        modelId: 'warm-test-model',
+        llamaBin: 'fake-llama-server',
+        signal: controller.signal,
+        log: () => {},
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(spawnMocks.spawnTrialDaemon).not.toHaveBeenCalled();
+  });
 });
 
 describe('assertMlxSourceComplete', () => {

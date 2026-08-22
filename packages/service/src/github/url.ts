@@ -37,7 +37,11 @@ export function parseGitHubUrl(input: string): ParsedGitHubUrl | null {
   } else {
     const https = HTTPS_RE.exec(trimmed);
     if (https) {
-      host = https[1]!;
+      // Userinfo is never part of repository identity. Normalize it away
+      // so a pasted credential-bearing URL cannot reach git argv or be
+      // persisted as origin by callers that use the canonical clone URL.
+      const authority = https[1]!;
+      host = authority.slice(authority.lastIndexOf('@') + 1);
       owner = https[2]!;
       repo = https[3]!;
     } else {
@@ -119,17 +123,4 @@ function hashUrl(canonical: string): string {
     h = Math.imul(h, 0x01000193);
   }
   return (h >>> 0).toString(16).padStart(8, '0');
-}
-
-/**
- * Inject a token into an https URL using the GitHub-recommended
- * `x-access-token` username form. Pass-through for non-https or when no
- * token is given.
- */
-export function authenticatedCloneUrl(cloneUrl: string, token?: string | null): string {
-  if (!token) return cloneUrl;
-  if (!/^https?:\/\//i.test(cloneUrl)) return cloneUrl;
-  // Strip any existing creds first.
-  const stripped = cloneUrl.replace(/^(https?:\/\/)([^@/]+@)?/i, '$1');
-  return stripped.replace(/^(https?:\/\/)/i, `$1x-access-token:${encodeURIComponent(token)}@`);
 }

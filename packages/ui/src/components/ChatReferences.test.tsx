@@ -451,8 +451,11 @@ describe('ChatReferences task picker', () => {
     });
 
     const rail = container.querySelector('.chat-rail-task');
-    const topbar = rail?.firstElementChild;
-    expect(topbar).toHaveClass('chat-rail-task-topbar');
+    // Progress first, then the identity/action bar: the tracker answers
+    // "where is this task" before anything else in the preview.
+    expect(rail?.firstElementChild).toHaveClass('chat-rail-task-track');
+    const topbar = rail?.querySelector('.chat-rail-task-topbar');
+    expect(topbar?.previousElementSibling).toHaveClass('chat-rail-task-track');
     expect(
       within(topbar as HTMLElement).getByRole('button', { name: 'Open full task' }),
     ).toBeVisible();
@@ -464,6 +467,67 @@ describe('ChatReferences task picker', () => {
     expect(noteBodies[0]?.querySelector('.gezel-icon-poppetje')).not.toBeNull();
     expect(noteBodies[0]).toHaveTextContent('Inspect');
     expect(noteBodies[1]).toHaveTextContent('Older note');
+  });
+
+  it('tracks the task through its steps and opens the full task from one', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    const base = task('project-1/1', 'First task');
+    apiMocks.getTaskByRef.mockResolvedValue({
+      ...base,
+      activeStepId: 'step-2',
+      craftbook: {
+        ...base.craftbook,
+        activeStepId: 'step-2',
+        steps: [
+          {
+            id: 'step-1',
+            name: 'Inspect',
+            createdAt: '2026-07-26T00:00:00.000Z',
+            completedAt: '2026-07-26T01:00:00.000Z',
+          },
+          { id: 'step-2', name: 'Repair', createdAt: '2026-07-26T00:00:00.000Z' },
+          { id: 'step-3', name: 'Sign off', createdAt: '2026-07-26T00:00:00.000Z' },
+        ],
+      },
+    } as unknown as Task);
+    const opened = vi.fn();
+    window.addEventListener('gezel:open-tab', opened);
+
+    const { container } = render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onTaskReference }) => (
+          <button type="button" onClick={() => onTaskReference('project-1/1')}>
+            Add task reference
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Add task reference' }));
+
+    const track = await screen.findByRole('group', { name: 'Task progress' });
+    expect(Array.from(track.querySelectorAll('.step-dot-label'), (el) => el.textContent)).toEqual([
+      'Inspect',
+      'Repair',
+      'Sign off',
+    ]);
+    expect(track.querySelector('.step-dot.status-done')).toHaveTextContent('Inspect');
+    expect(track.querySelector('.step-dot.status-active')).toHaveTextContent('Repair');
+    // The preview's steps lead to the full task — they are not tabs, and must
+    // not join the rail's own tablist.
+    expect(within(track).queryAllByRole('tab')).toHaveLength(0);
+    expect(track.querySelector('[aria-current="step"]')).toHaveTextContent('Repair');
+
+    await user.click(within(track).getByRole('button', { name: /Sign off/ }));
+    expect(opened).toHaveBeenCalled();
+    expect((opened.mock.calls[0]?.[0] as CustomEvent).detail).toEqual({
+      kind: 'task',
+      ref: 'project-1/1',
+    });
+
+    window.removeEventListener('gezel:open-tab', opened);
+    expect(container.querySelector('.chat-rail-task-track')).not.toBeNull();
   });
 });
 

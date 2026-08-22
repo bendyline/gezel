@@ -1305,9 +1305,12 @@ describe('ChatManager — task context', () => {
       expect(taskToolsLine).toContain('`advance_task_step`');
       expect(taskToolsLine).not.toContain('`update_task`');
       expect(taskToolsLine).not.toContain('`assign_task`');
-      expect(system).toContain('identify the FIRST tool it tells you to call, and call it');
+      expect(system).toContain('begin with the FIRST tool action it names');
       expect(system).toContain(
-        'First action: call `write_task_note` exactly as the procedure specifies.',
+        "If this turn's transcript already contains a successful result for that action, it is complete",
+      );
+      expect(system).toContain(
+        'First action (once only): call `write_task_note` exactly as the procedure specifies.',
       );
       expect(system).not.toContain('Do exactly ONE tool call this turn');
       expect(system).not.toContain('First action: `write_file');

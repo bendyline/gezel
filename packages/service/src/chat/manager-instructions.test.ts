@@ -371,10 +371,13 @@ describe('buildInstructions structured step inputs', () => {
       '`read_artifact({ path: "security/review-scope.md" })`; do not try the other drawer',
     );
     expect(rendered).toContain(
-      'First action: call `read_artifact` exactly as the procedure specifies.',
+      'First action (once only): call `read_artifact` exactly as the procedure specifies.',
+    );
+    expect(rendered).toContain(
+      'After its successful tool result appears in this turn, treat that first action as complete',
     );
     expect(rendered).not.toContain(
-      'First action: call `write_artifact` exactly as the procedure specifies.',
+      'First action (once only): call `write_artifact` exactly as the procedure specifies.',
     );
   });
 

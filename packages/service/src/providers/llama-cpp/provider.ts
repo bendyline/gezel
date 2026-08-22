@@ -2582,7 +2582,12 @@ interface LlamaCppSessionDeps {
   volatileContext?: string;
   priorMessages: Array<
     | { role: 'user' | 'assistant'; content: string }
-    | { role: 'assistant'; content: string; toolCalls: ExternalToolCall[] }
+    | {
+        role: 'assistant';
+        content: string;
+        toolCalls: ExternalToolCall[];
+        reasoning?: string;
+      }
     | { role: 'tool'; content: string; toolCallId: string }
   >;
   bridges: McpBridgePool;
@@ -2786,6 +2791,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             type: 'function' as const,
             function: { name: tc.name, arguments: tc.arguments },
           })),
+          ...(deps.replayReasoningContent && m.reasoning ? { reasoning_content: m.reasoning } : {}),
         });
         continue;
       }
