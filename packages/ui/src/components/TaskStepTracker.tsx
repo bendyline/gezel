@@ -31,7 +31,7 @@ interface TaskStepTrackerProps {
  * Once the task itself is complete or canceled, no step is active — the
  * task's end state lives on the terminal dot, not on a gezel.
  */
-function stepStatus(
+export function taskStepStatus(
   step: TaskCraftbookStep,
   activeStepId: string | undefined,
   terminal: boolean,
@@ -90,7 +90,7 @@ export function TaskStepTracker({
   };
 
   const stepOf = (step: TaskCraftbookStep): StepMeta => {
-    const status = stepStatus(step, activeStepId, terminal);
+    const status = taskStepStatus(step, activeStepId, terminal);
     const assignee: TaskAssignee | null =
       step.assignee ??
       (step.suggestedGezelId ? { kind: 'gezel', gezelId: step.suggestedGezelId } : null) ??
@@ -179,7 +179,7 @@ export function TaskStepTracker({
       steps={steps}
       selectedStepId={selectedStepId}
       onSelect={onSelect}
-      statusOf={(s) => stepStatus(s, activeStepId, terminal)}
+      statusOf={(s) => taskStepStatus(s, activeStepId, terminal)}
       stepOf={stepOf}
       onAddStep={onAddStep}
       busy={busy}

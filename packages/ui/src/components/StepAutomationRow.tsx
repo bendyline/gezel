@@ -33,6 +33,8 @@ export interface ScriptLibraries {
   project: ScriptEntry[] | null;
   /** The read-only standard library packed into the app. */
   standard: ScriptEntry[] | null;
+  /** The cross-project shared library — `user` scope (null while loading). */
+  shared: ScriptEntry[] | null;
 }
 
 function GearIcon() {
@@ -47,7 +49,12 @@ function findEntry(
   libraries: ScriptLibraries,
   ref: { name: string; scope?: ScriptScope },
 ): ScriptEntry | null {
-  const list = ref.scope === 'standard' ? libraries.standard : libraries.project;
+  const list =
+    ref.scope === 'standard'
+      ? libraries.standard
+      : ref.scope === 'user'
+        ? libraries.shared
+        : libraries.project;
   return list?.find((s) => s.name === ref.name) ?? null;
 }
 
@@ -117,7 +124,7 @@ function humanizeScriptName(name: string): string {
 
 function scopeTag(scope: ScriptScope | undefined): string | null {
   if (scope === 'standard') return 'standard';
-  if (scope === 'user') return 'my library';
+  if (scope === 'user') return 'shared library';
   if (scope === 'craftbook') return 'craftbook';
   return null;
 }
@@ -578,6 +585,7 @@ function ScriptPicker({
   const gateFilter = (s: ScriptEntry) => !(mode === 'gate' && !showAll) || s.meta.kind === 'gate';
   const groups: Array<{ label: string; scope?: ScriptScope; list: ScriptEntry[] | null }> = [
     { label: 'Standard library', scope: 'standard', list: libraries.standard },
+    { label: 'Shared library', scope: 'user', list: libraries.shared },
     { label: 'This project', list: libraries.project },
   ];
   // Standard first for gates (the no-code path); project first otherwise.

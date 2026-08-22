@@ -22,6 +22,8 @@ import { useEffectiveTheme } from '../theme.js';
 import { CommandsPanel } from './CommandsPanel.js';
 import { GezelIcon } from './GezelIcon.js';
 import { HtmlPreviewFrame } from './HtmlPreviewFrame.js';
+import { StepTracker } from './StepTracker.js';
+import { taskStepStatus } from './TaskStepTracker.js';
 import type { ToolActivity } from './chat-bubbles.js';
 import type { OpenChatReference, OpenChatReferenceKind } from './chat-open-command.js';
 import { gezelChatTheme } from './chat-theme.js';
@@ -1032,8 +1034,32 @@ function TaskRailCard({
       setStatusBusy(false);
     }
   };
+  const terminal = task.status === 'complete' || task.status === 'canceled';
+  const steps = cb?.steps ?? [];
+  // Where the work stands: the live step, or — once the task has ended —
+  // the last one it reached, so a finished task still centres on its end.
+  const currentStepId =
+    (terminal ? undefined : task.activeStepId) ??
+    [...steps].reverse().find((s) => s.completedAt)?.id ??
+    steps[steps.length - 1]?.id ??
+    null;
+
   return (
     <div className="chat-rail-task">
+      {steps.length > 0 && (
+        <div className="chat-rail-task-track">
+          <StepTracker
+            steps={steps}
+            statusOf={(s) => taskStepStatus(s, task.activeStepId, terminal)}
+            selectedStepId={currentStepId}
+            centerStepId={currentStepId}
+            scroll
+            stepRole="button"
+            onSelect={() => onOpenTask?.(task.ref)}
+            ariaLabel="Task progress"
+          />
+        </div>
+      )}
       <div className="chat-rail-task-topbar">
         <header className="chat-rail-task-header">
           <code className="chat-rail-task-ref">{task.ref}</code>
@@ -1099,22 +1125,9 @@ function TaskRailCard({
       <h4 className="chat-rail-task-title">{displayTitle}</h4>
       {task.description && <p className="chat-rail-task-desc">{task.description}</p>}
       {cb && (
-        <>
-          <div className="chat-rail-task-craftbook">
-            <span className="muted small">From craftbook</span> {cb.name}
-          </div>
-          <ol className="chat-rail-task-steps">
-            {cb.steps.map((s) => {
-              const state =
-                s.id === task.activeStepId ? 'is-active' : s.completedAt ? 'is-done' : '';
-              return (
-                <li key={s.id} className={`chat-rail-task-step ${state}`}>
-                  {s.name}
-                </li>
-              );
-            })}
-          </ol>
-        </>
+        <div className="chat-rail-task-craftbook">
+          <span className="muted small">From craftbook</span> {cb.name}
+        </div>
       )}
       <section className="chat-rail-task-history" aria-label="History and notes">
         <h5>History &amp; notes</h5>
