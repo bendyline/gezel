@@ -48,6 +48,7 @@ import {
   readJudgeSummary,
   readModelPerformance,
   resolveModelEngine,
+  resolveScorecardStartedAt,
   resolvedGildeVersion,
   runIdFor,
 } from '../scorecard.ts';
@@ -160,15 +161,22 @@ function main(): void {
   }
 
   const device = captureDevice();
-  const startedAt = args.flags['started-at']
-    ? String(args.flags['started-at'])
-    : new Date().toISOString();
-  const runId = args.flags['run-id'] ? String(args.flags['run-id']) : runIdFor(startedAt, device);
-
   const suites = verify ? [VERIFY_SUITE] : [...SCORECARD_SUITES];
   const datasetPath = verify
     ? join(repoRoot, 'evals/runs/scorecard-verify/dataset.json')
     : publishedDatasetPath;
+
+  const explicitRunId = args.flags['run-id'] ? String(args.flags['run-id']) : undefined;
+  const { startedAt, reusedFromRun } = resolveScorecardStartedAt({
+    dataset: readDataset(datasetPath),
+    runId: explicitRunId,
+    explicitStartedAt: args.flags['started-at'] ? String(args.flags['started-at']) : undefined,
+    now: new Date().toISOString(),
+  });
+  if (reusedFromRun) {
+    console.log(`[scorecard] reusing recorded start ${startedAt} for run ${explicitRunId}`);
+  }
+  const runId = explicitRunId ?? runIdFor(startedAt, device);
   const perModelMinutes = verify
     ? VERIFY_SCENARIOS.reduce((sum, id) => {
         const scenario = suiteScenarios(VERIFY_SUITE).find((entry) => entry.id === id);
@@ -316,10 +324,15 @@ function main(): void {
       // is the sweep itself plus a lead margin: same machine, same binary,
       // same model, therefore the same measurement. Probes from an older
       // session (a different binary) stay excluded.
-      const performance = readModelPerformance(join(repoRoot, 'evals/runs/preflight'), model.id, {
-        fromIso: new Date(Date.parse(startedAt) - 6 * 60 * 60_000).toISOString(),
-        toIso: matrix.finishedAt,
-      });
+      const performance = readModelPerformance(
+        join(repoRoot, 'evals/runs/preflight'),
+        model.id,
+        {
+          fromIso: new Date(Date.parse(startedAt) - 6 * 60 * 60_000).toISOString(),
+          toIso: matrix.finishedAt,
+        },
+        model.engine,
+      );
       const judge = readJudgeSummary(sweepRoot, model.id, suiteId);
       results.push(
         modelResultFromMatrix(

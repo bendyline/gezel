@@ -18,7 +18,10 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": ["core", "productivity"],
+      "suites": [
+        "core",
+        "productivity"
+      ],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -67,7 +70,10 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": ["core", "productivity"],
+      "suites": [
+        "core",
+        "productivity"
+      ],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -116,7 +122,10 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": ["core", "productivity"],
+      "suites": [
+        "core",
+        "productivity"
+      ],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -165,7 +174,10 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": ["core", "productivity"],
+      "suites": [
+        "core",
+        "productivity"
+      ],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -214,7 +226,10 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": ["core", "productivity"],
+      "suites": [
+        "core",
+        "productivity"
+      ],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -263,7 +278,10 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": ["core", "productivity"],
+      "suites": [
+        "core",
+        "productivity"
+      ],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -1566,6 +1584,11 @@
       "parameterSize": "35B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 1608,
+        "decodeTokensPerSec": 73.2,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 65536,
         "peakMemoryMb": 22718,
@@ -1664,6 +1687,11 @@
       "parameterSize": "284B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 680,
+        "decodeTokensPerSec": 16.9,
+        "samples": 1
+      },
       "judge": {
         "meanScore": 7.8,
         "artifacts": 7,
@@ -1757,6 +1785,11 @@
       "parameterSize": "8B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 4698,
+        "decodeTokensPerSec": 65.4,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 131072,
         "peakMemoryMb": 5877,
@@ -1855,6 +1888,11 @@
       "parameterSize": "27B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 725,
+        "decodeTokensPerSec": 7.8,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 30047,
@@ -1953,6 +1991,11 @@
       "parameterSize": "27B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "core",
+      "performance": {
+        "prefillTokensPerSec": 706,
+        "decodeTokensPerSec": 12.1,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 18441,
@@ -2051,6 +2094,11 @@
       "parameterSize": "35B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 1608,
+        "decodeTokensPerSec": 73.2,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 65536,
         "peakMemoryMb": 4873,
@@ -2163,6 +2211,11 @@
       "parameterSize": "284B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 680,
+        "decodeTokensPerSec": 16.9,
+        "samples": 1
+      },
       "judge": {
         "meanScore": 6.5,
         "artifacts": 26,
@@ -2270,6 +2323,11 @@
       "parameterSize": "8B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 4698,
+        "decodeTokensPerSec": 65.4,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 131072,
         "peakMemoryMb": 5233,
@@ -2382,6 +2440,11 @@
       "parameterSize": "27B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 725,
+        "decodeTokensPerSec": 7.8,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 29928,
@@ -2494,6 +2557,11 @@
       "parameterSize": "27B",
       "runId": "2026-08-19-gb10-spark",
       "suiteId": "productivity",
+      "performance": {
+        "prefillTokensPerSec": 706,
+        "decodeTokensPerSec": 12.1,
+        "samples": 1
+      },
       "runtime": {
         "contextTokens": 262144,
         "peakMemoryMb": 5544,
