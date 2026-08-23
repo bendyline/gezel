@@ -69,7 +69,7 @@ import { ActivityTracker } from './fs/activity-tracker.js';
 import { ensurePrivateUserHome } from './fs/home-permissions.js';
 import { mimeTypeForFilename } from './fs/media-types.js';
 import { Store } from './fs/store.js';
-import { ensureDefaultBoekwachter } from './gezels/autonomous-roles.js';
+import { ensureDefaultBoekwachter, resolveProjectBoekwachter } from './gezels/autonomous-roles.js';
 import { GildeUpdateManager } from './gilde-updates/manager.js';
 import { GitManager } from './git/manager.js';
 import { CodeReviewManager } from './git/reviews.js';
@@ -109,6 +109,7 @@ import { GlobalIndexManager } from './index-store/global-index-manager.js';
 import { GlobalIndex } from './index-store/global-index.js';
 import { readImageStaticMeta } from './index-store/image-meta.js';
 import { IndexingJobControl, ensureIndexingJobTask } from './index-store/indexing-job.js';
+import { ensureIndexFresh } from './index-store/readiness.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
 import { KnowledgeManager } from './knowledge/manager.js';
@@ -2099,6 +2100,31 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // search real minutes after a fresh install points gezel at a folder.
   workspaceIndex.setOnScanComplete((projectId) => {
     indexEnrichment.drainEmbedOnly(projectId);
+  });
+  // `gezel.index.*` for sandboxed scripts: the readiness surface craftbook
+  // hooks use to make "this review depends on a current index" real. Wired
+  // here (not at runner construction) because both index managers come up
+  // after the runner in boot order — same late-binding shape as setMcpCall.
+  scriptRunner.setIndexAccess({
+    status: (projectId) => workspaceIndex.statusForUi(projectId),
+    ensureFresh: (projectId, opts) =>
+      ensureIndexFresh(
+        {
+          workspaceIndex: {
+            statusForUi: (id) => workspaceIndex.statusForUi(id),
+            refreshAndWait: (id) => workspaceIndex.refreshAndWait(id),
+          },
+          enrichment: {
+            drive: (id, driveOpts) => indexEnrichment.drive(id, driveOpts),
+            awaitDrive: (id) => indexEnrichment.awaitDrive(id),
+            driveMode: (id) => indexEnrichment.driveMode(id),
+          },
+          resolveBoekwachter: (id) => resolveProjectBoekwachter(store, id).catch(() => null),
+          isPaused: () => indexingJob.isPaused(),
+        },
+        projectId,
+        opts,
+      ),
   });
   // FS watcher for the MRU-top workspaces — turns an on-disk change into a
   // near-immediate refresh instead of waiting for the polling tick.

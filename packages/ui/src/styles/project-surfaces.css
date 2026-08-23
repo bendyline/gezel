@@ -570,15 +570,23 @@
 }
 
 /* Long question bodies must not push the choices, note field, and submit
-   controls below the Updates drawer's viewport. Scroll only the rendered
-   Squisq body there; the surrounding alert context and controls stay visible.
-   The dialog itself remains scrollable as a fallback for unusually tall
-   non-Squisq controls or very short windows. */
-.app-questions-overlay .pending-question-prompt:has(> .squisq-linear) {
+   controls below the Updates drawer's viewport. The body is the one region
+   that gives: the drawer's flex chain (app-shell.css) shrinks it to
+   whatever the controls leave over, and it scrolls inside that. The
+   surrounding alert context and controls stay visible. The dialog itself
+   remains scrollable as a fallback for unusually tall non-Squisq controls
+   or very short windows. */
+.app-questions-overlay .pending-question > .pending-question-prompt {
   min-height: 0;
-  max-height: min(48vh, 30rem);
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+/* The other end of the same rule: on a window tall enough that nothing
+   forces the shrink, a very long body would still crowd the controls down
+   to the edge. Only the Squisq body gets the scrollbar gutter — a
+   two-line permission prompt reserving one reads as a stray indent. */
+.app-questions-overlay .pending-question-prompt:has(> .squisq-linear) {
+  max-height: min(44vh, 28rem);
   scrollbar-gutter: stable;
   padding-right: 0.25rem;
 }
@@ -591,6 +599,26 @@
 
 /* Answer chips are keys-in-trays aliases. The shared recipe lives in
    controls-handbook-and-admin.css, which loads later in the cascade. */
+
+/* A choice key carrying a description line (Claude CLI AskUserQuestion
+   options): same stacked label-plus-hint shape as `.gz-key--stacked`.
+   Descriptions can run long, so the key stretches and wraps instead of
+   staying a compact chip. */
+.pending-question-choice-described {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  text-align: left;
+  max-width: 34rem;
+}
+
+.pending-question-choice-desc {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--text-muted);
+  line-height: 1.35;
+  white-space: normal;
+}
 
 .pending-question-write-in {
   width: 100%;
@@ -606,6 +634,45 @@
   color: #c0392b;
   font-size: 0.85rem;
   margin: 0;
+}
+
+/* A retry that couldn't put anyone back to work: not an error (the task
+   did un-pause), so it stays in the muted register. */
+.pending-question-hold {
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+/* Tool-call arguments (and install details) on a permission card. JSON is
+   spatial like terminal output: preserve whitespace and contain overflow in
+   its own scrolling viewport — never let long lines escape the chat bubble
+   (docs/ux.md, "Terminal output"). */
+.pending-question-tool-args {
+  min-width: 0;
+  font-size: 0.85rem;
+}
+
+.pending-question-tool-args summary {
+  cursor: pointer;
+}
+
+.pending-question-tool-args pre {
+  margin: 0.4rem 0 0;
+  padding: 0.45rem 0.6rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  white-space: pre;
+  max-height: 16rem;
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--surface, #fff) 92%, transparent);
+}
+
+.pending-question-tool-args pre:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .pending-question-actions {
@@ -1318,6 +1385,20 @@
   overflow-y: auto;
 }
 
+/*
+ * Shelf group heading. Follows the uppercase-eyebrow spec in docs/ux.md and
+ * is drawn only where the family changes, so a rail whose books all land in
+ * one family never grows a heading that names nothing.
+ */
+.gz-npd-rail-group {
+  padding: 0.75rem 0.7rem 0.2rem;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .gz-npd-rail-item {
   display: flex;
   align-items: center;
@@ -1506,14 +1587,20 @@
   font-weight: 600;
 }
 
+/* Full-width, not fit-content: a flex-start column item shrink-wraps to its
+   text, and the clamp ellipsis is then painted past the card's padding — the
+   "…" lands on the squircle's edge. */
 .gz-npd-card-description {
   display: -webkit-box;
   overflow: hidden;
+  width: 100%;
+  min-width: 0;
   color: var(--text-muted);
   font-size: 0.74rem;
   line-height: 1.35;
+  overflow-wrap: break-word;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
 }
 
 /* "Soon" — the workshop rubber-stamp idiom, dialed small. */
@@ -1784,6 +1871,12 @@
 
   .gz-npd-rail-item {
     white-space: nowrap;
+  }
+
+  /* The rail turns into a horizontal scroller; a stacked heading has no row
+     to head, so the groups fall back to the shelf labels alone. */
+  .gz-npd-rail-group {
+    display: none;
   }
 
   .gz-npd-gallery {
@@ -2127,10 +2220,6 @@
   max-width: 100%;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.gz-connector-card .gz-npd-card-description {
-  width: 100%;
 }
 
 .gz-connector-card-meta {

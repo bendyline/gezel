@@ -1808,6 +1808,74 @@ describe('TaskManager craftbookParams interpolation', () => {
     expect(step.advanceWhen?.file).toBe(`${dir}/scope.md`);
   });
 
+  it('resolves a reserved runtime token supplied as an explicit param, and only that', async () => {
+    // The launcher form seeds declared defaults into its fields and renders
+    // them back into the staged command, so `workPath`'s `{{task.dir}}`
+    // default arrives as an EXPLICIT override — the one side that skips
+    // `resolveCraftbookParamDefaults`. `interpolateStepsContext` is
+    // single-pass, so every gate path built from `{{workPath}}` reached
+    // `step-gate.ts` as a literal `{{task.dir}}` and the gate refused to
+    // run at all (security-architecture-review 2.0.4, step `model-system`).
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            ...bookWithPlaceholders,
+            id,
+            paramSchema: {
+              type: 'object',
+              properties: {
+                workPath: { type: 'string', default: '{{task.dir}}' },
+                note: { type: 'string' },
+              },
+            },
+            steps: [
+              {
+                id: 'scope',
+                name: 'Scope',
+                prompt: 'Write {{workPath}}/security/review-scope.md. Template: {{note}}',
+                gate: {
+                  at: 'completion',
+                  checks: [
+                    {
+                      kind: 'minBytes',
+                      file: '{{workPath}}/security/review-scope.md',
+                      bytes: 1000,
+                      artifact: true,
+                    },
+                  ],
+                },
+                terminal: true,
+              },
+            ],
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+    const task = await tasks.create('website', {
+      title: 'Security architecture review',
+      craftbookId: 'spec-doc',
+      assignee: { kind: 'user' },
+      craftbookParams: {
+        workPath: '{{task.dir}}',
+        // A caller's own `{{…}}` text stays byte-for-byte: only the four
+        // reserved runtime keys are resolved inside overrides.
+        note: 'emit {{heading}} verbatim',
+      },
+    });
+    const dir = `tasks/${task.num}`;
+    const step = task.craftbook.steps[0]!;
+    expect(task.craftbookParams?.workPath).toBe(dir);
+    expect(task.craftbookParams?.note).toBe('emit {{heading}} verbatim');
+    expect(step.prompt).toBe(
+      `Write ${dir}/security/review-scope.md. Template: emit {{heading}} verbatim`,
+    );
+    expect((step.gate as { checks: Array<{ file: string }> }).checks[0]?.file).toBe(
+      `${dir}/security/review-scope.md`,
+    );
+  });
+
   it('leaves the snapshot byte-identical when no params are given', async () => {
     tasks.setCraftbookResolver({
       async resolve(id) {

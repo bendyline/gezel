@@ -7,6 +7,7 @@ import {
   assertMlxSourceComplete,
   ensureWarmModel,
   isModelInstalled,
+  linkModelIntoTrial,
   staleInstallReason,
 } from './model-cache.ts';
 import { _resetSourceIndexCache } from './model-sources.ts';
@@ -205,6 +206,37 @@ describe('isModelInstalled', () => {
   });
 });
 
+describe('linkModelIntoTrial', () => {
+  it('materializes a real model directory instead of a rejected directory symlink', async () => {
+    const cacheRoot = mkdtempSync(join(tmpdir(), 'gezel-model-cache-'));
+    const trialHome = mkdtempSync(join(tmpdir(), 'gezel-model-trial-'));
+    const source = join(cacheRoot, 'engines', 'mlx', 'models', 'ornith1.5-9b-q4');
+    mkdirSync(join(source, 'nested'), { recursive: true });
+    writeFileSync(join(source, 'manifest.json'), '{"model":"ornith"}');
+    writeFileSync(join(source, 'nested', 'weights.safetensors'), 'weights');
+
+    try {
+      await linkModelIntoTrial({
+        cacheRoot,
+        trialHome,
+        engine: 'mlx',
+        modelId: 'ornith1.5-9b-q4',
+      });
+
+      const destination = join(trialHome, 'engines', 'mlx', 'models', 'ornith1.5-9b-q4');
+      expect(lstatSync(destination).isDirectory()).toBe(true);
+      expect(lstatSync(destination).isSymbolicLink()).toBe(false);
+      expect(readFileSync(join(destination, 'manifest.json'), 'utf8')).toContain('ornith');
+      expect(readFileSync(join(destination, 'nested', 'weights.safetensors'), 'utf8')).toBe(
+        'weights',
+      );
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+      rmSync(trialHome, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('staleInstallReason', () => {
   const CATALOG = {
     id: 'qwen3.6-27b-q4',
@@ -347,7 +379,7 @@ describe('staleInstallReason', () => {
     ).resolves.toMatch(/sha256/);
   });
   // The MLX path cannot self-heal: those weights live in the user's dev home
-  // and the harness only symlinks them, so `runner.ts` fails the trial with a
+  // and the harness only clones them, so `runner.ts` fails the trial with a
   // re-pull instruction instead of evicting. Wild-caught 2026-07-31 —
   // correcting four gemma MLX sources left every installed copy stale, and the
   // re-test meant to validate the fix would have re-run the old weights.

@@ -86,8 +86,12 @@ export interface PendingHandoff {
    * read "Koray has handed step report to you" to Koray.
    */
   fromGezelId?: string;
-  /** `'entry'` for a fresh launch (no prior step); defaults to `'handoff'`. */
-  kind?: 'handoff' | 'entry';
+  /**
+   * `'entry'` for a fresh launch (no prior step), `'retry'` for a
+   * user-driven "try again" on a task that paused for help; defaults to
+   * `'handoff'`.
+   */
+  kind?: 'handoff' | 'entry' | 'retry';
   /** Step activation timestamp captured when this handoff was enqueued. */
   activationAt?: string;
   /** Reuse the latest persisted session for this task step after a service restart. */
@@ -137,7 +141,7 @@ export interface TaskRunnerDispatcher {
     stepId: string;
     fromGezelName?: string;
     fromGezelId?: string;
-    kind?: 'handoff' | 'entry';
+    kind?: 'handoff' | 'entry' | 'retry';
     /** Naming presentation pinned by the task that owns this handoff. */
     roleBasedNameOnlyMode?: boolean;
     /**

@@ -145,6 +145,7 @@ import {
 } from './tool-contracts.js';
 import {
   ALWAYS_REGISTERED_TOOLS,
+  HOST_CALLBACK_TOOLS,
   LEGACY_SPELLING_BY_CANONICAL,
   RESERVED_TOOL_NAMES,
   canonicalToolName,
@@ -595,8 +596,13 @@ const originalRegister = server.tool.bind(server) as (name: string, ...rest: unk
   // Gezel's tool contract is deliberately closed, so make the SDK's stored
   // schema strict after registration. This keeps tools/list and runtime
   // validation aligned without rewriting every legacy registration call.
+  //
+  // Host-harness callbacks are the deliberate exception: their arguments are
+  // authored by an external CLI whose payload grows between releases, so a
+  // key we don't know about is a version skew to tolerate, not a violation
+  // to reject. See HOST_CALLBACK_TOOLS.
   const rawShape = rest.find(isZodRawShape);
-  if (rawShape) {
+  if (rawShape && !HOST_CALLBACK_TOOLS.has(name)) {
     stored.inputSchema = z.strictObject(rawShape);
   }
   installAliasDispatchOnce();
@@ -12185,7 +12191,16 @@ if (process.env.GEZEL_PERMISSION_PROMPT === '1') {
       tool_name: z.string().describe('Name of the tool the CLI is requesting permission for.'),
       input: z
         .record(z.string(), z.unknown())
+        .default({})
         .describe('Arguments the CLI wants to call the requested tool with.'),
+      // Correlation id the CLI stamps on the originating tool_use block.
+      // We don't need it — the verdict is returned on the same call — but it
+      // must be *declared* rather than merely tolerated so the advertised
+      // schema tells the truth about what the CLI sends.
+      tool_use_id: z
+        .string()
+        .optional()
+        .describe('Id of the CLI tool_use block this request belongs to. Accepted, not used.'),
     },
     async ({ tool_name, input }) => {
       try {

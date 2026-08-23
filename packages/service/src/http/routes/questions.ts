@@ -244,6 +244,24 @@ export function questionRoutes(ctx: ServiceContext): Hono {
       return c.json(question);
     }
 
+    // Claude CLI `AskUserQuestion` cards ride the same synchronous
+    // long-poll as tool-permission — the `claude` subprocess is mid-turn,
+    // awaiting the verdict with the user's answer folded into
+    // `updatedInput.answers`. No follow-up turn to seed; just breadcrumb
+    // the outcome into the stream.
+    if (question.intent?.kind === 'claude-user-question') {
+      const unanswered = question.answer?.declined === true || question.answer?.silentSkip === true;
+      ctx.chat.recordSessionIntent(
+        {
+          sessionId: question.sessionId,
+          gezelId: question.gezelId,
+          projectId: question.projectId,
+        },
+        unanswered ? 'question dismissed' : 'question answered',
+      );
+      return c.json(question);
+    }
+
     // Craftbook dependency requests also hold the originating MCP call
     // open. The catalog route polls this answer and performs the install
     // itself after Allow, so seeding a second model turn here would race

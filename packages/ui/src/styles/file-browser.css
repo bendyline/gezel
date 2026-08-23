@@ -1967,6 +1967,18 @@ button.danger {
   flex: 0 0 auto;
 }
 
+/* Flat-list rows make their trailing badges select the row too, so the
+   element is a button there and has to shed every button default. */
+button.tree-row-trailing-select {
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
 /* ── Flat-list card rows ──
    A row that carries prose under its name (search results: the document plus
    the reason it surfaced). The trailing slot cannot hold that text — it is

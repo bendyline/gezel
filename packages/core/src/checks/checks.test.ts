@@ -464,6 +464,20 @@ describe('grounding checks', () => {
     expect((await citationsResolve(okWs, 'brief.md')).ok).toBe(true);
   });
 
+  it('citationsResolve resolves citations the capped listing dropped', async () => {
+    const files: Record<string, string> = {
+      'brief.md': 'Per (source: signed/q3.md) and (source: signed/fake.md).',
+      'signed/q3.md': '...',
+    };
+    const cappedListing: WorkspaceLike = {
+      read: async (f) => files[f] ?? null,
+      list: async () => ['brief.md'],
+    };
+    const r = await citationsResolve(cappedListing, 'brief.md');
+    expect(r.resolved).toEqual(['signed/q3.md']);
+    expect(r.unresolved).toEqual(['signed/fake.md']);
+  });
+
   it('citationsResolve tolerates trailing bracketed labels but not free prose', async () => {
     // Regression: `(Source: path [Citation 1])` zeroed the citation count
     // because the old regex demanded `)` immediately after the path.

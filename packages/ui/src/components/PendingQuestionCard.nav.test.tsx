@@ -129,6 +129,46 @@ describe('PendingQuestionCard navigation', () => {
     expect(container.querySelector('.pending-question-splitwrap')).toBeNull();
   });
 
+  // Dismiss only collapses the card — the task stays paused. The retry
+  // button is the one control that gets the work moving again, so it must
+  // restart the task BEFORE the card is answered away.
+  it('restarts a paused task and then clears its card', async () => {
+    vi.mocked(api.retryTask).mockResolvedValue({
+      task: { ref: 'learning/3', status: 'active' },
+      dispatched: true,
+      gezelId: 'yusuf',
+      assigneeName: 'Yusuf',
+    } as never);
+    const onAnswered = vi.fn();
+    render(<PendingQuestionCard question={taskPaused()} onAnswered={onAnswered} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+
+    await waitFor(() => {
+      expect(api.retryTask).toHaveBeenCalledWith('learning', 3);
+    });
+    await waitFor(() => {
+      expect(api.answerQuestion).toHaveBeenCalledWith('q1', { selectedChoices: [0] });
+    });
+    expect(onAnswered).toHaveBeenCalled();
+  });
+
+  // The task un-paused but nobody was put back to work: collapsing the card
+  // would hide the one thing the user still has to fix.
+  it('keeps the card open and says why when nothing could be re-driven', async () => {
+    vi.mocked(api.retryTask).mockResolvedValue({
+      task: { ref: 'learning/3', status: 'active' },
+      dispatched: false,
+      reason: 'project-inactive',
+    } as never);
+    render(<PendingQuestionCard question={taskPaused()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+
+    await screen.findByText(/isn't taking background work/);
+    expect(api.answerQuestion).not.toHaveBeenCalled();
+  });
+
   it('opens the attached task as a tab', async () => {
     const opened = vi.fn();
     window.addEventListener('gezel:open-tab', opened);

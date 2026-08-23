@@ -189,6 +189,13 @@ async function isSessionRouteAllowed(
     if (/^\/terminals(?:\/|$)/.test(rest)) {
       return sessionDeny('terminal routes require a first-party client');
     }
+    // Pausing for help is the circuit breaker on a task that cannot make
+    // progress. Retry resets the very budgets that tripped it, so it stays
+    // a human move — a worker able to un-pause and re-drive itself would
+    // spin exactly as long as the pause was meant to prevent.
+    if (/^\/tasks\/[^/]+\/retry\/?$/.test(rest)) {
+      return sessionDeny('restarting a paused task requires a first-party client');
+    }
     if (rest === '/preview-capability' || rest === '/preview-capability/') {
       return sessionDeny('preview capabilities require a first-party client');
     }

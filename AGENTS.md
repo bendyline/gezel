@@ -108,11 +108,19 @@ Do not bake "the service is in-process" assumptions into new code — go through
 │       ├── project.json     name, description, workingDir?, packages
 │       ├── finding-lifecycle.json  durable open/in-progress/resolved scanner findings
 │       ├── boekwachter-issues.json durable BW issue refs, stale anchors, lifecycle + task links
+│       ├── diffpacks.json   change proposals drafted but not yet applied
+│       ├── code-reviews.json durable review records (kickoff → task → outcome)
 │       ├── artifacts/       read-write user/agent outputs
+│       │   ├── tasks/{num}/ per-task working folder — the {{task.dir}} token
+│       │   ├── diffpacks/   after/ + files/ + notes.md per proposal
+│       │   └── shadow/      markdown twins of workspace content (derived)
 │       ├── workspace/       internal fallback when no external dir
 │       └── memories/        same structure as gezel memories
-├── documents/               cross-project shared library (mission, guidelines)
-├── index/                   global.db — sqlite FTS cache over sessions, history, documents
+├── documents/               cross-project shared library — the `shared` project's workspace
+├── knowledge/               installed .gezk catalogs + registry.json
+├── ai-apps/                 installed .gezapp packages + registry.json
+├── gilde/                   opt-in live catalog content cache
+├── index/                   global.db — sqlite FTS cache over sessions + history
 └── tasks/history/           completed task records
 ```
 
@@ -130,12 +138,16 @@ Persisted user state uses **gezels/**, never **agents/**. Repository-only metada
 | `packages/app` | Electron shell. Holds the supervisor (machine-service adoption on every packaged platform, per-user spawn, and embedded fallback), loads the UI, and ships platform installer/autostart scaffolding. |
 | `packages/cli` | `gezel` command-line for headless scenarios. |
 | `packages/catalog` | Catalog *loader* (sources, install pipeline, schema-aware compilers). The content itself — gilde templates, toolsets, craftbooks, chat-/image-/video-model catalogs — lives in the external [`bendyline/gilde`](https://github.com/bendyline/gilde) repo, consumed as the exact-pinned `@bendyline/gilde` npm package. Local content dev via `pnpm link:gilde`. See "The three-repo catalog architecture" below. |
+| `packages/knowledge` | The `.gezk` knowledge-catalog toolchain: deterministic compiler, archive safety (verified ZIP inspect/extract), read-only reader with two-stage `bit384+int8` retrieval, chunking, and the frozen format constants. Depends only on `core` — never on `gezel-service`. Format spec: [docs/gezk-format-v1.md](docs/gezk-format-v1.md). |
 | `packages/plugin-sdk` | Helpers for writing gezel plugins (legacy surface, kept for compatibility). |
 | `packages/sdk` | Newer extension surface — typed entry points for external integrations and embedders. The plugin-sdk is the historical equivalent; treat `sdk` as the preferred surface for new work. |
+| `packages/app-sdk` | Typed surface for embedders driving a local daemon (`GEZEL_SERVICE_ROLE` discovery lives here). |
+| `packages/connectors-spectral` | Connector adapters compiled against the spectral connector surface. |
+| `packages/script-stdlib` | The `standard`-scope scripts craftbook step hooks and gate scripts run (e.g. `publishCorpusBatches`). Deterministic work belongs here, not in a model turn. |
 | `packages/vscode` | VSCode extension that surfaces gezel features inside the editor. |
 | `evals` (top-level, **not** under `packages/`) | End-to-end evaluation harness. Drives `gezeld` via `GezelClient` against scripted scenarios and reports success rates. Registered in `pnpm-workspace.yaml`; invoked via root `pnpm eval:run` / `pnpm eval:batch`. |
 
-Build order (enforced in root `package.json` script): `core` → `client` / `plugin-sdk` / `sdk` / `catalog` (parallel) → `mcp` → `service` → `ui` → `cli` / `app` / `vscode` (parallel). The MCP depends on `client`; the service depends on all of them and resolves `@bendyline/gezel-mcp/dist/server.js` at runtime — this subpath is **explicitly exported** from the mcp package's `package.json` for a reason (see "Gotchas" below).
+Build order (enforced by root `build:packages:unleased`): `core` → `client` / `plugin-sdk` / `sdk` / `app-sdk` / `catalog` / `knowledge` / `connectors-spectral` (parallel) → `mcp` → `ui` → `service` → `cli` / `app` / `vscode` (parallel). **`ui` builds before `service`**, because `packages/service/tsup.config.ts` stages `packages/ui/dist` into `dist/ui/` — the UI ships *inside* the service tarball. The MCP depends on `client`; the service depends on all of them and resolves `@bendyline/gezel-mcp/dist/server.js` at runtime — this subpath is **explicitly exported** from the mcp package's `package.json` for a reason (see "Gotchas" below).
 
 ## The three-repo catalog architecture
 
@@ -245,6 +257,8 @@ Critical invariants from the maintained [poppetje rendering strategy](docs/poppe
 
 A scoped workspace. Always present: a `default` project that fills in when the user hasn't chosen one. A project can optionally point at an external `workingDir` — otherwise an internal fallback directory is used. Artifacts (reports, scripts, outputs the agent produces) live under the project and are separate from the codebase.
 
+Each task gets its own working folder inside the drawer — `artifacts/tasks/<num>/`, auto-created at task creation, stamped on the task as `artifactDir`, and inherited by fanout children so batch shards share the host's namespace. Craftbooks reach it through the reserved `{{task.dir}}` interpolation token, conventionally via a `workPath` param defaulting to `{{task.dir}}`. Two rules attach to that token: reserved runtime values always beat a caller-supplied param of the same name, and a launcher must never render a template-valued default back out as an explicit param — `TaskManager.create` resolves defaults through a fixpoint loop but treats explicit params as authoritative, and step interpolation is single-pass, so a `{{task.dir}}` arriving as an override used to reach the gate as an unresolvable literal.
+
 The project file viewer supports outside-in rendered documents: HTML, DOCX,
 PDF, PPTX, and XLSX remain the visible project files while editable Markdown,
 media, and versions live in a hidden sibling `<stem>_files/` folder. Both
@@ -260,9 +274,38 @@ Each project also carries:
 - **`missionObjectives`** — `documents/missionObjectives.md`. Concrete success criteria. Same lifecycle as `about` and same prompt injection (under `### Mission objectives`). Use this for the kind of bullet list you'd put in a team brief.
 - **`voormanGezelId`** — optional pointer to the gezel who acts as the project's voorman (Dutch for foreman / crew lead). Stored in `project.json`. When set, the system prompt for any session here notes "The voorman of this project is **{Name}**." This is informational only — it doesn't change any access or routing — but the model knows whom to defer to.
 
-The per-project `documents/` folder is **distinct from the global `~/.gezel/documents/` library**. Project docs are only injected into chats scoped to that project; the global library is referenced through MCP tools and the shared header listing.
+The per-project `documents/` folder is **distinct from the global `~/.gezel/documents/` library** and holds only `about.md` + `missionObjectives.md`. Project docs are injected into chats scoped to that project; the shared library is a project in its own right (below).
 
 All three fields are settable via the unified `PUT /api/projects/:id` endpoint and the MCP `update_project` tool, so the Meester (and any project voorman gezel) can adjust them in conversation.
+
+### The shared document library
+
+Cross-project knowledge — mission, guidelines, policies, house style — lives in
+the shared library, and **the library is a project**: a canonical `shared`
+project whose `workingDir` IS the documents root. That is what gives it the
+whole per-project stack (content index, office-doc shadow conversion,
+embeddings + hybrid search, the fs watcher, idle enrichment) instead of a
+second, thinner pipeline. The Documents area, `/api/documents/*`, and the
+`*_document` MCP tools are a facade over it.
+
+Rules that bite if you miss them:
+
+- **Identify it with `isSharedLibraryProject(project)`, never by id.** A user
+  project can own the `shared` id first; the library then takes a different one
+  and records it in `config.sharedProjectId`. `Store.sharedProjectId()` resolves
+  the live id.
+- **Nothing gezel-derived may be written into the library folder.** It is the
+  user's, and often cloud-synced: the index is forced home-side and conversions
+  land in the shared project's `artifacts/shadow/`. Outside-in editing twins
+  (`report.docx_files/`) are the deliberate exception — they are the user's
+  editable copy.
+- **It is not a jobsite.** No voorman, no meester check-ins, no review tier;
+  the Boekwachter is its resident gezel and the AI-tier opt-in.
+- Undeletable, unarchivable, not git-linkable; its location moves through
+  Settings → Folders, and `workingDir` is derived on every boot.
+
+Full contract in [docs/documents-library.md](docs/documents-library.md); the
+decision and its alternatives in [ADR 0006](docs/decisions/0006-shared-library-project.md).
 
 ### Session
 
@@ -284,13 +327,58 @@ Changing the meester from Settings **does not touch that gezel's `about.md`**. I
 
 ### Provider
 
-`LLMProvider` / `LLMSession` is the abstraction in `packages/service/src/providers/types.ts`. Three implementations:
+`LLMProvider` / `LLMSession` is the abstraction in `packages/service/src/providers/types.ts`. The ones worth knowing:
 
-- **CopilotProvider** — wraps `@github/copilot-sdk`. Supports `resumeSession`. Compaction is SDK-internal. Expensive first-call latency (~30–90s on cold start); our timeouts are 120s.
+- **CopilotProvider** — wraps `@github/copilot-sdk`. Supports `resumeSession`. Compaction is SDK-internal. Expensive first-call latency (~30–90s on cold start); our timeouts are 120s. **The SDK is an on-demand system toolset — it is not installed at boot.** The user installs it from Settings → GitHub Copilot, or already has a Copilot CLI of their own (`COPILOT_CLI_PATH`, or one on PATH); [copilot-availability.ts](packages/service/src/providers/copilot-availability.ts) resolves that ladder and is what every UI gate reads.
 - **OpenAIProvider** — wraps `openai` package's Responses API with `store: true` + `previous_response_id` for server-side state. **Owns an MCP bridge per session** because OpenAI's hosted MCP is HTTP-only; we run stdio ourselves.
+- **AnthropicProvider** — the API surface; consumes the same `McpBridgePool` as OpenAI, so bridge ownership is shared rather than per-provider.
+- **CLI providers** (`anthropic-cli`, `codex-cli`) — drive a vendor CLI as a child process. They run their own tool loop, so they reject caller-supplied tools, get history flattened into the prompt, and synthesize `tool.called` history from their structured event streams.
+- **On-device engines** (`mlx`, `llama-cpp`) — native inference through the machine engine broker.
 - **MockProvider** — deterministic, scriptable, no external deps. Used by tests and by the `GEZEL_MOCK_PROVIDER=1` env flag so Electron E2E and CI work without real credentials.
 
 Per-install default via `config.provider`. Per-gezel override via frontmatter. `ChatManager.providerFor(gezelId)` resolves the precedence.
+
+When `config.provider` is unset, [default-provider.ts](packages/service/src/providers/default-provider.ts) resolves it — **to the on-device engine wherever we bundle one** (`mlx` on Apple Silicon, `llama-cpp` on the other platforms in the native build matrix), falling back to `copilot` only where no engine ships. Use it instead of writing `config.provider ?? 'copilot'`: that literal predates Copilot becoming an opt-in download and now points at something a fresh install has no way to run.
+
+### OpenAI-compatible endpoints (Connected Apps)
+
+Gezel serves third-party local apps through a public inference facade, controlled from Settings → Connected Apps and stored under `config.openaiEndpoints`:
+
+- **`/v1/*`** on the main daemon port (canonical 6228) — OpenAI-shaped chat/models/embeddings, gated by bearer auth + the per-app consent flow (`/v1/apps/register`). Stateless: one fresh provider session per request; callers replay their own history. Unknown model strings fall back to the configured **serving gezel** (persona + frontmatter tuning apply). Tools are caller-executed (advertise-and-halt via `SessionOpts.externalTools`); providers that run their own tool loop reject tools loudly.
+- **`/ollama/v1/*`** — the same engine speaking Ollama's dialect (tags/chat/generate/show/embed/ps).
+- **Ollama emulation** — an opt-in (`emulateOllama`, default OFF), **unauthenticated** plain-HTTP loopback listener on port 11434 so apps that auto-discover Ollama find gezel. Inference surfaces only; refuses to bind when real Ollama owns the port. Never mount product `/api/*` routes there.
+
+Completed app turns land in history as `v1.chat.completion` and feed the UsageTracker via `ChatManager.recordExternalUsage`. A master `enabled: false` gates every surface plus new app registrations.
+
+### Diffpack (change proposal)
+
+A bundle of file edits a gezel drafted **without touching the project**. The
+gezel edits normally; the runtime collects the result into a reviewable pack in
+the artifacts drawer; the user reads it and clicks Apply. Nothing reaches the
+workspace until that click — which is what lets a developer gezel work on a
+folder gezels hold no write grant for, and what lets the night shift produce
+work you review in the morning instead of waking up to a mutated tree.
+
+- **The sink moves, the tools do not.** A task with `diffpackId` set puts its
+  session in drafting mode: `write_file`, `replace_in_file`, `replace_lines`,
+  `insert_at_marker`, and `delete_path` keep their names and arguments but land
+  in `artifacts/diffpacks/<packId>/after/`, and `read_file` falls through to the
+  real file until the pack has its own copy. `apply_patch` is withheld from a
+  drafting roster — a hand-authored unified hunk is the one edit shape models
+  reliably get wrong, and the runtime derives the diff from before/after anyway.
+- **Sealing.** When the drafting task completes, the settle hook diffs every
+  drafted file against the workspace *as it stands then*, writes the sidecars,
+  and records each file's sha256 as `baseHash`. A pack that proposed nothing is
+  `failed`, not `ready`.
+- **Drift and overlap are computed at read time, never stored.** Both are
+  functions of the current workspace and the other live packs.
+
+Applying passes `userInitiated` to `Store.assertWorkspaceWritable`, which waives
+**only** the external-consent branch: the gezel never wrote, so the user's click
+is the write. That flag must never be passed from an MCP tool or any other
+model-reachable surface. Pack ids are always the drafting task's `num`; a
+fanout shard addresses its own pack through `{{diffpack.dir}}`, **not**
+`{{task.num}}`, which `TaskManager.create` already froze to the host's number.
 
 ### MCP Bridge
 
@@ -303,13 +391,22 @@ Tool categories (`packages/mcp/src/server.ts`):
   the exact-string/regex surface. `search_code` and `search_documents` are
   compatibility aliases.
 - **Memory**: `search_memory`, `save_memory`, `list_memories`
-- **Workspace** (read-write, mirrors Node `fs`): `readdir`, `readFile`, `stat`, `writeFile`, `rm`, `mkdir`, `rename`. Direct project links appear through the same tools as virtual `../<project-id>/...` paths; they are one-way, non-transitive, file-only grants, and the target project's write policy remains authoritative.
+- **Workspace** (read-write): `list_dir`, `read_file`, `read_files`, `stat`, `write_file`, `delete_path`, `make_dir`, `rename`, plus the incremental editors `replace_in_file`, `replace_lines`, `insert_at_marker`, and `apply_patch`. Direct project links appear through the same tools as virtual `../<project-id>/...` paths; they are one-way, non-transitive, file-only grants, and the target project's write policy remains authoritative.
 - **Artifacts** (read-write, project-scoped): `list_artifacts`, `read_artifact`, `write_artifact`
 - **Documents** (shared library): `list_documents`, `read_document`, `write_document`, `delete_document`
-- **Execution**: `run_nodejs_script`, `run_playwright_script`, `npm_install`, `list_packages`
-- **Team / projects** (Meester surface): `list_gezels`, `create_gezel`, `update_gezel`, `list_gilde`, `create_gezel_from_gilde`, `ensure_gezel`, `message_gezel`, `list_projects`, `create_project`, `update_project`
+- **Execution**: `run_nodejs_script`, `run_playwright_script`, `npm_install`, `list_packages`, `list_package_scripts`, `run_package_script`, `run_npx`
+- **Team / projects** (Meester surface): `list_gezels`, `create_gezel`, `update_gezel`, `list_gilde`, `create_gezel_from_gilde`, `ensure_gezel`, `message_gezel`, `list_projects`, `create_project`, `update_project`, plus the suggested-work toggles (`list_suggested_work`, `enable_suggested_work`, `disable_suggested_work`) that surface role- and project-type-recommended recurring craftbooks
 - **Tasks**: `list_tasks`, `get_task`, `create_task`, `update_task`, `set_task_status`, `assign_task`, `add_task_step`, `advance_task_step`, `read_task_notes`, `write_task_note`
-- **Other**: `ask_user_question`, `search_history`, `render_image`
+- **Other**: `ask_user_question`, `search_history`, `render_image`, `generate_image`, `run_git` (read-only git wrapper), `fetch_url`, `web_search`
+
+Names here are the runtime's, not this document's. The listing a gezel
+actually receives is auto-injected at session-build time as a
+`## Tools available this turn` block, rendered from the post-allowlist bridge
+roster ([chat/tools-block.ts](packages/service/src/chat/tools-block.ts)) — and
+providers filter it further: the Claude CLI provider hides gezel's filesystem,
+search, web, and execution tools ([excluded-mcp-tools.ts](packages/service/src/providers/anthropic-cli/excluded-mcp-tools.ts))
+because Claude has first-class built-ins for all of them. Never enumerate tools
+in a gezel's `about.md`; see [ADR 0001](docs/decisions/0001-runtime-tool-inventory.md).
 
 Eligible MCP calls are auto-approved only after the role/security surface and
 call-time guards admit them; mutation sinks still enforce project consent and
@@ -363,16 +460,25 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/keurmeester/` — append-only JSONL intervention case records plus generated digest reports, owned by [KeurmeesterManager](packages/service/src/keurmeester/manager.ts)
   - `~/.gezel/gilde/` — opt-in live catalog content cache (`versions/<v>/` holding extracted `@bendyline/gilde` releases + `state.json`), owned by [GildeUpdateManager](packages/service/src/gilde-updates/manager.ts); rebuildable, safe to delete — the bundled pin is the permanent fallback
   - `~/.gezel/gezels/{id}/memories/index/` — sqlite-vec index (`mem.db`), owned by [MemoryManager](packages/service/src/memory/manager.ts)
-  - `~/.gezel/index/global.db` — home-scoped FTS mirror of session transcripts, the history log, and the documents library, owned by [GlobalIndexManager](packages/service/src/index-store/global-index-manager.ts); rebuildable cache, safe to delete
+  - `~/.gezel/index/global.db` — home-scoped FTS mirror of session transcripts and the history log, owned by [GlobalIndexManager](packages/service/src/index-store/global-index-manager.ts); rebuildable cache, safe to delete. Documents are NOT here: the shared library is a project and its content lives in that project's index (ADR 0006), which is forced home-side so no database rides the user's — possibly cloud-synced — documents folder
   - `~/.gezel/projects/{id}/digest-state.json` — weekly-digest idempotency state, owned by [ProjectDigestGenerator](packages/service/src/digest/generator.ts)
   - `~/.gezel/gezels/{id}/poppetje.json` — the resolved Poppetje struct (body shape, skin, hair, hat, etc.) driving the parametric figure renderer, owned by [PoppetjeManager](packages/service/src/poppetje/manager.ts). Persisted explicitly so adding new catalog entries or tuning slot odds later never drifts existing characters.
-  - `~/.gezel/system-toolsets/` — owned by [system-toolsets/bootstrap.ts](packages/service/src/system-toolsets/bootstrap.ts)
+  - `~/.gezel/system-toolsets/` — two classes of pinned entry. **Eager** ones (Playwright + its Chromium) install at boot via [system-toolsets/bootstrap.ts](packages/service/src/system-toolsets/bootstrap.ts). **On-demand** ones (`onDemand: true` in the manifest — today only `@github/copilot-sdk`) install only when the user asks. Read them back with `resolveInstalledSystemLibrary`, not `resolveSystemLibraryPath`: the strict resolver returns `null` on a version mismatch, which would un-install every existing user of an on-demand entry the moment its pin moved
+  - `~/.gezel/projects/{id}/artifacts/shadow/` — markdown twins of workspace content (office-doc conversions, vision descriptions, STT transcripts), owned by the content indexer. Lives under artifacts — never the (possibly read-only) workspace — write-denied through the artifact store, hidden from listings, orphan-swept, regenerable. See [ADR 0005](docs/decisions/0005-indexing-3.0.md)
+  - `~/.gezel/projects/{id}/diffpacks.json` plus `artifacts/diffpacks/<packId>/` — change proposals a gezel drafted but never applied, owned by [diffpack/manager.ts](packages/service/src/diffpack/manager.ts). `after/` and `files/` are write-denied through the artifact store (`isReservedDiffpackArtifactPath`) so a model cannot forge a diff it never drafted; `notes.md` stays writable because explaining the fix is the model's job
+  - `~/.gezel/projects/{id}/code-reviews.json` — durable code-review records, owned by [git/reviews.ts](packages/service/src/git/reviews.ts)'s `CodeReviewManager`
+  - `~/.gezel/knowledge/` — installed `.gezk` knowledge catalogs: `registry.json` plus immutable extracted versions. Catalog SQLite is only ever opened read-only+immutable, on the knowledge worker thread
+  - `~/.gezel/ai-apps/` — installed AI App (.gezapp) packages: `registry.json` (the atomic activation point) plus immutable `{appId}/{version}/` slices
+  - `~/.gezel/ambient/` — ambient-dashboard PNGs plus the Electron wallpaper applier's slots. Regenerable, safe to delete — except `display-state.json`, which holds the restore record for the user's pre-gezel wallpaper
   - `~/.gezel/git-clones/` and per-project checkouts (`workingDir`, `<workingDir>/gh/`, or the project workspace) — git working copies, owned by [git/manager.ts](packages/service/src/git/manager.ts)
   - `~/.gezel/sandbox/` — sandboxed script runs, owned by [sandbox/runner.ts](packages/service/src/sandbox/runner.ts)
   - `~/.gezel/python/` — uv runtime, owned by [python/uv-runtime.ts](packages/service/src/python/uv-runtime.ts)
   - Native binary trees (`~/.gezel/bin/llama-cpp/`, `sd-cpp/`, `uv/`) — owned by the matching provider; see [native/README.md](native/README.md) for the upstream fetch + bundle pipeline.
 
   If you're writing code that touches state outside this list, it goes through `Store`.
+- **Git vs GitHub naming.** Anything mechanically `git` (status, changes, diffs, commits, branches, sync, merge, code reviews) is named host-agnostically — `Git*` types, `GitManager`, [packages/service/src/git/](packages/service/src/git/), routes under `/api/projects/:id/git/*`. Anything that talks to the GitHub web service (PRs, checks, OAuth/identity, repo browse) is named `GitHub*` with a **capitalized H** — `GitHubPrs`, [packages/service/src/github/](packages/service/src/github/), routes under `/:id/github/*`. Wire/JSON keys (`project.github`, `githubToken`) and the gilde requirement value `'github'` are frozen — never rename serialized names.
+- **Long-running deadlines budget in AWAKE time, not wall clock.** Anything that can outlive a laptop nap — engine turns, one-shots, MCP tool calls, engine idle eviction — measures its budget with [`AwakeBudget`](packages/core/src/suspend-clock.ts) / `createAwakeTimeout`, never `Date.now() + ms` or `AbortSignal.timeout`. A host suspension freezes the daemon, the engine subprocess, and the socket between them alike, so wall clock spent asleep is time the work could not possibly have used; charging it produces failures like `afterMs=1002151 [Mac AI] timed out after 180s`, where the 822 s difference was macOS dark-wake sleep. Suspension is self-detected by a heartbeat that notices its own gap (`startSuspendMonitor`), so it works identically embedded, spawned, and as a system service. Two rules follow: poll a deadline rather than arming a single timer (an armed timer fires on the wake-up burst, which IS the bug), and dispose the poll when the work finishes.
+- **Editing prompts.** Read [docs/prompt-stack.md](docs/prompt-stack.md) first — it maps every layer of the system prompt, the per-turn prelude/nudge channel, and how delivery differs per provider. Prompt text lives in exactly two homes: universal/standing text in `buildInstructions` in [packages/service/src/chat/manager.ts](packages/service/src/chat/manager.ts), and model-conditional text as a behavior in [packages/service/src/model-profile/behaviors/](packages/service/src/model-profile/behaviors/). These prompts compound — guardrail + about + project context can pass 2000 tokens before the user's question — so verbosity costs attention at depth. Measure real sizes with `GEZEL_PROMPT_BREAKDOWN=1`.
 - **Path-safety primitives live in [packages/service/src/fs/safe-paths.ts](packages/service/src/fs/safe-paths.ts).** Anything that constructs a path from user/model input must funnel through `safeJoin` or `realpathContained` — the file's header explains the three latent bugs the naive `normalize(join(base, p)).startsWith(base)` pattern hides.
 - **`ChatManager` owns sessions.** HTTP handlers should be thin wrappers. Tests that inject a pre-seeded `providers` map are the way to exercise chat flow deterministically.
 - **MCP tools are how agents act.** If you find yourself teaching a gezel to "describe" doing something, consider adding a tool instead.
@@ -457,6 +563,13 @@ For automated coverage, [packages/cli/src/daemon-integration.test.ts](packages/c
 - **Gilde content is external** ([`bendyline/gilde`](https://github.com/bendyline/gilde)) — same shape as squisq: sibling checkout at `../gilde` and `pnpm link:gilde` / `pnpm unlink:gilde`. CI and release workflows run `pnpm check:local-links` before dependency installation so a committed `link:` override fails with a clear message. That guard only *enforces* when `CI` is set (or `GEZEL_ENFORCE_LOCAL_LINKS=1`) — a local `pnpm validate` / `pnpm all` just warns, so the full gate stays runnable while linked, and hard-fails only when a link points at a checkout that is not on disk. Content correctness gates run in gezel CI against the *pinned* `@bendyline/gilde` version (the catalog package's data-contract tests), so a bad content release fails here at bump time, before it ships.
 - **`@bendyline/gilde` must keep `./package.json` exported.** The catalog loader locates the content root via `createRequire(...).resolve('@bendyline/gilde/package.json')` ([gilde-data.ts](packages/catalog/src/gilde-data.ts)). If a gilde release ships an `exports` map without that subpath, resolution throws and the service boots with an **empty catalog** — no error, just no models/templates/craftbooks. Guarded by `packages/catalog/src/gilde-data.test.ts` (mirror of the mcp `./dist/server.js` gotcha).
 - **`gilde/schemas/*.schema.json` are generated from core's Zod schemas.** Regenerate with `pnpm gilde:export-schemas` whenever `packages/core/src/schemas/*` changes, and PR the result to gilde. Gilde CI validation is deliberately *looser* than the runtime (Zod refinements don't survive `z.toJSONSchema`); gezel's `.parse()` of the pinned content stays authoritative. The exporter throws on unrepresentable constructs (e.g. `z.transform`) rather than silently weakening gilde CI. **Forgetting to regenerate has a silent failure mode:** a manifest that uses a newly-added enum value (family/behavior/format) fails the stale generated schema's ajv identity check, so `build-index` drops it from the index with no error (`--verbose` → `skip … invalid-identity`) and the daemon serves it with default tuning. Regenerate before `build-index` whenever a content edit depends on a core-schema change — see the content-change dance above.
+- **A packaged build with Copilot not installed fails *fast*, not slow.** Don't diagnose it as a cold-start timeout. The SDK is an on-demand toolset and is stripped from the shipped bundle by `pnpm deploy --prod`, so `loadSdk()` throws immediately; the error says "install it in Settings" and carries `isActionable = true`. That marker is load-bearing — without it `ChatManager.ensureProvider` rewrites the message into "check your credentials", pointing at the wrong problem.
+- **`gilde/schemas/*.schema.json` are generated from core's Zod schemas.** Regenerate with `pnpm gilde:export-schemas` whenever `packages/core/src/schemas/*` changes, and PR the result to gilde. **Forgetting has a silent failure mode:** a manifest that uses a newly-added enum value (family/behavior/format) fails the stale generated schema's ajv identity check, so `build-index` drops it from the index with no error (`--verbose` → `skip … invalid-identity`) and the daemon serves it with default tuning as if your edit never happened.
+- **Textual tool-call markup cannot carry nested arguments.** Every salvage format in [local-tool-call-salvage.ts](packages/service/src/providers/local-tool-call-salvage.ts) — Hermes `<parameter=KEY>`, Claude `<parameter>`, GLM `<arg_value>`, XML attributes, shell-style — is a flat KEY→text map, so a parameter declared `object`/`array` arrives as a *string*. Invisible while every wired tool took flat scalars; the first toolset with non-scalar top-level args turned it into an unbreakable loop — the validator says `got string, expected object`, the model re-emits the identical correct JSON, the markup flattens it again. The defense is schema-gated coercion in [tool-arg-schema-coercion.ts](packages/service/src/providers/tool-arg-schema-coercion.ts); if you add a salvage format, route its args through it rather than parsing JSON blindly.
+- **A repeated, unresolved tool-validation failure hard-blocks `advance_task_step`.** [unresolved-tool-failure-ledger.ts](packages/service/src/providers/unresolved-tool-failure-ledger.ts) is pool-scoped, because the failing tool normally lives on a third-party bridge while the task tools live on gezel-mcp. Two *identical* validation rejections on the same tool with no later success and the bridge refuses `advance_task_step` before dispatch. Any success clears it; a *different* validation error restarts the count; transport faults and permission denials never count. `set_task_status` is deliberately not gated — pausing is the honest exit and a blocked gezel must keep one.
+- **A runtime hint may only name tools the turn actually wired — and only for the right drawer.** A steer hardcoding `replace_in_file`/`replace_lines` (workspace tools) on a writes-off project whose only payload tool was `write_artifact` forbade the one call the session could make and prescribed two it could not. Behaviors that steer toward a specific tool gate positively on `PromptCtx.availableToolNames` and return null when it is absent. Same failure class as ADR 0001, one layer down.
+- **A craftbook step must never ask a model to retype data the runtime already has.** Deterministic work belongs in an `onEnter` stdlib script ([packages/script-stdlib](packages/script-stdlib)), not in a prompt. Two lessons generalize: a gate that checks *syntax* cannot detect truncation, so gate fanout inputs against the artifact they were derived from; and step-hook `inputs` are interpolated alongside prompts and gates in `interpolateStepsContext` — a hook left out of that walk receives the literal `{{param}}`.
+- **Craftbook param interpolation is single-pass, and explicit params skip default resolution.** `resolveCraftbookParamDefaults` runs a bounded fixpoint so a default may reference another default (`workPath: '{{task.dir}}'`), but caller-supplied overrides are deliberately byte-for-byte authoritative and bypass it. `interpolateStepsContext` then substitutes once and does not re-scan its own output, so a template-valued param arriving as an override lands in every gate path as a literal `{{…}}` and `step-gate.ts` refuses to run the gate at all. Reserved runtime tokens are now resolved inside overrides (`resolveRuntimeTokensInParams`) and launcher forms no longer seed template-valued defaults ([seedableParamDefault](packages/ui/src/components/craftbook-command.ts)) — keep both ends, since either alone leaves a path open.
 - **The MCP server runs as a child process** with a fresh Node environment. Env variables we pass are its only connection to the running service — don't rely on anything else being inherited implicitly.
 - **The embedded fallback loads from the unpacked service-bundle, not from `app.asar/node_modules/`.** [supervisor/index.ts](packages/app/src/supervisor/index.ts)'s `startEmbeddedRaw` dynamic-imports `app.asar.unpacked/dist/service-bundle/dist/index.js` via a `file://` URL when that file exists (packaged mode), and only falls back to bare-specifier `import('@bendyline/gezel-service')` for dev (workspace symlink). The reason: electron-builder's pnpm dep walker copies `@bendyline/gezel-service` into `app.asar` but doesn't follow its transitive deps — about 100 packages get silently dropped, so any embedded boot from there crashes with `ERR_MODULE_NOT_FOUND` on whichever transitive (zod-to-json-schema, @octokit/endpoint, etc.) is imported first. The service-bundle (built by the dedicated-lockfile `pnpm deploy --prod` path) has a complete pnpm tree and is the same source the spawned daemon uses. Net effect: one canonical service tree on disk, consumed by both spawn and embedded paths.
 
@@ -472,3 +585,12 @@ For automated coverage, [packages/cli/src/daemon-integration.test.ts](packages/c
 | "Unlimited" shown for a user with a real cap | `CopilotProvider.parseUsage` — look at the raw event |
 | Provider switch doesn't take effect | `ChatManager.resetClient` gets called on credential change; check `config.ts` reset-fields list |
 | E2E fails "waiting for…" | Usually `GEZEL_MOCK_PROVIDER=1` not set, or the Electron window didn't reach `domcontentloaded` in time |
+| A gate rejects with "Gate configuration error … unresolved template placeholder" | A craftbook param reached the gate as a literal `{{…}}`. Check `task.craftbookParams` — a template-valued default (`workPath: '{{task.dir}}'`) that arrived as an EXPLICIT param bypasses default resolution, and step interpolation is single-pass. Not a deliverable failure: it pauses without charging an attempt |
+| A gezel's edits vanished — the file is unchanged | It was drafting a change proposal, not editing. Check `task.diffpackId`; the edits are in `artifacts/diffpacks/<packId>/after/` and land in the workspace only when the user applies from the project's Proposals tab |
+| A drafting shard wrote into the wrong pack folder | Its step used `{{task.num}}`, which `TaskManager.create` already froze to the HOST's number. Spawn steps address their own pack with `{{diffpack.dir}}` |
+| Applying a proposal 409s with `drifted` | The target file changed since the proposal was sealed (`baseHash` mismatch). The UI names the files and offers to apply anyway |
+| A task was created but nobody started it ("active", no chat) | Nothing resolved for the entry step, so `dispatchTaskEntry` returned `no-entry-gezel` — check the step's `suggestedRole`/`assignee` |
+| A timeout reports far less elapsed than the log shows | The host slept through it. Look for a silent gap in the service log followed by several unrelated timers firing within milliseconds of each other, then confirm with `pmset -g log \| grep -E "Entering Sleep state\|DarkWake"`. The budget should have been an `AwakeBudget` |
+| A document isn't findable in search | Is the `shared` project indexing? `GET /api/projects/<sharedId>/index/status`. Documents live in that project's index, not `global.db` |
+| A `.gezel/` dir or `*.db` appeared in the documents folder | The home-side index placement was bypassed — `projectContentIndexDbFile(..., { forceHomeSide })` |
+| The catalog is empty — no models, templates, or craftbooks | `@bendyline/gilde` stopped exporting `./package.json`, so `gildeDataDir()` resolution threw. No error is logged; the daemon just serves nothing |

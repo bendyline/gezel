@@ -5,7 +5,12 @@ import type {
   ProjectTypeManifest,
   RoleId,
 } from '@bendyline/gezel';
-import { CRAFTBOOK_ROLE_META, ROLES } from '@bendyline/gezel';
+import {
+  CRAFTBOOK_CATEGORY_FAMILY_META,
+  CRAFTBOOK_CATEGORY_META,
+  ROLES,
+  resolveCraftbookCategory,
+} from '@bendyline/gezel';
 import type { HandboekCatalog } from './macros.js';
 
 /**
@@ -58,10 +63,15 @@ export async function listGeneratedSummaries(
   const craftbooks = (await catalog.list('craftbook-template'))
     .map((s) => s.manifest as CraftbookTemplateManifest)
     .sort((a, b) => a.name.localeCompare(b.name));
+  // Shelved by subject, matching the New Task dialog and the `/do` picker;
+  // the family prefix stands in for the grouping the flat list cannot draw.
   for (const book of craftbooks) {
-    const role = book.role ?? 'general';
-    const roleIndex = CRAFTBOOK_ROLE_META.findIndex((item) => item.id === role);
-    const roleMeta = CRAFTBOOK_ROLE_META[roleIndex] ?? CRAFTBOOK_ROLE_META.at(-1)!;
+    const category = resolveCraftbookCategory(book);
+    const categoryIndex = CRAFTBOOK_CATEGORY_META.findIndex((item) => item.id === category);
+    const categoryMeta = CRAFTBOOK_CATEGORY_META[categoryIndex] ?? CRAFTBOOK_CATEGORY_META.at(-1)!;
+    const familyLabel = CRAFTBOOK_CATEGORY_FAMILY_META.find(
+      (family) => family.id === categoryMeta.family,
+    );
     out.push({
       id: `craftbook/${book.id}`,
       area: 'craftbooks',
@@ -69,9 +79,12 @@ export async function listGeneratedSummaries(
       order: 10,
       summary: firstSentence(book.description),
       subcategory: {
-        id: roleMeta.id,
-        title: roleMeta.label,
-        order: roleIndex < 0 ? CRAFTBOOK_ROLE_META.length : roleIndex,
+        id: categoryMeta.id,
+        title:
+          categoryMeta.family === 'universal' || !familyLabel
+            ? categoryMeta.label
+            : `${familyLabel.label} · ${categoryMeta.label}`,
+        order: categoryIndex < 0 ? CRAFTBOOK_CATEGORY_META.length : categoryIndex,
       },
     });
   }

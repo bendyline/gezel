@@ -669,6 +669,19 @@ export interface TaskRunnerState {
   };
 }
 
+/**
+ * Outcome of `retryTask`. `dispatched: false` still means the task was
+ * flipped back to active — `reason` says why no turn was queued (except
+ * `not-paused`, where nothing was touched at all).
+ */
+export interface TaskRetryResult {
+  task: Task;
+  dispatched: boolean;
+  gezelId?: string;
+  assigneeName?: string;
+  reason?: 'not-paused' | 'no-active-step' | 'spawn-host' | 'no-assignee' | 'project-inactive';
+}
+
 export interface ProjectContinuationResponse {
   projectId: string;
   projectStatus: 'active' | 'stable' | 'readonly' | 'inactive';
@@ -7242,6 +7255,21 @@ export class GezelClient {
       'POST',
       `/api/projects/${encodeURIComponent(projectId)}/tasks/${num}/status`,
       { status },
+    );
+  }
+
+  /**
+   * "Try again" on a task that paused for help: reset the recovery
+   * counters that tripped the pause, flip it back to active, and re-drive
+   * the assignee immediately. `dispatched: false` with a `reason` means the
+   * task is active again but nothing was queued (a spawn host, an inactive
+   * project, or a stale view of an already-running task).
+   */
+  retryTask(projectId: string, num: number): Promise<TaskRetryResult> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/tasks/${num}/retry`,
+      {},
     );
   }
 

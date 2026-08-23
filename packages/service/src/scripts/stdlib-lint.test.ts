@@ -41,12 +41,16 @@ const ALLOWED_STDLIB_GATE_CAPABILITIES = new Set([
 // publishCorpusBatches). Writes go through the same sandboxed dispatcher as
 // user scripts, and the artifacts drawer is the narrower of the two surfaces —
 // derived, regenerable, and the only one a writes-off project exposes at all.
-// Nothing here may reach network, llm, or credentials.
+// Nothing here may reach network, llm, or credentials. `index.refresh`
+// (ensureIndexFresh) mutates only derived index state by scheduling the same
+// scan/enrichment the daemon runs on its own; the drive path itself still
+// honors per-project indexing opt-out, the pause switch, and roster gating.
 const ALLOWED_STDLIB_ACTION_CAPABILITIES = new Set([
   'workspace.read',
   'workspace.write',
   'artifacts.read',
   'artifacts.write',
+  'index.refresh',
 ]);
 
 describe('standard script library', () => {

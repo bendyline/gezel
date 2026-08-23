@@ -1,6 +1,8 @@
 import { estimateLlamaCppResidentBytes } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
+  ds4MemoryHeadline,
+  ds4SizeTitle,
   formatBytes,
   formatMemoryBytes,
   modelMemoryHeadline,
@@ -116,5 +118,72 @@ describe('model memory copy', () => {
     ).toBe(
       '15.9 GB on disk. Expect about 28.0 GB of memory to serve one chat: weights plus the KV cache at the granted context window.',
     );
+  });
+});
+
+describe('ds4 memory copy', () => {
+  const GiB = 1024 ** 3;
+  // Real DeepSeek V4 geometry: 80 GB working set measured at 128K, 8 KiB/token.
+  const KV_PER_TOKEN = 8192;
+  const CONTEXT_FREE = 80 * GiB - KV_PER_TOKEN * 131_072;
+  const projected = (ctxTokens: number) => ({
+    approxSizeBytes: 153 * GiB,
+    residentBytes: CONTEXT_FREE + KV_PER_TOKEN * ctxTokens,
+    contextFreeBytes: CONTEXT_FREE,
+    effectiveContextWindow: ctxTokens,
+  });
+
+  it('drops the hedge once the figure is re-based on a real window', () => {
+    expect(ds4MemoryHeadline(projected(131_072))).toBe('80.0 GB in memory');
+  });
+
+  it('keeps the hedge on a flat authored footprint', () => {
+    // No slope to re-base against: the number does not move with the window,
+    // and saying so is the whole point of the tilde.
+    expect(ds4MemoryHeadline({ approxSizeBytes: 197 * GiB, residentBytes: 57 * GiB })).toBe(
+      '~57.0 GB in memory',
+    );
+  });
+
+  it('resolves a smaller window to a smaller working set', () => {
+    // The half-gigabyte that whole-GB rounding used to erase.
+    expect(ds4MemoryHeadline(projected(65_536))).toBe('79.5 GB in memory');
+  });
+
+  it('says nothing when there is no resident figure at all', () => {
+    expect(ds4MemoryHeadline({ approxSizeBytes: 153 * GiB })).toBeNull();
+  });
+
+  it('breaks the tooltip into the part that moves and the part that does not', () => {
+    const title = ds4SizeTitle(projected(131_072));
+    expect(title).toContain('153.0 GB on disk');
+    expect(title).toContain('routed experts stream from it');
+    expect(title).toContain('79.0 GB of routed-expert cache and resident model state');
+    expect(title).toContain('1.0 GB of context (KV)');
+    expect(title).toContain('Only the second figure moves');
+  });
+
+  it('does not invent a context breakdown for a flat footprint', () => {
+    const title = ds4SizeTitle({ approxSizeBytes: 197 * GiB, residentBytes: 57 * GiB });
+    expect(title).toContain('no per-token slope');
+    expect(title).not.toContain('context (KV)');
+  });
+
+  it('never reports a negative context term from a mis-authored slope', () => {
+    // contextFree above the total would otherwise print a negative KV figure.
+    const title = ds4SizeTitle({
+      approxSizeBytes: 153 * GiB,
+      residentBytes: 40 * GiB,
+      contextFreeBytes: 50 * GiB,
+      effectiveContextWindow: 131_072,
+    });
+    expect(title).toContain('no per-token slope');
+    expect(
+      ds4MemoryHeadline({
+        approxSizeBytes: 153 * GiB,
+        residentBytes: 40 * GiB,
+        contextFreeBytes: 50 * GiB,
+      }),
+    ).toBe('~40.0 GB in memory');
   });
 });

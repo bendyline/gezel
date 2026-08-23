@@ -34,7 +34,9 @@ export type ScriptCapability =
   | 'tasks.read'
   | 'tasks.write'
   | 'memory.read'
-  | 'memory.write';
+  | 'memory.write'
+  | 'index.read'
+  | 'index.refresh';
 
 /** A free-text string input field. */
 export interface ScriptStringInput {

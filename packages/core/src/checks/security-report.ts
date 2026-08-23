@@ -1,4 +1,5 @@
 import type { CheckResult, WorkspaceLike } from './types.js';
+import { createCitedPathChecker } from './workspace-exists.js';
 
 /**
  * Structural gate for a whole-codebase security review deliverable — the
@@ -50,17 +51,6 @@ export interface SecurityReportResult extends CheckResult {
 
 function str(x: unknown): string {
   return typeof x === 'string' ? x.trim() : '';
-}
-
-function normalizePath(p: string): string {
-  return p
-    .trim()
-    .replace(/^`+|`+$/g, '')
-    .replace(/[:#].*$/, '') // drop a :line / #anchor suffix
-    .replace(/^\.\//, '')
-    .replace(/^\/+/, '')
-    .replace(/^workspace\//i, '')
-    .toLowerCase();
 }
 
 function escapeRe(s: string): string {
@@ -139,13 +129,13 @@ export async function securityReport(
     return fail(`${findingsPath} must be a JSON array of findings (or { "findings": [...] }).`);
   }
 
-  const listing = new Set((await ws.list()).map(normalizePath));
+  const citedPathExists = createCitedPathChecker(ws);
   const problems: string[] = [];
   const fabricated: string[] = [];
   let critHigh = 0;
 
-  arr.forEach((raw, i) => {
-    const f = (raw ?? {}) as Record<string, unknown>;
+  for (const [i, rawFinding] of arr.entries()) {
+    const f = (rawFinding ?? {}) as Record<string, unknown>;
     const file = str(f.file ?? f.path);
     const sev = str(f.severity).toLowerCase();
     const remediation = str(f.remediation ?? f.fix ?? f.recommendation);
@@ -153,13 +143,13 @@ export async function securityReport(
     const line = f.line ?? f.lineStart;
     const label = file || `#${i + 1}`;
     if (!file) problems.push(`finding #${i + 1} has no file`);
-    else if (!listing.has(normalizePath(file))) fabricated.push(file);
+    else if (!(await citedPathExists(file))) fabricated.push(file);
     if (!VALID_SEVERITIES.has(sev)) problems.push(`${label} has an invalid severity "${sev}"`);
     if (!remediation) problems.push(`${label} has no remediation`);
     if (!title) problems.push(`${label} has no title/description`);
     if (typeof line !== 'number') problems.push(`${label} is not pinned to a line`);
     if (sev === 'critical' || sev === 'high') critHigh++;
-  });
+  }
 
   if (fabricated.length > 0) {
     return fail(

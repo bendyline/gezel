@@ -35,7 +35,7 @@ class FakeDispatcher {
     stepId: string;
     lane?: 'interactive' | 'background';
     nightShift?: boolean;
-    kind?: 'handoff' | 'entry';
+    kind?: 'handoff' | 'entry' | 'retry';
     roleBasedNameOnlyMode?: boolean;
     capabilityFloor?: string;
     bookCatalogId?: string;
@@ -59,7 +59,7 @@ class FakeDispatcher {
     fromGezelName?: string;
     lane?: 'interactive' | 'background';
     nightShift?: boolean;
-    kind?: 'handoff' | 'entry';
+    kind?: 'handoff' | 'entry' | 'retry';
     roleBasedNameOnlyMode?: boolean;
     capabilityFloor?: string;
     bookCatalogId?: string;

@@ -35,6 +35,7 @@ import { ConnectorPrepError } from '../../connectors/task-prep.js';
 import { craftbookScriptErrors } from '../../scripts/source.js';
 import { dispatchTaskEntry } from '../../tasks/entry-dispatch.js';
 import { ConnectorSetupRequiredError, CraftbookSetupRequiredError } from '../../tasks/manager.js';
+import { retryPausedTask } from '../../tasks/retry.js';
 import type { ServiceContext } from '../context.js';
 
 const taskDocLog = createLogger('craftbooks');
@@ -235,6 +236,18 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     const body = (await c.req.json().catch(() => ({}))) as { force?: boolean };
     const task = await ctx.tasks.activate(projectId, num, { force: body.force === true });
     return c.json(task);
+  });
+
+  // "Try again" on a task that paused for help: clear the recovery
+  // counters that tripped the pause, flip it back to active, and re-drive
+  // the assignee now instead of waiting out the scheduler's stall window.
+  app.post('/:projectId/tasks/:num/retry', async (c) => {
+    const projectId = c.req.param('projectId');
+    const num = parseNum(c.req.param('num'));
+    if (num == null) return c.json({ error: 'invalid num' }, 400);
+    const result = await retryPausedTask(ctx, projectId, num);
+    if (!result) return c.json({ error: 'not found' }, 404);
+    return c.json(result);
   });
 
   app.post('/:projectId/tasks/:num/steps', async (c) => {

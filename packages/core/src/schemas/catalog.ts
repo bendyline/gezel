@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CraftbookCategorySchema } from '../craftbook-categories.js';
 import { ProjectIconIdSchema } from '../project-icons.js';
 import { TaskAssigneeSchema } from './assignee.js';
 import {
@@ -653,6 +654,13 @@ export const CraftbookTemplateIdentitySchema = IdentityCommonSchema.extend({
   /** Coarse project-lifecycle shelf used by craftbook browsers. */
   role: CraftbookRoleSchema.default('general'),
   /**
+   * Subject shelf — what kind of work the recipe is about, independent of
+   * where in a project's life it fits. Optional because third-party and
+   * pre-category manifests predate it; `resolveCraftbookCategory` falls back
+   * to tag inference when it is absent.
+   */
+  category: CraftbookCategorySchema.optional(),
+  /**
    * Optional workflow tag for filtering / Gilde browser facets
    * (e.g. "review-loop", "publish-pipeline"). Free-form.
    */
@@ -747,6 +755,8 @@ export const CraftbookTemplateManifestSchema = z.object({
   version: z.string(),
   releasedAt: z.string(),
   role: CraftbookRoleSchema.default('general'),
+  /** Mirrored from the identity — see CraftbookTemplateIdentitySchema. */
+  category: CraftbookCategorySchema.optional(),
   workflow: z.string().optional(),
   about: z.string(),
   steps: z.array(CraftbookStepSchema).min(1),

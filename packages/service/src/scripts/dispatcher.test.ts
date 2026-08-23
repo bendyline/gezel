@@ -460,3 +460,47 @@ describe('dispatcher: task mutations', () => {
     ).rejects.toThrow(/no task manager wired/);
   });
 });
+
+describe('dispatcher: index readiness', () => {
+  it('index.status forwards to the wired access under index.read', async () => {
+    const status = vi.fn().mockResolvedValue({ state: 'fresh' });
+    const { dispatch } = makeDispatcher({
+      index: { status, ensureFresh: vi.fn() } as unknown as DispatcherDeps['index'],
+    });
+    const result = await dispatch(ctx(['index.read']), 'index.status', {});
+    expect(status).toHaveBeenCalledWith('p1');
+    expect(result).toEqual({ state: 'fresh' });
+  });
+
+  it('index.ensureFresh forwards only the recognized options under index.refresh', async () => {
+    const ensureFresh = vi.fn().mockResolvedValue({ version: 1 });
+    const { dispatch } = makeDispatcher({
+      index: { status: vi.fn(), ensureFresh } as unknown as DispatcherDeps['index'],
+    });
+    await dispatch(ctx(['index.refresh']), 'index.ensureFresh', {
+      waitBudgetMs: 5_000,
+      reviews: false,
+      bogus: 'ignored',
+    });
+    expect(ensureFresh).toHaveBeenCalledWith('p1', { waitBudgetMs: 5_000, reviews: false });
+  });
+
+  it('index.ensureFresh without index.refresh is denied', async () => {
+    const { dispatch } = makeDispatcher({
+      index: { status: vi.fn(), ensureFresh: vi.fn() } as unknown as DispatcherDeps['index'],
+    });
+    await expect(dispatch(ctx(['index.read']), 'index.ensureFresh', {})).rejects.toBeInstanceOf(
+      CapabilityDeniedError,
+    );
+  });
+
+  it('index.* errors clearly when no index access is wired', async () => {
+    const { dispatch } = makeDispatcher({});
+    await expect(dispatch(ctx(['index.read']), 'index.status', {})).rejects.toThrow(
+      /no index access wired/,
+    );
+    await expect(dispatch(ctx(['index.refresh']), 'index.ensureFresh', {})).rejects.toThrow(
+      /no index access wired/,
+    );
+  });
+});

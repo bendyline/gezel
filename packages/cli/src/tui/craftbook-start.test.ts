@@ -76,7 +76,7 @@ describe('craftbook start helpers', () => {
     ]);
   });
 
-  it('builds a recommended first stage plus project-lifecycle shelves', () => {
+  it('builds a recommended first stage plus subject shelves', () => {
     const books = normalizeCraftbooks([
       catalogCraftbook({
         id: 'game-loop',
@@ -88,7 +88,7 @@ describe('craftbook start helpers', () => {
         id: 'project-check',
         name: 'Project Check',
         sourceId: 'project',
-        tags: ['quality'],
+        tags: ['testing'],
         role: 'maintenance-review',
       }),
       catalogCraftbook({ id: 'general', name: 'General Work', tags: ['misc'] }),
@@ -111,9 +111,17 @@ describe('craftbook start helpers', () => {
     expect(
       categories.find((category) => category.id === 'role:project-starter')?.bookIds,
     ).toContain('game-loop');
+    expect(categories.find((category) => category.id === 'category:code-build')).toMatchObject({
+      label: 'Build & features',
+      hint: 'Code · 1 craftbook',
+    });
     expect(
-      categories.find((category) => category.id === 'role:maintenance-review')?.bookIds,
+      categories.find((category) => category.id === 'category:code-quality')?.bookIds,
     ).toContain('project-check');
+    // No subject signal at all still lands somewhere the picker can show.
+    expect(categories.find((category) => category.id === 'category:other')?.bookIds).toContain(
+      'general',
+    );
     expect(categories.at(-1)).toMatchObject({ id: 'all', hint: '3 craftbooks' });
   });
 
@@ -127,6 +135,7 @@ describe('craftbook start helpers', () => {
         stepCount: 3,
         tags: [],
         role: 'general' as const,
+        category: 'code-review' as const,
       },
     ];
     expect(findCraftbook(books, 'CODE-REVIEW')?.id).toBe('code-review');
@@ -144,6 +153,7 @@ describe('craftbook start helpers', () => {
       stepCount: 3,
       tags: ['review'],
       role: 'maintenance-review',
+      category: 'code-review',
     });
 
     expect(request).toMatchObject({

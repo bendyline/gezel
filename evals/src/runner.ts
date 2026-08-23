@@ -596,10 +596,11 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
     });
   }
 
-  // Phase 2: link the model dir into the trial home. Llama-cpp links
-  // from the eval cache root; MLX links from the user's existing
-  // `engines/mlx/models/<id>` tree. CLI-wrapper and cloud providers
-  // have nothing to link.
+  // Phase 2: clone the model dir into the trial home. Product model stores
+  // reject linked directories, so the cache helper uses copy-on-write clones
+  // where the filesystem supports them. Llama-cpp clones from the eval cache;
+  // MLX clones from the user's existing `engines/mlx/models/<id>` tree.
+  // CLI-wrapper and cloud providers have nothing to materialize.
   if (engine === 'llama-cpp') {
     for (const modelId of [opts.modelId, ...(secondModelId ? [secondModelId] : [])]) {
       await linkModelIntoTrial({

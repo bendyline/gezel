@@ -10,7 +10,7 @@ import {
   visibleCatalogItems,
 } from '@bendyline/gezel';
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiErrorMessage } from '../../api-error.js';
 import { api } from '../../api.js';
 import { CatalogArtwork } from '../../components/CatalogArtwork.js';
@@ -27,6 +27,7 @@ import {
   craftbookHasParams,
   seedParamDefaults,
   stringifyParamValues,
+  taskLensGroupLabel,
   taskLensesFor,
   toBookItems,
 } from './new-task-meta.js';
@@ -652,18 +653,24 @@ export function NewTaskDialog({
                   <span className="gz-npd-rail-label">All craftbooks</span>
                   <span className="gz-npd-rail-count">{books.length}</span>
                 </button>
-                {lenses.map((lens) => (
-                  <button
-                    key={lens.id}
-                    type="button"
-                    className={`gz-npd-rail-item${!searching && activeRail === lens.id ? ' active' : ''}`}
-                    onClick={() => setActiveRail(lens.id)}
-                  >
-                    <ProjectGlyph glyph={lens.glyph} size={16} />
-                    <span className="gz-npd-rail-label">{lens.label}</span>
-                    <span className="gz-npd-rail-count">{lens.bookIds.size}</span>
-                  </button>
-                ))}
+                {lenses.map((lens, index) => {
+                  const groupLabel =
+                    lenses[index - 1]?.family === lens.family ? null : taskLensGroupLabel(lens.family);
+                  return (
+                    <Fragment key={lens.id}>
+                      {groupLabel && <span className="gz-npd-rail-group">{groupLabel}</span>}
+                      <button
+                        type="button"
+                        className={`gz-npd-rail-item${!searching && activeRail === lens.id ? ' active' : ''}`}
+                        onClick={() => setActiveRail(lens.id)}
+                      >
+                        <ProjectGlyph glyph={lens.glyph} size={16} />
+                        <span className="gz-npd-rail-label">{lens.label}</span>
+                        <span className="gz-npd-rail-count">{lens.bookIds.size}</span>
+                      </button>
+                    </Fragment>
+                  );
+                })}
               </nav>
               <div className="gz-npd-gallery" role="radiogroup" aria-label="Task type">
                 {generalMatches && (

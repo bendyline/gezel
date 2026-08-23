@@ -2522,8 +2522,13 @@ button.machine-memory-unload-button {
   margin: 0;
   width: auto;
   max-width: none;
-  max-height: calc(100vh - var(--app-header-height, 44px));
+  max-height: calc(100vh - var(--app-header-height, 44px) - 1.25rem);
   overflow-y: auto;
+  /* Head of the shrink chain below (`.app-questions-overlay
+     .home-needs-input`) — the drawer is the bounded box the
+     question body is measured against. */
+  display: flex;
+  flex-direction: column;
   background: var(--bg);
   color: inherit;
   border: none;
@@ -2573,6 +2578,37 @@ button.machine-memory-unload-button {
   padding: 0.25rem 0 0;
   border: none;
   background: transparent;
+}
+
+/* The drawer is a bounded viewport, not a column that grows past the
+   window: the answer controls (choices, note field, Submit row) have to
+   stay on screen however long the question body is. Every level from the
+   drawer down to the body is a flex column carrying `min-height: 0`, so
+   the body — and only the body — absorbs the shortfall and scrolls inside
+   itself; its own ceiling lives with the card, in project-surfaces.css.
+   The `min-height: 0` is the load-bearing part: a flex item's automatic
+   minimum is its content height, which is exactly the overflow we're
+   preventing, and one missing link in the chain puts the controls back
+   under the bottom edge. A question that arrives with a document renders
+   two columns and is deliberately outside this chain — the document panel
+   there is a fixed portrait window, and the drawer's own scroll carries it. */
+.app-questions-overlay .home-needs-input {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.app-questions-overlay .home-needs-input-item,
+.app-questions-overlay .home-needs-input-item > .pending-question {
+  min-height: 0;
+}
+/* The controls keep their size while the body gives. A textarea's
+   automatic minimum does not reliably hold its `rows` height under shrink
+   pressure, and a half-height note field is the same bug one row up. */
+.app-questions-overlay .pending-question > .pending-question-context,
+.app-questions-overlay .pending-question > .pending-question-choices,
+.app-questions-overlay .pending-question > .pending-question-write-in,
+.app-questions-overlay .pending-question > .pending-question-actions {
+  flex-shrink: 0;
 }
 
 .needs-input-empty {

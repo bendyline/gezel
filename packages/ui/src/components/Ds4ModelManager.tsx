@@ -26,7 +26,7 @@ import { ModelFitnessCell, fitnessMenuAction } from './ModelFitnessCell.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { UnrecognizedModels } from './UnrecognizedModels.js';
 import { formatContextWindow } from './model-context.js';
-import { formatBytes } from './model-memory-copy.js';
+import { ds4MemoryHeadline, ds4SizeTitle, formatBytes } from './model-memory-copy.js';
 
 /**
  * Install/list/delete the GGUFs ds4 can run, straight from the catalog — so
@@ -68,10 +68,6 @@ type Ds4ChatModel = ChatModelManifest & { ds4: NonNullable<ChatModelManifest['ds
 function ds4Entry(m: CatalogItemSummary['manifest']): Ds4ChatModel | null {
   if (m.kind !== 'chat-model' || !m.ds4) return null;
   return m as Ds4ChatModel;
-}
-
-function fmtGb(bytes: number): string {
-  return `${(bytes / 1024 ** 3).toFixed(0)} GB`;
 }
 
 export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => void }) {
@@ -426,16 +422,12 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
               <col />
               <col />
               <col />
-              <col />
             </colgroup>
             <thead>
               <tr>
                 <th>Name</th>
-                <th title="Download size. DwarfStar builds stream routed experts from SSD, so this is far larger than the memory they need.">
+                <th title="Download size, and the memory working set this device would run the model at. A streaming engine keeps far less resident than it downloads.">
                   Size
-                </th>
-                <th title="Memory working set this device would run the model at, expert cache included">
-                  Memory
                 </th>
                 <th title="Effective per-turn context size after Gezel's settings and memory limits">
                   Context size
@@ -473,14 +465,14 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                   fitsRecommendedCache ? (
                     <span
                       className="gz-status-pill gz-status-pill--ok ds4-model-fit"
-                      title={`Uses SSD streaming with a target memory working set of about ${fmtGb(resident)}.`}
+                      title={`Uses SSD streaming with a target memory working set of about ${formatBytes(resident)}.`}
                     >
                       {isLightest ? 'recommended on this device' : 'fits with SSD streaming'}
                     </span>
                   ) : canRunSafely ? (
                     <span
                       className="gz-status-pill gz-status-pill--warn ds4-model-fit"
-                      title={`Gezel will reduce this model's expert cache below its ${fmtGb(
+                      title={`Gezel will reduce this model's expert cache below its ${formatBytes(
                         resident,
                       )} target to preserve 32 GB for the system and other apps. It should run, but will read from SSD more often.`}
                     >
@@ -531,12 +523,19 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                   installedRow?.overrideContextTokens ?? plan?.overrideContextTokens;
                 const restartNeeded = installedRow?.contextSizingStatus === 'restart-required';
                 // Only claim the footprint moves with the window where a measured
-                // slope says it does; otherwise the number is a flat authored target.
-                const kvPerToken = plan?.kvBytesPerToken;
-                const ctxKvBytes =
-                  kvPerToken !== undefined && launchCtx !== undefined
-                    ? kvPerToken * launchCtx
-                    : undefined;
+                // slope says it does; otherwise the number is a flat authored
+                // target and the copy hedges instead of pricing a window.
+                const memoryCopy = {
+                  approxSizeBytes: m.ds4.approxSizeBytes,
+                  residentBytes: resident,
+                  ...(plan?.kvBytesPerToken !== undefined &&
+                  plan.contextFreeResidentBytes !== undefined &&
+                  launchCtx !== undefined
+                    ? { contextFreeBytes: plan.contextFreeResidentBytes }
+                    : {}),
+                  ...(launchCtx !== undefined ? { effectiveContextWindow: launchCtx } : {}),
+                };
+                const memoryHeadline = ds4MemoryHeadline(memoryCopy);
                 const updateAvailable = installedRow?.updateAvailable === true;
                 const fitnessKey = `ds4:${m.id}`;
                 return (
@@ -568,27 +567,14 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                         </div>
                       </td>
                       <td>
-                        <span
-                          className="model-size-cell"
-                          title={`Download ${fmtGb(m.ds4.approxSizeBytes)}. Routed experts stream from disk, so the memory this model needs is far below its download size.`}
-                        >
-                          {fmtGb(m.ds4.approxSizeBytes)}
+                        <span className="model-size-cell" title={ds4SizeTitle(memoryCopy)}>
+                          {formatBytes(m.ds4.approxSizeBytes)}
+                          {memoryHeadline ? (
+                            <span className="muted small model-memory-headline">
+                              {memoryHeadline}
+                            </span>
+                          ) : null}
                         </span>
-                      </td>
-                      <td>
-                        {resident ? (
-                          <span
-                            title={
-                              ctxKvBytes !== undefined
-                                ? `About ${formatBytes(ctxKvBytes)} of this is context (KV) at ${formatContextWindow(launchCtx)}; the rest is the routed-expert cache and resident model state. Changing the context size moves the total.`
-                                : `Target memory working set with SSD streaming. Routed experts stream from disk, so this is far below the ${fmtGb(m.ds4.approxSizeBytes)} download.`
-                            }
-                          >
-                            ≈ {fmtGb(resident)}
-                          </span>
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
                       </td>
                       <td
                         title={
@@ -707,7 +693,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                     </tr>
                     {contextEditorFor === m.id && installedRow && (
                       <tr className="model-context-editor-row">
-                        <td colSpan={6}>
+                        <td colSpan={5}>
                           <ModelContextSliderPanel
                             engine="ds4"
                             model={installedRow}

@@ -1,14 +1,30 @@
-import type { CatalogItemSummary, CraftbookTemplateManifest, ProjectType } from '@bendyline/gezel';
-import { CRAFTBOOK_ROLE_META, listProjectTypes } from '@bendyline/gezel';
+import type {
+  CatalogItemSummary,
+  CraftbookCategory,
+  CraftbookCategoryFamily,
+  CraftbookTemplateManifest,
+  ProjectType,
+} from '@bendyline/gezel';
+import {
+  CRAFTBOOK_CATEGORY_FAMILY_META,
+  CRAFTBOOK_CATEGORY_META,
+  CRAFTBOOK_ROLE_META,
+  listProjectTypes,
+  resolveCraftbookCategory,
+} from '@bendyline/gezel';
+import { seedableParamDefault } from '../../components/craftbook-command.js';
 import type { ProjectGlyphId } from '../projects/new-project-meta.js';
 
 /**
  * Lens + card metadata for the New Task dialog's craftbook gallery.
  *
- * "Recommended" remains project-type-aware, while the browse rail groups
- * the remaining catalog by each craftbook's project-lifecycle role. That
- * keeps "what fits this project type?" separate from "what kind of work is
- * this recipe for?".
+ * "Recommended" stays project-type-aware. The browse rail below it shelves
+ * the catalog by subject category, grouped code / non-code, because the
+ * lifecycle role alone leaves a code project staring at one 190-book pile
+ * called "General work" that is mostly recipes about media and household
+ * admin. The one role shelf worth keeping beside the categories is
+ * "New project starters", which the service already drops for an
+ * established codebase.
  */
 
 /** A craftbook catalog item narrowed to its manifest kind. */
@@ -34,6 +50,14 @@ export interface TaskLens {
   tagline: string;
   glyph: ProjectGlyphId;
   bookIds: Set<string>;
+  /** Rail group this shelf sits in; `universal` shelves render ungrouped. */
+  family: CraftbookCategoryFamily;
+}
+
+/** Rail group heading, or `null` for the ungrouped shelves at the top. */
+export function taskLensGroupLabel(family: CraftbookCategoryFamily): string | null {
+  if (family === 'universal') return null;
+  return CRAFTBOOK_CATEGORY_FAMILY_META.find((meta) => meta.id === family)?.label ?? null;
 }
 
 function lensTagSet(type: ProjectType): Set<string> {
@@ -44,31 +68,72 @@ function bookMatchesTags(manifest: CraftbookTemplateManifest, wanted: Set<string
   return (manifest.tags ?? []).some((t) => wanted.has(t.toLowerCase()));
 }
 
+const CATEGORY_GLYPH: Record<CraftbookCategory, ProjectGlyphId> = {
+  'code-build': 'code',
+  'code-quality': 'branch',
+  'code-review': 'cards',
+  'code-data': 'server',
+  'code-release': 'package',
+  'code-ops': 'chart',
+  'code-docs': 'book',
+  writing: 'quill',
+  media: 'camera',
+  design: 'palette',
+  marketing: 'banner',
+  research: 'globe',
+  business: 'briefcase',
+  personal: 'house',
+  practice: 'sprout',
+  other: 'dots',
+};
+
 /**
- * The lifecycle shelves that have at least one matching book in the given
- * project-applicable subset. Project starters disappear automatically when
- * the service identifies an established codebase.
+ * The shelves that have at least one matching book in the given
+ * project-applicable subset. Empty shelves are dropped, which is what makes
+ * the rail read differently on a codebase and on a household project without
+ * either of them needing to know the taxonomy.
  */
 export function taskLensesFor(books: BookItem[]): TaskLens[] {
-  const roleGlyph: Record<(typeof CRAFTBOOK_ROLE_META)[number]['id'], ProjectGlyphId> = {
-    'project-starter': 'sprout',
-    'maintenance-review': 'code',
-    general: 'sheet',
-  };
   const out: TaskLens[] = [];
-  for (const role of CRAFTBOOK_ROLE_META) {
+
+  const starterMeta = CRAFTBOOK_ROLE_META.find((role) => role.id === 'project-starter');
+  if (starterMeta) {
     const bookIds = new Set(
       books
-        .filter((book) => (book.manifest.role ?? 'general') === role.id)
+        .filter((book) => (book.manifest.role ?? 'general') === 'project-starter')
         .map((book) => book.manifest.id),
     );
     if (bookIds.size > 0) {
       out.push({
-        id: `role:${role.id}`,
-        label: role.label,
-        tagline: role.description,
-        glyph: roleGlyph[role.id],
+        id: `role:${starterMeta.id}`,
+        label: starterMeta.label,
+        tagline: starterMeta.description,
+        glyph: 'sprout',
         bookIds,
+        family: 'universal',
+      });
+    }
+  }
+
+  const byCategory = new Map<CraftbookCategory, Set<string>>();
+  for (const book of books) {
+    const category = resolveCraftbookCategory(book.manifest);
+    let ids = byCategory.get(category);
+    if (!ids) byCategory.set(category, (ids = new Set()));
+    ids.add(book.manifest.id);
+  }
+  for (const family of CRAFTBOOK_CATEGORY_FAMILY_META) {
+    for (const meta of CRAFTBOOK_CATEGORY_META) {
+      if (meta.family !== family.id) continue;
+      const bookIds = byCategory.get(meta.id);
+      if (!bookIds || bookIds.size === 0) continue;
+      out.push({
+        id: `category:${meta.id}`,
+        label: meta.label,
+        tagline: meta.description,
+        glyph: CATEGORY_GLYPH[meta.id],
+        bookIds,
+        family: meta.family,
       });
     }
   }
@@ -133,13 +198,20 @@ export function stringifyParamValues(value: Record<string, unknown>): Record<str
   return out;
 }
 
-/** Seed a param object from the schema's declared defaults. */
+/**
+ * Seed a param object from the schema's declared defaults. Runtime-template
+ * defaults (`{{task.dir}}`) are left unseeded — the field stays empty, its
+ * description explains the fallback, and the server resolves the token at
+ * task creation. See `seedableParamDefault` for why seeding the literal
+ * token is actively harmful.
+ */
 export function seedParamDefaults(schema: unknown): Record<string, unknown> {
   const props = ((schema as { properties?: Record<string, { default?: unknown } | undefined> })
     ?.properties ?? {}) as Record<string, { default?: unknown } | undefined>;
   const out: Record<string, unknown> = {};
   for (const [key, def] of Object.entries(props)) {
-    if (def && def.default !== undefined) out[key] = def.default;
+    const seed = seedableParamDefault(def);
+    if (seed !== undefined) out[key] = seed;
   }
   return out;
 }

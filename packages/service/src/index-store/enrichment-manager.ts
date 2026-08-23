@@ -294,6 +294,16 @@ export class IndexEnrichmentManager {
   }
 
   /**
+   * Join the running on-demand drive for a project, or null when none is
+   * running. The promise never rejects (drive errors are logged inside
+   * `drive`). For callers that sequence bounded work on a drained index —
+   * the index-readiness ensure races this against an awake-time budget.
+   */
+  awaitDrive(projectId: string): Promise<void> | null {
+    return this.drives.get(projectId)?.run ?? null;
+  }
+
+  /**
    * Ask a running drive to stop at its next batch boundary. Already-completed
    * work stays in the index; the remainder is picked up by the next tick or
    * drive. Returns false when no drive is running for the project.

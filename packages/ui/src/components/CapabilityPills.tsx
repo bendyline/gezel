@@ -20,6 +20,8 @@ const CAPABILITY_LABELS: Record<string, string> = {
   'tasks.write': 'Updates tasks',
   'memory.read': 'Reads memory',
   'memory.write': 'Saves memory',
+  'index.read': 'Reads the index',
+  'index.refresh': 'Refreshes the index',
 };
 
 export function capabilityLabel(cap: string): string {

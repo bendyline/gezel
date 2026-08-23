@@ -124,13 +124,15 @@ describe('Ds4ModelManager', () => {
     expect(screen.getByText('fits with SSD streaming')).toBeInTheDocument();
     expect(screen.getByText('recommended on this device')).toBeInTheDocument();
     expect(screen.queryByText('runs on this device')).not.toBeInTheDocument();
-    // Download size and memory working set are separate columns: for a
-    // streaming model the two numbers are nearly an order of magnitude apart,
-    // and the memory one is the one that decides whether it runs.
+    // Download size and memory working set share one cell, as they do on the
+    // llama.cpp and MLX pages — for a streaming model the two numbers are
+    // nearly an order of magnitude apart, and the second decides whether it runs.
     expect(screen.getByRole('columnheader', { name: 'Size' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Memory' })).toBeInTheDocument();
-    expect(screen.getByText('153 GB')).toBeInTheDocument();
-    expect(screen.getByText(/≈ 80 GB/)).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: 'Memory' })).not.toBeInTheDocument();
+    expect(screen.getByText(/153\.0 GB/)).toBeInTheDocument();
+    // No context plan in this fixture, so the row quotes the flat authored
+    // footprint and keeps its hedge.
+    expect(screen.getByText('~80.0 GB in memory')).toBeInTheDocument();
   });
 
   it('labels a non-DeepSeek ds4 model by its own catalog name', async () => {
@@ -163,7 +165,7 @@ describe('Ds4ModelManager', () => {
     expect(await screen.findByText('GLM 5.2 (IQ2_XXS)')).toBeInTheDocument();
     expect(screen.queryByText(/DeepSeek/)).not.toBeInTheDocument();
     expect(screen.getByText('754B')).toBeInTheDocument();
-    expect(screen.getByText('197 GB')).toBeInTheDocument();
+    expect(screen.getByText(/197\.0 GB/)).toBeInTheDocument();
   });
 
   it('quotes the launch window and its memory cost on models that are not downloaded', async () => {
@@ -194,12 +196,15 @@ describe('Ds4ModelManager', () => {
     render(<Ds4ModelManager />);
 
     expect(await screen.findByText('128K')).toBeInTheDocument();
-    const planned = screen.getByText(/≈ 36 GB/);
-    expect(planned).toHaveAttribute('title', expect.stringContaining('context (KV) at 128K'));
-    // No plan for the FP4 row — it keeps the flat authored footprint and
-    // claims no relationship to the window.
-    const flat = screen.getByText(/≈ 80 GB/);
-    expect(flat).toHaveAttribute('title', expect.stringContaining('Target memory working set'));
+    // Planned row: the figure is re-based onto this device's window, so it is
+    // quoted plainly and the tooltip breaks out the part the window moves.
+    const planned = screen.getByText('36.0 GB in memory').closest('.model-size-cell');
+    expect(planned).toHaveAttribute('title', expect.stringContaining('granted 128K window'));
+    expect(planned).toHaveAttribute('title', expect.stringContaining('1.0 GB of context (KV)'));
+    // No plan for the FP4 row — it keeps the flat authored footprint, says so,
+    // and keeps the `~` the projected figure has earned its way out of.
+    const flat = screen.getByText('~80.0 GB in memory').closest('.model-size-cell');
+    expect(flat).toHaveAttribute('title', expect.stringContaining('no per-token slope'));
     expect(flat).toHaveAttribute('title', expect.not.stringContaining('context (KV)'));
     // Nothing is downloaded, so no check has run and none can.
     expect(screen.getAllByText('after download')).toHaveLength(2);
@@ -475,5 +480,64 @@ describe('Ds4ModelManager fitness column', () => {
 
     expect(await screen.findByText('not checked yet')).toBeInTheDocument();
     expect(screen.queryByText(/prefill/)).not.toBeInTheDocument();
+  });
+});
+
+describe('Ds4ModelManager memory projection', () => {
+  // Real catalog geometry: DeepSeek V4's compressed MLA KV is 8 KiB/token, so
+  // a 64K launch costs exactly 0.5 GB less than a 128K one. The projection was
+  // always context-aware; a whole-GB formatter rounded the difference away and
+  // made the row look like a fixed number. The decimal is the guard.
+  const RESIDENT_AT_128K = 80 * GiB;
+  const KV_PER_TOKEN = 8192;
+  const CONTEXT_FREE = RESIDENT_AT_128K - KV_PER_TOKEN * 131_072;
+
+  function planAt(ctxTokens: number) {
+    return {
+      plans: {
+        'deepseek-v4-flash-284b-q4': {
+          effectiveContextWindow: ctxTokens,
+          contextCeilingTokens: 262_144,
+          projectedResidentBytes: CONTEXT_FREE + KV_PER_TOKEN * ctxTokens,
+          kvBytesPerToken: KV_PER_TOKEN,
+          contextFreeResidentBytes: CONTEXT_FREE,
+        },
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.mocked(api.getMemoryProfile).mockResolvedValue({
+      platform: 'darwin',
+      totalRamBytes: 128 * GiB,
+      gpuVramBytes: null,
+      source: 'darwin-unified',
+      usableBytes: Math.floor(128 * GiB * 0.6),
+    });
+  });
+
+  it('quotes a smaller working set at a smaller context window', async () => {
+    vi.mocked(api.listDs4ContextPlans).mockResolvedValue(planAt(65_536) as never);
+    const { unmount } = render(<Ds4ModelManager />);
+    expect(await screen.findByText('79.5 GB in memory')).toBeInTheDocument();
+    unmount();
+
+    vi.mocked(api.listDs4ContextPlans).mockResolvedValue(planAt(131_072) as never);
+    render(<Ds4ModelManager />);
+    expect(await screen.findByText('80.0 GB in memory')).toBeInTheDocument();
+  });
+
+  it('names the part of the figure the context window actually moves', async () => {
+    vi.mocked(api.listDs4ContextPlans).mockResolvedValue(planAt(131_072) as never);
+
+    render(<Ds4ModelManager />);
+
+    const cell = (await screen.findByText('80.0 GB in memory')).closest('.model-size-cell');
+    expect(cell).toHaveAttribute(
+      'title',
+      expect.stringContaining('79.0 GB of routed-expert cache'),
+    );
+    expect(cell).toHaveAttribute('title', expect.stringContaining('1.0 GB of context (KV)'));
+    expect(cell).toHaveAttribute('title', expect.stringContaining('Only the second figure moves'));
   });
 });

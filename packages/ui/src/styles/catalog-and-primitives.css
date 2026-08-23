@@ -92,9 +92,12 @@
    difference: installed and downloadable builds share it. A ds4 download runs
    to hundreds of GB, so the memory and context guidance has to be readable on
    the row BEFORE the download starts — which a separate browse section cannot
-   do. The fit verdict rides the name cell rather than the memory column it
-   judges: its labels are the longest strings on the row, and a column sized to
-   hold them pushed the numeric columns off the panel. */
+   do. The fit verdict rides the name cell rather than the size cell it judges:
+   its labels are the longest strings on the row, and a column sized to hold
+   them pushed the numeric columns off the panel. Download size and memory
+   working set share one cell, as on the other engine pages — the two numbers
+   are nearly an order of magnitude apart for a streaming engine, so they read
+   as a pair rather than as two competing figures. */
 .ds4-model-table .ds4-model-name {
   font-weight: 600;
   white-space: nowrap;

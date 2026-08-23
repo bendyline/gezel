@@ -1,4 +1,5 @@
 import type { CheckResult, WorkspaceLike } from './types.js';
+import { createCitedPathChecker } from './workspace-exists.js';
 
 /**
  * Grounding + citation checks — the anti-fabrication vocabulary.
@@ -136,14 +137,6 @@ function cleanCitation(raw: string): string {
     .replace(/[>'"`).,;:]+$/, '');
 }
 
-function normalizePath(p: string): string {
-  return p
-    .trim()
-    .toLowerCase()
-    .replace(/^\.?\//, '')
-    .replace(/^workspace\//, '');
-}
-
 export interface CitationsResult extends CheckResult {
   /** Cited paths that resolved to a real workspace file. */
   resolved: string[];
@@ -156,7 +149,9 @@ export interface CitationsResult extends CheckResult {
 /**
  * Every source `file` cites must exist. File-path citations are resolved
  * against the workspace listing (tolerant of leading `./`, `/`, and
- * `workspace/`, case-insensitive). URLs cannot be fetched offline, so
+ * `workspace/`, case-insensitive), with a per-path read probe for listing
+ * misses — the listing is capped and dotfile-blind, see
+ * `createCitedPathChecker`. URLs cannot be fetched offline, so
  * they pass unless `corpus` is supplied, in which case every cited path
  * AND URL must be a member of the allowlist. The anti-fabrication gate.
  */
@@ -191,7 +186,7 @@ export async function citationsResolve(
 
   const cites = [...new Set(extractCitations(content, re).map(cleanCitation).filter(Boolean))];
   const min = opts.minCitations ?? 1;
-  const listing = new Set((await ws.list()).map(normalizePath));
+  const citedPathExists = createCitedPathChecker(ws);
   const corpus = opts.corpus ? new Set(opts.corpus.map((c) => c.toLowerCase())) : null;
 
   const resolved: string[] = [];
@@ -204,7 +199,7 @@ export async function citationsResolve(
       if (corpus && !corpus.has(c.toLowerCase())) unresolved.push(c);
       continue;
     }
-    if (listing.has(normalizePath(c)) || corpus?.has(c.toLowerCase())) resolved.push(c);
+    if (corpus?.has(c.toLowerCase()) || (await citedPathExists(c))) resolved.push(c);
     else unresolved.push(c);
   }
 

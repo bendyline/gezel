@@ -331,6 +331,39 @@ function resolveCraftbookParamDefaults(
 }
 
 /**
+ * Resolve ONLY the reserved runtime tokens (`{{task.dir}}` and its
+ * siblings) inside caller-supplied params. Everything else in an override
+ * survives byte-for-byte — inline templates, examples, and quoted source
+ * text are the caller's data, which is why overrides otherwise skip
+ * {@link resolveCraftbookParamDefaults} entirely.
+ *
+ * That exemption had a hole. A craftbook that declares
+ * `workPath: { default: '{{task.dir}}' }` gets that default seeded into
+ * the launcher form, rendered straight back out as a staged command token,
+ * and parsed as an EXPLICIT override — so the value that was supposed to
+ * be resolved by the defaults fixpoint arrives on the side that skips it.
+ * `interpolateStepsContext` is single-pass, so the gate's `{{workPath}}`
+ * resolved to a literal `{{task.dir}}` and `step-gate.ts` refused to run
+ * eight checks no deliverable could satisfy (security-architecture-review
+ * 2.0.4, task gezel/7, step `model-system`).
+ *
+ * Safe where a general re-substitution pass would not be: these four keys
+ * are reserved, a caller cannot declare them, and no caller ever means the
+ * literal token. Applied before the defaults resolve so the fixpoint sees
+ * concrete override values, and before persistence so
+ * {@link taskInterpolationContext}'s "already fully resolved" contract
+ * holds for every step added later.
+ */
+function resolveRuntimeTokensInParams(
+  params: Record<string, string>,
+  runtime: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(params).map(([key, value]) => [key, interpolateContext(value, runtime)]),
+  );
+}
+
+/**
  * Substitute `{{ key }}` placeholders with per-child context values.
  * Plain string substitution only — no templating engine (mirrors the
  * `TaskVariation.context` contract). Unknown placeholders are left intact
@@ -428,18 +461,26 @@ function interpolateStepsContext(
  * `create()` interpolates the whole recipe once; a step that arrives later
  * (add_task_step, set_step_deliverable's patch) skipped that walk, so a
  * `{{task.dir}}` in its gate would reach `step-gate.ts`'s unresolved-
- * placeholder guard and hard-fail as an infrastructure error. Persisted
- * `craftbookParams` are already fully resolved (reserved runtime values
- * never land there), so spreading them first and the runtime values last
- * preserves create()'s reserved-wins semantics.
+ * placeholder guard and hard-fail as an infrastructure error. Spreading
+ * the persisted params first and the runtime values last preserves
+ * create()'s reserved-wins semantics.
+ *
+ * The persisted params run back through {@link resolveRuntimeTokensInParams}
+ * rather than being trusted as-is: create() now resolves them before
+ * persisting, but tasks launched before that fix carry a literal
+ * `{{task.dir}}` on disk, and a single-pass substitution would hand it
+ * straight to the gate a second time.
  */
 function taskInterpolationContext(task: Task): Record<string, string> {
-  return {
-    ...(task.craftbookParams ?? {}),
+  const runtime = {
     'task.num': String(task.num),
     'task.ref': task.ref,
     'task.projectId': task.projectId,
     'task.dir': task.artifactDir ?? `tasks/${task.num}`,
+  };
+  return {
+    ...resolveRuntimeTokensInParams(task.craftbookParams ?? {}, runtime),
+    ...runtime,
   };
 }
 
@@ -1162,6 +1203,10 @@ export class TaskManager {
       'task.projectId': projectId,
       'task.dir': artifactDir,
     };
+    Object.assign(
+      craftbookParamOverrides,
+      resolveRuntimeTokensInParams(craftbookParamOverrides, runtimeCraftbookContext),
+    );
     effectiveCraftbookParams = {
       ...resolveCraftbookParamDefaults(
         declaredCraftbookDefaults,

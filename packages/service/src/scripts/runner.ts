@@ -132,6 +132,7 @@ export class ScriptRunner {
   private readonly catalog?: CatalogService;
   private dispatcher: ReturnType<typeof buildDispatcher>;
   private mcpCall: DispatcherDeps['mcpCall'];
+  private indexAccess: DispatcherDeps['index'];
 
   constructor(opts: ScriptRunnerOptions) {
     this.store = opts.store;
@@ -148,13 +149,18 @@ export class ScriptRunner {
         ? new DefaultCredentialRegistry(this.store, opts.secrets, this.store.historyManager)
         : undefined);
 
-    this.dispatcher = buildDispatcher({
+    this.dispatcher = this.buildDispatcherWithDeps();
+  }
+
+  private buildDispatcherWithDeps(): ReturnType<typeof buildDispatcher> {
+    return buildDispatcher({
       store: this.store,
       chat: this.chat,
       memory: this.memory,
       tasks: this.tasks,
       mcpCall: this.mcpCall,
       credentials: this.credentials,
+      index: this.indexAccess,
       runNested: (parentCtx, name, input) => this.runNested(parentCtx, name, input),
     });
   }
@@ -166,15 +172,17 @@ export class ScriptRunner {
    */
   setMcpCall(fn: DispatcherDeps['mcpCall']): void {
     this.mcpCall = fn;
-    this.dispatcher = buildDispatcher({
-      store: this.store,
-      chat: this.chat,
-      memory: this.memory,
-      tasks: this.tasks,
-      mcpCall: fn,
-      credentials: this.credentials,
-      runNested: (parentCtx, name, input) => this.runNested(parentCtx, name, input),
-    });
+    this.dispatcher = this.buildDispatcherWithDeps();
+  }
+
+  /**
+   * Wire the `index.*` methods after the workspace-index and enrichment
+   * managers exist — they are constructed later in service boot than the
+   * runner. Same late-binding shape as {@link setMcpCall}.
+   */
+  setIndexAccess(access: DispatcherDeps['index']): void {
+    this.indexAccess = access;
+    this.dispatcher = this.buildDispatcherWithDeps();
   }
 
   async run(opts: RunScriptOptions): Promise<ScriptRun> {

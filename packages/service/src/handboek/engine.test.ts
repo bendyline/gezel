@@ -38,6 +38,7 @@ const catalog: HandboekCatalog = {
             id: 'status-report',
             name: 'Status Report',
             description: 'Summarize the week. Keep it honest.',
+            tags: ['status', 'report', 'weekly'],
           } as never,
         },
       ];
@@ -132,10 +133,11 @@ describe('handboek engine', () => {
       'craftbooks-index',
       'craftbook/status-report',
     ]);
+    // Shelved by subject, with the family named because the list is flat.
     expect(craftbooks.entries[1]?.subcategory).toEqual({
-      id: 'general',
-      title: 'General work',
-      order: 2,
+      id: 'business',
+      title: 'Non-code · Business & admin',
+      order: 12,
     });
     const technical = toc.areas.find((a) => a.area === 'technical')!;
     expect(technical.entries.map((entry) => [entry.id, entry.subcategory?.title])).toEqual([

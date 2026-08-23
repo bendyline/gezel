@@ -250,9 +250,12 @@ describe('ScriptsView', () => {
       expect(screen.getByText('Hello World')).toBeInTheDocument();
     });
 
+    // The detail pane fills in a tick after the list; waiting only on the
+    // list name races the button into existence.
+    const editCode = await screen.findByRole('button', { name: 'Edit code' });
     const openTab = vi.fn();
     window.addEventListener('gezel:open-tab', openTab);
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Edit code' }));
+    await userEvent.setup().click(editCode);
     window.removeEventListener('gezel:open-tab', openTab);
 
     const detail = (openTab.mock.calls[0]?.[0] as CustomEvent).detail;

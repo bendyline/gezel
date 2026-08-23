@@ -2,7 +2,7 @@ import type { CraftbookTemplateManifest } from '@bendyline/gezel';
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
 import { useMemo, useState } from 'react';
 import { GezelJsonEditor } from './GezelJsonEditor.js';
-import { renderCraftbookCommand } from './craftbook-command.js';
+import { renderCraftbookCommand, seedableParamDefault } from './craftbook-command.js';
 
 /**
  * Collect a craftbook's parameters via a squisq dynamic form (its
@@ -83,7 +83,8 @@ function seedDefaults(schema: SquisqAnnotatedSchema | undefined): Record<string,
   const props = (schema?.properties ?? {}) as Record<string, { default?: unknown } | undefined>;
   const out: Record<string, unknown> = {};
   for (const [key, def] of Object.entries(props)) {
-    if (def && def.default !== undefined) out[key] = def.default;
+    const seed = seedableParamDefault(def);
+    if (seed !== undefined) out[key] = seed;
   }
   return out;
 }

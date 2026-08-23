@@ -164,12 +164,18 @@ describe('NewTaskDialog', () => {
     expect(await screen.findByRole('radio', { name: 'Social Digest' })).toBeInTheDocument();
   });
 
-  it('groups craftbooks into project-lifecycle shelves', async () => {
+  it('shelves craftbooks by subject category, grouped code / non-code', async () => {
     vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
       items: [
-        bookItem('branding-website', 'Branding Website', { role: 'project-starter' }),
-        bookItem('code-review', 'Code Review', { role: 'maintenance-review' }),
-        bookItem('research-report', 'Research Report', { role: 'general' }),
+        bookItem('branding-website', 'Branding Website', {
+          role: 'project-starter',
+          category: 'code-build',
+        }),
+        bookItem('code-review', 'Code Review', {
+          role: 'maintenance-review',
+          category: 'code-review',
+        }),
+        bookItem('research-report', 'Research Report', { role: 'general', category: 'research' }),
       ],
       missingToolsets: {},
       projectType: null,
@@ -180,12 +186,35 @@ describe('NewTaskDialog', () => {
     renderDialog();
     const user = userEvent.setup();
     const starters = await screen.findByRole('button', { name: /New project starters/ });
-    expect(screen.getByRole('button', { name: /Maintenance & review/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /General work/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Build & features/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Review & security/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Research & analysis/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /General work/ })).not.toBeInTheDocument();
+    expect(screen.getByText('Code')).toBeInTheDocument();
+    expect(screen.getByText('Non-code')).toBeInTheDocument();
 
     await user.click(starters);
     expect(screen.getByRole('radio', { name: 'Branding Website' })).toBeInTheDocument();
     expect(screen.queryByRole('radio', { name: 'Code Review' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Review & security/ }));
+    expect(screen.getByRole('radio', { name: 'Code Review' })).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Research Report' })).not.toBeInTheDocument();
+  });
+
+  it('falls back to tag inference for a craftbook with no authored category', async () => {
+    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
+      items: [bookItem('legacy-book', 'Legacy Book', { tags: ['tests', 'coverage'] })],
+      missingToolsets: {},
+      projectType: null,
+      suggestedIds: [],
+      establishedCodebase: true,
+    });
+
+    renderDialog();
+    const shelf = await screen.findByRole('button', { name: /Testing & fixes/ });
+    await userEvent.setup().click(shelf);
+    expect(screen.getByRole('radio', { name: 'Legacy Book' })).toBeInTheDocument();
   });
 
   it('ranks recommended title matches first when searching', async () => {

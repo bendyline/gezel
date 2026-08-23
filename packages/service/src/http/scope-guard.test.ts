@@ -439,6 +439,20 @@ describe('sessionRouteGuard', () => {
     expect((await app.request('/api/engines/status')).status).toBe(403);
   });
 
+  // A pause-for-help exists to stop a task that cannot converge. Resetting
+  // its budgets is the user's move; a worker that could retry itself would
+  // loop right past the circuit breaker.
+  it('keeps a paused task retry off the worker surface', async () => {
+    const app = sessionPolicyApp(session('proj-a'));
+    expect((await app.request('/api/projects/proj-a/tasks/3/retry', jsonPost({}))).status).toBe(
+      403,
+    );
+    // The worker's own progress writes on the same task stay open.
+    expect((await app.request('/api/projects/proj-a/tasks/3/status', jsonPost({}))).status).toBe(
+      200,
+    );
+  });
+
   it('keeps shared documents available without the foreign-project fallback', async () => {
     const app = sessionPolicyApp(session('proj-a'));
     expect((await app.request('/api/documents/read?path=guidelines%2Fcoding.md')).status).toBe(200);

@@ -79,6 +79,7 @@ The `requires` list is both documentation and an enforced permission boundary. A
 | `documents.read`, `documents.write` | `gezel.documents` for the shared document library |
 | `tasks.read`, `tasks.write` | `gezel.task` for task records, steps, and notes |
 | `memory.read`, `memory.write` | `gezel.memory` for project memories |
+| `index.read`, `index.refresh` | `gezel.index` for workspace-index status and the bounded make-it-fresh ensure |
 | `llm` | `gezel.llm.oneShot()` |
 | `network` | `gezel.mcp.call()` and `gezel.http` |
 | `credential:<name>` plus `network` | `gezel.http.authed()` with a project-approved named credential |

@@ -1,5 +1,5 @@
-import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
-import { mkdir, readFile, readdir, rm, symlink } from 'node:fs/promises';
+import { constants, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
+import { copyFile, mkdir, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { chatModelInstallIdentity } from './model-sources.ts';
@@ -469,11 +469,12 @@ export async function ensureWarmModel(opts: {
 }
 
 /**
- * Make a warm-cache model visible inside the trial home. We junction the
- * per-model directory (so the trial provider's installed-models loader
- * finds the model). Junctions on Windows + symlinks elsewhere both behave
- * like real directories; the loaders don't realpath, so the link looks
- * exactly like a normally-installed model.
+ * Make a warm-cache model visible inside the trial home as a real directory.
+ * Product model stores deliberately reject symlinks and junctions, so the
+ * eval harness cannot mount a cached model by linking its top-level folder.
+ * Clone-copying keeps the trial isolated while remaining cheap on APFS and
+ * other copy-on-write filesystems; COPYFILE_FICLONE falls back to an ordinary
+ * copy where reflinks are unavailable.
  */
 export async function linkModelIntoTrial(opts: {
   cacheRoot: string;
@@ -486,8 +487,22 @@ export async function linkModelIntoTrial(opts: {
   const link = modelDirInHome(trialHome, engine, modelId);
   await mkdir(dirname(link), { recursive: true });
   if (existsSync(link)) return;
-  // 'junction' on win32 needs an absolute target (Node enforces this); 'dir'
-  // on POSIX makes a directory symlink.
-  const type = process.platform === 'win32' ? 'junction' : 'dir';
-  await symlink(target, link, type);
+  await cloneDirectory(target, link);
+}
+
+async function cloneDirectory(source: string, destination: string): Promise<void> {
+  await mkdir(destination, { recursive: true });
+  const entries = await readdir(source, { withFileTypes: true });
+  for (const entry of entries) {
+    const sourcePath = join(source, entry.name);
+    const destinationPath = join(destination, entry.name);
+    if (entry.isDirectory()) {
+      await cloneDirectory(sourcePath, destinationPath);
+      continue;
+    }
+    if (!entry.isFile()) {
+      throw new Error(`refusing to clone linked or non-file model payload: ${sourcePath}`);
+    }
+    await copyFile(sourcePath, destinationPath, constants.COPYFILE_FICLONE);
+  }
 }

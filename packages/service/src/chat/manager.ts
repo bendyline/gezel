@@ -1955,6 +1955,18 @@ export class ChatManager {
   private taskBudgetHandler?: TaskBudgetPauseFn;
 
   /**
+   * Clear a task's unattended-spend accumulator. A `send` with no `from`
+   * already does this (the human is engaged), but a user-driven retry
+   * restarts the work through the handoff path instead — without this the
+   * task would still be sitting on its spent budget and the very first
+   * turn would trip the hard threshold again.
+   */
+  resetTaskBudget(taskRef: string): void {
+    this.taskBudget.reset(taskRef);
+    this.pendingBudgetNudge.delete(taskRef);
+  }
+
+  /**
    * Account one completed turn's usage against the task its session serves,
    * and act on a newly-crossed budget threshold. Called from each task-scoped
    * session's `onUsage` alongside the usage tracker; a no-op for non-task
@@ -3679,7 +3691,7 @@ export class ChatManager {
      * the seed says "you've been assigned" rather than "the previous
      * step was completed". Defaults to `'handoff'`.
      */
-    kind?: 'handoff' | 'entry';
+    kind?: 'handoff' | 'entry' | 'retry';
     /**
      * Provider-queue lane for the dispatched turn. Night-shift handoffs
      * pass `'background'` so any interactive turn on the same provider
@@ -3891,17 +3903,20 @@ export class ChatManager {
       : roleBasedNameOnlyMode
         ? undefined
         : args.fromGezelName;
-    const seed = resumedExisting
-      ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Continue this existing task thread from the progress and tool evidence above. Re-read only what you still need, keep appending focused notes with \`write_task_note\`, and call \`advance_task_step\` when the step is done.`
-      : args.kind === 'entry'
-        ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
-        : selfHandoff
-          ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well. Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
-          : `${
-              fromGezelDisplayName
-                ? `${fromGezelDisplayName} has`
-                : 'The previous step has been completed and'
-            } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`;
+    const seed =
+      args.kind === 'retry'
+        ? `You paused on step \`${dispatchStepId}\` of task ${args.taskRef}, and the user has asked you to try again. Call \`read_task_notes\` first — the newest note says why it stopped. Then take a DIFFERENT approach to the same deliverable instead of repeating the attempt that failed, and call \`advance_task_step\` when it is done. If it still cannot work, say exactly what you need with \`ask_user_question\` rather than going quiet.`
+        : resumedExisting
+          ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Continue this existing task thread from the progress and tool evidence above. Re-read only what you still need, keep appending focused notes with \`write_task_note\`, and call \`advance_task_step\` when the step is done.`
+          : args.kind === 'entry'
+            ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
+            : selfHandoff
+              ? `Task ${args.taskRef} has advanced to the next step — \`${dispatchStepId}\`, which is yours as well. Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
+              : `${
+                  fromGezelDisplayName
+                    ? `${fromGezelDisplayName} has`
+                    : 'The previous step has been completed and'
+                } handed step \`${dispatchStepId}\` of task ${args.taskRef} to you. Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go so the next gezel can pick up where you left off. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`;
     // Fire-and-forget: the voorman's MCP tool call doesn't need to wait for
     // Maya's first turn to return. `send` already publishes error + done
     // events on its own bus, so a failure just surfaces in Maya's session
