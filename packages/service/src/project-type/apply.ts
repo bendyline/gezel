@@ -1,16 +1,22 @@
-import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import {
   type AppliedProjectType,
+  type AppliedSeedRecord,
   type GezelFrontmatter,
   GezelFrontmatterSchema,
   type InstalledToolset,
+  type ProjectTypeApplyPlan,
   type ProjectTypeManifest,
   type ProjectTypeProvenance,
   type ProjectTypeSchedule,
+  type ProjectTypeSeedState,
+  type ProjectTypeStatusResponse,
   type Question,
   type ScheduleMaterialization,
+  type SeedPlanState,
+  compareSemver,
   createLogger,
   pickRandomNameWithGender,
   projectTypeIcon,
@@ -30,6 +36,7 @@ import {
   hostRecurrenceFields,
 } from '../tasks/schedule-host.js';
 import { installProjectTypeCraftbooks, resolveTypeCraftbook } from './craftbooks.js';
+import { listGezapps } from './gezapp.js';
 
 const log = createLogger('project-type');
 
@@ -40,6 +47,47 @@ export interface ApplyProjectTypeInput {
   version?: string;
   /** Param values collected at adoption, substituted into templates + seed files. */
   params?: Record<string, unknown>;
+  /**
+   * Seed collision policy. `overwrite` (default — the original behavior)
+   * writes every declared seed. `preserve` keeps user-modified files
+   * (reported in `seedsSkipped`), judged against the overlay manifest.
+   */
+  seedPolicy?: 'overwrite' | 'preserve';
+  /**
+   * Reuse a roster gezel with the same templateId instead of minting a new
+   * one — makes re-apply idempotent for non-lean types.
+   */
+  reuseRosterGezels?: boolean;
+}
+
+function sha256Hex(content: string | Buffer): string {
+  return createHash('sha256').update(content).digest('hex');
+}
+
+function semverGreater(a: string, b: string): boolean {
+  try {
+    return compareSemver(a, b) > 0;
+  } catch {
+    return a !== b && a.localeCompare(b) > 0;
+  }
+}
+
+/**
+ * What one seed apply would do — shared by the real write path and the
+ * preflight plan so they can never disagree. `priorSha` is the overlay's
+ * record of what the app last wrote to this path.
+ */
+function classifySeed(args: {
+  existing: Buffer | null;
+  renderedSha: string;
+  priorSha: string | undefined;
+  policy: 'overwrite' | 'preserve';
+}): SeedPlanState {
+  if (args.existing === null) return 'new';
+  const existingSha = sha256Hex(args.existing);
+  if (existingSha === args.renderedSha) return 'unchanged';
+  if (args.policy === 'preserve' && existingSha !== args.priorSha) return 'keep-modified';
+  return 'update';
 }
 
 /**
@@ -276,10 +324,21 @@ export async function applyProjectType(
   const gezelsCreated: AppliedProjectType['gezelsCreated'] = [];
   let voormanGezelId: string | undefined;
   const reusePool = manifest.leanProfile ? await store.listGezels().catch(() => []) : [];
+  // Non-lean re-apply reuse (opt-in): a roster gezel from the same template
+  // is this project's instance of that role — minting another one per apply
+  // is exactly the duplicate-Damspeler failure, one project down.
+  const rosterPool =
+    !manifest.leanProfile && input.reuseRosterGezels
+      ? (
+          await Promise.all(
+            (project.gezelIds ?? []).map((id) => store.getGezel(id).catch(() => null)),
+          )
+        ).filter((g) => g !== null)
+      : [];
   for (const ref of manifest.gezels) {
     const reused = manifest.leanProfile
       ? reusePool.find((g) => g.templateId === ref.templateId)
-      : undefined;
+      : rosterPool.find((g) => g.templateId === ref.templateId);
     let gezelId: string;
     let gezelName: string;
     if (reused) {
@@ -314,6 +373,12 @@ export async function applyProjectType(
       voorman: ref.voorman,
     });
     if (ref.voorman && !voormanGezelId) voormanGezelId = gezelId;
+    // The type's crew belongs on the project roster — that is what makes a
+    // later `reuseRosterGezels` re-apply idempotent for every role, not
+    // just the voorman (whose roster join rides the provenance update).
+    await store.addGezelToProject(projectId, gezelId, { source: 'project-type' }).catch((err) => {
+      log.warn(`[apply] roster add failed for ${projectId}/${gezelId}: ${String(err)}`);
+    });
   }
 
   // 3. Install SDK scripts with provenance markers.
@@ -343,45 +408,76 @@ export async function applyProjectType(
         )
       : { installed: [], skipped: [], failed: [] };
 
-  // 4. Seed workspace data files (param-substituted).
+  // 4. Seed workspace + artifact data files (param-substituted). Under
+  //    `seedPolicy: 'preserve'` a file the user modified since the app last
+  //    wrote it is kept (reported in `seedsSkipped`); everything written or
+  //    confirmed app-owned is recorded in the overlay manifest so the NEXT
+  //    apply can make the same distinction.
+  const seedPolicy = input.seedPolicy ?? 'overwrite';
+  const priorOverlay = await store.readProjectTypeOverlay(projectId);
+  const priorSeedByPath = new Map(
+    (priorOverlay?.seeds ?? []).map((seed) => [seed.path, seed] as const),
+  );
+  const appliedAt = new Date().toISOString();
   const workspaceSeeded: string[] = [];
+  const seedsSkipped: string[] = [];
+  const overlaySeeds: AppliedSeedRecord[] = [];
+
+  const applySeed = async (rel: string, baseDir: string, recordPath: string): Promise<void> => {
+    const buf = await catalog.readItemFile('project-type', typeId, rel, source, manifest.version);
+    if (!buf) {
+      log.warn(`[apply] project type ${typeId}: seed file ${rel} not found — skipping`);
+      return;
+    }
+    const dest = safeJoin(baseDir, rel);
+    if (!dest) {
+      log.warn(`[apply] project type ${typeId}: unsafe seed path ${rel} — skipping`);
+      return;
+    }
+    const rendered = renderProjectTypeTemplate(buf.toString('utf8'), params);
+    const renderedSha = sha256Hex(rendered);
+    const prior = priorSeedByPath.get(recordPath);
+    const record: AppliedSeedRecord = {
+      path: recordPath,
+      sha256: renderedSha,
+      typeVersion: manifest.version,
+      writtenAt: appliedAt,
+    };
+    const existing = seedPolicy === 'preserve' ? await readFile(dest).catch(() => null) : null;
+    const state =
+      seedPolicy === 'preserve'
+        ? classifySeed({ existing, renderedSha, priorSha: prior?.sha256, policy: seedPolicy })
+        : 'update';
+    if (state === 'keep-modified') {
+      seedsSkipped.push(recordPath);
+      // The app's last-written content is still whatever the old overlay
+      // recorded — carry that forward, never claim the user's bytes.
+      if (prior) overlaySeeds.push(prior);
+      return;
+    }
+    if (state === 'unchanged') {
+      overlaySeeds.push(record);
+      return;
+    }
+    await mkdir(dirname(dest), { recursive: true });
+    await writeFile(dest, rendered, 'utf8');
+    workspaceSeeded.push(recordPath);
+    overlaySeeds.push(record);
+  };
+
   if (manifest.workspaceSeed.length > 0) {
     const workspaceDir = await store.projectWorkspaceDir(projectId);
     for (const rel of manifest.workspaceSeed) {
-      const buf = await catalog.readItemFile('project-type', typeId, rel, source, manifest.version);
-      if (!buf) {
-        log.warn(`[apply] project type ${typeId}: seed file ${rel} not found — skipping`);
-        continue;
-      }
-      const dest = safeJoin(workspaceDir, rel);
-      if (!dest) {
-        log.warn(`[apply] project type ${typeId}: unsafe seed path ${rel} — skipping`);
-        continue;
-      }
-      await mkdir(dirname(dest), { recursive: true });
-      await writeFile(dest, renderProjectTypeTemplate(buf.toString('utf8'), params), 'utf8');
-      workspaceSeeded.push(rel);
+      await applySeed(rel, workspaceDir, rel);
     }
   }
 
-  // 4b. Seed artifact files (param-substituted) for types whose output lives
-  //     in `artifacts/` — e.g. a design gallery reading a starter palette.
+  // 4b. Artifact seeds, for types whose output lives in `artifacts/` —
+  //     e.g. a design gallery reading a starter palette.
   if (manifest.artifactsSeed.length > 0) {
     const artifactsDir = store.projectArtifactsDir(projectId);
     for (const rel of manifest.artifactsSeed) {
-      const buf = await catalog.readItemFile('project-type', typeId, rel, source, manifest.version);
-      if (!buf) {
-        log.warn(`[apply] project type ${typeId}: artifact seed ${rel} not found — skipping`);
-        continue;
-      }
-      const dest = safeJoin(artifactsDir, rel);
-      if (!dest) {
-        log.warn(`[apply] project type ${typeId}: unsafe artifact seed path ${rel} — skipping`);
-        continue;
-      }
-      await mkdir(dirname(dest), { recursive: true });
-      await writeFile(dest, renderProjectTypeTemplate(buf.toString('utf8'), params), 'utf8');
-      workspaceSeeded.push(`artifacts/${rel}`);
+      await applySeed(rel, artifactsDir, `artifacts/${rel}`);
     }
   }
 
@@ -481,6 +577,16 @@ export async function applyProjectType(
     { projectId, typeId, manifest, voormanGezelId },
   );
 
+  // 8. Record the overlay manifest — the durable answer to "which files did
+  //    the app deploy here, and what did the app-owned content hash to".
+  await store.writeProjectTypeOverlay(projectId, {
+    schemaVersion: 1,
+    typeId,
+    typeVersion: manifest.version,
+    appliedAt,
+    seeds: overlaySeeds,
+  });
+
   return {
     typeId,
     version: manifest.version,
@@ -488,6 +594,7 @@ export async function applyProjectType(
     gezelsCreated,
     scriptsInstalled,
     workspaceSeeded,
+    seedsSkipped,
     toolsetsInstalled,
     toolsBound: manifest.tools.map((t) => t.name),
     craftbooksInstalled: craftbookInstall.installed,
@@ -681,4 +788,174 @@ async function writeScheduleApprovalQuestion(
     createdAt: new Date().toISOString(),
   };
   await store.writeQuestion(question);
+}
+
+/**
+ * Dry-run report: what an apply with the same input would materialize,
+ * computed without writing anything. Runs the same preflight validation the
+ * apply engine relies on, so a plan that renders is a plan that can apply.
+ */
+export async function planProjectTypeApply(
+  deps: { store: Store; catalog: CatalogService; home: string },
+  input: ApplyProjectTypeInput,
+): Promise<ProjectTypeApplyPlan> {
+  const { store, catalog } = deps;
+  const project = await store.getProject(input.projectId);
+  if (!project) throw new Error(`project ${input.projectId} not found`);
+  const { manifest, source } = await resolveProjectType(catalog, input.typeId, input.version);
+  await preflightProjectType({ catalog }, { typeId: input.typeId, version: manifest.version });
+  const params = { ...seedParamDefaults(manifest.params), ...(input.params ?? {}) };
+  const policy = input.seedPolicy ?? 'overwrite';
+
+  const reusePool = manifest.leanProfile ? await store.listGezels().catch(() => []) : [];
+  const rosterPool =
+    !manifest.leanProfile && input.reuseRosterGezels
+      ? (
+          await Promise.all(
+            (project.gezelIds ?? []).map((id) => store.getGezel(id).catch(() => null)),
+          )
+        ).filter((g) => g !== null)
+      : [];
+  const gezels = manifest.gezels.map((ref) => ({
+    templateId: ref.templateId,
+    voorman: ref.voorman,
+    reuse: manifest.leanProfile
+      ? reusePool.some((g) => g.templateId === ref.templateId)
+      : rosterPool.some((g) => g.templateId === ref.templateId),
+  }));
+
+  const overlay = await store.readProjectTypeOverlay(input.projectId);
+  const priorSeedByPath = new Map((overlay?.seeds ?? []).map((seed) => [seed.path, seed] as const));
+  const seeds: ProjectTypeApplyPlan['seeds'] = [];
+  const planSeed = async (rel: string, baseDir: string, recordPath: string): Promise<void> => {
+    const buf = await catalog.readItemFile(
+      'project-type',
+      input.typeId,
+      rel,
+      source,
+      manifest.version,
+    );
+    if (!buf) return;
+    const dest = safeJoin(baseDir, rel);
+    if (!dest) return;
+    const rendered = renderProjectTypeTemplate(buf.toString('utf8'), params);
+    const existing = await readFile(dest).catch(() => null);
+    seeds.push({
+      path: recordPath,
+      state: classifySeed({
+        existing,
+        renderedSha: sha256Hex(rendered),
+        priorSha: priorSeedByPath.get(recordPath)?.sha256,
+        policy,
+      }),
+    });
+  };
+  if (manifest.workspaceSeed.length > 0) {
+    const workspaceDir = await store.projectWorkspaceDir(input.projectId);
+    for (const rel of manifest.workspaceSeed) await planSeed(rel, workspaceDir, rel);
+  }
+  if (manifest.artifactsSeed.length > 0) {
+    const artifactsDir = store.projectArtifactsDir(input.projectId);
+    for (const rel of manifest.artifactsSeed) await planSeed(rel, artifactsDir, `artifacts/${rel}`);
+  }
+
+  const installNow: string[] = [];
+  const deferred: string[] = [];
+  for (const ref of manifest.toolsets) {
+    const tsDetail = await catalog.get('toolset', ref.id, ref.sourceId, undefined);
+    if (tsDetail?.manifest.kind === 'toolset' && tsDetail.manifest.runtime.kind === 'http-mcp') {
+      installNow.push(ref.id);
+    } else {
+      deferred.push(ref.id);
+    }
+  }
+
+  return {
+    typeId: input.typeId,
+    version: manifest.version,
+    source,
+    gezels,
+    scripts: Object.keys(manifest.scripts ?? {}),
+    seeds,
+    toolsets: { installNow, deferred },
+    craftbooks: manifest.craftbooks,
+    schedules: manifest.schedules.map((schedule) => ({
+      craftbook: schedule.craftbook,
+      ...(schedule.cron ? { cron: schedule.cron } : {}),
+      consent: schedule.consent,
+    })),
+    pages: manifest.pages !== undefined,
+  };
+}
+
+/**
+ * The applied type vs the installed AI App, plus per-seed drift against the
+ * overlay manifest. Declared seeds with no overlay record report `untracked`
+ * (the folder moved machines, or the apply predates overlay tracking).
+ */
+export async function projectTypeStatus(
+  deps: { store: Store; catalog: CatalogService; home: string },
+  projectId: string,
+): Promise<ProjectTypeStatusResponse> {
+  const { store, catalog } = deps;
+  const project = await store.getProject(projectId);
+  if (!project) throw new Error(`project ${projectId} not found`);
+  const provenance = project.projectType ?? null;
+
+  let installedApp: ProjectTypeStatusResponse['installedApp'] = null;
+  if (provenance) {
+    const apps = await listGezapps(deps.home);
+    const found = apps.find((app) => app.entry.appId === provenance.id);
+    if (found) {
+      installedApp = {
+        appId: found.entry.appId,
+        version: found.entry.version,
+        enabled: found.entry.enabled,
+      };
+    }
+  }
+  const updateAvailable = Boolean(
+    provenance && installedApp && semverGreater(installedApp.version, provenance.version),
+  );
+
+  const seedDest = async (recordPath: string): Promise<string | null> => {
+    if (recordPath.startsWith('artifacts/')) {
+      return safeJoin(store.projectArtifactsDir(projectId), recordPath.slice('artifacts/'.length));
+    }
+    try {
+      return safeJoin(await store.projectWorkspaceDir(projectId), recordPath);
+    } catch {
+      return null;
+    }
+  };
+
+  const overlay = await store.readProjectTypeOverlay(projectId);
+  const seeds: Array<{ path: string; state: ProjectTypeSeedState }> = [];
+  for (const record of overlay?.seeds ?? []) {
+    const dest = await seedDest(record.path);
+    const existing = dest ? await readFile(dest).catch(() => null) : null;
+    seeds.push({
+      path: record.path,
+      state:
+        existing === null ? 'missing' : sha256Hex(existing) === record.sha256 ? 'ok' : 'modified',
+    });
+  }
+  if (provenance) {
+    try {
+      const { manifest } = await resolveProjectType(catalog, provenance.id, provenance.version);
+      const known = new Set((overlay?.seeds ?? []).map((seed) => seed.path));
+      for (const rel of manifest.workspaceSeed) {
+        if (!known.has(rel)) seeds.push({ path: rel, state: 'untracked' });
+      }
+      for (const rel of manifest.artifactsSeed) {
+        if (!known.has(`artifacts/${rel}`)) {
+          seeds.push({ path: `artifacts/${rel}`, state: 'untracked' });
+        }
+      }
+    } catch {
+      // The type no longer resolves (app removed) — overlay-only report.
+    }
+  }
+
+  return { projectId, provenance, installedApp, updateAvailable, seeds };
 }

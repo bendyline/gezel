@@ -42,7 +42,14 @@ interface Harness {
   runInPage(code: string): unknown;
 }
 
-function boot(opts: { embedded?: boolean; pathname?: string } = {}): Harness {
+function boot(
+  opts: {
+    embedded?: boolean;
+    pathname?: string;
+    serve?: boolean;
+    fetchImpl?: (url: string, init?: Record<string, unknown>) => Promise<unknown>;
+  } = {},
+): Harness {
   const embedded = opts.embedded !== false;
   const posted: unknown[] = [];
   const listeners: Array<(ev: { source: unknown; data: unknown }) => void> = [];
@@ -74,12 +81,16 @@ function boot(opts: { embedded?: boolean; pathname?: string } = {}): Harness {
     addEventListener: (type: string, fn: (ev: { source: unknown; data: unknown }) => void) => {
       if (type === 'message') listeners.push(fn);
     },
-    fetch: () => Promise.reject(new Error('no fetch in test')),
+    fetch: opts.fetchImpl ?? (() => Promise.reject(new Error('no fetch in test'))),
   };
   context.window = context;
   (context as { parent?: unknown }).parent = embedded ? parent : context;
   createContext(context);
-  const html = buildPageApiShim(BOOTSTRAP);
+  const html = buildPageApiShim(
+    opts.serve
+      ? { ...BOOTSTRAP, serve: { apiBase: '/app/api', dataBase: '/data', chat: true } }
+      : BOOTSTRAP,
+  );
   const script = html.replace(/^<script>/, '').replace(/<\/script>$/, '');
   runInContext(script, context);
   return {
@@ -259,5 +270,88 @@ describe('buildPageApiShim', () => {
     const h = boot();
     h.gezel.refresh();
     expect(lastPosted(h, 'refresh')).toMatchObject({ __gezelPage: 1, kind: 'refresh' });
+  });
+});
+
+describe('serve mode (bootstrap.serve present)', () => {
+  function jsonResponse(status: number, body: unknown) {
+    return { ok: status >= 200 && status < 300, status, json: async () => body };
+  }
+
+  it('selects mode serve, skips hello, and sends invoke over same-origin fetch', async () => {
+    const calls: Array<{ url: string; init: Record<string, unknown> }> = [];
+    const h = boot({
+      embedded: false,
+      serve: true,
+      fetchImpl: async (url, init) => {
+        calls.push({ url, init: init ?? {} });
+        return jsonResponse(200, { status: 'ok', output: { board: 'b' }, runId: 'r1' });
+      },
+    });
+    expect(h.gezel.page.mode).toBe('serve');
+    expect(h.posted).toEqual([]);
+    const result = (await h.gezel.tools.invoke('user_move', { from: 'c3', to: 'd4' })) as {
+      output: unknown;
+      runId: string;
+    };
+    expect(result).toMatchObject({ output: { board: 'b' }, runId: 'r1' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe('/app/api/invoke');
+    expect(calls[0]?.init).toMatchObject({ method: 'POST', credentials: 'same-origin' });
+    expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
+      tool: 'user_move',
+      input: { from: 'c3', to: 'd4' },
+    });
+  });
+
+  it('maps HTTP failures onto the page error codes', async () => {
+    const h = boot({
+      embedded: false,
+      serve: true,
+      fetchImpl: async () => jsonResponse(429, { error: 'slow down' }),
+    });
+    await expect(h.gezel.tools.invoke('user_move')).rejects.toMatchObject({
+      code: 'rate-limited',
+      message: 'slow down',
+    });
+  });
+
+  it('rejects a failed run like the relay does', async () => {
+    const h = boot({
+      embedded: false,
+      serve: true,
+      fetchImpl: async () =>
+        jsonResponse(200, { status: 'error', error: 'Illegal move', runId: 'r2' }),
+    });
+    await expect(h.gezel.tools.invoke('user_move')).rejects.toMatchObject({
+      code: 'script-error',
+      message: 'Illegal move',
+      runId: 'r2',
+    });
+  });
+
+  it('reads over the head API and decodes like the embedded path', async () => {
+    const h = boot({
+      embedded: false,
+      serve: true,
+      fetchImpl: async (url) => {
+        expect(url).toBe('/app/api/read');
+        return jsonResponse(200, {
+          op: 'read',
+          content: '{"level":3}',
+          encoding: 'utf8',
+          etag: 'e1',
+        });
+      },
+    });
+    const value = (await h.gezel.data.read('progress.json')) as { level: number };
+    expect(value).toEqual({ level: 3 });
+  });
+
+  it('maps data.url onto the head data base', () => {
+    const h = boot({ embedded: false, serve: true, fetchImpl: async () => jsonResponse(200, {}) });
+    expect(h.gezel.data.url('media/win.mp3', { source: 'artifacts' })).toBe(
+      '/data/artifacts/media/win.mp3',
+    );
   });
 });

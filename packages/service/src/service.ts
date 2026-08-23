@@ -26,6 +26,7 @@ import {
 import { gezelHome, gezelPaths, readConfigRaw } from '@bendyline/gezel/paths';
 import { type ServerType, serve } from '@hono/node-server';
 import { AmbientDashboardGenerator } from './ambient/dashboard-generator.js';
+import { createAppServeController } from './app-serve/controller.js';
 import { defaultCacheBudgetMb } from './cache/budget.js';
 import { SessionCacheController } from './cache/controller.js';
 import { ChannelManager } from './channels/manager.js';
@@ -2436,6 +2437,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   const childProcessSpawn = await probeChildProcessSpawn();
   if (childProcessSpawn === 'denied') log.error(`[spawn] ${SPAWN_DENIED_MESSAGE}`);
 
+  // App-serve sites — per-site visitor listeners for shared AI App
+  // mini-sites. A product feature: the machine-engine role never serves.
+  const appServe =
+    serviceRole === 'machine-engine'
+      ? undefined
+      : createAppServeController({ store, catalog, chat, chatEvents, history, scriptRunner });
+
   const context: ServiceContext = {
     serviceRole,
     home,
@@ -2458,6 +2466,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     catalog,
     gildeUpdates,
     ...(knowledge ? { knowledge } : {}),
+    ...(appServe ? { appServe } : {}),
     handboek,
     secrets,
     git,
@@ -3081,6 +3090,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       await shutdownStep('speech synthesis', () => tts.shutdown());
       if (idleSummarizerTimer) clearInterval(idleSummarizerTimer);
       await shutdownStep('channels', () => channels.stop());
+      await shutdownStep('app serve', async () => appServe?.stopAll());
       await shutdownStep('remote serving', () => remoteServing.stop());
       await shutdownStep('Ollama emulation', () => ollamaEmulation.stop());
       await shutdownStep('Codex setup', () => codexSetup.stop());

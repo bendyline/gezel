@@ -449,7 +449,7 @@ describe('SettingsView', () => {
     } as never);
 
     render(<SettingsView />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Artificial Intelligence' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Artificial Intelligence/ }));
 
     const expected = ['This Mac (Apple MLX)', 'This Mac (llama)', 'This Mac (DwarfStar - DS4)'];
     const defaultTray = within(await screen.findByTestId('default-provider-switch'));
@@ -460,6 +460,44 @@ describe('SettingsView', () => {
       expect(defaultTray.getByRole('button', { name: label })).toBeInTheDocument();
       expect(nightShiftTray.getByRole('radio', { name: label })).toBeInTheDocument();
     }
+  });
+
+  it('names the default engine and model under the Artificial Intelligence header', async () => {
+    window.__GEZEL__ = { ...window.__GEZEL__, token: 'test-token', platform: 'darwin' };
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mlx',
+      defaultModel: { mlx: 'qwen3.8-27b-q4' },
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+    } as never);
+    vi.mocked(api.listMlxModels).mockResolvedValue({
+      models: [
+        { id: 'gemma4-26b-q4', name: 'Gemma 4 (26B, Q4)' },
+        { id: 'qwen3.8-27b-q4', name: 'Qwen 3.8 (27B, Q4)' },
+      ],
+    } as never);
+
+    render(<SettingsView />);
+
+    const header = await screen.findByTestId('settings-nav-defaults');
+    await waitFor(() => expect(header).toHaveTextContent('Default: This Mac · Qwen 3.8'));
+  });
+
+  it('falls back to the first installed model when no default is configured', async () => {
+    window.__GEZEL__ = { ...window.__GEZEL__, token: 'test-token', platform: 'darwin' };
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mlx',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: true,
+    } as never);
+    vi.mocked(api.listMlxModels).mockResolvedValue({
+      models: [{ id: 'gemma4-26b-q4', name: 'Gemma 4 (26B, Q4)' }],
+    } as never);
+
+    render(<SettingsView />);
+
+    const header = await screen.findByTestId('settings-nav-defaults');
+    await waitFor(() => expect(header).toHaveTextContent('Default: This Mac · Gemma 4'));
   });
 
   it('shows the default-model picker when llama.cpp is the default provider', async () => {
@@ -476,7 +514,7 @@ describe('SettingsView', () => {
     } as never);
 
     render(<SettingsView />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Artificial Intelligence' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Artificial Intelligence/ }));
 
     const picker = await screen.findByTestId('model-picker-llama-cpp');
     expect(picker).toBeInTheDocument();
@@ -614,7 +652,7 @@ describe('SettingsView', () => {
       },
     } as never);
     const inherited = render(<SettingsView />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Artificial Intelligence' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Artificial Intelligence/ }));
     const checkbox = await screen.findByRole('checkbox', {
       name: 'Use a specific model by default during Night Shift',
     });
@@ -643,7 +681,7 @@ describe('SettingsView', () => {
       },
     } as never);
     render(<SettingsView />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Artificial Intelligence' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Artificial Intelligence/ }));
 
     expect(
       await screen.findByRole('checkbox', {
@@ -656,7 +694,7 @@ describe('SettingsView', () => {
 
   /** The default-provider pill row, scoped so Night Shift's row can't match. */
   async function defaultProviderSwitch() {
-    fireEvent.click(await screen.findByRole('button', { name: 'Artificial Intelligence' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Artificial Intelligence/ }));
     return within(await screen.findByTestId('default-provider-switch'));
   }
 

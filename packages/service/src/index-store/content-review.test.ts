@@ -22,12 +22,15 @@ let home: string;
 let artifacts: string;
 let ci: ContentIndex;
 let durableIssues: Array<Record<string, unknown>>;
+/** Paths handed to each `observeProjectBoekwachterReviews` call, in order. */
+let observedBatches: string[][];
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'gezel-review-'));
   home = await mkdtemp(join(tmpdir(), 'gezel-review-home-'));
   artifacts = join(home, 'artifacts');
   durableIssues = [];
+  observedBatches = [];
   ci = new ContentIndex(
     {
       projectWorkspaceDir: async () => dir,
@@ -45,6 +48,7 @@ beforeEach(async () => {
           }>;
         }>,
       ) => {
+        observedBatches.push(observations.map((observation) => observation.path));
         for (const observation of observations) {
           for (const existing of durableIssues.filter((row) => row.path === observation.path)) {
             existing.lastCheckedAt = '2026-08-12T00:00:00.000Z';
@@ -151,6 +155,31 @@ describe('ContentIndex.review end-to-end', () => {
 
     const map = await ci.mapRepo('c');
     expect(map.health).toMatchObject({ reviewedFiles: 3, avgHealth: 6, minorIssues: 3 });
+  });
+
+  // Opening a file in the Workspace calls file-review. Reconciling every
+  // reviewed path on that click is work proportional to the whole repo, and
+  // it blocks the daemon's event loop: on a 2.4k-path backlog it cost several
+  // seconds per click, which reads as the app hanging on every file switch.
+  it('reconciles only the opened file, while the list surface still sweeps all', async () => {
+    await mkdir(join(dir, 'src'), { recursive: true });
+    await writeFile(join(dir, 'src', 'a.ts'), 'export const one = 1;\n');
+    await writeFile(join(dir, 'src', 'b.ts'), 'export const two = 2;\n');
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await ci.review(
+      'c',
+      deps(async () => VALID_REPLY),
+      10,
+      await builtinRubrics(),
+    );
+
+    observedBatches = [];
+    await ci.fileReview('c', 'src/a.ts');
+    expect(observedBatches).toEqual([['src/a.ts']]);
+
+    observedBatches = [];
+    await ci.listFileIssues('c', {});
+    expect(observedBatches).toEqual([['src/a.ts', 'src/b.ts']]);
   });
 
   it('retains an old issue but labels its line stale after the file hash changes', async () => {

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
   CatalogItemIdentitySchema,
@@ -14,6 +14,7 @@ import {
   type GezappManifest,
   GezappManifestSchema,
   type GezappRegistry,
+  type GezappRegistryEntry,
   GezappRegistrySchema,
   GezelTemplateVersionManifestSchema,
   ProjectTypeVersionManifestSchema,
@@ -700,7 +701,8 @@ async function readRegistry(home: string): Promise<GezappRegistry> {
   }
 }
 
-async function missingDependencies(
+/** Dependency locks that do not currently resolve from the catalog. */
+export async function missingGezappDependencies(
   catalog: CatalogService,
   dependencies: GezappDependency[],
 ): Promise<GezappDependency[]> {
@@ -812,7 +814,7 @@ export async function importGezapp(
       `.gezapp requires Gezel ${parsed.manifest.minGezelVersion} or newer (this build supports ${currentVersion})`,
     );
   }
-  const missing = await missingDependencies(deps.catalog, parsed.manifest.dependencies);
+  const missing = await missingGezappDependencies(deps.catalog, parsed.manifest.dependencies);
   const result: ImportGezappResult = {
     manifest: parsed.manifest,
     items: parsed.manifest.items.map(({ kind, id, version }) => ({ kind, id, version })),
@@ -929,5 +931,136 @@ export async function importGezapp(
         alreadyPresent: false,
       },
     };
+  });
+}
+
+// ─ install-level management (list / enable / remove) ─────────────────────
+
+export interface InstalledGezapp {
+  entry: GezappRegistryEntry;
+  /** Null when the receipt is unreadable — reported, never fatal. */
+  receipt: GezappInstallReceipt | null;
+  /** Version dirs on disk for this app, oldest first (rollback material). */
+  versionsOnDisk: string[];
+}
+
+function bySemverTolerant(a: string, b: string): number {
+  try {
+    return compareSemver(a, b);
+  } catch {
+    return a.localeCompare(b);
+  }
+}
+
+async function versionDirsOnDisk(home: string, appId: string): Promise<string[]> {
+  const entries = await readdir(join(aiAppsRoot(home), appId), { withFileTypes: true }).catch(
+    () => [],
+  );
+  return entries
+    .filter((entry) => entry.isDirectory() && !entry.name.includes('.staging-'))
+    .map((entry) => entry.name)
+    .sort(bySemverTolerant);
+}
+
+async function readReceipt(
+  home: string,
+  appId: string,
+  version: string,
+): Promise<GezappInstallReceipt | null> {
+  try {
+    return GezappInstallReceiptSchema.parse(
+      JSON.parse(await readFile(aiAppReceiptFile(home, appId, version), 'utf8')),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Every registered AI App with its receipt and on-disk version dirs. */
+export async function listGezapps(home: string): Promise<InstalledGezapp[]> {
+  const registry = await readRegistry(home);
+  const result: InstalledGezapp[] = [];
+  for (const entry of registry.apps) {
+    result.push({
+      entry,
+      receipt: await readReceipt(home, entry.appId, entry.version),
+      versionsOnDisk: await versionDirsOnDisk(home, entry.appId),
+    });
+  }
+  return result.sort((a, b) => a.entry.appId.localeCompare(b.entry.appId));
+}
+
+/** Flip an installed app's enabled flag. Returns null when not installed. */
+export async function setGezappEnabled(
+  home: string,
+  appId: string,
+  enabled: boolean,
+): Promise<GezappRegistryEntry | null> {
+  return withGezappInstallLock(async () => {
+    const registry = await readRegistry(home);
+    const entry = registry.apps.find((candidate) => candidate.appId === appId);
+    if (!entry) return null;
+    if (entry.enabled !== enabled) {
+      entry.enabled = enabled;
+      await mkdir(aiAppsRoot(home), { recursive: true });
+      await writeFileAtomic(aiAppsRegistryFile(home), `${JSON.stringify(registry, null, 2)}\n`);
+      log.info(`[manage] ${enabled ? 'enabled' : 'disabled'} AI App ${appId}`);
+    }
+    return entry;
+  });
+}
+
+export interface RemoveGezappResult {
+  appId: string;
+  removedVersions: string[];
+  keptVersions: string[];
+}
+
+/**
+ * Uninstall an AI App. The registry entry is dropped FIRST — the registry is
+ * the activation point, so unmounting before touching bytes closes the window
+ * where a catalog read could resolve a half-deleted version. Version-dir
+ * deletion failures (e.g. Windows EBUSY under an open reader) are reported in
+ * `keptVersions`, never fatal: a leftover dir with a valid receipt is
+ * harmlessly re-adopted by a later import of the same bytes.
+ */
+export async function removeGezapp(
+  home: string,
+  appId: string,
+  opts: { keepFiles?: boolean } = {},
+): Promise<RemoveGezappResult | null> {
+  return withGezappInstallLock(async () => {
+    const registry = await readRegistry(home);
+    if (!registry.apps.some((candidate) => candidate.appId === appId)) return null;
+    const next: GezappRegistry = {
+      schemaVersion: 1,
+      apps: registry.apps.filter((candidate) => candidate.appId !== appId),
+    };
+    await mkdir(aiAppsRoot(home), { recursive: true });
+    await writeFileAtomic(aiAppsRegistryFile(home), `${JSON.stringify(next, null, 2)}\n`);
+
+    const versions = await versionDirsOnDisk(home, appId);
+    const removedVersions: string[] = [];
+    const keptVersions: string[] = [];
+    if (opts.keepFiles) {
+      keptVersions.push(...versions);
+    } else {
+      const appDir = join(aiAppsRoot(home), appId);
+      for (const version of versions) {
+        try {
+          await rm(join(appDir, version), { recursive: true, force: true });
+          removedVersions.push(version);
+        } catch (err) {
+          log.warn(`[manage] could not delete ${appId}@${version}: ${errorMessage(err)}`);
+          keptVersions.push(version);
+        }
+      }
+      if (keptVersions.length === 0)
+        await rm(appDir, { recursive: true, force: true }).catch(() => {});
+    }
+    log.info(
+      `[manage] uninstalled AI App ${appId} (removed ${removedVersions.length} version dir${removedVersions.length === 1 ? '' : 's'})`,
+    );
+    return { appId, removedVersions, keptVersions };
   });
 }

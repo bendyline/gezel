@@ -33,6 +33,7 @@ Typed definitions ship as `@bendyline/gezel-sdk/page`. Feature-detect with
 |---|---|---|---|
 | `embedded` | The Output pane iframe | relayed through the host | relayed through the host |
 | `browser` | "Open in browser" tab | reject `code: 'unavailable'` | same-origin capability fetch fallback |
+| `serve` | An app-serve mini-site (`gezel app serve`) | same-origin fetch against the head API | same-origin fetch; `watch` polls | 
 | `demo` | Raw file, no server | page-supplied handlers | page-supplied handlers |
 
 `demo` is not produced by the injected shim — a raw double-clicked file has
@@ -122,6 +123,29 @@ host → page: { __gezelPage: 1, kind: 'init' | 'result' | 'read-result' | 'chan
   sandboxed without `allow-same-origin` (opaque origin), so the shim
   requires `event.source === window.parent` and the relay requires
   `event.source === frame.contentWindow`. No bearer ever enters the frame.
+
+## Serve head (HTTP transport)
+
+When a page is served by the app-serve head (`gezel app serve`,
+docs/app-serve.md), the injected bootstrap carries a `serve` block
+(`{ apiBase, dataBase, chat }`) and the shim selects mode `serve`. The same
+queue/ceiling machinery runs, but each call travels as a same-origin fetch
+under the visitor's HttpOnly cookie:
+
+- `tools.invoke` → `POST {apiBase}/invoke` with `{tool, input}` — the same
+  body and result contract as the first-party page-invoke route, enforced by
+  the same server-side implementation (`http/page-io.ts`).
+- `data.read/list/stat` → `POST {apiBase}/read` with the read envelope.
+- `data.watch` → polls `stat` on the read route (2.5s default), with an
+  immediate sweep after each successful invoke.
+- `data.url()` → `{dataBase}/{source}/{path}` — direct media GETs; the
+  browser attaches the visitor cookie same-origin.
+
+HTTP status → error-code mapping matches the desktop relay: 400/413/422 →
+`invalid-input`, 401/403/404 → `not-allowed`, 429 → `rate-limited`,
+anything else `unavailable`. No credential ever reaches the page; the
+visitor cookie is HttpOnly and means nothing to the daemon's `/api/*`
+surface.
 
 ## Compatibility
 

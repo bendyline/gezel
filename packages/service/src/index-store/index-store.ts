@@ -1577,6 +1577,28 @@ export class IndexStore {
   }
 
   /**
+   * The same observation, narrowed to one file. Surfaces that read a single
+   * file's review reconcile only that file — materializing every reviewed
+   * path in the project is work proportional to the whole repo on a click.
+   */
+  currentFileReviewIssuesForPath(path: string): CurrentFileReviewIssues[] {
+    return this.db
+      .prepare(
+        `SELECT f.path, f.hash AS content_hash, r.issues
+         FROM files f
+         JOIN file_reviews r ON r.content_hash = f.hash
+         WHERE f.collection_id = ? AND f.path = ? AND f.hash IS NOT NULL
+           AND r.notes_md IS NOT NULL`,
+      )
+      .all<{ path: string; content_hash: string; issues: string | null }>(this.collectionId, path)
+      .map((row) => ({
+        path: row.path,
+        contentHash: row.content_hash,
+        issues: parseIssuesJson(row.issues),
+      }));
+  }
+
+  /**
    * Files of one kind whose current hash needs a review under the given
    * rubric: no row yet, or covered by a DIFFERENT rubric and still holding
    * retry budget (attempts for another rubric don't count against it).

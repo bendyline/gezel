@@ -211,7 +211,7 @@ The current exporter packages the catalog definition, not the organic state of t
 
 `.gezapp` is the customer-facing package for one AI App, not a generic bag of unrelated catalog content. Its entry project type defines the experience; referenced roles and craftbooks travel with it; external executable and model dependencies stay locked by identity and exact version. Gezel validates the archive's paths, size limits, schemas, reference closure, hashes, compatibility, dependencies, and conflicts before it mounts the package.
 
-The mounted-unit design preserves the relationship between the installed items and the app that supplied them. That makes receipts, inspection, disabling, replacement, and a future uninstall flow possible without scattering copied files through several local catalog directories.
+The mounted-unit design preserves the relationship between the installed items and the app that supplied them. That makes receipts, inspection, disabling, replacement, and uninstall possible without scattering copied files through several local catalog directories. The command line manages all of it: `gezel app add/update/list/show/enable/disable/remove` for the install-level lifecycle, `gezel app apply` and `gezel app status` to outfit a folder and watch its drift, and `gezel app serve` to share the app's pages (and optional visitor chat) as a mini-site.
 
 ## What still needs improvement
 
@@ -221,8 +221,8 @@ The runtime pieces are farther along than the authoring experience. These are th
 | --- | --- |
 | App builder | A guided UI or CLI that scaffolds the type, role, page, craftbook, script, and seed files and validates them together |
 | Project-to-app export | A deliberate diff and review flow that converts an organic project into a new project-type version instead of exporting only its original catalog item |
-| Import interface | File picking, bundle review, conflict handling, and export/download controls in the desktop app rather than a project-artifact and gezel-tool flow |
-| Updates and drift | A three-way reconcile view for a new type version versus the installed provenance versus user-edited scripts, craftbooks, documents, and data |
+| Import interface | File picking, bundle review, conflict handling, and export/download controls in the desktop app; today the desktop flow goes through project artifacts and gezel tools, while the CLI (`gezel app add`) covers review-and-install from a file |
+| Updates and drift | A three-way reconcile view for a new type version versus the installed provenance versus user-edited scripts, craftbooks, documents, and data; `gezel app status` reports per-seed drift and `gezel app apply` preserves user-modified seeds, but scripts still overwrite on upgrade |
 | Schema evolution | App data-version declarations, migrations, backup, and rollback for custom JSON or other records |
 | Dashboard surface | First-class page templates, development preview, diagnostics, and possibly more than one app-owned project page |
 | Testing | A standard AI App test kit covering adoption, schema validation, scripts, page tools, craftbooks, permissions, local models, and upgrades |

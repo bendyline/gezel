@@ -64,7 +64,11 @@ import {
   MANAGED_TOOLSET_IMPORT_HOOK_URL,
   nodeOptionsWithManagedToolsetImport,
 } from '../../packages/toolset-import-hook.js';
-import { applyProjectType } from '../../project-type/apply.js';
+import {
+  applyProjectType,
+  planProjectTypeApply,
+  projectTypeStatus,
+} from '../../project-type/apply.js';
 import { TypedProjectCreateError, createTypedProject } from '../../project-type/create.js';
 import { detectAndPersistProjectType } from '../../project-type/detect.js';
 import { GEZAPP_MAX_ARCHIVE_BYTES, importGezapp, packGezapp } from '../../project-type/gezapp.js';
@@ -458,7 +462,16 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     try {
       const applied = await applyProjectType(
         { store: ctx.store, catalog: ctx.catalog, home: ctx.home },
-        { projectId: id, typeId: body.typeId, version: body.version, params: body.params },
+        {
+          projectId: id,
+          typeId: body.typeId,
+          version: body.version,
+          params: body.params,
+          ...(body.seedPolicy ? { seedPolicy: body.seedPolicy } : {}),
+          ...(body.reuseRosterGezels !== undefined
+            ? { reuseRosterGezels: body.reuseRosterGezels }
+            : {}),
+        },
       );
       await ctx.history.log({
         kind: 'project.updated',
@@ -466,10 +479,60 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         summary: `Applied project type ${applied.typeId}@${applied.version}`,
         details: { projectType: applied.typeId, version: applied.version },
       });
+      if (applied.source.startsWith('gezapp:')) {
+        await ctx.history.log({
+          kind: 'ai-app.applied',
+          projectId: id,
+          summary: `Applied AI App ${applied.typeId}@${applied.version} to ${project.name}`,
+          details: { appId: applied.typeId, version: applied.version },
+        });
+      }
       return c.json(applied);
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
+  });
+
+  /**
+   * Dry-run the apply above: same request body, no writes. Validation
+   * problems (missing templates, bad cron, unresolvable craftbooks) surface
+   * as a 400 with the preflight message, exactly as the real apply would.
+   */
+  app.post('/:id/apply-project-type/preflight', async (c) => {
+    const id = c.req.param('id');
+    const body = ApplyProjectTypeRequestSchema.parse(await c.req.json());
+    const project = await ctx.store.getProject(id).catch(() => null);
+    if (!project) return c.json({ error: 'project not found' }, 404);
+    try {
+      const plan = await planProjectTypeApply(
+        { store: ctx.store, catalog: ctx.catalog, home: ctx.home },
+        {
+          projectId: id,
+          typeId: body.typeId,
+          version: body.version,
+          params: body.params,
+          ...(body.seedPolicy ? { seedPolicy: body.seedPolicy } : {}),
+          ...(body.reuseRosterGezels !== undefined
+            ? { reuseRosterGezels: body.reuseRosterGezels }
+            : {}),
+        },
+      );
+      return c.json(plan);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  /** Applied type vs installed AI App, plus per-seed drift. */
+  app.get('/:id/project-type/status', async (c) => {
+    const id = c.req.param('id');
+    const project = await ctx.store.getProject(id).catch(() => null);
+    if (!project) return c.json({ error: 'project not found' }, 404);
+    const status = await projectTypeStatus(
+      { store: ctx.store, catalog: ctx.catalog, home: ctx.home },
+      id,
+    );
+    return c.json(status);
   });
 
   /** Package the project's AI App into a `.gezapp` artifact. */

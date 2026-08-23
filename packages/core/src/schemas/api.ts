@@ -102,6 +102,11 @@ import {
   type ListGitHubWorkflowRunsResponse,
   ListGitHubWorkflowRunsResponseSchema,
 } from './api/git.js';
+import {
+  GezappDependencySchema,
+  GezappEmbeddedKindSchema,
+  GezappManifestSchema,
+} from './catalog.js';
 import { ChannelsConfigSchema } from './channels.js';
 import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeCompatSchema, CodexPermissionModeSchema } from './codex.js';
@@ -134,6 +139,7 @@ import {
   ProjectNudgeConfigSchema,
   ProjectSchema,
   ProjectTabVisibilitySchema,
+  ProjectTypeProvenanceSchema,
 } from './project.js';
 import { NpmInstallApprovalDecisionSchema, QuestionSchema } from './question.js';
 import { RecognitionModeSchema } from './recognition.js';
@@ -3988,6 +3994,20 @@ export const ApplyProjectTypeRequestSchema = z.object({
   version: z.string().optional(),
   /** Param values collected at adoption, substituted into templates + seed files. */
   params: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Seed-file collision policy. `overwrite` (the default, the original
+   * behavior) re-renders and writes every declared seed. `preserve` keeps
+   * files the user modified since the last apply — reported in
+   * `seedsSkipped` — while still writing new seeds and refreshing
+   * stale-but-untouched ones against the overlay manifest.
+   */
+  seedPolicy: z.enum(['overwrite', 'preserve']).optional(),
+  /**
+   * Reuse a roster gezel with the same `templateId` instead of minting a
+   * fresh one — makes re-apply idempotent for non-lean types. Lean types
+   * always reuse from the global pool regardless.
+   */
+  reuseRosterGezels: z.boolean().optional(),
 });
 export type ApplyProjectTypeRequest = z.infer<typeof ApplyProjectTypeRequestSchema>;
 
@@ -4023,6 +4043,8 @@ export const AppliedProjectTypeSchema = z.object({
   ),
   scriptsInstalled: z.array(z.string()),
   workspaceSeeded: z.array(z.string()),
+  /** Seed files kept because the user modified them (`seedPolicy: 'preserve'`). */
+  seedsSkipped: z.array(z.string()).default([]),
   /** Toolset ids registered into the project scope on adoption (http-mcp — just a URL). */
   toolsetsInstalled: z.array(z.string()),
   /**
@@ -4082,6 +4104,152 @@ export const CreateTypedProjectResponseSchema = z.object({
   applied: AppliedProjectTypeSchema,
 });
 export type CreateTypedProjectResponse = z.infer<typeof CreateTypedProjectResponseSchema>;
+
+/** What an apply would do to one declared seed file, per the requested policy. */
+export const SeedPlanStateSchema = z.enum(['new', 'unchanged', 'update', 'keep-modified']);
+export type SeedPlanState = z.infer<typeof SeedPlanStateSchema>;
+
+/**
+ * The dry-run report for `POST /:id/apply-project-type/preflight` — what an
+ * apply with the same body would materialize, computed without writing
+ * anything. Validation problems surface as a 400, not as a plan.
+ */
+export const ProjectTypeApplyPlanSchema = z.object({
+  typeId: z.string(),
+  version: z.string(),
+  source: z.string(),
+  gezels: z.array(
+    z.object({
+      templateId: z.string(),
+      voorman: z.boolean(),
+      /** True when an existing gezel would be reused instead of minted. */
+      reuse: z.boolean(),
+    }),
+  ),
+  scripts: z.array(z.string()),
+  seeds: z.array(z.object({ path: z.string(), state: SeedPlanStateSchema })),
+  toolsets: z.object({
+    /** http-mcp toolsets registered on adoption. */
+    installNow: z.array(z.string()),
+    /** npm-package / builtin / unresolvable — installed explicitly later. */
+    deferred: z.array(z.string()),
+  }),
+  craftbooks: z.array(z.string()),
+  schedules: z.array(
+    z.object({
+      craftbook: z.string(),
+      cron: z.string().optional(),
+      consent: z.enum(['ask', 'auto', 'disabled']),
+    }),
+  ),
+  pages: z.boolean(),
+});
+export type ProjectTypeApplyPlan = z.infer<typeof ProjectTypeApplyPlanSchema>;
+
+export const ProjectTypeSeedStateSchema = z.enum(['ok', 'modified', 'missing', 'untracked']);
+export type ProjectTypeSeedState = z.infer<typeof ProjectTypeSeedStateSchema>;
+
+/**
+ * `GET /:id/project-type/status` — the applied type vs the installed AI App,
+ * plus per-seed drift against the overlay manifest. `untracked` marks a
+ * declared seed with no overlay record (e.g. the folder moved machines, or
+ * the apply predates overlay tracking).
+ */
+export const ProjectTypeStatusResponseSchema = z.object({
+  projectId: z.string(),
+  provenance: ProjectTypeProvenanceSchema.nullable(),
+  installedApp: z
+    .object({ appId: z.string(), version: z.string(), enabled: z.boolean() })
+    .nullable(),
+  updateAvailable: z.boolean(),
+  seeds: z.array(z.object({ path: z.string(), state: ProjectTypeSeedStateSchema })),
+});
+export type ProjectTypeStatusResponse = z.infer<typeof ProjectTypeStatusResponseSchema>;
+
+// ─ AI App management (global /api/ai-apps) ─────────────────────────
+//
+// The install-level view over `~/.gezel/ai-apps/`. Distinct from the
+// project-nested export/import routes, which move `.gezapp` bytes through a
+// project's artifacts drawer: these shapes manage the machine's registry of
+// installed apps regardless of any project.
+
+/** One installed AI App as reported by `GET /api/ai-apps`. */
+export const AiAppStatusSchema = z.object({
+  appId: z.string(),
+  version: z.string(),
+  packageSha256: z.string(),
+  installedAt: z.string(),
+  enabled: z.boolean(),
+  /** Review snapshot from the install receipt; null when the receipt is unreadable. */
+  name: z.string().nullable(),
+  description: z.string().nullable(),
+  publisher: z.object({ name: z.string(), url: z.string().optional() }).nullable(),
+  itemCount: z.number().int(),
+  dependencyCount: z.number().int(),
+  /** Every version directory present on disk for this app (rollback material). */
+  versionsOnDisk: z.array(z.string()),
+});
+export type AiAppStatus = z.infer<typeof AiAppStatusSchema>;
+
+export const ListAiAppsResponseSchema = z.object({
+  apps: z.array(AiAppStatusSchema),
+});
+export type ListAiAppsResponse = z.infer<typeof ListAiAppsResponseSchema>;
+
+/** A project outfitted by this app (matched on `projectType` provenance). */
+export const AiAppAppliedProjectSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** Type version the project was outfitted with — may lag the installed app. */
+  version: z.string(),
+});
+export type AiAppAppliedProject = z.infer<typeof AiAppAppliedProjectSchema>;
+
+export const AiAppDetailSchema = AiAppStatusSchema.extend({
+  /** Full receipt manifest; null when the receipt is unreadable. */
+  manifest: GezappManifestSchema.nullable(),
+  /** Dependency locks that do not currently resolve from the catalog. */
+  missingDependencies: z.array(GezappDependencySchema),
+  appliedProjects: z.array(AiAppAppliedProjectSchema),
+});
+export type AiAppDetail = z.infer<typeof AiAppDetailSchema>;
+
+export const UpdateAiAppRequestSchema = z.object({
+  enabled: z.boolean(),
+});
+export type UpdateAiAppRequest = z.infer<typeof UpdateAiAppRequestSchema>;
+
+export const RemoveAiAppResponseSchema = z.object({
+  appId: z.string(),
+  removedVersions: z.array(z.string()),
+  /** Version dirs left on disk — `keepFiles`, or a delete failure (see logs). */
+  keptVersions: z.array(z.string()),
+  appliedProjects: z.array(AiAppAppliedProjectSchema),
+});
+export type RemoveAiAppResponse = z.infer<typeof RemoveAiAppResponseSchema>;
+
+/**
+ * Wire shape of a `.gezapp` import, preview and confirmed alike. Mirrors the
+ * service engine's result: `installed` is present only after a confirmed
+ * install; `previous` only when the same app id was already registered.
+ */
+export const ImportAiAppResultSchema = z.object({
+  manifest: GezappManifestSchema,
+  items: z.array(z.object({ kind: GezappEmbeddedKindSchema, id: z.string(), version: z.string() })),
+  dependencies: z.array(GezappDependencySchema),
+  missingDependencies: z.array(GezappDependencySchema),
+  packageSha256: z.string(),
+  installed: z
+    .object({
+      appId: z.string(),
+      version: z.string(),
+      receiptPath: z.string(),
+      alreadyPresent: z.boolean(),
+    })
+    .optional(),
+  previous: z.object({ version: z.string(), enabled: z.boolean() }).optional(),
+});
+export type ImportAiAppResult = z.infer<typeof ImportAiAppResultSchema>;
 
 export const ProjectResponseSchema = ProjectDetailSchema;
 

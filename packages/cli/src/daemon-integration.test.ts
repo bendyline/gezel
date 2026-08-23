@@ -293,4 +293,66 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
     const { tasks } = await client.listProjectTasks(project!.id);
     expect(tasks.some((task) => task.craftbook.id === 'security-architecture-review')).toBe(true);
   });
+
+  it('adds, lists, toggles, and removes an AI App through the app subcommand', async () => {
+    // Build the fixture .gezapp through the daemon's own exporter — the
+    // export route writes it into the default project's artifacts drawer,
+    // and this test owns that home directory.
+    const exported = await client.exportAiApp('default', { typeId: 'just-chat' });
+    const fixturePath = join(gezelHome, 'projects', 'default', 'artifacts', exported.artifactPath);
+
+    const added = await runCli('app', 'add', fixturePath, '--yes');
+    expect(added.stderr).toBe('');
+    expect(added.stdout).toContain('Installed just-chat@');
+
+    const again = await runCli('app', 'add', fixturePath, '--yes');
+    expect(again.stdout).toContain('already installed — no changes');
+
+    const list = await runCli('app', 'list');
+    expect(list.stdout).toContain('just-chat');
+    expect(list.stdout).toContain('enabled');
+
+    const folder = await mkdtemp(join(tmpdir(), 'gezel-app-apply-'));
+    try {
+      const applied = await runCliAtHome(
+        gezelHome,
+        '--project',
+        folder,
+        'app',
+        'apply',
+        'just-chat',
+        '--yes',
+      );
+      expect(applied.stdout).toContain('Applied just-chat@');
+
+      const status = await runCliAtHome(gezelHome, '--project', folder, 'app', 'status');
+      expect(status.stdout).toContain('just-chat');
+      expect(status.stdout).not.toContain('Update available');
+
+      const noop = await runCliAtHome(
+        gezelHome,
+        '--project',
+        folder,
+        'app',
+        'apply',
+        'just-chat',
+        '--yes',
+      );
+      expect(noop.stdout).toContain('already applied');
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+
+    const disabled = await runCli('app', 'disable', 'just-chat');
+    expect(disabled.stdout).toContain('Disabled just-chat@');
+
+    const show = await runCli('app', 'show', 'just-chat');
+    expect(show.stdout).toContain('state: disabled');
+
+    const removed = await runCli('app', 'remove', 'just-chat', '--yes');
+    expect(removed.stdout).toContain('Uninstalled just-chat');
+
+    const empty = await runCli('app', 'list');
+    expect(empty.stdout).toContain('No AI Apps installed');
+  }, 90_000);
 });

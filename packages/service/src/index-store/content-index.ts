@@ -1683,8 +1683,13 @@ export class ContentIndex {
     try {
       const fileRec = opened.index.getFile(relPath);
       const currentHash = await currentIndexedHash(opened.index, opened.workspaceDir, relPath);
-      const currentObservations = opened.index.currentFileReviewIssues();
-      await this.store.observeProjectBoekwachterReviews(projectId, currentObservations);
+      // Only this file's observation: the caller asked about one path, and the
+      // whole-project materialization belongs to the review pass that produced
+      // the rows (see `reviewPass`), not to opening a file in the UI.
+      await this.store.observeProjectBoekwachterReviews(
+        projectId,
+        opened.index.currentFileReviewIssuesForPath(relPath),
+      );
       const trackedIssues = await this.boekwachterIssuesForPath(projectId, relPath, currentHash);
       if (!fileRec?.hash) {
         return {
@@ -1776,14 +1781,20 @@ export class ContentIndex {
         limit: 1,
       });
       const records = await this.store.listProjectBoekwachterIssues(projectId);
+      // Findings cluster on the same files, so resolve each path's live hash
+      // once rather than per record — a stat + index read per finding is
+      // thousands of syscalls on a repo-sized backlog.
+      const hashByPath = new Map<string, Promise<string | null>>();
       const matching = filterAndSortBoekwachterIssues(
         await Promise.all(
-          records.map(async (record) =>
-            toBoekwachterIssueWire(
-              record,
-              await currentIndexedHash(index, opened.workspaceDir, record.path),
-            ),
-          ),
+          records.map(async (record) => {
+            let hash = hashByPath.get(record.path);
+            if (!hash) {
+              hash = currentIndexedHash(index, opened.workspaceDir, record.path);
+              hashByPath.set(record.path, hash);
+            }
+            return toBoekwachterIssueWire(record, await hash);
+          }),
         ),
         req,
       );
@@ -1814,9 +1825,15 @@ export class ContentIndex {
       return record ? toBoekwachterIssueWire(record, null) : null;
     }
     try {
+      // A ref names a record that already exists, so reconcile only its file.
+      // Falling back to the whole project keeps a ref that has not been
+      // materialized yet resolvable.
+      const known = await this.store.getProjectBoekwachterIssue(projectId, ref);
       await this.store.observeProjectBoekwachterReviews(
         projectId,
-        opened.index.currentFileReviewIssues(),
+        known
+          ? opened.index.currentFileReviewIssuesForPath(known.path)
+          : opened.index.currentFileReviewIssues(),
       );
       const record = await this.store.getProjectBoekwachterIssue(projectId, ref);
       return record

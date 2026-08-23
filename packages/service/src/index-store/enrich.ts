@@ -4,6 +4,7 @@ import {
   type GezelSummary,
   type ProviderName,
   createLogger,
+  isLocalProvider,
 } from '@bendyline/gezel';
 import { CompletionBlockedError } from '../chat/large-content.js';
 import type { ChatManager } from '../chat/manager.js';
@@ -156,8 +157,31 @@ export interface EnrichResult {
 }
 
 // Local providers we'll use for summaries. Embeddings are always local and run
-// regardless of whether one of these is configured.
-export const ENRICH_LOCAL_PROVIDERS: ProviderName[] = ['llama-cpp', 'mlx', 'ollama'];
+// regardless of whether one of these is configured. This order only decides
+// the tie-break when the install default is NOT a local engine — otherwise
+// that engine leads (see `enrichLocalProviderOrder`).
+export const ENRICH_LOCAL_PROVIDERS: ProviderName[] = ['llama-cpp', 'mlx', 'ollama', 'ds4'];
+
+/**
+ * The local engines to consider, most-preferred first, with the install
+ * default (`config.provider`) leading whenever it is one of them.
+ *
+ * A fixed list order is wrong here because `config.defaultModel` is a
+ * per-provider map that remembers a model for every engine the user has ever
+ * pointed at — nothing clears the old entry when they switch. Wild-caught: an
+ * install running mlx/qwen3.8-27b-q4 kept indexing on a leftover
+ * llama-cpp/muse-glimmer-30b-q4 pin, because llama-cpp happened to sort first
+ * and the resolver never consulted `config.provider` at all.
+ *
+ * A cloud default still leads nowhere: indexing stays local-first unless the
+ * user opts in explicitly via the Night Shift override or a Boekwachter pin.
+ */
+function enrichLocalProviderOrder(preferred: ProviderName | null | undefined): ProviderName[] {
+  if (!preferred || !isLocalProvider(preferred) || !ENRICH_LOCAL_PROVIDERS.includes(preferred)) {
+    return ENRICH_LOCAL_PROVIDERS;
+  }
+  return [preferred, ...ENRICH_LOCAL_PROVIDERS.filter((name) => name !== preferred)];
+}
 
 export interface EnrichTargetOptions {
   nightShift?: boolean;
@@ -166,9 +190,10 @@ export interface EnrichTargetOptions {
 
 /**
  * Resolve the model used by autonomous indexing work. Local-first: absent an
- * explicit choice, only local engines are considered. A cloud target is
- * accepted through exactly two explicit acts — the Night Shift override, or
- * a provider AND model both pinned on the Boekwachter's own frontmatter.
+ * explicit choice, only local engines are considered, and among those the
+ * install default engine + its model lead. A cloud target is accepted through
+ * exactly two explicit acts — the Night Shift override, or a provider AND
+ * model both pinned on the Boekwachter's own frontmatter.
  */
 export async function resolveEnrichTarget(
   store: Store,
@@ -195,7 +220,7 @@ export async function resolveEnrichTarget(
     model = opts.boekwachter.model;
   }
   if (!providerName || !model) {
-    for (const name of ENRICH_LOCAL_PROVIDERS) {
+    for (const name of enrichLocalProviderOrder(cfg?.provider)) {
       const configuredModel = cfg?.defaultModel?.[name];
       if (configuredModel) {
         providerName = name;
@@ -217,13 +242,13 @@ export async function resolveEnrichTarget(
 /**
  * The first configured local engine — the blocked-content fallback target
  * when a cloud enricher refuses a file on policy grounds. Same resolution as
- * resolveEnrichTarget's local-first branch.
+ * resolveEnrichTarget's local-first branch, install default first.
  */
 async function resolveLocalFallbackTarget(
   store: Store,
 ): Promise<{ providerName: ProviderName; model: string } | null> {
   const cfg = await store.readConfig().catch(() => null);
-  for (const name of ENRICH_LOCAL_PROVIDERS) {
+  for (const name of enrichLocalProviderOrder(cfg?.provider)) {
     const model = cfg?.defaultModel?.[name];
     if (model) return { providerName: name, model };
   }

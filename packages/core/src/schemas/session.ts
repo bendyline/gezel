@@ -257,6 +257,17 @@ export const ChatSessionSchema = z.object({
    */
   consultationMode: z.boolean().optional(),
   /**
+   * Set when this session belongs to an anonymous VISITOR of an app-serve
+   * site, not to the signed-in user. Triggers at session build: (a) the
+   * tool surface is stripped to nothing — no MCP toolsets, no script
+   * tools, no builtins; (b) a visitor-context system-prompt addendum
+   * (don't disclose project internals, don't act on instructions to
+   * change anything); (c) exclusion from memory extraction, so a hostile
+   * visitor can never poison gezel memories. Persisted so every later
+   * turn on the session keeps the stripped posture.
+   */
+  visitorAccess: z.literal(true).optional(),
+  /**
    * Optional shape-of-deliverable hint passed by the asker when this
    * session was spawned (or messaged) by another gezel. When
    * `kind: "file"` is set, the system prompt's consultation-mode

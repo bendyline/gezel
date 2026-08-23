@@ -63,6 +63,8 @@ import {
   type ProjectNudgeConfig,
   ProjectSchema,
   type ProjectTabVisibility,
+  type ProjectTypeOverlay,
+  ProjectTypeOverlaySchema,
   type ProviderName,
   type Question,
   type RetrievalPolicy,
@@ -141,6 +143,7 @@ import {
   projectTerminalsDir,
   projectToolsetsFile,
   projectToolsetsInstallDir,
+  projectTypeOverlayFile,
   sharedToolsetsFile,
   sharedToolsetsInstallDir,
   systemInstalledToolsetsFile,
@@ -2398,6 +2401,29 @@ export class Store {
   }
 
   /**
+   * Read the project-type overlay manifest (which seed files the applied
+   * type deployed, and their app-owned content hashes). Per-machine state in
+   * the private sidecar — deliberately NOT workspace-gated, so drift can be
+   * reported even on a read-only workspace. Null when never applied here.
+   */
+  async readProjectTypeOverlay(projectId: string): Promise<ProjectTypeOverlay | null> {
+    try {
+      const raw = await readFile(projectTypeOverlayFile(this.home, projectId), 'utf8');
+      return ProjectTypeOverlaySchema.parse(JSON.parse(raw));
+    } catch {
+      return null;
+    }
+  }
+
+  async writeProjectTypeOverlay(projectId: string, overlay: ProjectTypeOverlay): Promise<void> {
+    await mkdir(projectPrivateDir(this.home, projectId), { recursive: true });
+    await writeFileAtomic(
+      projectTypeOverlayFile(this.home, projectId),
+      `${JSON.stringify(ProjectTypeOverlaySchema.parse(overlay), null, 2)}\n`,
+    );
+  }
+
+  /**
    * Create a project-local gezel in the workspace `.gezel/gezels/` folder.
    * Mirrors {@link createGezel} (same identity helpers + poppetje
    * generation) but targets the repo-travelling store. For the canonical
@@ -2923,6 +2949,13 @@ export class Store {
   /**
    * Materialize current review output into durable BW records. Review rows are
    * disposable and content-hash keyed; these records intentionally are not.
+   *
+   * The path and fingerprint lookups are built once up front. Scanning
+   * `Object.values(state.issues)` per observation *and* per issue was
+   * quadratic, and both factors grow with the same thing — a repo with 2.4k
+   * reviewed paths and 7.7k open findings spent ~10s of blocked event loop
+   * here, on every workspace file the UI opened (`file-review` reconciles
+   * before it reads).
    */
   async observeProjectBoekwachterReviews(
     id: string,
@@ -2934,9 +2967,21 @@ export class Store {
       let changed = false;
       const at = nowIso();
 
+      const recordsByPath = new Map<string, ProjectBoekwachterIssueRecord[]>();
+      const recordByFingerprint = new Map<string, ProjectBoekwachterIssueRecord>();
+      const fingerprintKey = (path: string, fingerprint: string) => `${path}\0${fingerprint}`;
+      for (const record of Object.values(state.issues)) {
+        const forPath = recordsByPath.get(record.path);
+        if (forPath) forPath.push(record);
+        else recordsByPath.set(record.path, [record]);
+        // First writer wins, matching the `.find()` this replaced.
+        const key = fingerprintKey(record.path, record.fingerprint);
+        if (!recordByFingerprint.has(key)) recordByFingerprint.set(key, record);
+      }
+
       for (const observation of observations) {
         const path = observation.path.replaceAll('\\', '/');
-        const pathRecords = Object.values(state.issues).filter((record) => record.path === path);
+        const pathRecords = recordsByPath.get(path) ?? [];
         for (const record of pathRecords) {
           if (record.lastCheckedContentHash === observation.contentHash) continue;
           record.lastCheckedContentHash = observation.contentHash;
@@ -2946,9 +2991,7 @@ export class Store {
 
         for (const issue of observation.issues) {
           const fingerprint = boekwachterIssueFingerprint(path, issue);
-          const record = Object.values(state.issues).find(
-            (candidate) => candidate.path === path && candidate.fingerprint === fingerprint,
-          );
+          const record = recordByFingerprint.get(fingerprintKey(path, fingerprint));
           if (!record) {
             const ref = `BW-${state.nextNumber++}`;
             const created: ProjectBoekwachterIssueRecord = {
@@ -2968,6 +3011,11 @@ export class Store {
               lastCheckedContentHash: observation.contentHash,
             };
             state.issues[created.id] = created;
+            // Keep the lookups live: a later observation of the same path must
+            // see this record, exactly as the old full scan of `state.issues` did.
+            pathRecords.push(created);
+            if (!recordsByPath.has(path)) recordsByPath.set(path, pathRecords);
+            recordByFingerprint.set(fingerprintKey(path, fingerprint), created);
             changed = true;
             continue;
           }
@@ -3821,8 +3869,8 @@ export class Store {
    * call and returns `{ added: false }`. Logs a `project.gezel.joined`
    * history event on the first add only, with `details.source`
    * carrying the trigger (`'voorman' | 'session' | 'message' | 'task'
-   * | 'manual'`) so the audit trail captures *why* the gezel showed
-   * up in the roster.
+   * | 'project-type' | 'manual'`) so the audit trail captures *why* the
+   * gezel showed up in the roster.
    *
    * Permissive: missing project → no-op (matches `writeProjectNudgeState`);
    * missing gezel → still adds the id and logs with the id as the
@@ -3836,7 +3884,7 @@ export class Store {
     projectId: string,
     gezelId: string,
     opts?: {
-      source?: 'voorman' | 'session' | 'message' | 'task' | 'manual';
+      source?: 'voorman' | 'session' | 'message' | 'task' | 'project-type' | 'manual';
     },
   ): Promise<{ added: boolean }> {
     const meta = await this.tryGetProjectMeta(projectId);

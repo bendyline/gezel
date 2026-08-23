@@ -116,6 +116,15 @@ export function projectPrivateDir(root: string, projectId: string): string {
   return userProjectDir(root, projectId);
 }
 
+/**
+ * Daemon-owned record of the seed files the applied project type deployed
+ * into the workspace (the "overlay manifest"). Per-machine by design — it
+ * lives in the private sidecar, never in the possibly-synced workspace.
+ */
+export function projectTypeOverlayFile(root: string, projectId: string): string {
+  return join(projectPrivateDir(root, projectId), 'project-type-overlay.json');
+}
+
 export function machineSharedGezelDir(gezelId: string): string | null {
   assertSafeEntityId(gezelId, 'gezel id');
   const shared = activeMachineSharedHome();

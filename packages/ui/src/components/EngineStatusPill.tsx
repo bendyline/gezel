@@ -59,6 +59,7 @@ import {
   formatTokensPerSec,
 } from './engine-pill-stats.js';
 import { useHeaderDensity } from './header-density.js';
+import { shortModelName } from './model-display-name.js';
 import { deviceLabel, providerLabel } from './provider-label.js';
 import {
   type LiveTurnState,
@@ -870,11 +871,7 @@ function EngineStatusPillForProvider({
   // is unchanged.
   // Suppress the chat model name while a media engine is active — the
   // pill is showing "Video / Image", not the (paused) chat model.
-  const displayModelName = activeMedia
-    ? undefined
-    : modelName
-      ? modelName.replace(/\s*\([^)]*\)\s*$/, '').trim()
-      : modelName;
+  const displayModelName = activeMedia ? undefined : shortModelName(modelName);
   const modelSuffix = displayModelName ? ` · ${displayModelName}` : '';
   // Active tuning for the loaded model. Two independent layers can be in
   // play (see InstallModelTuningEditor): an install-wide preset

@@ -170,6 +170,34 @@ export const ProjectTypeProvenanceSchema = z.object({
 });
 export type ProjectTypeProvenance = z.infer<typeof ProjectTypeProvenanceSchema>;
 
+/** One seed file the applied project type wrote into the workspace. */
+export const AppliedSeedRecordSchema = z.object({
+  /** Workspace-relative path; artifact seeds are prefixed `artifacts/`. */
+  path: z.string(),
+  /** sha256 (hex) of the rendered content as last written by an apply. */
+  sha256: z.string(),
+  /** Type version that wrote this content. */
+  typeVersion: z.string(),
+  writtenAt: z.string(),
+});
+export type AppliedSeedRecord = z.infer<typeof AppliedSeedRecordSchema>;
+
+/**
+ * The overlay manifest: which files the applied project type deployed, and
+ * what the app-owned content hashed to. Stored per-machine in the project's
+ * private sidecar (`projectTypeOverlayFile`), never in the workspace — it is
+ * how a later apply distinguishes a user-modified seed (kept under
+ * `seedPolicy: 'preserve'`) from a stale-but-untouched one (refreshed).
+ */
+export const ProjectTypeOverlaySchema = z.object({
+  schemaVersion: z.literal(1),
+  typeId: z.string(),
+  typeVersion: z.string(),
+  appliedAt: z.string(),
+  seeds: z.array(AppliedSeedRecordSchema).default([]),
+});
+export type ProjectTypeOverlay = z.infer<typeof ProjectTypeOverlaySchema>;
+
 /**
  * Project shape. `crew` (the default) is the original behavior — the voorman
  * recruits and coordinates a team of specialists. `solo` is a "job": a single

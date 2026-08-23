@@ -28,10 +28,15 @@ import type {
   VideoModelPullEvent,
 } from '@bendyline/gezel';
 import type {
+  AiAppDetail,
   AmbientDashboardDisplayTarget,
   AmbientDashboardStatusResponse,
   AmbientDashboardTheme,
   AnswerQuestionRequest,
+  AppServeRotateKeyRequest,
+  AppServeSiteStatus,
+  AppServeStartRequest,
+  AppServeStartResponse,
   AppendTaskNoteRequest,
   AppendTaskNoteResponse,
   AppliedProjectType,
@@ -128,9 +133,8 @@ import type {
   GetBoekwachterIssueRequest,
   GetBoekwachterIssueResponse,
   GetScriptSourceResponse,
-  GezappDependency,
-  GezappEmbeddedKind,
   GezappManifest,
+  GezappRegistryEntry,
   GezelGender,
   GezelGrowthResponse,
   GezelIconHistoryResponse,
@@ -177,6 +181,7 @@ import type {
   HandboekRenderMode,
   HandboekToc,
   HealthResponse,
+  ImportAiAppResult,
   ImportCustomMcpConfigRequest,
   ImportCustomMcpConfigResponse,
   InsertAtMarkerInProjectWorkspaceFileRequest,
@@ -188,6 +193,8 @@ import type {
   InvokePageToolRequest,
   InvokePageToolResponse,
   InvokeSessionToolResponse,
+  ListAiAppsResponse,
+  ListAppServeSitesResponse,
   ListChatSessionsResponse,
   ListCodeReviewsResponse,
   ListCraftbooksResponse,
@@ -252,6 +259,8 @@ import type {
   ProjectResponse,
   ProjectSearchRequest,
   ProjectSearchResponse,
+  ProjectTypeApplyPlan,
+  ProjectTypeStatusResponse,
   ProviderName,
   Question,
   ReadArtifactSliceOpts,
@@ -268,6 +277,7 @@ import type {
   ReferenceFileLocationResponse,
   ReferencePreviewRequest,
   ReferencePreviewResponse,
+  RemoveAiAppResponse,
   RenameGezelRequest,
   RenderImageRequest,
   RenderImageResponse,
@@ -5205,6 +5215,20 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/apply-project-type`, body);
   }
 
+  /** Dry-run `applyProjectType`: same request body, no writes. */
+  preflightProjectType(id: string, body: ApplyProjectTypeRequest): Promise<ProjectTypeApplyPlan> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/apply-project-type/preflight`,
+      body,
+    );
+  }
+
+  /** Applied type vs installed AI App, plus per-seed drift. */
+  projectTypeStatus(id: string): Promise<ProjectTypeStatusResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/project-type/status`);
+  }
+
   /** Package an exact-version AI App into a `.gezapp` artifact. */
   exportAiApp(
     id: string,
@@ -5219,23 +5243,101 @@ export class GezelClient {
   }
 
   /** Preview or install a `.gezapp` artifact. */
-  importAiApp(
-    id: string,
-    body: { path: string; confirm?: boolean },
-  ): Promise<{
-    manifest: GezappManifest;
-    items: Array<{ kind: GezappEmbeddedKind; id: string; version: string }>;
-    dependencies: GezappDependency[];
-    missingDependencies: GezappDependency[];
-    packageSha256: string;
-    installed?: {
-      appId: string;
-      version: string;
-      receiptPath: string;
-      alreadyPresent: boolean;
-    };
-  }> {
+  importAiApp(id: string, body: { path: string; confirm?: boolean }): Promise<ImportAiAppResult> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/ai-apps/import`, body);
+  }
+
+  // ── AI App management (global /api/ai-apps) ──
+
+  /** Installed AI Apps: registry entries + receipt snapshots. */
+  listAiApps(): Promise<ListAiAppsResponse> {
+    return this.request('GET', '/api/ai-apps');
+  }
+
+  /** One installed app with its manifest, live dependency check, and applied projects. */
+  getAiApp(appId: string): Promise<AiAppDetail> {
+    return this.request('GET', `/api/ai-apps/${encodeURIComponent(appId)}`);
+  }
+
+  /**
+   * Preview (default) or install (`confirm`) a `.gezapp` package from raw
+   * bytes. Idempotent: re-sending installed bytes re-registers without
+   * touching disk; same version with different bytes is refused.
+   */
+  async importAiAppPackage(
+    data: Blob | ArrayBuffer | Uint8Array,
+    opts?: { confirm?: boolean },
+  ): Promise<ImportAiAppResult> {
+    const url = `${this.baseUrl}/api/ai-apps/import${opts?.confirm ? '?confirm=1' : ''}`;
+    const body =
+      data instanceof Blob
+        ? data
+        : data instanceof Uint8Array
+          ? data
+          : new Uint8Array(data as ArrayBuffer);
+    const res = await this.fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/octet-stream',
+        Authorization: `Bearer ${this.token}`,
+      },
+      body,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      let message = text;
+      try {
+        const parsed = JSON.parse(text) as { error?: string };
+        if (parsed.error) message = parsed.error;
+      } catch {
+        // Non-JSON error body — surface it verbatim.
+      }
+      throw new Error(message || `AI App import failed (${res.status})`);
+    }
+    return res.json() as Promise<ImportAiAppResult>;
+  }
+
+  /** Flip an installed app's enabled flag. */
+  setAiAppEnabled(appId: string, enabled: boolean): Promise<{ entry: GezappRegistryEntry }> {
+    return this.request('PATCH', `/api/ai-apps/${encodeURIComponent(appId)}`, { enabled });
+  }
+
+  /** Uninstall an app (registry entry + version dirs unless `keepFiles`). */
+  removeAiApp(appId: string, opts?: { keepFiles?: boolean }): Promise<RemoveAiAppResponse> {
+    return this.request(
+      'DELETE',
+      `/api/ai-apps/${encodeURIComponent(appId)}${opts?.keepFiles ? '?keepFiles=1' : ''}`,
+    );
+  }
+
+  // ── App serve (shareable AI App mini-sites) ──
+
+  /** Start serving a project's applied app; the 201 carries the site key. */
+  startAppServe(body: AppServeStartRequest): Promise<AppServeStartResponse> {
+    return this.request('POST', '/api/app-serve', body);
+  }
+
+  listAppServeSites(): Promise<ListAppServeSitesResponse> {
+    return this.request('GET', '/api/app-serve');
+  }
+
+  getAppServeSite(siteId: string): Promise<AppServeSiteStatus> {
+    return this.request('GET', `/api/app-serve/${encodeURIComponent(siteId)}`);
+  }
+
+  rotateAppServeKey(
+    siteId: string,
+    body?: AppServeRotateKeyRequest,
+  ): Promise<{ siteKey: string; shareUrl: string }> {
+    return this.request(
+      'POST',
+      `/api/app-serve/${encodeURIComponent(siteId)}/rotate-key`,
+      body ?? {},
+    );
+  }
+
+  stopAppServeSite(siteId: string): Promise<{ ok: true }> {
+    return this.request('DELETE', `/api/app-serve/${encodeURIComponent(siteId)}`);
   }
 
   // ── Connectors (external-data sources) ────────────────────────────────────
