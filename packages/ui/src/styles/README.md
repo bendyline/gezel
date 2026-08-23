@@ -24,6 +24,7 @@ intermediate render.
 | `project-surfaces.css` | Project output, remaining tab primitives, questions, creation galleries, mail, and connected project surfaces |
 | `terminal.css` | In-chat terminal, terminal composer, and folder switcher |
 | `github-and-growth.css` | GitHub workspace and gezel growth surfaces |
+| `diffpacks.css` | Change-proposal review pane (the project Proposals tab) |
 | `scripts-and-craftbooks.css` | Script editor, craftbook editor, automation, and gates |
 | `village-and-overview.css` | Village, task planning, project overview, machine budget, and remote serving |
 | `controls-handbook-and-admin.css` | Late shared control recipes, storage cleanup, backup/restore, and first-run content |

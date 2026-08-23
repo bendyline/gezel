@@ -78,6 +78,8 @@ import {
   workspaceIndexLabel,
 } from '../components/WorkspaceIndexPane.js';
 import { WorkspaceIssueFixDialog } from '../components/WorkspaceIssueFixDialog.js';
+import { DiffpackReviewView } from '../components/diffpacks/DiffpackReviewView.js';
+import { useDiffpackCount } from '../components/diffpacks/useDiffpacks.js';
 import {
   BINARY_FILE,
   type FileBrowserCustomList,
@@ -187,6 +189,7 @@ type ProjectTab =
   | 'packages'
   | 'workspace'
   | 'artifacts'
+  | 'proposals'
   | 'github'
   | 'mail'
   | 'connections'
@@ -1437,6 +1440,18 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     [selected],
   );
 
+  const saveNightlyFixesEnabled = useCallback(
+    async (next: boolean) => {
+      if (!selected) return;
+      try {
+        setSelected(await api.updateProject(selected.id, { nightlyFixesEnabled: next }));
+      } catch (err) {
+        console.error('updateProject(nightlyFixesEnabled) failed:', err);
+      }
+    },
+    [selected],
+  );
+
   const toggleProjectLink = useCallback(
     async (linkedProjectId: string, enabled: boolean) => {
       if (!selected || savingProjectLinks) return;
@@ -2105,6 +2120,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // beside the content, so it becomes its own tab. It's offered whenever
   // the workspace has any previewable HTML.
   const compactOutputAvailable = effectiveCompact && workspaceHtmlFiles.length > 0;
+  const diffpackCount = useDiffpackCount(selected?.id ?? '');
   // Keep the active tab valid as the form factor / availability changes:
   // 'output' only exists in compact mode while there's output to show.
   useEffect(() => {
@@ -2386,6 +2402,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         label: 'Artifacts',
                         show: projectTabIsVisible(selected, 'artifacts'),
                       },
+                      // Shown only once the project has proposals: a tab that is
+                      // empty for every project that never ran a fix is noise.
+                      {
+                        value: 'proposals',
+                        label: 'Proposals',
+                        show: diffpackCount > 0,
+                      },
                       { value: 'github', label: 'GitHub', show: Boolean(selected.github?.url) },
                       {
                         value: 'mail',
@@ -2613,6 +2636,25 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                 Builds file search, commands, the Village map, and AI summaries.
                                 Turn it off for lightweight projects such as games or language
                                 practice.
+                              </span>
+                            </div>
+                          </label>
+
+                          <label className="config-label" style={{ marginTop: '0.75rem' }}>
+                            Fix problems overnight
+                            <div className="new-row" style={{ alignItems: 'center' }}>
+                              <input
+                                type="checkbox"
+                                checked={selected.nightlyFixesEnabled !== false}
+                                onChange={(event) =>
+                                  void saveNightlyFixesEnabled(event.target.checked)
+                                }
+                              />
+                              <span className="muted small">
+                                When this project has both a Boekwachter and a developer, the
+                                developer works through open issues during the night shift. Your
+                                files aren’t touched — fixes arrive as change proposals in the
+                                Proposals tab for you to review and apply.
                               </span>
                             </div>
                           </label>
@@ -3287,18 +3329,18 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                 requestId: (current?.requestId ?? 0) + 1,
                               }));
                             }}
-                            onFixIssue={
-                              workspaceAccess.effectiveWritable
-                                ? (issue) => {
-                                    if (workspaceReviewPath) {
-                                      setWorkspaceIssueFixRequest({
-                                        path: workspaceReviewPath,
-                                        issue,
-                                      });
-                                    }
-                                  }
-                                : undefined
-                            }
+                            // No writability gate: a fix is drafted as a
+                            // change proposal the user applies, so this works
+                            // on a read-only folder too — the case that needs
+                            // it most.
+                            onFixIssue={(issue) => {
+                              if (workspaceReviewPath) {
+                                setWorkspaceIssueFixRequest({
+                                  path: workspaceReviewPath,
+                                  issue,
+                                });
+                              }
+                            }}
                             onUpdateIssue={updateWorkspaceIssue}
                             onOpenTask={(taskRef) => navigateToTab({ kind: 'task', ref: taskRef })}
                           />
@@ -3377,6 +3419,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   )}
 
                   {tab === 'tasks' && <TasksView projectId={selected.id} />}
+
+                  {tab === 'proposals' && <DiffpackReviewView projectId={selected.id} />}
 
                   {tab === 'github' && selected.github?.url && (
                     <ProjectGitHubView project={selected} onProjectChange={setSelected} />

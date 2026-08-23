@@ -35,6 +35,7 @@ import { configRoutes } from './routes/config.js';
 import { connectorRoutes } from './routes/connectors.js';
 import { craftbookRoutes } from './routes/craftbooks.js';
 import { credentialRoutes } from './routes/credentials.js';
+import { diffpackRoutes } from './routes/diffpacks.js';
 import { documentMediaExportRoutes } from './routes/document-media-export.js';
 import { documentRoutes } from './routes/documents.js';
 import { ds4Routes } from './routes/ds4.js';
@@ -588,6 +589,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/projects', suggestedWorkRoutes(ctx));
   // Report-embedded action requests at /api/projects/:id/report-actions/*
   app.route('/api/projects', reportActionRoutes(ctx));
+  app.route('/api/projects', diffpackRoutes(ctx));
   // Per-project GitHub operations live at /api/projects/:id/github/*
   app.route('/api/projects', gitRoutes(ctx, 'git'));
   // Legacy alias: the same local-git routes under the old /github segment,

@@ -461,6 +461,11 @@ export function projectCodeReviewsFile(root: string, projectId: string): string 
   return join(projectPrivateDir(root, projectId), 'code-reviews.json');
 }
 
+/** Durable per-project diffpack records for this account. */
+export function projectDiffpacksFile(root: string, projectId: string): string {
+  return join(projectPrivateDir(root, projectId), 'diffpacks.json');
+}
+
 /** Durable per-account report-action lifecycle records. */
 export function projectReportActionsFile(root: string, projectId: string): string {
   return join(projectPrivateDir(root, projectId), 'report-actions.json');
@@ -500,6 +505,34 @@ export function projectShadowDir(
   external?: ExternalFolders,
 ): string {
   return join(projectArtifactsDir(root, projectId, external), PROJECT_SHADOW_DIR_NAME);
+}
+
+/**
+ * Reserved artifacts subtree holding diffpacks: proposed change sets a gezel
+ * drafted but never applied. Each pack owns `after/` (the copy-on-write draft
+ * tree), `files/` (the sealed single-file unified diffs), `notes.md` and
+ * `manifest.json`. Lives under artifacts — never the workspace, which is the
+ * whole point: the gezel proposes, the user applies.
+ */
+export const PROJECT_DIFFPACKS_DIR_NAME = 'diffpacks';
+
+/** Per-project `artifacts/diffpacks/` root. */
+export function projectDiffpacksDir(
+  root: string,
+  projectId: string,
+  external?: ExternalFolders,
+): string {
+  return join(projectArtifactsDir(root, projectId, external), PROJECT_DIFFPACKS_DIR_NAME);
+}
+
+/** One pack's folder: `artifacts/diffpacks/<packId>/`. */
+export function projectDiffpackDir(
+  root: string,
+  projectId: string,
+  packId: string,
+  external?: ExternalFolders,
+): string {
+  return join(projectDiffpacksDir(root, projectId, external), packId);
 }
 
 /** Per-project memories folder (daily markdown + summary + vectra index). */

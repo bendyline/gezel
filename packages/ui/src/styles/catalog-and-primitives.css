@@ -88,22 +88,38 @@
   margin: 0 0 0.5rem 0;
 }
 
-/* DwarfStar lists installed and downloadable builds in one flow of rows
-   rather than the installed-models table the other engines use — each row
-   carries two lines of memory/context guidance that a cell can't hold. The
-   surface and hairline separators still come from the same recipe so the
-   panel reads as one family with MLX and llama.cpp. */
-.ds4-model-list {
-  padding: 0.25rem 0.75rem;
+/* DwarfStar uses the same model table as MLX and llama.cpp, with one
+   difference: installed and downloadable builds share it. A ds4 download runs
+   to hundreds of GB, so the memory and context guidance has to be readable on
+   the row BEFORE the download starts — which a separate browse section cannot
+   do. The fit verdict rides the name cell rather than the memory column it
+   judges: its labels are the longest strings on the row, and a column sized to
+   hold them pushed the numeric columns off the panel. */
+.ds4-model-table .ds4-model-name {
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.ds4-model-row.new-row {
-  margin: 0;
-  padding: 0.6rem 0;
+/* Own line under the name/status stack. A pill is a key, not a paragraph — it
+   never wraps mid-label. */
+.ds4-model-fit {
+  white-space: nowrap;
 }
 
-.ds4-model-row.new-row:not(:first-child) {
-  border-top: 1px solid var(--border);
+/* The percentage and phase label change every tick; a fixed width keeps them
+   from reflowing the cells to their left, and tabular figures keep the digits
+   from jittering. */
+.ds4-model-progress-label {
+  display: inline-block;
+  min-width: 9rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.ds4-model-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
 }
 
 .shared-model-migration-copy {
@@ -226,6 +242,12 @@
 
 .model-fitness-cell {
   white-space: nowrap;
+}
+
+/* Reading speed under the badge. Tabular figures so a column of rates reads as
+   a column; the badge above already carries writing speed. */
+.model-fitness-speeds {
+  font-variant-numeric: tabular-nums;
 }
 
 .model-actions-table-cell {

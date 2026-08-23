@@ -172,8 +172,9 @@ import { PoppetjeManager } from '../poppetje/manager.js';
 import {
   type WorkspaceEditResult,
   buildWorkspaceEditResult,
-  findAllOccurrences,
-  findFlexibleMatch,
+  computeInsertAtMarker,
+  computeReplaceInFile,
+  computeReplaceLines,
   readFileForEditOrThrow,
 } from '../workspace/edit.js';
 import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../workspace/errors.js';
@@ -3397,6 +3398,8 @@ export class Store {
       leanProfile?: boolean;
       /** Missing/true indexes the workspace; false opts the project out. */
       indexingEnabled?: boolean;
+      /** Missing/true allows overnight bug fixing; false opts the project out. */
+      nightlyFixesEnabled?: boolean;
       workspaceScriptTimeoutMs?: number;
       status?: 'active' | 'readonly' | 'inactive' | 'stable';
       /** Buried in project navigation. Archiving always forces inactive. */
@@ -3537,6 +3540,9 @@ export class Store {
           : {}),
       ...(patch.leanProfile !== undefined ? { leanProfile: patch.leanProfile } : {}),
       ...(patch.indexingEnabled !== undefined ? { indexingEnabled: patch.indexingEnabled } : {}),
+      ...(patch.nightlyFixesEnabled !== undefined
+        ? { nightlyFixesEnabled: patch.nightlyFixesEnabled }
+        : {}),
       ...(patch.workspaceScriptTimeoutMs !== undefined
         ? { workspaceScriptTimeoutMs: patch.workspaceScriptTimeoutMs }
         : {}),
@@ -3615,6 +3621,12 @@ export class Store {
       patch.indexingEnabled !== (meta.indexingEnabled !== false)
     ) {
       metaChanged.push('indexingEnabled');
+    }
+    if (
+      patch.nightlyFixesEnabled !== undefined &&
+      patch.nightlyFixesEnabled !== (meta.nightlyFixesEnabled !== false)
+    ) {
+      metaChanged.push('nightlyFixesEnabled');
     }
     if (patch.archived !== undefined && patch.archived !== (meta.archived ?? false)) {
       metaChanged.push('archived');
@@ -4595,7 +4607,7 @@ export class Store {
    */
   async assertWorkspaceWritable(
     id: string,
-    opts?: { initiatedByGezel?: boolean; path?: string | string[] },
+    opts?: { initiatedByGezel?: boolean; userInitiated?: boolean; path?: string | string[] },
   ): Promise<
     | { ok: true; workspaceDir: string; external: boolean }
     | {
@@ -4607,7 +4619,18 @@ export class Store {
     const meta = await this.tryGetProjectMeta(id);
     const resolved = this.resolveWorkspaceDir(id, meta);
     const managedWritePolicy = projectManagedWorkspaceWritePolicy(meta);
-    if (resolved.source === 'workingDir' && managedWritePolicy !== 'allow') {
+    // `userInitiated` waives ONLY the external-consent branch, and only for
+    // callers that can prove the write is the user's own act — today the
+    // diffpack apply route, where a gezel drafted a proposal it could not
+    // write and the user clicked Apply. The consent this branch protects is
+    // "gezels may edit my folder", which such a write does not claim. Path
+    // containment, journaling, and history are unaffected. Never pass it from
+    // an MCP tool or any other model-reachable surface.
+    if (
+      resolved.source === 'workingDir' &&
+      managedWritePolicy !== 'allow' &&
+      opts?.userInitiated !== true
+    ) {
       return { ok: false, reason: 'external-consent-required', workingDir: resolved.dir };
     }
     if (opts?.initiatedByGezel && managedWritePolicy === 'deny') {
@@ -4642,9 +4665,11 @@ export class Store {
     filePath: string,
     content: string,
     ctx?: JournalContext,
+    opts?: { userInitiated?: boolean },
   ): Promise<void> {
     const gate = await this.assertWorkspaceWritable(id, {
       initiatedByGezel: !!ctx?.gezelId,
+      ...(opts?.userInitiated ? { userInitiated: true } : {}),
       path: filePath,
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
@@ -4690,59 +4715,7 @@ export class Store {
     const full = await resolveInside(gate.workspaceDir, args.path);
     const oldContent = await readFileForEditOrThrow(full, args.path);
 
-    const matches = findAllOccurrences(oldContent, args.find);
-    const notFound = () =>
-      new WorkspaceEditError(
-        `pattern not found in ${args.path}. The file's content may have changed since you last read it — re-read and try again.`,
-        'pattern-not-found',
-      );
-
-    let newContent: string;
-    if (args.occurrence === 'all') {
-      if (matches.length === 0) throw notFound();
-      newContent = oldContent.split(args.find).join(args.replace);
-    } else if (typeof args.occurrence === 'number') {
-      const pos = matches[args.occurrence - 1];
-      if (pos === undefined) {
-        if (matches.length === 0) throw notFound();
-        throw new WorkspaceEditError(
-          `occurrence ${args.occurrence} out of range — found ${matches.length} match(es) in ${args.path}`,
-          'occurrence-out-of-range',
-        );
-      }
-      newContent =
-        oldContent.slice(0, pos) + args.replace + oldContent.slice(pos + args.find.length);
-    } else if (matches.length === 1) {
-      const pos = matches[0]!;
-      newContent =
-        oldContent.slice(0, pos) + args.replace + oldContent.slice(pos + args.find.length);
-    } else if (matches.length > 1) {
-      throw new WorkspaceEditError(
-        `pattern matches ${matches.length} places in ${args.path}; specify occurrence=<1-based index> or 'all'.`,
-        'ambiguous-match',
-      );
-    } else {
-      // No exact match. Fall back to a whitespace-flexible, line-based
-      // match so a botched-indentation or gutter-pasted `find` still
-      // lands instead of bouncing the model into a full-file rewrite.
-      const flexible = findFlexibleMatch(oldContent, args.find);
-      if (flexible.kind === 'ambiguous') {
-        throw new WorkspaceEditError(
-          `pattern matches ${flexible.count} places in ${args.path} (ignoring whitespace); add more surrounding lines to \`find\` so it is unique, or use \`replace_lines\`.`,
-          'ambiguous-match',
-        );
-      }
-      if (flexible.kind === 'none') throw notFound();
-      newContent =
-        oldContent.slice(0, flexible.start) + args.replace + oldContent.slice(flexible.end);
-    }
-
-    if (newContent === oldContent) {
-      throw new WorkspaceEditError(
-        `replace_in_file is a no-op on ${args.path} — \`find\` and \`replace\` produced identical content.`,
-        'identity-edit',
-      );
-    }
+    const newContent = computeReplaceInFile(oldContent, args);
 
     await writeFileAtomic(full, newContent);
     await appendJournalEntry(this.home, id, 'write', args.path, { content: newContent, ctx });
@@ -4779,38 +4752,7 @@ export class Store {
     const full = await resolveInside(gate.workspaceDir, args.path);
     const oldContent = await readFileForEditOrThrow(full, args.path);
 
-    if (args.endLine < args.startLine) {
-      throw new WorkspaceEditError(
-        `endLine (${args.endLine}) is before startLine (${args.startLine}) in ${args.path}.`,
-        'invalid-range',
-      );
-    }
-
-    const newlineStyle = oldContent.includes('\r\n') ? '\r\n' : '\n';
-    const hadTrailingNewline = oldContent.endsWith('\n');
-    const body = hadTrailingNewline ? oldContent.slice(0, -newlineStyle.length) : oldContent;
-    const lines = body === '' ? [] : body.split(/\r?\n/);
-    const total = lines.length;
-
-    if (args.startLine > total) {
-      throw new WorkspaceEditError(
-        `startLine ${args.startLine} is past the end of ${args.path} (${total} line(s)). Re-read the file for current line numbers, or use \`append_to_file\` to add to the end.`,
-        'line-out-of-range',
-      );
-    }
-    const endLine = Math.min(args.endLine, total);
-
-    const inserted = args.content === '' ? [] : args.content.replace(/\r?\n$/, '').split(/\r?\n/);
-    const next = [...lines.slice(0, args.startLine - 1), ...inserted, ...lines.slice(endLine)];
-    let newContent = next.join(newlineStyle);
-    if (hadTrailingNewline && newContent !== '') newContent += newlineStyle;
-
-    if (newContent === oldContent) {
-      throw new WorkspaceEditError(
-        `replace_lines is a no-op on ${args.path} — the new content matches lines ${args.startLine}-${endLine}.`,
-        'identity-edit',
-      );
-    }
+    const newContent = computeReplaceLines(oldContent, args);
 
     await writeFileAtomic(full, newContent);
     await appendJournalEntry(this.home, id, 'write', args.path, { content: newContent, ctx });
@@ -4907,9 +4849,11 @@ export class Store {
     id: string,
     edits: Array<{ path: string; diff: string }>,
     ctx?: JournalContext,
+    opts?: { userInitiated?: boolean },
   ): Promise<{ ok: boolean; results: Array<{ path: string; ok: boolean; error?: string }> }> {
     const gate = await this.assertWorkspaceWritable(id, {
       initiatedByGezel: !!ctx?.gezelId,
+      ...(opts?.userInitiated ? { userInitiated: true } : {}),
       path: edits.map((e) => e.path),
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
@@ -5012,26 +4956,7 @@ export class Store {
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, args.path);
     const oldContent = await readFileForEditOrThrow(full, args.path);
-    const matches = findAllOccurrences(oldContent, args.marker);
-    if (matches.length === 0) {
-      throw new WorkspaceEditError(
-        `marker not found in ${args.path}. Re-read the file and pass a literal substring that appears exactly once.`,
-        'marker-not-found',
-      );
-    }
-    if (matches.length > 1) {
-      throw new WorkspaceEditError(
-        `marker matches ${matches.length} places in ${args.path}; pick a longer literal substring that's unique.`,
-        'marker-ambiguous',
-      );
-    }
-    const pos = matches[0]!;
-    const newContent =
-      where === 'after'
-        ? oldContent.slice(0, pos + args.marker.length) +
-          args.content +
-          oldContent.slice(pos + args.marker.length)
-        : oldContent.slice(0, pos) + args.content + oldContent.slice(pos);
+    const newContent = computeInsertAtMarker(oldContent, { ...args, where });
     await writeFileAtomic(full, newContent);
     await appendJournalEntry(this.home, id, 'write', args.path, { content: newContent, ctx });
     const result = buildWorkspaceEditResult(args.path, oldContent, newContent);
@@ -5122,11 +5047,12 @@ export class Store {
   async rmProjectWorkspacePath(
     id: string,
     filePath: string,
-    opts: { recursive?: boolean } = {},
+    opts: { recursive?: boolean; userInitiated?: boolean } = {},
     ctx?: JournalContext,
   ): Promise<void> {
     const gate = await this.assertWorkspaceWritable(id, {
       initiatedByGezel: !!ctx?.gezelId,
+      ...(opts.userInitiated ? { userInitiated: true } : {}),
       path: filePath,
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);

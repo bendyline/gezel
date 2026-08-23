@@ -117,8 +117,17 @@ describe('Boekwachter issue tool routes', () => {
           }),
         ],
       }),
-      { origin: { kind: 'boekwachter-issue', issueRef: 'BW-7', path: 'docs/guide.md' } },
+      {
+        origin: { kind: 'boekwachter-issue', issueRef: 'BW-7', path: 'docs/guide.md' },
+        draftsDiffpack: true,
+      },
     );
+    // The fix is a proposal, and the prompt has to say so: a gezel that
+    // believes it edited the project writes "fixed" into its task notes, and
+    // that claim then flows into the issue lifecycle and the review card.
+    const prompt = create.mock.calls[0]?.[1]?.steps?.[0]?.prompt ?? '';
+    expect(prompt).toMatch(/CHANGE PROPOSAL, not editing this project/);
+    expect(prompt).toMatch(/diffpacks\/\{\{task\.num\}\}\/notes\.md/);
     expect(updateBoekwachterIssue).toHaveBeenCalledWith('p1', 'BW-7', {
       status: 'in_progress',
       seen: true,

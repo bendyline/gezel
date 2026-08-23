@@ -40,6 +40,8 @@ import type {
   AppendTaskNoteRequest,
   AppendTaskNoteResponse,
   AppliedProjectType,
+  ApplyDiffpackRequest,
+  ApplyDiffpackResponse,
   ApplyPatchToProjectWorkspaceFileRequest,
   ApplyProjectTypeRequest,
   ArchiveExtractRequest,
@@ -93,6 +95,8 @@ import type {
   DeviceSafetyPolicyConfig,
   DiffFilesRequest,
   DiffFilesResponse,
+  DiffpackResponse,
+  DismissDiffpackResponse,
   DismissReportActionRequest,
   DocumentMediaExportRequest,
   DraftScriptRequest,
@@ -199,6 +203,7 @@ import type {
   ListCodeReviewsResponse,
   ListCraftbooksResponse,
   ListDependenciesResponse,
+  ListDiffpacksResponse,
   ListEntityMentionsRequest,
   ListEntityMentionsResponse,
   ListFileIssuesRequest,
@@ -1801,6 +1806,13 @@ export interface LlamaCppInstalledModel {
    */
   contextCeilingTokens?: number;
   quantization?: string;
+  /**
+   * What the model file declares about itself (`general.file_type`), sent
+   * only when the catalog's `quantization` names no bit depth. The model
+   * table renders this instead, so a hand-authored catalog label like
+   * `K-Quant-17GB` never lands in a column of `~4` / `~8`.
+   */
+  ggufQuantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;
   /**
@@ -2570,6 +2582,135 @@ export class GezelClient {
       `/api/projects/${encodeURIComponent(projectId)}/report-actions/dismiss`,
       body,
     );
+  }
+
+  // ---------- diffpacks ----------
+
+  /** Change proposals a gezel drafted for this project, newest first. */
+  listDiffpacks(projectId: string): Promise<ListDiffpacksResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(projectId)}/diffpacks`);
+  }
+
+  /** One proposal plus its notes markdown, in a single round trip. */
+  getDiffpack(projectId: string, packId: string): Promise<DiffpackResponse> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(projectId)}/diffpacks/${encodeURIComponent(packId)}`,
+    );
+  }
+
+  /**
+   * Apply a proposal to the workspace — all of it, or the `paths` subset.
+   *
+   * This is a USER-initiated write: the drafting gezel never touched the
+   * workspace, so this succeeds on a folder gezels hold no write grant for.
+   * 409 `drifted` means a target changed since the proposal was drafted;
+   * re-request with `allowDrifted` only after showing the user which files.
+   */
+  applyDiffpack(
+    projectId: string,
+    packId: string,
+    body: ApplyDiffpackRequest = {},
+  ): Promise<ApplyDiffpackResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/diffpacks/${encodeURIComponent(packId)}/apply`,
+      body,
+    );
+  }
+
+  dismissDiffpack(projectId: string, packId: string): Promise<DismissDiffpackResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/diffpacks/${encodeURIComponent(packId)}/dismiss`,
+    );
+  }
+
+  /** Download the proposal as a zip of patches + notes + `git apply` instructions. */
+  async exportDiffpack(projectId: string, packId: string): Promise<Blob> {
+    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/diffpacks/${encodeURIComponent(packId)}/export`;
+    const res = await this.fetchImpl(url, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (!res.ok) throw new Error(`diffpack export failed: ${res.status}`);
+    return res.blob();
+  }
+
+  /* ── diffpack drafting ──────────────────────────────────────────────
+   *
+   * The re-rooted twin of the `/workspace/*` edit surface, used by a session
+   * that is drafting a change proposal. Same request and response shapes: the
+   * MCP tools calling these are the same tools with the same names, and only
+   * the sink moves.
+   */
+
+  readDiffpackDraftFile(
+    projectId: string,
+    packId: string,
+    filePath: string,
+  ): Promise<{ path: string; content: string; size?: number }> {
+    return this.request(
+      'GET',
+      `${this.draftBase(projectId, packId)}/read?path=${encodeURIComponent(filePath)}`,
+    );
+  }
+
+  statDiffpackDraftPath(
+    projectId: string,
+    packId: string,
+    filePath: string,
+  ): Promise<{ kind: 'file' | 'dir' | 'missing'; size?: number; mtime?: string }> {
+    return this.request(
+      'GET',
+      `${this.draftBase(projectId, packId)}/stat?path=${encodeURIComponent(filePath)}`,
+    );
+  }
+
+  writeDiffpackDraftFile(
+    projectId: string,
+    packId: string,
+    body: { path: string; content: string },
+  ): Promise<WorkspaceEditResponse> {
+    return this.request('PUT', `${this.draftBase(projectId, packId)}/file`, body);
+  }
+
+  replaceInDiffpackDraftFile(
+    projectId: string,
+    packId: string,
+    body: { path: string; find: string; replace: string; occurrence?: number | 'all' },
+  ): Promise<WorkspaceEditResponse> {
+    return this.request('POST', `${this.draftBase(projectId, packId)}/replace`, body);
+  }
+
+  replaceLinesInDiffpackDraftFile(
+    projectId: string,
+    packId: string,
+    body: { path: string; startLine: number; endLine: number; content: string },
+  ): Promise<WorkspaceEditResponse> {
+    return this.request('POST', `${this.draftBase(projectId, packId)}/replace-lines`, body);
+  }
+
+  insertAtMarkerInDiffpackDraftFile(
+    projectId: string,
+    packId: string,
+    body: { path: string; marker: string; content: string; where?: 'before' | 'after' },
+  ): Promise<WorkspaceEditResponse> {
+    return this.request('POST', `${this.draftBase(projectId, packId)}/insert-at-marker`, body);
+  }
+
+  deleteDiffpackDraftPath(
+    projectId: string,
+    packId: string,
+    filePath: string,
+  ): Promise<{ ok: true }> {
+    return this.request(
+      'DELETE',
+      `${this.draftBase(projectId, packId)}/path?path=${encodeURIComponent(filePath)}`,
+    );
+  }
+
+  private draftBase(projectId: string, packId: string): string {
+    return `/api/projects/${encodeURIComponent(projectId)}/diffpacks/${encodeURIComponent(packId)}/draft`;
   }
 
   // ---------- meester status report ----------
@@ -6270,6 +6411,20 @@ export class GezelClient {
    */
   getNightShiftPowerIntent(): Promise<{ keepAwake: boolean; wakeAtIso: string | null }> {
     return this.request('GET', '/api/night-shift/power-intent');
+  }
+
+  /**
+   * The same directive, widened to every reason the machine should not
+   * idle-sleep — the night shift plus live work someone is waiting on. Prefer
+   * this over {@link getNightShiftPowerIntent}, which stays for older daemons
+   * a newly-updated shell may have adopted.
+   */
+  getSystemPowerIntent(): Promise<{
+    keepAwake: boolean;
+    wakeAtIso: string | null;
+    reason: 'night-shift' | 'active-work' | null;
+  }> {
+    return this.request('GET', '/api/system/power-intent');
   }
 
   toolReadDocAsMarkdown(

@@ -1,23 +1,43 @@
 import {
   type GezelDetail,
   type GezelGender,
+  type RoleId,
   inferGenderForName,
   pickRandomNameWithGender,
+  resolveRoleId,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { Store } from '../fs/store.js';
 import { resolveGildeTemplateForRole } from './ensure.js';
 
-export type AutonomousRole = 'boekwachter';
+export type AutonomousRole = 'boekwachter' | 'developer';
 
-const ROLE_DEFINITIONS: Record<
-  AutonomousRole,
-  { role: string; templateId: string; configKey: 'boekwachterGezelId' }
-> = {
+interface AutonomousRoleDefinition {
+  role: string;
+  templateId?: string;
+  /** Install-wide designation, where the role has one. */
+  configKey?: 'boekwachterGezelId';
+  /**
+   * Canonical role ids that also count as wearing this hat, matched through
+   * core's role registry so free-form roles ("Senior Software Engineer") land
+   * the same way they do everywhere else in the product.
+   */
+  roleIds?: readonly RoleId[];
+}
+
+const ROLE_DEFINITIONS: Record<AutonomousRole, AutonomousRoleDefinition> = {
   boekwachter: {
     role: 'Boekwachter',
     templateId: 'boekwachter',
     configKey: 'boekwachterGezelId',
+  },
+  // No install-wide designation and no single canonical template: a project
+  // has whichever developer the user put on its crew, and "developer" is a
+  // free-form role people spell a dozen ways. The registry does that matching
+  // already — the same set the issue-fix dialog filters on.
+  developer: {
+    role: 'Developer',
+    roleIds: ['developer', 'web-developer'],
   },
 };
 
@@ -50,6 +70,7 @@ export async function resolveProjectAutonomousGezel(
   if (!project) return null;
 
   const definition = ROLE_DEFINITIONS[role];
+  const acceptedRoleIds = new Set<RoleId>(definition.roleIds ?? []);
   const memberIds = Array.from(
     new Set([
       ...(project.gezelIds ?? []),
@@ -61,17 +82,28 @@ export async function resolveProjectAutonomousGezel(
   const members = (
     await Promise.all(memberIds.map((id) => store.getGezel(id).catch(() => null)))
   ).filter((gezel): gezel is GezelDetail => gezel !== null);
-  const designatedId = config?.[definition.configKey];
+  const designatedId = definition.configKey ? config?.[definition.configKey] : undefined;
   if (designatedId) {
     const designated = members.find((gezel) => gezel.id === designatedId);
     if (designated) return designated;
   }
 
   const roleKey = normalized(definition.role);
-  const templateKey = normalized(definition.templateId);
+  const templateKey = definition.templateId ? normalized(definition.templateId) : null;
+  const matchesRoleId = (gezel: GezelDetail): boolean => {
+    if (acceptedRoleIds.size === 0) return false;
+    // `fixedFunction` gezels run a single scripted job and cannot take on
+    // open-ended work, so they never satisfy an autonomous role.
+    if (gezel.fixedFunction) return false;
+    const id = resolveRoleId(gezel.role) ?? resolveRoleId(gezel.roleBasedName);
+    return id !== null && acceptedRoleIds.has(id);
+  };
   return (
     members.find(
-      (gezel) => normalized(gezel.role) === roleKey || normalized(gezel.templateId) === templateKey,
+      (gezel) =>
+        normalized(gezel.role) === roleKey ||
+        (templateKey !== null && normalized(gezel.templateId) === templateKey) ||
+        matchesRoleId(gezel),
     ) ?? null
   );
 }
@@ -81,6 +113,22 @@ export function resolveProjectBoekwachter(
   projectId: string,
 ): Promise<GezelDetail | null> {
   return resolveProjectAutonomousGezel(store, projectId, 'boekwachter');
+}
+
+/**
+ * The developer on this project's crew, or null.
+ *
+ * Deliberately never recruits — unlike `ensureGezel({ jobTitle })`, which the
+ * user-initiated paths use. Overnight bug fixing turns itself on from crew
+ * composition, so conjuring the very gezel that unlocks it would make the
+ * gate meaningless and start spending model time on a project the user never
+ * staffed for it.
+ */
+export function resolveProjectDeveloper(
+  store: Store,
+  projectId: string,
+): Promise<GezelDetail | null> {
+  return resolveProjectAutonomousGezel(store, projectId, 'developer');
 }
 
 /**

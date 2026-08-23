@@ -13,6 +13,7 @@ import { faceEmbedAvailability, imageEmbedAvailability } from '../memory/image-e
 import type { SystemIdleState } from '../system/idle-state.js';
 import type { AiShadowProducers } from './ai-shadow.js';
 import type { ContentIndex } from './content-index.js';
+import { EnrichTimeoutBreaker } from './enrich-breaker.js';
 import { type EnrichDeps, buildEnrichDeps } from './enrich.js';
 import { type ResolvedRubric, resolveRubrics } from './rubrics.js';
 
@@ -141,6 +142,20 @@ export class IndexEnrichmentManager {
   private readonly shadowProducers: AiShadowProducers | undefined;
   private readonly history: IndexEnrichmentManagerOptions['history'];
   private readonly refreshStatic: ((projectId: string) => Promise<unknown>) | undefined;
+  /**
+   * Shared across projects and across deps rebuilds: the summarizer target is
+   * one engine, so a streak of timeouts on project A is evidence about project
+   * B's next call too. Backing the whole sweep off is also what breaks the
+   * thermal feedback loop — see {@link EnrichTimeoutBreaker}.
+   */
+  private readonly summarizerBreaker = new EnrichTimeoutBreaker({
+    onOpen: ({ streak, cooldownMs }) =>
+      log.warn(
+        `[enrich] summarizer timed out ${streak}x in a row — pausing the AI tiers for ` +
+          `${Math.round(cooldownMs / 60_000)}m instead of re-issuing straight into the same wall`,
+      ),
+    onClose: () => log.info('[enrich] summarizer back-off cleared — AI tiers resume'),
+  });
   /** In-flight on-demand drives, one per project (joiners get the same run). */
   private readonly drives = new Map<string, { mode: DriveIntensity; run: Promise<void> }>();
   /** Projects whose running drive was asked to stop; checked between batches. */
@@ -327,9 +342,35 @@ export class IndexEnrichmentManager {
     const run = this.runCatchUpAll(token).finally(() => {
       this.catchUpAborts.delete(token);
       this.catchUps.delete(run);
+      // Downstream night work that reads the index — today, planning bug
+      // fixes from open issues — has to run AFTER the sweep, or it plans
+      // against yesterday's findings. Not fired on an aborted sweep: the
+      // window closed, and there is no point starting work that will be
+      // held until tomorrow anyway.
+      if (!token.aborted && !this.stopping) {
+        // try/catch as well as .catch(): a hook that throws SYNCHRONOUSLY
+        // would escape this `finally` and reject the sweep itself, taking
+        // down indexing because a downstream planner had a bad day.
+        try {
+          void Promise.resolve(this.onCatchUpDrained?.()).catch((err) =>
+            log.warn(`[enrich] catch-up drained hook failed: ${describe(err)}`),
+          );
+        } catch (err) {
+          log.warn(`[enrich] catch-up drained hook threw: ${describe(err)}`);
+        }
+      }
     });
     this.catchUps.add(run);
     return run;
+  }
+
+  /**
+   * Late-bound callback for work that must see a current index. Mirrors the
+   * NightShiftManager's `setOnActivated` shape — the wiring order in
+   * `service.ts` is index first, then whatever reads it.
+   */
+  setOnCatchUpDrained(fn: () => void | Promise<void>): void {
+    this.onCatchUpDrained = fn;
   }
 
   /**
@@ -354,6 +395,8 @@ export class IndexEnrichmentManager {
     }
     if (cancelled > 0) log.info('[enrich] night shift ended — catch-up sweep standing down');
   }
+
+  private onCatchUpDrained?: () => void | Promise<void>;
 
   private async runCatchUpAll(token: CatchUpToken): Promise<void> {
     this.catchUpRuns++;
@@ -478,8 +521,16 @@ export class IndexEnrichmentManager {
     // indexing job's pause switch all mean the same thing here — stop between
     // files and leave the remainder to the next tick.
     let standDown = false;
+    // Flipped once the drive reaches the tiers that actually call the
+    // summarizer. The breaker must not gate the static, embed, or face tiers
+    // above it: those are local and LLM-free, so a target that stopped
+    // answering says nothing about whether they can run.
+    let aiPhase = false;
     const halt = async (): Promise<boolean> =>
-      abort?.aborted === true || standDown || (await this.driveHalted(projectId));
+      abort?.aborted === true ||
+      standDown ||
+      (aiPhase && this.summarizerBreaker.isOpen()) ||
+      (await this.driveHalted(projectId));
     // The review tier judges files against code-shaped rubrics (structure,
     // dead code, test coverage). Pointed at a policy document or a style
     // guide it produces confident nonsense, so the library gets the tiers
@@ -541,6 +592,14 @@ export class IndexEnrichmentManager {
 
       const boekwachter = await this.resolveBoekwachter(projectId);
       if (!boekwachter) return; // static is current; AI needs the roster opt-in
+      aiPhase = true;
+      if (this.summarizerBreaker.isOpen()) {
+        log.info(
+          `[enrich] ${projectId}: summarizer is not answering — holding the AI tiers for ` +
+            `${this.summarizerBreaker.describe()} before trying again`,
+        );
+        return;
+      }
       if (await halt()) return;
       const buildDeps = (nightShift: boolean) =>
         buildEnrichDeps(this.store, this.chat, {
@@ -550,6 +609,9 @@ export class IndexEnrichmentManager {
           ambient: !full,
           boekwachter,
           projectId,
+          // Breaker lives on the manager, not on deps: a night-shift retarget
+          // rebuilds deps mid-drive and a per-deps streak would reset with it.
+          onOutcome: (outcome) => this.summarizerBreaker.observe(outcome),
         });
       let night = this.isNightShiftActive();
       let deps = await buildDeps(night);

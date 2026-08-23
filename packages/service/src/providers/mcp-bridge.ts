@@ -6,7 +6,13 @@
  * results as function-call outputs.
  */
 
-import { type HookPhase, type HookResult, type HookSpec, createLogger } from '@bendyline/gezel';
+import {
+  type HookPhase,
+  type HookResult,
+  type HookSpec,
+  createAwakeTimeout,
+  createLogger,
+} from '@bendyline/gezel';
 import { resolveToolNameSpelling } from '@bendyline/gezel-mcp';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
@@ -237,6 +243,21 @@ export const TOOL_TIMEOUT_MS: Record<string, number> = {
   ask_gezel: 35 * 60 * 1000,
   ask_specialist: 35 * 60 * 1000,
 };
+
+/**
+ * Wall-clock slack allowed on top of a tool's awake-time budget.
+ *
+ * The real deadline is enforced by an awake-time abort signal, because the
+ * SDK's own `timeout` is a plain wall-clock timer: a host suspension consumes
+ * it while the tool is frozen and the call dies with `-32001: Request timed
+ * out` on the wake-up burst, having made no progress and used none of its
+ * budget. Wild-caught on `consult_*` calls — nested local-engine turns running
+ * at roughly a 5% duty cycle inside a macOS dark-wake cycle, which could not
+ * finish inside any transport ceiling. The SDK timer stays armed well beyond
+ * the real budget purely as a backstop against a wedged transport, so a bug in
+ * the awake-time signal can never leave a request pending forever.
+ */
+const SUSPENSION_SLACK_MS = 6 * 60 * 60 * 1000;
 
 export function timeoutForTool(name: string): number {
   // Role-typed consultations (`consult_developer`, `consult_reviewer`, …)
@@ -975,9 +996,25 @@ export class McpBridge {
     // `timeout` here the SDK falls back to its 60 s default, which kills
     // legitimately long calls (image gen, npm install, playwright runs)
     // mid-flight before the engine has a chance to respond.
-    const result = await this.client.callTool({ name, arguments: args }, undefined, {
-      timeout: timeoutForTool(name),
+    //
+    // `signal` carries the real deadline in awake time; `timeout` is only the
+    // wedged-transport backstop. See {@link SUSPENSION_SLACK_MS}.
+    const toolTimeoutMs = timeoutForTool(name);
+    const deadline = createAwakeTimeout(toolTimeoutMs, {
+      reason: (budget) =>
+        new Error(
+          `[mcp-bridge] ${name} timed out after ${Math.round(toolTimeoutMs / 1000)}s${budget.describeSuspension()}`,
+        ),
     });
+    let result: Awaited<ReturnType<typeof this.client.callTool>>;
+    try {
+      result = await this.client.callTool({ name, arguments: args }, undefined, {
+        timeout: toolTimeoutMs + SUSPENSION_SLACK_MS,
+        signal: deadline.signal,
+      });
+    } finally {
+      deadline.dispose();
+    }
     const content = Array.isArray(result.content) ? result.content : [];
     const texts: string[] = [];
     for (const block of content) {

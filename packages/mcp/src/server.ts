@@ -254,23 +254,114 @@ async function concreteWorkspaceTarget(path: string): Promise<ConcreteWorkspaceT
   return target;
 }
 
+/**
+ * The change proposal this session is drafting into, if any (`task.diffpackId`,
+ * forwarded by ChatManager). When set, the workspace WRITE tools keep their
+ * names and their arguments but land in the pack's draft tree instead of the
+ * project workspace, and reads fall through to the real file until the pack
+ * has its own copy.
+ *
+ * Keeping the tool names is the point. A model drafting a fix calls
+ * `replace_in_file` exactly as it always has, so every prompt, behavior, and
+ * hard-won error string still applies — and it can work on a folder gezels
+ * hold no write grant for, because nothing is written there until the user
+ * applies the proposal. The step prompt tells the model plainly that it is
+ * proposing rather than editing; the sandbox is scoped, not secret.
+ */
+const diffpackId = process.env.GEZEL_DIFFPACK_ID ?? '';
+const isDrafting = diffpackId !== '';
+
+/**
+ * The subset of the client the file-editing tools use, so a draft-routing
+ * adapter can stand in for the real client at those call sites without
+ * reimplementing the other two hundred methods.
+ */
+type WorkspaceEditApi = Pick<
+  GezelClient,
+  | 'readProjectWorkspaceFile'
+  | 'statProjectWorkspacePath'
+  | 'writeProjectWorkspaceFile'
+  | 'replaceInProjectWorkspaceFile'
+  | 'replaceLinesInProjectWorkspaceFile'
+  | 'insertAtMarkerInProjectWorkspaceFile'
+  | 'applyPatchToProjectWorkspaceFile'
+  | 'rmProjectWorkspacePath'
+>;
+
+/** Adapter mapping the workspace edit surface onto one pack's draft tree. */
+function draftEditApi(client: GezelClient, packId: string): WorkspaceEditApi {
+  return {
+    readProjectWorkspaceFile: (id, filePath) => client.readDiffpackDraftFile(id, packId, filePath),
+    statProjectWorkspacePath: (id, filePath) => client.statDiffpackDraftPath(id, packId, filePath),
+    writeProjectWorkspaceFile: async (id, body) => {
+      await client.writeDiffpackDraftFile(id, packId, { path: body.path, content: body.content });
+      return { ok: true as const, path: body.path };
+    },
+    replaceInProjectWorkspaceFile: (id, body) =>
+      client.replaceInDiffpackDraftFile(id, packId, body),
+    replaceLinesInProjectWorkspaceFile: (id, body) =>
+      client.replaceLinesInDiffpackDraftFile(id, packId, body),
+    insertAtMarkerInProjectWorkspaceFile: (id, body) =>
+      client.insertAtMarkerInDiffpackDraftFile(id, packId, body),
+    applyPatchToProjectWorkspaceFile: () => {
+      // `apply_patch` is withheld from a drafting roster, but a stale roster
+      // or a hand-rolled call must not silently fall through to the real
+      // workspace. Refuse loudly and name the tools that do work: a
+      // hand-authored hunk is the one edit shape models reliably get wrong,
+      // and the runtime computes the diff from before/after anyway.
+      throw new Error(
+        'apply_patch is unavailable while drafting a change proposal. Use replace_in_file, replace_lines, or write_file — the diff is generated for you.',
+      );
+    },
+    rmProjectWorkspacePath: async (id, filePath) => {
+      await client.deleteDiffpackDraftPath(id, packId, filePath);
+      return { ok: true as const };
+    },
+  };
+}
+
+/**
+ * The client the editing tools should use for one target.
+ *
+ * While drafting, a write to a LINKED sibling project is refused rather than
+ * silently redirected: a pack belongs to one project, so there is nowhere
+ * honest to put such an edit.
+ */
+function editClient(target: ConcreteWorkspaceTarget): WorkspaceEditApi {
+  const client = workspaceClient(target);
+  if (!isDrafting) return client;
+  if (target.kind === 'linked') {
+    throw new Error(
+      `Cannot edit ${target.displayPath} while drafting a change proposal — a proposal covers one project. Read from linked projects freely, but make your changes in this one.`,
+    );
+  }
+  return draftEditApi(client, diffpackId);
+}
+
 async function readWorkspaceFile(path: string) {
   const target = await concreteWorkspaceTarget(path);
-  const result = await workspaceClient(target).readProjectWorkspaceFile(
-    target.projectId,
-    target.path,
-  );
+  // Reads go through the draft view when drafting, so the model sees its own
+  // in-progress edits rather than the untouched file it just changed.
+  const client =
+    isDrafting && target.kind === 'current'
+      ? draftEditApi(workspaceClient(target), diffpackId)
+      : workspaceClient(target);
+  const result = await client.readProjectWorkspaceFile(target.projectId, target.path);
   return { ...result, path: target.displayPath };
 }
 
 async function statWorkspacePath(path: string) {
   const target = await concreteWorkspaceTarget(path);
-  return workspaceClient(target).statProjectWorkspacePath(target.projectId, target.path);
+  const client =
+    isDrafting && target.kind === 'current'
+      ? draftEditApi(workspaceClient(target), diffpackId)
+      : workspaceClient(target);
+  return client.statProjectWorkspacePath(target.projectId, target.path);
 }
 
 async function writeWorkspaceFile(path: string, content: string) {
   const target = await concreteWorkspaceTarget(path);
-  return workspaceClient(target).writeProjectWorkspaceFile(target.projectId, {
+  return editClient(target).writeProjectWorkspaceFile(target.projectId, {
     path: target.path,
     content,
     ...(gezelId ? { gezelId } : {}),
@@ -2302,7 +2393,7 @@ server.tool(
   async ({ path, find, replace, occurrence, partial }) => {
     try {
       const target = await concreteWorkspaceTarget(path);
-      const targetApi = workspaceClient(target);
+      const targetApi = editClient(target);
       const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
       const result = await targetApi.replaceInProjectWorkspaceFile(target.projectId, {
         path: target.path,
@@ -2372,7 +2463,7 @@ server.tool(
   async ({ path, startLine, endLine, content, partial }) => {
     try {
       const target = await concreteWorkspaceTarget(path);
-      const targetApi = workspaceClient(target);
+      const targetApi = editClient(target);
       const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
       const result = await targetApi.replaceLinesInProjectWorkspaceFile(target.projectId, {
         path: target.path,
@@ -2441,7 +2532,7 @@ server.tool(
   async ({ path, diff, partial }) => {
     try {
       const target = await concreteWorkspaceTarget(path);
-      const targetApi = workspaceClient(target);
+      const targetApi = editClient(target);
       const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
       const result = await targetApi.applyPatchToProjectWorkspaceFile(target.projectId, {
         path: target.path,
@@ -2503,7 +2594,7 @@ server.tool(
   async ({ path, marker, content, where, partial }) => {
     try {
       const target = await concreteWorkspaceTarget(path);
-      const targetApi = workspaceClient(target);
+      const targetApi = editClient(target);
       const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
       const result = await targetApi.insertAtMarkerInProjectWorkspaceFile(target.projectId, {
         path: target.path,
@@ -2561,7 +2652,7 @@ server.tool(
   async ({ path, recursive }) => {
     try {
       const target = await concreteWorkspaceTarget(path);
-      await workspaceClient(target).rmProjectWorkspacePath(target.projectId, target.path, {
+      await editClient(target).rmProjectWorkspacePath(target.projectId, target.path, {
         ...(recursive ? { recursive } : {}),
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),

@@ -8,11 +8,15 @@ import {
   type GezelConfig,
   type ServiceRole,
   createLogger,
+  formatSuspension,
   isEngagementAllowed,
   normalizeStepGate,
   nowIso,
+  onSuspension,
   parseTaskRef,
   projectAllowsAmbientWork,
+  startSuspendMonitor,
+  stopSuspendMonitor,
 } from '@bendyline/gezel';
 import { type ExternalFolders, type TaskAssignee, resolveSecurityPolicy } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
@@ -53,6 +57,8 @@ import {
   listGlobalCraftbookCandidates,
 } from './craftbook/suggest.js';
 import { DebugFlag } from './debug/flag.js';
+import { DiffpackManager } from './diffpack/manager.js';
+import { planNightFixes } from './diffpack/night-fix-planner.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { reuseVerifiedElectronNativeBinaries } from './engines/electron-native-reuse.js';
 import { effectiveEngineRelease } from './engines/native-manifest.js';
@@ -185,6 +191,7 @@ import { WorkspaceIndexManager } from './workspace/index-manager.js';
 import { WorkspaceWatchManager } from './workspace/watch-manager.js';
 
 const log = createLogger('service');
+const powerLog = createLogger('power');
 
 /**
  * Collapses an editor autosave burst (or a gezel writing several documents in
@@ -370,6 +377,17 @@ function ensureBundledNodeOnPath(): void {
 
 export async function startService(opts: StartServiceOptions = {}): Promise<RunningService> {
   const home = opts.home ?? gezelHome();
+  // Sleep-aware clock, started before anything can arm a deadline. Every
+  // long-running budget in the daemon — engine turns, one-shots, MCP tool
+  // calls, engine idle eviction — is measured in awake time, and a budget
+  // built before the monitor runs would silently keep the old wall-clock
+  // semantics for its whole life.
+  startSuspendMonitor();
+  const suspendLogOff = onSuspension((event) => {
+    powerLog.warn(
+      `host resumed after ${formatSuspension(event.suspendedMs)} suspended — in-flight deadlines were credited that time rather than charged for it`,
+    );
+  });
   discoverManagedScriptRuntimes(home);
   // Make sure shell-shim child processes can find `node` on PATH (see
   // helper above). Has to run before anything spawns a child — the
@@ -1806,6 +1824,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     catalog,
     chat,
   });
+  // Diffpacks: change sets a gezel drafted into artifacts for the user to
+  // review and apply. The workspace is never written by the drafting side.
+  const diffpacks = new DiffpackManager({ home, store, tasks, history });
   // Morning review question: once per settled night window (deduped on
   // the window key against the question store, so restarts and
   // slept-through-window-end catch-ups never double-ask), summarize what
@@ -1820,7 +1841,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       return;
     }
     const review = await buildNightShiftReview(
-      { store, tasks, reportActions },
+      { store, tasks, reportActions, diffpacks },
       nightShift.currentWindow(),
       new Date(),
     );
@@ -1908,6 +1929,12 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     await codeReviews
       .settleForTask(projectId, task.ref, outcome)
       .catch((err) => log.warn(`[service] review settle failed for ${task.ref}: ${String(err)}`));
+    // A completed drafting task seals its pack; a canceled one discards the
+    // draft tree, because a half-finished proposal is worse than none — the
+    // user cannot tell which parts the gezel stood behind.
+    await diffpacks
+      .settleForTask(projectId, task.ref, outcome)
+      .catch((err) => log.warn(`[service] diffpack settle failed for ${task.ref}: ${String(err)}`));
     // Report actions can live in a different project than their fired
     // task (the oversight report delegates cross-project), so this settle
     // scans records by taskRef rather than trusting projectId.
@@ -2047,6 +2074,25 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     },
   });
   indexEnrichmentRef = indexEnrichment;
+  // Night bug fixing: once the shift's index sweep drains, hand every
+  // qualifying project's open Boekwachter issues to its developer, who drafts
+  // change proposals into artifacts. Runs here rather than on activation so
+  // it plans against tonight's findings, not last night's. The gate is crew
+  // composition — a Boekwachter and a developer on the roster — and nothing
+  // it produces touches the workspace.
+  indexEnrichment.setOnCatchUpDrained(async () => {
+    if (!nightShift.isActive()) return;
+    await planNightFixes({
+      store,
+      tasks,
+      taskRunner,
+      contentIndex,
+      catalog,
+      diffpacks,
+      history,
+      nightShiftWindow: () => nightShift.currentWindow(),
+    }).catch((err) => log.warn(`[diffpack] night fix planning failed: ${String(err)}`));
+  });
   // Scan-complete → immediate embed drain: the moment a workspace scan
   // enrolls files, the always-on local embed tiers start filling vectors —
   // no 3-minute OS-idle wait, no Boekwachter. This is what makes semantic
@@ -2473,6 +2519,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     gitHubPrs,
     codeReviews,
     reportActions,
+    diffpacks,
     connectors,
     connectorActions,
     renderer,
@@ -3048,6 +3095,8 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       const shutdownStep = <T>(name: string, action: () => T | Promise<T>) =>
         observeShutdownStep(name, action, { warn: (message) => log.warn(message) });
       log.info('[service] shutdown started');
+      suspendLogOff();
+      stopSuspendMonitor();
       scheduler.stop();
       nightShift.stop();
       // Quiesce chat before tearing down any callback dependencies. In

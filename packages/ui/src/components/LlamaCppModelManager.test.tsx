@@ -113,6 +113,37 @@ describe('LlamaCppModelManager local model list', () => {
     expect(screen.queryByText('128K')).not.toBeInTheDocument();
   });
 
+  it('shows the bit depth the model file declares when the catalog label has none', async () => {
+    vi.mocked(api.listLlamaCppModels).mockResolvedValue({
+      models: [
+        {
+          id: 'muse-glimmer-30b-q4',
+          name: 'Muse Glimmer (30B, Q4)',
+          approxSizeBytes: 16_756_681_056,
+          installedAt: '2026-08-10T00:00:00.000Z',
+          weightsPath: '/tmp/muse-glimmer-30b-q4/model.gguf',
+          contextWindow: 131_072,
+          effectiveContextWindow: 131_072,
+          // Lifted from the upstream GGUF filename by whoever authored the
+          // catalog entry — it names no bit depth at all.
+          quantization: 'K-Quant-17GB',
+          ggufQuantization: 'Q4_K_M',
+          chatTemplatePresent: true,
+        },
+      ],
+    } as never);
+
+    render(<LlamaCppModelManager />);
+
+    expect(await screen.findByText('muse-glimmer-30b-q4')).toBeInTheDocument();
+    expect(screen.getByText('~4')).toBeInTheDocument();
+    expect(screen.queryByText('K-Quant-17GB')).not.toBeInTheDocument();
+    expect(screen.getByText('~4').closest('td')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/exact format: Q4_K_M \(the catalog calls it K-Quant-17GB\)/),
+    );
+  });
+
   it('tags a per-model context override as custom in the Context size column', async () => {
     vi.mocked(api.listLlamaCppModels).mockResolvedValue({
       models: [

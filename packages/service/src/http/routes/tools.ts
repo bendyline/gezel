@@ -462,6 +462,7 @@ export function toolRoutes(ctx: ServiceContext): Hono {
           gezelId: assignedId,
           gezelName: assigned?.name ?? 'Gezel',
           enqueued: true,
+          ...(existing.diffpackId ? { packId: existing.diffpackId } : {}),
         });
       }
     }
@@ -508,13 +509,25 @@ export function toolRoutes(ctx: ServiceContext): Hono {
               body.message,
               '</request>',
               '',
-              'Make the smallest appropriate fix. Re-read the changed area and run a relevant check when one exists.',
-              'Only after the issue is addressed and the result verified, call advance_task_step for this terminal step. Completing the task marks the BW issue resolved. If the lead is not valid, pause the task and explain that finding rather than editing merely to satisfy the review.',
+              'Make the smallest appropriate fix, then re-read the changed area to check your work.',
+              '',
+              'You are drafting a CHANGE PROPOSAL, not editing this project. `write_file`, `replace_in_file`, and `replace_lines` behave normally and you will read your own edits back — but they land in a proposal the user reviews and applies. The project files do not change until a person clicks Apply, so never claim you "fixed" or "applied" anything; you proposed it. Anything that RUNS the project — scripts, tests, a build — still sees the unmodified files, so it cannot confirm your change; say what you could not verify instead of implying you did.',
+              'Before you finish, write your explanation to the artifact `diffpacks/{{task.num}}/notes.md` with the headings `## Problem`, `## Change`, `## Risk`, and `## How to verify`.',
+              '',
+              'Only after the change is drafted and explained, call advance_task_step for this terminal step. Completing the task seals the proposal and marks the BW issue resolved. If the lead is not valid, pause the task and explain that finding rather than editing merely to satisfy the review.',
             ].join('\n'),
           },
         ],
       },
-      { origin: { kind: 'boekwachter-issue', issueRef: issue.ref, path: issue.path } },
+      {
+        origin: { kind: 'boekwachter-issue', issueRef: issue.ref, path: issue.path },
+        // Always a proposal, never a direct edit. The button used to write
+        // straight to the workspace, which limited it to projects that had
+        // granted gezels write access — the projects least in need of a
+        // review step. A reviewable diff costs one click and works
+        // everywhere, including a read-only checkout.
+        draftsDiffpack: true,
+      },
     );
     const updated = await ctx.contentIndex.updateBoekwachterIssue(id, issue.ref, {
       status: 'in_progress',
@@ -531,6 +544,7 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       gezelId: gezel.id,
       gezelName: gezel.name,
       enqueued: dispatch.enqueued,
+      ...(task.diffpackId ? { packId: task.diffpackId } : {}),
     });
   });
 

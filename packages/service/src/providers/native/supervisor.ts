@@ -24,7 +24,7 @@
 import type { ChildProcess } from 'node:child_process';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { basename } from 'node:path';
-import { createLogger } from '@bendyline/gezel';
+import { awakeNow, createLogger } from '@bendyline/gezel';
 import { listProcessSnapshots } from '@bendyline/gezel-client/node';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 
@@ -373,6 +373,14 @@ export class NativeEngineSupervisor {
   private readonly logListeners = new Set<(line: string) => void>();
   private recentStarts: number[] = [];
   private lastUsedAt = 0;
+  /**
+   * The same mark on the awake clock. Every idle/pressure DECISION reads this
+   * one; {@link lastUsedAt} stays wall-clock because it is rendered to the
+   * user. A host suspension advances wall clock without giving the engine any
+   * time, and charging that against idleness unloaded resident models on every
+   * dark-wake cycle — the next turn then paid a full cold load.
+   */
+  private lastUsedAwakeAt = 0;
   /** PID of the engine child this supervisor currently owns, registered
    *  in {@link liveEnginePids} so a sibling supervisor's orphan reaper
    *  leaves it alone. Set on spawn, cleared on exit. */
@@ -471,10 +479,13 @@ export class NativeEngineSupervisor {
     const running = this.state.kind === 'running' || this.state.kind === 'starting';
     const active = running && this.engineBusy();
     const idleDeadline =
-      running && !active && this.lastUsedAt > 0 && this.idleTimeoutMs > 0
-        ? this.lastUsedAt + this.idleTimeoutMs
+      running && !active && this.lastUsedAwakeAt > 0 && this.idleTimeoutMs > 0
+        ? this.wallClockFor(this.lastUsedAwakeAt + this.idleTimeoutMs)
         : null;
-    const pressureDeadline = running && !active ? (this.pressureDeadlineAt ?? null) : null;
+    const pressureDeadline =
+      running && !active && this.pressureDeadlineAt !== undefined
+        ? this.wallClockFor(this.pressureDeadlineAt)
+        : null;
     const usePressure =
       pressureDeadline !== null && (idleDeadline === null || pressureDeadline < idleDeadline);
     const pid = this.currentChildPid();
@@ -557,6 +568,7 @@ export class NativeEngineSupervisor {
    */
   async ensureRunning(): Promise<NativeEngineLaunch> {
     this.lastUsedAt = Date.now();
+    this.lastUsedAwakeAt = awakeNow();
     this.pressureDeadlineAt = undefined;
     if (this.state.kind === 'running') {
       this.resetIdleTimer();
@@ -605,6 +617,7 @@ export class NativeEngineSupervisor {
   /** Update the last-used clock without triggering a start. */
   markUsed(): void {
     this.lastUsedAt = Date.now();
+    this.lastUsedAwakeAt = awakeNow();
     this.pressureDeadlineAt = undefined;
     this.resetIdleTimer();
   }
@@ -1204,8 +1217,8 @@ export class NativeEngineSupervisor {
         this.pressureDeadlineAt = undefined;
         return;
       }
-      this.pressureDeadlineAt = this.lastUsedAt + this.pressureIdleTimeoutMs;
-      if (Date.now() < this.pressureDeadlineAt || this.engineBusy()) return;
+      this.pressureDeadlineAt = this.lastUsedAwakeAt + this.pressureIdleTimeoutMs;
+      if (awakeNow() < this.pressureDeadlineAt || this.engineBusy()) return;
       this.onLog(
         `${this.logPrefix} memory pressure${pressure.detail ? ` (${pressure.detail})` : ''} — flushing and stopping idle engine`,
       );
@@ -1267,10 +1280,31 @@ export class NativeEngineSupervisor {
     }
     // Stage 2 (idle): full SIGTERM. Existing behavior — runs after
     // idleTimeoutMs regardless of whether Stage 1 fired.
+    this.armIdleTimer(this.idleTimeoutMs);
+  }
+
+  /**
+   * Arm the VRAM-release timer to fire `delayMs` from now, then re-check
+   * against the AWAKE clock when it does.
+   *
+   * The re-check is the load-bearing part. A host suspension fires every
+   * overdue timer the instant the machine resumes, so a nap longer than the
+   * idle timeout used to read as "this engine has been idle that long" and
+   * unload it — observed unloading a resident 27B model on each ~16 min
+   * dark-wake cycle, so the next turn paid a full cold load for idleness
+   * nobody could have avoided. Re-arming for the shortfall matters just as
+   * much: an early return with no re-arm would leave the engine resident for
+   * good, trading a spurious unload for a permanent leak.
+   */
+  private armIdleTimer(delayMs: number): void {
+    this.clearIdleTimer();
     if (this.idleTimeoutMs <= 0) return;
     this.idleTimer = setTimeout(() => {
-      const since = Date.now() - this.lastUsedAt;
-      if (since < this.idleTimeoutMs) return;
+      const since = awakeNow() - this.lastUsedAwakeAt;
+      if (since < this.idleTimeoutMs) {
+        this.armIdleTimer(this.idleTimeoutMs - since);
+        return;
+      }
       // Don't interrupt an actual native request. Logical turns parked on a
       // tool or a person are intentionally not busy here; a later iteration
       // can lazy-start the engine again from its flushed disk cache.
@@ -1283,8 +1317,17 @@ export class NativeEngineSupervisor {
       }
       this.onLog(`${this.logPrefix} idle timeout — stopping to free VRAM`);
       void this.stop('idle');
-    }, this.idleTimeoutMs + 50);
+    }, delayMs + 50);
     this.idleTimer.unref?.();
+  }
+
+  /**
+   * Project an awake-clock instant onto the wall clock for display. The UI
+   * renders a countdown, and a deadline held in awake time would otherwise
+   * show as an already-past timestamp after any suspension.
+   */
+  private wallClockFor(awakeInstant: number): number {
+    return Date.now() + (awakeInstant - awakeNow());
   }
 
   /**

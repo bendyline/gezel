@@ -2,7 +2,7 @@ import type { Stats } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
-import { isReservedShadowArtifactPath } from '@bendyline/gezel';
+import { isReservedDiffpackArtifactPath, isReservedShadowArtifactPath } from '@bendyline/gezel';
 import {
   type ExternalFolders,
   PROJECT_SHADOW_DIR_NAME,
@@ -79,6 +79,23 @@ export class ConnectorCorpusWriteDeniedError extends Error {
       'The artifacts/data directory contains read-only connector mirrors. Editing or deleting a synced record can cause permanent data loss because its cursor has already advanced.',
     );
     this.name = 'ConnectorCorpusWriteDeniedError';
+  }
+}
+
+/**
+ * The drafted tree and the sealed diffs of a diffpack are machine-owned: the
+ * draft store writes `after/`, the sealer writes `files/`, and both go
+ * straight to disk. A `write_artifact` landing here would let a model forge a
+ * change set it never drafted — the one thing the review surface has to be
+ * able to trust. `notes.md` beside them stays writable.
+ */
+export class DiffpackPathWriteDeniedError extends Error {
+  readonly code = 'diffpack-readonly' as const;
+  constructor() {
+    super(
+      "A change proposal's after/ and files/ folders are written by the runtime, not by tools. Use the workspace edit tools while drafting; write your explanation to the pack's notes.md.",
+    );
+    this.name = 'DiffpackPathWriteDeniedError';
   }
 }
 
@@ -379,6 +396,7 @@ export class ProjectArtifactsStore {
     // only legitimate writer is the indexer's converter, which bypasses this
     // store entirely, so every write arriving here is a mistake.
     if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
+    if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
     await mkdir(dirname(full), { recursive: true });
@@ -396,6 +414,7 @@ export class ProjectArtifactsStore {
     const cleaned = normalizeArtifactPath(filePath);
     if (!cleaned) throw new Error('empty artifact path');
     if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
+    if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
     await mkdir(dirname(full), { recursive: true });
@@ -419,6 +438,7 @@ export class ProjectArtifactsStore {
     const cleaned = normalizeArtifactPath(folderPath);
     if (!cleaned) throw new Error('empty artifact path');
     if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
+    if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
     await mkdir(full, { recursive: true });

@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import {
   type AIEngagementMode,
+  type AwakeBudget,
   type ChatEvent,
   type ChatMessage,
   type ChatMessageToolCall,
@@ -27,6 +28,8 @@ import {
   type TaskCraftbookStep,
   type TaskNote,
   type ToolsetManifest,
+  awakeTimeoutSignal,
+  createAwakeTimeout,
   createLogger,
   decodeProjectGezelId,
   deriveThreadTitleFromMessages,
@@ -381,10 +384,10 @@ const log = createLogger('chat');
 const memLog = createLogger('memory');
 const oneShotLog = createLogger('one-shot');
 
-function oneShotTimeoutError(timeoutMs: number): Error {
+function oneShotTimeoutError(timeoutMs: number, budget?: AwakeBudget): Error {
   const duration = timeoutMs < 1_000 ? `${timeoutMs}ms` : `${Math.round(timeoutMs / 1_000)}s`;
   const err = new Error(
-    `one-shot timed out after ${duration} (including provider setup and queue wait)`,
+    `one-shot timed out after ${duration} (including provider setup and queue wait)${budget?.describeSuspension() ?? ''}`,
   );
   err.name = 'TimeoutError';
   return err;
@@ -9974,12 +9977,23 @@ export class ChatManager {
   ): Promise<string> {
     if (this.shuttingDown) throw serviceShutdownAbortError();
     const shutdownController = new AbortController();
-    const pending = this.runOneShotCompletion(prompt, timeoutMs, opts, shutdownController.signal);
+    // Owned here rather than inside `runOneShotCompletion` so the deadline
+    // poll is disposed on EVERY exit, including a throw from the provider and
+    // persona setup that runs before that method's own try block.
+    const deadline = createAwakeTimeout(Math.max(1, timeoutMs));
+    const pending = this.runOneShotCompletion(
+      prompt,
+      timeoutMs,
+      opts,
+      shutdownController.signal,
+      deadline,
+    );
     this.activeOneShots.set(shutdownController, pending);
     try {
       return await pending;
     } finally {
       this.activeOneShots.delete(shutdownController);
+      deadline.dispose();
     }
   }
 
@@ -9988,17 +10002,21 @@ export class ChatManager {
     timeoutMs: number,
     opts: NonNullable<Parameters<ChatManager['oneShotCompletion']>[2]>,
     shutdownSignal: AbortSignal,
+    deadline: ReturnType<typeof createAwakeTimeout>,
   ): Promise<string> {
     oneShotLog.info(`requesting completion (${prompt.length} chars, ${timeoutMs}ms timeout)`);
-    const deadlineAt = Date.now() + timeoutMs;
-    const deadlineSignal = AbortSignal.timeout(Math.max(1, timeoutMs));
+    // Awake-time budget: a one-shot that straddles a host suspension gets its
+    // whole budget consumed by frozen time and dies on the wake-up burst. The
+    // enrichment sweep and the ambient dashboard failed this way on every
+    // dark-wake cycle, each reporting a budget it never actually received.
+    const { signal: deadlineSignal, budget } = deadline;
     const oneShotSignal = AbortSignal.any([
       shutdownSignal,
       deadlineSignal,
       ...(opts.signal ? [opts.signal] : []),
     ]);
     const abortError = () => {
-      if (deadlineSignal.aborted) return oneShotTimeoutError(timeoutMs);
+      if (deadlineSignal.aborted) return oneShotTimeoutError(timeoutMs, budget);
       if (opts.signal?.reason instanceof Error) return opts.signal.reason;
       if (shutdownSignal.reason instanceof Error) return shutdownSignal.reason;
       const err = new Error('one-shot cancelled by caller');
@@ -10225,7 +10243,7 @@ export class ChatManager {
       // the affinity bonus keeps the KV cache warm when a gezel is mid-batch.
       const content = await wait(
         session.sendAndWait(prompt, {
-          timeoutMs: Math.max(1, deadlineAt - Date.now()),
+          timeoutMs: Math.max(1, budget.remainingMs()),
           queue: {
             lane: opts.lane ?? 'background',
             signal: oneShotSignal,
@@ -11652,6 +11670,23 @@ export class ChatManager {
     const router = this.engineRouter ?? this.engineRouterCache;
     if (!router) return new Map();
     return router.pool.queueSummaries();
+  }
+
+  /**
+   * Whether a local engine is serving or holding work someone is waiting on.
+   *
+   * Only the interactive lane counts. Background and ambient chores (index
+   * enrichment, memory extraction, the ambient dashboard) are explicitly
+   * designed to yield and resume later, so holding the machine awake for them
+   * would keep a laptop hot and running for work that has no deadline — the
+   * exact loop that cooked a closed-lid MacBook through a night of dark-wake
+   * cycles. A night shift declares its own keep-awake intent separately.
+   */
+  hasInteractiveLocalWork(): boolean {
+    for (const summary of this.localEngineQueueSummaries().values()) {
+      if (summary.runningInteractive > 0 || summary.queuedInteractive > 0) return true;
+    }
+    return false;
   }
 
   /**
@@ -14558,7 +14593,19 @@ export class ChatManager {
         );
       },
     });
-    const promptToolAllowlist = promptSurface.allowlist;
+    // A drafting session composes its change through before/after edits and
+    // the runtime derives the diff. `apply_patch` asks the model to author a
+    // unified hunk instead — the one edit shape models reliably get wrong —
+    // so it is withheld from BOTH surfaces. Both, because the prompt block
+    // and the wired roster must agree: promising a tool the turn cannot make
+    // is the McKinley Park failure (ADR 0001).
+    const withheldWhileDrafting = <T extends Set<string> | null | undefined>(allowlist: T): T => {
+      if (!taskContext?.task.diffpackId || !allowlist?.has('apply_patch')) return allowlist;
+      const next = new Set(allowlist);
+      next.delete('apply_patch');
+      return next as T;
+    };
+    const promptToolAllowlist = withheldWhileDrafting(promptSurface.allowlist);
     // Predict the built-in tools the model will see this turn. The
     // bridge isn't spawned at prompt-build time on first call, so we
     // can't ask it for the live `getOpenAITools()` set. Instead we
@@ -15324,6 +15371,11 @@ export class ChatManager {
         // the current task when a small model omits or mangles the ref
         // (e.g. `arcade-game#1` for `space-war-arcade-game/1`).
         ...(record.taskRef ? { GEZEL_TASK_REF: record.taskRef } : {}),
+        // Scope diffpack: a task that drafts a change proposal re-roots the
+        // workspace WRITE tools at the pack's draft tree. Same tool names,
+        // same arguments — only the sink moves, so the gezel can work on a
+        // folder it holds no write grant for and the user applies the result.
+        ...(taskContext?.task.diffpackId ? { GEZEL_DIFFPACK_ID: taskContext.task.diffpackId } : {}),
         // Scope craftbook: the unified craftbook_* tools default their
         // target to this template when editing in the explicit editor.
         ...(record.craftbookRef ? { GEZEL_CRAFTBOOK_ID: record.craftbookRef } : {}),
@@ -15847,7 +15899,7 @@ export class ChatManager {
         );
       },
     });
-    const constrainedAllowlist = bridgeSurface.allowlist;
+    const constrainedAllowlist = withheldWhileDrafting(bridgeSurface.allowlist);
     if (record.providerName === 'codex-cli' && opts.mcpServer && constrainedAllowlist) {
       // Script-tool names ride outside the role allowlist vocabulary; union
       // them in or the strict GEZEL_MCP_ALLOW filter would drop them.

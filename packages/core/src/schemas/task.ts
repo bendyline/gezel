@@ -380,6 +380,15 @@ export const TaskSchema = z.object({
    */
   artifactDir: z.string().optional(),
   /**
+   * When set, this task drafts a diffpack instead of editing the workspace:
+   * its session's workspace-write tools are re-rooted at
+   * `artifacts/diffpacks/<diffpackId>/after/`, reads fall through to the real
+   * file, and `apply_patch` is withheld so the model never hand-authors a
+   * hunk. Stamped by the service at create / fanout-materialize time — never
+   * by callers, because it is a capability boundary, not a preference.
+   */
+  diffpackId: z.string().optional(),
+  /**
    * Provenance for service-materialized tasks (today: project-type
    * schedule hosts). The dedup key that makes re-applying a type
    * idempotent — apply scans for a matching origin instead of creating a

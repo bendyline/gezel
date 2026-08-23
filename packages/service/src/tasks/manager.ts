@@ -951,6 +951,13 @@ export class TaskManager {
        * `CreateTaskRequest` on purpose — HTTP/MCP callers cannot forge it.
        */
       origin?: Task['origin'];
+      /**
+       * This task drafts a change proposal: its workspace-write tools re-root
+       * at `artifacts/diffpacks/<task.num>/after/` and the project files are
+       * never touched. Service-only for the same reason as `origin` — it is a
+       * capability boundary, not something a prompt should be able to set.
+       */
+      draftsDiffpack?: boolean;
     },
   ): Promise<Task> {
     const project = await this.store.getProject(projectId);
@@ -1257,6 +1264,7 @@ export class TaskManager {
       ...(input.spawnsCraftbookParams && Object.keys(input.spawnsCraftbookParams).length > 0
         ? { spawnsCraftbookParams: input.spawnsCraftbookParams }
         : {}),
+      ...(extras?.draftsDiffpack ? { diffpackId: String(num) } : {}),
       activeStepId,
       ...(input.parentTaskRef ? { parentTaskRef: input.parentTaskRef } : {}),
       artifactDir,
@@ -3861,7 +3869,20 @@ export class TaskManager {
     // step prompts and gate/advanceWhen file paths become the concrete
     // values BEFORE the child is written + dispatched, so the child's turn
     // and its gate both see the resolved per-item data.
-    if (variation?.context) interpolateStepsContext(childCraftbook.steps, variation.context);
+    // A shard of a proposal-drafting host writes into its OWN proposal, whose
+    // id is this child's task number. `{{task.num}}` cannot express that:
+    // `create()` already interpolated the spawn template with the HOST's
+    // context, so every shard would silently target the host's pack. Hence a
+    // dedicated token resolved here, where the child's number is known.
+    const shardContext: Record<string, string> = {
+      ...(variation?.context ?? {}),
+      ...(parent.diffpackId
+        ? { 'diffpack.id': String(num), 'diffpack.dir': `diffpacks/${num}` }
+        : {}),
+    };
+    if (Object.keys(shardContext).length > 0) {
+      interpolateStepsContext(childCraftbook.steps, shardContext);
+    }
     const activeStepId = childCraftbook.entryStepId;
     // First activation of the child's entry step → attemptCount 1.
     childCraftbook.steps = bumpStepActivation(childCraftbook.steps, activeStepId, now);
@@ -3917,6 +3938,18 @@ export class TaskManager {
       craftbook: childCraftbook,
       ...(childSources.length > 0 ? { sourceCraftbookIds: childSources } : {}),
       ...(parent.spawnsCraftbookParams ? { craftbookParams: parent.spawnsCraftbookParams } : {}),
+      // `packId` is the reserved diffpack binding (see `resolveDiffpackId`):
+      // a shard that carries one drafts into that change proposal, so its
+      // workspace-write tools re-root at the pack instead of the workspace.
+      // Per-child, because a fanout exists precisely to give each cluster of
+      // issues its own reviewable proposal.
+      // A shard of a proposal-drafting host drafts its OWN proposal — one per
+      // cluster, which is why the fanout exists. Derived from the child's task
+      // number rather than passed in: if this were model-supplied, a mangled
+      // value would silently unbind the child and send its edits to the real
+      // workspace, which is the one outcome this whole feature exists to
+      // prevent. Fail-safe, not fail-open.
+      ...(parent.diffpackId ? { diffpackId: String(num) } : {}),
       // A child of a night-shift host is itself night-shift work — the
       // runner gates its dispatch to an active shift. The child is a plain
       // task (no cron/spawn), so `onceADay` doesn't carry over.

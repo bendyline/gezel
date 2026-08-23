@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readGgufSummaryAsync } from './gguf-metadata-async.js';
-import { readGgufSummary } from './gguf-metadata.js';
+import { ggufQuantizationTag, readGgufSummary } from './gguf-metadata.js';
 
 /**
  * Build a synthetic GGUF binary in-memory so we can test the parser
@@ -473,5 +473,18 @@ describe('readGgufSummary — tensor sizing (includeTensorSizes)', () => {
     expect(s.expertBytesTotal).toBeUndefined();
     expect(s.nonExpertBytes).toBeUndefined();
     expect(s.expertBytesByLayer).toBeUndefined();
+  });
+});
+
+describe('ggufQuantizationTag', () => {
+  it('drops the enum prefix so the tag reads like a catalog label', () => {
+    expect(ggufQuantizationTag({ fileTypeName: 'MOSTLY_Q4_K_M' })).toBe('Q4_K_M');
+    expect(ggufQuantizationTag({ fileTypeName: 'MOSTLY_BF16' })).toBe('BF16');
+    expect(ggufQuantizationTag({ fileTypeName: 'ALL_F32' })).toBe('F32');
+  });
+
+  it('has nothing to offer for a file_type this build cannot name', () => {
+    expect(ggufQuantizationTag({ fileTypeName: 'UNKNOWN_999' })).toBeUndefined();
+    expect(ggufQuantizationTag({})).toBeUndefined();
   });
 });

@@ -1103,17 +1103,20 @@ describe('ProjectsView', () => {
     expect(api.toolFileReview).toHaveBeenCalledWith('pj-alpha', { path: 'notes/audit.md' });
     expect(within(pane).getByRole('button', { name: 'Fix' })).toBeInTheDocument();
 
+    // Turning managed edits off does NOT take Fix away: a fix is drafted as a
+    // change proposal the user applies, so it works on a workspace gezels may
+    // not write — the case that needs it most.
     const editsSelect = () =>
       screen
         .getAllByTestId('mock-select')
         .find((select) => within(select).queryByRole('option', { name: 'Can edit' }));
     fireEvent.change(editsSelect()!, { target: { value: 'off' } });
     await waitFor(() => {
-      expect(within(pane).queryByRole('button', { name: 'Fix' })).toBeNull();
       expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', {
         managedWorkspaceWritePolicy: 'deny',
       });
     });
+    expect(within(pane).getByRole('button', { name: 'Fix' })).toBeInTheDocument();
 
     fireEvent.change(editsSelect()!, { target: { value: 'on' } });
     await waitFor(() => {
@@ -1836,6 +1839,35 @@ describe('ProjectsView', () => {
       render(<ProjectsView forceProjectId="pj-alpha" compact />);
       const chat = await screen.findByTestId('project-chat');
       expect(chat.getAttribute('data-compact')).toBe('true');
+    });
+  });
+
+  it('lets a project opt out of overnight fixing, and defaults it on', async () => {
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      gezelIds: [],
+    } as never);
+    vi.mocked(api.updateProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      gezelIds: [],
+      nightlyFixesEnabled: false,
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+
+    const toggle = await screen.findByRole('checkbox', { name: /Fix problems overnight/ });
+    // Unset means on: the crew that unlocks it is the opt-in.
+    expect(toggle).toBeChecked();
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', { nightlyFixesEnabled: false });
     });
   });
 });

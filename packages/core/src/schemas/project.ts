@@ -312,6 +312,18 @@ export const ProjectSchema = z.object({
    */
   indexingEnabled: z.boolean().optional(),
   /**
+   * Per-project switch for overnight bug fixing. Missing = ON, which is
+   * deliberate: the capability already gates itself on the project having
+   * both a Boekwachter and a developer on the roster, so a user who assembled
+   * that crew has asked for it. This field exists to turn it OFF without
+   * disbanding the crew.
+   *
+   * Nothing it produces touches the workspace — the developer drafts
+   * diffpacks the user applies — but it does spend model time overnight, so
+   * the off switch has to exist and has to be findable.
+   */
+  nightlyFixesEnabled: z.boolean().optional(),
+  /**
    * Which knowledge catalogs are in scope for sessions here. Absent =
    * inherit the user's global enabled set. Unresolvable refs under
    * 'selected' are retained so a restored project regains its selection
@@ -484,6 +496,18 @@ export function projectAllowsAmbientWork(project: {
   // (automatic via the task lifecycle vs. a deliberate user choice) —
   // for the scheduler's purposes they're all "don't nudge."
   return status === 'active';
+}
+
+/**
+ * True when the project has not opted out of overnight bug fixing. Missing =
+ * on; see `nightlyFixesEnabled`. This is only the *user's* half of the gate —
+ * the planner additionally requires a Boekwachter and a developer on the
+ * roster, and `projectAllowsAmbientWork`.
+ */
+export function projectAllowsNightlyFixes(project: {
+  nightlyFixesEnabled?: boolean;
+}): boolean {
+  return project.nightlyFixesEnabled !== false;
 }
 
 export const InstalledPackageSchema = z.object({

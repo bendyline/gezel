@@ -162,7 +162,8 @@ export function WorkspaceIssueFixDialog({
               <h3>Assign issue fix</h3>
             </Dialog.Title>
             <Dialog.Description className="muted small">
-              This creates an assigned task and starts its specialist chat immediately.
+              This creates an assigned task and starts its specialist chat immediately. Your files
+              aren’t touched — the fix arrives as a change proposal you review and apply.
             </Dialog.Description>
 
             <label>

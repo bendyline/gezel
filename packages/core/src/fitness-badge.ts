@@ -231,3 +231,78 @@ export function composeFitnessBadge(input: FitnessBadgeInput): FitnessBadge {
     detail: `${passed} This older check measured only short-prompt decode (${shown} t/s); re-run it for realistic startup and loaded-context timing. ${band.detail}${softener}${ramCaveat(ramFit)}`,
   };
 }
+
+/**
+ * The two speeds a representative-context probe turn produced: how fast
+ * the model *read* the ~20K-token check prompt (prefill) and how fast it
+ * *wrote* the answer (decode).
+ *
+ * Prefill is the number that decides whether a big model is usable at all
+ * — a DwarfStar build streams routed experts from SSD, so it can decode at
+ * a comfortable rate and still take minutes before the first word. The
+ * badge label carries decode; this carries the half it omits.
+ */
+export interface FitnessThroughput {
+  /** Prompt tokens the turn actually evaluated — cache hits excluded. */
+  evaluatedPromptTokens: number;
+  /** Prefill rate in tokens/sec, or null when neither source is available. */
+  prefillTokensPerSec: number | null;
+  /**
+   * `engine` — the engine reported its own prefill timing. `first-token` —
+   * derived from time-to-first-output, which the probe's warm second turn
+   * makes a fair proxy: the engine is already loaded, so the pre-first-token
+   * window IS prefill. Checked against four real records whose engine did
+   * report a rate (388 / 498 / 2437 / 3797 t/s): the derived number came in
+   * 0.4-1.2% low every time — it lags by the first token's own decode, and
+   * nothing else. ds4-server reports no prefill timing at all, so on the page
+   * where prefill matters most this fallback is the whole measurement.
+   */
+  prefillSource: 'engine' | 'first-token' | null;
+  /** Time to first model output on the representative turn. */
+  ttftMs: number | null;
+  /** Decode rate on the same turn. */
+  decodeTokensPerSec: number | null;
+}
+
+/**
+ * Below this, a derived rate is noise: a turn whose prompt was almost
+ * entirely served from cache evaluates a handful of tokens, and dividing
+ * those by a whole time-to-first-token produces a rate that describes the
+ * cache lookup, not the model.
+ */
+const MIN_DERIVABLE_PREFILL_TOKENS = 512;
+
+/**
+ * Read the representative-turn speeds off a record. Returns null for
+ * records written before that turn existed, and for probes that never
+ * reached it — an unmeasured turn must read as absent, never as zero.
+ */
+export function fitnessThroughput(record: ModelFitnessRecord): FitnessThroughput | null {
+  const rep = record.representativeContext;
+  if (!rep) return null;
+  const promptTokens = rep.promptTokens;
+  if (promptTokens == null) return null;
+  const evaluatedPromptTokens = Math.max(0, promptTokens - (rep.cachedPromptTokens ?? 0));
+
+  let prefillTokensPerSec: number | null = null;
+  let prefillSource: FitnessThroughput['prefillSource'] = null;
+  if (rep.promptTokensPerSec != null && rep.promptTokensPerSec > 0) {
+    prefillTokensPerSec = rep.promptTokensPerSec;
+    prefillSource = 'engine';
+  } else if (
+    rep.ttftMs != null &&
+    rep.ttftMs > 0 &&
+    evaluatedPromptTokens >= MIN_DERIVABLE_PREFILL_TOKENS
+  ) {
+    prefillTokensPerSec = evaluatedPromptTokens / (rep.ttftMs / 1000);
+    prefillSource = 'first-token';
+  }
+
+  return {
+    evaluatedPromptTokens,
+    prefillTokensPerSec,
+    prefillSource,
+    ttftMs: rep.ttftMs,
+    decodeTokensPerSec: rep.genTokensPerSec,
+  };
+}

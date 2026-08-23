@@ -2202,18 +2202,27 @@ let scheduledWakeIso: string | null = null;
 const execFileAsync = promisify(execFile);
 
 /**
- * Poll the service's night-shift power intent and drive OS power:
+ * Poll the service's power intent and drive OS power:
  *   - `keepAwake` → hold a `prevent-app-suspension` power-save blocker so
- *     the machine doesn't sleep mid-shift (all platforms).
+ *     the machine doesn't idle-sleep mid-shift or mid-turn (all platforms).
  *   - `wakeAtIso` → schedule an OS wake at the next window start so a
  *     sleeping machine comes up for the shift. macOS only (`pmset`); a
  *     no-op with a single log line elsewhere.
  *
+ * The intent now covers live work as well as the night shift, so a long local
+ * turn the user is waiting on keeps an otherwise-idle laptop up rather than
+ * freezing mid-generation. Be clear about what this cannot do: on macOS the
+ * blocker is a `NoIdleSleepAssertion`, and nothing in userspace overrides a
+ * closed lid or a dark-wake thermal emergency. The daemon's deadlines are
+ * sleep-aware for exactly that reason — this is the cheap half of the defense,
+ * not the whole of it.
+ *
  * Idempotent and best-effort; runs on a 30s cadence so "keep awake"
- * engages quickly once a shift starts.
+ * engages quickly once a shift or a turn starts.
  */
 function startNightShiftPowerControl(): void {
   if (nightShiftPowerTimer) clearInterval(nightShiftPowerTimer);
+  hookHostPowerTransitions();
 
   const applyKeepAwake = (keepAwake: boolean) => {
     if (keepAwake) {
@@ -2247,8 +2256,15 @@ function startNightShiftPowerControl(): void {
   };
 
   const poll = () => {
-    void apiClient
-      ?.getNightShiftPowerIntent()
+    const client = apiClient;
+    if (!client) return;
+    // Fall back to the night-shift-only intent when the endpoint is missing:
+    // a freshly-updated shell can adopt an already-running older daemon, and
+    // losing the scheduled keep-awake would be a worse regression than not
+    // gaining the live-work one.
+    void client
+      .getSystemPowerIntent()
+      .catch(() => client.getNightShiftPowerIntent())
       .then((intent) => {
         applyKeepAwake(intent.keepAwake);
         applyWake(intent.wakeAtIso);
@@ -2257,8 +2273,47 @@ function startNightShiftPowerControl(): void {
         /* service not ready / endpoint missing — ignore */
       });
   };
+  repollPowerIntent = poll;
   poll();
   nightShiftPowerTimer = setInterval(poll, 30_000);
+}
+
+let hostPowerHooked = false;
+let suspendedAt: number | null = null;
+/** Set by {@link startNightShiftPowerControl}; lets the resume hook re-poll now. */
+let repollPowerIntent: (() => void) | null = null;
+
+/**
+ * Watch host sleep/resume so the shell can react to a nap the way the daemon
+ * already does.
+ *
+ * On resume: forgive the health failures the wake-up burst is about to
+ * deliver (a restart triggered by sleep is a restart nobody needed), and
+ * re-read the power intent immediately rather than waiting out the 30s poll.
+ * The daemon detects the same suspension independently through its own
+ * heartbeat, so this hook is a refinement, not the mechanism — a system-service
+ * or headless daemon has no Electron to tell it anything.
+ */
+function hookHostPowerTransitions(): void {
+  if (hostPowerHooked) return;
+  hostPowerHooked = true;
+  try {
+    powerMonitor.on('suspend', () => {
+      suspendedAt = Date.now();
+      console.log('[power] host suspending');
+    });
+    powerMonitor.on('resume', () => {
+      const napMs = suspendedAt === null ? null : Date.now() - suspendedAt;
+      suspendedAt = null;
+      console.log(
+        `[power] host resumed${napMs === null ? '' : ` after ${Math.round(napMs / 1000)}s`}`,
+      );
+      connection?.noteHostResumed();
+      repollPowerIntent?.();
+    });
+  } catch {
+    /* powerMonitor unavailable (headless/test) — the daemon still self-detects */
+  }
 }
 
 /**

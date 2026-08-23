@@ -992,6 +992,76 @@ describe('TaskManager spawn craftbooks & children', () => {
     });
   });
 
+  it('binds every shard of a proposal-drafting host to its own proposal', async () => {
+    // Fail-safe, not fail-open: a shard that came up unbound would send its
+    // edits to the real workspace, which is the one outcome the whole
+    // change-proposal feature exists to prevent. The id is derived from the
+    // child's own task number, never supplied by a model.
+    const parent = await tasks.create(
+      'website',
+      {
+        title: 'Nightly fixes',
+        assignee: { kind: 'user' },
+        steps: [{ name: 'Triage' }],
+        spawnsSteps: [{ name: 'Draft' }],
+        cron: { expression: '0 9 * * *' },
+      },
+      { draftsDiffpack: true },
+    );
+    expect(parent.diffpackId).toBe(String(parent.num));
+
+    const first = await tasks.spawnChild(parent.ref);
+    const second = await tasks.spawnChild(parent.ref);
+    expect(first.diffpackId).toBe(String(first.num));
+    expect(second.diffpackId).toBe(String(second.num));
+    expect(first.diffpackId).not.toBe(second.diffpackId);
+  });
+
+  it("resolves {{diffpack.dir}} to each shard's own proposal folder", async () => {
+    // `{{task.num}}` cannot be used here: create() froze the spawn template
+    // with the HOST's context, so every shard would target the host's pack.
+    const parent = await tasks.create(
+      'website',
+      {
+        title: 'Nightly fixes',
+        assignee: { kind: 'user' },
+        steps: [{ name: 'Triage' }],
+        spawnsSteps: [
+          {
+            name: 'Draft',
+            prompt: 'Write your notes to {{diffpack.dir}}/notes.md',
+            advanceWhen: { file: '{{diffpack.dir}}/notes.md', artifact: true },
+          },
+        ],
+        cron: { expression: '0 9 * * *' },
+      },
+      { draftsDiffpack: true },
+    );
+
+    const first = await tasks.spawnChild(parent.ref);
+    const second = await tasks.spawnChild(parent.ref);
+    for (const child of [first, second]) {
+      const step = child.craftbook.steps[0]!;
+      expect(step.prompt).toContain(`diffpacks/${child.num}/notes.md`);
+      expect(step.advanceWhen?.file).toBe(`diffpacks/${child.num}/notes.md`);
+    }
+    expect(first.craftbook.steps[0]?.advanceWhen?.file).not.toBe(
+      second.craftbook.steps[0]?.advanceWhen?.file,
+    );
+  });
+
+  it('leaves shards of an ordinary host unbound so they edit normally', async () => {
+    const parent = await tasks.create('website', {
+      title: 'Ordinary',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Wait' }],
+      spawnsSteps: [{ name: 'Work' }],
+      cron: { expression: '0 9 * * *' },
+    });
+    const child = await tasks.spawnChild(parent.ref);
+    expect(child.diffpackId).toBeUndefined();
+  });
+
   it('spawnChild inherits the host artifact folder — shards share one namespace', async () => {
     // The host's collect-barrier gates were interpolated with the HOST's
     // number; a per-child folder would leave them watching an empty dir.

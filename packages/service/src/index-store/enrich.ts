@@ -11,6 +11,7 @@ import type { ChatManager } from '../chat/manager.js';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import { shadowDocFilesPaths } from './docs.js';
+import { type EnrichOutcome, classifyEnrichFailure } from './enrich-breaker.js';
 import {
   type EnrichBudget,
   REVIEW_BUDGET,
@@ -309,6 +310,14 @@ export async function buildEnrichDeps(
     boekwachter?: Pick<GezelSummary, 'id' | 'name' | 'provider' | 'model'>;
     /** Project owning the indexed paths, for queue and chat activity context. */
     projectId?: string;
+    /**
+     * Observe every summarizer/reviewer completion so a caller can back off
+     * when the target stops answering. `withPolicyFallback` swallows failures
+     * into `''` on purpose — files have their own capped-attempt gate — which
+     * leaves no other way to tell "this file was unusable" from "the engine
+     * has not answered in an hour".
+     */
+    onOutcome?: (outcome: EnrichOutcome) => void;
   } = {},
 ): Promise<EnrichDeps> {
   const { embedBatch } = await import('../memory/embeddings.js');
@@ -390,20 +399,25 @@ export async function buildEnrichDeps(
     ) =>
     async (prompt: string, activity?: string): Promise<EnrichCompletionResult> => {
       try {
-        return await primary(prompt, activity);
+        const completion = await primary(prompt, activity);
+        opts.onOutcome?.('ok');
+        return completion;
       } catch (err) {
         // Cancellation is lifecycle control, not a failed model attempt. Let
         // it unwind the batch so quit/drive-stop never burns a file's retry
         // budget or falls through to another engine during shutdown.
         if (isAbortError(err)) throw err;
         const message = errorMessage(err);
+        opts.onOutcome?.(classifyEnrichFailure(err));
         if (isPolicyBlockMessage(message)) {
           if (fallback && fallbackTarget) {
             log.warn(
               `${label} blocked by ${providerName} policy filter; retrying on ${fallbackTarget.providerName}:${fallbackTarget.model}`,
             );
             try {
-              return await fallback(prompt, activity);
+              const completion = await fallback(prompt, activity);
+              opts.onOutcome?.('ok');
+              return completion;
             } catch (fallbackErr) {
               if (isAbortError(fallbackErr)) throw fallbackErr;
               // Local-engine failure is transient (deferred, cold, busy) —

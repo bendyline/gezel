@@ -301,6 +301,12 @@ export const FixBoekwachterIssueResponseSchema = z.object({
   gezelId: z.string().min(1),
   gezelName: z.string().min(1),
   enqueued: z.boolean(),
+  /**
+   * The change proposal the fix will be drafted into. The gezel edits into
+   * this pack rather than the workspace, so the fix is reviewable and the
+   * button works on a folder gezels hold no write grant for.
+   */
+  packId: z.string().optional(),
 });
 export type FixBoekwachterIssueResponse = z.infer<typeof FixBoekwachterIssueResponseSchema>;
 

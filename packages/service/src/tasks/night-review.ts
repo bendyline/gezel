@@ -1,4 +1,5 @@
 import {
+  type DiffpackSummary,
   type NightShiftCompletedTask,
   type NightShiftReport,
   type NightShiftReviewResponse,
@@ -6,9 +7,11 @@ import {
   type Question,
   type Task,
   findFirstH1,
+  isActiveDiffpackStatus,
   lastNightShiftWindow,
   parseReportActions,
 } from '@bendyline/gezel';
+import type { DiffpackManager } from '../diffpack/manager.js';
 import type { Store } from '../fs/store.js';
 import type { ReportActionManager } from '../report-actions/report-action-manager.js';
 import type { TaskManager } from '../tasks/manager.js';
@@ -30,11 +33,16 @@ import type { TaskManager } from '../tasks/manager.js';
  * window close, over a handful of small files.
  */
 export async function buildNightShiftReview(
-  deps: { store: Store; tasks: TaskManager; reportActions: ReportActionManager },
+  deps: {
+    store: Store;
+    tasks: TaskManager;
+    reportActions: ReportActionManager;
+    diffpacks: DiffpackManager;
+  },
   window: NightShiftWindow,
   now: Date,
 ): Promise<NightShiftReviewResponse> {
-  const { store, tasks, reportActions } = deps;
+  const { store, tasks, reportActions, diffpacks } = deps;
   const { key, start, end } = lastNightShiftWindow(now, window);
   const startMs = start.getTime();
   const endMs = end.getTime();
@@ -43,6 +51,7 @@ export async function buildNightShiftReview(
   const projectNames = new Map(projects.map((p) => [p.id, p.name]));
 
   const tasksCompleted: NightShiftCompletedTask[] = [];
+  const proposals: DiffpackSummary[] = [];
   const reportCandidates = new Map<string, Set<string>>(); // projectId → artifact paths
 
   const addCandidate = (projectId: string, path: string) => {
@@ -88,6 +97,26 @@ export async function buildNightShiftReview(
       for (const path of declaredArtifacts(task)) addCandidate(project.id, path);
     }
 
+    // Change proposals still awaiting a decision. Listed by window key
+    // rather than swept by mtime: a proposal drafted two nights ago and
+    // never answered is still the first thing the user should see, and
+    // dropping it out of the review would quietly lose a night's work.
+    for (const pack of await diffpacks.list(project.id).catch(() => [])) {
+      if (!isActiveDiffpackStatus(pack.status)) continue;
+      proposals.push({
+        packId: pack.packId,
+        projectId: project.id,
+        projectName: project.name,
+        title: pack.title,
+        status: pack.status,
+        fileCount: pack.files.length,
+        additions: pack.additions,
+        deletions: pack.deletions,
+        issueRefs: pack.origin.kind === 'boekwachter-issue' ? pack.origin.issueRefs : [],
+        drifted: pack.drifted.length > 0,
+      });
+    }
+
     // Mtime sweep: report-shaped markdown written during the window.
     const files = await store
       .listProjectArtifactsRecursive(project.id, { withStats: true })
@@ -127,6 +156,13 @@ export async function buildNightShiftReview(
     }
   }
   reports.sort((a, b) => b.actionCounts.total - a.actionCounts.total);
+  // Ready before still-drafting — a proposal you can act on outranks one that
+  // is not finished — then largest first, since the biggest change is the one
+  // most worth reading before it lands.
+  proposals.sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'ready' ? -1 : 1;
+    return b.fileCount - a.fileCount;
+  });
   tasksCompleted.sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''));
 
   return {
@@ -135,6 +171,7 @@ export async function buildNightShiftReview(
     windowEnd: end.toISOString(),
     tasksCompleted,
     reports,
+    diffpacks: proposals,
   };
 }
 

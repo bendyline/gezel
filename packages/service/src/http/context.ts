@@ -9,6 +9,7 @@ import type { CodexSetupManager } from '../codex-setup/manager.js';
 import type { ConnectorActionManager } from '../connectors/actions.js';
 import type { ConnectorManager } from '../connectors/manager.js';
 import type { DebugFlag } from '../debug/flag.js';
+import type { DiffpackManager } from '../diffpack/manager.js';
 import type { EngineBinaryRegistry } from '../engines/registry.js';
 import type { ModelFitnessManager } from '../fitness/manager.js';
 import type { JobManager } from '../folders/job-manager.js';
@@ -130,6 +131,8 @@ export interface ServiceContext {
   codeReviews: CodeReviewManager;
   /** Lifecycle of report-embedded action requests (```gezel-action blocks). */
   reportActions: ReportActionManager;
+  /** Proposed change sets a gezel drafted for the user to review and apply. */
+  diffpacks: DiffpackManager;
   connectors: ConnectorManager;
   connectorActions: ConnectorActionManager;
   renderer: ImageRenderer;

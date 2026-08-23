@@ -111,6 +111,7 @@ import { ChannelsConfigSchema } from './channels.js';
 import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeCompatSchema, CodexPermissionModeSchema } from './codex.js';
 import { CraftbookSuggestionSchema } from './craftbook.js';
+import { DiffpackSummarySchema } from './diffpack.js';
 import { EntityIdSchema } from './entity-id.js';
 import { FileReviewIssueSeveritySchema, FileReviewWireSchema } from './file-review.js';
 import {
@@ -3924,6 +3925,13 @@ export const UpdateProjectRequestSchema = z.object({
    */
   indexingEnabled: z.boolean().optional(),
   /**
+   * Turn overnight bug fixing on or off for this project. Missing = ON when
+   * the project has both a Boekwachter and a developer on its roster; this
+   * only exists so a user with that crew can stop the night work without
+   * disbanding it.
+   */
+  nightlyFixesEnabled: z.boolean().optional(),
+  /**
    * Project-level operational status. `active` (default) lets ambient
    * gezel work flow; `readonly` and `inactive` pause meester nudges,
    * auto-phase-advance handoffs, cron-tick recording, and boot-time
@@ -6151,6 +6159,13 @@ export const NightShiftReviewResponseSchema = z.object({
   windowEnd: z.string(),
   tasksCompleted: z.array(NightShiftCompletedTaskSchema),
   reports: z.array(NightShiftReportSchema),
+  /**
+   * Change proposals the night drafted that are still waiting on the user.
+   * Kept separate from `reports`: a report is something to read, a proposal
+   * is something to decide about, and collapsing the two would bury the only
+   * item in the review that needs an answer.
+   */
+  diffpacks: z.array(DiffpackSummarySchema),
 });
 export type NightShiftReviewResponse = z.infer<typeof NightShiftReviewResponseSchema>;
 

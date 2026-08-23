@@ -1,5 +1,4 @@
 import type { CatalogItemSummary, ChatModelCategory, ChatModelManifest } from '@bendyline/gezel';
-import { composeFitnessBadge } from '@bendyline/gezel';
 import type {
   IncompleteModelDownload,
   MlxInstallEvent,
@@ -21,6 +20,7 @@ import { IncompleteDownloads } from './IncompleteDownloads.js';
 import { LicenseButton } from './LicenseButton.js';
 import { ImportModelBundleButton } from './ModelBundleControls.js';
 import { ModelActionsMenu, ModelContextSliderPanel } from './ModelContextControls.js';
+import { ModelFitnessCell, fitnessMenuAction } from './ModelFitnessCell.js';
 import { ModelSizeCell } from './ModelSizeCell.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { UnrecognizedModels } from './UnrecognizedModels.js';
@@ -612,18 +612,6 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                     const reinstalling = Boolean(installs.get(m.id));
                     const fitnessKey = `mlx:${m.id}`;
                     const entry = fitness.get(fitnessKey);
-                    const badge = composeFitnessBadge({
-                      ...(entry
-                        ? {
-                            fitness: {
-                              record: entry.record,
-                              stale: entry.stale,
-                              hardwareChanged: entry.hardwareChanged,
-                            },
-                          }
-                        : {}),
-                      probing: probing.includes(fitnessKey),
-                    });
                     return (
                       <Fragment key={m.id}>
                         <tr>
@@ -677,24 +665,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                               </>
                             )}
                           </td>
-                          <td className="model-fitness-table-cell">
-                            <div className="model-fitness-cell">
-                              <span
-                                className={`gz-status-pill model-fitness-badge${
-                                  badge.tier === 'probing' ? ' model-fitness-badge--probing' : ''
-                                }${
-                                  badge.tier === 'ok'
-                                    ? ' gz-status-pill--ok'
-                                    : badge.tier === 'warn'
-                                      ? ' gz-status-pill--warn'
-                                      : ''
-                                }`}
-                                title={badge.detail}
-                              >
-                                {badge.label}
-                              </span>
-                            </div>
-                          </td>
+                          <ModelFitnessCell entry={entry} probing={probing.includes(fitnessKey)} />
                           <td className="model-actions-table-cell">
                             <div className="model-actions-cell">
                               <div className="model-action-status">
@@ -717,21 +688,16 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                                   onToggleContextEditor={() =>
                                     setContextEditorFor((prev) => (prev === m.id ? null : m.id))
                                   }
-                                  fitnessAction={{
-                                    label:
-                                      badge.tier === 'probing'
-                                        ? 'Checking fitness…'
-                                        : entry && !entry.stale && entry.record.status !== 'blocked'
-                                          ? 'Re-run fitness check'
-                                          : 'Run fitness check',
-                                    checking: badge.tier === 'probing',
-                                    onRun: () => {
+                                  fitnessAction={fitnessMenuAction(
+                                    entry,
+                                    probing.includes(fitnessKey),
+                                    () => {
                                       void api
                                         .runModelFitnessProbe('mlx', m.id)
                                         .then(() => refreshFitness())
                                         .catch(() => {});
                                     },
-                                  }}
+                                  )}
                                   onUpdate={() => startInstall(m.id)}
                                   updateLabel={{ idle: 'Download again', busy: 'Downloading…' }}
                                   onDelete={() => setToDelete(m.id)}
