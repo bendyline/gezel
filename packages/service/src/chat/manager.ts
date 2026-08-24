@@ -13064,6 +13064,9 @@ export class ChatManager {
     try {
       const found = await this.contentIndexRef.searchLibrary(libraryId, text, {
         maxResults: TURN_LIBRARY_RECALL_TOP_K * 3,
+        // This recall rides a user's turn — see the same flag on the unified
+        // retrieval path. Keyword now beats semantic in a minute.
+        skipColdEmbedder: true,
       });
       const already = state.libraryRecallPaths ?? new Set<string>();
       const picked: Array<{ path: string; snippet: string; score: number }> = [];

@@ -210,6 +210,10 @@ export async function retrieveProjectContext(args: {
     includeShared: policy.sources.includes('shared'),
     sources: policy.sources,
     maxResults: MODE_RESULTS[policy.mode],
+    // This retrieval rides a user's turn. A cold embedder costs tens of
+    // seconds of model load, so the keyword arms answer this turn and the
+    // vector arm rejoins once the pipeline is warm.
+    skipColdEmbedder: true,
   });
   args.onSearchProbe?.({
     query,

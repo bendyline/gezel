@@ -655,7 +655,9 @@ export function NewTaskDialog({
                 </button>
                 {lenses.map((lens, index) => {
                   const groupLabel =
-                    lenses[index - 1]?.family === lens.family ? null : taskLensGroupLabel(lens.family);
+                    lenses[index - 1]?.family === lens.family
+                      ? null
+                      : taskLensGroupLabel(lens.family);
                   return (
                     <Fragment key={lens.id}>
                       {groupLabel && <span className="gz-npd-rail-group">{groupLabel}</span>}

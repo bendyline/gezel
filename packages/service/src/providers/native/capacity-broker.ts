@@ -261,6 +261,25 @@ export class EngineBusyError extends Error {
   }
 }
 
+/**
+ * Did this failure come from the pool refusing to make room, rather than from
+ * the model? Match the `code` first, and fall back to the stable message so a
+ * rewrapped error (the one-shot and provider layers both re-throw) still
+ * classifies right.
+ *
+ * Callers must not charge this to whatever they were working on: the request
+ * never reached a model, so it is evidence about neither the target nor the
+ * input. The fitness probe records `blocked` ("did not run"); index enrichment
+ * defers the file with its retry budget untouched.
+ */
+export function isEngineBusyError(err: unknown): boolean {
+  if (err && typeof err === 'object' && (err as { code?: unknown }).code === 'engine-busy') {
+    return true;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return /did not drain|busy serving requests/i.test(message);
+}
+
 export class CapacityBroker {
   private budgetBytes: number;
   private enforced: boolean;

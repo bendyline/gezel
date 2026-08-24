@@ -21,6 +21,7 @@
 
 import type { ModelFitnessRecord, ModelFitnessTrigger } from '@bendyline/gezel';
 import { createLogger } from '@bendyline/gezel';
+import { isEngineBusyError } from '../providers/native/capacity-broker.js';
 import { isEngineLaunchError } from '../providers/native/supervisor.js';
 import type { TurnStatsEvent } from '../providers/streaming-session.js';
 import type { ExternalToolCall, ExternalToolSpec, LLMProvider } from '../providers/types.js';
@@ -79,16 +80,9 @@ const WRITE_FILE_SPEC: ExternalToolSpec = {
  * The pool throws {@link EngineBusyError} (code `engine-busy`) when it
  * cannot evict a busy resident engine to make room for the probe model.
  * That is contention, not a model defect — the record is marked `blocked`
- * ("did not run") rather than `failed`. Match the code first, and fall
- * back to the stable message so a rewrapped error still classifies right.
+ * ("did not run") rather than `failed`.
  */
-function isEngineBusy(err: unknown): boolean {
-  if (err && typeof err === 'object' && (err as { code?: unknown }).code === 'engine-busy') {
-    return true;
-  }
-  const message = err instanceof Error ? err.message : String(err);
-  return /did not drain|busy serving requests/i.test(message);
-}
+const isEngineBusy = isEngineBusyError;
 
 /**
  * Attribute a turn failure to the axis that actually failed.

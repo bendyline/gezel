@@ -119,7 +119,10 @@ export function taskLensesFor(books: BookItem[]): TaskLens[] {
   for (const book of books) {
     const category = resolveCraftbookCategory(book.manifest);
     let ids = byCategory.get(category);
-    if (!ids) byCategory.set(category, (ids = new Set()));
+    if (!ids) {
+      ids = new Set();
+      byCategory.set(category, ids);
+    }
     ids.add(book.manifest.id);
   }
   for (const family of CRAFTBOOK_CATEGORY_FAMILY_META) {

@@ -1,4 +1,5 @@
 import { awakeNow, formatSuspension } from '@bendyline/gezel';
+import { isEngineBusyError } from '../providers/native/capacity-broker.js';
 
 /**
  * Consecutive-timeout circuit breaker for the enrichment summarizer.
@@ -20,7 +21,13 @@ import { awakeNow, formatSuspension } from '@bendyline/gezel';
  * The cooldown is measured on the awake clock, so a machine that sleeps through
  * it comes back still backed off rather than treating a nap as recovery time.
  */
-export type EnrichOutcome = 'ok' | 'timeout' | 'failed';
+/**
+ * `unavailable` is the "never dispatched" arm: the pool refused to make room
+ * because another engine was mid-turn, so the request never reached a model.
+ * It is evidence about neither the target nor the file, and must neither
+ * advance the streak nor clear it — see {@link EnrichTimeoutBreaker.observe}.
+ */
+export type EnrichOutcome = 'ok' | 'timeout' | 'failed' | 'unavailable';
 
 export interface EnrichTimeoutBreakerOptions {
   /** Consecutive timeouts that trip the breaker. */
@@ -54,6 +61,11 @@ export class EnrichTimeoutBreaker {
   }
 
   observe(outcome: EnrichOutcome): void {
+    // A call that never reached the target proves nothing either way. Left to
+    // fall through as `failed` it would RESET a genuine timeout streak, and a
+    // busy engine interleaving with a wedged one would keep the breaker from
+    // ever tripping — the exact feedback loop this class exists to stop.
+    if (outcome === 'unavailable') return;
     if (outcome !== 'timeout') {
       // Any completed call — even one that failed for a file-specific reason —
       // proves the target is answering, which is the whole question here.
@@ -102,6 +114,10 @@ export class EnrichTimeoutBreaker {
  * `[Mac AI] timed out after 180s`).
  */
 export function classifyEnrichFailure(err: unknown): EnrichOutcome {
+  // Checked before the timeout arms: contention is not a slow target, and a
+  // drain refusal names a duration ("did not drain within 30s") that a looser
+  // matcher could mistake for one.
+  if (isEngineBusyError(err)) return 'unavailable';
   if (err instanceof Error && err.name === 'TimeoutError') return 'timeout';
   const message = err instanceof Error ? err.message : String(err);
   return /timed out after/i.test(message) ? 'timeout' : 'failed';

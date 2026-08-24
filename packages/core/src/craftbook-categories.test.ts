@@ -40,9 +40,9 @@ describe('craftbook categories', () => {
     expect(inferCraftbookCategory(['subscriptions', 'finance', 'audit', 'spend', 'report'])).toBe(
       'business',
     );
-    expect(inferCraftbookCategory(['research', 'citations', 'audit', 'verification', 'review'])).toBe(
-      'research',
-    );
+    expect(
+      inferCraftbookCategory(['research', 'citations', 'audit', 'verification', 'review']),
+    ).toBe('research');
   });
 
   it('ignores presentation-only tags', () => {

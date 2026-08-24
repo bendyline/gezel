@@ -1066,6 +1066,13 @@ export class ContentIndex {
        * embed on demand (the single-project MCP-tool path).
        */
       queryVector?: number[];
+      /**
+       * Answer from the keyword arm rather than wait for a cold/warming
+       * embedder. Set by callers riding a user's chat turn: the model load
+       * costs tens of seconds on a fresh install, and implicit retrieval must
+       * never hold the turn hostage for it.
+       */
+      skipColdEmbedder?: boolean;
     } = {},
   ): Promise<SearchCodeResponse> {
     const opened = await this.open(projectId);
@@ -1081,8 +1088,13 @@ export class ContentIndex {
           queryVector = opts.queryVector;
         } else {
           try {
-            const { embedQuery } = await import('../memory/embeddings.js');
-            queryVector = await embedQuery(query);
+            const { embedQuery, embeddingPipelineStatus } = await import('../memory/embeddings.js');
+            const status = embeddingPipelineStatus();
+            if (opts.skipColdEmbedder && (status === 'cold' || status === 'warming')) {
+              queryVector = null; // the service's deferred boot warm owns the load
+            } else {
+              queryVector = await embedQuery(query);
+            }
           } catch {
             queryVector = null; // embeddings disabled → keyword only
           }
@@ -1929,12 +1941,13 @@ export class ContentIndex {
   async searchLibrary(
     projectId: string,
     query: string,
-    opts: { maxResults?: number; queryVector?: number[] } = {},
+    opts: { maxResults?: number; queryVector?: number[]; skipColdEmbedder?: boolean } = {},
   ): Promise<SearchDocumentsResponse> {
     const maxResults = opts.maxResults ?? 10;
     const code = await this.searchCode(projectId, query, {
       maxResults,
       ...(opts.queryVector ? { queryVector: opts.queryVector } : {}),
+      ...(opts.skipColdEmbedder ? { skipColdEmbedder: true } : {}),
     });
     if (code.engine === 'unavailable') return { results: [], engine: 'unavailable' };
     const artifactsDir = this.store.projectArtifactsDir(projectId);

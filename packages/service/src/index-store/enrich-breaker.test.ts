@@ -1,5 +1,6 @@
 import { resetSuspendClockForTests, startSuspendMonitor } from '@bendyline/gezel';
 import { describe, expect, it, vi } from 'vitest';
+import { EngineBusyError } from '../providers/native/capacity-broker.js';
 import { EnrichTimeoutBreaker, classifyEnrichFailure } from './enrich-breaker.js';
 
 function breaker(overrides: Partial<{ threshold: number; cooldownMs: number }> = {}) {
@@ -106,5 +107,40 @@ describe('classifyEnrichFailure', () => {
   it('does not classify ordinary failures as timeouts', () => {
     expect(classifyEnrichFailure(new Error('model returned no content'))).toBe('failed');
     expect(classifyEnrichFailure('some string')).toBe('failed');
+  });
+});
+
+describe('engine-busy is never charged to the target', () => {
+  it('classifies a drain refusal as unavailable, not failed', () => {
+    expect(
+      classifyEnrichFailure(new EngineBusyError('engine mlx:x:0 is busy serving requests')),
+    ).toBe('unavailable');
+    // Rewrapped by the one-shot layer — only the message survives.
+    expect(
+      classifyEnrichFailure(
+        new Error('engine mlx:x:0 is busy serving requests and did not drain within 30s'),
+      ),
+    ).toBe('unavailable');
+    // "did not drain within 30s" names a duration; it must not read as a timeout.
+    expect(classifyEnrichFailure(new Error('[Mac AI] timed out after 180s'))).toBe('timeout');
+  });
+
+  it('leaves a timeout streak untouched instead of resetting it', () => {
+    const breaker = new EnrichTimeoutBreaker({ threshold: 3 });
+    breaker.observe('timeout');
+    breaker.observe('timeout');
+    // Contention interleaving with a genuinely wedged target used to clear the
+    // streak here, so the breaker could never trip.
+    breaker.observe('unavailable');
+    breaker.observe('timeout');
+    expect(breaker.isOpen()).toBe(true);
+  });
+
+  it('still lets a real completion clear the streak', () => {
+    const breaker = new EnrichTimeoutBreaker({ threshold: 2 });
+    breaker.observe('timeout');
+    breaker.observe('failed');
+    breaker.observe('timeout');
+    expect(breaker.isOpen()).toBe(false);
   });
 });

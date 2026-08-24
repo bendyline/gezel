@@ -19,8 +19,10 @@ import type { WorkspaceLike } from './types.js';
 export function createCitedPathChecker(ws: WorkspaceLike): (cited: string) => Promise<boolean> {
   let listing: Promise<Set<string>> | null = null;
   const probes = new Map<string, Promise<boolean>>();
-  const loadListing = () =>
-    (listing ??= ws.list().then((files) => new Set(files.map((f) => citedPathKey(f)))));
+  const loadListing = () => {
+    listing ??= ws.list().then((files) => new Set(files.map((f) => citedPathKey(f))));
+    return listing;
+  };
   return async (cited) => {
     const probe = cleanCitedPath(cited);
     if (!probe) return false;
