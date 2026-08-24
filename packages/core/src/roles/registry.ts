@@ -576,3 +576,23 @@ export function meetsCapabilityFloor(tier: ModelTier, role: string | undefined):
   const floor = roleCapabilityFloor(role);
   return floor === null ? true : tierAtLeast(tier, floor);
 }
+
+/**
+ * The floor a craftbook step actually dispatches with. An explicit
+ * `step.capabilityFloor` keeps its documented absolute-override contract;
+ * otherwise the step's role floor and the book's template-level floor are
+ * two independent minimums, so they compose by MAX — a `small` role step
+ * inside a book that declares `capabilityFloor: 'medium'` needs medium.
+ * Null when nothing declares a floor (no routing constraint).
+ */
+export function effectiveCapabilityFloor(
+  step: { capabilityFloor?: ModelTier; suggestedRole?: string },
+  book?: { capabilityFloor?: ModelTier } | null,
+): ModelTier | null {
+  if (step.capabilityFloor) return step.capabilityFloor;
+  const roleFloor = roleCapabilityFloor(step.suggestedRole);
+  const bookFloor = book?.capabilityFloor ?? null;
+  if (roleFloor === null) return bookFloor;
+  if (bookFloor === null) return roleFloor;
+  return tierAtLeast(roleFloor, bookFloor) ? roleFloor : bookFloor;
+}

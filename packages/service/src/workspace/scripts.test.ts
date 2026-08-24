@@ -293,3 +293,91 @@ describe('runNpx', () => {
     expect(res.error).toContain('node_modules/.bin');
   });
 });
+
+describe('run receipts (commandEvidence attribution)', () => {
+  it('stamps taskRef/stepId/output tails onto the history event', async () => {
+    const { HistoryManager } = await import('../history/manager.js');
+    const { ensureCommandApprovalQuestions } = await import('./scripts.js');
+    const history = new HistoryManager(home);
+    const p = await store.createProject({ name: 'p' });
+    await seedWorkspace(p.id, { scripts: { test: 'node -e "console.log(\'1 test ok\')"' } });
+
+    // Approve at kickoff through the launcher path, then run attributed.
+    await ensureCommandApprovalQuestions({
+      store,
+      home,
+      projectId: p.id,
+      needs: [{ scope: 'script', name: 'test' }],
+      requestedBy: 'The "Fix a bug" craftbook (task p/1)',
+    });
+    const questions = await store.listProjectQuestions(p.id);
+    const q = questions.find((x) => x.intent?.kind === 'command-approval');
+    expect(q).toBeTruthy();
+    expect(q!.sessionId).toBe('');
+    expect(q!.prompt).toContain('Fix a bug');
+    if (q!.intent?.kind !== 'command-approval') throw new Error('wrong intent');
+    await applyCommandApprovalAnswer({
+      home,
+      projectId: p.id,
+      intent: q!.intent,
+      answer: { selectedChoices: [0], at: new Date().toISOString() },
+    });
+
+    const res = await runPackageScript({
+      store,
+      home,
+      projectId: p.id,
+      history,
+      script: 'test',
+      taskRef: `${p.id}/7`,
+      stepId: 'reproduce',
+      sessionId: 's',
+    });
+    expect(res.ok).toBe(true);
+
+    const events = await history.listEvents({ projectId: p.id, kinds: ['workspace.script.run'] });
+    expect(events).toHaveLength(1);
+    const details = events[0]!.details as Record<string, unknown>;
+    expect(details.taskRef).toBe(`${p.id}/7`);
+    expect(details.stepId).toBe('reproduce');
+    expect(details.exitCode).toBe(0);
+    expect(String(details.stdoutTail)).toContain('1 test ok');
+  });
+
+  it('kickoff approval raiser skips approved, declined, unknown, and pending commands', async () => {
+    const { ensureCommandApprovalQuestions } = await import('./scripts.js');
+    const p = await store.createProject({ name: 'p' });
+    await seedWorkspace(p.id, { scripts: { test: 'echo ok' } });
+    const needs = [
+      { scope: 'script' as const, name: 'test' },
+      { scope: 'script' as const, name: 'not-a-script' },
+    ];
+
+    await ensureCommandApprovalQuestions({ store, home, projectId: p.id, needs });
+    const first = await store.listProjectQuestions(p.id);
+    // Unknown script raised nothing; the real one raised exactly one.
+    expect(first.filter((x) => x.intent?.kind === 'command-approval')).toHaveLength(1);
+
+    // Re-raising while pending dedupes.
+    await ensureCommandApprovalQuestions({ store, home, projectId: p.id, needs });
+    const second = await store.listProjectQuestions(p.id);
+    expect(second.filter((x) => x.intent?.kind === 'command-approval')).toHaveLength(1);
+
+    // A decline is respected — never re-asked by a later launch.
+    const q = second.find((x) => x.intent?.kind === 'command-approval')!;
+    if (q.intent?.kind !== 'command-approval') throw new Error('wrong intent');
+    await applyCommandApprovalAnswer({
+      home,
+      projectId: p.id,
+      intent: q.intent,
+      answer: { selectedChoices: [1], at: new Date().toISOString() },
+    });
+    await store.writeQuestion({
+      ...q,
+      answer: { selectedChoices: [1], at: new Date().toISOString() },
+    });
+    await ensureCommandApprovalQuestions({ store, home, projectId: p.id, needs });
+    const third = await store.listProjectQuestions(p.id);
+    expect(third.filter((x) => x.intent?.kind === 'command-approval' && !x.answer)).toHaveLength(0);
+  });
+});

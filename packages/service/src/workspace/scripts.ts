@@ -37,6 +37,14 @@ export interface RunScriptsOptions {
   history?: HistoryManager;
   gezelId?: string;
   sessionId?: string;
+  /**
+   * Task/step attribution for the run receipt. Threaded from the MCP
+   * server's env (`GEZEL_TASK_REF` / `GEZEL_STEP_ID`) — never from model
+   * arguments — so a `commandEvidence` gate can trust that a receipt
+   * really came from the step it is judging.
+   */
+  taskRef?: string;
+  stepId?: string;
   timeoutMs?: number;
 }
 
@@ -402,7 +410,135 @@ async function logRunEvent(
         exitCode: res.code,
         durationMs: res.durationMs,
         timedOut: res.timedOut,
+        // Receipt attribution + evidence for `commandEvidence` gates. The
+        // tails let a gate rejection quote the actual failure output.
+        ...(opts.taskRef ? { taskRef: opts.taskRef } : {}),
+        ...(opts.stepId ? { stepId: opts.stepId } : {}),
+        ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+        ...(res.stdout ? { stdoutTail: res.stdout.slice(-RUN_EVENT_TAIL_CHARS) } : {}),
+        ...(res.stderr ? { stderrTail: res.stderr.slice(-RUN_EVENT_TAIL_CHARS) } : {}),
       },
     })
     .catch(() => undefined);
+}
+
+/** Last N chars of each output stream preserved on the run receipt. */
+const RUN_EVENT_TAIL_CHARS = 2000;
+
+// ── kickoff command approvals ──────────────────────────────────────────────
+
+/**
+ * Raise the first-use approval question for each of a craftbook's declared
+ * `commands` needs that is not already decided — at task KICKOFF, so the
+ * user approves `npm run test` while launching the book instead of three
+ * steps in when a `commandEvidence` gate first demands a run. Reuses the
+ * exact `command-approval` question intent the mid-task path uses, so the
+ * existing answer route records the decision identically; the question
+ * carries no session (`sessionId: ''`, the night-review pattern) because
+ * no gezel asked it — the launch did.
+ *
+ * Never blocks and never throws: an unresolvable command (script not in
+ * package.json yet, bin not installed) is skipped — the book's own gate
+ * rejects with the actionable message when the time comes.
+ */
+export async function ensureCommandApprovalQuestions(opts: {
+  store: Store;
+  home: string;
+  projectId: string;
+  needs: ReadonlyArray<import('@bendyline/gezel').CraftbookCommandNeed>;
+  /** Names the requester in the prompt, e.g. `the "Fix a bug" craftbook (task default/7)`. */
+  requestedBy?: string;
+}): Promise<void> {
+  if (opts.needs.length === 0) return;
+  let workspaceDir: string;
+  try {
+    workspaceDir = await opts.store.projectWorkspaceDir(opts.projectId);
+  } catch {
+    return;
+  }
+  const approvals = await readCommandApprovals(opts.home, opts.projectId);
+  for (const need of opts.needs) {
+    try {
+      await ensureOneCommandApprovalQuestion({ ...opts, need, workspaceDir, approvals });
+    } catch {
+      // Skipped — the run-time gate carries the actionable failure.
+    }
+  }
+}
+
+async function ensureOneCommandApprovalQuestion(opts: {
+  store: Store;
+  home: string;
+  projectId: string;
+  need: import('@bendyline/gezel').CraftbookCommandNeed;
+  workspaceDir: string;
+  approvals: CommandApprovalsFile;
+  requestedBy?: string;
+}): Promise<void> {
+  const { need } = opts;
+  const args = need.args ?? [];
+  let body: string;
+  let entryFiles: string[];
+  if (need.scope === 'script') {
+    const { scripts } = await opts.store.readPackageJsonScripts(opts.projectId);
+    const scriptBody = scripts[need.name];
+    if (typeof scriptBody !== 'string') return;
+    body = scriptBody;
+    entryFiles = [join(opts.workspaceDir, 'package.json')];
+  } else {
+    const resolved = await resolveBinPath(opts.workspaceDir, need.name);
+    if (!resolved) return;
+    body = resolved;
+    entryFiles = [join(opts.workspaceDir, 'package.json'), resolved];
+  }
+  const inputFiles = await fingerprintCommandInputs({
+    workspaceDir: opts.workspaceDir,
+    body,
+    args,
+    entryFiles,
+  });
+  const decision = lookupApproval(
+    opts.approvals,
+    need.scope,
+    need.name,
+    hashCommandInvocation(body, args, inputFiles),
+  );
+  // Approved for this exact invocation → nothing to ask. Declined → the
+  // user already said no; a launch must not re-ask what a run may not.
+  if (decision !== undefined) return;
+  const gateShape = {
+    store: opts.store,
+    home: opts.home,
+    projectId: opts.projectId,
+    approvals: opts.approvals,
+    scope: need.scope,
+    name: need.name,
+    body,
+    args,
+    inputFiles,
+  };
+  if (await findPendingApproval(gateShape)) return;
+  const intro = opts.requestedBy
+    ? `${opts.requestedBy} verifies its work by running this command, and asks for the approval up front so the run does not stall mid-task.${need.reason ? ` Reason: ${need.reason}` : ''}\n\n`
+    : '';
+  const question: Question = {
+    id: randomUUID(),
+    projectId: opts.projectId,
+    gezelId: '',
+    sessionId: '',
+    prompt: `${intro}${buildApprovalPrompt(gateShape)}`,
+    choices: ['Approve', 'Decline'],
+    allowWriteIn: false,
+    multiSelect: false,
+    intent: {
+      kind: 'command-approval',
+      scope: need.scope,
+      name: need.name,
+      body,
+      ...(args.length > 0 ? { args } : {}),
+      ...(inputFiles.length > 0 ? { inputFiles } : {}),
+    },
+    createdAt: nowIso(),
+  };
+  await opts.store.writeQuestion(question);
 }

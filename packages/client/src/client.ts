@@ -6565,6 +6565,8 @@ export class GezelClient {
       timeoutMs?: number;
       gezelId?: string;
       sessionId?: string;
+      taskRef?: string;
+      stepId?: string;
     },
   ): Promise<RunWorkspaceCommandResult> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/run-package-script`, body);
@@ -6578,6 +6580,8 @@ export class GezelClient {
       timeoutMs?: number;
       gezelId?: string;
       sessionId?: string;
+      taskRef?: string;
+      stepId?: string;
     },
   ): Promise<RunWorkspaceCommandResult & { resolvedBinPath?: string }> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/run-npx`, body);

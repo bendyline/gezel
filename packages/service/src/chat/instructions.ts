@@ -1062,6 +1062,37 @@ ${artifactsLine}
       `### Current task: ${t.ref} — "${t.title}"`,
       `Status: **${t.status}**. Assigned to: **${assigneeLabel}**.`,
     ];
+    // Drafting mode is a property of the RUN, injected by the runtime — a
+    // craftbook must read identically whether it edits in place or drafts a
+    // proposal, so no book carries this prose itself. Saying it plainly is
+    // load-bearing: a gezel that believes it edited the workspace writes
+    // "fixed" into its task notes, and that claim flows into the issue
+    // lifecycle and the review card the user reads.
+    if (t.diffpackId) {
+      const editToolsWired =
+        availableTools === undefined ||
+        ['write_file', 'replace_in_file', 'replace_lines'].some((name) =>
+          availableToolNameSet.has(name),
+        );
+      const toolSentence = editToolsWired
+        ? 'Use `read_file`, `write_file`, `replace_in_file`, and `replace_lines` exactly as you always do. They behave normally and you will read your own edits back — but they land in the proposal.'
+        : 'Your file edits land in the proposal, and you will read your own edits back.';
+      lines.push(
+        [
+          '#### Change-proposal mode',
+          '',
+          `You are drafting CHANGE PROPOSAL DP-${t.diffpackId}, not editing this project.`,
+          '',
+          toolSentence,
+          'The project files do not change until a person reviews the proposal and clicks',
+          'Apply. Never claim you "fixed" or "applied" anything; you proposed it.',
+          '',
+          'Anything that RUNS the project — scripts, tests, a build — still sees the',
+          'unmodified files, so it cannot confirm your change. Say what you could not',
+          'verify rather than implying you did.',
+        ].join('\n'),
+      );
+    }
     // Fanout children advertise the HOST's folder (artifactDir is inherited
     // at spawn) — shards share one namespace so collect gates resolve.
     // Roster-gated: naming a tool the turn didn't wire is a documented

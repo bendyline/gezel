@@ -276,6 +276,31 @@ describe('NightShiftQuotaGate', () => {
     expect(await gate.holdFor('anthropic-cli')).toMatchObject({ bucket: 'seven_day' });
   });
 
+  it('drops a tracker window that has since reset, so the gate cannot latch', async () => {
+    const usage = new UsageTracker();
+    usage.recordQuotaBuckets('anthropic-cli', [pctBucket('five_hour', 99, daysFromNow(-0.1))]);
+    const { gate } = makeGate({ usage, claude: async () => null });
+    expect(await gate.holdFor('anthropic-cli')).toBeNull();
+    expect(usage.quotaBucketsFor('anthropic-cli')).toHaveLength(0);
+  });
+
+  it('keeps holding on a tracker window that has not reset yet', async () => {
+    const usage = new UsageTracker();
+    usage.recordQuotaBuckets('anthropic-cli', [pctBucket('five_hour', 99, daysFromNow(0.1))]);
+    const { gate } = makeGate({ usage, claude: async () => null });
+    expect(await gate.holdFor('anthropic-cli')).toMatchObject({ bucket: 'five_hour' });
+  });
+
+  it('a reset window does not mask a live one still under its floor', async () => {
+    const usage = new UsageTracker();
+    usage.recordQuotaBuckets('anthropic-cli', [
+      pctBucket('five_hour', 99, daysFromNow(-0.1)),
+      pctBucket('seven_day', 90, daysFromNow(3)),
+    ]);
+    const { gate } = makeGate({ usage, claude: async () => null });
+    expect(await gate.holdFor('anthropic-cli')).toMatchObject({ bucket: 'seven_day' });
+  });
+
   it('falls back to tracker buckets when the codex probe fails', async () => {
     const usage = new UsageTracker();
     usage.recordQuotaBuckets('codex-cli', [pctBucket('primary', 95)]);

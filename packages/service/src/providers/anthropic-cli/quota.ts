@@ -144,3 +144,58 @@ function roundOne(value: number): number {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+/**
+ * Process-scoped record of the newest `rate_limit_event` seen per window.
+ *
+ * The CLI pushes one window per event — whichever the server considers
+ * noteworthy for that request — so a turn that reports `seven_day` says
+ * nothing about `five_hour`. Merging here rather than per worker keeps the
+ * two windows from clobbering each other across the pool's ten workers,
+ * each of which sees only the events from its own turns.
+ */
+const rateLimitWindows = new Map<string, QuotaBucket>();
+
+/** Fold one parsed `rate_limit_event` into the shared window record. */
+export function recordClaudeRateLimitWindow(event: {
+  rateLimitType: string | undefined;
+  utilization: number | undefined;
+  resetsAt: number | undefined;
+}): void {
+  if (!event.rateLimitType) return;
+  if (typeof event.utilization !== 'number' || !Number.isFinite(event.utilization)) return;
+  const used = roundOne(Math.max(0, event.utilization * 100));
+  const remaining = roundOne(Math.max(0, 100 - used));
+  const resetDate = normalizeResetDate(event.resetsAt);
+  rateLimitWindows.set(event.rateLimitType, {
+    name: event.rateLimitType,
+    isUnlimited: false,
+    limit: 100,
+    used,
+    remaining,
+    remainingPercent: remaining,
+    overage: roundOne(Math.max(0, used - 100)),
+    ...(resetDate ? { resetDate } : {}),
+  });
+}
+
+/** Windows recorded so far, dropping any whose reset has already passed. */
+export function claudeRateLimitBuckets(now = Date.now()): QuotaBucket[] {
+  const live: QuotaBucket[] = [];
+  for (const [key, bucket] of rateLimitWindows) {
+    if (bucket.resetDate) {
+      const resetAt = new Date(bucket.resetDate).getTime();
+      if (!Number.isNaN(resetAt) && resetAt <= now) {
+        rateLimitWindows.delete(key);
+        continue;
+      }
+    }
+    live.push(bucket);
+  }
+  return live;
+}
+
+/** Test seam. */
+export function resetClaudeRateLimitWindows(): void {
+  rateLimitWindows.clear();
+}

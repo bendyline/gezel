@@ -1935,6 +1935,20 @@ export class ChatManager {
   private taskAdvancer?: TaskAdvancerFn;
 
   /**
+   * Wire the diffpack draft overlay (set by service.ts once the
+   * DiffpackManager exists — same cycle-avoidance as `setTaskAdvancer`).
+   * The observable-progress watcher must judge a drafting task's
+   * workspace-path deliverable against the PROPOSED tree: the drafted copy
+   * when one exists, the live file otherwise. Without it, an advanceWhen on
+   * a new file never fires (the real workspace never gains the file) and one
+   * on an existing file fires against stale content.
+   */
+  setDraftReader(reader: import('../diffpack/draft-store.js').DraftOverlayReader): void {
+    this.draftReader = reader;
+  }
+  private draftReader?: import('../diffpack/draft-store.js').DraftOverlayReader;
+
+  /**
    * Fail-fast per-task budget (Theme F, F3.1). Accumulates each task's
    * UNATTENDED token/turn spend across the sessions that serve it; a soft
    * trip queues a converge-now nudge, a hard trip routes to
@@ -2061,9 +2075,14 @@ export class ChatManager {
             (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
       if (owner !== gezelId) continue;
 
+      // A drafting task's workspace deliverable lives in the diffpack
+      // overlay — judge the proposed tree, not the untouched real one.
+      // Artifact deliverables are real in both modes.
       const content = await (adv.artifact
         ? this.store.readProjectArtifact(projectId, adv.file)
-        : this.store.readProjectWorkspaceFile(projectId, adv.file)
+        : task.diffpackId && this.draftReader
+          ? this.draftReader.read(projectId, task.diffpackId, adv.file)
+          : this.store.readProjectWorkspaceFile(projectId, adv.file)
       ).catch(() => null);
       // `requireChange` steps (edit-an-existing-file deliverables) gate on
       // the model having written to `adv.file` THIS turn — presence alone

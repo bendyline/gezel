@@ -74,6 +74,7 @@ import { createPatientFetch, createTrustingFetch } from '@bendyline/gezel-client
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { advanceHandoffNote } from './advance-note.js';
 import { commandResultIsError } from './command-result.js';
 import {
   RootTurnInvocationCache,
@@ -2861,6 +2862,10 @@ server.tool(
         ...(timeoutMs ? { timeoutMs } : {}),
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
+        // Receipt attribution for commandEvidence gates — env-derived, so a
+        // model cannot stamp another step's receipt.
+        ...(sessionTaskRef ? { taskRef: sessionTaskRef } : {}),
+        ...(sessionStepId ? { stepId: sessionStepId } : {}),
       });
       return commandToolResult(`npm run ${script}`, res);
     } catch (err) {
@@ -2890,6 +2895,8 @@ server.tool(
         ...(timeoutMs ? { timeoutMs } : {}),
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
+        ...(sessionTaskRef ? { taskRef: sessionTaskRef } : {}),
+        ...(sessionStepId ? { stepId: sessionStepId } : {}),
       });
       return commandToolResult(`npx ${bin}`, res);
     } catch (err) {
@@ -9222,11 +9229,7 @@ server.tool(
     const active = task.craftbook.steps.find((s) => s.id === task.activeStepId);
     const assigneeId =
       active?.assignee?.kind === 'gezel' ? active.assignee.gezelId : active?.suggestedGezelId;
-    const handoffNote = assigneeId
-      ? ` Started ${assigneeId} on it — they now have an open session with the task in context.`
-      : task.status === 'complete'
-        ? ' Task is now complete (terminal step).'
-        : ' (No gezel is assigned to the new step, so no handoff was started.)';
+    const handoffNote = advanceHandoffNote({ status: task.status, assigneeId });
     const text = `Completed step "${stepId}" on ${ref}. Active step is now "${active?.name ?? task.activeStepId ?? '(none)'}".${handoffNote}`;
     return okResult(
       TaskToolOutputSchema,

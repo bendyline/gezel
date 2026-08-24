@@ -902,8 +902,36 @@ describe('ClaudeWorker — rate limit warnings', () => {
     await w.shutdown();
 
     expect(h.warnings).toHaveLength(1);
-    expect(h.warnings[0]).toContain('five-hour');
-    expect(h.warnings[0]).toContain('rejected');
+    expect(h.warnings[0]).toContain('5-hour');
+    expect(h.warnings[0]).toContain('used up');
     expect(h.warnings[0]).toContain('overage');
+    // The raw CLI verb must not reach the transcript.
+    expect(h.warnings[0]).not.toContain('rejected');
+  });
+
+  it('repeats the notice only when the posture changes', async () => {
+    const limitEvent = (status: string) => ({
+      type: 'rate_limit_event',
+      rate_limit_info: { status, rateLimitType: 'seven_day', isUsingOverage: false },
+    });
+    const binPath = await makeFakeClaude({
+      sessionId: 'cli-sess-1',
+      turns: [
+        [limitEvent('allowed_warning'), resultEvent('one')],
+        [limitEvent('allowed_warning'), resultEvent('two')],
+        [limitEvent('rejected'), resultEvent('three')],
+      ],
+    });
+    const w = buildWorker({ binPath });
+    await w.start();
+    const h = makeNoopHooks();
+    await w.sendTurn('a', h.hooks, { timeoutMs: 10_000 });
+    await w.sendTurn('b', h.hooks, { timeoutMs: 10_000 });
+    await w.sendTurn('c', h.hooks, { timeoutMs: 10_000 });
+    await w.shutdown();
+
+    expect(h.warnings).toHaveLength(2);
+    expect(h.warnings[0]).toContain('close to your weekly');
+    expect(h.warnings[1]).toContain('used up your weekly');
   });
 });

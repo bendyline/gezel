@@ -57,6 +57,7 @@ import {
 import { collapseCraftbookForTier as collapseCraftbookPass } from '@bendyline/gezel';
 import { evaluateDeliverableGate } from '../chat/deliverable-gate.js';
 import { installedToolsetIds } from '../craftbook/applicable.js';
+import type { DraftOverlayReader } from '../diffpack/draft-store.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { ScriptRunner } from '../scripts/runner.js';
@@ -211,6 +212,9 @@ function snapshotCraftbookForTask(book: Craftbook, now: string): TaskCraftbook {
     // Snapshot connector needs so a running task records the corpus it was
     // launched against without re-resolving the catalog book.
     ...(book.connectors ? { connectors: book.connectors } : {}),
+    // Snapshot command needs so the kickoff hook can raise their first-use
+    // approval questions from the task record alone.
+    ...(book.commands ? { commands: book.commands } : {}),
     // Snapshot embedded script sources so the task's gate/lifecycle
     // scripts execute from its own copy (scope 'craftbook' refs resolve
     // here first — see runGateScript/runStepScript).
@@ -218,6 +222,12 @@ function snapshotCraftbookForTask(book: Craftbook, now: string): TaskCraftbook {
     // Snapshot the declarative per-item fanout config so the runtime reads
     // `task.craftbook.spawn` when the `spawnFanout` step activates.
     ...(book.spawn ? { spawn: book.spawn } : {}),
+    // Snapshot the mode-agnostic declaration so the task records that its
+    // book allowed drafting (the run's actual mode is `task.diffpackId`).
+    ...(book.diffpackCapable ? { diffpackCapable: true } : {}),
+    // Snapshot the whole-book floor so dispatch routing reads it from the
+    // task record alone (effectiveCapabilityFloor).
+    ...(book.capabilityFloor ? { capabilityFloor: book.capabilityFloor } : {}),
     createdAt: now,
     updatedAt: now,
   };
@@ -477,6 +487,11 @@ function taskInterpolationContext(task: Task): Record<string, string> {
     'task.ref': task.ref,
     'task.projectId': task.projectId,
     'task.dir': task.artifactDir ?? `tasks/${task.num}`,
+    // Present only on drafting tasks — legacy content compatibility; v2
+    // mode-agnostic books never reference these tokens.
+    ...(task.diffpackId
+      ? { 'diffpack.id': task.diffpackId, 'diffpack.dir': `diffpacks/${task.diffpackId}` }
+      : {}),
   };
   return {
     ...resolveRuntimeTokensInParams(task.craftbookParams ?? {}, runtime),
@@ -852,6 +867,75 @@ export class TaskManager {
     this.keurmeester = keurmeester;
   }
   private keurmeester?: import('../keurmeester/manager.js').KeurmeesterManager;
+
+  /**
+   * Wire the diffpack draft overlay. Set by service.ts after the
+   * DiffpackManager exists (same cycle-avoidance as setKeurmeester). When a
+   * task drafts a change proposal (`task.diffpackId`), its gates and
+   * deliverable checks must judge the PROPOSED tree — drafted copies first,
+   * live files as fallback, tombstoned paths as absent. Without this, a
+   * drafting task's workspace-path gate reads the untouched real file:
+   * it rejects a newly-created deliverable forever, and worse, approves a
+   * stale original the draft has already rewritten.
+   */
+  setDraftReader(reader: DraftOverlayReader): void {
+    this.draftReader = reader;
+  }
+  private draftReader?: DraftOverlayReader;
+
+  /**
+   * The workspace view a gate evaluates against for `task`. For ordinary
+   * tasks this is the live workspace + artifacts drawer. For a drafting task
+   * it is the draft overlay: `read`/`readBytes` resolve drafted content
+   * first, and `list` is (workspace − proposed deletions) ∪ drafted paths.
+   * Artifact methods are never overlaid — the artifacts drawer is real in
+   * both modes. Public so the activation-gate hook in service.ts evaluates
+   * against the same view as completion gates.
+   */
+  gateWorkspaceReader(
+    projectId: string,
+    task: Pick<Task, 'ref' | 'diffpackId'>,
+  ): GateWorkspaceReader {
+    const packId = task.diffpackId;
+    const drafts = this.draftReader;
+    if (packId && !drafts) {
+      log.warn(
+        `${task.ref} drafts diffpack ${packId} but no draft reader is wired — gates read the real workspace`,
+      );
+    }
+    const overlay = packId && drafts ? { packId, drafts } : undefined;
+    return {
+      read: (f) =>
+        overlay
+          ? overlay.drafts.read(projectId, overlay.packId, f).catch(() => null)
+          : this.store.readProjectWorkspaceFile(projectId, f).catch(() => null),
+      list: async () => {
+        const entries = await this.store.listProjectWorkspaceRecursive(projectId).catch(() => []);
+        const files = entries.filter((e) => !e.isDirectory).map((e) => e.path);
+        if (!overlay) return files;
+        const [drafted, deletions] = await Promise.all([
+          overlay.drafts.listDraftedPaths(projectId, overlay.packId).catch(() => [] as string[]),
+          overlay.drafts.listDeletions(projectId, overlay.packId).catch(() => [] as string[]),
+        ]);
+        const deleted = new Set(deletions);
+        const out = new Set(files.filter((f) => !deleted.has(f)));
+        for (const path of drafted) out.add(path);
+        return [...out];
+      },
+      // Byte reader for image-signature checks (fileCount.verifyImageBytes).
+      readBytes: (f) =>
+        overlay
+          ? overlay.drafts.readBinary(projectId, overlay.packId, f).catch(() => null)
+          : this.store.readProjectWorkspaceBinary(projectId, f).catch(() => null),
+      readArtifact: (f) => this.store.readProjectArtifact(projectId, f).catch(() => null),
+      readArtifactBytes: async (f) =>
+        (await this.store.readProjectArtifactBinary(projectId, f).catch(() => null))?.data ?? null,
+      listArtifacts: async () =>
+        (await this.store.listProjectArtifactsRecursive(projectId).catch(() => []))
+          .filter((e) => !e.isDirectory)
+          .map((e) => e.path),
+    };
+  }
   /**
    * Per-(task, step) judge-call budget for `judge` gate checks — a
    * reject-loop must not burn frontier spend on every attempt. Reset
@@ -1197,11 +1281,42 @@ export class TaskManager {
       }
     }
     const artifactDir = `tasks/${num}`;
+    // ── Delivery-mode resolution ───────────────────────────────────────
+    // `extras.draftsDiffpack` (service callers — night fix, Boekwachter
+    // routes) is absolute: it is a capability boundary owned by the caller
+    // that knows the run's intent, and a request-level `deliveryMode:
+    // 'edit'` never overrides it. A `diffpackCapable` book additionally
+    // lets the INVOCATION elect drafting: explicitly (`'propose'`), or via
+    // `'auto'` for runs nobody attends (night-shift/cron) and for
+    // workspaces the crew holds no write grant for — where drafting is the
+    // difference between a proposal in the morning and a hard write
+    // failure. The book itself never knows the mode.
+    const requestedDeliveryMode = input.deliveryMode ?? 'auto';
+    if (
+      requestedDeliveryMode === 'propose' &&
+      !mainBook.diffpackCapable &&
+      !extras?.draftsDiffpack
+    ) {
+      throw new Error(
+        `craftbook "${mainBook.id}" is not diffpackCapable, so it cannot run in propose mode — its gates and prompts are not authored to evaluate through a draft overlay. Launch it with deliveryMode "edit" (or omit deliveryMode).`,
+      );
+    }
+    const unattendedRun = Boolean(input.nightShift?.enabled || input.cron);
+    const draftsDiffpack =
+      Boolean(extras?.draftsDiffpack) ||
+      (Boolean(mainBook.diffpackCapable) &&
+        (requestedDeliveryMode === 'propose' ||
+          (requestedDeliveryMode === 'auto' &&
+            (unattendedRun || !projectManagedWorkspaceWritable(project)))));
     const runtimeCraftbookContext = {
       'task.num': String(num),
       'task.ref': buildTaskRef(projectId, num),
       'task.projectId': projectId,
       'task.dir': artifactDir,
+      // Resolved for drafting tasks so older content that addresses the
+      // pack folder keeps working. v2 mode-agnostic books must NOT use
+      // these — their deliverables live at mode-neutral locations.
+      ...(draftsDiffpack ? { 'diffpack.id': String(num), 'diffpack.dir': `diffpacks/${num}` } : {}),
     };
     Object.assign(
       craftbookParamOverrides,
@@ -1309,7 +1424,7 @@ export class TaskManager {
       ...(input.spawnsCraftbookParams && Object.keys(input.spawnsCraftbookParams).length > 0
         ? { spawnsCraftbookParams: input.spawnsCraftbookParams }
         : {}),
-      ...(extras?.draftsDiffpack ? { diffpackId: String(num) } : {}),
+      ...(draftsDiffpack ? { diffpackId: String(num) } : {}),
       activeStepId,
       ...(input.parentTaskRef ? { parentTaskRef: input.parentTaskRef } : {}),
       artifactDir,
@@ -2929,22 +3044,9 @@ export class TaskManager {
       };
     }
 
-    const ws: GateWorkspaceReader = {
-      read: (f) => this.store.readProjectWorkspaceFile(projectId, f).catch(() => null),
-      list: async () =>
-        (await this.store.listProjectWorkspaceRecursive(projectId).catch(() => []))
-          .filter((e) => !e.isDirectory)
-          .map((e) => e.path),
-      // Byte reader for image-signature checks (fileCount.verifyImageBytes).
-      readBytes: (f) => this.store.readProjectWorkspaceBinary(projectId, f).catch(() => null),
-      readArtifact: (f) => this.store.readProjectArtifact(projectId, f).catch(() => null),
-      readArtifactBytes: async (f) =>
-        (await this.store.readProjectArtifactBinary(projectId, f).catch(() => null))?.data ?? null,
-      listArtifacts: async () =>
-        (await this.store.listProjectArtifactsRecursive(projectId).catch(() => []))
-          .filter((e) => !e.isDirectory)
-          .map((e) => e.path),
-    };
+    // For a drafting task this is the draft overlay, so the gate judges the
+    // proposed tree rather than the untouched workspace.
+    const ws = this.gateWorkspaceReader(projectId, task);
     const outcome = await evaluateStepGate({
       gate,
       ws,
@@ -3039,6 +3141,58 @@ export class TaskManager {
           }
           return { observable: true, matches };
         },
+        commandEvidence: async ({ scope, name, args }) => {
+          if (!this.history) return { observable: false, runs: [] };
+          const events = await this.history.listEvents({
+            projectId,
+            kinds: [scope === 'script' ? 'workspace.script.run' : 'workspace.npx.run'],
+            ...(step.lastActivatedAt ? { from: step.lastActivatedAt } : {}),
+          });
+          const sameArgs = (value: unknown): boolean => {
+            const eventArgs = Array.isArray(value)
+              ? value.filter((v): v is string => typeof v === 'string')
+              : [];
+            return eventArgs.length === args.length && eventArgs.every((v, i) => v === args[i]);
+          };
+          // `listEvents` returns newest-first, but its stable sort leaves
+          // SAME-millisecond events in append order (oldest of the tie
+          // first) — and two quick runs can land in one millisecond. Track
+          // the position and re-sort with it as the tiebreaker so "latest
+          // run" is really the latest.
+          const runs = events
+            .map((event, index) => ({ event, index }))
+            .filter(({ event }) => {
+              const details = event.details as Record<string, unknown> | undefined;
+              if (!details) return false;
+              // Attribution comes from the MCP env, not model args — a
+              // receipt from another task or step never counts here.
+              if (details.taskRef !== task.ref || details.stepId !== step.id) return false;
+              if (details.name !== name) return false;
+              return sameArgs(details.args);
+            })
+            .sort((a, b) =>
+              a.event.at < b.event.at ? 1 : a.event.at > b.event.at ? -1 : b.index - a.index,
+            )
+            .map(({ event }) => {
+              const details = event.details as Record<string, unknown>;
+              return {
+                exitCode: typeof details.exitCode === 'number' ? details.exitCode : 1,
+                timedOut: details.timedOut === true,
+                at: event.at,
+                ...(typeof details.stderrTail === 'string'
+                  ? { stderrTail: details.stderrTail }
+                  : {}),
+                ...(typeof details.stdoutTail === 'string'
+                  ? { stdoutTail: details.stdoutTail }
+                  : {}),
+              };
+            });
+          return {
+            observable: true,
+            ...(task.diffpackId ? { drafting: true } : {}),
+            runs,
+          };
+        },
       },
     });
 
@@ -3121,7 +3275,13 @@ export class TaskManager {
     // naming the real cause and the real fixes — instead of charging the
     // budget and then demanding `write_file` from a roster it was
     // stripped from.
-    const unsatFiles = await this.unsatisfiableWorkspaceGateFiles(projectId, step, gate, outcome);
+    const unsatFiles = await this.unsatisfiableWorkspaceGateFiles(
+      projectId,
+      task,
+      step,
+      gate,
+      outcome,
+    );
     if (unsatFiles) {
       const fileList =
         unsatFiles.length > 0 ? unsatFiles.map((f) => `\`${f}\``).join(', ') : 'files';
@@ -3499,7 +3659,7 @@ export class TaskManager {
         ? task.craftbook.steps.find((s) => s.id === task.activeStepId)
         : undefined;
       if (!step) return false;
-      if (!(await this.unsatisfiableStepWorkspaceFiles(projectId, step))) return false;
+      if (!(await this.unsatisfiableStepWorkspaceFiles(projectId, task, step))) return false;
     }
     return true;
   }
@@ -3519,8 +3679,14 @@ export class TaskManager {
    */
   private async unsatisfiableStepWorkspaceFiles(
     projectId: string,
+    task: Pick<Task, 'diffpackId'>,
     step: Pick<TaskCraftbookStep, 'advanceWhen' | 'gate'>,
   ): Promise<string[] | null> {
+    // A drafting task's workspace writes are re-rooted into the diffpack
+    // overlay, and its gates read through that overlay — the writes-off
+    // policy cannot make its deliverable unwinnable. That is the point of
+    // proposing on a locked workspace.
+    if (task.diffpackId) return null;
     const project = await this.store.getProject(projectId).catch(() => null);
     if (!project || projectManagedWorkspaceWritable(project)) return null;
     const files = new Set<string>();
@@ -3559,7 +3725,7 @@ export class TaskManager {
     task: Task,
     step: Pick<TaskCraftbookStep, 'id' | 'name' | 'advanceWhen' | 'gate'>,
   ): Promise<boolean> {
-    const files = await this.unsatisfiableStepWorkspaceFiles(projectId, step);
+    const files = await this.unsatisfiableStepWorkspaceFiles(projectId, task, step);
     if (!files) return false;
     const fileList = files.map((f) => `\`${f}\``).join(', ');
     await this.setStatus(projectId, task.num, 'paused').catch(() => {});
@@ -3599,10 +3765,14 @@ export class TaskManager {
    */
   private async unsatisfiableWorkspaceGateFiles(
     projectId: string,
+    task: Pick<Task, 'diffpackId'>,
     step: Pick<TaskCraftbookStep, 'advanceWhen' | 'gate'>,
     gate: NormalizedStepGate,
     outcome: StepGateOutcome,
   ): Promise<string[] | null> {
+    // Drafting tasks: see unsatisfiableStepWorkspaceFiles — the overlay
+    // makes workspace deliverables writable regardless of policy.
+    if (task.diffpackId) return null;
     const project = await this.store.getProject(projectId).catch(() => null);
     if (!project || projectManagedWorkspaceWritable(project)) return null;
     const workspaceChecks = new Map<string, string | undefined>();
@@ -3617,7 +3787,7 @@ export class TaskManager {
       return [...new Set(failingWorkspace.map((o) => o.file).filter((f): f is string => !!f))];
     }
     if (!outcome.runs.some((r) => r.decision === 'reject')) return null;
-    return await this.unsatisfiableStepWorkspaceFiles(projectId, step);
+    return await this.unsatisfiableStepWorkspaceFiles(projectId, task, step);
   }
 
   /**

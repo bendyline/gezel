@@ -6,7 +6,12 @@ import { SessionResumeError } from '../types.js';
 import type { SessionOpts, ToolArgsDeltaMeta, ToolCallEvent, TurnUsage } from '../types.js';
 import { buildTurnUsage } from '../usage-builder.js';
 import type { ClaudePermissionMode } from './provider.js';
-import { writeClaudeQuotaCaptureFiles } from './quota.js';
+import {
+  claudeRateLimitBuckets,
+  recordClaudeRateLimitWindow,
+  writeClaudeQuotaCaptureFiles,
+} from './quota.js';
+import { formatRateLimitNotice } from './rate-limit-notice.js';
 import type { ClaudeReasoningEffort } from './reasoning.js';
 import {
   type ClaudeMcpServerEntry,
@@ -263,6 +268,14 @@ export class ClaudeWorker {
    * gap between close-event and the subsequent send.
    */
   private lastCrashError: Error | null = null;
+  /**
+   * Posture key of the last rate-limit notice shown to the user. The CLI
+   * repeats `rate_limit_event` on every turn for as long as the window
+   * stays in the same state; without this the chat would carry the same
+   * banner on every reply until the window reset. Workers are keyed by
+   * session, so this is session-scoped suppression.
+   */
+  private lastRateLimitKey: string | null = null;
   private stdoutBuffer = '';
   private stderrChunks: string[] = [];
   private stderrSize = 0;
@@ -968,15 +981,17 @@ export class ClaudeWorker {
       case 'rate-limit': {
         // Silent on the happy path — `allowed` arrives on every turn and
         // a warning per turn would train the user to ignore the channel.
-        if (event.status === 'allowed') return;
-        const window = event.rateLimitType ? ` (${event.rateLimitType.replace(/_/g, '-')})` : '';
-        const resets = event.resetsAt
-          ? ` Resets ${new Date(event.resetsAt * 1000).toLocaleTimeString()}.`
-          : '';
-        const overage = event.isUsingOverage ? ' Currently billing as overage.' : '';
-        hooks.emitWarning(
-          `Claude subscription rate limit${window}: ${event.status}.${resets}${overage}`,
-        );
+        // The same reasoning applies once the posture *is* worth saying:
+        // the CLI repeats it every turn until the window rolls, so only
+        // a change in posture earns a second banner.
+        const notice = formatRateLimitNotice(event, this.nowFn());
+        if (!notice) {
+          this.lastRateLimitKey = null;
+          return;
+        }
+        if (notice.key === this.lastRateLimitKey) return;
+        this.lastRateLimitKey = notice.key;
+        hooks.emitWarning(notice.text);
         return;
       }
       case 'tool-args-start':
@@ -1109,6 +1124,10 @@ export class ClaudeWorker {
     }
 
     if (turn.state.usage) {
+      // Every recorded window, not just the one this turn happened to
+      // report: `TurnUsage.quotaBuckets` replaces the tracker's array
+      // wholesale, so sending one window would blank out the other.
+      const quotaBuckets = claudeRateLimitBuckets(this.nowFn());
       turn.hooks.emitUsage(
         buildTurnUsage({
           model: this.opts.model,
@@ -1119,6 +1138,7 @@ export class ClaudeWorker {
             ? { cachedInputTokens: turn.state.usage.cachedInputTokens }
             : {}),
           ...(turn.state.usage.costUsd !== undefined ? { cost: turn.state.usage.costUsd } : {}),
+          ...(quotaBuckets.length > 0 ? { quotaBuckets } : {}),
         }),
       );
     }

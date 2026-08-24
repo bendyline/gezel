@@ -18,6 +18,22 @@ import { WorkspaceEditError } from '../workspace/errors.js';
 const log = createLogger('diffpack');
 
 /**
+ * The read side of a draft overlay, as consumed by gate evaluation and the
+ * advanceWhen deliverable watcher. A drafting task's workspace-path checks
+ * must judge the PROPOSED tree — the drafted copy where one exists, the live
+ * file otherwise, and nothing for a tombstoned path — or a gate would reject
+ * a new file forever and approve a stale original. `DiffpackDraftStore`
+ * satisfies this structurally; TaskManager/ChatManager hold it behind this
+ * interface so neither owns the diffpack module.
+ */
+export interface DraftOverlayReader {
+  read(projectId: string, packId: string, path: string): Promise<string | null>;
+  readBinary(projectId: string, packId: string, path: string): Promise<Uint8Array | null>;
+  listDraftedPaths(projectId: string, packId: string): Promise<string[]>;
+  listDeletions(projectId: string, packId: string): Promise<string[]>;
+}
+
+/**
  * The copy-on-write draft tree behind one diffpack.
  *
  * A drafting session's workspace-write tools are re-rooted here instead of at
@@ -91,6 +107,23 @@ export class DiffpackDraftStore {
       }
     }
     return this.store.readProjectWorkspaceFile(projectId, path);
+  }
+
+  /**
+   * Binary sibling of `read` — same draft-first/tombstone semantics, for the
+   * gate checks that verify real bytes (`fileCount.verifyImageBytes`).
+   */
+  async readBinary(projectId: string, packId: string, path: string): Promise<Uint8Array | null> {
+    if (await this.isDeleted(projectId, packId, path)) return null;
+    const full = await this.draftPath(projectId, packId, path, { create: false });
+    if (full !== null) {
+      try {
+        return new Uint8Array(await readFile(full));
+      } catch {
+        // Not drafted yet — fall through.
+      }
+    }
+    return this.store.readProjectWorkspaceBinary(projectId, path);
   }
 
   /**

@@ -4,6 +4,7 @@ import {
   AdvanceWhenSchema,
   CraftbookBasedOnSchema,
   CraftbookBranchSchema,
+  CraftbookCommandNeedSchema,
   CraftbookConnectorNeedSchema,
   CraftbookSchema,
   CraftbookScriptsSchema,
@@ -245,6 +246,8 @@ export const TaskCraftbookSchema = z.object({
   paramSchema: z.record(z.string(), z.unknown()).optional(),
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
   connectors: z.array(CraftbookConnectorNeedSchema).optional(),
+  /** Command needs snapshotted for kickoff approval — see CraftbookCommandNeedSchema. */
+  commands: z.array(CraftbookCommandNeedSchema).optional(),
   /**
    * Embedded script sources snapshotted from the source craftbook, so the
    * task's gate/lifecycle scripts execute from its own copy — `scope:
@@ -258,6 +261,15 @@ export const TaskCraftbookSchema = z.object({
    * {@link CraftbookSpawnSchema}.
    */
   spawn: CraftbookSpawnSchema.optional(),
+  /**
+   * Snapshotted from the source craftbook: this book is authored
+   * mode-agnostic and an invocation may run it in drafting mode. See
+   * `CraftbookSchema.diffpackCapable`; whether THIS run actually drafts is
+   * `TaskSchema.diffpackId`, resolved at create.
+   */
+  diffpackCapable: z.boolean().optional(),
+  /** Whole-book model-tier floor snapshotted from the source craftbook. */
+  capabilityFloor: ModelTierSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   /**
@@ -546,6 +558,19 @@ export const CreateTaskRequestSchema = z
     createdBy: TaskAssigneeSchema.optional(),
     /** Preserve the launcher's naming presentation across task handoffs. */
     roleBasedNameOnlyMode: z.boolean().optional(),
+    /**
+     * How the run's file edits land, for a `diffpackCapable` craftbook:
+     * `'edit'` writes the workspace directly, `'propose'` drafts a diffpack
+     * change proposal the user reviews and applies, and `'auto'` (the
+     * default when absent) proposes for unattended runs (night-shift/cron,
+     * or a workspace the crew cannot write) and edits otherwise.
+     * `'propose'` on a book that is not `diffpackCapable` is rejected —
+     * the book's gates would judge the wrong tree. `'edit'` never overrides
+     * a service-internal `draftsDiffpack` binding: that flag is a capability
+     * boundary owned by the caller that knows the run's intent (see
+     * `TaskSchema.diffpackId`).
+     */
+    deliveryMode: z.enum(['auto', 'edit', 'propose']).optional(),
     /**
      * Enqueue the entry-step handoff immediately after create — the
      * single-channel kickoff (there is no "tell a gezel about work"

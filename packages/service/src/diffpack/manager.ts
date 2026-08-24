@@ -216,7 +216,7 @@ export class DiffpackManager {
       });
     }
 
-    const summary = await this.summaryFromNotes(projectId, record.notesPath);
+    const summary = await this.summaryFromNotes(projectId, record);
     const sealed = await this.mutate(projectId, async (packs) => {
       const draft = packs.find((p) => p.packId === packId);
       if (!draft) throw new DiffpackNotFoundError(packId);
@@ -520,15 +520,29 @@ export class DiffpackManager {
 
   /* ─── Persistence ────────────────────────────────────────────────── */
 
-  private async summaryFromNotes(projectId: string, notesPath: string): Promise<string> {
-    const notes = await this.deps.store.readProjectArtifact(projectId, notesPath).catch(() => null);
-    if (!notes) return '';
-    for (const line of notes.split('\n')) {
-      const trimmed = line.trim();
-      if (trimmed === '' || trimmed.startsWith('#')) continue;
-      return trimmed.slice(0, 400);
-    }
-    return '';
+  private async summaryFromNotes(
+    projectId: string,
+    record: Pick<DiffpackRecord, 'notesPath' | 'taskRef'>,
+  ): Promise<string> {
+    const firstProseLine = async (path: string): Promise<string> => {
+      const notes = await this.deps.store.readProjectArtifact(projectId, path).catch(() => null);
+      if (!notes) return '';
+      for (const line of notes.split('\n')) {
+        const trimmed = line.trim();
+        if (trimmed === '' || trimmed.startsWith('#')) continue;
+        return trimmed.slice(0, 400);
+      }
+      return '';
+    };
+    const fromPack = await firstProseLine(record.notesPath);
+    if (fromPack !== '') return fromPack;
+    // Mode-agnostic books explain their change at `<task.dir>/fix-notes.md` —
+    // a location that exists identically whether the run edited in place or
+    // drafted this pack — so the pack summary falls back there rather than
+    // requiring content to know about `diffpacks/<id>/notes.md`.
+    const task = await this.deps.tasks.getByRef(record.taskRef).catch(() => null);
+    if (!task) return '';
+    return firstProseLine(`${task.artifactDir ?? `tasks/${task.num}`}/fix-notes.md`);
   }
 
   private async writeManifest(

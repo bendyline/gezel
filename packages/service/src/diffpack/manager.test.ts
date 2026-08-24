@@ -164,6 +164,32 @@ describe('DiffpackManager.seal', () => {
     const sealed = await manager.seal(projectId, '1');
     expect(sealed.summary).toBe('The parser dropped the trailing comma.');
   });
+
+  it('falls back to the task folder fix-notes.md when the pack has no notes', async () => {
+    await seedWorkspace('src/a.ts', 'before\n');
+    const taskRef = `${projectId}/7`;
+    tasks.set(taskRef, {
+      ref: taskRef,
+      num: 7,
+      artifactDir: 'tasks/7',
+    } as unknown as Task);
+    await manager.ensure(projectId, '7', {
+      title: 'T',
+      origin: { kind: 'manual' },
+      taskRef,
+    });
+    // A mode-agnostic book explains its change at <task.dir>/fix-notes.md —
+    // it never writes diffpacks/<id>/notes.md, because that path only exists
+    // in drafting mode.
+    await store.writeProjectArtifact(
+      projectId,
+      'tasks/7/fix-notes.md',
+      '## Problem\n\nThe validator rejected empty arrays.\n',
+    );
+    await manager.drafts.write(projectId, '7', 'src/a.ts', 'after\n');
+    const sealed = await manager.seal(projectId, '7');
+    expect(sealed.summary).toBe('The validator rejected empty arrays.');
+  });
 });
 
 describe('DiffpackManager drift', () => {

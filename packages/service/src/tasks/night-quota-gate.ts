@@ -143,7 +143,10 @@ export interface NightShiftQuotaGateOptions {
  *
  * Freshness per provider mirrors the usage route: Copilot only reports
  * through turn events (empty tracker = allow, optimistically — the first
- * night turn populates it); anthropic-cli is a cheap snapshot-file read;
+ * night turn populates it); anthropic-cli reports the same way, since
+ * Claude Code runs the `statusLine` capture only for its interactive UI
+ * and a headless worker's sole quota channel is the `rate_limit_event`
+ * stream that `ChatWorker` folds into each turn's usage;
  * codex-cli probes `codex app-server` behind its 60s success/failure
  * cache, and only ever from here when a night handoff actually resolves
  * to codex-cli.
@@ -198,7 +201,19 @@ export class NightShiftQuotaGate {
         this.usage.recordQuotaBuckets('anthropic-cli', snapshot.buckets, snapshot.capturedAt);
         return snapshot.buckets;
       }
-      return this.usage.quotaBucketsFor('anthropic-cli');
+      // Fall back to what completed turns reported, minus any window that
+      // has since reset. Unlike Copilot and Codex this reading is never
+      // re-probed: Claude Code emits `rate_limit_event` only mid-turn, so
+      // a hold on an expired window would block the very turn that would
+      // refresh it — the one way this gate could latch shut. Prune rather
+      // than let `evaluateQuotaReserve` judge it, because a past reset is
+      // a staleness fact about this source, not a policy question.
+      const tracked = this.usage.quotaBucketsFor('anthropic-cli');
+      const live = tracked.filter((b) => !hasReset(b.resetDate, this.now()));
+      if (live.length !== tracked.length) {
+        this.usage.recordQuotaBuckets('anthropic-cli', live);
+      }
+      return live;
     }
     if (provider === 'codex-cli') {
       const detections = getCliPresence(config.codexCli ? { codexCli: config.codexCli } : {});
@@ -233,6 +248,13 @@ export class NightShiftQuotaGate {
 
 function clampPercent(value: number): number {
   return Math.min(100, Math.max(0, value));
+}
+
+function hasReset(resetDate: string | undefined, now: Date): boolean {
+  if (!resetDate) return false;
+  const resetAt = new Date(resetDate).getTime();
+  if (Number.isNaN(resetAt)) return false;
+  return resetAt <= now.getTime();
 }
 
 function fractionalDaysUntil(resetDate: string | undefined, now: Date): number | null {

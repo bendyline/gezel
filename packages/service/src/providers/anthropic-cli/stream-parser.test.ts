@@ -326,6 +326,21 @@ describe('parseStreamLine — rate limit', () => {
       status: 'allowed',
       rateLimitType: 'five_hour',
       resetsAt: 1787600400,
+      utilization: undefined,
+      isUsingOverage: false,
+    });
+  });
+
+  it('carries utilization when the server reports one', () => {
+    const ev = parseStreamLine(
+      '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1787616000,"rateLimitType":"seven_day","utilization":0.76,"isUsingOverage":false,"surpassedThreshold":0.75},"uuid":"u","session_id":"s"}',
+    );
+    expect(ev).toEqual({
+      kind: 'rate-limit',
+      status: 'allowed_warning',
+      rateLimitType: 'seven_day',
+      resetsAt: 1787616000,
+      utilization: 0.76,
       isUsingOverage: false,
     });
   });

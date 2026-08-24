@@ -3,12 +3,14 @@ import { z as zod } from 'zod';
 import { TaskAssigneeSchema } from './assignee.js';
 import {
   CraftbookBasedOnSchema,
+  CraftbookCommandNeedSchema,
   CraftbookConnectorNeedSchema,
   CraftbookRequirementSchema,
   CraftbookRunModesSchema,
   CraftbookScriptsSchema,
   CraftbookSpawnSchema,
   CraftbookToolsetNeedSchema,
+  ModelTierSchema,
   NewCraftbookStepSchema,
 } from './craftbook.js';
 import { HookSpecSchema } from './hook.js';
@@ -46,6 +48,8 @@ export const CraftbookDocSchema = zod.object({
   /** Unattended launch modes this recipe is suitable for. */
   runModes: CraftbookRunModesSchema.optional(),
   toolsets: zod.array(CraftbookToolsetNeedSchema).optional(),
+  /** Commands the book's commandEvidence gates verify — approval asked at kickoff. */
+  commands: zod.array(CraftbookCommandNeedSchema).optional(),
   connectors: zod.array(CraftbookConnectorNeedSchema).optional(),
   paramSchema: zod.record(zod.string(), zod.unknown()).optional(),
   /**
@@ -62,6 +66,13 @@ export const CraftbookDocSchema = zod.object({
    * See {@link CraftbookSpawnSchema}.
    */
   spawn: CraftbookSpawnSchema.optional(),
+  /**
+   * Authored mode-agnostic: the same book works whether a run edits in
+   * place or drafts a diffpack proposal. See `CraftbookSchema.diffpackCapable`.
+   */
+  diffpackCapable: zod.boolean().optional(),
+  /** Minimum model tier for the whole book — see `CraftbookSchema.capabilityFloor`. */
+  capabilityFloor: ModelTierSchema.optional(),
   /** Inline script sources (name → TypeScript). */
   scripts: CraftbookScriptsSchema.optional(),
   /** Catalog provenance — carried by bundled/local books, optional for ad-hoc docs. */

@@ -4,6 +4,7 @@ import { ProjectIconIdSchema } from '../project-icons.js';
 import { TaskAssigneeSchema } from './assignee.js';
 import {
   CraftbookBasedOnSchema,
+  CraftbookCommandNeedSchema,
   CraftbookConnectorNeedSchema,
   CraftbookRequirementSchema,
   CraftbookRunModesSchema,
@@ -11,6 +12,7 @@ import {
   CraftbookSpawnSchema,
   CraftbookStepSchema,
   CraftbookToolsetNeedSchema,
+  ModelTierSchema,
 } from './craftbook.js';
 import { ProviderNameSchema } from './gezel.js';
 import { HookSpecSchema } from './hook.js';
@@ -733,6 +735,12 @@ export const CraftbookTemplateVersionManifestSchema = z.object({
    * live API. See {@link CraftbookConnectorNeedSchema}.
    */
   connectors: z.array(CraftbookConnectorNeedSchema).optional(),
+  /** Command needs for commandEvidence gates (see CraftbookCommandNeedSchema). */
+  commands: z.array(CraftbookCommandNeedSchema).optional(),
+  /** Authored mode-agnostic — see `CraftbookSchema.diffpackCapable`. */
+  diffpackCapable: z.boolean().optional(),
+  /** Minimum model tier for the whole book (see CraftbookSchema.capabilityFloor). */
+  capabilityFloor: ModelTierSchema.optional(),
 });
 export type CraftbookTemplateVersionManifest = z.infer<
   typeof CraftbookTemplateVersionManifestSchema
@@ -797,6 +805,12 @@ export const CraftbookTemplateManifestSchema = z.object({
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
   /** Connector dependencies (mirrored from the version manifest). */
   connectors: z.array(CraftbookConnectorNeedSchema).optional(),
+  /** Command needs (mirrored from the version manifest). */
+  commands: z.array(CraftbookCommandNeedSchema).optional(),
+  /** Authored mode-agnostic (mirrored from the version manifest). */
+  diffpackCapable: z.boolean().optional(),
+  /** Whole-book model-tier floor (mirrored from the version manifest). */
+  capabilityFloor: ModelTierSchema.optional(),
 });
 export type CraftbookTemplateManifest = z.infer<typeof CraftbookTemplateManifestSchema>;
 

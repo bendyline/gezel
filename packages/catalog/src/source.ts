@@ -814,9 +814,12 @@ function craftbookManifestFromDoc(
     ...(doc.requirements ? { requirements: doc.requirements } : {}),
     ...(doc.runModes ? { runModes: doc.runModes } : {}),
     ...(doc.toolsets ? { toolsets: doc.toolsets } : {}),
+    ...(doc.commands ? { commands: doc.commands } : {}),
     ...(doc.connectors ? { connectors: doc.connectors } : {}),
     ...(doc.hooks ? { hooks: doc.hooks } : {}),
     ...(doc.spawn ? { spawn: doc.spawn } : {}),
+    ...(doc.diffpackCapable ? { diffpackCapable: true } : {}),
+    ...(doc.capabilityFloor ? { capabilityFloor: doc.capabilityFloor } : {}),
     availableVersions,
   };
 }

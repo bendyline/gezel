@@ -1502,3 +1502,100 @@ describe('evaluateGate — L1 structural discrimination (large-but-wrong vs minB
     ).toBe(true);
   });
 });
+
+describe('commandEvidence', () => {
+  const check = (over: Record<string, unknown> = {}) =>
+    ({ kind: 'commandEvidence', script: 'test', expect: 'pass', ...over }) as never;
+  const run = (exitCode: number, over: Record<string, unknown> = {}) => ({
+    exitCode,
+    timedOut: false,
+    at: '2026-08-24T00:00:00Z',
+    ...over,
+  });
+  const deps = (runs: unknown[], extra: Record<string, unknown> = {}) => ({
+    commandEvidence: async () => ({ observable: true, runs: runs as never, ...extra }),
+  });
+
+  it('is misconfigured with neither or both of script/bin', async () => {
+    const neither = await evaluateGate([check({ script: undefined })], reader({}), deps([run(0)]));
+    expect(neither.pass).toBe(false);
+    expect(neither.failures[0]).toMatch(/exactly one of `script`.*or `bin`/);
+    const both = await evaluateGate([check({ bin: 'vitest' })], reader({}), deps([run(0)]));
+    expect(both.pass).toBe(false);
+  });
+
+  it('fails closed without the deps provider or without telemetry', async () => {
+    const noDep = await evaluateGate([check()], reader({}));
+    expect(noDep.pass).toBe(false);
+    expect(noDep.failures[0]).toMatch(/fail-closed/);
+    const noTelemetry = await evaluateGate([check()], reader({}), {
+      commandEvidence: async () => ({ observable: false, runs: [] }),
+    });
+    expect(noTelemetry.pass).toBe(false);
+    expect(noTelemetry.failures[0]).toMatch(/fail-closed/);
+  });
+
+  it('rejects with a prescriptive message when no matching run was observed', async () => {
+    const res = await evaluateGate([check()], reader({}), deps([]));
+    expect(res.pass).toBe(false);
+    expect(res.failures[0]).toMatch(/No `npm run test` run was observed/);
+    expect(res.failures[0]).toMatch(/run_package_script/);
+  });
+
+  it('expect fail: a passing latest run rejects with the repro-first message', async () => {
+    const res = await evaluateGate([check({ expect: 'fail' })], reader({}), deps([run(0)]));
+    expect(res.pass).toBe(false);
+    expect(res.failures[0]).toMatch(/requires it to FAIL/);
+    const ok = await evaluateGate([check({ expect: 'fail' })], reader({}), deps([run(1)]));
+    expect(ok.pass).toBe(true);
+  });
+
+  it('expect pass: a failing latest run rejects quoting the stderr tail', async () => {
+    const res = await evaluateGate(
+      [check()],
+      reader({}),
+      deps([run(1, { stderrTail: 'AssertionError: expected 3 to be 4' })]),
+    );
+    expect(res.pass).toBe(false);
+    expect(res.failures[0]).toMatch(/exit 1/);
+    expect(res.failures[0]).toMatch(/AssertionError/);
+    const ok = await evaluateGate([check()], reader({}), deps([run(0)]));
+    expect(ok.pass).toBe(true);
+  });
+
+  it('a timed-out run proves neither outcome', async () => {
+    const res = await evaluateGate([check()], reader({}), deps([run(0, { timedOut: true })]));
+    expect(res.pass).toBe(false);
+    expect(res.failures[0]).toMatch(/timed out/);
+  });
+
+  it('minRuns: the latest N runs must ALL match (consecutive-green semantics)', async () => {
+    const flaky = await evaluateGate(
+      [check({ minRuns: 3 })],
+      reader({}),
+      deps([run(0), run(1), run(0)]),
+    );
+    expect(flaky.pass).toBe(false);
+    const stable = await evaluateGate(
+      [check({ minRuns: 3 })],
+      reader({}),
+      deps([run(0), run(0), run(0)]),
+    );
+    expect(stable.pass).toBe(true);
+    const tooFew = await evaluateGate([check({ minRuns: 3 })], reader({}), deps([run(0)]));
+    expect(tooFew.pass).toBe(false);
+    expect(tooFew.failures[0]).toMatch(/Only 1 .*need 3/);
+  });
+
+  it('drafting: defers by default with an honest note, hard-blocks under onDraft require', async () => {
+    const deferred = await evaluateGate([check()], reader({}), deps([], { drafting: true }));
+    expect(deferred.pass).toBe(true);
+    expect(deferred.checks?.[0]?.detail).toMatch(/Execution deferred/);
+    const required = await evaluateGate(
+      [check({ onDraft: 'require' })],
+      reader({}),
+      deps([], { drafting: true }),
+    );
+    expect(required.pass).toBe(false);
+  });
+});

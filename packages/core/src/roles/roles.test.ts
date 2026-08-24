@@ -6,6 +6,7 @@ import {
   type RoleId,
   meetsCapabilityFloor,
   resolveRoleId,
+  effectiveCapabilityFloor,
   roleCapabilityFloor,
   roleDefaultBooks,
   roleDeliverableScripts,
@@ -129,5 +130,35 @@ describe('role registry — invariants', () => {
       expect(new Set(books).size, `${id} defaultBooks unique`).toBe(books.length);
       for (const b of books) expect(b, `${id} book "${b}"`).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
     }
+  });
+});
+
+describe('effectiveCapabilityFloor', () => {
+  it('explicit step floor is absolute — even below the role or book floor', () => {
+    expect(
+      effectiveCapabilityFloor(
+        { capabilityFloor: 'tiny', suggestedRole: 'reviewer' },
+        { capabilityFloor: 'large' },
+      ),
+    ).toBe('tiny');
+  });
+
+  it('role and book floors compose by max', () => {
+    // developer floors at small; the book demands medium → medium wins.
+    expect(
+      effectiveCapabilityFloor({ suggestedRole: 'developer' }, { capabilityFloor: 'medium' }),
+    ).toBe('medium');
+    // reviewer floors at medium; the book only asks small → role wins.
+    expect(
+      effectiveCapabilityFloor({ suggestedRole: 'reviewer' }, { capabilityFloor: 'small' }),
+    ).toBe('medium');
+  });
+
+  it('falls back to whichever floor exists, or null', () => {
+    expect(effectiveCapabilityFloor({ suggestedRole: 'developer' }, {})).toBe(
+      roleCapabilityFloor('developer'),
+    );
+    expect(effectiveCapabilityFloor({}, { capabilityFloor: 'medium' })).toBe('medium');
+    expect(effectiveCapabilityFloor({ suggestedRole: 'Astronaut' }, undefined)).toBeNull();
   });
 });

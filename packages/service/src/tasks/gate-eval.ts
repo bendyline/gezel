@@ -133,6 +133,30 @@ export interface GateEvalDeps {
     observable: boolean;
     matches: Array<{ tool: string; path?: string; target?: string; at?: string }>;
   }>;
+  /**
+   * Run receipts for `commandEvidence`. The task manager scopes this to
+   * the current task, step, and activation timestamp, reading the
+   * service-written `workspace.script.run` / `workspace.npx.run` history
+   * events — the gate never executes anything itself.
+   */
+  commandEvidence?: (opts: {
+    scope: 'script' | 'npx';
+    name: string;
+    args: string[];
+    minRuns: number;
+  }) => Promise<{
+    observable: boolean;
+    /** The judged task drafts a change proposal — see the check's `onDraft`. */
+    drafting?: boolean;
+    /** Matching receipts, newest first. */
+    runs: Array<{
+      exitCode: number;
+      timedOut: boolean;
+      at?: string;
+      stderrTail?: string;
+      stdoutTail?: string;
+    }>;
+  }>;
 }
 
 /**
@@ -252,6 +276,8 @@ export function gateCheckLabel(c: GateCheck): string {
       return `citationsResolve ${c.file}`;
     case 'researchEvidence':
       return `researchEvidence ${c.sourcePath?.trim() || c.tools.join(',')}`;
+    case 'commandEvidence':
+      return `commandEvidence ${c.script?.trim() || c.bin?.trim() || '?'} expect=${c.expect}${c.label ? ` ${c.label}` : ''}`;
     case 'corpusCoverage':
       return `corpusCoverage ${c.file} ${c.corpusDir}`;
     case 'corpusBatches':
@@ -651,6 +677,107 @@ async function evalCheckInner(
       return {
         ok: true,
         detail: `Research evidence: ${result.matches.length} successful source-acquisition call(s) observed`,
+        evidence,
+      };
+    }
+    case 'commandEvidence': {
+      const script = c.script?.trim();
+      const bin = c.bin?.trim();
+      if ((script && bin) || (!script && !bin)) {
+        return {
+          ok: false,
+          detail:
+            'commandEvidence check is misconfigured: set exactly one of `script` (a package.json script name) or `bin` (an npx binary).',
+        };
+      }
+      const scope = script ? ('script' as const) : ('npx' as const);
+      const name = (script ?? bin)!;
+      const args = c.args ?? [];
+      const argSuffix = args.length > 0 ? ` ${args.join(' ')}` : '';
+      const verb =
+        scope === 'script' ? `\`npm run ${name}${argSuffix}\`` : `\`npx ${name}${argSuffix}\``;
+      const runTool = scope === 'script' ? 'run_package_script' : 'run_npx';
+      if (!deps?.commandEvidence) {
+        return {
+          ok: false,
+          detail: `Command evidence is unavailable in this runtime, so a real ${verb} run cannot be verified (fail-closed).`,
+        };
+      }
+      const minRuns = c.minRuns ?? 1;
+      const result = await deps.commandEvidence({ scope, name, args, minRuns });
+      if (!result.observable) {
+        return {
+          ok: false,
+          detail: `Command-run telemetry is unavailable for this step, so a real ${verb} run cannot be verified (fail-closed).`,
+        };
+      }
+      // Drafting task: the command would run against the UNMODIFIED tree, so
+      // a receipt cannot verify the proposed change. Default policy is an
+      // honest deferral; `onDraft: 'require'` opts a book out of drafting
+      // viability instead.
+      if (result.drafting && c.onDraft !== 'require') {
+        return {
+          ok: true,
+          detail: `Execution deferred: this task drafts a change proposal, and ${verb} runs against the unmodified project — it cannot verify the proposed change. Verification happens when the proposal is applied; state plainly in your notes what remains unverified.`,
+          evidence: { commandEvidence: { deferred: true } },
+        };
+      }
+      const evidence = {
+        commandEvidence: {
+          runs: result.runs.slice(0, EVIDENCE_LIST_CAP).map((r) => ({
+            exitCode: r.exitCode,
+            timedOut: r.timedOut,
+            ...(r.at ? { at: r.at } : {}),
+          })),
+        },
+      };
+      if (result.runs.length < minRuns) {
+        const need =
+          minRuns === 1
+            ? `Run ${verb} with \`${runTool}\``
+            : `Run ${verb} with \`${runTool}\` at least ${minRuns} times`;
+        const outcome =
+          c.expect === 'fail'
+            ? 'and let it FAIL — the reproduction must demonstrate the problem before you advance'
+            : 'and get it passing before you advance';
+        return {
+          ok: false,
+          detail: `${result.runs.length === 0 ? `No ${verb} run was observed during this step` : `Only ${result.runs.length} ${verb} run(s) were observed during this step (need ${minRuns})`}. ${need} ${outcome}. If the command is awaiting user approval, say so and pause rather than retrying.`,
+          evidence,
+        };
+      }
+      // The latest `minRuns` receipts must ALL match `expect` — which is
+      // what makes "N consecutive green runs" expressible for flaky-test
+      // work, and means a repro that stopped failing no longer counts.
+      const judged = result.runs.slice(0, minRuns);
+      const timedOut = judged.find((r) => r.timedOut);
+      if (timedOut) {
+        return {
+          ok: false,
+          detail: `${verb} timed out — a timed-out run proves neither failure nor success. Re-run it to completion (raise timeoutMs if the suite is genuinely slow).`,
+          evidence,
+        };
+      }
+      const wantFail = c.expect === 'fail';
+      const offending = judged.find((r) => (r.exitCode === 0) === wantFail);
+      if (offending) {
+        if (wantFail) {
+          return {
+            ok: false,
+            detail: `${verb} PASSED (exit 0), but this step requires it to FAIL: a reproduction that passes does not demonstrate the problem (or the problem is already fixed — say so instead of advancing). Make the test fail for the right reason against the current code, and record the failing output.`,
+            evidence,
+          };
+        }
+        const tail = offending.stderrTail?.trim() || offending.stdoutTail?.trim() || '';
+        return {
+          ok: false,
+          detail: `${verb} FAILED (exit ${offending.exitCode}), but this step requires it to pass.${tail ? ` Latest output tail:\n${tail}` : ''}`,
+          evidence,
+        };
+      }
+      return {
+        ok: true,
+        detail: `Command evidence: ${verb} ${wantFail ? 'failed as required' : 'passed'} (${judged.length} verified run(s) this step)`,
         evidence,
       };
     }

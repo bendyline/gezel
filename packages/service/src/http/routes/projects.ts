@@ -2364,6 +2364,8 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       timeoutMs?: number;
       gezelId?: string;
       sessionId?: string;
+      taskRef?: string;
+      stepId?: string;
     };
     if (!body.script) return c.json({ error: 'missing script' }, 400);
     try {
@@ -2379,6 +2381,8 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         ...(effectiveTimeout ? { timeoutMs: effectiveTimeout } : {}),
         ...(body.gezelId ? { gezelId: body.gezelId } : {}),
         ...(body.sessionId ? { sessionId: body.sessionId } : {}),
+        ...(body.taskRef ? { taskRef: body.taskRef } : {}),
+        ...(body.stepId ? { stepId: body.stepId } : {}),
       });
       return c.json(result);
     } catch (err) {
@@ -2395,6 +2399,8 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       timeoutMs?: number;
       gezelId?: string;
       sessionId?: string;
+      taskRef?: string;
+      stepId?: string;
     };
     if (!body.bin) return c.json({ error: 'missing bin' }, 400);
     try {
@@ -2410,6 +2416,8 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         ...(effectiveTimeout ? { timeoutMs: effectiveTimeout } : {}),
         ...(body.gezelId ? { gezelId: body.gezelId } : {}),
         ...(body.sessionId ? { sessionId: body.sessionId } : {}),
+        ...(body.taskRef ? { taskRef: body.taskRef } : {}),
+        ...(body.stepId ? { stepId: body.stepId } : {}),
       });
       return c.json(result);
     } catch (err) {

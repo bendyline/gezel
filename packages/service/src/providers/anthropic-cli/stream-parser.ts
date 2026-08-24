@@ -75,16 +75,19 @@ export type StreamEvent =
   /** Coarse CLI lifecycle status (`requesting` as an API call goes out). */
   | { kind: 'status'; status: string }
   /**
-   * Subscription rate-limit posture, pushed inline on the stream. Note
-   * this overlaps the richer `statusLine` capture in `quota.ts`, which
-   * reports every window; this one is whichever window the CLI considers
-   * current, and arrives without a staged helper script.
+   * Subscription rate-limit posture, pushed inline on the stream. This is
+   * the only quota channel that actually fires under `--print`: Claude Code
+   * runs a `statusLine` command for its interactive UI only, so the richer
+   * multi-window capture in `quota.ts` never produces a snapshot for a
+   * headless worker. One window arrives per event — merge, never replace.
    */
   | {
       kind: 'rate-limit';
       status: string;
       rateLimitType: string | undefined;
       resetsAt: number | undefined;
+      /** Fraction of the window consumed, 0..1. Absent on older CLIs. */
+      utilization: number | undefined;
       isUsingOverage: boolean;
     }
   | {
@@ -339,6 +342,10 @@ function parseRateLimit(raw: Record<string, unknown>): StreamEvent {
     status,
     rateLimitType: typeof info.rateLimitType === 'string' ? info.rateLimitType : undefined,
     resetsAt: typeof info.resetsAt === 'number' ? info.resetsAt : undefined,
+    utilization:
+      typeof info.utilization === 'number' && Number.isFinite(info.utilization)
+        ? info.utilization
+        : undefined,
     isUsingOverage: info.isUsingOverage === true,
   };
 }

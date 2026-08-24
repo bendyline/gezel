@@ -1,6 +1,9 @@
 import { join } from 'node:path';
 import { Hono } from 'hono';
-import { readClaudeQuotaSnapshot } from '../../providers/anthropic-cli/quota.js';
+import {
+  claudeRateLimitBuckets,
+  readClaudeQuotaSnapshot,
+} from '../../providers/anthropic-cli/quota.js';
 import { getCliPresence } from '../../providers/cli-detection.js';
 import { readCodexQuotaBucketsCached } from '../../providers/codex-cli/quota.js';
 import type { ServiceContext } from '../context.js';
@@ -37,6 +40,16 @@ export function usageRoutes(ctx: ServiceContext): Hono {
           claudeSnapshot.buckets,
           claudeSnapshot.capturedAt,
         );
+      } else {
+        // Claude Code runs its `statusLine` command for the interactive UI
+        // only, so a headless worker never produces that snapshot. The
+        // `rate_limit_event` stream events collected during turns are the
+        // live source; publishing them here rather than waiting for the
+        // next turn's usage block keeps the pill current mid-turn.
+        // Authoritative, including when it empties: the registry drops a
+        // window once its reset passes, and the pill must clear with it
+        // rather than keep showing the last reading before the reset.
+        ctx.chat.usageTracker.recordQuotaBuckets('anthropic-cli', claudeRateLimitBuckets());
       }
     } catch {
       // Usage already collected from turns is still useful. Keep this route

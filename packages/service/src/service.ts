@@ -189,6 +189,7 @@ import { type CraftbookInvoker, TerminalManager } from './terminal/manager.js';
 import { HF_CACHE_DIR_ENV, transformersCacheDir } from './transformers-cache.js';
 import { createVSCodeSetupManager } from './vscode-setup/manager.js';
 import { WorkspaceIndexManager } from './workspace/index-manager.js';
+import { ensureCommandApprovalQuestions } from './workspace/scripts.js';
 import { WorkspaceWatchManager } from './workspace/watch-manager.js';
 
 const log = createLogger('service');
@@ -1241,7 +1242,23 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   const { installCraftbookScripts, installLocalCraftbookScripts } = await import(
     './scripts/install.js'
   );
-  tasks.setTaskCreatedHook(async ({ projectId, sources }) => {
+  tasks.setTaskCreatedHook(async ({ projectId, task, sources }) => {
+    // A book that verifies its work by running project commands
+    // (`commandEvidence` gates) declares them as `commands` needs; raise
+    // their first-use approval questions NOW so the user answers at
+    // launch instead of the run stalling steps later. Fire-and-forget —
+    // an unanswered question just means the mid-task path asks again.
+    if (task.craftbook.commands && task.craftbook.commands.length > 0) {
+      await ensureCommandApprovalQuestions({
+        store,
+        home,
+        projectId,
+        needs: task.craftbook.commands,
+        requestedBy: `The "${task.craftbook.name}" craftbook (task ${task.ref})`,
+      }).catch((err) => {
+        log.warn(`[tasks] kickoff command approvals for ${task.ref} failed: ${String(err)}`);
+      });
+    }
     for (const src of sources) {
       // Local craftbooks (editor-authored) carry their scripts on disk —
       // copy from the local template dir rather than the bundled catalog.
@@ -1422,18 +1439,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         if (gateProject && !projectAllowsAmbientWork(gateProject)) return;
         const attempt = newStep.attemptCount ?? 1;
         const onFail = gate.onReject ?? task.craftbook.entryStepId;
-        const reader: GateWorkspaceReader = {
-          read: (f) => store.readProjectWorkspaceFile(projectId, f).catch(() => null),
-          list: async () =>
-            (await store.listProjectWorkspaceRecursive(projectId).catch(() => []))
-              .filter((e) => !e.isDirectory)
-              .map((e) => e.path),
-          readArtifact: (f) => store.readProjectArtifact(projectId, f).catch(() => null),
-          listArtifacts: async () =>
-            (await store.listProjectArtifactsRecursive(projectId).catch(() => []))
-              .filter((e) => !e.isDirectory)
-              .map((e) => e.path),
-        };
+        // Shared with completion gates: for a drafting task this reader is
+        // the diffpack overlay, so activation gates judge the proposed tree.
+        const reader: GateWorkspaceReader = tasks.gateWorkspaceReader(projectId, task);
         const outcome = await evaluateStepGate({
           gate,
           ws: reader,
@@ -1828,6 +1836,10 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // Diffpacks: change sets a gezel drafted into artifacts for the user to
   // review and apply. The workspace is never written by the drafting side.
   const diffpacks = new DiffpackManager({ home, store, tasks, history });
+  // Gates, activation gates, and the advanceWhen watcher judge a drafting
+  // task against the draft overlay (proposed tree), not the real workspace.
+  tasks.setDraftReader(diffpacks.drafts);
+  chat.setDraftReader(diffpacks.drafts);
   // Morning review question: once per settled night window (deduped on
   // the window key against the question store, so restarts and
   // slept-through-window-end catch-ups never double-ask), summarize what

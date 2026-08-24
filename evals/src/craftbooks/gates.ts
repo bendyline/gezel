@@ -208,6 +208,15 @@ async function evaluateOne(
       const message = ts.flattenDiagnosticMessageText(firstError.messageText, ' ');
       return `${check.file} does not parse: ${message}${position} - the file will not load until this is fixed (commonly a truncated file or an unbalanced brace).`;
     }
+    case 'commandEvidence':
+      // Advisory in the GRADER: run receipts live in the eval daemon's
+      // history, which this after-the-fact check pass cannot see, and
+      // there is no live user to approve first-use commands in a harness
+      // run anyway. Execution claims are graded by the eval's own
+      // executable oracles (`nodeScriptPasses` on a seeded test/oracle),
+      // which prove red/green directly. Inside the eval's real task run
+      // the RUNTIME still enforces this check with real receipts.
+      return null;
     default:
       // Every remaining core gate-check kind (recordSchema, tableShape,
       // valuesSubsetOf, valueGrounding, citationsResolve, judge, …)

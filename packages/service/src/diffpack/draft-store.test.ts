@@ -205,3 +205,19 @@ describe('DiffpackDraftStore containment', () => {
     await expect(drafts.write(projectId, packId, '../../../etc/passwd', 'nope')).rejects.toThrow();
   });
 });
+
+describe('DiffpackDraftStore.readBinary', () => {
+  it('prefers drafted bytes, falls back to the workspace, and honors tombstones', async () => {
+    await seedWorkspace('img/logo.bin', 'workspace-bytes');
+    const fromWorkspace = await drafts.readBinary(projectId, packId, 'img/logo.bin');
+    expect(Buffer.from(fromWorkspace!).toString()).toBe('workspace-bytes');
+
+    await drafts.write(projectId, packId, 'img/logo.bin', 'drafted-bytes');
+    const fromDraft = await drafts.readBinary(projectId, packId, 'img/logo.bin');
+    expect(Buffer.from(fromDraft!).toString()).toBe('drafted-bytes');
+
+    await drafts.discard(projectId, packId);
+    await drafts.delete(projectId, packId, 'img/logo.bin');
+    expect(await drafts.readBinary(projectId, packId, 'img/logo.bin')).toBeNull();
+  });
+});

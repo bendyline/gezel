@@ -47,7 +47,7 @@ import {
   getEngagementMode,
   isTaskWorkAllowed,
   projectAllowsAmbientWork,
-  roleCapabilityFloor,
+  effectiveCapabilityFloor,
 } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { LLMProvider, ProviderName } from '../providers/types.js';
@@ -726,7 +726,11 @@ export class TaskRunner {
       // (maybeResolveStepRole keeps `suggestedRole` intact when it
       // stamps `suggestedGezelId`, so the role is available here).
       const step = task.craftbook?.steps.find((s) => s.id === handoff.stepId);
-      const floor = step?.capabilityFloor ?? roleCapabilityFloor(step?.suggestedRole) ?? undefined;
+      // Effective floor = explicit step floor, else max(role floor,
+      // whole-book floor) — see effectiveCapabilityFloor.
+      const floor = step
+        ? (effectiveCapabilityFloor(step, task.craftbook) ?? undefined)
+        : undefined;
 
       // Dispatch. `startHandoffSession` is itself fire-and-forget
       // internally (spawns a session, detaches the first send), so
