@@ -127,6 +127,35 @@ describe('SessionSwitcher', () => {
     expect(screen.getByText(/Landing page plan/)).toBeInTheDocument();
   });
 
+  it('holds the composer on a fresh thread when auto-pick is off', async () => {
+    mockSessions([
+      {
+        id: 's-old',
+        gezelId: 'g1',
+        title: 'Landing page plan',
+        lastActivityAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+        providerName: 'mock',
+        archived: false,
+      },
+    ]);
+    const onSessionIdChange = vi.fn();
+    render(
+      <SessionSwitcher
+        gezelId="g1"
+        projectId="p1"
+        sessionId={undefined}
+        gezelName="Ada Lovelace"
+        autoPickNewest={false}
+        onSessionIdChange={onSessionIdChange}
+      />,
+    );
+    // The thread is still listed — only the automatic pick is withheld.
+    await waitFor(() => {
+      expect(screen.getByText(/Landing page plan/)).toBeInTheDocument();
+    });
+    expect(onSessionIdChange).not.toHaveBeenCalled();
+  });
+
   it('keeps task and night-shift sessions out of ordinary chat', async () => {
     mockSessions([
       {

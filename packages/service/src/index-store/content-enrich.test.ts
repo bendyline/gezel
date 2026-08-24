@@ -340,6 +340,14 @@ describe('summary retry gate (markEnrichAttempt)', () => {
     expect(counts!.summarized).toBe(0);
     expect(counts!.embedded).toBe(0); // attempt rows are not "embedded"
     expect(counts!.pending).toBe(0); // gave-up is terminal until the content changes
+    // A bare count can't be acted on — the status popover names the file.
+    expect(counts!.skippedFiles).toEqual([
+      {
+        path: 'src/a.ts',
+        attempts: 3,
+        reason: 'the summarizer returned nothing for this file',
+      },
+    ]);
   });
 
   it('consumes the gate immediately when no model is configured (embeddings-only)', async () => {
@@ -369,6 +377,9 @@ describe('summary retry gate (markEnrichAttempt)', () => {
     expect(counts!.summarized).toBe(0);
     expect(counts!.pending).toBe(0);
     expect(counts!.skipped).toBe(1);
+    expect(counts!.skippedFiles).toEqual([
+      { path: 'src/a.ts', attempts: 3, reason: 'Request blocked.' },
+    ]);
   });
 
   it('a busy engine defers the file without spending an attempt', async () => {

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "kind": "gezel-template",
+  "id": "example-circle-archivist",
+  "name": "Circle Archivist",
+  "description": "Keeps the circle's notes and record of what was read and said.",
+  "role": "Archivist",
+  "tags": ["example"],
+  "maintainer": {
+    "name": "Gezel"
+  },
+  "license": "MIT",
+  "yankedVersions": []
+}

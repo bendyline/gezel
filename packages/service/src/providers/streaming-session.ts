@@ -261,6 +261,7 @@ export abstract class StreamingSessionBase {
 
   protected clearHandlers(): void {
     this.deltaHandlers.clear();
+    this.reasoningDeltaHandlers.clear();
     this.usageHandlers.clear();
     this.wirePulseHandlers.clear();
     this.toolArgsDeltaHandlers.clear();

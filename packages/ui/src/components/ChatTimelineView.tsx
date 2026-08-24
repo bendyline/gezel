@@ -2392,9 +2392,19 @@ export function ChatTimelineView({
 
   /**
    * Queue receipts for held tasks, minus any task that is already
-   * streaming here. A live bubble IS that task's representation, and a
-   * card beside it claiming the work is "waiting its turn" would
+   * visible here. A live bubble IS that task's representation, and a
+   * card beside it claiming the work is "picking it up now" would
    * contradict what the reader can see happening.
+   *
+   * Two correlations, because neither covers the case alone. By
+   * `taskRef` catches a task speaking in a session the timeline already
+   * knows. By the dispatch's own `sessionId` catches the case the ref
+   * cannot: a handoff opens a BRAND-NEW session, and both the live slot
+   * and the synthesized user row copy their `taskRef` from that
+   * session's previous message — of which there is none. So the ref
+   * stays undefined until the post-`complete` refresh replaces the row
+   * with the canonical one from disk, and until then the card sat
+   * beside a visibly streaming bubble for the whole turn.
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: liveBump is a counter that forces re-derivation from the mutable liveRef.
   const queuedTaskCards = useMemo(() => {
@@ -2409,7 +2419,13 @@ export function ChatTimelineView({
       const ref = slot.taskRef ?? findLastForSession(messages, sessionId)?.taskRef;
       if (ref) streaming.add(ref);
     }
-    return queuedTasks.filter((entry) => !streaming.has(entry.task.ref));
+    return queuedTasks.filter((entry) => {
+      if (streaming.has(entry.task.ref)) return false;
+      const sid = entry.wait.sessionId;
+      if (!sid) return true;
+      if (liveRef.current.has(sid)) return false;
+      return !messages.some((m) => m.sessionId === sid);
+    });
   }, [queuedTasks, messages, liveBump]);
 
   // Auto-scroll: snapshot whether the user is near the bottom *before*

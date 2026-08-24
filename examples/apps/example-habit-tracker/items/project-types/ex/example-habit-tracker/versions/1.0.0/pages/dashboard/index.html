@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f4ee;
+    --ink: #2c2925;
+    --muted: #6f6a62;
+    --card: #fffdf9;
+    --line: #d9d2c6;
+    --accent: #8a6d3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #211e1a;
+      --ink: #e8e2d8;
+      --muted: #a49c90;
+      --card: #2b2723;
+      --line: #47413a;
+      --accent: #c9a86a;
+    }
+  }
+  body {
+    margin: 0;
+    padding: 1.5rem;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.5 system-ui, sans-serif;
+  }
+  h1 { font-size: 1.2rem; margin: 0 0 0.25rem; }
+  p.hint { color: var(--muted); margin: 0 0 1.25rem; }
+  ul { list-style: none; margin: 0; padding: 0; max-width: 32rem; }
+  li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.6rem 0.85rem;
+    margin-bottom: 0.5rem;
+  }
+  .streak { color: var(--muted); font-variant-numeric: tabular-nums; }
+  button {
+    background: var(--card);
+    color: var(--accent);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.35rem 0.8rem;
+    font: inherit;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+</style>
+</head>
+<body>
+<h1>Habit board</h1>
+<p class="hint">Log a check-in and the coach reacts in chat.</p>
+<ul id="board"></ul>
+<script>
+  const board = document.querySelector('#board');
+  const today = new Date().toISOString().slice(0, 10);
+
+  function render(data) {
+    board.replaceChildren();
+    for (const habit of data.habits) {
+      const item = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = habit.name;
+      const streak = document.createElement('span');
+      streak.className = 'streak';
+      streak.textContent = habit.log.length + ' check-ins';
+      const log = document.createElement('button');
+      const done = habit.log.includes(today);
+      log.textContent = done ? 'Done today' : 'Log today';
+      log.disabled = done;
+      log.addEventListener('click', async () => {
+        log.disabled = true;
+        await gezel.tools.invoke('log_habit', { name: habit.name });
+        await refresh();
+      });
+      item.append(label, streak, log);
+      board.append(item);
+    }
+  }
+
+  async function refresh() {
+    render(await gezel.data.read('habits.json', { as: 'json' }));
+  }
+
+  gezel.data.watch('habits.json', refresh);
+  refresh();
+</script>
+</body>
+</html>

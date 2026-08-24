@@ -286,6 +286,54 @@ describe('ProjectGitStatusBar', () => {
     expect(api.driveIndexEnrichment).not.toHaveBeenCalled();
   });
 
+  it('names the skipped files and why they were skipped', async () => {
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
+      state: 'fresh',
+      enrichment: {
+        eligible: 3792,
+        summarized: 3784,
+        embedded: 3784,
+        pending: 0,
+        skipped: 2,
+        skippedFiles: [
+          { path: 'src/huge.ts', attempts: 3, reason: 'the summarizer returned nothing' },
+          { path: 'docs/policy.md', attempts: 3 },
+        ],
+      },
+    } as never);
+
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /Workspace index is ready/ });
+    await userEvent.click(trigger);
+
+    const panel = await screen.findByRole('dialog', { name: 'Indexing status' });
+    expect(panel).toHaveTextContent('2 skipped after repeated failures');
+
+    // The count alone can't be acted on; the paths (and the reason, when we
+    // recorded one) can. Radix portals the content, so it lands outside the
+    // panel element.
+    await userEvent.hover(panel.querySelector('.project-index-skipped-trigger')!);
+    expect(await screen.findByText('src/huge.ts')).toBeInTheDocument();
+    expect(screen.getByText('the summarizer returned nothing')).toBeInTheDocument();
+    expect(screen.getByText('docs/policy.md')).toBeInTheDocument();
+  });
+
+  it('omits the skipped hover when the daemon sent only a count', async () => {
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
+      state: 'fresh',
+      enrichment: { eligible: 10, summarized: 9, embedded: 9, pending: 0, skipped: 1 },
+    } as never);
+
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /Workspace index is ready/ });
+    await userEvent.click(trigger);
+
+    const panel = await screen.findByRole('dialog', { name: 'Indexing status' });
+    expect(panel).toHaveTextContent('1 skipped after repeated failures');
+    // Nothing to name — no hover affordance promising a list we don't have.
+    expect(panel.querySelector('.project-index-skipped-trigger')).toBeNull();
+  });
+
   it('labels a background drive distinctly', async () => {
     vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
       state: 'fresh',

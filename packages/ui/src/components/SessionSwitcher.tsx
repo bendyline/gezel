@@ -34,6 +34,15 @@ interface Props {
   taskRef?: string;
   stepId?: string;
   /**
+   * Whether an unselected composer should fall onto the newest thread in
+   * scope (default) or stay blank so the next message starts a fresh one.
+   * The project chat turns it off when it opens on a gezel whose last
+   * conversation is too old to be resumed — see `RESUMABLE_THREAD_MAX_AGE_MS`
+   * in {@link ProjectChat}. Older threads remain pickable from the list
+   * either way; this only decides what happens when nobody has picked.
+   */
+  autoPickNewest?: boolean;
+  /**
    * Overrides the per-row engine/model suffix (normally the chat
    * provider + model, e.g. "This Mac (qwen3.6-…)"). Set for fixed-function
    * generator gezels so the row shows the generation model instead, e.g.
@@ -71,6 +80,7 @@ export function SessionSwitcher({
   refreshKey,
   taskRef,
   stepId,
+  autoPickNewest = true,
   engineLabel,
 }: Props) {
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
@@ -155,9 +165,13 @@ export function SessionSwitcher({
     }
     if (autoPickedFor.current === key) return;
     if (sessions.length === 0) return;
+    // Latch either way: once this scope has had its one chance, a later
+    // flip of `autoPickNewest` must not reach in and move a composer the
+    // user is already typing into.
     autoPickedFor.current = key;
+    if (!autoPickNewest) return;
     onSessionIdChange(sessions[0]!.id);
-  }, [sessions, sessionsScope, sessionId, scopeKey, onSessionIdChange]);
+  }, [sessions, sessionsScope, sessionId, scopeKey, autoPickNewest, onSessionIdChange]);
 
   useEffect(() => {
     if (sessionsScope !== scopeKey) return;
@@ -270,6 +284,10 @@ export function SessionSwitcher({
   const emptyLabel = gezelName
     ? `No threads with ${gezelName} yet — a message starts one`
     : 'No threads yet';
+  // Nothing picked. With auto-pick on that is a momentary state before the
+  // newest thread lands; with it off it is the deliberate resting state, and
+  // the trigger has to say so rather than read as a control the user forgot.
+  const unselectedLabel = autoPickNewest ? 'Pick a thread' : 'New thread';
 
   return (
     <div className="gezel-chat-session-header">
@@ -281,7 +299,7 @@ export function SessionSwitcher({
         disabled={!hasSessions || busy}
       >
         <Select.Trigger className="gezel-chat-session-select">
-          <Select.Value placeholder={hasSessions ? 'Pick a thread' : emptyLabel} />
+          <Select.Value placeholder={hasSessions ? unselectedLabel : emptyLabel} />
         </Select.Trigger>
         <Select.Content className="gezel-chat-session-menu">
           {hasSessions ? (

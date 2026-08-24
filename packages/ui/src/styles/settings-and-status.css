@@ -1643,6 +1643,58 @@
   text-align: right;
 }
 
+/* Skipped-summary hover: the count alone can't be acted on, the paths can. */
+.project-index-skipped-trigger {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: right;
+  cursor: help;
+  text-decoration: underline dotted color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 0.15em;
+}
+
+.gz-tooltip-content:has(> .project-index-skipped-tip) {
+  max-width: 26rem;
+}
+
+.project-index-skipped-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  text-align: left;
+}
+
+.project-index-skipped-tip ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-index-skipped-tip li {
+  display: flex;
+  flex-direction: column;
+}
+
+.project-index-skipped-path {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.project-index-skipped-reason,
+.project-index-skipped-more,
+.project-index-skipped-note {
+  color: color-mix(in srgb, currentColor 70%, transparent);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
 .project-index-panel-footer {
   display: flex;
   flex-direction: column;

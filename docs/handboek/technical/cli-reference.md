@@ -41,6 +41,19 @@ gezel task list             tasks in flight
 gezel env skills list       importable skills
 ```
 
+## AI Apps
+
+```
+gezel app new my-app        scaffold an app source folder
+gezel app validate my-app   check a source folder or .gezapp (--json for tooling)
+gezel app pack my-app       produce my-app-1.0.0.gezapp
+gezel app add <file> --yes  review and install a package
+gezel app apply my-app      outfit the current folder as a project
+gezel app serve my-app      share its page as a mini-site
+```
+
+The full story — the source-folder format, both script forms, and the loop an AI agent can drive — is [Building AI Apps inside Gezel](building-ai-apps-inside-gezel.md).
+
 ## This documentation
 
 ```

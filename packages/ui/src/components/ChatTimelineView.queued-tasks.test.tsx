@@ -140,6 +140,37 @@ describe('ChatTimelineView — queued task receipts', () => {
     });
   });
 
+  it('drops the receipt when the dispatch session speaks from a fresh session', async () => {
+    // The regression: a handoff opens a session the timeline has never
+    // seen, so neither the live slot nor the synthesized user row can
+    // resolve a `taskRef` — and the "picking it up now" card sat beside
+    // a visibly streaming bubble for the whole turn. The dispatch's own
+    // session id is the correlation that survives.
+    renderTimeline({
+      queuedTasks: [entry(9, { reason: 'dispatching', sessionId: 's9' })],
+    });
+    await screen.findByText('Task number 9');
+
+    stream.push({
+      sessionId: 's9',
+      gezelId: 'g1',
+      projectId: 'p1',
+      event: {
+        type: 'user_message',
+        message: {
+          role: 'user',
+          content: 'Continue with the harvest step.',
+          at: '2026-08-21T05:31:00.000Z',
+          origin: 'system',
+        },
+      },
+    } as ChatEventEnvelope);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Task number 9')).toBeNull();
+    });
+  });
+
   it('counts the remainder rather than drawing a card per batch shard', async () => {
     renderTimeline({ queuedTasks: [6, 7, 8, 9, 10, 11].map((n) => entry(n)) });
     expect(await screen.findByText('Task number 6')).toBeInTheDocument();

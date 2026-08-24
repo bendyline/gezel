@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "version": "1.0.0",
+  "releasedAt": "2026-08-24T00:00:00Z",
+  "mode": "solo",
+  "leadLabel": "Journalkeeper",
+  "params": {
+    "type": "object",
+    "properties": {
+      "subject": {
+        "type": "string",
+        "title": "What is this journal about?",
+        "default": "daily life"
+      }
+    }
+  },
+  "nameTemplate": "{{subject}} journal",
+  "aboutTemplate": "about.md",
+  "missionTemplate": "mission.md",
+  "gezels": [
+    {
+      "templateId": "example-journal-keeper",
+      "voorman": true
+    }
+  ]
+}

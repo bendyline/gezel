@@ -285,3 +285,111 @@ describe('parseStreamLine — robustness', () => {
     expect(events[1]?.kind).toBe('text-delta');
   });
 });
+
+// The payloads below are verbatim lines captured from `claude` 2.1.226
+// running under the exact flag set `buildSpawnArgs` produces. Hand-written
+// approximations of these shapes are what let the thinking stream go
+// unnoticed in the first place, so keep them literal.
+describe('parseStreamLine — thinking token estimates', () => {
+  it('parses a thinking_tokens system event', () => {
+    const ev = parseStreamLine(
+      '{"type":"system","subtype":"thinking_tokens","estimated_tokens":67,"estimated_tokens_delta":52,"uuid":"u","session_id":"s"}',
+    );
+    expect(ev).toEqual({ kind: 'thinking-tokens', estimatedTokens: 67, deltaTokens: 52 });
+  });
+
+  it('defaults missing counters to zero rather than dropping the event', () => {
+    const ev = parseStreamLine(JSON.stringify({ type: 'system', subtype: 'thinking_tokens' }));
+    expect(ev).toEqual({ kind: 'thinking-tokens', estimatedTokens: 0, deltaTokens: 0 });
+  });
+
+  it('parses a status event', () => {
+    const ev = parseStreamLine(
+      '{"type":"system","subtype":"status","status":"requesting","uuid":"u","session_id":"s"}',
+    );
+    expect(ev).toEqual({ kind: 'status', status: 'requesting' });
+  });
+
+  it('returns unknown for a status event with no status string', () => {
+    const ev = parseStreamLine(JSON.stringify({ type: 'system', subtype: 'status' }));
+    expect(ev).toEqual({ kind: 'unknown', type: 'system:status' });
+  });
+});
+
+describe('parseStreamLine — rate limit', () => {
+  it('parses a rate_limit_event', () => {
+    const ev = parseStreamLine(
+      '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1787600400,"rateLimitType":"five_hour","overageStatus":"rejected","isUsingOverage":false},"uuid":"u","session_id":"s"}',
+    );
+    expect(ev).toEqual({
+      kind: 'rate-limit',
+      status: 'allowed',
+      rateLimitType: 'five_hour',
+      resetsAt: 1787600400,
+      isUsingOverage: false,
+    });
+  });
+
+  it('returns unknown when rate_limit_info is absent', () => {
+    const ev = parseStreamLine(JSON.stringify({ type: 'rate_limit_event' }));
+    expect(ev).toEqual({ kind: 'unknown', type: 'rate_limit_event' });
+  });
+});
+
+describe('parseStreamLine — streamed tool arguments', () => {
+  it('parses a tool_use content_block_start with its block index', () => {
+    const ev = parseStreamLine(
+      '{"type":"stream_event","event":{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_01Nd","name":"Read","input":{},"caller":{"type":"direct"}}},"session_id":"s"}',
+    );
+    expect(ev).toEqual({ kind: 'tool-args-start', index: 2, id: 'toolu_01Nd', name: 'Read' });
+  });
+
+  it('parses an input_json_delta fragment', () => {
+    const ev = parseStreamLine(
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\\"file_path\\": \\"/tmp/data.txt"}},"session_id":"s"}',
+    );
+    expect(ev).toEqual({
+      kind: 'partial-tool-args-delta',
+      index: 2,
+      partialJson: '{"file_path": "/tmp/data.txt',
+    });
+  });
+
+  it('ignores the empty leading fragment the CLI always sends first', () => {
+    const ev = parseStreamLine(
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":""}},"session_id":"s"}',
+    );
+    expect(ev?.kind).toBe('unknown');
+  });
+
+  it('parses content_block_stop so consumers can drop the index mapping', () => {
+    const ev = parseStreamLine(
+      '{"type":"stream_event","event":{"type":"content_block_stop","index":2},"session_id":"s"}',
+    );
+    expect(ev).toEqual({ kind: 'content-block-stop', index: 2 });
+  });
+
+  it('does not treat a thinking block start as a tool-args block', () => {
+    const ev = parseStreamLine(
+      '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}},"session_id":"s"}',
+    );
+    expect(ev?.kind).toBe('unknown');
+  });
+
+  it('leaves signature_delta unhandled — it is an attestation, not content', () => {
+    const ev = parseStreamLine(
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"abc"}},"session_id":"s"}',
+    );
+    expect(ev).toEqual({
+      kind: 'unknown',
+      type: 'stream_event:content_block_delta:signature_delta',
+    });
+  });
+
+  it('parses a partial thinking delta', () => {
+    const ev = parseStreamLine(
+      '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Let me calculate:"}},"session_id":"s"}',
+    );
+    expect(ev).toEqual({ kind: 'partial-thinking-delta', text: 'Let me calculate:' });
+  });
+});

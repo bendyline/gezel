@@ -115,7 +115,7 @@ rules that matter are re-implemented in \`tools/validate.mjs\`.
  * in a published schema fails loudly here instead of silently weakening
  * gilde validation.
  */
-function renderSchema(filename: string, schema: z.ZodType): string {
+export function renderSchema(filename: string, schema: z.ZodType): string {
   const json = z.toJSONSchema(schema, { target: 'draft-2020-12', io: 'input' }) as Record<
     string,
     unknown

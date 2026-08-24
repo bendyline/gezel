@@ -1,9 +1,9 @@
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { join } from 'node:path';
-import { createLogger, toolActivityLabel } from '@bendyline/gezel';
+import { createLogger, stripMcpPrefix, toolActivityLabel } from '@bendyline/gezel';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { SessionResumeError } from '../types.js';
-import type { SessionOpts, ToolCallEvent, TurnUsage } from '../types.js';
+import type { SessionOpts, ToolArgsDeltaMeta, ToolCallEvent, TurnUsage } from '../types.js';
 import { buildTurnUsage } from '../usage-builder.js';
 import type { ClaudePermissionMode } from './provider.js';
 import { writeClaudeQuotaCaptureFiles } from './quota.js';
@@ -62,6 +62,28 @@ const HEARTBEAT_INTERVAL_MS = 3_000;
 const SILENCE_THRESHOLD_MS = 15_000;
 
 /**
+ * Minimum accumulated argument text before a tool's streamed arguments
+ * become visible as a live "working" block. The CLI fires tool calls
+ * constantly and most carry trivial arguments — a `Read` path or a
+ * `Grep` pattern is complete in one fragment, so surfacing it would
+ * flash a block for a few hundred milliseconds before the finished tool
+ * row supersedes it. The channel exists for the opposite case: a long
+ * `write_file` whose content is the only thing happening for minutes.
+ * Fragments below the threshold are buffered, and flushed in full the
+ * moment a call crosses it, so nothing is lost from what we do show.
+ */
+const TOOL_ARGS_VISIBILITY_THRESHOLD = 400;
+
+/**
+ * Heartbeat label for a thinking phase. Once the CLI has reported any
+ * thinking-token estimate, the count rides along so a long deliberation
+ * reads as measurable progress rather than an unexplained pause.
+ */
+function thinkingPhaseLabel(thinkingTokens: number): string {
+  return thinkingTokens > 0 ? `thinking · ${thinkingTokens} tokens` : 'thinking';
+}
+
+/**
  * State machine. Transitions:
  *   stopped → starting → running.idle ⇄ running.busy
  *                            ↓ (crash / timeout / abort)
@@ -84,7 +106,16 @@ export type WorkerState =
  */
 export interface WorkerTurnHooks {
   emitDelta(text: string): void;
+  /**
+   * Private chain-of-thought. Routed to the session's reasoning channel,
+   * NOT `emitDelta` — the trace must stay out of the committed reply
+   * body, the abort-salvage buffer, and the OpenAI-/Ollama-compat
+   * forwarders that serve Connected Apps from these same sessions.
+   */
+  emitReasoningDelta(text: string): void;
   emitHeartbeat(label?: string): void;
+  emitToolArgsDelta(name: string, chunk: string, meta?: ToolArgsDeltaMeta): void;
+  emitWarning(message: string): void;
   emitUsage(usage: TurnUsage): void;
   onToolCall?: (ev: ToolCallEvent) => void | Promise<void>;
   knownSecretValues?: Set<string>;
@@ -127,11 +158,33 @@ interface PendingToolCall {
   startedAt: number;
 }
 
+/**
+ * Per-`tool_use`-block argument streaming state. Keyed by content-block
+ * index, which restarts at 0 on every assistant message — hence the
+ * `content-block-stop` cleanup rather than a turn-lifetime map.
+ */
+interface ToolArgsBlock {
+  name: string;
+  id: string;
+  /** Withheld fragments, flushed once the block crosses the visibility threshold. */
+  buffered: string;
+  charCount: number;
+  visible: boolean;
+}
+
 interface TurnState {
   assistantText: string;
   finalText: string | undefined;
   pendingTools: Map<string, PendingToolCall>;
+  toolArgBlocks: Map<number, ToolArgsBlock>;
   thinking: boolean;
+  /**
+   * Running total of the CLI's own thinking-token estimates, summed from
+   * `estimated_tokens_delta`. Summing the deltas rather than trusting the
+   * cumulative field keeps the total correct whether or not the counter
+   * restarts on each assistant message.
+   */
+  thinkingTokens: number;
   usage?: {
     inputTokens: number;
     cachedInputTokens?: number;
@@ -354,7 +407,9 @@ export class ClaudeWorker {
           assistantText: '',
           finalText: undefined,
           pendingTools: new Map(),
+          toolArgBlocks: new Map(),
           thinking: false,
+          thinkingTokens: 0,
           usage: undefined,
           success: true,
           usingPartialStream: false,
@@ -868,29 +923,92 @@ export class ClaudeWorker {
         state.usingPartialStream = true;
         state.assistantText += event.text;
         turn.currentPhase = 'streaming';
+        if (state.thinking) state.thinking = false;
         hooks.emitDelta(event.text);
         return;
       case 'partial-thinking-delta':
         state.usingPartialStream = true;
-        turn.currentPhase = 'thinking';
+        turn.currentPhase = thinkingPhaseLabel(state.thinkingTokens);
+        hooks.emitReasoningDelta(event.text);
         if (!state.thinking) {
           state.thinking = true;
-          hooks.emitHeartbeat('thinking');
+          hooks.emitHeartbeat(turn.currentPhase);
         }
         return;
       case 'text-delta':
         if (state.usingPartialStream) return;
         state.assistantText += event.text;
         turn.currentPhase = 'streaming';
+        if (state.thinking) state.thinking = false;
         hooks.emitDelta(event.text);
         return;
       case 'thinking-delta':
         if (state.usingPartialStream) return;
-        turn.currentPhase = 'thinking';
+        turn.currentPhase = thinkingPhaseLabel(state.thinkingTokens);
+        hooks.emitReasoningDelta(event.text);
         if (!state.thinking) {
           state.thinking = true;
-          hooks.emitHeartbeat('thinking');
+          hooks.emitHeartbeat(turn.currentPhase);
         }
+        return;
+      case 'thinking-tokens':
+        // The CLI's own running estimate. Worth surfacing even when the
+        // reasoning text itself is not rendered: a climbing token count
+        // is the difference between "deliberating" and "wedged".
+        state.thinkingTokens += event.deltaTokens;
+        if (state.thinking) turn.currentPhase = thinkingPhaseLabel(state.thinkingTokens);
+        return;
+      case 'status':
+        // `requesting` fires as each API call goes out — after a tool
+        // result the model is waiting on the wire, not running a tool.
+        if (event.status === 'requesting' && !state.thinking) {
+          turn.currentPhase = thinkingPhaseLabel(state.thinkingTokens);
+        }
+        return;
+      case 'rate-limit': {
+        // Silent on the happy path — `allowed` arrives on every turn and
+        // a warning per turn would train the user to ignore the channel.
+        if (event.status === 'allowed') return;
+        const window = event.rateLimitType ? ` (${event.rateLimitType.replace(/_/g, '-')})` : '';
+        const resets = event.resetsAt
+          ? ` Resets ${new Date(event.resetsAt * 1000).toLocaleTimeString()}.`
+          : '';
+        const overage = event.isUsingOverage ? ' Currently billing as overage.' : '';
+        hooks.emitWarning(
+          `Claude subscription rate limit${window}: ${event.status}.${resets}${overage}`,
+        );
+        return;
+      }
+      case 'tool-args-start':
+        state.toolArgBlocks.set(event.index, {
+          name: stripMcpPrefix(event.name),
+          id: event.id,
+          buffered: '',
+          charCount: 0,
+          visible: false,
+        });
+        return;
+      case 'partial-tool-args-delta': {
+        const block = state.toolArgBlocks.get(event.index);
+        // A fragment with no preceding `tool-args-start` means we missed
+        // the block header; without a name there is nothing useful to
+        // label the live block with, so drop it rather than guess.
+        if (!block) return;
+        block.charCount += event.partialJson.length;
+        turn.currentPhase = toolActivityLabel(block.name);
+        if (block.visible) {
+          hooks.emitToolArgsDelta(block.name, event.partialJson, { id: block.id });
+          return;
+        }
+        block.buffered += event.partialJson;
+        if (block.charCount < TOOL_ARGS_VISIBILITY_THRESHOLD) return;
+        block.visible = true;
+        hooks.emitToolArgsDelta(block.name, block.buffered, { id: block.id });
+        block.buffered = '';
+        return;
+      }
+      case 'content-block-stop':
+        state.toolArgBlocks.delete(event.index);
         return;
       case 'tool-use': {
         if (state.thinking) {
@@ -948,7 +1066,7 @@ export class ClaudeWorker {
         // generic "thinking" so the next heartbeat reads as in-progress
         // rather than still claiming we're using the (now-finished) tool.
         // Subsequent text/thinking/tool-use events overwrite this.
-        turn.currentPhase = 'thinking';
+        turn.currentPhase = thinkingPhaseLabel(state.thinkingTokens);
         return;
       }
       case 'result': {

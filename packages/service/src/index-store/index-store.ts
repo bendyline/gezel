@@ -368,6 +368,20 @@ const SEVERITY_RANK_SQL =
 /** Summarize retries per content hash before the enrichment gate gives up. */
 export const MAX_ENRICH_ATTEMPTS = 3;
 
+/** Failure reasons are shown verbatim in the status popover — keep them short. */
+const ENRICH_REASON_CAP = 300;
+
+/** Files named in {@link IndexStore.skippedEnrichmentFiles} per call. */
+const SKIPPED_FILES_CAP = 25;
+
+function truncateReason(reason: string | undefined): string | null {
+  const trimmed = reason?.replace(/\s+/g, ' ').trim();
+  if (!trimmed) return null;
+  return trimmed.length > ENRICH_REASON_CAP
+    ? `${trimmed.slice(0, ENRICH_REASON_CAP - 1)}…`
+    : trimmed;
+}
+
 /**
  * Invalidate the text vectors when the embedding model changed. Vectors from a
  * different embedder are not comparable to the current model's query vectors
@@ -951,6 +965,12 @@ export class IndexStore {
     searchReady: number;
     pending: number;
     skipped: number;
+    /**
+     * The attempt-capped files themselves, newest content first and capped at
+     * {@link SKIPPED_FILES_CAP}. A bare count tells the user something was
+     * dropped but not what, and the one thing they can act on is the path.
+     */
+    skippedFiles: Array<{ path: string; attempts: number; reason?: string }>;
     shadowsPending: number;
     /** Files awaiting the always-on embed-only tier (semantic-search readiness). */
     embedOnlyPending: number;
@@ -996,10 +1016,42 @@ export class IndexStore {
       searchReady,
       pending: this.countNeedingEnrichment(),
       skipped,
+      skippedFiles: skipped > 0 ? this.skippedEnrichmentFiles() : [],
       shadowsPending: this.countNeedingAiShadow(),
       embedOnlyPending: this.countNeedingEmbedOnly(),
       ...(embedModel ? { embedModel } : {}),
     };
+  }
+
+  /**
+   * The files behind `enrichmentCounts().skipped`: summarize failed
+   * MAX_ENRICH_ATTEMPTS times for the current content hash, so they are off
+   * the work list until the file changes. `reason` is the last recorded
+   * failure and is absent on rows written before the column existed.
+   */
+  skippedEnrichmentFiles(limit = SKIPPED_FILES_CAP): Array<{
+    path: string;
+    attempts: number;
+    reason?: string;
+  }> {
+    return this.db
+      .prepare(
+        `SELECT f.path AS path, COALESCE(e.attempts, 0) AS attempts, e.last_error AS last_error
+         FROM files f JOIN enrichments e ON e.content_hash = f.hash
+         WHERE e.embedded_at IS NULL AND COALESCE(e.attempts, 0) >= ${MAX_ENRICH_ATTEMPTS}
+           AND f.collection_id = ? AND f.trivial = 0 AND f.hash IS NOT NULL
+           AND (f.modality IN ('code','text','doc')
+                OR EXISTS (SELECT 1 FROM shadow_state s
+                           WHERE s.content_hash = f.hash AND s.state = 'ok'))
+         ORDER BY f.path
+         LIMIT ?`,
+      )
+      .all<{ path: string; attempts: number; last_error: string | null }>(this.collectionId, limit)
+      .map((r) => ({
+        path: r.path,
+        attempts: Number(r.attempts),
+        ...(r.last_error ? { reason: r.last_error } : {}),
+      }));
   }
 
   /**
@@ -1025,7 +1077,9 @@ export class IndexStore {
   /** Mark a content hash as enriched (vectors built) so it isn't reprocessed. */
   markEnriched(contentHash: string): void {
     this.db
-      .prepare('INSERT OR REPLACE INTO enrichments (content_hash, embedded_at) VALUES (?, ?)')
+      .prepare(
+        'INSERT OR REPLACE INTO enrichments (content_hash, embedded_at, attempts, last_error) VALUES (?, ?, 0, NULL)',
+      )
       .run(contentHash, nowIso());
   }
 
@@ -1035,13 +1089,15 @@ export class IndexStore {
    * `attempts` reaches MAX_ENRICH_ATTEMPTS. A later success (markEnriched's
    * INSERT OR REPLACE) resets the row.
    */
-  markEnrichAttempt(contentHash: string): number {
+  markEnrichAttempt(contentHash: string, reason?: string): number {
     this.db
       .prepare(
-        `INSERT INTO enrichments (content_hash, embedded_at, attempts) VALUES (?, NULL, 1)
-         ON CONFLICT(content_hash) DO UPDATE SET attempts = COALESCE(enrichments.attempts, 0) + 1`,
+        `INSERT INTO enrichments (content_hash, embedded_at, attempts, last_error)
+         VALUES (?, NULL, 1, ?)
+         ON CONFLICT(content_hash) DO UPDATE
+           SET attempts = COALESCE(enrichments.attempts, 0) + 1, last_error = excluded.last_error`,
       )
-      .run(contentHash);
+      .run(contentHash, truncateReason(reason));
     return Number(
       this.db
         .prepare('SELECT attempts FROM enrichments WHERE content_hash = ?')
@@ -1055,15 +1111,16 @@ export class IndexStore {
    * fail identically. The file drops off the work list and counts as
    * `skipped` in {@link enrichmentCounts} until its content changes.
    */
-  markEnrichSkipped(contentHash: string): void {
+  markEnrichSkipped(contentHash: string, reason?: string): void {
     this.db
       .prepare(
-        `INSERT INTO enrichments (content_hash, embedded_at, attempts)
-         VALUES (?, NULL, ${MAX_ENRICH_ATTEMPTS})
+        `INSERT INTO enrichments (content_hash, embedded_at, attempts, last_error)
+         VALUES (?, NULL, ${MAX_ENRICH_ATTEMPTS}, ?)
          ON CONFLICT(content_hash) DO UPDATE
-           SET attempts = MAX(COALESCE(enrichments.attempts, 0), ${MAX_ENRICH_ATTEMPTS})`,
+           SET attempts = MAX(COALESCE(enrichments.attempts, 0), ${MAX_ENRICH_ATTEMPTS}),
+               last_error = excluded.last_error`,
       )
-      .run(contentHash);
+      .run(contentHash, truncateReason(reason));
   }
 
   /**

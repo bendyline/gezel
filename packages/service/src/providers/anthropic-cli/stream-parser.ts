@@ -6,6 +6,9 @@
  *   - `{"type":"system","subtype":"init","session_id":"…","model":"…",…}`
  *   - `{"type":"assistant","message":{role:"assistant",content:[{type:"text",text:"…"}|{type:"tool_use",id,name,input}|{type:"thinking",thinking:"…"}]}}`
  *   - `{"type":"user","message":{role:"user",content:[{type:"tool_result",tool_use_id,content,is_error}]}}`
+ *   - `{"type":"system","subtype":"thinking_tokens","estimated_tokens":N,"estimated_tokens_delta":N}`
+ *   - `{"type":"system","subtype":"status","status":"requesting"}`
+ *   - `{"type":"rate_limit_event","rate_limit_info":{status,rateLimitType,resetsAt,…}}`
  *   - `{"type":"result","subtype":"success"|"error_during_execution"|"error_max_turns",
  *        result?:string, is_error:boolean, duration_ms:number,
  *        usage:{input_tokens,output_tokens,cache_creation_input_tokens?,cache_read_input_tokens?},
@@ -42,6 +45,48 @@ export type StreamEvent =
   /** Token-granularity thinking delta. Same shape as `partial-text-delta`. */
   | { kind: 'partial-thinking-delta'; text: string }
   | { kind: 'tool-use'; id: string; name: string; input: Record<string, unknown> }
+  /**
+   * A `tool_use` content block opened. Carries the block `index` that
+   * subsequent {@link StreamEvent} `partial-tool-args-delta` fragments
+   * are keyed by — the delta events themselves carry only the index, so
+   * the consumer has to hold the index→name mapping. Indices restart at
+   * 0 on every assistant message, which is why `content-block-stop`
+   * exists: it lets the consumer drop the entry rather than carry a
+   * stale name into the next message.
+   */
+  | { kind: 'tool-args-start'; index: number; id: string; name: string }
+  /**
+   * One fragment of the JSON argument text for the `tool_use` block at
+   * `index`. Display-only: the authoritative parsed input still arrives
+   * whole on the block-granularity `assistant` snapshot. This exists so a
+   * long `write_file` — which emits no visible text for its whole
+   * duration — can show the user what is being written as it streams.
+   */
+  | { kind: 'partial-tool-args-delta'; index: number; partialJson: string }
+  | { kind: 'content-block-stop'; index: number }
+  /**
+   * Running estimate of thinking tokens produced this turn. Fires
+   * several times per thinking block. `estimatedTokens` is cumulative
+   * and `deltaTokens` is the increment since the previous event —
+   * prefer summing the deltas, which stays correct whether or not the
+   * cumulative counter restarts on a new assistant message.
+   */
+  | { kind: 'thinking-tokens'; estimatedTokens: number; deltaTokens: number }
+  /** Coarse CLI lifecycle status (`requesting` as an API call goes out). */
+  | { kind: 'status'; status: string }
+  /**
+   * Subscription rate-limit posture, pushed inline on the stream. Note
+   * this overlaps the richer `statusLine` capture in `quota.ts`, which
+   * reports every window; this one is whichever window the CLI considers
+   * current, and arrives without a staged helper script.
+   */
+  | {
+      kind: 'rate-limit';
+      status: string;
+      rateLimitType: string | undefined;
+      resetsAt: number | undefined;
+      isUsingOverage: boolean;
+    }
   | {
       kind: 'tool-result';
       toolUseId: string;
@@ -95,6 +140,8 @@ export function parseStreamLine(line: string): StreamEvent | null {
       return parseResult(raw);
     case 'stream_event':
       return parseStreamEvent(raw);
+    case 'rate_limit_event':
+      return parseRateLimit(raw);
     default:
       return { kind: 'unknown', type };
   }
@@ -113,6 +160,21 @@ function parseStreamEvent(raw: Record<string, unknown>): StreamEvent {
   const inner = isObject(raw.event) ? raw.event : null;
   if (!inner) return { kind: 'unknown', type: 'stream_event' };
   const innerType = typeof inner.type === 'string' ? inner.type : 'unknown';
+  if (innerType === 'content_block_start') {
+    const block = isObject(inner.content_block) ? inner.content_block : null;
+    const index = typeof inner.index === 'number' ? inner.index : -1;
+    if (block?.type === 'tool_use' && index >= 0) {
+      const id = typeof block.id === 'string' ? block.id : '';
+      const name = typeof block.name === 'string' ? block.name : '';
+      if (name) return { kind: 'tool-args-start', index, id, name };
+    }
+    return { kind: 'unknown', type: 'stream_event:content_block_start' };
+  }
+  if (innerType === 'content_block_stop') {
+    const index = typeof inner.index === 'number' ? inner.index : -1;
+    if (index >= 0) return { kind: 'content-block-stop', index };
+    return { kind: 'unknown', type: 'stream_event:content_block_stop' };
+  }
   if (innerType !== 'content_block_delta') {
     return { kind: 'unknown', type: `stream_event:${innerType}` };
   }
@@ -125,9 +187,16 @@ function parseStreamEvent(raw: Record<string, unknown>): StreamEvent {
   if (deltaType === 'thinking_delta' && typeof delta.thinking === 'string') {
     return { kind: 'partial-thinking-delta', text: delta.thinking };
   }
-  // input_json_delta carries tool_use input fragments. We currently get
-  // the parsed input from the `assistant` snapshot event when the block
-  // closes; reassembling partial JSON here is unnecessary.
+  if (deltaType === 'input_json_delta' && typeof delta.partial_json === 'string') {
+    const index = typeof inner.index === 'number' ? inner.index : -1;
+    // Empty leading fragments are real but carry nothing to show.
+    if (index >= 0 && delta.partial_json.length > 0) {
+      return { kind: 'partial-tool-args-delta', index, partialJson: delta.partial_json };
+    }
+    return { kind: 'unknown', type: 'stream_event:content_block_delta:input_json_delta' };
+  }
+  // `signature_delta` is the cryptographic attestation on a thinking
+  // block — never content, never shown.
   return { kind: 'unknown', type: `stream_event:content_block_delta:${deltaType}` };
 }
 
@@ -145,6 +214,18 @@ export function parseStreamLines(lines: readonly string[]): StreamEvent[] {
 }
 
 function parseSystem(raw: Record<string, unknown>): StreamEvent {
+  if (raw.subtype === 'thinking_tokens') {
+    return {
+      kind: 'thinking-tokens',
+      estimatedTokens: numField(raw, 'estimated_tokens'),
+      deltaTokens: numField(raw, 'estimated_tokens_delta'),
+    };
+  }
+  if (raw.subtype === 'status') {
+    const status = typeof raw.status === 'string' ? raw.status : '';
+    if (status) return { kind: 'status', status };
+    return { kind: 'unknown', type: 'system:status' };
+  }
   if (raw.subtype !== 'init') {
     return { kind: 'unknown', type: `system:${String(raw.subtype ?? 'unknown')}` };
   }
@@ -246,6 +327,20 @@ function collectToolResultBody(content: unknown): {
     }
   }
   return { text: textParts.join(''), images };
+}
+
+function parseRateLimit(raw: Record<string, unknown>): StreamEvent {
+  const info = isObject(raw.rate_limit_info) ? raw.rate_limit_info : null;
+  if (!info) return { kind: 'unknown', type: 'rate_limit_event' };
+  const status = typeof info.status === 'string' ? info.status : '';
+  if (!status) return { kind: 'unknown', type: 'rate_limit_event' };
+  return {
+    kind: 'rate-limit',
+    status,
+    rateLimitType: typeof info.rateLimitType === 'string' ? info.rateLimitType : undefined,
+    resetsAt: typeof info.resetsAt === 'number' ? info.resetsAt : undefined,
+    isUsingOverage: info.isUsingOverage === true,
+  };
 }
 
 function parseResult(raw: Record<string, unknown>): StreamEvent {

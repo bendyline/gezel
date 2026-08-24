@@ -1176,6 +1176,7 @@ export class ContentIndex {
     searchReady: number;
     pending: number;
     skipped: number;
+    skippedFiles: Array<{ path: string; attempts: number; reason?: string }>;
     shadowsPending: number;
     embedOnlyPending: number;
     embedModel?: string;

@@ -7,6 +7,7 @@ import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-c
 export default defineConfig({
   entry: {
     index: 'src/index.ts',
+    gezapp: 'src/gezapp-entry.ts',
     'bin/gezeld': 'src/bin/gezeld.ts',
     // Spawned as a separate process by sandbox-convert.ts to parse untrusted
     // attachments in isolation; must exist as its own file, not bundled into
@@ -47,6 +48,7 @@ export default defineConfig({
   dts: {
     entry: {
       index: 'src/index.ts',
+      gezapp: 'src/gezapp-entry.ts',
       handboek: 'src/handboek/engine.ts',
     },
   },

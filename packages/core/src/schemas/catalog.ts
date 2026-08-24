@@ -2444,6 +2444,44 @@ export const GezappRegistrySchema = z.object({
 });
 export type GezappRegistry = z.infer<typeof GezappRegistrySchema>;
 
+/**
+ * The root `gezapp.json` of an AI App *source folder* — the authoring form
+ * of a `.gezapp`. Deliberately minimal: everything heavy on the packed
+ * manifest (`items` + per-item sha256, `createdAt`, `dependencies`,
+ * `minGezelVersion`, `signature`) is derived from the `items/` tree by
+ * `gezel app pack`, never hand-maintained. Strict so an author who pastes
+ * packed-manifest fields here gets told they are generated, not silently
+ * carried stale.
+ */
+export const GezappSourceManifestSchema = z
+  .object({
+    format: z.literal('gezel-ai-app-source'),
+    schemaVersion: z.literal(1),
+    /**
+     * Optional entry pin. When the items tree holds exactly one project
+     * type, both fields are discovered; `version` defaults to the highest
+     * semver version folder present.
+     */
+    entry: z
+      .object({
+        projectType: z.string().regex(IdRegex).optional(),
+        version: z.string().regex(SemverRegex).optional(),
+      })
+      .optional(),
+    /** Defaults to the entry project type identity's maintainer at pack time. */
+    publisher: z
+      .object({
+        name: z.string().min(1),
+        url: z.string().url().optional(),
+      })
+      .optional(),
+  })
+  .strict();
+export type GezappSourceManifest = z.infer<typeof GezappSourceManifestSchema>;
+
+/** The source-folder manifest filename beside `items/`. */
+export const GEZAPP_SOURCE_MANIFEST_FILENAME = 'gezapp.json';
+
 // ─ .gezmodel portable model bundles ──────────────────────────────────────
 //
 // A `.gezmodel` is a renamed ZIP containing a root `manifest.json`, the

@@ -5958,6 +5958,21 @@ export const WorkspaceIndexStatusSchema = z.object({
        */
       skipped: z.number().int().nonnegative().optional(),
       /**
+       * The skipped files themselves (capped), so the status popover can name
+       * what was dropped and why instead of showing a bare count the user
+       * cannot act on. `reason` is the last recorded failure; absent for files
+       * capped out before the reason was recorded.
+       */
+      skippedFiles: z
+        .array(
+          z.object({
+            path: z.string(),
+            attempts: z.number().int().nonnegative(),
+            reason: z.string().optional(),
+          }),
+        )
+        .optional(),
+      /**
        * Images/audio still awaiting an AI shadow description. The drive works
        * this tier BEFORE summaries, so a fresh full scan can be busy here
        * while `summarized` sits still — surface it, or the scan looks stuck.

@@ -14,6 +14,33 @@ import { pickChatPlaceholder } from './chat-placeholder.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 /**
+ * How recent an ordinary thread has to be for opening the project to resume
+ * it. Past this the conversation is not one the user is still having, so the
+ * default reverts to the voorman on a blank thread; the older thread stays
+ * one click away in the switcher.
+ */
+const RESUMABLE_THREAD_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Is this thread one the user is still in the middle of?
+ *
+ * Freshness is measured from the last HUMAN turn, not `lastActivityAt`: a
+ * meester nudge or a gezel's own follow-up bumps the session hours after the
+ * user stopped reading it, and a thread nobody ever spoke in (a machine-
+ * started reaction thread) is not a conversation to resume at all.
+ */
+function isResumableThread(thread: LastThread | null | undefined, now: number): boolean {
+  if (!thread?.lastHumanActivityAt) return false;
+  const at = Date.parse(thread.lastHumanActivityAt);
+  return Number.isFinite(at) && now - at < RESUMABLE_THREAD_MAX_AGE_MS;
+}
+
+interface LastThread {
+  gezelId: string;
+  lastHumanActivityAt?: string;
+}
+
+/**
  * Per-project chat with the people doing the work. The selected gezel scopes
  * the composer; the timeline shows ALL chats in the project interleaved.
  * Project membership is summarized in Project Settings, while the To-line
@@ -59,17 +86,19 @@ export function ProjectChat({
   // biome-ignore lint/correctness/useExhaustiveDependencies: project.id is the deliberate reset trigger.
   useEffect(() => {
     setSelectedId('');
+    setStartFreshFor(null);
   }, [project.id]);
 
-  // Whose conversation was live most recently in this project. The default
-  // recipient lands there so every surface agrees on arrival: the timeline's
-  // most recent thread, the thread picker, the To line, and the composer
-  // placeholder all point at the same gezel. A project with no threads yet
-  // falls back to the voorman — the natural first conversation.
+  // Whose conversation was live most recently in this project. A FRESH one
+  // takes the default recipient so every surface agrees on arrival: the
+  // timeline's most recent thread, the thread picker, the To line, and the
+  // composer placeholder all point at the same gezel. A stale one — or no
+  // threads at all — falls back to the voorman, the natural first
+  // conversation.
   // `undefined` = probe in flight (hold the default), `null` = no threads.
-  const [lastActiveGezelId, setLastActiveGezelId] = useState<string | null | undefined>(undefined);
+  const [lastThread, setLastThread] = useState<LastThread | null | undefined>(undefined);
   useEffect(() => {
-    setLastActiveGezelId(undefined);
+    setLastThread(undefined);
     let cancelled = false;
     api
       .listChatSessions({ projectId: project.id })
@@ -79,33 +108,62 @@ export function ProjectChat({
         // steer the ordinary project composer toward whichever gezel most
         // recently worked a night-shift step.
         const live = r.sessions.filter((s) => !s.archived && !s.taskRef);
-        setLastActiveGezelId(live[0]?.gezelId ?? null);
+        const newest = live[0];
+        setLastThread(
+          newest
+            ? {
+                gezelId: newest.gezelId,
+                ...(newest.lastHumanActivityAt
+                  ? { lastHumanActivityAt: newest.lastHumanActivityAt }
+                  : {}),
+              }
+            : null,
+        );
       })
       .catch(() => {
-        if (!cancelled) setLastActiveGezelId(null);
+        if (!cancelled) setLastThread(null);
       });
     return () => {
       cancelled = true;
     };
   }, [project.id]);
 
+  // The gezel whose initial thread selection must stay blank, because
+  // nothing fresh was there to resume. Cleared the moment the user picks a
+  // recipient themselves — an explicit choice gets the ordinary
+  // newest-thread behavior.
+  const [startFreshFor, setStartFreshFor] = useState<string | null>(null);
+  const selectGezel = useCallback((gezelId: string) => {
+    setStartFreshFor(null);
+    setSelectedId(gezelId);
+  }, []);
+
   // Pick only the initial To-line target here. After that, the To-line picker
-  // owns every recipient change. Prefer the most recent live conversation,
-  // then the project lead, then the first explicitly assigned gezel, and
-  // finally the first available gezel.
+  // owns every recipient change. Prefer a conversation the user is still in
+  // the middle of, then the project lead, then the first explicitly assigned
+  // gezel, and finally the first available gezel.
   useEffect(() => {
     if (selectedId) return;
-    if (lastActiveGezelId === undefined) return;
-    const lastActive =
-      lastActiveGezelId && gezels.some((g) => g.id === lastActiveGezelId) ? lastActiveGezelId : '';
+    if (lastThread === undefined) return;
+    const resumable =
+      isResumableThread(lastThread, Date.now()) &&
+      lastThread &&
+      gezels.some((g) => g.id === lastThread.gezelId)
+        ? lastThread.gezelId
+        : '';
     const lead = gezels.find((gezel) => gezel.id === project.voormanGezelId)?.id ?? '';
     const assigned =
       (project.gezelIds ?? [])
         .map((id) => gezels.find((gezel) => gezel.id === id)?.id)
         .find(Boolean) ?? '';
-    const next = lastActive || lead || assigned || gezels[0]?.id || '';
-    if (next) setSelectedId(next);
-  }, [selectedId, lastActiveGezelId, gezels, project.voormanGezelId, project.gezelIds]);
+    const next = resumable || lead || assigned || gezels[0]?.id || '';
+    if (!next) return;
+    setSelectedId(next);
+    // Nothing fresh to resume: open on a blank thread instead of reviving
+    // whatever this gezel last talked about days ago. Their older threads
+    // stay in the switcher.
+    setStartFreshFor(resumable ? null : next);
+  }, [selectedId, lastThread, gezels, project.voormanGezelId, project.gezelIds]);
 
   const selected = gezels.find((g) => g.id === selectedId);
 
@@ -125,7 +183,8 @@ export function ProjectChat({
           selectedGezel={selected}
           recipientGezels={gezels}
           isVoorman={selected.id === project.voormanGezelId}
-          onSelectGezel={setSelectedId}
+          startFreshThread={selected.id === startFreshFor}
+          onSelectGezel={selectGezel}
           compact={compact}
         />
       )}
@@ -138,6 +197,7 @@ function ProjectChatBody({
   selectedGezel,
   recipientGezels,
   isVoorman,
+  startFreshThread,
   onSelectGezel,
   compact,
 }: {
@@ -145,6 +205,8 @@ function ProjectChatBody({
   selectedGezel: GezelSummary;
   recipientGezels: GezelSummary[];
   isVoorman: boolean;
+  /** Open on a blank thread: the parent found nothing fresh to resume. */
+  startFreshThread: boolean;
   onSelectGezel: (gezelId: string) => void;
   compact: boolean;
 }) {
@@ -534,6 +596,9 @@ function ProjectChatBody({
                       onSessionIdChange={(next) => setSessionId(next ?? '')}
                       onNewSessionCreated={() => setChatFocusRequestKey((key) => key + 1)}
                       refreshKey={sessionRefreshKey}
+                      // A task scope is always an explicit navigation, so it
+                      // keeps the ordinary newest-thread pick.
+                      autoPickNewest={!startFreshThread || Boolean(activeTask)}
                     />
                   }
                 />

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
 import { displayThreadTitle, plainTitle } from './session-labels.js';
+import { useFinishedTaskRefs } from './useFinishedTaskRefs.js';
 
 /**
  * How stale an *idle* thread may be and still earn a pill. A day covers a
@@ -105,6 +106,11 @@ function applyLatestMessage(
  * `taskPills` and never appears as a separate thread pill, regardless of
  * state. The newest independent thread is always retained, even after the
  * ordinary recency window, so the bar keeps one route back to unscoped chat.
+ *
+ * `finishedTaskRefs` names tasks that have settled (`complete`/`canceled`).
+ * Their chats are history — reachable from the task itself — so an idle one
+ * earns no glanceable slot. A thread that is streaming, errored, or pinned
+ * keeps its pill either way: state and the composer's focus outrank tidiness.
  */
 export function selectThreadPills(input: {
   sessions: ChatSessionSummary[];
@@ -113,6 +119,7 @@ export function selectThreadPills(input: {
   now: number;
   pinnedSessionId?: string | undefined;
   groupedTaskRefs?: ReadonlySet<string>;
+  finishedTaskRefs?: ReadonlySet<string>;
   /** Session id → the tool it is running, from the live event stream. */
   liveTools?: ReadonlyMap<string, string>;
   maxInline?: number;
@@ -128,6 +135,7 @@ export function selectThreadPills(input: {
     now,
     pinnedSessionId,
     groupedTaskRefs,
+    finishedTaskRefs,
     liveTools,
     maxInline = MAX_INLINE_THREAD_PILLS,
   } = input;
@@ -175,6 +183,9 @@ export function selectThreadPills(input: {
     }
 
     const pinned = pinnedSessionId !== undefined && s.id === pinnedSessionId;
+    // A settled task's chat is a record of finished work, not a live thread.
+    if (state === 'idle' && !pinned && s.taskRef && finishedTaskRefs?.has(s.taskRef)) continue;
+
     const latestIndependent = s.id === latestIndependentSessionId;
     if (state === 'idle' && !pinned && !latestIndependent) {
       if (now - activityMs(s.lastActivityAt) > RECENT_THREAD_WINDOW_MS) continue;
@@ -419,6 +430,21 @@ export function useChatThreadPills({
     };
   }, [projectId, gezelId, loadSessions, noteLiveTool]);
 
+  // Task-scoped threads whose task isn't in the caller's active set: each one
+  // is either still live (draft/paused) or already settled, and only the
+  // settled ones should lose their pill. The active ones never reach here —
+  // they own a unified task pill instead — so this stays a handful of refs.
+  const unresolvedTaskRefs = useMemo(() => {
+    const refs = new Set<string>();
+    for (const s of sessions) {
+      if (s.archived || !s.taskRef) continue;
+      if (groupedTaskRefs?.has(s.taskRef)) continue;
+      refs.add(s.taskRef);
+    }
+    return [...refs];
+  }, [sessions, groupedTaskRefs]);
+  const finishedTaskRefs = useFinishedTaskRefs(unresolvedTaskRefs, refreshKey);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: ageTick is the recompute trigger for the recency cutoff — the body reads Date.now(), not the tick.
   const { pills, overflow, taskPills } = useMemo(
     () =>
@@ -429,9 +455,19 @@ export function useChatThreadPills({
         now: Date.now(),
         pinnedSessionId,
         liveTools,
+        finishedTaskRefs,
         ...(groupedTaskRefs ? { groupedTaskRefs } : {}),
       }),
-    [sessions, inflight, errored, liveTools, pinnedSessionId, groupedTaskRefs, ageTick],
+    [
+      sessions,
+      inflight,
+      errored,
+      liveTools,
+      pinnedSessionId,
+      groupedTaskRefs,
+      finishedTaskRefs,
+      ageTick,
+    ],
   );
 
   return { pills, overflow, taskPills, loading };

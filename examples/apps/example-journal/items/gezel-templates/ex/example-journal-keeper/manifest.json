@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "kind": "gezel-template",
+  "id": "example-journal-keeper",
+  "name": "Journalkeeper",
+  "description": "Keeps a running journal from what the user tells them.",
+  "role": "Journalkeeper",
+  "tags": ["example"],
+  "maintainer": {
+    "name": "Gezel"
+  },
+  "license": "MIT",
+  "yankedVersions": []
+}

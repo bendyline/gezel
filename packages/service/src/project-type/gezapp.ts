@@ -215,9 +215,157 @@ function mergeDependency(
   });
 }
 
+// Internal helpers shared with the source-folder authoring module
+// (`gezapp-source.ts`); renamed on export so their scope stays clear.
+export {
+  KIND_DIR as GEZAPP_KIND_DIR,
+  hashItemFiles as hashGezappItemFiles,
+  isSafeArchivePath as isSafeGezappArchivePath,
+  itemPath as gezappItemPath,
+};
+
+export interface GezappDependencyLockInputs {
+  /** The entry project type's toolset references. */
+  typeToolsets: Array<{
+    id: string;
+    need: 'required' | 'suggested';
+    sourceId?: string;
+    reason?: string;
+  }>;
+  /** Embedded gezel-template payloads (suggested tools/model become optional locks). */
+  roles: Array<{ id: string; suggestedTools: string[]; suggestedModel?: string }>;
+  /** Embedded craftbook payloads — template items and type-private docs alike. */
+  craftbooks: Array<{
+    id: string;
+    toolsets?: Array<{
+      toolsetId: string;
+      optional?: boolean;
+      sourceId?: string;
+      minVersion?: string;
+      reason?: string;
+    }>;
+    connectors?: Array<{ typeId: string; optional?: boolean; sourceId?: string; reason?: string }>;
+  }>;
+}
+
+/**
+ * Resolve the exact external dependency lock for a package's contents.
+ * Collects problems (a required dependency missing from the catalog, a
+ * version conflict, a semver floor violation) instead of throwing so the
+ * source-folder validator can report all of them; `packGezapp` keeps its
+ * historical throw-on-first behavior on top.
+ */
+export async function resolveGezappDependencyLock(
+  catalog: CatalogService,
+  inputs: GezappDependencyLockInputs,
+): Promise<{ dependencies: GezappDependency[]; problems: string[] }> {
+  const dependencies = new Map<string, GezappDependency>();
+  const problems: string[] = [];
+  const add = async (
+    input: Omit<GezappDependency, 'version'> & { minVersion?: string },
+  ): Promise<void> => {
+    try {
+      mergeDependency(dependencies, await resolveExternalDependency(catalog, input));
+    } catch (err) {
+      problems.push(errorMessage(err));
+    }
+  };
+  for (const ref of inputs.typeToolsets) {
+    await add({
+      kind: 'toolset',
+      id: ref.id,
+      required: ref.need === 'required',
+      ...(ref.sourceId ? { sourceId: ref.sourceId } : {}),
+      ...(ref.reason ? { reason: ref.reason } : {}),
+    });
+  }
+  for (const role of inputs.roles) {
+    for (const id of role.suggestedTools) {
+      await add({ kind: 'toolset', id, required: false, reason: `Suggested by role ${role.id}` });
+    }
+    if (role.suggestedModel) {
+      await add({
+        kind: 'chat-model',
+        id: role.suggestedModel,
+        required: false,
+        reason: `Suggested by role ${role.id}`,
+      });
+    }
+  }
+  for (const craftbook of inputs.craftbooks) {
+    for (const ref of craftbook.toolsets ?? []) {
+      await add({
+        kind: 'toolset',
+        id: ref.toolsetId,
+        required: !ref.optional,
+        ...(ref.sourceId ? { sourceId: ref.sourceId } : {}),
+        ...(ref.minVersion ? { minVersion: ref.minVersion } : {}),
+        ...(ref.reason ? { reason: ref.reason } : {}),
+      });
+    }
+    for (const ref of craftbook.connectors ?? []) {
+      await add({
+        kind: 'connector-type',
+        id: ref.typeId,
+        required: !ref.optional,
+        ...(ref.sourceId ? { sourceId: ref.sourceId } : {}),
+        ...(ref.reason ? { reason: ref.reason } : {}),
+      });
+    }
+  }
+  return {
+    dependencies: [...dependencies.values()].sort((a, b) =>
+      `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`),
+    ),
+    problems,
+  };
+}
+
 export interface PackGezappResult {
   buffer: Buffer;
   manifest: GezappManifest;
+}
+
+/**
+ * Assemble the final `.gezapp` bytes from package-relative item files
+ * (`items/…`) plus the root manifest, enforcing the archive safety rules
+ * and quotas shared with `readGezapp`.
+ */
+export function buildGezappArchive(
+  files: ReadonlyMap<string, Buffer>,
+  manifest: GezappManifest,
+): Buffer {
+  const zip = new AdmZip();
+  const archiveNames = new Set<string>();
+  let expandedBytes = 0;
+  const addArchiveFile = (path: string, content: Buffer): void => {
+    if (!isSafeArchivePath(path)) throw new Error(`unsafe catalog path for .gezapp: ${path}`);
+    const portableName = path.toLowerCase();
+    if (archiveNames.has(portableName)) {
+      throw new Error(`duplicate or case-colliding .gezapp file: ${path}`);
+    }
+    if (content.length > GEZAPP_MAX_FILE_BYTES) {
+      throw new Error(`${path} exceeds ${GEZAPP_MAX_FILE_BYTES} byte file limit`);
+    }
+    if (archiveNames.size + 1 > GEZAPP_MAX_FILES) {
+      throw new Error(`.gezapp exceeds ${GEZAPP_MAX_FILES} file limit`);
+    }
+    expandedBytes += content.length;
+    if (expandedBytes > GEZAPP_MAX_UNCOMPRESSED_BYTES) {
+      throw new Error(`.gezapp exceeds ${GEZAPP_MAX_UNCOMPRESSED_BYTES} byte expanded limit`);
+    }
+    archiveNames.add(portableName);
+    zip.addFile(path, content);
+  };
+  for (const [path, content] of [...files.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    addArchiveFile(path, content);
+  }
+  addArchiveFile('manifest.json', Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`));
+  const buffer = zip.toBuffer();
+  if (buffer.length > GEZAPP_MAX_ARCHIVE_BYTES) {
+    throw new Error(`.gezapp exceeds ${GEZAPP_MAX_ARCHIVE_BYTES} byte archive limit`);
+  }
+  return buffer;
 }
 
 /** Build one exact-version AI App package from a catalog project type. */
@@ -300,109 +448,47 @@ export async function packGezapp(
     addTarget(detail);
   }
 
-  const dependencies = new Map<string, GezappDependency>();
-  for (const ref of typeDetail.manifest.toolsets) {
-    mergeDependency(
-      dependencies,
-      await resolveExternalDependency(deps.catalog, {
-        kind: 'toolset',
-        id: ref.id,
-        required: ref.need === 'required',
-        ...(ref.sourceId ? { sourceId: ref.sourceId } : {}),
-        ...(ref.reason ? { reason: ref.reason } : {}),
-      }),
-    );
-  }
-
+  const lockInputs: GezappDependencyLockInputs = {
+    typeToolsets: typeDetail.manifest.toolsets,
+    roles: [],
+    craftbooks: [],
+  };
   for (const target of targets.values()) {
     if (target.detail.manifest.kind === 'gezel-template') {
-      for (const id of target.detail.manifest.suggestedTools) {
-        mergeDependency(
-          dependencies,
-          await resolveExternalDependency(deps.catalog, {
-            kind: 'toolset',
-            id,
-            required: false,
-            reason: `Suggested by role ${target.id}`,
-          }),
-        );
-      }
-      const modelId = target.detail.manifest.suggestedModel;
-      if (modelId) {
-        mergeDependency(
-          dependencies,
-          await resolveExternalDependency(deps.catalog, {
-            kind: 'chat-model',
-            id: modelId,
-            required: false,
-            reason: `Suggested by role ${target.id}`,
-          }),
-        );
-      }
+      lockInputs.roles.push({
+        id: target.id,
+        suggestedTools: target.detail.manifest.suggestedTools,
+        ...(target.detail.manifest.suggestedModel
+          ? { suggestedModel: target.detail.manifest.suggestedModel }
+          : {}),
+      });
     }
     if (target.detail.manifest.kind === 'craftbook-template') {
-      for (const ref of target.detail.manifest.toolsets ?? []) {
-        mergeDependency(
-          dependencies,
-          await resolveExternalDependency(deps.catalog, {
-            kind: 'toolset',
-            id: ref.toolsetId,
-            required: !ref.optional,
-            ...(ref.sourceId ? { sourceId: ref.sourceId } : {}),
-            ...(ref.minVersion ? { minVersion: ref.minVersion } : {}),
-            ...(ref.reason ? { reason: ref.reason } : {}),
-          }),
-        );
-      }
-      for (const ref of target.detail.manifest.connectors ?? []) {
-        mergeDependency(
-          dependencies,
-          await resolveExternalDependency(deps.catalog, {
-            kind: 'connector-type',
-            id: ref.typeId,
-            required: !ref.optional,
-            ...(ref.sourceId ? { sourceId: ref.sourceId } : {}),
-            ...(ref.reason ? { reason: ref.reason } : {}),
-          }),
-        );
-      }
+      lockInputs.craftbooks.push({
+        id: target.id,
+        ...(target.detail.manifest.toolsets ? { toolsets: target.detail.manifest.toolsets } : {}),
+        ...(target.detail.manifest.connectors
+          ? { connectors: target.detail.manifest.connectors }
+          : {}),
+      });
     }
   }
+  const lock = await resolveGezappDependencyLock(deps.catalog, lockInputs);
+  if (lock.problems.length > 0) throw new Error(lock.problems[0]);
 
-  const zip = new AdmZip();
-  const archiveNames = new Set<string>();
-  let expandedBytes = 0;
-  const addArchiveFile = (path: string, content: Buffer): void => {
-    if (!isSafeArchivePath(path)) throw new Error(`unsafe catalog path for .gezapp: ${path}`);
-    const portableName = path.toLowerCase();
-    if (archiveNames.has(portableName)) {
-      throw new Error(`duplicate or case-colliding .gezapp file: ${path}`);
-    }
-    if (content.length > GEZAPP_MAX_FILE_BYTES) {
-      throw new Error(`${path} exceeds ${GEZAPP_MAX_FILE_BYTES} byte file limit`);
-    }
-    if (archiveNames.size + 1 > GEZAPP_MAX_FILES) {
-      throw new Error(`.gezapp exceeds ${GEZAPP_MAX_FILES} file limit`);
-    }
-    expandedBytes += content.length;
-    if (expandedBytes > GEZAPP_MAX_UNCOMPRESSED_BYTES) {
-      throw new Error(`.gezapp exceeds ${GEZAPP_MAX_UNCOMPRESSED_BYTES} byte expanded limit`);
-    }
-    archiveNames.add(portableName);
-    zip.addFile(path, content);
-  };
+  const files = new Map<string, Buffer>();
   const items: GezappItem[] = [];
   let minGezelVersion: string | undefined;
   for (const target of targets.values()) {
-    const files = await collectTargetFiles(deps.catalog, target);
-    for (const file of files) {
-      addArchiveFile(`items/${itemPath(target)}/${file.rel}`, file.content);
+    const collected = await collectTargetFiles(deps.catalog, target);
+    for (const file of collected) {
+      files.set(`items/${itemPath(target)}/${file.rel}`, file.content);
     }
     items.push({
       kind: target.kind,
       id: target.id,
       version: target.version,
-      sha256: hashItemFiles(files),
+      sha256: hashItemFiles(collected),
     });
     minGezelVersion = maxMinGezelVersion(minGezelVersion, target.detail.manifest.minGezelVersion);
   }
@@ -418,20 +504,13 @@ export async function packGezapp(
     ...(minGezelVersion ? { minGezelVersion } : {}),
     signature: { status: 'unsigned' },
     items,
-    dependencies: [...dependencies.values()].sort((a, b) =>
-      `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`),
-    ),
+    dependencies: lock.dependencies,
     provenance: {
       source: typeDetail.sourceId,
       ...(opts.exportedFromProject ? { exportedFromProject: opts.exportedFromProject } : {}),
     },
   });
-  addArchiveFile('manifest.json', Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`));
-  const buffer = zip.toBuffer();
-  if (buffer.length > GEZAPP_MAX_ARCHIVE_BYTES) {
-    throw new Error(`.gezapp exceeds ${GEZAPP_MAX_ARCHIVE_BYTES} byte archive limit`);
-  }
-  return { buffer, manifest };
+  return { buffer: buildGezappArchive(files, manifest), manifest };
 }
 
 export interface ReadGezappResult {

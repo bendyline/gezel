@@ -22,6 +22,7 @@ export default defineConfig({
     'handboek-export': 'src/handboek-export.ts',
     'knowledge-command': 'src/knowledge-command.ts',
     'app-command': 'src/app-command.ts',
+    'app-author-command': 'src/app-author-command.ts',
   },
   format: ['esm'],
   dts: false,

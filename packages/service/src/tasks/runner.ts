@@ -437,6 +437,7 @@ export class TaskRunner {
         reason: 'dispatching',
         gezelId: dispatch.gezelId,
         stepId: dispatch.stepId,
+        sessionId: dispatch.sessionId,
         since: new Date(dispatch.dispatchedAt).toISOString(),
       });
     }

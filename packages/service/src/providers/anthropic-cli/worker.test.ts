@@ -86,24 +86,36 @@ process.stdin.on('end', () => process.exit(0));
 interface NoopHooksControl {
   hooks: WorkerTurnHooks;
   deltas: string[];
+  reasoning: string[];
   usages: TurnUsage[];
   toolCalls: ToolCallEvent[];
+  toolArgs: Array<{ name: string; chunk: string }>;
+  warnings: string[];
   heartbeats: Array<string | undefined>;
 }
 
 function makeNoopHooks(): NoopHooksControl {
   const deltas: string[] = [];
+  const reasoning: string[] = [];
   const usages: TurnUsage[] = [];
   const toolCalls: ToolCallEvent[] = [];
+  const toolArgs: Array<{ name: string; chunk: string }> = [];
+  const warnings: string[] = [];
   const heartbeats: Array<string | undefined> = [];
   return {
     deltas,
+    reasoning,
     usages,
     toolCalls,
+    toolArgs,
+    warnings,
     heartbeats,
     hooks: {
       emitDelta: (t) => deltas.push(t),
+      emitReasoningDelta: (t) => reasoning.push(t),
       emitHeartbeat: (label) => heartbeats.push(label),
+      emitToolArgsDelta: (name, chunk) => toolArgs.push({ name, chunk }),
+      emitWarning: (message) => warnings.push(message),
       emitUsage: (u) => usages.push(u),
       onToolCall: (ev) => {
         toolCalls.push(ev);
@@ -580,5 +592,318 @@ describe('ClaudeWorker — system prompt delivery', () => {
     expect(capturedArgs[idx + 1]).toBe('You are a test gezel.');
 
     await worker.shutdown();
+  });
+});
+
+/** `stream_event` envelope for a partial-message delta. */
+function se(event: unknown) {
+  return { type: 'stream_event', event, session_id: 'cli-sess-1' };
+}
+
+function resultEvent(text: string) {
+  return {
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    result: text,
+    duration_ms: 5,
+    usage: { input_tokens: 1, output_tokens: 1 },
+    session_id: 'cli-sess-1',
+  };
+}
+
+describe('ClaudeWorker — thinking stream', () => {
+  it('routes thinking text to the reasoning channel, never to visible deltas', async () => {
+    const binPath = await makeFakeClaude({
+      sessionId: 'cli-sess-1',
+      turns: [
+        [
+          se({
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'thinking_delta', thinking: 'Let me calculate: ' },
+          }),
+          se({
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'thinking_delta', thinking: '17 * 23 = 391.' },
+          }),
+          se({
+            type: 'content_block_delta',
+            index: 1,
+            delta: { type: 'text_delta', text: '391, not prime.' },
+          }),
+          resultEvent('391, not prime.'),
+        ],
+      ],
+    });
+    const w = buildWorker({ binPath });
+    await w.start();
+    const h = makeNoopHooks();
+    const text = await w.sendTurn('go', h.hooks, { timeoutMs: 10_000 });
+    await w.shutdown();
+
+    expect(h.reasoning.join('')).toBe('Let me calculate: 17 * 23 = 391.');
+    // The trace must not reach the committed reply body — it would round-trip
+    // into the transcript and out through the OpenAI-compat forwarders.
+    expect(h.deltas.join('')).toBe('391, not prime.');
+    expect(text).toBe('391, not prime.');
+  });
+
+  it('reports block-granularity thinking when partial streaming is unavailable', async () => {
+    const binPath = await makeFakeClaude({
+      sessionId: 'cli-sess-1',
+      turns: [
+        [
+          {
+            type: 'assistant',
+            message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'pondering' }] },
+          },
+          {
+            type: 'assistant',
+            message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
+          },
+          resultEvent('done'),
+        ],
+      ],
+    });
+    const w = buildWorker({ binPath });
+    await w.start();
+    const h = makeNoopHooks();
+    await w.sendTurn('go', h.hooks, { timeoutMs: 10_000 });
+    await w.shutdown();
+
+    expect(h.reasoning.join('')).toBe('pondering');
+    expect(h.deltas.join('')).toBe('done');
+  });
+
+  it('suppresses block-granularity thinking once partial deltas are in play', async () => {
+    const binPath = await makeFakeClaude({
+      sessionId: 'cli-sess-1',
+      turns: [
+        [
+          se({
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'thinking_delta', thinking: 'abc' },
+          }),
+          // The CLI also emits the completed block as an `assistant` snapshot.
+          // Counting both would double the trace.
+          {
+            type: 'assistant',
+            message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'abc' }] },
+          },
+          resultEvent(''),
+        ],
+      ],
+    });
+    const w = buildWorker({ binPath });
+    await w.start();
+    const h = makeNoopHooks();
+    await w.sendTurn('go', h.hooks, { timeoutMs: 10_000 });
+    await w.shutdown();
+
+    expect(h.reasoning.join('')).toBe('abc');
+  });
+
+  it('carries the CLI thinking-token estimate into the heartbeat label', async () => {
+    const binPath = await makeFakeClaude({
+      sessionId: 'cli-sess-1',
+      turns: [
+        [
+          {
+            type: 'system',
+            subtype: 'thinking_tokens',
+            estimated_tokens: 9,
+            estimated_tokens_delta: 9,
+          },
+          {
+            type: 'system',
+            subtype: 'thinking_tokens',
+            estimated_tokens: 61,
+            estimated_tokens_delta: 52,
+          },
+          se({
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'thinking_delta', thinking: 'hmm' },
+          }),
+          resultEvent('ok'),
+        ],
+      ],
+    });
+    const w = buildWorker({ binPath });
+    await w.start();
+    const h = makeNoopHooks();
+    await w.sendTurn('go', h.hooks, { timeoutMs: 10_000 });
+    await w.shutdown();
+
+    // Summed from the deltas, so the total stays right whether or not the
+    // cumulative counter restarts on a new assistant message.
+    expect(h.heartbeats).toContain('thinking · 61 tokens');
+  });
+});
+
+describe('ClaudeWorker — streamed tool arguments', () => {
+  it('withholds short argument sets and streams a long one', async () => {
+    const longContent = 'x'.repeat(600);
+    const binPath = await makeFakeClaude({
+      sessionId: 'cli-sess-1',
+      turns: [
+        [
+          // A trivial Read — complete well under the visibility threshold,
+          // and superseded by its own finished tool row moments later.
+          se({
+            type: 'content_block_start',
+            index: 0,
+            content_block: { type: 'tool_use', id: 'toolu_a', name: 'Read' },
+          }),
+          se({
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'input_json_delta', partial_json: '{"file_path":"/tmp/a.txt"}' },
+          }),
+          se({ type: 'content_block_stop', index: 0 }),
+          // A large write — the only thing happening for its whole duration.
+          se({
+            type: 'content_block_start',
+            index: 1,
+            content_block: { type: 'tool_use', id: 'toolu_b', name: 'mcp__gezel__write_artifact' },
+          }),
+          se({
+            type: 'content_block_delta',
+            index: 1,
+            delta: { type: 'input_json_delta', partial_json: `{"content":"${longContent}` },
+          }),
+          se({
+            type: 'content_block_delta',
+            index: 1,
+            delta: { type: 'input_json_delta', partial_json: '"}' },
+          }),
+          se({ type: 'content_block_stop', index: 1 }),
+          resultEvent('done'),
+        ],
+      ],
+    });
+    const w = buildWorker({ binPath });
+    await w.start();
+    const h = makeNoopHooks();
+    await w.sendTurn('go', h.hooks, { timeoutMs: 10_000 });
+    await w.shutdown();
+
+    expect(h.toolArgs.some((a) => a.name === 'Read')).toBe(false);
+    const written = h.toolArgs.filter((a) => a.name === 'write_artifact');
+    expect(written.length).toBeGreaterThan(0);
+    // The MCP wire prefix is stripped so the UI's verb map resolves.
+    expect(written[0]?.name).toBe('write_artifact');
+    // Nothing buffered below the threshold is lost — the flush carries it.
+    expect(written.map((a) => a.chunk).join('')).toContain(longContent);
+  });
+
+  it('ignores argument fragments for a block it never saw open', async () => {
+    const binPath = await makeFakeClaude({
+      sessionId: 'cli-sess-1',
+      turns: [
+        [
+          se({
+            type: 'content_block_delta',
+            index: 7,
+            delta: { type: 'input_json_delta', partial_json: 'x'.repeat(900) },
+          }),
+          resultEvent('done'),
+        ],
+      ],
+    });
+    const w = buildWorker({ binPath });
+    await w.start();
+    const h = makeNoopHooks();
+    await w.sendTurn('go', h.hooks, { timeoutMs: 10_000 });
+    await w.shutdown();
+
+    expect(h.toolArgs).toEqual([]);
+  });
+
+  it('does not carry a tool name across the index reset between messages', async () => {
+    const binPath = await makeFakeClaude({
+      sessionId: 'cli-sess-1',
+      turns: [
+        [
+          se({
+            type: 'content_block_start',
+            index: 1,
+            content_block: { type: 'tool_use', id: 'toolu_a', name: 'Write' },
+          }),
+          se({ type: 'content_block_stop', index: 1 }),
+          // Next assistant message restarts indices; index 1 is now a text
+          // block, so any fragment claiming that index is not Write's.
+          se({
+            type: 'content_block_delta',
+            index: 1,
+            delta: { type: 'input_json_delta', partial_json: 'y'.repeat(900) },
+          }),
+          resultEvent('done'),
+        ],
+      ],
+    });
+    const w = buildWorker({ binPath });
+    await w.start();
+    const h = makeNoopHooks();
+    await w.sendTurn('go', h.hooks, { timeoutMs: 10_000 });
+    await w.shutdown();
+
+    expect(h.toolArgs).toEqual([]);
+  });
+});
+
+describe('ClaudeWorker — rate limit warnings', () => {
+  it('stays silent while the subscription is allowed', async () => {
+    const binPath = await makeFakeClaude({
+      sessionId: 'cli-sess-1',
+      turns: [
+        [
+          {
+            type: 'rate_limit_event',
+            rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour' },
+          },
+          resultEvent('ok'),
+        ],
+      ],
+    });
+    const w = buildWorker({ binPath });
+    await w.start();
+    const h = makeNoopHooks();
+    await w.sendTurn('go', h.hooks, { timeoutMs: 10_000 });
+    await w.shutdown();
+
+    expect(h.warnings).toEqual([]);
+  });
+
+  it('surfaces a warning when the window is no longer allowed', async () => {
+    const binPath = await makeFakeClaude({
+      sessionId: 'cli-sess-1',
+      turns: [
+        [
+          {
+            type: 'rate_limit_event',
+            rate_limit_info: {
+              status: 'rejected',
+              rateLimitType: 'five_hour',
+              isUsingOverage: true,
+            },
+          },
+          resultEvent('ok'),
+        ],
+      ],
+    });
+    const w = buildWorker({ binPath });
+    await w.start();
+    const h = makeNoopHooks();
+    await w.sendTurn('go', h.hooks, { timeoutMs: 10_000 });
+    await w.shutdown();
+
+    expect(h.warnings).toHaveLength(1);
+    expect(h.warnings[0]).toContain('five-hour');
+    expect(h.warnings[0]).toContain('rejected');
+    expect(h.warnings[0]).toContain('overage');
   });
 });

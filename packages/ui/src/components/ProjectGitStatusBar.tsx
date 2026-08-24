@@ -7,7 +7,7 @@ import type {
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { DropdownChevron, Popover, Select } from '../primitives/index.js';
+import { DropdownChevron, Popover, Select, Tooltip } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { statusChipPhrase } from './github/gitCopy.js';
 import { GIT_CHANGED_EVENT, useGitSync } from './github/useGitSync.js';
@@ -762,6 +762,16 @@ export function ProjectGitStatusBar({
   // Fallback for older daemons that don't send the combined counter.
   const searchReady = enrichment?.searchReady ?? enrichment?.embedded ?? 0;
   const aiCoverage = enrichment ? coveragePercent(searchReady, enrichment.eligible) : null;
+  const skippedCount = enrichment?.skipped ?? 0;
+  // The named files behind the skipped count. Older daemons send the count
+  // only, so the hover degrades to no tooltip rather than an empty one.
+  const skippedFiles = enrichment?.skippedFiles ?? [];
+  const unlistedSkipped = Math.max(0, skippedCount - skippedFiles.length);
+  const summaryCoverageLabel = enrichment
+    ? `${enrichment.summarized} of ${enrichment.eligible} files${
+        skippedCount > 0 ? ` · ${skippedCount} skipped after repeated failures` : ''
+      }`
+    : '';
   // The bar aggregates the totality of indexing (summaries + embeddings +
   // quality review); `aiCoverage` keeps feeding the caption's search-ready
   // count, which is a narrower question than "is all the work done".
@@ -1086,10 +1096,46 @@ export function ProjectGitStatusBar({
                   <div>
                     <dt>AI summaries</dt>
                     <dd>
-                      {enrichment.summarized} of {enrichment.eligible} files
-                      {(enrichment.skipped ?? 0) > 0
-                        ? ` · ${enrichment.skipped} skipped after repeated failures`
-                        : ''}
+                      {skippedFiles.length > 0 ? (
+                        <Tooltip.Provider delayDuration={150}>
+                          <Tooltip.Root>
+                            <Tooltip.Trigger asChild>
+                              <button type="button" className="project-index-skipped-trigger">
+                                {summaryCoverageLabel}
+                              </button>
+                            </Tooltip.Trigger>
+                            <Tooltip.Content side="left">
+                              <div className="project-index-skipped-tip">
+                                <strong>Skipped after repeated failures</strong>
+                                <ul>
+                                  {skippedFiles.map((file) => (
+                                    <li key={file.path}>
+                                      <span className="project-index-skipped-path">
+                                        {file.path}
+                                      </span>
+                                      {file.reason && (
+                                        <span className="project-index-skipped-reason">
+                                          {file.reason}
+                                        </span>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ul>
+                                {unlistedSkipped > 0 && (
+                                  <span className="project-index-skipped-more">
+                                    and {unlistedSkipped} more
+                                  </span>
+                                )}
+                                <span className="project-index-skipped-note">
+                                  Each retries once its content changes.
+                                </span>
+                              </div>
+                            </Tooltip.Content>
+                          </Tooltip.Root>
+                        </Tooltip.Provider>
+                      ) : (
+                        summaryCoverageLabel
+                      )}
                     </dd>
                   </div>
                 )}

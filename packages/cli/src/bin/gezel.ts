@@ -900,6 +900,15 @@ const loadAppCommand = async (): Promise<AppCommandModule> => {
   return (await import(appModule)) as AppCommandModule;
 };
 
+type AppAuthorCommandModule = typeof import('../app-author-command.js');
+const loadAppAuthorCommand = async (): Promise<AppAuthorCommandModule> => {
+  // Separate seam from app-command: the authoring module carries the
+  // TypeScript compiler (script diagnostics), which daemon-backed app
+  // subcommands must never pay for.
+  const appAuthorModule = '../app-author-command.js';
+  return (await import(appAuthorModule)) as AppAuthorCommandModule;
+};
+
 appCmd
   .command('add <file>')
   .description('Install a .gezapp AI App (idempotent; a newer version upgrades)')
@@ -1050,6 +1059,45 @@ appCmd
   .action(async (appId: string) => {
     const { runAppSetEnabled } = await loadAppCommand();
     await runAppSetEnabled(await connectOwned(cliGlobals()), appId, false);
+  });
+
+appCmd
+  .command('new <id>')
+  .description('Scaffold a minimal AI App source folder')
+  .option('--dir <parent>', 'parent directory (defaults to the current folder)')
+  .option('--with-page', 'include an Output page wired to the example tool')
+  .action(async (id: string, opts: { dir?: string; withPage?: boolean }) => {
+    const { runAppNew } = await loadAppAuthorCommand();
+    await runAppNew(id, opts);
+  });
+
+appCmd
+  .command('validate <target>')
+  .description('Validate an AI App source folder or .gezapp file (no daemon needed)')
+  .option('--json', 'print the machine-readable findings')
+  .action(async (target: string, opts: { json?: boolean }) => {
+    const { runAppValidate } = await loadAppAuthorCommand();
+    await runAppValidate(target, opts);
+  });
+
+appCmd
+  .command('pack <folder>')
+  .description('Validate and pack an AI App source folder into a .gezapp')
+  .option('-o, --out <file>', 'output path (defaults to <appId>-<version>.gezapp)')
+  .option('--json', 'print the machine-readable result')
+  .action(async (folder: string, opts: { out?: string; json?: boolean }) => {
+    const { runAppPack } = await loadAppAuthorCommand();
+    await runAppPack(folder, opts);
+  });
+
+appCmd
+  .command('schemas')
+  .description('The JSON Schemas an AI App author codes against, rendered from this build')
+  .option('--out <dir>', 'write the schema files into a directory')
+  .option('--json', 'print one combined JSON object')
+  .action(async (opts: { out?: string; json?: boolean }) => {
+    const { runAppSchemas } = await loadAppAuthorCommand();
+    await runAppSchemas(opts);
   });
 
 const task = program.command('task').description('Manage tasks');

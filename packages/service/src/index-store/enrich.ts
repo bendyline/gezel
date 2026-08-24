@@ -760,6 +760,9 @@ export async function enrichFile(
   //    file's content is unchanged but its enrichment was invalidated.
   let summary = store.getSummary(file.hash) ?? '';
   let blockedByPolicy = false;
+  // Why the summarize came back empty, recorded on the gate row so the status
+  // popover can say what went wrong and not just that something did.
+  let failureReason: string | undefined;
   // The target refused to make room (another engine mid-turn). Nothing was
   // asked of a model, so no attempt budget may be spent on this file.
   let targetUnavailable = false;
@@ -778,6 +781,7 @@ export async function enrichFile(
       if (isAbortError(err)) throw err;
       summary = '';
       if (err instanceof CompletionBlockedError) blockedByPolicy = true;
+      failureReason = err instanceof Error ? err.message : String(err);
     }
     if (summary) {
       store.upsertSummary({
@@ -890,12 +894,18 @@ export async function enrichFile(
     } else if (blockedByPolicy) {
       // Deterministic refusal with no fallback engine — retrying the same
       // content is pure waste, so consume the whole attempt budget at once.
-      store.markEnrichSkipped(file.hash);
+      store.markEnrichSkipped(
+        file.hash,
+        failureReason ?? 'the provider blocked this file’s content (policy filter)',
+      );
       log.warn(
         `skipping ${file.path}: the provider blocked its content (policy filter) — it stays unsummarized until its content changes`,
       );
     } else {
-      const attempts = store.markEnrichAttempt(file.hash);
+      const attempts = store.markEnrichAttempt(
+        file.hash,
+        failureReason ?? 'the summarizer returned nothing for this file',
+      );
       if (attempts >= MAX_ENRICH_ATTEMPTS) {
         log.warn(
           `giving up on ${file.path} after ${attempts} failed summarize attempts — it stays unsummarized until its content changes`,

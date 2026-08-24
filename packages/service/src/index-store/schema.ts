@@ -146,7 +146,8 @@ CREATE INDEX IF NOT EXISTS idx_chunks_file ON chunks (collection_id, file_path);
 CREATE TABLE IF NOT EXISTS enrichments (
   content_hash TEXT PRIMARY KEY,
   embedded_at TEXT,
-  attempts INTEGER DEFAULT 0
+  attempts INTEGER DEFAULT 0,
+  last_error TEXT
 );
 
 -- CLIP-style whole-image embeddings (v12). Keyed by content hash, NOT chunk
@@ -435,7 +436,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts_history
 // v12: image_vectors re-keyed by content_hash (old chunk_id table had zero
 // writers — dropped in place), plus image_embed_state and the face-lane
 // tables (face_vectors/face_clusters/face_state). Additive otherwise.
-const SCHEMA_VERSION = 12;
+// v13: enrichments.last_error — why a hash stopped being retried, so the
+// status popover can name the file AND the reason instead of a bare count.
+const SCHEMA_VERSION = 13;
 
 /**
  * Add a column to an existing table if it isn't already present. SQLite has no
@@ -487,6 +490,9 @@ export function applySchema(
   addColumnIfMissing(db, 'imports', 'bindings', 'TEXT');
   // v7 → v8: capped summarize retries on the enrichment gate.
   addColumnIfMissing(db, 'enrichments', 'attempts', 'INTEGER DEFAULT 0');
+  // v12 → v13: the last failure reason behind a capped-out hash. No backfill —
+  // older rows keep a null reason and the status popover names the file only.
+  addColumnIfMissing(db, 'enrichments', 'last_error', 'TEXT');
   // v8 → v9: lifecycle actions require a stable identity. Older/partial
   // scanner rows may have left fingerprint null even though the column
   // existed from the first security schema.

@@ -1,0 +1,19 @@
+{
+  "id": "session-prep",
+  "name": "Session prep",
+  "description": "Prepare the next reading-circle meeting: pick passages, then draft discussion questions.",
+  "steps": [
+    {
+      "id": "pick-passages",
+      "name": "Pick passages",
+      "prompt": "Read circle.json for the current book and chapter, and the most recent notes/ file if one exists. Choose two or three passages from the current stretch of the book that reward discussion, and write them into prep/passages.md with a line on why each earns its place.",
+      "next": "draft-questions"
+    },
+    {
+      "id": "draft-questions",
+      "name": "Draft questions",
+      "prompt": "From prep/passages.md, draft five discussion questions in prep/questions.md. Make each question specific to this book and this stretch of it; a question that fits any novel is not done. End with one lighter opener the host can start with.",
+      "terminal": true
+    }
+  ]
+}

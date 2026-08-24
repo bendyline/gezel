@@ -771,9 +771,10 @@ export type NewTaskStep = z.infer<typeof NewTaskStepSchema>;
  * Why a task that is `active` and assigned still has not produced any
  * chat. Ordered from "moving shortly" to "parked on purpose".
  *
- * `'dispatching'` is the narrow window after the runner handed the
- * handoff to a provider but before the first turn persists a message —
- * the work IS starting, it just has nothing to show yet.
+ * `'dispatching'` means the runner has handed the handoff to a provider.
+ * It holds for as long as that session is in flight, not just until the
+ * first message lands — so a surface that reads it as "nothing to show
+ * yet" must check `sessionId` against what it can already see.
  */
 export const TaskWaitReasonSchema = z.enum([
   'dispatching',
@@ -805,6 +806,15 @@ export const TaskWaitStateSchema = z.object({
   /** Gezel the queued step belongs to. */
   gezelId: z.string(),
   stepId: z.string().optional(),
+  /**
+   * The handoff session the dispatch is running in. Only ever set for
+   * `'dispatching'` — queued work has no session yet. It is what lets a
+   * chat surface tell "handed off, nothing to show" apart from "handed
+   * off and already talking": a brand-new handoff session's live rows
+   * carry no `taskRef` until the first canonical refresh, so the session
+   * id is the only correlation available while the turn is in flight.
+   */
+  sessionId: z.string().optional(),
   /** ISO time the handoff went onto the queue. */
   since: z.string(),
 });
