@@ -4,6 +4,7 @@ import { join, sep } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   PathSafetyError,
+  assertNoTemplatePlaceholderPath,
   intoWorkspaceRelative,
   isPathInside,
   isReservedWindowsName,
@@ -225,5 +226,39 @@ describe('isPathInside', () => {
     // different would misfile a user's content as living outside their home.
     const caseInsensitive = process.platform === 'darwin' || process.platform === 'win32';
     expect(isPathInside('/home/FOO/bar', '/home/foo')).toBe(caseInsensitive);
+  });
+});
+
+describe('assertNoTemplatePlaceholderPath', () => {
+  it('refuses a path that still carries an unresolved launch token', () => {
+    // Wild-caught on task gezel/7: the gate was checking a literal
+    // `{{task.dir}}/…` path, so the assignee wrote its deliverable there to
+    // make the check match. It cannot — the gate rejects on configuration
+    // before any check runs — and the drawer kept a directory named
+    // `{{task.dir}}`.
+    expect(() => assertNoTemplatePlaceholderPath('{{task.dir}}/security/scope.md')).toThrow(
+      PathSafetyError,
+    );
+    try {
+      assertNoTemplatePlaceholderPath('{{task.dir}}/security/scope.md');
+    } catch (err) {
+      expect((err as PathSafetyError).code).toBe('template-placeholder');
+      expect((err as PathSafetyError).message).toContain('{{task.dir}}');
+      expect((err as PathSafetyError).message).toContain('tasks/<task number>');
+    }
+  });
+
+  it('names every distinct token once', () => {
+    expect(() => assertNoTemplatePlaceholderPath('{{a}}/{{b}}/{{a}}/x.md')).toThrow(
+      /\{\{a\}\} \{\{b\}\}/,
+    );
+  });
+
+  it('leaves ordinary paths alone, braces included', () => {
+    // Single braces are legal filename characters, and a lone `{` is not a
+    // template token — flagging either would refuse real files.
+    expect(() => assertNoTemplatePlaceholderPath('tasks/7/security/scope.md')).not.toThrow();
+    expect(() => assertNoTemplatePlaceholderPath('src/{index}.ts')).not.toThrow();
+    expect(() => assertNoTemplatePlaceholderPath('notes/a{b}c.md')).not.toThrow();
   });
 });

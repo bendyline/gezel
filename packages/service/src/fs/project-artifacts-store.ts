@@ -10,7 +10,7 @@ import {
 } from '@bendyline/gezel/paths';
 import { writeFileAtomic } from './atomic.js';
 import { mimeTypeForFilename } from './media-types.js';
-import { safeJoin } from './safe-paths.js';
+import { assertNoTemplatePlaceholderPath, safeJoin } from './safe-paths.js';
 import {
   type WalkDirResult,
   listDirEntries,
@@ -389,6 +389,7 @@ export class ProjectArtifactsStore {
     const base = this.projectArtifactsDir(id);
     const cleaned = normalizeArtifactPath(filePath);
     if (!cleaned) throw new Error('empty artifact path');
+    assertNoTemplatePlaceholderPath(cleaned);
     if (opts?.initiatedByGezel && isProtectedConnectorCorpusPath(cleaned)) {
       throw new ConnectorCorpusWriteDeniedError();
     }
@@ -413,6 +414,7 @@ export class ProjectArtifactsStore {
     const base = this.projectArtifactsDir(id);
     const cleaned = normalizeArtifactPath(filePath);
     if (!cleaned) throw new Error('empty artifact path');
+    assertNoTemplatePlaceholderPath(cleaned);
     if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
     if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
     const full = safeJoin(base, cleaned);
@@ -437,6 +439,7 @@ export class ProjectArtifactsStore {
     const base = this.projectArtifactsDir(id);
     const cleaned = normalizeArtifactPath(folderPath);
     if (!cleaned) throw new Error('empty artifact path');
+    assertNoTemplatePlaceholderPath(cleaned);
     if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
     if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
     const full = safeJoin(base, cleaned);
@@ -460,6 +463,7 @@ export class ProjectArtifactsStore {
     const from = normalizeArtifactPath(fromPath);
     const to = normalizeArtifactPath(toPath);
     if (!from || !to) throw new Error('the artifacts root cannot be renamed');
+    assertNoTemplatePlaceholderPath(to);
     if (isReservedShadowArtifactPath(from) || isReservedShadowArtifactPath(to)) {
       throw new ShadowPathWriteDeniedError();
     }

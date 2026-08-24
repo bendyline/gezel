@@ -29,3 +29,49 @@ describe('ProjectArtifactsStore recursive listings', () => {
     }
   });
 });
+
+describe('ProjectArtifactsStore unresolved-template paths', () => {
+  it('refuses a write whose path is a literal {{token}}, on every sink', async () => {
+    // The drawer is runtime output space: a `{{…}}` segment here is always an
+    // unsubstituted launch parameter, never a filename anyone meant.
+    const home = await mkdtemp(join(tmpdir(), 'gezel-artifact-template-test-'));
+    try {
+      const artifacts = new ProjectArtifactsStore({
+        home,
+        touchProject: async () => {},
+      });
+      const bad = '{{task.dir}}/security/review-scope.md';
+      await expect(artifacts.writeProjectArtifact('p', bad, 'x')).rejects.toThrow(
+        /unresolved template placeholder/,
+      );
+      await expect(
+        artifacts.writeProjectArtifactBinary('p', bad, Buffer.from('x')),
+      ).rejects.toThrow(/unresolved template placeholder/);
+      await expect(artifacts.createProjectArtifactFolder('p', '{{task.dir}}')).rejects.toThrow(
+        /unresolved template placeholder/,
+      );
+
+      await artifacts.writeProjectArtifact('p', 'tasks/7/scope.md', 'real');
+      await expect(
+        artifacts.renameProjectArtifactPath('p', 'tasks/7/scope.md', bad),
+      ).rejects.toThrow(/unresolved template placeholder/);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('still writes the resolved path', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'gezel-artifact-template-ok-test-'));
+    try {
+      const artifacts = new ProjectArtifactsStore({
+        home,
+        touchProject: async () => {},
+      });
+      await artifacts.writeProjectArtifact('p', 'tasks/7/security/review-scope.md', 'real');
+      const read = await artifacts.readProjectArtifact('p', 'tasks/7/security/review-scope.md');
+      expect(read).toContain('real');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});

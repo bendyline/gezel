@@ -220,12 +220,55 @@ function hasUnsafePortableSegment(relPath: string): boolean {
   });
 }
 
+export type PathSafetyCode =
+  | 'path-traversal'
+  | 'symlink-escape'
+  | 'reserved-name'
+  | 'empty-path'
+  | 'template-placeholder';
+
+/**
+ * Same token shape `interpolateStepsContext` substitutes, so this sees
+ * exactly what launch interpolation left behind.
+ */
+const TEMPLATE_PLACEHOLDER = /\{\{\s*[a-zA-Z0-9_.-]+\s*\}\}/g;
+
+/** Distinct `{{param}}` tokens still present in a path. */
+export function unresolvedTemplatePlaceholders(p: string): string[] {
+  return [...new Set(p.match(TEMPLATE_PLACEHOLDER) ?? [])];
+}
+
+/**
+ * Refuse a write whose path still carries an unresolved `{{param}}` token.
+ *
+ * `step-gate.ts` already refuses to EVALUATE a gate holding one, because a
+ * literal `{{…}}` handed to a path resolver can never match. Nothing refused
+ * the mirror-image act: writing a file AT that literal path. On task gezel/7
+ * a security gezel read its own paused gate, correctly diagnosed that
+ * `workPath` had never resolved, and then "worked around" it by writing the
+ * deliverable a second time to `{{task.dir}}/security/review-scope.md` — a
+ * real directory named `{{task.dir}}` that the drawer now owned forever. It
+ * could not have helped: the gate rejects on configuration before any check
+ * runs, so no file placement satisfies it.
+ *
+ * The token was always meant to be substituted, so refusing costs a caller
+ * nothing real — the exception is a gezel deliberately authoring a template
+ * tree (cookiecutter/copier scaffolding uses `{{…}}` directory names), which
+ * is why the workspace applies this only to model-initiated writes and the
+ * user's own hand stays unrestricted.
+ */
+export function assertNoTemplatePlaceholderPath(p: string): void {
+  const hits = unresolvedTemplatePlaceholders(p);
+  if (hits.length === 0) return;
+  throw new PathSafetyError(
+    `unresolved template placeholder in path: ${hits.join(' ')} — writing "${p}" would create a folder literally named that. The launch parameter behind the token was never substituted; use the real path it stands for (a task's working folder is tasks/<task number>). If a gate is asking for this path, the gate is misconfigured and no file can satisfy it.`,
+    'template-placeholder',
+  );
+}
+
 export class PathSafetyError extends Error {
-  readonly code: 'path-traversal' | 'symlink-escape' | 'reserved-name' | 'empty-path';
-  constructor(
-    message: string,
-    code: 'path-traversal' | 'symlink-escape' | 'reserved-name' | 'empty-path',
-  ) {
+  readonly code: PathSafetyCode;
+  constructor(message: string, code: PathSafetyCode) {
     super(message);
     this.name = 'PathSafetyError';
     this.code = code;

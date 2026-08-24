@@ -492,3 +492,29 @@ describe('workspace tools tolerate an absolute path under the workspace', () => 
     );
   });
 });
+
+describe('workspace writes refuse an unresolved launch token in the path', () => {
+  // A gezel that "works around" a gate checking a literal `{{task.dir}}/…`
+  // path by writing there produces a real directory named `{{task.dir}}` and
+  // satisfies nothing (task gezel/7). Gezel-initiated writes only — a user
+  // scaffolding a cookiecutter tree means those braces literally.
+  it('refuses a gezel-initiated write to a literal {{token}} path', async () => {
+    await expect(
+      store.writeProjectWorkspaceFile(projectId, '{{task.dir}}/scope.md', 'x', {
+        gezelId: 'g1',
+      }),
+    ).rejects.toThrow(/unresolved template placeholder/);
+  });
+
+  it('leaves a user-initiated write alone', async () => {
+    await store.writeProjectWorkspaceFile(projectId, '{{cookiecutter.name}}/README.md', 'x');
+    expect(await readBack('{{cookiecutter.name}}/README.md')).toBe('x');
+  });
+
+  it('still writes the resolved path for a gezel', async () => {
+    await store.writeProjectWorkspaceFile(projectId, 'tasks/7/scope.md', 'real', {
+      gezelId: 'g1',
+    });
+    expect(await readBack('tasks/7/scope.md')).toBe('real');
+  });
+});

@@ -199,7 +199,12 @@ import {
   type ProjectArtifactSliceResult,
   ProjectArtifactsStore,
 } from './project-artifacts-store.js';
-import { intoWorkspaceRelative, resolveInside, safeJoin } from './safe-paths.js';
+import {
+  assertNoTemplatePlaceholderPath,
+  intoWorkspaceRelative,
+  resolveInside,
+  safeJoin,
+} from './safe-paths.js';
 import { TaskFilesStore } from './task-files-store.js';
 import {
   type WalkDirResult,
@@ -4635,6 +4640,19 @@ export class Store {
     }
     if (opts?.initiatedByGezel && managedWritePolicy === 'deny') {
       return { ok: false, reason: 'disabled-by-project', workingDir: resolved.dir };
+    }
+    // Every workspace-mutating sink already hands its target path here, which
+    // makes this the one place a model-initiated write can be checked for an
+    // unresolved `{{param}}` token before it becomes a directory on disk. It
+    // THROWS rather than returning a denial on purpose: the denial shape is
+    // for policy failures ("the path was fine, the project says no"), and the
+    // next line of every caller can already surface a `PathSafetyError` from
+    // `resolveInside`. Gezel-initiated only — a user scaffolding a
+    // cookiecutter tree by hand means those braces literally.
+    if (opts?.initiatedByGezel) {
+      for (const p of Array.isArray(opts.path) ? opts.path : [opts.path ?? '']) {
+        assertNoTemplatePlaceholderPath(p);
+      }
     }
     return {
       ok: true,
