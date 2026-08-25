@@ -475,6 +475,12 @@ export async function ensureWarmModel(opts: {
  * Clone-copying keeps the trial isolated while remaining cheap on APFS and
  * other copy-on-write filesystems; COPYFILE_FICLONE falls back to an ordinary
  * copy where reflinks are unavailable.
+ *
+ * Linking the folder instead fails as `refusing a linked or non-directory
+ * model-store path`, which the daemon reports as "no model is installed yet"
+ * and the trial only surfaces ~300 s later as a `chat-stalled` soft-timeout —
+ * five minutes downstream of the real cause, and it hits every model, so a
+ * whole sweep measures nothing.
  */
 export async function linkModelIntoTrial(opts: {
   cacheRoot: string;
