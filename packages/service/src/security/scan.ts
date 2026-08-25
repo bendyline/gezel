@@ -13,7 +13,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { builtinModules } from 'node:module';
-import { createLogger, nowIso } from '@bendyline/gezel';
+import { type SecurityScanProvenance, createLogger, nowIso } from '@bendyline/gezel';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { DependencyInput, IndexStore } from '../index-store/index-store.js';
 import {
@@ -40,7 +40,35 @@ export interface SecurityScanResult {
   };
   dependencies: number;
   advisories: number;
+  sca: SecurityScanProvenance['sca'];
 }
+
+/** Lockfile basenames worth reporting in SCA provenance — which of these
+ *  exist tells the reader what an advisory count could have covered. */
+const LOCKFILE_BASENAMES = new Set([
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'bun.lockb',
+  'bun.lock',
+]);
+const MAX_LOCKFILES = 20;
+
+/**
+ * Grammar ids whose import specifiers name npm packages. Other grammars'
+ * specifiers (python's `asyncio`, C++'s `<cstdint>`, Go/Rust paths) are valid
+ * edges for the import map but are NOT npm dependencies — sweeping them minted
+ * inventory rows like `cstdint` and `windows.h` with ecosystem 'npm'.
+ * vue/svelte have no wired grammar today (symbols.ts GRAMMAR_FILE) so they
+ * emit no import rows; add them here if grammars land.
+ */
+const NPM_IMPORT_LANGS = new Set(['javascript', 'jsx', 'typescript', 'tsx']);
+
+/** npm package-name shape (registry rules: lowercase, URL-safe). Applied to
+ *  import-swept names only — manifest-declared names are authoritative and
+ *  bypass it. Kills template-literal remnants and other junk specifiers. */
+const NPM_NAME_RE = /^(@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/;
 
 /** Reduce a raw module specifier to its package name, or null when it's a
  *  relative path or a node builtin (not a third-party dependency). */
@@ -119,11 +147,15 @@ async function buildDependencyInventory(
 ): Promise<DependencyInput[]> {
   const manifest = await readManifestDeps(store, workspaceDir);
 
-  // Union of declared deps and packages actually imported from source.
+  // Union of declared deps and packages actually imported from source — but
+  // only from grammars whose specifiers name npm packages, and only names
+  // that could exist on the registry.
+  const langByPath = new Map(store.allFiles().map((f) => [f.path, f.lang]));
   const names = new Set<string>(manifest.keys());
-  for (const { raw } of store.allImports()) {
+  for (const { srcPath, raw } of store.allImports()) {
+    if (!NPM_IMPORT_LANGS.has(langByPath.get(srcPath) ?? '')) continue;
     const name = packageNameOf(raw);
-    if (name) names.add(name);
+    if (name && NPM_NAME_RE.test(name)) names.add(name);
   }
 
   const deps: DependencyInput[] = [];
@@ -171,13 +203,19 @@ export async function runSecurityScan(
     engines.push('gitleaks');
   }
   // Prefer osv-scanner; fall back to npm audit only when osv isn't present.
-  const advisories = tools.osvScanner
-    ? await runOsvScanner(workspaceDir)
-    : tools.npm
-      ? await runNpmAudit(workspaceDir)
-      : [];
-  if (advisories.length) engines.push(tools.osvScanner ? 'osv-scanner' : 'npm-audit');
-  for (const a of advisories)
+  // `advisories === null` means no SCA measurement happened (no tool, or the
+  // tool produced no usable output) — deliberately distinct from "measured
+  // clean" so the presentation layer never renders an unearned zero.
+  const scaEngine = tools.osvScanner ? 'osv-scanner' : tools.npm ? 'npm-audit' : null;
+  const advisories =
+    scaEngine === 'osv-scanner'
+      ? await runOsvScanner(workspaceDir)
+      : scaEngine === 'npm-audit'
+        ? await runNpmAudit(workspaceDir)
+        : null;
+  const measured = advisories !== null;
+  if (measured && scaEngine) engines.push(scaEngine);
+  for (const a of advisories ?? [])
     advisoryByName.set(a.name, { ids: a.advisoryIds, sev: a.maxSeverity });
 
   // Merge advisories into the inventory; surface advisory-only packages too.
@@ -202,11 +240,32 @@ export async function runSecurityScan(
   }
 
   store.replaceDependencies(deps);
-  store.setMeta('security_scanned_at', nowIso());
+  const scannedAt = nowIso();
+  const lockfiles = store
+    .allFiles()
+    .map((f) => f.path)
+    .filter((p) => LOCKFILE_BASENAMES.has(p.slice(p.lastIndexOf('/') + 1)))
+    .slice(0, MAX_LOCKFILES);
+  // `engine` records the tool ATTEMPTED (even when it produced nothing) so
+  // the renderer can distinguish "npm audit ran but measured nothing" from
+  // "no SCA tool on this host"; `measured` is the truth bit either way.
+  const sca: SecurityScanProvenance['sca'] = { engine: scaEngine, measured, lockfiles };
+  store.setMeta('security_scanned_at', scannedAt);
+  store.setMeta(
+    'security_scan_provenance',
+    JSON.stringify({
+      scannedAt,
+      engines,
+      toolsAvailable: tools,
+      sca,
+    } satisfies SecurityScanProvenance),
+  );
 
   const advisoryCount = deps.filter((d) => (d.advisoryIds?.length ?? 0) > 0).length;
   log.info(
-    `[security] scan complete: engines=${engines.join(',')} deps=${deps.length} advisories=${advisoryCount}`,
+    `[security] scan complete: engines=${engines.join(',')} deps=${deps.length} advisories=${
+      measured ? advisoryCount : 'unmeasured'
+    }`,
   );
 
   return {
@@ -215,5 +274,6 @@ export async function runSecurityScan(
     findingCounts: store.securityFindingCounts(),
     dependencies: deps.length,
     advisories: advisoryCount,
+    sca,
   };
 }

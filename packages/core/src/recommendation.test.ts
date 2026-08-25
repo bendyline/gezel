@@ -286,6 +286,17 @@ describe('isRecommendedModel (the one shared gate)', () => {
   it('admits media manifests, which declare no supportsTools field at all', () => {
     expect(isRecommendedModel({ recoScore: 10, licenseClass: 'open' })).toBe(true);
   });
+
+  it('never recommends a retired catalog entry', () => {
+    expect(
+      isRecommendedModel({
+        recoScore: 99,
+        licenseClass: 'open',
+        supportsTools: true,
+        tags: ['Retired'],
+      }),
+    ).toBe(false);
+  });
 });
 
 describe('hardware hints (C2 — advisory only)', () => {

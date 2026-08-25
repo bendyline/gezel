@@ -13,6 +13,7 @@
 import {
   type GezelGrowthState,
   type GrowthSignals,
+  KeyedLock,
   createLogger,
   xpForLevel,
 } from '@bendyline/gezel';
@@ -42,6 +43,7 @@ export class GrowthEngine {
   private readonly history: HistoryManager;
   private readonly oneShot: CompactOneShot;
   private readonly announce: ((gezelId: string, toLevel: number) => Promise<void>) | undefined;
+  private readonly gezelLocks = new KeyedLock();
 
   constructor(opts: GrowthEngineOptions) {
     this.store = opts.store;
@@ -63,6 +65,25 @@ export class GrowthEngine {
    * refreshes).
    */
   async refresh(
+    gezelId: string,
+    opts: { allowKlerk: boolean; createPending?: boolean },
+  ): Promise<GezelGrowthState> {
+    return this.runExclusive(gezelId, () => this.refreshLocked(gezelId, opts));
+  }
+
+  /**
+   * Serialize growth-state mutations for one gezel. `growth.json` writes are
+   * whole-file last-writer-wins, so every read-modify-write — refresh here,
+   * accept/decline/trait-removal in the routes — must run under this lock.
+   * Unserialized, the background refresh the sheet GET fires could write
+   * back a `pendingLevelUp` the user consumed while it computed,
+   * resurrecting the level-up for a second accept.
+   */
+  runExclusive<T>(gezelId: string, fn: () => Promise<T>): Promise<T> {
+    return this.gezelLocks.run(gezelId, fn);
+  }
+
+  private async refreshLocked(
     gezelId: string,
     opts: { allowKlerk: boolean; createPending?: boolean },
   ): Promise<GezelGrowthState> {

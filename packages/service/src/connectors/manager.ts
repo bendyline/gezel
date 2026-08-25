@@ -20,7 +20,7 @@ import type {
   ProjectConnectorBinding,
   ProjectDetail,
 } from '@bendyline/gezel';
-import { backoffDelayMs, createLogger, retryTransient } from '@bendyline/gezel';
+import { KeyedLock, backoffDelayMs, createLogger, retryTransient } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { writeFileAtomic } from '../fs/atomic.js';
 import { resolveInside } from '../fs/safe-paths.js';
@@ -32,7 +32,6 @@ import { validateConnectorConfig } from './config-validate.js';
 import { McpConnectorAdapter } from './drivers/mcp.js';
 import { ScriptConnectorAdapter } from './drivers/script.js';
 import { SpectralConnectorAdapter } from './drivers/spectral.js';
-import { ProjectLocks } from './lock.js';
 import {
   type LongLivedExchange,
   type OAuthEndpoints,
@@ -409,7 +408,7 @@ export interface ConnectorManagerOptions {
   /** For `script`-driver connectors + script-normalize. */
   scriptRunner?: import('../scripts/runner.js').ScriptRunner;
   /** Shared with the action manager so commits can't race syncs. */
-  locks?: ProjectLocks;
+  locks?: KeyedLock;
 }
 
 export interface BindConnectorInput {
@@ -471,7 +470,7 @@ interface PendingConnectorOAuth {
 const RATE_LIMIT_BACKOFF_MS = [60_000, 300_000, 900_000, 1_800_000] as const;
 
 export class ConnectorManager {
-  private readonly locks: ProjectLocks;
+  private readonly locks: KeyedLock;
   /** In-flight OAuth link sessions keyed by `state` (10-min TTL). */
   private readonly pendingOAuth = new Map<string, PendingConnectorOAuth>();
   /**
@@ -482,7 +481,7 @@ export class ConnectorManager {
   private readonly backoff = new Map<string, { consecutive: number; nextEligibleAt: number }>();
 
   constructor(private readonly opts: ConnectorManagerOptions) {
-    this.locks = opts.locks ?? new ProjectLocks();
+    this.locks = opts.locks ?? new KeyedLock();
   }
 
   /** When the binding's rate-limit backoff expires (undefined = eligible now). */

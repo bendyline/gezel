@@ -8,6 +8,7 @@ import {
   type DiffpackRecord,
   DiffpackRecordSchema,
   type DiffpackStatus,
+  KeyedLock,
   createLogger,
   isActiveDiffpackStatus,
   nowIso,
@@ -73,7 +74,7 @@ export class DiffpackDriftedError extends Error {
  * Boekwachter issue's `stale` bit makes.
  */
 export class DiffpackManager {
-  private readonly locks = new Map<string, Promise<unknown>>();
+  private readonly locks = new KeyedLock();
   /** Packs this process has already confirmed a record for. */
   private readonly known = new Set<string>();
   readonly drafts: DiffpackDraftStore;
@@ -315,7 +316,7 @@ export class DiffpackManager {
       deletions: record.files.reduce((n, f) => n + f.deletions, 0),
     };
     if (record.status !== 'drafting') return out;
-    const task = await this.deps.tasks.getByRef(record.taskRef).catch(() => null);
+    const task = await this.deps.tasks.getByRef?.(record.taskRef).catch(() => null);
     if (!task) return out;
     out.taskStatus = task.status;
     if (task.status === 'paused') out.needsAttention = true;
@@ -540,7 +541,7 @@ export class DiffpackManager {
     // a location that exists identically whether the run edited in place or
     // drafted this pack — so the pack summary falls back there rather than
     // requiring content to know about `diffpacks/<id>/notes.md`.
-    const task = await this.deps.tasks.getByRef(record.taskRef).catch(() => null);
+    const task = await this.deps.tasks.getByRef?.(record.taskRef).catch(() => null);
     if (!task) return '';
     return firstProseLine(`${task.artifactDir ?? `tasks/${task.num}`}/fix-notes.md`);
   }
@@ -602,22 +603,12 @@ export class DiffpackManager {
     projectId: string,
     fn: (packs: DiffpackRecord[]) => Promise<{ record: T; changed: boolean }>,
   ): Promise<T> {
-    const previous = this.locks.get(projectId) ?? Promise.resolve();
-    const run = previous.then(async () => {
+    return this.locks.run(projectId, async () => {
       const packs = await this.readRecords(projectId);
       const { record, changed } = await fn(packs);
       if (changed) await this.writeRecords(projectId, packs);
       return record;
     });
-    const tracked: Promise<unknown> = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.locks.set(projectId, tracked);
-    void tracked.then(() => {
-      if (this.locks.get(projectId) === tracked) this.locks.delete(projectId);
-    });
-    return run;
   }
 }
 

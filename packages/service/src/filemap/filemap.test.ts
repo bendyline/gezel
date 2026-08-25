@@ -60,6 +60,20 @@ describe('extractImportEdges', () => {
     expect(byRaw.get('./side-effect.js')).toEqual([]);
   });
 
+  it('keeps constant template specifiers but drops interpolated ones', async () => {
+    const code = [
+      'const a = await import(`lodash`);',
+      'const b = await import(`./mods/${name}.js`);',
+      'const c = require(`${base}/plugin`);',
+    ].join('\n');
+    const edges = await extractImportEdges('typescript', code);
+    expect(edges).not.toBeNull();
+    const set = new Set(edges!.map((e) => e.raw));
+    expect(set.has('lodash')).toBe(true);
+    // Interpolated templates ship unresolvable `${…}` text — no edge at all.
+    expect(set.size).toBe(1);
+  });
+
   it('records re-export bindings and treats export * as whole-module', async () => {
     const code = ["export { a, b as c } from './x.js';", "export * from './y.js';"].join('\n');
     const edges = await extractImportEdges('typescript', code);

@@ -14,6 +14,7 @@ import type {
   ProjectFileEntry,
   ProjectGitHub,
 } from '@bendyline/gezel';
+import { KeyedLock } from '@bendyline/gezel';
 import {
   projectInternalGithubDir,
   projectStorageDir,
@@ -191,7 +192,7 @@ export class ConflictsRemainError extends Error {
 }
 
 export class GitManager {
-  private readonly locks = new Map<string, Promise<unknown>>();
+  private readonly locks = new KeyedLock();
 
   constructor(
     private readonly home: string,
@@ -1993,20 +1994,7 @@ export class GitManager {
   }
 
   private async withLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
-    const prev = this.locks.get(projectId);
-    const next = (prev ?? Promise.resolve()).then(fn, fn);
-    // Store a settled-safe tail: callers still see `next` reject, but the
-    // copy held in the map never does — otherwise every failing operation
-    // surfaces a second, unhandled rejection from the lock chain.
-    const tail = next.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.locks.set(projectId, tail);
-    void tail.then(() => {
-      if (this.locks.get(projectId) === tail) this.locks.delete(projectId);
-    });
-    return next;
+    return this.locks.run(projectId, fn);
   }
 }
 

@@ -14,6 +14,7 @@ import {
   resolveEnrichCompletion,
 } from './enrich.js';
 import type { FileRecord, IndexStore } from './index-store.js';
+import { isSpuriousTruncationClaim } from './review-claims.js';
 import type { ResolvedRubric } from './rubrics.js';
 
 /**
@@ -112,6 +113,13 @@ export function buildReviewPrompt(
     w && w.count > 1
       ? `\nThis is part ${w.index + 1} of ${w.count} — lines ${w.lineStart}-${w.lineEnd} of a ${w.totalLines}-line file. Review ONLY the lines shown; judge health for this part alone.`
       : '';
+  // Trailing marker at the cut point — the header 100+ lines up is exactly
+  // what small models forget by the time they see the text stop mid-construct
+  // and conclude the FILE is truncated (live false 2/10s came from this).
+  const continuation =
+    w && w.lineEnd < w.totalLines
+      ? `\n(end of part ${w.index + 1} of ${w.count} — the file continues after line ${w.lineEnd}; this cut point is NOT the end of the file, do not report truncation)`
+      : '';
   const prompt = [
     `You are reviewing one file for a code-intelligence index. Score it against this rubric:${partHeader}`,
     '',
@@ -132,7 +140,7 @@ export function buildReviewPrompt(
     `${kindRules}${diagram}`,
     '',
     `File: ${file.path}`,
-    numbered,
+    `${numbered}${continuation}`,
   ].join('\n');
   return { prompt, lineStart, shownLines: lines.length };
 }
@@ -369,16 +377,24 @@ export async function reviewFile(
  * across overlaps), health is the WORST window (a file with one broken part
  * is a file with a problem), and the notes come from the first window plus an
  * honest coverage marker whenever the file was reviewed in parts.
+ *
+ * Truncation claims from windows that do not show EOF are structurally false
+ * — the file demonstrably continues past what that window saw — so they are
+ * dropped from the issue list and excluded from the worst-health fold. A
+ * whole-file or EOF window keeps its truncation claims: there they can be
+ * true (a genuinely broken file must keep its honest low score).
  */
 function mergeWindowReplies(
   parsed: Array<{ window: ContentWindow; reply: FileReviewReply }>,
   run: { totalWindows: number; truncated: boolean },
   allowMermaid: boolean,
 ): { notesMd: string; issues: FileReviewIssue[]; health: number; healthReason: string } {
+  const midWindow = (w: ContentWindow): boolean => w.lineEnd < w.totalLines;
   const issues: FileReviewIssue[] = [];
   const seen = new Set<string>();
   for (const { window, reply } of parsed) {
     for (const issue of reply.issues) {
+      if (midWindow(window) && isSpuriousTruncationClaim(issue.message)) continue;
       const inWindow =
         issue.line === undefined ||
         (issue.line >= window.lineStart &&
@@ -390,8 +406,15 @@ function mergeWindowReplies(
       if (issues.length < MAX_ISSUES) issues.push(kept);
     }
   }
-  let worst = parsed[0]!;
-  for (const p of parsed) {
+  // Fold-with-fallback: when every parsed window is a suspect mid-window
+  // (a capped run can have no EOF window at all), keep today's behavior
+  // rather than inventing a health from nothing.
+  const foldable = parsed.filter(
+    (p) => !(midWindow(p.window) && isSpuriousTruncationClaim(p.reply.health_reason)),
+  );
+  const fold = foldable.length > 0 ? foldable : parsed;
+  let worst = fold[0]!;
+  for (const p of fold) {
     if (p.reply.health < worst.reply.health) worst = p;
   }
   let notesMd = sanitizeMermaid(parsed[0]!.reply.notes_md, allowMermaid);

@@ -18,7 +18,12 @@ import {
   startSuspendMonitor,
   stopSuspendMonitor,
 } from '@bendyline/gezel';
-import { type ExternalFolders, type TaskAssignee, resolveSecurityPolicy } from '@bendyline/gezel';
+import {
+  type ExternalFolders,
+  KeyedLock,
+  type TaskAssignee,
+  resolveSecurityPolicy,
+} from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { electronNativeBinCandidates } from '@bendyline/gezel-client/node';
 import {
@@ -38,7 +43,6 @@ import { ChatEventBus } from './chat/events.js';
 import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
 import { createCodexSetupManager } from './codex-setup/manager.js';
 import { ConnectorActionManager } from './connectors/actions.js';
-import { ProjectLocks } from './connectors/lock.js';
 import { ConnectorManager, corpusDirFor } from './connectors/manager.js';
 import { registerBlueskyAdapters } from './connectors/natives/bluesky-posts.js';
 import { registerCalendarAdapters } from './connectors/natives/calendar-google.js';
@@ -2162,7 +2166,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   registerLinkedInAdapters();
   registerGitHubReleasesAdapters();
   registerGitHubWikiAdapters();
-  const connectorLocks = new ProjectLocks();
+  // Sync passes, binding mutations, and action commits all read-modify-write
+  // the same project state (project.json bindings, the corpus, the `_actions`
+  // staging dirs), so the sync manager and the action manager share ONE lock —
+  // a commit can't race a sync or a concurrent discard on the same project.
+  const connectorLocks = new KeyedLock();
   const connectors = new ConnectorManager({
     store,
     secrets,

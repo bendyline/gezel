@@ -1,4 +1,5 @@
 import type { CatalogItemSummary, ChatModelCategory, ChatModelManifest } from '@bendyline/gezel';
+import { isRetiredModel } from '@bendyline/gezel';
 import type {
   IncompleteModelDownload,
   MlxInstallEvent,
@@ -738,19 +739,23 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
           , a community library of open, freely available AI models. Your device downloads them
           directly.
         </p>
-        {memory && (
-          <p className="muted small">
-            Some models may be too large to run on this machine.{' '}
-            <button
-              type="button"
-              className="gz-link-button"
-              onClick={() => setShowAll((v) => !v)}
-              style={{ padding: 0 }}
-            >
-              {showAll ? 'Hide oversized' : 'Show all sizes'}
-            </button>
-          </p>
-        )}
+        <p className="muted small">
+          {memory
+            ? 'Models that may not fit this machine, and retired models, are hidden by default. '
+            : 'Retired models are hidden by default. '}
+          <button
+            type="button"
+            className="gz-link-button"
+            onClick={() => setShowAll((v) => !v)}
+            style={{ padding: 0 }}
+          >
+            {showAll
+              ? memory
+                ? 'Hide retired and oversized models'
+                : 'Hide retired models'
+              : 'Show all models'}
+          </button>
+        </p>
         <div className="provider-switch" style={{ marginBottom: '0.5rem' }}>
           {availableCategories.map((c) => (
             <button
@@ -771,6 +776,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
           filter={(item: CatalogItemSummary) => {
             const m = asMlxEntry(item.manifest);
             if (!m) return false;
+            if (!showAll && isRetiredModel(m)) return false;
             if (activeCategory !== 'all' && (m.category ?? 'general') !== activeCategory) {
               return false;
             }

@@ -167,6 +167,10 @@ export const PROJECT_TYPES: ProjectType[] = [
       'http',
       'seo',
       'performance',
+      'bug-fix',
+      'debugging',
+      'tests',
+      'quality',
     ],
     gezelRoles: {
       default: [
@@ -308,6 +312,10 @@ export const PROJECT_TYPES: ProjectType[] = [
       'testing',
       'tests',
       'tdd',
+      'bug-fix',
+      'debugging',
+      'dependencies',
+      'migration',
     ],
     gezelRoles: {
       default: [
@@ -331,7 +339,18 @@ export const PROJECT_TYPES: ProjectType[] = [
       extensions: ['ts', 'js', 'py', 'go', 'rs', 'sh', 'bash'],
       keywords: ['cli', 'command', 'terminal', 'tool', 'script', 'automation', 'utility'],
     },
-    craftbookTags: ['tooling', 'automation', 'script', 'testing', 'tests', 'quality', 'refactor'],
+    craftbookTags: [
+      'tooling',
+      'automation',
+      'script',
+      'testing',
+      'tests',
+      'quality',
+      'refactor',
+      'bug-fix',
+      'debugging',
+      'tdd',
+    ],
     gezelRoles: {
       default: [
         {
@@ -373,6 +392,9 @@ export const PROJECT_TYPES: ProjectType[] = [
       'release-notes',
       'refactor',
       'quality',
+      'bug-fix',
+      'debugging',
+      'dependencies',
     ],
     gezelRoles: {
       default: [

@@ -9,7 +9,7 @@ import type {
   ExternalRequestDiagnostics,
   ProviderName,
 } from '@bendyline/gezel';
-import { redactCredentials } from '@bendyline/gezel';
+import { KeyedLock, redactCredentials } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { ChatEventBus, PublishScope } from './events.js';
 import { externalUserMessageForDisplay } from './external-message-display.js';
@@ -126,7 +126,7 @@ interface ExternalConversationRecorderOptions {
  * app sends them back on the next request.
  */
 export class ExternalConversationRecorder {
-  private readonly locks = new Map<string, Promise<void>>();
+  private readonly locks = new KeyedLock();
   private readonly active = new Map<string, ActiveExternalConversation>();
   private readonly drafts = new Map<string, ExternalTurnDraft>();
   private readonly now: () => Date;
@@ -502,18 +502,7 @@ export class ExternalConversationRecorder {
   }
 
   private async withLock<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
-    const previous = this.locks.get(sessionId) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(work);
-    const settled = current.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.locks.set(sessionId, settled);
-    try {
-      return await current;
-    } finally {
-      if (this.locks.get(sessionId) === settled) this.locks.delete(sessionId);
-    }
+    return this.locks.run(sessionId, work);
   }
 }
 

@@ -6,6 +6,7 @@ import {
   projectManagedWorkspaceWritable,
   providerNativeWorkspaceAccess,
 } from '@bendyline/gezel';
+import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 
 /** Config fields that determine managed and provider-native workspace access. */
 export type AiProviderEditabilityConfig = Pick<
@@ -24,7 +25,7 @@ function projectProviderCandidates(
   projectLocalGezels: readonly GezelSummary[],
   config: AiProviderEditabilityConfig | null | undefined,
 ): Array<{ provider: GezelSummary['provider']; gezel?: GezelSummary }> {
-  const defaultProvider = config?.provider ?? 'copilot';
+  const defaultProvider = config?.provider ?? UI_FALLBACK_PROVIDER;
   const projectGezelIds = new Set(project.gezelIds ?? []);
   if (project.voormanGezelId) projectGezelIds.add(project.voormanGezelId);
   const projectGezels = [

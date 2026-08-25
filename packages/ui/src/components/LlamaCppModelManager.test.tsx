@@ -41,7 +41,12 @@ async function readSizeTooltip(memory: HTMLElement): Promise<string> {
   return tooltips[0]?.textContent ?? '';
 }
 
-function catalogModel(id: string, name: string, category: 'general' | 'coding') {
+function catalogModel(
+  id: string,
+  name: string,
+  category: 'general' | 'coding',
+  tags: string[] = [],
+) {
   return {
     source: { id: 'bundled', label: 'Bundled' },
     manifest: {
@@ -51,7 +56,7 @@ function catalogModel(id: string, name: string, category: 'general' | 'coding') 
       name,
       version: '1.0.0',
       description: 'test model',
-      tags: [],
+      tags,
       maintainer: {
         name: 'Google',
         url: 'https://huggingface.co/google/gemma-4-31B-it',
@@ -411,6 +416,25 @@ describe('LlamaCppModelManager local model list', () => {
     expect(screen.queryByRole('button', { name: 'All' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'General' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Coding' })).not.toBeInTheDocument();
+  });
+
+  it('hides retired catalog models until Show all models is selected', async () => {
+    vi.mocked(api.listCatalogItems).mockResolvedValue({
+      items: [
+        catalogModel('current-model', 'Current Model', 'general'),
+        catalogModel('retired-model', 'Retired Model', 'general', ['retired']),
+      ],
+    } as never);
+
+    render(<LlamaCppModelManager />);
+
+    expect(await screen.findByText('Current Model')).toBeInTheDocument();
+    expect(screen.queryByText('Retired Model')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show all models' }));
+
+    expect(await screen.findByText('Retired Model')).toBeInTheDocument();
+    expect(screen.getByText('retired')).toHaveClass('catalog-item-tag--retired');
   });
 
   it('places maker and customization credit directly below the model title', async () => {

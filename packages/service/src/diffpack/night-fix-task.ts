@@ -5,8 +5,8 @@ import type { TaskManager } from '../tasks/manager.js';
 
 const log = createLogger('diffpack');
 
-/** Catalog id of the night bug-fixing craftbook (lives in gilde). */
-export const FIX_CRAFTBOOK_ID = 'fix-into-diffpack';
+/** Catalog id of the night proposal-sweep craftbook (lives in gilde). */
+export const FIX_CRAFTBOOK_ID = 'nightly-fix-sweep';
 
 /**
  * Ceiling on proposals from one night in one project. Past this the morning
@@ -51,7 +51,11 @@ export async function createNightFixTask(
           description,
           craftbookId: FIX_CRAFTBOOK_ID,
           assignee: { kind: 'gezel', gezelId: args.developerId },
-          craftbookParams: { issueRefs: args.issues.map((i) => i.ref).join(',') },
+          // The book's host-level param is `leads` — deliberately NOT
+          // `issueRefs`, which is the per-cluster fanout context field and
+          // would be consumed by create-time param interpolation before the
+          // shards could resolve their own values.
+          craftbookParams: { leads: args.issues.map((i) => i.ref).join(',') },
           nightShift: { enabled: true, onceADay: true },
         },
         {

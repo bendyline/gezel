@@ -4,6 +4,7 @@ import {
   type GateCheck,
   GateCheckSchema,
   HookSpecSchema,
+  ModelTierSchema,
   type NewCraftbookStep,
   NewCraftbookStepSchema,
   type SkillPersona,
@@ -92,6 +93,8 @@ export const QualityPhaseSchema = z
     suggestedRole: z.string().min(1),
     prompt: z.string().min(1),
     output: QualityOutputSchema,
+    /** Per-step model-tier floor emitted onto the generated step (tactical fleet). */
+    capabilityFloor: ModelTierSchema.optional(),
   })
   .strict();
 export type QualityPhase = z.infer<typeof QualityPhaseSchema>;
@@ -109,6 +112,23 @@ export const QualityReviewSchema = z
     repairRole: z.string().min(1).optional(),
     minReviewBytes: z.number().int().positive().optional(),
     criteria: z.array(z.string().min(1)).min(1),
+    /**
+     * Make the review ENFORCEABLE (tactical fleet): the evaluate gate gains
+     * the `checkFixReview` standard script, so a well-formed REVISE verdict
+     * is rejected by the RUNTIME and routed back to `fixStepId` (default
+     * 'repair') with the findings as the prescriptive message — the model
+     * cannot advance to finish past a REVISE, and the default edge becomes
+     * the PASS path (`next: 'finish'`). Absent → the historical model-routed
+     * evaluate (gstack wave unchanged).
+     */
+    enforce: z
+      .object({
+        fixStepId: z.string().min(1).optional(),
+        /** Optional machine-readable findings JSON the fix step consumes. */
+        findingsPath: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type QualityReview = z.infer<typeof QualityReviewSchema>;
@@ -232,6 +252,7 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
       description: phase.description,
       prompt: `${phase.prompt.trim()}${inputInstruction}\n\nObservable handoff: write the completed result to \`${phase.output.path}\` in ${outputLocation}. Do not merely describe what the file would contain. ${rereadInstruction} and repair any incomplete sections.`,
       suggestedRole: phase.suggestedRole,
+      ...(phase.capabilityFloor ? { capabilityFloor: phase.capabilityFloor } : {}),
       ...(priorInputs.length > 0 ? { consumes: priorInputs } : {}),
       advanceWhen: {
         file: phase.output.path,
@@ -291,6 +312,15 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
     phaseOutputs.get(workflow.review.artifactPath) ??
     isAccessoryArtifactPath(workflow.review.artifactPath);
 
+  const enforce = workflow.review.enforce;
+  const enforcedFixStep = enforce?.fixStepId ?? 'repair';
+  const evaluateRouting = enforce
+    ? `Give each criterion a PASS or FAIL with a concrete path, excerpt, measurement, or observed behavior. End with exactly \`Verdict: PASS\` or \`Verdict: REVISE\`. The gate ENFORCES the verdict: a well-formed REVISE is rejected and routed back to \`${enforcedFixStep}\` automatically, carrying your findings — so list every finding in the table with a concrete fix. On PASS, \`advance_task_step\` to \`finish\`. Never write PASS while a criterion is unmet.`
+    : `Give each criterion a PASS or FAIL with a concrete path, excerpt, measurement, or observed behavior. End with exactly \`Verdict: PASS\` or \`Verdict: REVISE\`. Then use \`advance_task_step\` for the active task: PASS routes to \`finish\`; REVISE routes to \`repair\` for review rounds 1 through ${Math.max(1, maxReviewRounds - 1)}, and the ${maxReviewRounds}th REVISE routes to \`needs-user\`. Never route to finish while a criterion is unmet.`;
+  const evaluateFindingsInstruction = enforce
+    ? `\n\nList the findings as a markdown table with columns \`| Severity | File | Line | Problem | Fix |\` (severities: critical/major/minor/nit; empty table only on PASS).${enforce.findingsPath ? ` Also write the same findings as a JSON array to \`${enforce.findingsPath}\` with \`write_artifact\` — a fix step reads it as data.` : ''}`
+    : '';
+
   return [
     ...phases,
     {
@@ -298,7 +328,7 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
       name: 'Evaluate the deliverable',
       description:
         'Independently grade the observable deliverable and route it to finish, repair, or user escalation.',
-      prompt: `Review ${reviewTargets} against every criterion below. Inspect the underlying evidence files named by the workflow; do not grade from the author's summary alone.\n\n${criteria}\n\n${reviewReadInstruction} Give each criterion a PASS or FAIL with a concrete path, excerpt, measurement, or observed behavior. End with exactly \`Verdict: PASS\` or \`Verdict: REVISE\`. Then use \`advance_task_step\` for the active task: PASS routes to \`finish\`; REVISE routes to \`repair\` for review rounds 1 through ${Math.max(1, maxReviewRounds - 1)}, and the ${maxReviewRounds}th REVISE routes to \`needs-user\`. Never route to finish while a criterion is unmet.`,
+      prompt: `Review ${reviewTargets} against every criterion below. Inspect the underlying evidence files named by the workflow; do not grade from the author's summary alone.\n\n${criteria}\n\n${reviewReadInstruction}${evaluateFindingsInstruction} ${evaluateRouting}`,
       suggestedRole: workflow.review.reviewerRole ?? 'reviewer',
       consumes: reviewInputs,
       gate: {
@@ -319,10 +349,28 @@ export function qualityWorkflowSteps(workflow: QualityWorkflow): NewCraftbookSte
             ...(reviewOutputIsArtifact ? { artifact: true } : {}),
           },
         ],
+        ...(enforce
+          ? {
+              scripts: [
+                {
+                  name: 'checkFixReview',
+                  scope: 'standard' as const,
+                  inputs: {
+                    reviewPath: workflow.review.reviewPath,
+                    fixStepId: enforcedFixStep,
+                    ...(enforce.findingsPath ? { findingsPath: enforce.findingsPath } : {}),
+                  },
+                },
+              ],
+            }
+          : {}),
         onReject: 'evaluate',
         maxAttempts: maxGateAttempts,
       },
-      next: 'repair',
+      // Enforced reviews own the REVISE routing at the gate, so the default
+      // edge is the PASS path; the historical shape keeps the model-routed
+      // repair edge.
+      next: enforce ? 'finish' : 'repair',
     },
     {
       id: 'repair',

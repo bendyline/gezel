@@ -1599,3 +1599,42 @@ describe('commandEvidence', () => {
     expect(required.pass).toBe(false);
   });
 });
+
+describe('citationsResolve across surfaces', () => {
+  it('a drawer-side evidence doc may cite real workspace files', async () => {
+    const r = splitReader(
+      { 'src/pricing.js': 'export const x = 1;\n' },
+      {
+        'tasks/7/repro.md':
+          'The defect lives in `src/pricing.js` and the evidence sits in `tasks/7/notes.md`.\n',
+        'tasks/7/notes.md': 'evidence\n',
+      },
+    );
+    const ok = await evaluateGate(
+      [
+        {
+          kind: 'citationsResolve',
+          file: 'tasks/7/repro.md',
+          minCitations: 2,
+          artifact: true,
+        },
+      ],
+      r,
+    );
+    expect(ok.pass).toBe(true);
+
+    const phantom = await evaluateGate(
+      [
+        {
+          kind: 'citationsResolve',
+          file: 'tasks/7/repro.md',
+          minCitations: 1,
+          artifact: true,
+        },
+      ],
+      splitReader({}, { 'tasks/7/repro.md': 'See `src/ghost.js` for details.\n' }),
+    );
+    expect(phantom.pass).toBe(false);
+    expect(phantom.failures[0]).toContain('src/ghost.js');
+  });
+});

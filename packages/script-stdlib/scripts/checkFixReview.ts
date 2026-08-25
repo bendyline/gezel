@@ -42,10 +42,12 @@ export const meta = defineScript({
   outputs: {
     decision: { type: 'string', description: "'approve' or 'reject'." },
     message: { type: 'string', description: 'What passed, or the concrete gaps / findings.' },
-    goto: {
-      type: 'string',
-      description: 'On a well-formed REVISE verdict: the fix step to re-activate.',
-    },
+    // `goto` (the fix step to re-activate on a well-formed REVISE) is
+    // deliberately NOT declared: every declared output field is REQUIRED by
+    // the runner's coerceOutput, and the approve path emits no goto — the
+    // first PASS verdict in the wild paused the task with `output is
+    // missing declared field "goto"`. Undeclared fields pass through to the
+    // GateScriptResult parse untouched.
   },
   requires: ['tasks.read', 'artifacts.read', 'workspace.read'],
 } as const);
@@ -79,9 +81,13 @@ const fixStepId = input.fixStepId ?? 'fix';
  * A cited path exists when it reads from ANY surface the review may talk
  * about: the live workspace, this task's diffpack draft overlay (a drafting
  * run's fix exists only there), or the artifacts drawer (repro/validation
- * notes). Read-probes, never listings.
+ * notes). A bare sibling name additionally resolves relative to the
+ * review's own folder — a reviewer naturally writes "see `fix-notes.md`"
+ * for the evidence doc beside the review, and rejecting that as a
+ * fabricated path failed a flawless PASS verdict (wild-caught, trial 5).
+ * Read-probes, never listings.
  */
-async function citedPathExists(path: string): Promise<boolean> {
+async function citedPathExists(path: string, reviewDir: string): Promise<boolean> {
   if ((await gezel.fs.read(path).catch(() => null)) !== null) return true;
   if (task?.diffpackId) {
     const drafted = await gezel.artifacts
@@ -89,7 +95,13 @@ async function citedPathExists(path: string): Promise<boolean> {
       .catch(() => null);
     if (drafted !== null) return true;
   }
-  return (await gezel.artifacts.read(path).catch(() => null)) !== null;
+  if ((await gezel.artifacts.read(path).catch(() => null)) !== null) return true;
+  if (!path.includes('/') && reviewDir) {
+    if ((await gezel.artifacts.read(`${reviewDir}/${path}`).catch(() => null)) !== null) {
+      return true;
+    }
+  }
+  return false;
 }
 
 if (!reviewPath) {
@@ -164,9 +176,12 @@ if (!reviewPath) {
       const p = m[1];
       if (p) cited.add(normPath(p));
     }
+    const reviewDir = reviewPath.includes('/')
+      ? reviewPath.slice(0, reviewPath.lastIndexOf('/'))
+      : '';
     const unresolved: string[] = [];
     for (const p of cited) {
-      if (!(await citedPathExists(p))) unresolved.push(p);
+      if (!(await citedPathExists(p, reviewDir))) unresolved.push(p);
     }
     if (unresolved.length > 0) {
       gaps.push(

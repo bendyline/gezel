@@ -1334,6 +1334,35 @@ async function hasYoungProjectInflightTurn(
   }
 }
 
+/**
+ * Approve pending command-approval questions through the REAL answer route —
+ * in a trial the harness plays the user who clicks Approve. Without this,
+ * any book whose gates carry `commandEvidence` stalls at its first
+ * `run_package_script`: first-use command consent has no human to answer it,
+ * so no run receipt can ever exist and the gate rejects forever. Approving
+ * (never declining) is the eval policy — fixtures are trusted by
+ * construction, and the decline path is unit-tested service-side.
+ */
+async function approvePendingCommandQuestions(
+  ctx: EvalContext,
+  projectId: string,
+  spec: CraftbookEvalSpec,
+): Promise<void> {
+  const res = await ctx.client.listQuestions({ projectId, pending: true }).catch(() => null);
+  for (const question of res?.questions ?? []) {
+    if (question.intent?.kind !== 'command-approval') continue;
+    const answered = await ctx.client
+      .answerQuestion(question.id, { selectedChoices: [0] })
+      .then(() => true)
+      .catch(() => false);
+    if (answered) {
+      ctx.log(
+        `[craftbook:${spec.craftbookId}] approved first-use command ${question.intent.scope}:${question.intent.name}`,
+      );
+    }
+  }
+}
+
 export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario {
   if (!spec.prompt) {
     throw new Error(`craftbook eval ${spec.scenarioId} needs a prompt`);
@@ -1450,6 +1479,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       if (!projectName) return { done: false };
       const projectId = await findProjectId(ctx.client, projectName);
       if (!projectId) return { done: false };
+      await approvePendingCommandQuestions(ctx, projectId, spec);
 
       const checks = successChecksForSpec(spec);
       const workspace = workspaceFromClient(ctx.client, projectId);

@@ -40,6 +40,7 @@ import {
   type InstalledPackage,
   type InstalledToolset,
   InstalledToolsetSchema,
+  KeyedLock,
   type MeesterStatusReport,
   MeesterStatusReportSchema,
   type MeesterStatusState,
@@ -154,6 +155,12 @@ import {
   userProjectDir,
 } from '@bendyline/gezel/paths';
 import { applyPatch, parsePatch } from 'diff';
+import { createGitIgnoreResolver } from '../git/ignore.js';
+import { inspectGitWorkdir } from '../git/inspect.js';
+import { parseGitHubUrl, sameGitHubRepo } from '../github/url.js';
+import { sanitizeSvg } from '../icon/sanitize.js';
+import type { MemoryKind } from '../memory/daily-markdown.js';
+import { PoppetjeManager } from '../poppetje/manager.js';
 import {
   type FileInventoryIndex,
   artifactPathsOf,
@@ -161,14 +168,8 @@ import {
   hasQualifiedReferenceMismatch,
   matchReferencedFilesWithIndex,
   referencedFilesFromArtifactPaths,
-} from '../chat/file-references.js';
-import { matchReferencedTasksInContent } from '../chat/task-references.js';
-import { createGitIgnoreResolver } from '../git/ignore.js';
-import { inspectGitWorkdir } from '../git/inspect.js';
-import { parseGitHubUrl, sameGitHubRepo } from '../github/url.js';
-import { sanitizeSvg } from '../icon/sanitize.js';
-import type { MemoryKind } from '../memory/daily-markdown.js';
-import { PoppetjeManager } from '../poppetje/manager.js';
+} from '../references/file-references.js';
+import { matchReferencedTasksInContent } from '../references/task-references.js';
 import {
   type WorkspaceEditResult,
   buildWorkspaceEditResult,
@@ -384,8 +385,8 @@ export class Store {
   private readonly memories: MemoryStore;
   private readonly taskFiles: TaskFilesStore;
   private projectCreationTail: Promise<void> = Promise.resolve();
-  private readonly findingLifecycleLocks = new Map<string, Promise<unknown>>();
-  private readonly boekwachterIssueLocks = new Map<string, Promise<unknown>>();
+  private readonly findingLifecycleLocks = new KeyedLock();
+  private readonly boekwachterIssueLocks = new KeyedLock();
 
   /**
    * Notified after every session persist/delete — the single choke point all
@@ -3236,27 +3237,11 @@ export class Store {
   }
 
   private async withBoekwachterIssueLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.boekwachterIssueLocks.get(id) ?? Promise.resolve();
-    const run = previous.then(fn, fn);
-    const tracked: Promise<unknown> = run.finally(() => {
-      if (this.boekwachterIssueLocks.get(id) === tracked) {
-        this.boekwachterIssueLocks.delete(id);
-      }
-    });
-    this.boekwachterIssueLocks.set(id, tracked);
-    return run;
+    return this.boekwachterIssueLocks.run(id, fn);
   }
 
   private async withFindingLifecycleLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.findingLifecycleLocks.get(id) ?? Promise.resolve();
-    const run = previous.then(fn, fn);
-    const tracked: Promise<unknown> = run.finally(() => {
-      if (this.findingLifecycleLocks.get(id) === tracked) {
-        this.findingLifecycleLocks.delete(id);
-      }
-    });
-    this.findingLifecycleLocks.set(id, tracked);
-    return run;
+    return this.findingLifecycleLocks.run(id, fn);
   }
 
   /**
@@ -3283,8 +3268,8 @@ export class Store {
     );
   }
 
-  /** Per-project chains serializing {@link touchProject}'s metadata bumps. */
-  private readonly touchChains = new Map<string, Promise<void>>();
+  /** Per-project lock serializing {@link touchProject}'s metadata bumps. */
+  private readonly touchChains = new KeyedLock();
 
   async touchProject(id: string): Promise<void> {
     // Serialized per project AND best-effort. Every workspace write ends in
@@ -3294,25 +3279,19 @@ export class Store {
     // rename holds), silently-lost bumps elsewhere. And the caller's actual
     // write already succeeded by the time we run: a failed TIMESTAMP bump
     // must never convert that success into a 500.
-    const prev = this.touchChains.get(id) ?? Promise.resolve();
-    const next = prev
-      .then(async () => {
+    await this.touchChains.run(id, async () => {
+      try {
         const meta = await this.tryGetProjectMeta(id);
         if (!meta) return;
         const updated: Project = { ...meta, updatedAt: nowIso() };
         await this.writeProjectMeta(updated);
-      })
-      .catch((err) => {
+      } catch (err) {
         log.warn(
           `touchProject(${id}) failed (updatedAt bump only — the triggering write succeeded):`,
           err instanceof Error ? err.message : err,
         );
-      });
-    this.touchChains.set(id, next);
-    void next.finally(() => {
-      if (this.touchChains.get(id) === next) this.touchChains.delete(id);
+      }
     });
-    await next;
   }
 
   /**
@@ -5236,8 +5215,8 @@ export class Store {
     this.notifySessionChange({ type: 'write', gezelId: session.gezelId, sessionId: session.id });
   }
 
-  /** Per-session chains serializing {@link mutateSession}'s read-modify-writes. */
-  private readonly sessionMutationChains = new Map<string, Promise<void>>();
+  /** Per-session lock serializing {@link mutateSession}'s read-modify-writes. */
+  private readonly sessionMutationChains = new KeyedLock();
 
   /**
    * Serialized read-modify-write on one session file.
@@ -5266,26 +5245,13 @@ export class Store {
     mutate: (session: ChatSession) => unknown,
   ): Promise<boolean> {
     const key = `${gezelId}/${sessionId}`;
-    const prev = this.sessionMutationChains.get(key) ?? Promise.resolve();
-    const run = prev.then(async () => {
+    return this.sessionMutationChains.run(key, async () => {
       const session = await this.getSession(gezelId, sessionId);
       if (!session) return false;
       if ((await mutate(session)) === false) return false;
       await this.writeSession(session);
       return true;
     });
-    // The chain tail must never carry a rejection — a failed mutation
-    // would otherwise poison every queued mutation behind it. The caller
-    // still sees the error through `run`.
-    const next = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.sessionMutationChains.set(key, next);
-    void next.then(() => {
-      if (this.sessionMutationChains.get(key) === next) this.sessionMutationChains.delete(key);
-    });
-    return run;
   }
 
   /**

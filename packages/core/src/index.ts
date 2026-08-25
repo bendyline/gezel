@@ -22,6 +22,7 @@ export * from './github-pr-selection.js';
 export * from './log.js';
 export * from './error-report.js';
 export * from './process-errors.js';
+export * from './keyed-lock.js';
 export * from './redact.js';
 export * from './ollama-models.js';
 export * from './model-fit.js';

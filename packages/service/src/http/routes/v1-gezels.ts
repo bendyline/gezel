@@ -1,5 +1,7 @@
 import { externalGezelModelId } from '@bendyline/gezel';
+import type { ProviderName } from '@bendyline/gezel';
 import { Hono } from 'hono';
+import { resolveDefaultProviderName } from '../../providers/default-provider.js';
 import type { ServiceContext } from '../context.js';
 
 /**
@@ -58,20 +60,23 @@ export function v1GezelsRoutes(ctx: ServiceContext): Hono {
     const list = await ctx.store.listGezels();
     const config = await ctx.store
       .readConfig()
-      .catch(() => ({}) as { defaultModel?: Record<string, string> });
+      .catch(() => ({}) as { defaultModel?: Record<string, string>; provider?: ProviderName });
     const defaultModelByProvider = (config.defaultModel ?? {}) as Record<string, string>;
+    const fallbackProvider = resolveDefaultProviderName(config);
 
     // Resolve effective provider per gezel in parallel — providerForGezel
     // walks the gezel's frontmatter + install config, and is cached
     // inside ChatManager so repeated calls during a single request are
     // cheap. We swallow per-gezel failures so a single broken gezel
     // doesn't take the whole list down — instead we fall back to the
-    // frontmatter override (or 'copilot' when neither is set), the
-    // same shape the picker showed before this endpoint resolved
-    // effective values.
+    // frontmatter override (or the resolved install default when neither
+    // is set), the same shape the picker showed before this endpoint
+    // resolved effective values.
     const effective = await Promise.all(
       list.map(async (g) => {
-        const provider = await ctx.chat.providerForGezel(g.id).catch(() => g.provider ?? 'copilot');
+        const provider = await ctx.chat
+          .providerForGezel(g.id)
+          .catch(() => g.provider ?? fallbackProvider);
         const model = g.model ?? defaultModelByProvider[provider];
         return { id: g.id, provider, model };
       }),
@@ -88,7 +93,7 @@ export function v1GezelsRoutes(ctx: ServiceContext): Hono {
         ...(g.role ? { role: g.role } : {}),
         ...(g.provider ? { provider: g.provider } : {}),
         ...(g.model ? { model: g.model } : {}),
-        effectiveProvider: eff?.provider ?? g.provider ?? 'copilot',
+        effectiveProvider: eff?.provider ?? g.provider ?? fallbackProvider,
         ...(eff?.model ? { effectiveModel: eff.model } : {}),
       };
     });

@@ -376,7 +376,9 @@ export class ProviderPool {
     const pending = this.buildLocks.get(key);
     if (pending) return pending;
     const build = this.buildEntry(provider, modelId, replicaIdx, residentBytes).finally(() => {
-      this.buildLocks.delete(key);
+      // Identity-guarded like `evicting` below: a retry build started after
+      // this one settled must not be evicted by this one's cleanup.
+      if (this.buildLocks.get(key) === build) this.buildLocks.delete(key);
     });
     this.buildLocks.set(key, build);
     return build;

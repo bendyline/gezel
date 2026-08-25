@@ -108,9 +108,9 @@ export const LicenseMetaShape = {
  *
  * A score alone is never enough: every surface routes through
  * `isRecommendedModel` (`packages/core/src/recommendation.ts`), which also
- * requires `licenseClass === 'open'` and — for chat models, which declare it —
- * `supportsTools !== false`. So a stray score on a restricted or tool-less
- * model is ignored rather than trusted.
+ * requires `licenseClass === 'open'`, no `retired` tag, and — for chat models,
+ * which declare it — `supportsTools !== false`. So a stray score on a
+ * restricted, retired, or tool-less model is ignored rather than trusted.
  */
 export const RecoMetaShape = {
   recoScore: z.number().int().positive().optional(),

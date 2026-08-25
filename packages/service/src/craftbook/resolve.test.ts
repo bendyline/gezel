@@ -31,6 +31,9 @@ const FULL: CraftbookTemplateManifest = CraftbookTemplateManifestSchema.parse({
   command: 'everything',
   requirements: [{ kind: 'github' }],
   runModes: { scheduled: 'supported' },
+  commands: [{ scope: 'script', name: 'test' }],
+  diffpackCapable: true,
+  capabilityFloor: 'small',
   spawn: {
     overFile: 'items.json',
     steps: [{ id: 'child', name: 'Child', prompt: 'Child work.', terminal: true }],

@@ -235,6 +235,33 @@ describe('POST /api/gezels/:id/growth/accept', () => {
     expect(unknown.status).toBe(400);
   });
 
+  it('concurrent accepts resolve exactly once: one 200, one 409, one trait', async () => {
+    const id = await createGezel('GrowthAcceptRace');
+    await seedGrowth(id, {
+      pendingLevelUp: {
+        toLevel: 2,
+        proposals: [
+          traitProposal('prop-a', 'Prefer boring, proven solutions.'),
+          traitProposal('prop-b', 'Sketch the data model before the code.'),
+        ],
+        createdAt: new Date().toISOString(),
+      },
+    });
+
+    const [first, second] = await Promise.all([
+      api('POST', `/api/gezels/${id}/growth/accept`, { proposalId: 'prop-a' }),
+      api('POST', `/api/gezels/${id}/growth/accept`, { proposalId: 'prop-b' }),
+    ]);
+    expect([first.status, second.status].sort()).toEqual([200, 409]);
+
+    const payload = (await (await api('GET', `/api/gezels/${id}/growth`)).json()) as Payload;
+    expect(payload.state.level).toBe(2);
+    expect(payload.state.pendingLevelUp).toBeUndefined();
+    expect(payload.state.adoptedTraits).toHaveLength(1);
+    expect(payload.activeTraits).toHaveLength(1);
+    expect(payload.driftedTraitIds).toEqual([]);
+  });
+
   it('409s on the trait slot cap and keeps the pending unresolved', async () => {
     const id = await createGezel('GrowthSlotCap');
     for (let i = 0; i < 8; i++) {

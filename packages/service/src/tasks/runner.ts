@@ -44,10 +44,10 @@ import {
   type TaskWaitReason,
   type TaskWaitState,
   createLogger,
+  effectiveCapabilityFloor,
   getEngagementMode,
   isTaskWorkAllowed,
   projectAllowsAmbientWork,
-  effectiveCapabilityFloor,
 } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { LLMProvider, ProviderName } from '../providers/types.js';

@@ -4,6 +4,7 @@ import type {
   ChatModelManifest,
   ModelInfo,
 } from '@bendyline/gezel';
+import { isRetiredModel } from '@bendyline/gezel';
 import type { OllamaPullChunk } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
@@ -340,6 +341,7 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
     for (const item of catalogItems) {
       const m = asOllamaChatModel(item.manifest);
       if (!m) continue;
+      if (isRetiredModel(m)) continue;
       if (m.supportsTools === false) continue;
       if (m.approxSizeBytes * MEMORY_OVERHEAD_FACTOR > budget) continue;
       const cat = (m.category ?? 'general') as ChatModelCategory;
@@ -436,6 +438,7 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
             // are llama.cpp-only and have no place in this picker.
             const m = asOllamaChatModel(item.manifest);
             if (!m) return false;
+            if (!showAll && isRetiredModel(m)) return false;
             // Category filter first.
             if (activeCategory !== 'all' && (m.category ?? 'general') !== activeCategory) {
               return false;
@@ -564,13 +567,18 @@ function MemoryBudgetLine({
   showAll: boolean;
   setShowAll: (v: boolean) => void;
 }) {
-  if (!memory) return null;
-  const usable = formatBytes(memory.usableBytes);
+  const usable = memory ? formatBytes(memory.usableBytes) : null;
   return (
     <p className="muted small" style={{ marginTop: 0 }}>
-      Models larger than your ~{usable} budget are hidden by default.{' '}
+      {usable
+        ? `Models larger than your ~${usable} budget, and retired models, are hidden by default. `
+        : 'Retired models are hidden by default. '}
       <button type="button" className="gz-link-button" onClick={() => setShowAll(!showAll)}>
-        {showAll ? 'Hide oversized models' : 'Include oversized models'}
+        {showAll
+          ? usable
+            ? 'Hide retired and oversized models'
+            : 'Hide retired models'
+          : 'Show all models'}
       </button>
     </p>
   );

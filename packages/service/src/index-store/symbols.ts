@@ -397,10 +397,18 @@ function edgesFor(node: TsNode): Array<{ raw: string; bindings: ImportBinding[] 
     }
     case 'call_expression': {
       // `require('x')` / dynamic `import('x')` — takes the whole module.
+      // Only constant specifiers: an interpolated template ships its literal
+      // `${…}` text, which nothing downstream can resolve (and which used to
+      // surface verbatim in the dependency inventory).
       const fn = node.childForFieldName('function')?.text;
       if (fn !== 'require' && fn !== 'import') return [];
       const args = node.childForFieldName('arguments');
-      const str = args?.namedChildren.find((c) => c.type.includes('string'));
+      const str = args?.namedChildren.find(
+        (c) =>
+          c.type === 'string' ||
+          (c.type === 'template_string' &&
+            !c.namedChildren.some((n) => n.type === 'template_substitution')),
+      );
       return str ? [{ raw: unquote(str.text), bindings: [{ ...NAMESPACE_BINDING }] }] : [];
     }
     case 'import_spec': {

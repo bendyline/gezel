@@ -6,6 +6,7 @@ import {
 } from '@bendyline/gezel';
 import { embedProfileId } from '../memory/embed-core.js';
 import { imageEmbedModelId } from '../memory/image-embed-core.js';
+import { purgeSpuriousTruncationReviews } from './review-claims.js';
 import { TEXT_EMBED_DIM, applySchema } from './schema.js';
 import {
   type SqlValue,
@@ -461,6 +462,7 @@ export class IndexStore {
         reconcileEmbedModel(db, caps.vec);
         reconcileImageEmbedModel(db);
       }
+      purgeSpuriousTruncationReviews(db);
       db.prepare(
         'INSERT OR REPLACE INTO collections (id, kind, root_path, label, created_at) VALUES (?, ?, ?, ?, ?)',
       ).run(opts.collectionId, opts.kind, opts.rootPath, opts.label ?? null, nowIso());

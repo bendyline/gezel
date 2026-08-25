@@ -398,6 +398,7 @@ export function lintPromptToolContract(args: {
       const associated =
         candidate.syntax === 'named-tool' ||
         candidate.syntax === 'bare-directive' ||
+        (args.toolDescription === true && candidate.syntax === 'call') ||
         /\b(?:call|invoke)(?:\s+(?:the|named))?\s*$/i.test(before) ||
         /^\s*(?:MCP\s+)?(?:tool|call)\b/i.test(after);
       if (!associated) continue;

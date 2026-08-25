@@ -17,7 +17,7 @@
 import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { ProjectDetail } from '@bendyline/gezel';
-import { createLogger } from '@bendyline/gezel';
+import { KeyedLock, createLogger } from '@bendyline/gezel';
 import type { ConnectorTypeManifest } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { writeFileAtomic } from '../fs/atomic.js';
@@ -27,7 +27,6 @@ import type { ContentIndex } from '../index-store/content-index.js';
 import { parseFrontmatter, withFrontmatter } from '../index-store/frontmatter.js';
 import type { SecretStore } from '../secrets/types.js';
 import { enforceConsent } from './consent.js';
-import { ProjectLocks } from './lock.js';
 import { corpusDirFor, createConnectorAdapter } from './manager.js';
 import { newDraftId } from './outbox.js';
 import { connectorCorpusStorage } from './storage.js';
@@ -70,14 +69,14 @@ export interface ConnectorActionManagerOptions {
   scriptRunner?: import('../scripts/runner.js').ScriptRunner;
   isNightShiftActive?: () => boolean;
   /** Shared with ConnectorManager so commits can't race syncs. */
-  locks?: ProjectLocks;
+  locks?: KeyedLock;
 }
 
 export class ConnectorActionManager {
-  private readonly locks: ProjectLocks;
+  private readonly locks: KeyedLock;
 
   constructor(private readonly opts: ConnectorActionManagerOptions) {
-    this.locks = opts.locks ?? new ProjectLocks();
+    this.locks = opts.locks ?? new KeyedLock();
   }
 
   /** Draft an action (agent-facing). No network; never commits. Only actions

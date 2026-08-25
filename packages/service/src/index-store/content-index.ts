@@ -35,11 +35,12 @@ import type {
   SearchImagesResponse,
   SecurityFindingWire,
   SecurityOverviewResponse,
+  SecurityScanProvenance,
   SecurityScanResponse,
   SymbolContext,
   TraceTaintResponse,
 } from '@bendyline/gezel';
-import { isSharedLibraryProject, nowIso } from '@bendyline/gezel';
+import { SecurityScanProvenanceSchema, isSharedLibraryProject, nowIso } from '@bendyline/gezel';
 import {
   fallbackProjectIndexDir,
   fallbackProjectVillageFile,
@@ -874,6 +875,7 @@ export class ContentIndex {
         total: deps.length,
         withAdvisories: deps.filter((d) => d.advisoryIds.length > 0).length,
         scanned: !!index.getMeta('security_scanned_at'),
+        ...maybeScanProvenance(index),
       };
     } finally {
       index.close();
@@ -950,6 +952,7 @@ export class ContentIndex {
           withAdvisories: deps.filter((d) => d.advisoryIds.length > 0).length,
         },
         systemicCandidates,
+        ...maybeScanProvenance(index),
       };
     } finally {
       index.close();
@@ -2593,6 +2596,21 @@ function cosine(a: Float32Array, b: Float32Array): number {
 // ── security-intel helpers ──────────────────────────────────────────────────
 
 const EMPTY_COUNTS = { total: 0, bySeverity: {}, byCategory: {}, bySource: {} };
+
+/**
+ * The persisted provenance of the last security_scan, as a spreadable
+ * optional field. Absent (empty object) on pre-provenance databases and on
+ * unparseable values — the renderer treats absence as "provenance unknown".
+ */
+function maybeScanProvenance(index: IndexStore): { provenance?: SecurityScanProvenance } {
+  const raw = index.getMeta('security_scan_provenance');
+  if (!raw) return {};
+  try {
+    return { provenance: SecurityScanProvenanceSchema.parse(JSON.parse(raw)) };
+  } catch {
+    return {};
+  }
+}
 
 const ENTRY_RE =
   /(^|\/)(index|main|app|server|cli|worker|handler)\.(ts|tsx|js|mjs|cjs|py|go|rs|rb|php|java)$/i;

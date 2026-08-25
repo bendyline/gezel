@@ -227,3 +227,18 @@ describe('checkFixReview', () => {
     expect(res.message).toContain('"blocker"');
   });
 });
+
+describe('checkFixReview — sibling citations', () => {
+  it('a bare sibling artifact name resolves relative to the review folder', async () => {
+    h.reset();
+    h.setTask({ num: 7, artifactDir: 'tasks/7' });
+    h.workspace.set('src/pricing.js', 'x');
+    h.artifacts.set('tasks/7/fix-notes.md', 'notes');
+    h.artifacts.set(
+      'tasks/7/review.md',
+      'Checked `src/pricing.js` against `fix-notes.md`.\n\nVerdict: PASS\n',
+    );
+    const res = await run({});
+    expect(res.decision).toBe('approve');
+  });
+});

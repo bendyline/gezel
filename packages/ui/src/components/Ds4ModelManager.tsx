@@ -1,4 +1,5 @@
 import type { CatalogItemSummary, ChatModelManifest } from '@bendyline/gezel';
+import { RETIRED_MODEL_TOOLTIP, isRetiredModel } from '@bendyline/gezel';
 import type {
   Ds4ContextPlan,
   IncompleteModelDownload,
@@ -95,6 +96,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
   // flat footprint and show no window.
   const [plans, setPlans] = useState<Map<string, Ds4ContextPlan>>(new Map());
   const [mem, setMem] = useState<Mem | null>(null);
+  const [showAll, setShowAll] = useState(false);
   // Which installed row has the context-size editor expanded beneath it.
   const [contextEditorFor, setContextEditorFor] = useState<string | null>(null);
   // False until the override endpoint answers — an older daemon or machine
@@ -385,6 +387,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
   // before the download starts, not only after.
   const visibleDs4Models = ds4Models
     .filter(({ m }) => !attentionIds.has(m.id) || installing.has(m.id))
+    .filter(({ m }) => showAll || installed.has(m.id) || !isRetiredModel(m))
     .map((entry, index) => ({ entry, index }))
     .sort((a, b) => {
       const rank = Number(installed.has(b.entry.m.id)) - Number(installed.has(a.entry.m.id));
@@ -414,6 +417,16 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
         onDelete={setToRemove}
       />
       <div className="ollama-section">
+        <p className="muted small" style={{ marginTop: 0 }}>
+          Retired models are hidden by default.{' '}
+          <button
+            type="button"
+            className="gz-link-button"
+            onClick={() => setShowAll((value) => !value)}
+          >
+            {showAll ? 'Hide retired models' : 'Show all models'}
+          </button>
+        </p>
         <div className="ollama-model-table-wrap">
           <table className="ollama-model-table ds4-model-table">
             <colgroup>
@@ -456,6 +469,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                 const canRunSafely = mem ? fixedResident + 1024 ** 3 <= ds4Ceiling : true;
                 const isLightest = resident === lightestResidentBytes;
                 const isInstalled = installed.has(m.id);
+                const retired = isRetiredModel(m);
                 const job = installing.get(m.id);
                 const pct =
                   job && job.totalBytes > 0
@@ -548,6 +562,14 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                             <span className="muted small">{m.parameterSize}</span>
                             {isInstalled && (
                               <span className="gz-status-pill gz-status-pill--ok">on device</span>
+                            )}
+                            {retired && (
+                              <span
+                                className="catalog-item-tag catalog-item-tag--retired"
+                                title={RETIRED_MODEL_TOOLTIP}
+                              >
+                                retired
+                              </span>
                             )}
                             {updateAvailable && (
                               <span

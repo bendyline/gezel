@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import type { Task } from '@bendyline/gezel';
+import { KeyedLock, type Task } from '@bendyline/gezel';
 import {
   type ExternalFolders,
   gezelPaths,
@@ -20,7 +20,7 @@ export interface TaskFilesStoreOptions {
 export class TaskFilesStore {
   private readonly home: string;
   private readonly external?: ExternalFolders;
-  private readonly taskNumLocks = new Map<string, Promise<number>>();
+  private readonly taskNumLocks = new KeyedLock();
 
   constructor(opts: TaskFilesStoreOptions) {
     this.home = opts.home;
@@ -28,8 +28,11 @@ export class TaskFilesStore {
   }
 
   async nextProjectTaskNum(projectId: string): Promise<number> {
-    const prior = this.taskNumLocks.get(projectId) ?? Promise.resolve(0);
-    const next = prior.then(async () => {
+    // Task numbers are the identity scheme for tasks and diffpacks, so one
+    // failed allocation must stay one failed allocation — the previous
+    // hand-rolled chain kept the rejected promise as the queue head and
+    // refused every later allocation for the project until restart.
+    return this.taskNumLocks.run(projectId, async () => {
       const file = projectTaskNextIdFile(this.home, projectId, this.external);
       let current = 0;
       try {
@@ -44,8 +47,6 @@ export class TaskFilesStore {
       await writeFileAtomic(file, `${num}\n`);
       return num;
     });
-    this.taskNumLocks.set(projectId, next);
-    return next;
   }
 
   async writeTask(task: Task): Promise<void> {

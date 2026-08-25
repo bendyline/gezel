@@ -761,6 +761,11 @@
   color: #5a3825;
 }
 
+.catalog-item-tag--retired {
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent);
+  color: var(--text-muted);
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .catalog-item-tag {
     background: rgba(176, 114, 76, 0.14);
@@ -771,6 +776,18 @@
 [data-theme="dark"] .catalog-item-tag {
   background: rgba(176, 114, 76, 0.14);
   color: #e0b897;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .catalog-item-tag--retired {
+    background: color-mix(in srgb, var(--text-muted) 18%, transparent);
+    color: var(--text-muted);
+  }
+}
+
+[data-theme="dark"] .catalog-item-tag--retired {
+  background: color-mix(in srgb, var(--text-muted) 18%, transparent);
+  color: var(--text-muted);
 }
 
 .catalog-item-action {

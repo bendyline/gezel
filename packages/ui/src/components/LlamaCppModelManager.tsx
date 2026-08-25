@@ -5,6 +5,7 @@ import {
   estimateManifestKvBytes,
   hardwareHint,
   isMoEFromTags,
+  isRetiredModel,
   localContextFloorTokens,
 } from '@bendyline/gezel';
 import type {
@@ -884,19 +885,23 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
           , a community library of open, freely available AI models. Your device downloads them
           directly.
         </p>
-        {memory && (
-          <p className="muted small">
-            Some models may be too large to run on this machine.{' '}
-            <button
-              type="button"
-              className="gz-link-button"
-              onClick={() => setShowAll((v) => !v)}
-              style={{ padding: 0 }}
-            >
-              {showAll ? 'Hide oversized' : 'Show all sizes'}
-            </button>
-          </p>
-        )}
+        <p className="muted small">
+          {memory
+            ? 'Models that may not fit this machine, and retired models, are hidden by default. '
+            : 'Retired models are hidden by default. '}
+          <button
+            type="button"
+            className="gz-link-button"
+            onClick={() => setShowAll((v) => !v)}
+            style={{ padding: 0 }}
+          >
+            {showAll
+              ? memory
+                ? 'Hide retired and oversized models'
+                : 'Hide retired models'
+              : 'Show all models'}
+          </button>
+        </p>
         <CatalogBrowser
           kind="chat-model"
           emptyMessage="No on-device models in the catalog yet."
@@ -905,6 +910,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
           filter={(item: CatalogItemSummary) => {
             const m = asLlamaCppEntry(item.manifest);
             if (!m) return false;
+            if (!showAll && isRetiredModel(m)) return false;
             if (!showAll && memory) {
               // MoE-aware: keep any model that can RUN (incl. big MoE that
               // fits only via expert-offload to RAM) — hide only the truly

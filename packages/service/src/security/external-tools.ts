@@ -177,13 +177,16 @@ function osvSeverity(v: Record<string, unknown>): SecuritySeverity {
   }
 }
 
-export async function runOsvScanner(workspaceDir: string): Promise<ToolAdvisory[]> {
-  const json = (await runJson('osv-scanner', ['--format', 'json', '-r', '.'], workspaceDir)) as {
-    results?: Array<{ packages?: Array<Record<string, unknown>> }>;
-  } | null;
-  if (!json?.results) return [];
+/**
+ * Normalize osv-scanner JSON, or null when the output is not a scan result
+ * (tool failed / missing). `[]` means the scan RAN and found nothing — the
+ * caller uses that distinction to report "measured clean" vs "never measured".
+ */
+export function parseOsvJson(json: unknown): ToolAdvisory[] | null {
+  const v = json as { results?: Array<{ packages?: Array<Record<string, unknown>> }> } | null;
+  if (!v || typeof v !== 'object' || !Array.isArray(v.results)) return null;
   const byPkg = new Map<string, ToolAdvisory>();
-  for (const res of json.results) {
+  for (const res of v.results) {
     for (const p of res.packages ?? []) {
       const pkg = (p.package ?? {}) as { name?: string; ecosystem?: string };
       const vulns = (p.vulnerabilities ?? []) as Array<Record<string, unknown>>;
@@ -206,12 +209,23 @@ export async function runOsvScanner(workspaceDir: string): Promise<ToolAdvisory[
   return [...byPkg.values()];
 }
 
-export async function runNpmAudit(workspaceDir: string): Promise<ToolAdvisory[]> {
-  const json = (await runJson('npm', ['audit', '--json', '--audit-level=low'], workspaceDir)) as {
-    vulnerabilities?: Record<string, Record<string, unknown>>;
-  } | null;
-  const vulns = json?.vulnerabilities;
-  if (!vulns) return [];
+export async function runOsvScanner(workspaceDir: string): Promise<ToolAdvisory[] | null> {
+  return parseOsvJson(await runJson('osv-scanner', ['--format', 'json', '-r', '.'], workspaceDir));
+}
+
+/**
+ * Normalize `npm audit --json`, or null when it did not actually audit.
+ * Keyed on the presence of the `vulnerabilities` object — NOT on parse
+ * success: audit failures (e.g. ENOLOCK, no lockfile) print a perfectly
+ * parseable `{"error":{…}}` to stdout, and treating that as "0 advisories"
+ * is exactly the unearned-confidence failure this provenance work removes.
+ */
+export function parseNpmAuditJson(json: unknown): ToolAdvisory[] | null {
+  const v = json as { vulnerabilities?: Record<string, Record<string, unknown>> } | null;
+  if (!v || typeof v !== 'object' || typeof v.vulnerabilities !== 'object' || !v.vulnerabilities) {
+    return null;
+  }
+  const vulns = v.vulnerabilities;
   const out: ToolAdvisory[] = [];
   for (const [name, info] of Object.entries(vulns)) {
     const via = (info.via ?? []) as Array<string | Record<string, unknown>>;
@@ -227,6 +241,12 @@ export async function runNpmAudit(workspaceDir: string): Promise<ToolAdvisory[]>
     });
   }
   return out;
+}
+
+export async function runNpmAudit(workspaceDir: string): Promise<ToolAdvisory[] | null> {
+  return parseNpmAuditJson(
+    await runJson('npm', ['audit', '--json', '--audit-level=low'], workspaceDir),
+  );
 }
 
 function npmSeverity(s: string): SecuritySeverity {

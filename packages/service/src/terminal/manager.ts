@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, normalize, relative, resolve } from 'node:path';
 import {
+  KeyedLock,
   type TerminalFileReference,
   type TerminalMessage,
   type TerminalThread,
@@ -116,7 +117,7 @@ export class TerminalManager {
    * to finish before spawning. Cleared opportunistically when the
    * tail promise resolves.
    */
-  private readonly threadQueues = new Map<string, Promise<void>>();
+  private readonly threadQueues = new KeyedLock();
   private readonly shellPool: PersistentShellPool;
   /**
    * Live runs that can still be cancelled. Key: `runId`. Value:
@@ -305,73 +306,60 @@ export class TerminalManager {
     // chain so the confirmation bubble lands in submission order relative
     // to any shell commands fired around it.
     if (resolution.kind === 'craftbook') {
-      const prior = this.threadQueues.get(threadId) ?? Promise.resolve();
-      const next = prior
-        .catch(() => undefined)
-        .then(() =>
-          this.runCraftbookInvocation({
-            projectId,
-            workingDir,
-            threadId,
-            runId,
-            commandMessageId: commandMessage.id,
-            resolution,
-            cwdDisplay,
-          }),
-        );
-      this.threadQueues.set(threadId, next);
-      void next.finally(() => {
-        if (this.threadQueues.get(threadId) === next) {
-          this.threadQueues.delete(threadId);
-        }
-      });
+      this.enqueueThreadWork(threadId, 'craftbook invocation', () =>
+        this.runCraftbookInvocation({
+          projectId,
+          workingDir,
+          threadId,
+          runId,
+          commandMessageId: commandMessage.id,
+          resolution,
+          cwdDisplay,
+        }),
+      );
       return { threadId, runId, resolution };
     }
 
     // MCP tool commands run via the project tool bridge (no shell). Same
     // per-thread queue so the result bubble lands in submission order.
     if (resolution.kind === 'mcpTool') {
-      const prior = this.threadQueues.get(threadId) ?? Promise.resolve();
-      const next = prior
-        .catch(() => undefined)
-        .then(() =>
-          this.runMcpToolInvocation({ projectId, workingDir, threadId, resolution, cwdDisplay }),
-        );
-      this.threadQueues.set(threadId, next);
-      void next.finally(() => {
-        if (this.threadQueues.get(threadId) === next) {
-          this.threadQueues.delete(threadId);
-        }
-      });
+      this.enqueueThreadWork(threadId, 'MCP tool invocation', () =>
+        this.runMcpToolInvocation({ projectId, workingDir, threadId, resolution, cwdDisplay }),
+      );
       return { threadId, runId, resolution };
     }
 
     // Queue the actual exec behind any in-flight run for this thread.
-    const prior = this.threadQueues.get(threadId) ?? Promise.resolve();
-    const next = prior
-      .catch(() => undefined)
-      .then(async () => {
-        await this.executeAndEmit({
-          projectId,
-          workingDir,
-          threadId,
-          runId,
-          resolution,
-          wsRoot,
-          preRunCwdDisplay: cwdDisplay,
-          commandMessageId: commandMessage.id,
-          columns,
-        });
-      });
-    this.threadQueues.set(threadId, next);
-    void next.finally(() => {
-      // Only clear the queue head if no later run took our place.
-      if (this.threadQueues.get(threadId) === next) {
-        this.threadQueues.delete(threadId);
-      }
-    });
+    this.enqueueThreadWork(threadId, 'command run', () =>
+      this.executeAndEmit({
+        projectId,
+        workingDir,
+        threadId,
+        runId,
+        resolution,
+        wsRoot,
+        preRunCwdDisplay: cwdDisplay,
+        commandMessageId: commandMessage.id,
+        columns,
+      }),
+    );
 
     return { threadId, runId, resolution };
+  }
+
+  /**
+   * Fire-and-forget: the submit route already answered by the time queued
+   * work runs, so a failure here (the result-bubble append hitting a disk
+   * error, say) has no caller to reject into. It must be logged and
+   * swallowed — an unowned rejection is fatal to the whole daemon.
+   */
+  private enqueueThreadWork(threadId: string, label: string, work: () => Promise<void>): void {
+    void this.threadQueues.run(threadId, work).catch((err) => {
+      log.warn(
+        `queued ${label} failed for thread ${threadId}:`,
+        err instanceof Error ? err.message : err,
+      );
+    });
   }
 
   private buildInterceptOutput(

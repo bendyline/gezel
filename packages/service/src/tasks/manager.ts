@@ -1374,11 +1374,20 @@ export class TaskManager {
     // `spawnBook`/`mainBook`, which may still be the resolver's cached
     // template — writing through would leak one task's params into the
     // next launch of the same craftbook.
+    // The SPAWN template must keep `{{diffpack.*}}` un-interpolated: those
+    // tokens are per-shard (spawnChild resolves them with the CHILD's pack
+    // id), and a drafting host's own context would otherwise consume them
+    // here with the host's folder — every shard would then draft into one
+    // pack. Host steps keep the full context (the non-fanout Boekwachter
+    // path legitimately addresses its own pack).
+    const spawnTemplateContext = Object.fromEntries(
+      Object.entries(craftbookInterpolationContext).filter(([key]) => !key.startsWith('diffpack.')),
+    );
     if (spawnsCraftbook) {
-      interpolateStepsContext(spawnsCraftbook.steps, craftbookInterpolationContext);
+      interpolateStepsContext(spawnsCraftbook.steps, spawnTemplateContext);
     }
     if (craftbook.spawn) {
-      craftbook.spawn = interpolateContextDeep(craftbook.spawn, craftbookInterpolationContext);
+      craftbook.spawn = interpolateContextDeep(craftbook.spawn, spawnTemplateContext);
     }
     const activeStepId = craftbook.entryStepId;
     if (!isDraft) {

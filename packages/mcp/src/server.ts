@@ -323,6 +323,28 @@ function draftEditApi(client: GezelClient, packId: string): WorkspaceEditApi {
 }
 
 /**
+ * The active task's artifact folder (`task.artifactDir`, forwarded by
+ * ChatManager). That namespace lives in the ARTIFACTS DRAWER — a workspace
+ * write "into" it lands beside the real deliverable, invisible to every
+ * gate, and the model then re-writes the same wrong surface through nudge
+ * after nudge (wild-caught: a bug-fix eval died with repro.md written
+ * workspace-side three times). Scoped to the exact folder of THIS session's
+ * task, so a project that legitimately keeps a `tasks/` source directory is
+ * untouched outside that task's own numbered folder.
+ */
+const sessionTaskArtifactDir = (process.env.GEZEL_TASK_ARTIFACT_DIR ?? '').replace(/\/+$/, '');
+
+function assertNotTaskArtifactNamespace(target: ConcreteWorkspaceTarget): void {
+  if (!sessionTaskArtifactDir || target.kind !== 'current') return;
+  const p = target.path.replace(/\\/g, '/').replace(/^\.\//, '');
+  if (p === sessionTaskArtifactDir || p.startsWith(`${sessionTaskArtifactDir}/`)) {
+    throw new Error(
+      `\`${p}\` is this task's working folder in the ARTIFACTS DRAWER, not the project workspace. Write it with \`write_artifact({ path: ${JSON.stringify(p)}, ... })\` and read it back with \`read_artifact\` — the workspace file tools cannot reach the drawer.`,
+    );
+  }
+}
+
+/**
  * The client the editing tools should use for one target.
  *
  * While drafting, a write to a LINKED sibling project is refused rather than
@@ -330,6 +352,7 @@ function draftEditApi(client: GezelClient, packId: string): WorkspaceEditApi {
  * honest to put such an edit.
  */
 function editClient(target: ConcreteWorkspaceTarget): WorkspaceEditApi {
+  assertNotTaskArtifactNamespace(target);
   const client = workspaceClient(target);
   if (!isDrafting) return client;
   if (target.kind === 'linked') {
@@ -10852,6 +10875,41 @@ server.tool(
   },
 );
 
+const NPM_AUDIT_UNREADABLE_LOCKFILES = new Set([
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'bun.lockb',
+  'bun.lock',
+]);
+
+/**
+ * Render the dependency/advisory count with its provenance, so "0 with
+ * advisories" is never shown for a measurement that never happened.
+ */
+function advisoryLine(
+  total: number,
+  withAdvisories: number,
+  sca?: { engine: string | null; measured: boolean; lockfiles: string[] },
+): string {
+  if (!sca) {
+    return `dependencies: ${total} (${withAdvisories} with advisories — provenance unknown; re-run security_scan)`;
+  }
+  if (!sca.measured) {
+    const why = sca.engine ? `${sca.engine} produced no usable audit` : 'no SCA tool on this host';
+    return `dependencies: ${total} (advisories NOT measured — ${why}; install osv-scanner)`;
+  }
+  const uncovered =
+    sca.engine === 'npm-audit'
+      ? sca.lockfiles.filter((p) =>
+          NPM_AUDIT_UNREADABLE_LOCKFILES.has(p.slice(p.lastIndexOf('/') + 1)),
+        )
+      : [];
+  const partial = uncovered.length
+    ? ` — npm audit cannot read ${uncovered.join(', ')}; advisory coverage is partial`
+    : '';
+  return `dependencies: ${total} (${withAdvisories} with advisories via ${sca.engine}${partial})`;
+}
+
 server.tool(
   'security_scan',
   'Run (or refresh) the whole-repo security analysis: build the dependency inventory and, when semgrep / osv-scanner / gitleaks are installed on the host, ingest their findings. The cheap built-in pattern/entropy scan already runs continuously in the index; call this once at the start of a deep security review to populate dependency advisories and tool findings, then query with security_overview / scan_findings / list_dependencies.',
@@ -10880,7 +10938,7 @@ server.tool(
             .map(([k, n]) => `${k}=${n}`)
             .join(' ') || '(none)'
         }`,
-        `dependencies: ${res.dependencies} (${res.advisories} with advisories)`,
+        advisoryLine(res.dependencies, res.advisories, res.sca),
       ].join('\n');
       return { content: [{ type: 'text' as const, text }] };
     } catch (err) {
@@ -10925,7 +10983,7 @@ server.tool(
             .join(' ') || '(none)'
         }`,
         `attack surface: ${res.attackSurface.entryPoints} entry points, ${res.attackSurface.routes} routes, ${res.attackSurface.authBoundaries} auth boundaries, ${res.attackSurface.secretTouchpoints} secret touchpoints, ${res.attackSurface.taintSources} taint sources`,
-        `dependencies: ${res.dependencies.total} (${res.dependencies.withAdvisories} with advisories)`,
+        advisoryLine(res.dependencies.total, res.dependencies.withAdvisories, res.provenance?.sca),
         `candidate systemic themes:\n${themes || '  (none recurring across ≥3 files)'}`,
       ].join('\n');
       return { content: [{ type: 'text' as const, text }] };
@@ -11089,7 +11147,7 @@ server.tool(
           (d) =>
             `${d.name}@${d.version ?? '?'}${d.direct ? '' : ' (transitive)'}${d.advisoryIds.length ? ` — ${d.maxSeverity} advisories: ${d.advisoryIds.join(', ')}` : ''}${d.license ? ` [${d.license}]` : ''}`,
         );
-      const head = `${res.total} dependencies, ${res.withAdvisories} with advisories`;
+      const head = advisoryLine(res.total, res.withAdvisories, res.provenance?.sca);
       return {
         content: [{ type: 'text' as const, text: `${head}\n${lines.join('\n') || '(none)'}` }],
       };

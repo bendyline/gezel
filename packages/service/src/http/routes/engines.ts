@@ -4,6 +4,7 @@ import {
   LlamaCppContextSizingResponseSchema,
   ModelContextOverrideUpdateSchema,
   type NativeEngineName,
+  createLogger,
 } from '@bendyline/gezel';
 import { resolvePlatformKey } from '@bendyline/gezel/native';
 import { Hono } from 'hono';
@@ -15,6 +16,8 @@ import { EngineBusyError } from '../../providers/native/capacity-broker.js';
 import type { ServiceContext } from '../context.js';
 import { isMachineEngineProvider, machineEngineProxy } from './machine-engine-proxy.js';
 import { invalidateModelsCache } from './models.js';
+
+const log = createLogger('engines');
 
 const ENGINE_ENV_VAR: Record<NativeEngineName, string> = {
   'llama-server': 'GEZEL_LLAMA_SERVER_BIN',
@@ -350,7 +353,15 @@ async function subscribeEngineSse(
     if (done) return;
     writes = writes.then(async () => {
       if (event.type === 'done' && engine) {
-        await refreshNativeConsumer(ctx, engine);
+        // A refresh failure must not break the write chain: the 'done'
+        // write and the finished latch below still have to run, and a
+        // rejected chain nobody observes is fatal daemon-wide.
+        await refreshNativeConsumer(ctx, engine).catch((err) => {
+          log.warn(
+            `native consumer refresh failed after ${key}:`,
+            err instanceof Error ? err.message : err,
+          );
+        });
       }
       await stream.writeSSE({ data: JSON.stringify(event) }).catch(() => {});
       if (event.type === 'done' || event.type === 'error') {

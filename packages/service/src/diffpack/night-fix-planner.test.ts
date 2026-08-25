@@ -279,11 +279,11 @@ describe('the shape of the planned task', () => {
   it('marks the host on the catalog path too', async () => {
     const deps = makeDeps();
     deps.catalog = {
-      get: async () => ({ id: 'fix-into-diffpack' }),
+      get: async () => ({ id: 'nightly-fix-sweep' }),
     } as unknown as NightFixPlannerDeps['catalog'];
 
     await planProjectNightFixes(deps, projectId);
-    expect(created[0]?.input).toMatchObject({ craftbookId: 'fix-into-diffpack' });
+    expect(created[0]?.input).toMatchObject({ craftbookId: 'nightly-fix-sweep' });
     expect(created[0]?.extras).toMatchObject({ draftsDiffpack: true });
   });
 

@@ -24,6 +24,25 @@ describe('scanCode (built-in pattern scanner)', () => {
     ).toBe(true);
   });
 
+  it('flags exec across its child_process spellings', () => {
+    const flagged = (src: string) => scanCode(src).some((f) => f.ruleId === 'sink.command-exec');
+    expect(flagged("exec('ls ' + name)")).toBe(true);
+    expect(flagged("execSync('ls ' + name)")).toBe(true);
+    expect(flagged("cp.exec('convert ' + file)")).toBe(true);
+    expect(flagged("childProcess.exec('ls')")).toBe(true);
+    expect(flagged("cp2.execSync('ls')")).toBe(true);
+  });
+
+  it('does not flag non-child_process exec receivers (regex, sqlite, statements)', () => {
+    const flagged = (src: string) => scanCode(src).some((f) => f.ruleId === 'sink.command-exec');
+    expect(flagged('const m = myRe.exec(line);')).toBe(false);
+    expect(flagged('db.exec(sql);')).toBe(false);
+    expect(flagged('stmt.exec();')).toBe(false);
+    expect(flagged('const m = /x/.exec(s);')).toBe(false);
+    expect(flagged('handle?.exec(query);')).toBe(false);
+    expect(flagged('myexec(cmd);')).toBe(false);
+  });
+
   it('flags a hardcoded credential and reports a 1-based line', () => {
     const src = 'const cfg = {};\nconst apiKey = "abcd1234efgh5678ijkl";\n';
     const hit = scanCode(src).find((f) => f.category === 'secret');

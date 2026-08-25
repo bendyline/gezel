@@ -1015,6 +1015,12 @@ export async function runResponsesStreaming(
   const enqueue = (events: ResponsesStreamEvent[]): void => {
     for (const event of events) {
       writes = writes.then(() => sink.writeSSE(serializeResponsesSseEvent(event)));
+      // Observe each new tail immediately. A rejecting writeSSE (client gone
+      // mid-stream) otherwise sits unhandled until the next enqueue or the
+      // final await — and an unowned rejection is fatal daemon-wide. The
+      // chain itself still rejects, so `await writes` below keeps surfacing
+      // the first failure and later events keep being skipped.
+      writes.catch(() => {});
     }
   };
 

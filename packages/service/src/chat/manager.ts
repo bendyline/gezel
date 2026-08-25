@@ -190,6 +190,7 @@ import {
   type TurnUsage,
 } from '../providers/types.js';
 import type { MlxRuntimeStatusBus } from '../python/mlx-runtime-status-bus.js';
+import { artifactPathsOf, extractReferencedFiles } from '../references/file-references.js';
 import { getPairedRemoteFetch } from '../remotes/pinned-fetch.js';
 import type { RemotesRegistry } from '../remotes/registry.js';
 import { listStdlibScripts } from '../scripts/stdlib-source.js';
@@ -225,7 +226,6 @@ import {
   type ExternalConversationTurn,
   type ResolveExternalConversationInput,
 } from './external-conversation-recorder.js';
-import { artifactPathsOf, extractReferencedFiles } from './file-references.js';
 
 /**
  * Replace a value-taking CLI option with Gezel's authoritative value.
@@ -261,6 +261,7 @@ function withForcedCliOption(args: readonly string[], option: string, value: str
 export interface WorkspaceFileSource {
   readFiles(projectId: string): Promise<Array<{ path: string }>>;
 }
+import { extractReferencedTasks } from '../references/task-references.js';
 import { type ResidentModel, selectBackgroundEngine } from './background-routing.js';
 import { evaluateDeliverableContract } from './deliverable-contract.js';
 import { deliverableWrittenThisTurn, evaluateDeliverableGate } from './deliverable-gate.js';
@@ -335,7 +336,6 @@ import {
   type TaskBudgetSnapshot,
   TaskBudgetTracker,
 } from './task-budget.js';
-import { extractReferencedTasks } from './task-references.js';
 import type { AvailableToolInfo } from './tools-block.js';
 import { describeTurnError } from './turn-error.js';
 import { UsageTracker } from './usage.js';
@@ -15408,6 +15408,18 @@ export class ChatManager {
         // the current task when a small model omits or mangles the ref
         // (e.g. `arcade-game#1` for `space-war-arcade-game/1`).
         ...(record.taskRef ? { GEZEL_TASK_REF: record.taskRef } : {}),
+        // Scope the task's artifact folder: workspace WRITES into this
+        // namespace are redirected with an actionable error — the folder
+        // lives in the artifacts drawer, and `write_file` there is the
+        // wrong-surface mistake every deliverable gate then rejects
+        // opaquely (wild-caught: a whole bug-fix eval died on repro.md
+        // written workspace-side through three nudges).
+        ...(taskContext?.task
+          ? {
+              GEZEL_TASK_ARTIFACT_DIR:
+                taskContext.task.artifactDir ?? `tasks/${taskContext.task.num}`,
+            }
+          : {}),
         // Scope diffpack: a task that drafts a change proposal re-roots the
         // workspace WRITE tools at the pack's draft tree. Same tool names,
         // same arguments — only the sink moves, so the gezel can work on a

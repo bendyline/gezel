@@ -27,6 +27,7 @@ import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import { profileHasBehavior } from '../model-profile/runtime.js';
 import type { ResolvedModelProfile } from '../model-profile/types.js';
+import { resolveDefaultProviderName } from '../providers/default-provider.js';
 import { KeurmeesterCaseStore } from './case-store.js';
 import {
   type KeurmeesterConsultBundle,
@@ -764,7 +765,7 @@ export class KeurmeesterManager {
     // same tier rule as chat stalls, derived from config + frontmatter
     // because no session state is in scope.
     const gezel = await this.store.getGezel(assigneeGezelId).catch(() => null);
-    const providerRaw = gezel?.parsed.frontmatter.provider ?? config.provider ?? 'copilot';
+    const providerRaw = gezel?.parsed.frontmatter.provider ?? resolveDefaultProviderName(config);
     const provider = ProviderNameSchema.safeParse(providerRaw);
     if (!provider.success || !isLocalProvider(provider.data)) {
       log.debug(`skip task consult: assignee provider ${String(providerRaw)} is not local`);

@@ -50,6 +50,7 @@ function catalogModel(opts: {
   downloadGiB: number;
   residentGiB: number;
   cacheGiB: number;
+  tags?: string[];
 }) {
   return {
     source: { id: 'bundled', label: 'Bundled' },
@@ -60,7 +61,7 @@ function catalogModel(opts: {
       name: opts.name,
       version: '1.0.0',
       description: 'test',
-      tags: ['moe'],
+      tags: opts.tags ?? ['moe'],
       license: 'MIT',
       licenseClass: 'open',
       parameterSize: opts.parameterSize ?? '284B',
@@ -166,6 +167,75 @@ describe('Ds4ModelManager', () => {
     expect(screen.queryByText(/DeepSeek/)).not.toBeInTheDocument();
     expect(screen.getByText('754B')).toBeInTheDocument();
     expect(screen.getByText(/197\.0 GB/)).toBeInTheDocument();
+  });
+
+  it('hides retired downloads until Show all models is selected', async () => {
+    vi.mocked(api.listCatalogItems).mockResolvedValue({
+      items: [
+        catalogModel({
+          id: 'current-ds4',
+          name: 'Current DS4',
+          quantization: 'IQ2_XXS',
+          downloadGiB: 81,
+          residentGiB: 36,
+          cacheGiB: 32,
+        }),
+        catalogModel({
+          id: 'retired-ds4',
+          name: 'Retired DS4',
+          quantization: 'IQ2_XXS',
+          downloadGiB: 81,
+          residentGiB: 36,
+          cacheGiB: 32,
+          tags: ['retired'],
+        }),
+      ],
+    } as never);
+
+    render(<Ds4ModelManager />);
+
+    expect(await screen.findByText('Current DS4')).toBeInTheDocument();
+    expect(screen.queryByText('Retired DS4')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show all models' }));
+
+    expect(await screen.findByText('Retired DS4')).toBeInTheDocument();
+    expect(screen.getByText('retired')).toHaveClass('catalog-item-tag--retired');
+  });
+
+  it('keeps an installed retired model visible for management', async () => {
+    vi.mocked(api.listCatalogItems).mockResolvedValue({
+      items: [
+        catalogModel({
+          id: 'retired-ds4',
+          name: 'Retired DS4',
+          quantization: 'IQ2_XXS',
+          downloadGiB: 81,
+          residentGiB: 36,
+          cacheGiB: 32,
+          tags: ['retired'],
+        }),
+      ],
+    } as never);
+    vi.mocked(api.listDs4Models).mockResolvedValue({
+      models: [
+        {
+          id: 'retired-ds4',
+          name: 'Retired DS4',
+          approxSizeBytes: 81 * GiB,
+          installedAt: '2026-08-01T00:00:00.000Z',
+          weightsPath: '/tmp/retired-ds4/model.gguf',
+          contextWindow: 128_000,
+          quantization: 'IQ2_XXS',
+          chatTemplatePresent: true,
+        },
+      ],
+    } as never);
+
+    render(<Ds4ModelManager />);
+
+    expect(await screen.findByText('Retired DS4')).toBeInTheDocument();
+    expect(screen.getByText('on device')).toBeInTheDocument();
   });
 
   it('quotes the launch window and its memory cost on models that are not downloaded', async () => {

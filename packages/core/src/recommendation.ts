@@ -35,6 +35,17 @@ import { computeModelFit, isMoEFromTags } from './model-fit.js';
 
 const GB = 1024 ** 3;
 
+/** Catalog lifecycle tag used for models kept only for compatibility. */
+export const RETIRED_MODEL_TAG = 'retired';
+
+export const RETIRED_MODEL_TOOLTIP =
+  'This model is kept for compatibility but is no longer recommended for new downloads.';
+
+/** Tags are authored content, so match defensively across casing and whitespace. */
+export function isRetiredModel(manifest: { tags?: readonly string[] }): boolean {
+  return manifest.tags?.some((tag) => tag.trim().toLowerCase() === RETIRED_MODEL_TAG) ?? false;
+}
+
 /**
  * The fields the recommendation gate reads — the structural subset every
  * model manifest satisfies, so the same predicate covers chat, image, video
@@ -47,6 +58,8 @@ export interface RecoGateInput {
   licenseClass?: string;
   /** Chat models declare this; media manifests have no such field. */
   supportsTools?: boolean;
+  /** Retired entries remain installable deliberately, never recommended automatically. */
+  tags?: readonly string[];
 }
 
 /**
@@ -54,13 +67,15 @@ export interface RecoGateInput {
  * below, the ★ Recommended badge, the CLI bootstrap and the media pickers all
  * call this so they can never drift apart.
  *
- * Three conditions:
+ * Four conditions:
  *   1. a hand-curated positive `recoScore` — absent means no one nominated it;
  *   2. a fully-open license, so a stray score on a restricted model is ignored;
  *   3. tool support. Gezels do their work THROUGH the MCP toolset, so a model
  *      that cannot call tools is never a sane default no matter how good its
  *      prose is — it stays installable, but choosing it has to be the user's
  *      deliberate act, not ours.
+ *   4. no `retired` lifecycle tag. Retired builds stay available behind the
+ *      catalog's Show all control, but must never become an automatic choice.
  *
  * Media manifests carry no `supportsTools` field, hence `!== false` rather
  * than `=== true`: undefined passes, only an explicit refusal disqualifies.
@@ -70,7 +85,8 @@ export function isRecommendedModel(m: RecoGateInput): boolean {
     typeof m.recoScore === 'number' &&
     m.recoScore > 0 &&
     m.licenseClass === 'open' &&
-    m.supportsTools !== false
+    m.supportsTools !== false &&
+    !isRetiredModel(m)
   );
 }
 

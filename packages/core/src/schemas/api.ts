@@ -5028,18 +5028,43 @@ export const SecurityScanRequestSchema = z.object({
 });
 export type SecurityScanRequest = z.infer<typeof SecurityScanRequestSchema>;
 
+const SecurityToolsAvailableSchema = z.object({
+  semgrep: z.boolean(),
+  osvScanner: z.boolean(),
+  gitleaks: z.boolean(),
+  npm: z.boolean(),
+});
+
+/** How the last dependency-advisory (SCA) measurement actually happened —
+ *  the answer to "did we look and find nothing, or never look at all?". */
+export const ScaProvenanceSchema = z.object({
+  /** SCA tool attempted, or null when none is installed. A string (not an
+   *  enum) so future engines don't require a wire change. */
+  engine: z.string().nullable(),
+  /** True only when the tool produced a real scan result — an advisory count
+   *  without this is not a measurement. */
+  measured: z.boolean(),
+  /** Lockfiles present in the workspace, so a reader can judge coverage
+   *  (npm audit reads only npm lockfiles; osv-scanner reads most). */
+  lockfiles: z.array(z.string()),
+});
+
+export const SecurityScanProvenanceSchema = z.object({
+  scannedAt: z.string(),
+  engines: z.array(z.string()),
+  toolsAvailable: SecurityToolsAvailableSchema,
+  sca: ScaProvenanceSchema,
+});
+export type SecurityScanProvenance = z.infer<typeof SecurityScanProvenanceSchema>;
+
 export const SecurityScanResponseSchema = z.object({
   ran: z.boolean(),
   engines: z.array(z.string()),
-  toolsAvailable: z.object({
-    semgrep: z.boolean(),
-    osvScanner: z.boolean(),
-    gitleaks: z.boolean(),
-    npm: z.boolean(),
-  }),
+  toolsAvailable: SecurityToolsAvailableSchema,
   findingCounts: FindingCountsSchema,
   dependencies: z.number().int().nonnegative(),
   advisories: z.number().int().nonnegative(),
+  sca: ScaProvenanceSchema.optional(),
 });
 export type SecurityScanResponse = z.infer<typeof SecurityScanResponseSchema>;
 
@@ -5115,6 +5140,8 @@ export const ListDependenciesResponseSchema = z.object({
   withAdvisories: z.number().int().nonnegative(),
   /** false until `security_scan` has populated the inventory. */
   scanned: z.boolean(),
+  /** Absent on pre-provenance databases; re-running security_scan sets it. */
+  provenance: SecurityScanProvenanceSchema.optional(),
 });
 export type ListDependenciesResponse = z.infer<typeof ListDependenciesResponseSchema>;
 
@@ -5143,6 +5170,8 @@ export const SecurityOverviewResponseSchema = z.object({
       severity: SecuritySeveritySchema,
     }),
   ),
+  /** Absent on pre-provenance databases; re-running security_scan sets it. */
+  provenance: SecurityScanProvenanceSchema.optional(),
 });
 export type SecurityOverviewResponse = z.infer<typeof SecurityOverviewResponseSchema>;
 

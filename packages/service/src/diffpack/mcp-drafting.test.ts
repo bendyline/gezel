@@ -27,6 +27,7 @@ let home: string;
 let scratch: string;
 let drafting: McpBridge;
 let plain: McpBridge;
+let taskScoped: McpBridge;
 let externalDir: string;
 let projectId: string;
 
@@ -82,11 +83,19 @@ beforeAll(async () => {
 
   plain = new McpBridge();
   await plain.start({ command: 'node', args: [mcpPath], env: baseEnv });
+
+  taskScoped = new McpBridge();
+  await taskScoped.start({
+    command: 'node',
+    args: [mcpPath],
+    env: { ...baseEnv, GEZEL_TASK_REF: `${projectId}/7`, GEZEL_TASK_ARTIFACT_DIR: 'tasks/7' },
+  });
 }, 60_000);
 
 afterAll(async () => {
   await drafting?.stop();
   await plain?.stop();
+  await taskScoped?.stop();
   await svc?.stop();
   await rm(home, { recursive: true, force: true }).catch(() => {});
   await rm(scratch, { recursive: true, force: true }).catch(() => {});
@@ -165,5 +174,28 @@ describe('a session with no pack is unaffected', () => {
     const out = await text(plain, 'write_file', { path: 'sneaky.ts', content: 'nope\n' });
     expect(out).toMatch(/consent|not writable|permission|denied|enable/i);
     expect(await workspaceFile('sneaky.ts')).toBeNull();
+  });
+});
+
+describe('the task artifact namespace rejects workspace writes', () => {
+  it("write_file into the task's own folder redirects to write_artifact", async () => {
+    const out = await text(taskScoped, 'write_file', {
+      path: 'tasks/7/repro.md',
+      content: '## Symptom\n\nwrong surface\n',
+    });
+    expect(out).toContain('ARTIFACTS DRAWER');
+    expect(out).toContain('write_artifact');
+    // Nothing landed on either surface.
+    expect(await workspaceFile('tasks/7/repro.md')).toBeNull();
+  });
+
+  it('other workspace paths are untouched by the guard', async () => {
+    const out = await text(taskScoped, 'write_file', {
+      path: 'src/elsewhere.ts',
+      content: 'export {};\n',
+    });
+    // This external project denies managed writes — but that is the
+    // ordinary write gate speaking, not the drawer redirect.
+    expect(out).not.toContain('ARTIFACTS DRAWER');
   });
 });

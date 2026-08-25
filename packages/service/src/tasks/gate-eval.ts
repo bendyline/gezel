@@ -601,7 +601,22 @@ async function evalCheckInner(
       return { ok: true, detail: `${c.file} ran clean (exit 0)`, evidence };
     }
     case 'citationsResolve': {
-      const r = await citationsResolve(reader, c.file, {
+      // An artifact-flagged citation check must NOT probe cited paths
+      // against the artifacts drawer alone: the whole point of a
+      // drawer-side evidence doc (a repro note, a fix summary) is to cite
+      // REAL WORKSPACE FILES, and the plain reader swap rejected every
+      // honest citation as fabricated ("cites N source(s) that do not
+      // exist" — about files that exist). Merge the surfaces: the report
+      // itself reads artifact-first, and a cited path resolves when it
+      // exists on EITHER surface. For a drafting task `ws.read` is already
+      // the overlay, so drafted files count too.
+      const citationsReader: WorkspaceLike = usesArtifact
+        ? {
+            read: async (f) => (await artifactReader.read(f)) ?? (await ws.read(f)),
+            list: async () => [...(await ws.list()), ...(await artifactReader.list())],
+          }
+        : ws;
+      const r = await citationsResolve(citationsReader, c.file, {
         ...(c.pattern ? { pattern: c.pattern } : {}),
         ...(c.flags ? { flags: c.flags } : {}),
         ...(c.minCitations !== undefined ? { minCitations: c.minCitations } : {}),
