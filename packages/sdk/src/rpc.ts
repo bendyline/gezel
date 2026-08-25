@@ -48,6 +48,12 @@ const DEFAULT_INIT: InitMessage = {
   engagementFlags: { llmAllowed: false },
 };
 
+const WRITE_BACKPRESSURE_RETRY_MS = 1;
+const WRITE_BACKPRESSURE_TIMEOUT_MS = 30_000;
+const WRITE_BACKPRESSURE_SIGNAL = new Int32Array(
+  new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT),
+);
+
 /**
  * Only read stdin synchronously when we're actually running inside a
  * ScriptRunner sandbox — signalled by the `GEZEL_SCRIPT_RUNTIME` env
@@ -197,9 +203,10 @@ export class RpcClient {
     // When the script exits naturally after a fire-and-forget call (e.g.
     // `gezel.output(...); // done`), the unref'd socket lets the process
     // exit before that flush happens — the parent never sees the frame
-    // and the run hangs at the runner's timeout. fs.writeSync blocks
-    // until the OS pipe buffer accepts the bytes, so the data can't be
-    // lost on exit. notify is fire-and-forget so we don't need the
+    // and the run hangs at the runner's timeout. writeFrame does not
+    // return until every byte has reached the OS buffer, including when
+    // the inherited descriptor becomes non-blocking after the read Socket
+    // is initialized. notify is fire-and-forget so we don't need the
     // socket's read side here at all.
     writeFrame(`${JSON.stringify(msg)}\n`);
   }
@@ -210,13 +217,44 @@ export class RpcClient {
  * write buffer so callers can rely on the data reaching the parent before
  * the next line of script runs. Throws on real I/O errors (e.g. fd 3
  * closed); callers convert those into rejected promises where applicable.
+ *
+ * Once fd 3 has been wrapped in a net.Socket for reads, Node configures the
+ * descriptor as non-blocking. A large later request can therefore short-write
+ * and then raise EAGAIN while the parent drains the first chunk. Retrying here
+ * preserves the synchronous durability required by notifications without
+ * routing writes through the Socket's lossy-on-exit userland buffer.
  */
 function writeFrame(payload: string): void {
   // Encode once to bytes so writeSync can count them and re-issue if the
   // OS short-writes (rare on pipes but defined behavior).
   const buf = Buffer.from(payload, 'utf8');
   let offset = 0;
+  const startedAt = Date.now();
   while (offset < buf.length) {
-    offset += writeSync(3, buf, offset, buf.length - offset);
+    try {
+      const written = writeSync(3, buf, offset, buf.length - offset);
+      if (written > 0) {
+        offset += written;
+        continue;
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'EINTR') continue;
+      if (code !== 'EAGAIN' && code !== 'EWOULDBLOCK') throw error;
+    }
+
+    if (Date.now() - startedAt >= WRITE_BACKPRESSURE_TIMEOUT_MS) {
+      const error = new Error(
+        `script RPC channel remained backpressured after writing ${offset} of ${buf.length} bytes`,
+      ) as NodeJS.ErrnoException;
+      error.code = 'ETIMEDOUT';
+      throw error;
+    }
+
+    // The parent is a separate process, so it can continue draining fd 3
+    // while this script thread sleeps. Atomics.wait provides a bounded,
+    // non-spinning synchronous pause; setTimeout cannot preserve notify's
+    // write-before-exit contract.
+    Atomics.wait(WRITE_BACKPRESSURE_SIGNAL, 0, 0, WRITE_BACKPRESSURE_RETRY_MS);
   }
 }

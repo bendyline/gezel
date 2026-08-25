@@ -311,6 +311,38 @@ describe.runIf(process.platform === 'darwin')('ScriptRunner — end-to-end', () 
     expect(written).toBe('hello');
   });
 
+  it('retries a large SDK request when the RPC channel is backpressured', async () => {
+    await writeScript(
+      'writes-large-artifact',
+      `
+          import { gezel, defineScript } from '@bendyline/gezel-sdk';
+          export const meta = defineScript({
+            name: 'writes-large-artifact',
+            description: 'writes an artifact larger than the RPC socket buffer.',
+            requires: ['artifacts.write'],
+            outputs: { bytes: { type: 'number', description: 'bytes written' } },
+          });
+          await gezel.artifacts.write('warmup.txt', 'ready');
+          const content = 'x'.repeat(1024 * 1024);
+          await gezel.artifacts.write('large-rpc-frame.txt', content);
+          gezel.output({ bytes: content.length });
+        `,
+    );
+
+    const run = await runner.run({
+      projectId: 'default',
+      scriptName: 'writes-large-artifact',
+      trigger: { kind: 'manual', userInitiated: true },
+    });
+
+    expect(run.status).toBe('ok');
+    expect(run.output).toEqual({ bytes: 1024 * 1024 });
+    const written = await store.readProjectArtifact('default', 'large-rpc-frame.txt');
+    expect(written).toHaveLength(1024 * 1024);
+    expect(written?.startsWith('x')).toBe(true);
+    expect(written?.endsWith('x')).toBe(true);
+  }, 60_000);
+
   it('validates output against meta.outputs', async () => {
     await writeScript(
       'bad-output',
