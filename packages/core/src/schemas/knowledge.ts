@@ -425,6 +425,40 @@ export const KnowledgeRegistryIndexSchema = z.object({
 });
 export type KnowledgeRegistryIndex = z.infer<typeof KnowledgeRegistryIndexSchema>;
 
+/**
+ * One available upgrade: an installed catalog for which the signed registry
+ * offers a strictly newer version. `contentDigest`/`url`/`archiveBytes` come
+ * from the verified registry row — exactly what the install endpoint needs
+ * to run the hardened URL install.
+ */
+export const KnowledgeUpdateCandidateSchema = z.object({
+  publisherId: KnowledgeIdSchema,
+  catalogId: KnowledgeIdSchema,
+  name: z.string(),
+  installedVersion: z.string(),
+  availableVersion: z.string(),
+  archiveBytes: z.number().int().nonnegative(),
+  contentDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  url: z.string().url(),
+});
+export type KnowledgeUpdateCandidate = z.infer<typeof KnowledgeUpdateCandidateSchema>;
+
+export const KnowledgeUpdatesResponseSchema = z.discriminatedUnion('available', [
+  z.object({
+    available: z.literal(false),
+    reason: z.enum(['no-registry-url', 'network-blocked', 'no-trust-anchors', 'fetch-failed']),
+    detail: z.string().optional(),
+  }),
+  z.object({
+    available: z.literal(true),
+    registryUrl: z.string(),
+    publisher: z.object({ id: KnowledgeIdSchema, name: z.string() }),
+    checkedAt: z.string(),
+    updates: z.array(KnowledgeUpdateCandidateSchema),
+  }),
+]);
+export type KnowledgeUpdatesResponse = z.infer<typeof KnowledgeUpdatesResponseSchema>;
+
 // ── HTTP request shapes ─────────────────────────────────────────────────────
 
 export const KnowledgeInstallRequestSchema = z.object({

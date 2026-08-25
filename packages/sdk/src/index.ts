@@ -8,10 +8,11 @@
  * of user code.
  */
 
-import type { IndexReadinessReport, WorkspaceIndexStatus } from '@bendyline/gezel';
+import type { IndexReadinessReport, WorkspaceIndexStatus } from './index-readiness.js';
 import { RpcClient } from './rpc.js';
 import type { InferInput, InferOutput, ScriptInputs, ScriptMeta, ScriptOutputs } from './types.js';
 
+export type { IndexReadinessReport, WorkspaceIndexStatus } from './index-readiness.js';
 export * from './types.js';
 
 /**

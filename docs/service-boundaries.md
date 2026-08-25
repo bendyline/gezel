@@ -151,6 +151,17 @@ existing shared model-asset tree. The boundary rules:
   compatibility, `quick_check`, embedder-free smoke), and atomically publishes
   `catalogs/<publisher>/<id>/versions/<version>/<sha256>/`. Arbitrary URLs and
   local paths are rejected at the route boundary.
+- **Archive resolution is broker-side, in a fixed ladder** (both rungs
+  operator-configured env, never request data): the local drop directory
+  `GEZEL_KNOWLEDGE_REGISTRY_DIR` (a file whose sha256 equals the coordinate's
+  digest), then the signed CDN registry `GEZEL_KNOWLEDGE_REGISTRY_URL` —
+  fetched, schema-parsed, and Ed25519-verified against the built-in trust
+  anchors plus the `GEZEL_KNOWLEDGE_TRUST_ANCHORS` overlay (a JSON file that
+  can only ADD anchors, never remove built-ins). A registry no anchor verifies
+  is ignored outright. The registry only locates bytes: the row must match the
+  coordinate exactly (digest included), the row's declared size hard-caps the
+  download, the digest is re-verified on the downloaded bytes, and the
+  download is deleted after extraction.
 - **The broker never receives** a search query, prompt, chunk request,
   project/session/gezel id, enabled-catalog list, or user path — and no route
   exists that could return catalog content. Its surface is content-addressed

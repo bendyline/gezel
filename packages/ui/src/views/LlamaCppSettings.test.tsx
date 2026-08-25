@@ -190,6 +190,32 @@ describe('LlamaCppSettings', () => {
     expect(onConfigChanged).toHaveBeenCalled();
   });
 
+  it('clears the saved-status reset timer when the view unmounts', async () => {
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout');
+    const clearTimeoutSpy = vi.spyOn(window, 'clearTimeout');
+    try {
+      const { unmount } = render(
+        <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
+      );
+      await screen.findByRole('option', { name: /First local model/ });
+
+      const defaultModel = screen.getAllByRole('combobox')[0]!;
+      fireEvent.change(defaultModel, { target: { value: 'qwen-2.5-7b' } });
+      await screen.findByText('saved ✓');
+
+      const resetTimerCall = setTimeoutSpy.mock.calls.findIndex(([, delay]) => delay === 1200);
+      expect(resetTimerCall).toBeGreaterThanOrEqual(0);
+      const resetTimer = setTimeoutSpy.mock.results[resetTimerCall]!.value;
+
+      unmount();
+
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(resetTimer);
+    } finally {
+      setTimeoutSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
+    }
+  });
+
   it('changing the backend override saves the value', async () => {
     render(
       <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
