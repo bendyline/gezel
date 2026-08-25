@@ -48,20 +48,30 @@ describe('TaskFilesStore.listAllTasks', () => {
     await rm(home, { recursive: true, force: true });
   });
 
-  it('ignores Finder metadata instead of aborting the scheduler-wide scan', async () => {
-    const taskFile = projectTaskFile(home, 'alpha', 1);
-    await mkdir(dirname(taskFile), { recursive: true });
-    await writeFile(
-      taskFile,
-      `${JSON.stringify({
-        projectId: 'alpha',
-        num: 1,
-        ref: 'alpha/1',
-        createdAt: '2026-08-25T00:00:00.000Z',
-        updatedAt: '2026-08-25T00:00:00.000Z',
-      })}\n`,
-    );
+  it('ignores centralized OS/sync junk and unsafe dot folders during scheduler scans', async () => {
+    const writeTask = async (projectId: string, num: number): Promise<void> => {
+      const taskFile = projectTaskFile(home, projectId, num);
+      await mkdir(dirname(taskFile), { recursive: true });
+      await writeFile(
+        taskFile,
+        `${JSON.stringify({
+          projectId,
+          num,
+          ref: `${projectId}/${num}`,
+          createdAt: '2026-08-25T00:00:00.000Z',
+          updatedAt: '2026-08-25T00:00:00.000Z',
+        })}\n`,
+      );
+    };
+
+    await writeTask('alpha', 1);
+    // These names are valid entity ids, so this proves the shared junk
+    // predicate excludes them rather than relying only on id validation.
+    await writeTask('Thumbs.db', 98);
+    await writeTask('desktop.ini', 99);
+    await writeTask('unfinished.partial', 100);
     await writeFile(join(gezelPaths(home).projects, '.DS_Store'), 'finder metadata');
+    await mkdir(join(gezelPaths(home).projects, '.git'), { recursive: true });
 
     const tasks = await new TaskFilesStore({ home }).listAllTasks();
     expect(tasks.map((task) => task.ref)).toEqual(['alpha/1']);

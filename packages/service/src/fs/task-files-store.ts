@@ -10,6 +10,7 @@ import {
   projectTasksDir,
 } from '@bendyline/gezel/paths';
 import { writeFileAtomic } from './atomic.js';
+import { isSyncJunkName } from './sync-junk.js';
 
 export interface TaskFilesStoreOptions {
   home: string;
@@ -112,12 +113,11 @@ export class TaskFilesStore {
     const projectIds = await safeReaddir(gezelPaths(this.home).projects);
     const all: Task[] = [];
     for (const id of projectIds) {
-      // The projects root is an ordinary user-visible directory. Finder and
-      // other sync/indexing tools may leave metadata files here (most notably
-      // `.DS_Store`). `projectTasksDir` deliberately rejects such values as
-      // entity ids; letting one escape this enumerator used to abort the whole
-      // scheduler tick before cron dispatch and stuck-step redrives ran.
-      if (!isSafeEntityId(id)) continue;
+      // The projects root is an ordinary user-visible directory, so apply the
+      // same centralized sync/OS-junk policy as other filesystem scanners.
+      // Entity validation is a second boundary: it rejects `.git`, arbitrary
+      // dot folders, and any other name that cannot safely be a project id.
+      if (!isSafeEntityId(id) || isSyncJunkName(id)) continue;
       all.push(...(await this.listProjectTasks(id)));
     }
     all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
