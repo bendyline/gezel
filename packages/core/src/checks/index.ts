@@ -109,3 +109,9 @@ export {
   type PlanStructureResult,
   type PlanStructureSpec,
 } from './plan.js';
+export {
+  mergeCorpusCoverageShards,
+  type CorpusCoverageLedger,
+  type CorpusCoverageMergeResult,
+  type CorpusCoverageShardInput,
+} from './corpus-coverage.js';

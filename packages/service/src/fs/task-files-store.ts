@@ -1,6 +1,6 @@
 import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { KeyedLock, type Task } from '@bendyline/gezel';
+import { KeyedLock, type Task, isSafeEntityId } from '@bendyline/gezel';
 import {
   type ExternalFolders,
   gezelPaths,
@@ -112,6 +112,12 @@ export class TaskFilesStore {
     const projectIds = await safeReaddir(gezelPaths(this.home).projects);
     const all: Task[] = [];
     for (const id of projectIds) {
+      // The projects root is an ordinary user-visible directory. Finder and
+      // other sync/indexing tools may leave metadata files here (most notably
+      // `.DS_Store`). `projectTasksDir` deliberately rejects such values as
+      // entity ids; letting one escape this enumerator used to abort the whole
+      // scheduler tick before cron dispatch and stuck-step redrives ran.
+      if (!isSafeEntityId(id)) continue;
       all.push(...(await this.listProjectTasks(id)));
     }
     all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));

@@ -70,6 +70,7 @@ import {
   foldPostActionRumination,
   foldPreToolPreamble,
   formatToolMenu,
+  isWriteShapedToolName,
   parseGemmaNativeToolCall,
   parseGemmaToolCall,
   parseJsonEnvelopeToolCalls,
@@ -2350,6 +2351,20 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             parseGemmaToolCall(body, knownToolNames) ??
             parseGemmaNativeToolCall(body, knownToolNames);
           if (parsed) {
+            // An EOS-flushed artifact call is only a prefix of an atomic
+            // whole-file replacement, and the artifact drawer has no append
+            // primitive. Do not destroy the previous artifact with it.
+            if (
+              eosFlushedIndices.has(bodyIdx) &&
+              parsed.name === 'write_artifact' &&
+              typeof parsed.arguments.content === 'string' &&
+              typeof parsed.arguments.path === 'string'
+            ) {
+              this.emitWarning(
+                'The model hit its output limit while replacing an artifact. The incomplete write was skipped and the previous artifact was preserved; split or deterministically assemble the deliverable before retrying.',
+              );
+              continue;
+            }
             const id = `repair-${seq}-${turn}-${repairedCalls.length}`;
             repairedCalls.push({
               id,
@@ -2371,10 +2386,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             // tail rather than re-emit the whole file.
             if (eosFlushedIndices.has(bodyIdx)) {
               const args = parsed.arguments;
-              const isWriteShaped =
-                parsed.name === 'write_file' ||
-                parsed.name === 'write_artifact' ||
-                parsed.name === 'append_to_file';
+              const isWriteShaped = isWriteShapedToolName(parsed.name);
               if (
                 isWriteShaped &&
                 typeof args.content === 'string' &&
@@ -2511,6 +2523,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         ) {
           const glmSpans = findGlmToolCallSpans(turnContent, knownToolNames);
           for (const [idx, parsed] of glmSpans.entries()) {
+            if (parsed.truncated && !isWriteShapedToolName(parsed.name)) {
+              this.emitWarning(
+                `The model's \`${parsed.name}\` call was cut off mid-stream and was skipped so a partial mutation could not land. Retry with a smaller payload.`,
+              );
+              continue;
+            }
             const id = `glm-repair-${seq}-${turn}-${idx}`;
             glmRepaired.push({
               id,
@@ -2564,6 +2582,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             }
           }
           for (const [idx, parsed] of hermesSpans.entries()) {
+            if (parsed.truncated && !isWriteShapedToolName(parsed.name)) {
+              this.emitWarning(
+                `The model's \`${parsed.name}\` call was cut off mid-stream and was skipped so a partial mutation could not land. Retry with a smaller payload.`,
+              );
+              continue;
+            }
             const id = `hermes-repair-${seq}-${turn}-${idx}`;
             hermesRepaired.push({
               id,
