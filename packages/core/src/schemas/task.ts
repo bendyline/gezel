@@ -126,6 +126,13 @@ export const TaskCraftbookStepSchema = CraftbookStepSchema.extend({
   attemptCount: z.number().int().nonnegative().optional(),
   lastActivatedAt: z.string().optional(),
   /**
+   * Activation timestamp whose `onEnter` hooks completed successfully.
+   * Compared to `lastActivatedAt` so overlapping kickoff/retry paths can
+   * distinguish an already-prepared activation from one that still needs
+   * its deterministic setup.
+   */
+  onEnterCompletedAt: z.string().optional(),
+  /**
    * Completion-gate rejections since this step last activated. Distinct
    * from `attemptCount` (which counts ACTIVATIONS — loop-backs): a
    * rejection holds the step active without re-activating it. Reset by

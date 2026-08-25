@@ -440,6 +440,37 @@ describe('consolidated MCP tools', () => {
     expect(text).not.toContain('THIS CONTENT MUST NOT LEAK');
   });
 
+  it('reports the canonical artifact path and fuzzy status as structured content', async () => {
+    handler = (url, method) => {
+      expect(url.pathname).toBe('/api/projects/project-a/artifacts/slice');
+      expect(method).toBe('GET');
+      expect(url.searchParams.get('path')).toBe('summary.md');
+      return {
+        kind: 'found',
+        content: '# Summary',
+        path: 'reports/summary.md',
+        fuzzy: true,
+        linesReturned: 1,
+        totalLines: 1,
+        bytesReturned: 9,
+        totalBytes: 9,
+        hasMore: false,
+      };
+    };
+
+    const result = await client.callTool({
+      name: 'read_artifact',
+      arguments: { path: 'summary.md' },
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      requestedPath: 'summary.md',
+      resolvedPath: 'reports/summary.md',
+      fuzzy: true,
+    });
+  });
+
   it('reads common paths batches, keeps an all-path status index first, and exposes metadata', async () => {
     handler = (url, method, body) => {
       expect(url.pathname).toBe('/api/projects/project-a/tools/read-files');

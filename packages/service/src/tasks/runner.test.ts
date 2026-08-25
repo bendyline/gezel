@@ -281,6 +281,63 @@ describe('TaskRunner — dispatch + FIFO', () => {
     expect(runner.snapshot().pendingCount).toBe(0);
   });
 
+  it('prepares an unmarked onEnter step before dispatch', async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    await store.writeTask({
+      projectId: 'p1',
+      num: 1,
+      ref: 'p1/1',
+      title: 't',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: 'bea' },
+      craftbook: fixtureCraftbook([
+        {
+          id: 'plan',
+          name: 'plan',
+          assignee: { kind: 'gezel', gezelId: 'bea' },
+          onEnter: { name: 'prepare', scope: 'standard' },
+          lastActivatedAt: now,
+          createdAt: now,
+        },
+      ]),
+      activeStepId: 'plan',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+
+    const events: string[] = [];
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]), async () => {
+      events.push('dispatch');
+    });
+    dispatcher.setProvider('copilot', new ProviderQueue({ concurrency: 10 }));
+    const prepareActiveStep = vi.fn(async () => {
+      events.push('setup');
+      const current = (await store.readTask('p1', 1))!;
+      const prepared = {
+        ...current,
+        craftbook: {
+          ...current.craftbook,
+          steps: current.craftbook.steps.map((step) =>
+            step.id === 'plan' ? { ...step, onEnterCompletedAt: now } : step,
+          ),
+        },
+      };
+      await store.writeTask(prepared);
+      return { status: 'ready' as const, task: prepared };
+    });
+    const runner = new TaskRunner({ store, dispatcher, prepareActiveStep });
+
+    runner.enqueueHandoff({ taskRef: 'p1/1', stepId: 'plan', gezelId: 'bea', projectId: 'p1' });
+    await runner.tick();
+
+    expect(events).toEqual(['setup', 'dispatch']);
+    expect(prepareActiveStep).toHaveBeenCalledWith('p1', 1);
+    expect(dispatcher.dispatches).toHaveLength(1);
+  });
+
   it('holds off when the provider queue is saturated', async () => {
     await store.createProject({ name: 'p1' });
     await store.createGezel({ name: 'Bea' });

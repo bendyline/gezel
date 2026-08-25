@@ -691,6 +691,11 @@ export interface CompleteStepOpts {
   cause?: 'gate' | 'user' | 'model' | 'auto' | 'sweep';
 }
 
+type CompleteStepInternalOpts = CompleteStepOpts & {
+  /** The create route will dispatch the returned current step itself. */
+  suppressHandoff?: boolean;
+};
+
 export interface GateHoldInfo {
   /** The prescriptive rejection text for the working session. */
   message: string;
@@ -726,6 +731,11 @@ export interface GateHoldInfo {
 export type CompleteStepOutcome =
   | { status: 'advanced'; task: Task }
   | { status: 'held'; task: Task; gate: GateHoldInfo };
+
+export type StepEntranceOutcome = {
+  status: 'ready' | 'advanced' | 'failed' | 'not-active';
+  task: Task;
+};
 
 function formatGateScriptDiagnostics(runs: StepGateOutcome['runs']): string {
   return runs
@@ -1500,6 +1510,24 @@ export class TaskManager {
       }
     }
 
+    let activatedTask = task;
+    if (!isDraft && !fanout) {
+      const entryStep = activatedTask.craftbook.steps.find((s) => s.id === activeStepId);
+      if (entryStep) {
+        const entrance = await this.runActivatedStepOnEnter(
+          projectId,
+          activatedTask,
+          entryStep,
+          0,
+          true,
+        );
+        activatedTask = entrance.task;
+        if (entrance.status === 'failed') {
+          return activatedTask;
+        }
+      }
+    }
+
     if (!isDraft && fanout && spawnsCraftbook) {
       const materialized = await this.materializeFanout(projectId, num);
       return materialized.parent;
@@ -1510,12 +1538,14 @@ export class TaskManager {
     // too. Returning the paused task is what stops the dispatch: it
     // guards on `status === 'active'`.
     if (!isDraft && !fanout) {
-      const entryStep = craftbook.steps.find((s) => s.id === activeStepId);
-      if (entryStep && (await this.pauseIfStepUnsatisfiable(projectId, task, entryStep))) {
-        return { ...task, status: 'paused' };
+      const entryStep = activatedTask.craftbook.steps.find(
+        (s) => s.id === activatedTask.activeStepId,
+      );
+      if (entryStep && (await this.pauseIfStepUnsatisfiable(projectId, activatedTask, entryStep))) {
+        return { ...activatedTask, status: 'paused' };
       }
     }
-    return task;
+    return activatedTask;
   }
 
   async get(projectId: string, num: number): Promise<Task | null> {
@@ -1828,19 +1858,24 @@ export class TaskManager {
       details: { ref: next.ref, entryStepId: entry },
     });
     const entryStep = next.craftbook.steps.find((s) => s.id === entry);
-    if (entryStep && this.onStepActivated) {
+    const entrance = entryStep
+      ? await this.runActivatedStepOnEnter(projectId, next, entryStep, 0)
+      : ({ status: 'ready', task: next } satisfies StepEntranceOutcome);
+    if (entrance.status !== 'ready') return entrance.task;
+    const preparedStep = entrance.task.craftbook.steps.find((s) => s.id === entry);
+    if (preparedStep && this.onStepActivated) {
       try {
         await this.onStepActivated({
           projectId,
-          task: next,
-          newStep: entryStep,
-          completedStep: entryStep,
+          task: entrance.task,
+          newStep: preparedStep,
+          completedStep: preparedStep,
         });
       } catch (err) {
         log.error('[tasks] onStepActivated hook failed on activate:', err);
       }
     }
-    return next;
+    return entrance.task;
   }
 
   async setAssignee(projectId: string, num: number, assignee: TaskAssignee): Promise<Task> {
@@ -2218,7 +2253,9 @@ export class TaskManager {
       summary: `Activated step "${step.name}" on ${next.ref}`,
       details: { ref: next.ref, stepId },
     });
-    return next;
+    const activatedStep = next.craftbook.steps.find((candidate) => candidate.id === stepId);
+    if (!activatedStep) return next;
+    return (await this.runActivatedStepOnEnter(projectId, next, activatedStep, 0)).task;
   }
 
   /**
@@ -2417,7 +2454,7 @@ export class TaskManager {
     stepId: string,
     nextArg: string | undefined,
     cascadeDepth: number,
-    opts: CompleteStepOpts,
+    opts: CompleteStepInternalOpts,
   ): Promise<CompleteStepOutcome> {
     const task = await this.requireTask(projectId, num);
     const idx = task.craftbook.steps.findIndex((s) => s.id === stepId);
@@ -2642,65 +2679,40 @@ export class TaskManager {
       });
 
       if (newStep) {
-        // Run ALL onEnter refs in order; a ref auto-advances when ITS
-        // OWN predicate matches ITS OWN output (predictable — a later
-        // setup script is never skipped because an earlier one matched).
-        let autoAdvance = false;
-        for (const ref of normalizeScriptRefs(newStep.onEnter)) {
-          const enterRun = await this.runStepScript(
-            projectId,
-            updated,
-            newStep,
-            'enter',
-            ref,
-          ).catch((err) => {
-            log.error('[tasks] step onEnter script failed:', err);
-            return null;
-          });
-          if (enterRun && enterRun.status === 'ok' && shouldAutoAdvance(ref, enterRun.output)) {
-            autoAdvance = true;
-          }
+        const entrance = await this.runActivatedStepOnEnter(
+          projectId,
+          updated,
+          newStep,
+          cascadeDepth,
+          opts.suppressHandoff,
+        );
+        if (entrance.status === 'failed' || entrance.status === 'advanced') {
+          return { status: 'advanced', task: entrance.task };
         }
-
-        if (autoAdvance) {
-          if (cascadeDepth + 1 > STEP_CASCADE_CAP) {
-            log.warn(
-              `[tasks] cascade cap (${STEP_CASCADE_CAP}) hit for ${updated.ref}; pausing task.`,
-            );
-            await this.setStatus(projectId, num, 'paused');
-            return { status: 'advanced', task: { ...updated, status: 'paused' } };
-          }
-          // A held cascade (the next step's own completion gate
-          // rejected) stops the chain; THIS step still advanced — the
-          // rejection note is already on the downstream step.
-          const cascaded = await this.completeStepInternal(
-            projectId,
-            num,
-            newStep.id,
-            undefined,
-            cascadeDepth + 1,
-            { cause: 'auto' },
-          );
-          return { status: 'advanced', task: cascaded.task };
+        const preparedTask = entrance.task;
+        const preparedStep = preparedTask.craftbook.steps.find((s) => s.id === newStep.id)!;
+        if (opts.suppressHandoff) {
+          return { status: 'advanced', task: preparedTask };
         }
 
         // No auto-advance → fire the handoff hook so a gezel picks up,
         // unless nobody could satisfy the step under current policy.
-        if (await this.pauseIfStepUnsatisfiable(projectId, updated, newStep)) {
-          return { status: 'advanced', task: { ...updated, status: 'paused' } };
+        if (await this.pauseIfStepUnsatisfiable(projectId, preparedTask, preparedStep)) {
+          return { status: 'advanced', task: { ...preparedTask, status: 'paused' } };
         }
         if (this.onStepActivated) {
           try {
             await this.onStepActivated({
               projectId,
-              task: updated,
-              newStep,
+              task: preparedTask,
+              newStep: preparedStep,
               completedStep: completedStep as TaskCraftbookStep,
             });
           } catch (err) {
             log.error('[tasks] onStepActivated hook failed:', err);
           }
         }
+        return { status: 'advanced', task: preparedTask };
       }
     }
     return { status: 'advanced', task: updated };
@@ -3936,8 +3948,14 @@ export class TaskManager {
     ref: ScriptRef,
   ): Promise<ScriptRun | null> {
     if (!this.scriptRunner) return null;
-    const config = await this.store.readConfig();
-    if (!isEngagementAllowed(config)) return null;
+    // Standard scripts are trusted product code and must be able to prepare
+    // deterministic step inputs even when autonomous/model work is paused.
+    // This mirrors runGateScript; project/craftbook scripts retain the
+    // engagement-policy ceiling.
+    if (ref.scope !== 'standard') {
+      const config = await this.store.readConfig();
+      if (!isEngagementAllowed(config)) return null;
+    }
     return this.scriptRunner.run({
       projectId,
       scriptName: ref.name,
@@ -3946,6 +3964,123 @@ export class TaskManager {
       inputs: ref.inputs,
       trigger: { kind: 'step', taskRef: task.ref, stepId: step.id, moment },
     });
+  }
+
+  /**
+   * Run one freshly-activated step's deterministic setup before its handoff.
+   * A successful marker is persisted before dispatch, so overlapping kickoff
+   * paths cannot repeat a completed setup. A failed setup pauses the task with
+   * a durable diagnosis instead of dispatching a model against inputs the
+   * prompt falsely claims already exist.
+   */
+  private async runActivatedStepOnEnter(
+    projectId: string,
+    task: Task,
+    step: TaskCraftbookStep,
+    cascadeDepth: number,
+    suppressHandoff = false,
+  ): Promise<StepEntranceOutcome> {
+    const refs = normalizeScriptRefs(step.onEnter);
+    if (refs.length === 0) return { status: 'ready', task };
+    const activationAt = step.lastActivatedAt ?? step.createdAt;
+    if (step.onEnterCompletedAt === activationAt) {
+      return { status: 'ready', task };
+    }
+
+    let autoAdvance = false;
+    for (const ref of refs) {
+      let run: ScriptRun | null;
+      try {
+        run = await this.runStepScript(projectId, task, step, 'enter', ref);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        const paused = await this.pauseForStepEntranceFailure(projectId, task, step, ref, detail);
+        return { status: 'failed', task: paused };
+      }
+      if (!run) {
+        const paused = await this.pauseForStepEntranceFailure(
+          projectId,
+          task,
+          step,
+          ref,
+          'The script runner is unavailable or current engagement policy does not allow this script.',
+        );
+        return { status: 'failed', task: paused };
+      }
+      if (run.status !== 'ok') {
+        const logs = run.logs.trim();
+        const logTail = logs.length > 1_500 ? logs.slice(-1_500) : logs;
+        const detail = [
+          run.error ?? 'The script reported an error.',
+          `Run ID: ${run.id}`,
+          ...(logTail ? [`Log tail:\n${logTail}`] : []),
+        ].join('\n\n');
+        const paused = await this.pauseForStepEntranceFailure(projectId, task, step, ref, detail);
+        return { status: 'failed', task: paused };
+      }
+      if (shouldAutoAdvance(ref, run.output)) autoAdvance = true;
+    }
+
+    const now = nowIso();
+    const prepared: Task = {
+      ...task,
+      craftbook: {
+        ...task.craftbook,
+        steps: task.craftbook.steps.map((candidate) =>
+          candidate.id === step.id ? { ...candidate, onEnterCompletedAt: activationAt } : candidate,
+        ),
+        updatedAt: now,
+      },
+      updatedAt: now,
+    };
+    await this.store.writeTask(prepared);
+
+    if (!autoAdvance) return { status: 'ready', task: prepared };
+    if (cascadeDepth + 1 > STEP_CASCADE_CAP) {
+      log.warn(`[tasks] cascade cap (${STEP_CASCADE_CAP}) hit for ${prepared.ref}; pausing task.`);
+      const paused = await this.setStatus(projectId, prepared.num, 'paused');
+      return { status: 'failed', task: paused };
+    }
+    const cascaded = await this.completeStepInternal(
+      projectId,
+      prepared.num,
+      step.id,
+      undefined,
+      cascadeDepth + 1,
+      { cause: 'auto', ...(suppressHandoff ? { suppressHandoff: true } : {}) },
+    );
+    return { status: 'advanced', task: cascaded.task };
+  }
+
+  private async pauseForStepEntranceFailure(
+    projectId: string,
+    task: Task,
+    step: TaskCraftbookStep,
+    ref: ScriptRef,
+    detail: string,
+  ): Promise<Task> {
+    log.error(
+      `[tasks] step onEnter script failed for ${task.ref}/${step.id} (${ref.name}): ${detail}`,
+    );
+    await this.appendNote(projectId, task.num, {
+      text: `# Step setup failed — task paused\n\nThe \`onEnter\` script \`${ref.name}\` could not prepare step "${step.name}" (\`${step.id}\`). The assignee was not dispatched because the step's promised inputs may be missing.\n\n${detail}\n\nFix the script/runtime problem, then use Try again so setup runs before the next handoff.`,
+      author: { kind: 'user' },
+      stepId: step.id,
+    }).catch(() => {});
+    const current = await this.requireTask(projectId, task.num);
+    if (current.status !== 'active' || current.activeStepId !== step.id) return current;
+    return this.setStatus(projectId, task.num, 'paused');
+  }
+
+  /** Prepare the current activation before a retry or another dispatch path. */
+  async ensureActiveStepEntered(projectId: string, num: number): Promise<StepEntranceOutcome> {
+    const task = await this.requireTask(projectId, num);
+    if (task.status !== 'active' || !task.activeStepId) {
+      return { status: 'not-active', task };
+    }
+    const step = task.craftbook.steps.find((candidate) => candidate.id === task.activeStepId);
+    if (!step) return { status: 'not-active', task };
+    return this.runActivatedStepOnEnter(projectId, task, step, 0);
   }
 
   // ── Notes / sessions ───────────────────────────────────────────
@@ -4078,12 +4213,14 @@ export class TaskManager {
             completedAt: _co,
             attemptCount: _ac,
             lastActivatedAt: _la,
+            onEnterCompletedAt: _entered,
             ...recipe
           } = s;
           void _ca;
           void _co;
           void _ac;
           void _la;
+          void _entered;
           return recipe;
         }),
       },
@@ -4223,19 +4360,26 @@ export class TaskManager {
       details: { parentRef: parent.ref, childRef: child.ref, title: child.title },
     });
 
-    if (this.onStepActivated) {
+    const entrance = await this.runActivatedStepOnEnter(child.projectId, child, firstStep, 0);
+    if (entrance.status !== 'ready') return entrance.task;
+    const preparedChild = entrance.task;
+    const preparedFirstStep = preparedChild.craftbook.steps.find(
+      (step) => step.id === activeStepId,
+    );
+
+    if (preparedFirstStep && this.onStepActivated) {
       try {
         await this.onStepActivated({
-          projectId: child.projectId,
-          task: child,
-          newStep: firstStep,
-          completedStep: firstStep,
+          projectId: preparedChild.projectId,
+          task: preparedChild,
+          newStep: preparedFirstStep,
+          completedStep: preparedFirstStep,
         });
       } catch (err) {
         log.error('[tasks] onStepActivated hook failed on spawnChild:', err);
       }
     }
-    return child;
+    return preparedChild;
   }
 
   /**
@@ -4404,6 +4548,7 @@ function bumpStepActivation(
     // signature and the trailing-run score resets to 1.
     const {
       completedAt: _done,
+      onEnterCompletedAt: _entered,
       gateAttempts: _ga,
       gateProgressAttempts: _gpa,
       lastGateReject: _lgr,
@@ -4412,6 +4557,7 @@ function bumpStepActivation(
       ...rest
     } = s;
     void _done;
+    void _entered;
     void _ga;
     void _gpa;
     void _lgr;

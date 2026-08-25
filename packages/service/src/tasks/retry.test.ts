@@ -37,6 +37,7 @@ function deps(task: Task, overrides: Partial<TaskRetryDeps> = {}) {
   const resets: Array<Record<string, unknown>> = [];
   const statuses: string[] = [];
   const budgetResets: string[] = [];
+  const entrances: string[] = [];
   const d: TaskRetryDeps = {
     store: {
       getProject: vi.fn(async () => ({ id: 'p1', name: 'P1', status: 'active' }) as never),
@@ -60,6 +61,10 @@ function deps(task: Task, overrides: Partial<TaskRetryDeps> = {}) {
       ) => {
         resets.push({ stepId, ...opts });
       },
+      ensureActiveStepEntered: async (projectId: string, num: number) => {
+        entrances.push(`${projectId}/${num}`);
+        return { status: 'ready', task: { ...task, status: 'active' } as Task };
+      },
     } as unknown as TaskRetryDeps['tasks'],
     taskRunner: {
       enqueueHandoff: (h: Record<string, unknown>) => {
@@ -73,7 +78,7 @@ function deps(task: Task, overrides: Partial<TaskRetryDeps> = {}) {
     },
     ...overrides,
   };
-  return { deps: d, enqueued, notes, resets, statuses, budgetResets };
+  return { deps: d, enqueued, notes, resets, statuses, budgetResets, entrances };
 }
 
 describe('retryPausedTask', () => {
@@ -94,6 +99,7 @@ describe('retryPausedTask', () => {
     ]);
     expect(h.budgetResets).toEqual(['p1/7']);
     expect(h.statuses).toEqual(['active']);
+    expect(h.entrances).toEqual(['p1/7']);
     expect(h.notes[0]).toMatchObject({ author: { kind: 'user' }, stepId: 'model-system' });
     expect(String(h.notes[0]?.text)).toContain('# Retry requested');
     // Continues the stalled thread so the model sees its own failed attempts.
@@ -117,6 +123,7 @@ describe('retryPausedTask', () => {
     expect(h.resets).toEqual([]);
     expect(h.notes).toEqual([]);
     expect(h.enqueued).toEqual([]);
+    expect(h.entrances).toEqual([]);
   });
 
   it('un-pauses a spawn host without driving its inert wait step', async () => {
@@ -124,6 +131,21 @@ describe('retryPausedTask', () => {
     const result = await retryPausedTask(h.deps, 'p1', 7);
     expect(result).toMatchObject({ dispatched: false, reason: 'spawn-host' });
     expect(result?.task.status).toBe('active');
+    expect(h.enqueued).toEqual([]);
+    expect(h.entrances).toEqual([]);
+  });
+
+  it('does not dispatch when the step setup fails again', async () => {
+    const task = fixtureTask();
+    const h = deps(task);
+    h.deps.tasks.ensureActiveStepEntered = async () => ({
+      status: 'failed',
+      task,
+    });
+
+    await expect(retryPausedTask(h.deps, 'p1', 7)).rejects.toThrow(
+      'setup for its current step failed again',
+    );
     expect(h.enqueued).toEqual([]);
   });
 

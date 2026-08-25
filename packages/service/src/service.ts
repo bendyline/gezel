@@ -1043,6 +1043,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   let indexEnrichmentRef: IndexEnrichmentManager | null = null;
   const taskRunner = new TaskRunner({
     store,
+    prepareActiveStep: (projectId, num) => tasks.ensureActiveStepEntered(projectId, num),
     dispatcher: {
       startHandoffSession: (args) => chat.startHandoffSession(args),
       cancelHandoffSession: (sessionId) => chat.cancelInflight(sessionId),

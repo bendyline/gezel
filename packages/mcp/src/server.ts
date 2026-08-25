@@ -3739,6 +3739,11 @@ server.tool(
         : '';
     return {
       content: [{ type: 'text' as const, text: header + res.content + sliceTail }],
+      structuredContent: {
+        requestedPath: clean,
+        resolvedPath: res.path,
+        fuzzy: res.fuzzy,
+      },
     };
   },
 );
@@ -3831,6 +3836,11 @@ server.tool(
             text: `No matches for /${pattern}/ in ${res.path} (${res.totalLines} lines).`,
           },
         ],
+        structuredContent: {
+          requestedPath: clean,
+          resolvedPath: res.path,
+          fuzzy: res.fuzzy,
+        },
       };
     }
     const lines: string[] = [];
@@ -3858,7 +3868,14 @@ server.tool(
         `…[truncated: ${res.totalMatches - res.matches.length} more match(es). Re-run with a tighter pattern or a larger \`maxMatches\` if needed.]`,
       );
     }
-    return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+    return {
+      content: [{ type: 'text' as const, text: lines.join('\n') }],
+      structuredContent: {
+        requestedPath: clean,
+        resolvedPath: res.path,
+        fuzzy: res.fuzzy,
+      },
+    };
   },
 );
 

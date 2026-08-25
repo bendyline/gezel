@@ -1348,7 +1348,14 @@ async function approvePendingCommandQuestions(
   projectId: string,
   spec: CraftbookEvalSpec,
 ): Promise<void> {
-  const res = await ctx.client.listQuestions({ projectId, pending: true }).catch(() => null);
+  let res: Awaited<ReturnType<typeof ctx.client.listQuestions>> | null = null;
+  try {
+    res = await ctx.client.listQuestions({ projectId, pending: true });
+  } catch {
+    // Question polling is opportunistic: old clients, transient route
+    // failures, and focused unit-test doubles must not break grading.
+    return;
+  }
   for (const question of res?.questions ?? []) {
     if (question.intent?.kind !== 'command-approval') continue;
     const answered = await ctx.client

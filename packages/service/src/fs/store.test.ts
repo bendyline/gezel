@@ -794,6 +794,18 @@ describe('project artifacts', () => {
     }
   });
 
+  it('does not fall back by basename when a qualified path misses', async () => {
+    await store.createProject({ name: 'Qualified Miss' });
+    await store.writeProjectArtifact('qualified-miss', 'tasks/6/pr-review/batches.json', 'task 6');
+
+    const res = await store.resolveProjectArtifact(
+      'qualified-miss',
+      'tasks/11/pr-review/batches.json',
+    );
+
+    expect(res).toEqual({ kind: 'missing' });
+  });
+
   it('resolveProjectArtifact basename match is case-insensitive', async () => {
     // Write at a nested path so the exact-match attempt genuinely misses
     // on case-sensitive filesystems (Linux CI) — on case-insensitive

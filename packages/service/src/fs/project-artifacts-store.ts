@@ -240,6 +240,14 @@ export class ProjectArtifactsStore {
     if (exact !== null) {
       return { kind: 'found', content: exact, path: cleaned, fuzzy: false };
     }
+    // A path with directory segments is an exact claim. Falling back to a
+    // drawer-wide basename match can silently cross task/run boundaries —
+    // `tasks/11/pr-review/batches.json` must never resolve to the only other
+    // `batches.json` under `tasks/6/`. Bare filenames keep the convenience
+    // fallback below. A redundant leading `artifacts/` has already been
+    // stripped by normalizeArtifactPath, so the legacy nested-artifact rescue
+    // still reaches this branch as a bare filename.
+    if (cleaned.includes('/')) return { kind: 'missing' };
     const targetBase = cleaned.split('/').pop()?.toLowerCase() ?? '';
     if (!targetBase) return { kind: 'missing' };
     // Shadow twins must not hijack fuzzy basename lookups — a converted

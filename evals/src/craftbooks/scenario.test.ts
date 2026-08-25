@@ -355,6 +355,45 @@ describe('craftbook generic scenario adapter', () => {
     ).resolves.toMatchObject({ done: true, success: true });
   });
 
+  it('approves pending first-use command questions while grading a trial', async () => {
+    const client = {
+      listProjects: vi.fn().mockResolvedValue({
+        projects: [{ id: 'project-1', name: 'Sample Project' }],
+      }),
+      listQuestions: vi.fn().mockResolvedValue({
+        questions: [
+          {
+            id: 'question-1',
+            intent: { kind: 'command-approval', scope: 'package-script', name: 'test' },
+          },
+        ],
+      }),
+      answerQuestion: vi.fn().mockResolvedValue({ answered: true }),
+    };
+    const logs: string[] = [];
+    const scenario = craftbookScenarioFromSpec(directWorkerSpec());
+
+    await expect(
+      scenario.successCheck({
+        client,
+        meesterId: 'meester',
+        log: (line: string) => logs.push(line),
+        logChanged: vi.fn(),
+      } as unknown as EvalContext),
+    ).resolves.toMatchObject({ done: true, success: true });
+
+    expect(client.listQuestions).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      pending: true,
+    });
+    expect(client.answerQuestion).toHaveBeenCalledWith('question-1', {
+      selectedChoices: [0],
+    });
+    expect(logs).toContain(
+      '[craftbook:sample-book] approved first-use command package-script:test',
+    );
+  });
+
   it('seeds modelInput:false fixtures without exposing them as model source inputs', async () => {
     const client = {
       listProjects: vi.fn().mockResolvedValue({ projects: [] }),

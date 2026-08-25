@@ -15180,7 +15180,23 @@ export class ChatManager {
           : [];
       const paths = [...new Set(structuredReadPaths)];
       const rawPath = info.args?.path;
-      const path = typeof rawPath === 'string' ? rawPath : paths[0];
+      const artifactResolutionTool = info.name === 'read_artifact' || info.name === 'grep_artifact';
+      const resolvedArtifactPath =
+        artifactResolutionTool && typeof sc?.resolvedPath === 'string'
+          ? sc.resolvedPath
+          : undefined;
+      const artifactFuzzy =
+        artifactResolutionTool && typeof sc?.fuzzy === 'boolean' ? sc.fuzzy : undefined;
+      const requestedArtifactPath =
+        artifactResolutionTool && typeof sc?.requestedPath === 'string'
+          ? sc.requestedPath
+          : typeof rawPath === 'string'
+            ? rawPath
+            : undefined;
+      // Artifact reads report their canonical resolution separately from the
+      // model-supplied path. Persist and render the file that was actually
+      // opened; keep the requested spelling in argsFull/history for audit.
+      const path = resolvedArtifactPath ?? (typeof rawPath === 'string' ? rawPath : paths[0]);
       const researchTarget = researchTargetForToolCall(info.name, info.args);
       // Non-nerdy one-liner (falls back to the key:value summary for
       // tools we have no template for); plus the full, capped args for
@@ -15286,6 +15302,9 @@ export class ChatManager {
             success: info.success,
             ...(path ? { path } : {}),
             ...(paths.length > 0 ? { paths } : {}),
+            ...(resolvedArtifactPath ? { resolvedPath: resolvedArtifactPath } : {}),
+            ...(requestedArtifactPath ? { requestedPath: requestedArtifactPath } : {}),
+            ...(artifactFuzzy !== undefined ? { fuzzy: artifactFuzzy } : {}),
             ...(researchTarget ? { researchTarget } : {}),
             ...(info.errorMessage ? { errorMessage: info.errorMessage } : {}),
             ...(diff !== undefined ? { diff } : {}),
