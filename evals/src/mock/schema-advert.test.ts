@@ -88,3 +88,77 @@ describe('mock MCP advertises the arguments its fixtures need', () => {
     }
   });
 });
+
+describe('well-known docblocks tool schemas', () => {
+  it('advertises convert_document arguments and rejects an empty call', async () => {
+    // Wild-caught on the 2026-08-22 scorecard sweep (powerpoint-deck 0/33
+    // across 11 models): with no inputSchema the models called
+    // convert_document with no arguments at all, and the schema-less mock
+    // answered the canned success template — the trial "converted" nothing
+    // while the provenance checks lit up green.
+    runtime = await startMockServices([
+      {
+        kind: 'mcp',
+        id: 'docblocks',
+        toolsetId: 'docblocks',
+        description: 'fake docblocks',
+        tools: [
+          {
+            name: 'convert_document',
+            description: 'Convert approved Markdown.',
+            resultTemplate: { artifacts: [{ format: 'pptx', uri: 'mock://deck.pptx' }] },
+          },
+          { name: 'list_roots', description: 'List roots.', resultTemplate: { roots: [] } },
+        ],
+      },
+    ] as never);
+    expect(runtime).toBeTruthy();
+
+    const baseUrl = runtime!.services.get('docblocks')!.baseUrl;
+    const prevTls = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    try {
+      const client = new Client({ name: 'probe', version: '1.0.0' });
+      await client.connect(new StreamableHTTPClientTransport(new URL(baseUrl)));
+      const { tools } = await client.listTools();
+
+      const convert = tools.find((t) => t.name === 'convert_document');
+      expect(convert?.inputSchema).toMatchObject({
+        type: 'object',
+        required: expect.arrayContaining(['source', 'targets']),
+      });
+
+      // An empty call must be a learnable error, not a canned success.
+      const empty = await client
+        .callTool({ name: 'convert_document', arguments: {} })
+        .catch((err: unknown) => ({ isError: true, caught: String(err) }));
+      expect(
+        (empty as { isError?: boolean }).isError === true ||
+          JSON.stringify(empty).toLowerCase().includes('invalid'),
+      ).toBe(true);
+
+      // The lenient forms the product accepts must pass: a plain string
+      // source path and a bare-string targets.
+      const lenient = (await client.callTool({
+        name: 'convert_document',
+        arguments: { source: 'powerpoint/eval/deck.md', targets: 'pptx' },
+      })) as { isError?: boolean; content?: Array<{ text?: string }> };
+      expect(lenient.isError ?? false).toBe(false);
+      expect(lenient.content?.[0]?.text).toContain('mock://deck.pptx');
+
+      // The structured form must also pass.
+      const structured = (await client.callTool({
+        name: 'convert_document',
+        arguments: {
+          source: { kind: 'file', path: 'powerpoint/eval/deck.md' },
+          targets: [{ format: 'pptx' }],
+        },
+      })) as { isError?: boolean };
+      expect(structured.isError ?? false).toBe(false);
+      await client.close();
+    } finally {
+      if (prevTls === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevTls;
+    }
+  });
+});

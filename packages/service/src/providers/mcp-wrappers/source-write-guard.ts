@@ -4,15 +4,55 @@ import type { McpToolWrapper } from './types.js';
 
 const SOURCE_EXT_RE = /\.(?:html?|css|mjs|cjs|js|jsx|ts|tsx|json|md)$/i;
 
+/**
+ * Extensions whose contents are binary containers (ZIP-family office
+ * documents, archives, PDFs). A text write to one of these paths can
+ * never be a valid deliverable — the result is a corrupt file no office
+ * app can open — yet models under deliverable pressure reach for
+ * `write_file` at the required `.pptx` path with Markdown or base64
+ * instead of copying the real converted bytes. Wild-caught on the
+ * craftbook-powerpoint-deck e2e (gemma4-12b-q4, 2026-08-25): the model
+ * converted and saved a real 2.9 KB PPTX into the artifacts drawer, then
+ * hand-wrote 43–472 bytes of Markdown at the workspace path six times in
+ * a row while the ZIP-container gate rejected each attempt.
+ */
+const BINARY_CONTAINER_EXT_RE = /\.(?:pptx|docx|xlsx|odp|ods|odt|zip|pdf|epub)$/i;
+
+function binaryContainerWriteError(path: string, hasTool: (name: string) => boolean): string {
+  const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
+  const base = `ERROR: Refusing to write text to \`${path}\` — a .${ext} file is a binary container, and text bytes there produce a corrupt file that will not open.`;
+  if (hasTool('copy_artifact_to_workspace')) {
+    const produce = hasTool('convert_document')
+      ? 'Produce the real file with `convert_document` and `save_artifact`; if the converted file is already saved in the artifacts drawer, do not convert again.'
+      : 'Produce the real file with the document-production toolset; if it is already saved in the artifacts drawer, do not produce it again.';
+    return `${base} ${produce} Then make exactly one call: \`copy_artifact_to_workspace({ source: "<artifact path>", dest: "${path}" })\` to land the saved bytes at this path.`;
+  }
+  return `${base} Produce it through the document-production workflow and copy the real converted bytes to this path instead.`;
+}
+
 export const SourceWriteGuard: McpToolWrapper = {
   id: 'source-write-guard',
   matches(spec: McpServerSpec): boolean {
     return isGezelMcp(spec);
   },
   async preProcess(toolName, args, ctx) {
-    if (toolName !== 'write_file' && toolName !== 'replace_lines') return { kind: 'allow' };
+    if (
+      toolName !== 'write_file' &&
+      toolName !== 'replace_lines' &&
+      toolName !== 'append_to_file'
+    ) {
+      return { kind: 'allow' };
+    }
     const path = typeof args.path === 'string' ? args.path : '';
     const content = typeof args.content === 'string' ? args.content : '';
+    // These tools carry text by construction, so ANY call targeting a
+    // binary-container path is wrong — reject before the source-extension
+    // gate (a .pptx path never matches it and used to sail straight
+    // through).
+    if (path && BINARY_CONTAINER_EXT_RE.test(path)) {
+      return { kind: 'reject', error: binaryContainerWriteError(path, ctx.hasTool) };
+    }
+    if (toolName === 'append_to_file') return { kind: 'allow' };
     if (!path || !SOURCE_EXT_RE.test(path) || content.length === 0) return { kind: 'allow' };
 
     let normalizedContent = pathLooksHtml(path) ? normalizeHtmlScriptBody(content) : content;

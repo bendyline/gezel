@@ -626,8 +626,12 @@ async function handleMcpMockRequest(
       const declaredInputSchema = declaredMockToolInputSchema(
         fixtureContext.toolArgumentSchemas?.[tool.name],
       );
+      const wellKnownSchema =
+        WELL_KNOWN_TOOLSET_TOOL_SCHEMAS[mockMcpToolsetId(mock.id, mock.toolsetId)]?.[tool.name] ??
+        {};
       const inputSchema = {
         ...declaredInputSchema,
+        ...wellKnownSchema,
         ...(tool.writeFixture ? fixturePathSchema(tool.writeFixture.pathArgument) : {}),
       };
       const config = {
@@ -696,6 +700,99 @@ function declaredMockToolInputSchema(
     }),
   );
 }
+
+/**
+ * Argument schemas for mock tools that impersonate a REAL first-party
+ * toolset, keyed by toolset id then tool name.
+ *
+ * A mock without a schema is deliberately permissive — but when the tool
+ * being faked is a product tool with required structured arguments, that
+ * permissiveness rewards precisely the calls the product would reject.
+ * Wild-caught on the 2026-08-22 scorecard sweep and its follow-up e2e
+ * (craftbook-powerpoint-deck, every model 0/3): models called
+ * `convert_document` with NO arguments (bridge log: `call_tool
+ * convert_document keys=`), the schema-less mock answered the canned
+ * success template, and the trial "converted" nothing while every
+ * DocBlocks provenance check lit up green. The model was not careless —
+ * nothing advertised that `source`/`targets` existed, and nothing
+ * rejected their absence.
+ *
+ * Shapes mirror ../docblocks/packages/core/src/mcp/zod.ts (the runtime
+ * truth), including the lenient convenience forms the product accepts
+ * (a plain string `source` path; a bare-string or string-array
+ * `targets`). Registering them makes the MCP SDK both ADVERTISE the
+ * arguments and VALIDATE calls, so an empty call becomes a learnable
+ * error instead of a fake success. Keep in sync with DocBlocks — an
+ * over-strict drift here fails honest calls, an over-loose one hides
+ * broken ones.
+ */
+const docblocksDocumentSource = z
+  .union([
+    z
+      .string()
+      .min(1)
+      .describe(
+        'Path to the source document, workspace-root-relative (e.g. "powerpoint/eval/deck.md").',
+      ),
+    z
+      .object({
+        kind: z.literal('file'),
+        rootId: z.string().min(1).optional(),
+        path: z.string().min(1),
+        format: z.string().nullable().optional(),
+      })
+      .passthrough(),
+    z
+      .object({
+        kind: z.literal('markdown'),
+        markdown: z.string().min(1),
+        name: z.string().nullable().optional(),
+      })
+      .passthrough(),
+    z.object({ kind: z.literal('artifact'), uri: z.string().min(1) }).passthrough(),
+  ])
+  .describe(
+    'The document to operate on: a workspace-relative path string, or a structured source ({kind:"file",path}, {kind:"markdown",markdown}, {kind:"artifact",uri}).',
+  );
+
+const docblocksTargets = z
+  .union([
+    z.string().min(1),
+    z
+      .array(z.union([z.string().min(1), z.object({ format: z.string().min(1) }).passthrough()]))
+      .min(1),
+  ])
+  .describe('Output format(s), e.g. "pptx" or [{"format":"pptx"}].');
+
+const WELL_KNOWN_TOOLSET_TOOL_SCHEMAS: Record<
+  string,
+  Record<string, Record<string, z.ZodTypeAny>>
+> = {
+  docblocks: {
+    convert_document: {
+      source: docblocksDocumentSource,
+      targets: docblocksTargets,
+      themeId: z.string().min(1).optional().describe('Optional exact theme id.'),
+      title: z.string().optional(),
+    },
+    preview_document: {
+      source: docblocksDocumentSource,
+      startIndex: z.number().int().nonnegative().optional(),
+      maxItems: z.number().int().min(1).max(20).optional(),
+    },
+    save_artifact: {
+      // artifactUri stays optional here although the product requires it:
+      // the fixture write keys off destination.path alone, and existing
+      // scenarios pass with destination-only calls. Advertising it teaches
+      // the convert -> save handoff without failing those calls.
+      artifactUri: z
+        .string()
+        .min(1)
+        .optional()
+        .describe('URI of the converted artifact returned by convert_document.'),
+    },
+  },
+};
 
 function valueAtPath(value: unknown, dottedPath: string): unknown {
   let current = value;
