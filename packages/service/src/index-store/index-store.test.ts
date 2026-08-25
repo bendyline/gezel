@@ -290,6 +290,7 @@ describe('IndexStore', () => {
     expect(hits).toHaveLength(1);
     expect(hits[0]?.source).toBe('fts');
     expect(hits[0]?.path).toBe('docs/pastry.md');
+    store.close();
   });
 
   it('upserts and reads a summary', async () => {
