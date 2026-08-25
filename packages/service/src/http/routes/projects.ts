@@ -317,7 +317,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   });
 
   // Clear the poisoned "last turn failed" state on every session in the
-  // project so ambient work resumes (the chat banner's Continue button).
+  // project so ambient work resumes (the chat banner's Acknowledge button).
   app.post('/:id/clear-errors', async (c) => {
     const cleared = await ctx.chat.clearProjectErrors(c.req.param('id'));
     return c.json({ cleared });

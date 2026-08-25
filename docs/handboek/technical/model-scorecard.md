@@ -1,7 +1,7 @@
 ---
 id: model-scorecard
 title: "Model scorecard"
-order: 11
+order: 13
 summary: Measured results for every model we have tested, on both task sets.
 subcategory:
   id: models-and-testing

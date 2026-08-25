@@ -1,7 +1,7 @@
 ---
 id: cli-reference
 title: The gezel command line
-order: 6
+order: 7
 summary: Headless gezel — start the service, run one-shot work, export docs.
 subcategory:
   id: gezel-command-line

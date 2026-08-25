@@ -1,7 +1,7 @@
 ---
 id: building-ai-apps-inside-gezel
 title: Building AI Apps inside Gezel
-order: 10
+order: 11
 summary: Combine a project type, dashboard, crew, craftbooks, scripts, and data into one reusable Gezel experience.
 subcategory:
   id: developer

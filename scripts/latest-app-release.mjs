@@ -17,8 +17,9 @@
  *   node scripts/latest-app-release.mjs --out ../gezel-site/releases.json
  *   node scripts/latest-app-release.mjs --repo owner/name --print
  */
+import { existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -113,6 +114,35 @@ export function classifyBuilds(assets) {
     );
 }
 
+/**
+ * Locate the Handboek "What's new" article for a release, as a path relative to
+ * the listing file — so the landing page can link the notes for the version it
+ * is offering instead of the index of every release.
+ *
+ * Article ids are `whats-new/<major>.<minor>`; the third segment is the build
+ * number and never appears in the content tree. The existence check is the
+ * whole point: releases do not always get an article (a rebuild, a hotfix), and
+ * a landing page linking a 404 is worse than one linking the index. A null here
+ * means "fall back to the index", which is what index.html does with it.
+ *
+ * Callers pass the directory the Handboek was just rendered into, so this stays
+ * correct for a non-default --out. An article outside the listing's own
+ * directory tree is refused rather than linked through `../` — the listing is
+ * read by a page at the site root, so upward paths cannot resolve for a visitor.
+ */
+export function handboekNotesPath(version, options = {}) {
+  const listingDir = resolve(options.listingDir ?? '.');
+  const docsDir = resolve(options.docsDir ?? join(listingDir, 'docs'));
+  const segments = String(version).split('.');
+  if (segments.length < 2) return null;
+  const slug = `${segments[0]}.${segments[1]}`;
+  const articleDir = join(docsDir, 'whats-new', slug);
+  if (!existsSync(join(articleDir, 'index.html'))) return null;
+  const rel = relative(listingDir, articleDir);
+  if (!rel || rel.startsWith('..') || resolve(rel) === rel) return null;
+  return `${rel.split(sep).join('/')}/`;
+}
+
 /** Render the selected release as the payload index.html consumes. */
 export function buildReleaseListing(selected, options = {}) {
   const repo = options.repo ?? DEFAULT_REPO;
@@ -131,6 +161,7 @@ export function buildReleaseListing(selected, options = {}) {
     version: selected.version,
     published: selected.record?.published_at ?? selected.record?.created_at ?? '',
     notesUrl: selected.record?.html_url ?? releasesUrl,
+    notesPath: options.notesPath ?? null,
     checksumsUrl: checksums?.browser_download_url ?? null,
     builds: classifyBuilds(assets),
   };
@@ -178,7 +209,13 @@ export async function writeReleaseListing(outPath, options = {}) {
   if (!selected) {
     throw new Error(`no published stable app release found in ${options.repo ?? DEFAULT_REPO}`);
   }
-  const listing = buildReleaseListing(selected, options);
+  const listingDir = dirname(resolve(outPath));
+  const listing = buildReleaseListing(selected, {
+    ...options,
+    notesPath:
+      options.notesPath ??
+      handboekNotesPath(selected.version, { listingDir, docsDir: options.docsDir }),
+  });
   if (!listing.builds.length) {
     throw new Error(`${listing.tag} publishes no downloadable desktop build`);
   }

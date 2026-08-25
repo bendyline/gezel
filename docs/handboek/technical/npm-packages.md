@@ -1,7 +1,7 @@
 ---
 id: npm-packages
 title: "Gezel on npm: the package map"
-order: 7
+order: 8
 summary: Choose the command line, SDK, daemon, client, or lower-level package for your integration.
 subcategory:
   id: gezel-command-line

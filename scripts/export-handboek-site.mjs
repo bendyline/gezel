@@ -12,7 +12,8 @@
 // listing index.html reads instead of calling the GitHub releases API from the
 // visitor's browser. It sits outside the wiped directory, alongside
 // handboek.css, so regenerating docs can never leave the landing page without
-// downloads.
+// downloads. It is written after the render, so it can record whether this
+// release has a what's-new article to link directly.
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
@@ -139,9 +140,18 @@ let releasesFailure = null;
 if (releasesOut) {
   console.log('[handboek-site] refreshing download listing');
   try {
-    const listing = await writeReleaseListing(releasesOut, { repo });
+    // `out` is passed so the listing can link the article for this exact
+    // release. It is resolved after the render above, deliberately: the
+    // existence check that decides between the article and the index only
+    // means anything once the pages are on disk.
+    const listing = await writeReleaseListing(releasesOut, { repo, docsDir: out });
     console.log(
       `[handboek-site] ${listing.tag} — ${listing.builds.length} builds → ${releasesOut}`,
+    );
+    console.log(
+      listing.notesPath
+        ? `[handboek-site] release notes link → ${listing.notesPath}`
+        : `[handboek-site] no what's-new article for ${listing.version} — the landing page links the index`,
     );
   } catch (err) {
     releasesFailure = err.message;

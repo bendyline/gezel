@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
   buildReleaseListing,
   classifyBuilds,
   fetchLatestAppRelease,
+  handboekNotesPath,
   selectLatestAppRelease,
 } from './latest-app-release.mjs';
 
@@ -86,6 +90,63 @@ test('the listing carries the checksums file and the release notes link', () => 
   assert.equal(listing.notesUrl, 'https://github.com/bendyline/gezel/releases/tag/v1.26231.53');
   assert.equal(listing.releasesUrl, 'https://github.com/bendyline/gezel/releases');
   assert.equal(listing.builds.length, 1);
+});
+
+function siteWithArticles(...slugs) {
+  const root = mkdtempSync(join(tmpdir(), 'gezel-site-'));
+  for (const slug of slugs) {
+    const dir = join(root, 'docs', 'whats-new', slug);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'index.html'), '<html></html>');
+  }
+  return root;
+}
+
+test('the notes path points at the article for the release being offered', (t) => {
+  const root = siteWithArticles('1.26237', '1.26234');
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  assert.equal(handboekNotesPath('1.26237.59', { listingDir: root }), 'docs/whats-new/1.26237/');
+});
+
+// A rebuild or a hotfix ships without its own article. Linking one anyway puts
+// a 404 on the landing page, which is worse than linking the index.
+test('a release with no article falls back to null rather than a dead link', (t) => {
+  const root = siteWithArticles('1.26237');
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  assert.equal(handboekNotesPath('1.26238.60', { listingDir: root }), null);
+  assert.equal(handboekNotesPath('', { listingDir: root }), null);
+});
+
+// The docs can be rendered somewhere other than <site>/docs via --out; the path
+// has to stay relative to the listing, which is read by the page at the site root.
+test('a docs directory outside the listing tree is refused, not linked upward', (t) => {
+  const root = siteWithArticles();
+  const elsewhere = siteWithArticles('1.26237');
+  t.after(() => {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  });
+  assert.equal(
+    handboekNotesPath('1.26237.59', {
+      listingDir: root,
+      docsDir: join(elsewhere, 'docs'),
+    }),
+    null,
+  );
+  assert.equal(
+    handboekNotesPath('1.26237.59', { listingDir: root, docsDir: join(root, 'handboek') }),
+    null,
+  );
+});
+
+test('a listing built without a resolved article carries a null notes path', () => {
+  const listing = buildReleaseListing({
+    tag: 'v1.2.3',
+    version: '1.2.3',
+    record: { assets: [asset('Gezel-1.2.3-windows-x64.exe')] },
+  });
+  assert.equal(listing.notesPath, null);
+  assert.equal(listing.notesUrl, 'https://github.com/bendyline/gezel/releases');
 });
 
 test('a release with no checksums file still publishes its builds', () => {

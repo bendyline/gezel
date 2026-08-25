@@ -5596,8 +5596,8 @@ export class ChatManager {
 
   /**
    * Clear the poisoned state on every non-archived session in a project — the
-   * "get this project working again" action behind the chat banner's Continue
-   * button. One engine crash typically poisons several of a project's sessions
+   * "get this project working again" action behind the chat banner's
+   * Acknowledge button. One engine crash typically poisons several of a project's sessions
    * (voorman + helpers), so clearing just one leaves the sidebar flag lit; this
    * resets them all so ambient work resumes. Returns how many were cleared.
    */

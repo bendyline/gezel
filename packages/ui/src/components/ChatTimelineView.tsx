@@ -2631,7 +2631,7 @@ export function ChatTimelineView({
       target.classList.add('timeline-focus-flash');
       window.setTimeout(() => target.classList.remove('timeline-focus-flash'), FOCUS_FLASH_MS);
       // Point the composer at the failed session too, so the user's next
-      // message (or the banner's Continue) resumes THAT conversation
+      // message (or the banner's Retry action) resumes THAT conversation
       // rather than whichever one the roster happened to select.
       if (opts?.notifyParent !== false) {
         const owner = messagesRef.current.find((m) => m.sessionId === sessionId);

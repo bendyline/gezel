@@ -27,6 +27,8 @@ Packaged installs communicate with `gezeld` over loopback TLS using scoped beare
 
 Read [Security Architecture](docs/security-architecture.md) for the threat model, enforced controls, and known limitations. Report vulnerabilities privately through [Security Policy](SECURITY.md). Third-party components and their licenses are recorded in [NOTICE](NOTICE.md).
 
+Every release publishes a `SHA256SUMS` manifest and SLSA build provenance for each installer, so a download can be checked against what the pipeline actually produced. macOS and Windows installers are additionally signed and, on macOS, notarized; Linux packages are not GPG-signed, which makes these checks the verification path there. [Verifying your download](docs/handboek/technical/verifying-your-download.md) has the per-platform commands.
+
 ## Architecture
 
 ```text
