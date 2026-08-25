@@ -91,3 +91,55 @@ export function modelSizeTitle(input: ModelSizeCopyInput): string {
   if (!multiSlot) return `${onDisk} ${single}`;
   return `${onDisk} ${single} Serving ${slots} chats at once reserves about ${formatMemoryBytes(input.reservedResidentBytes ?? 0)}: one copy of the weights plus ${formatMemoryBytes(perChatBytes)} for each chat.`;
 }
+
+export interface Ds4MemoryCopyInput {
+  /** Download size. For a streaming engine this is NOT what stays in memory. */
+  approxSizeBytes: number;
+  /** Working set at the launch window: expert cache + resident state + KV. */
+  residentBytes?: number | undefined;
+  /**
+   * Everything the context window does not move — routed-expert cache, the
+   * prefill reserve, resident non-routed weights. Present only where the
+   * catalog authored a per-token slope to re-base against, which is what
+   * turns the quoted figure from a fixed measurement into this device's.
+   */
+  contextFreeBytes?: number | undefined;
+  /** Granted per-turn window the figure was evaluated at. */
+  effectiveContextWindow?: number | undefined;
+}
+
+function ds4ContextBytes(input: Ds4MemoryCopyInput): number | null {
+  if (input.residentBytes === undefined || input.contextFreeBytes === undefined) return null;
+  const kv = input.residentBytes - input.contextFreeBytes;
+  return kv > 0 ? kv : null;
+}
+
+/**
+ * The memory headline beside the download size.
+ *
+ * No `~` when the catalog authored a slope: the figure is then a measured
+ * working set re-based onto the window this device will actually launch with,
+ * evaluated the same way the launcher will. The hedge stays where it is
+ * earned — a flat authored footprint that does not move with the window.
+ */
+export function ds4MemoryHeadline(input: Ds4MemoryCopyInput): string | null {
+  if (!input.residentBytes) return null;
+  const projected = ds4ContextBytes(input) !== null;
+  return `${projected ? '' : '~'}${formatMemoryBytes(input.residentBytes)} in memory`;
+}
+
+export function ds4SizeTitle(input: Ds4MemoryCopyInput): string {
+  const onDisk = `${formatBytes(input.approxSizeBytes)} on disk — routed experts stream from it instead of loading, so the download size is not what the model occupies.`;
+  if (!input.residentBytes) return onDisk;
+
+  const contextBytes = ds4ContextBytes(input);
+  if (contextBytes === null || input.contextFreeBytes === undefined) {
+    return `${onDisk} About ${formatMemoryBytes(input.residentBytes)} stays in memory. This build authored no per-token slope, so the figure is a measured working set rather than one re-based on this device's context window.`;
+  }
+
+  const window =
+    input.effectiveContextWindow !== undefined
+      ? `the granted ${formatContextWindow(input.effectiveContextWindow)} window`
+      : 'the granted window';
+  return `${onDisk} ${formatMemoryBytes(input.residentBytes)} stays in memory at ${window}: ${formatMemoryBytes(input.contextFreeBytes)} of routed-expert cache and resident model state, plus ${formatMemoryBytes(contextBytes)} of context (KV). Only the second figure moves when you change the context size.`;
+}

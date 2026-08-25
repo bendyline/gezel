@@ -439,6 +439,30 @@ export const CraftbookToolsetNeedSchema = z.object({
 export type CraftbookToolsetNeed = z.infer<typeof CraftbookToolsetNeedSchema>;
 
 /**
+ * A project command this craftbook's gates expect to verify runs of —
+ * `run_package_script` (`scope: 'script'`) or `run_npx` (`scope: 'npx'`)
+ * invocations that `commandEvidence` checks will look for receipts of.
+ * Declaring it lets the launcher raise the first-use approval question at
+ * KICKOFF instead of mid-task: the user approves `npm run test` while
+ * launching "Fix a bug", not three steps in when the model first tries to
+ * run the suite. Approval stays the user's act, recorded in the same
+ * per-project invocation-hash store every ad-hoc run uses — an unapproved
+ * command still pauses exactly as today. `args` must be the exact extra
+ * argument vector (default none): the approval store pins ONE invocation
+ * hash per command name, so books standardize on the argless canonical
+ * invocation. `optional: true` marks a command the book can degrade
+ * without (the launcher may not push for it).
+ */
+export const CraftbookCommandNeedSchema = z.object({
+  scope: z.enum(['script', 'npx']),
+  name: z.string().min(1),
+  args: z.array(z.string()).optional(),
+  reason: z.string().optional(),
+  optional: z.boolean().optional(),
+});
+export type CraftbookCommandNeed = z.infer<typeof CraftbookCommandNeedSchema>;
+
+/**
  * Returns the *required* (non-optional) toolset needs whose ids are not
  * present in `installedToolsetIds` — the set the launcher must offer to
  * install before the craftbook can run. Pure; both the listing route and
@@ -645,6 +669,13 @@ export const CraftbookSchema = z
      */
     toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
     /**
+     * Project commands this craftbook's `commandEvidence` gates verify runs
+     * of. See {@link CraftbookCommandNeedSchema}. Carried into the runtime
+     * craftbook and the task snapshot so the kickoff path can raise the
+     * first-use approval questions up front.
+     */
+    commands: z.array(CraftbookCommandNeedSchema).optional(),
+    /**
      * Connectors whose mirrored `artifacts/data/` corpus this craftbook reads. The
      * launcher binds and syncs them before the first step runs. See
      * {@link CraftbookConnectorNeedSchema}. Carried into the runtime
@@ -667,6 +698,26 @@ export const CraftbookSchema = z
      * task snapshot so the runtime reads it at fanout time.
      */
     spawn: CraftbookSpawnSchema.optional(),
+    /**
+     * This craftbook is authored mode-agnostic: it works identically whether
+     * a run edits the workspace in place or drafts a diffpack change
+     * proposal. Concretely, its workspace deliverables and gates evaluate
+     * through the draft overlay, and it carries no mode-specific prose and
+     * no `{{diffpack.*}}` tokens — the runtime injects drafting framing and
+     * re-roots the write tools. Declaring it lets an invocation opt the run
+     * into proposing (`deliveryMode: 'propose'`, or automatically for
+     * unattended runs); the mode is a property of the RUN, never of the
+     * book. Resolution rule in `TaskManager.create`.
+     */
+    diffpackCapable: z.boolean().optional(),
+    /**
+     * Minimum model tier for the WHOLE book: every step floors at least
+     * here (per-step `capabilityFloor` still overrides absolutely, and a
+     * stricter role floor still wins — see `effectiveCapabilityFloor` in
+     * roles/registry.ts). The honest "this recipe needs a medium model"
+     * declaration, consumed by per-step routing at dispatch.
+     */
+    capabilityFloor: ModelTierSchema.optional(),
     createdAt: z.string(),
     updatedAt: z.string(),
   })

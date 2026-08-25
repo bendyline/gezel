@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
-import { resolveEnrichTarget } from './enrich.js';
+import { ENRICH_LOCAL_PROVIDERS, enrichLocalProviderOrder, resolveEnrichTarget } from './enrich.js';
 
 const priorModel = process.env.GEZEL_ENRICH_MODEL;
 const priorProvider = process.env.GEZEL_ENRICH_PROVIDER;
@@ -45,6 +45,50 @@ describe('resolveEnrichTarget', () => {
     expect(target).toBeNull();
   });
 
+  it('the install default local engine leads, not the list order', async () => {
+    // Wild-caught: `defaultModel` keeps an entry for every engine the user has
+    // ever pointed at, so a stale llama-cpp pin outranked the mlx engine the
+    // install actually runs and indexing silently ran on the wrong model.
+    const target = await resolveEnrichTarget(
+      storeWith({
+        provider: 'mlx',
+        defaultModel: { 'llama-cpp': 'muse-glimmer-30b-q4', mlx: 'qwen3.8-27b-q4' },
+      }),
+      { boekwachter: { id: 'b', name: 'Mhairi' } },
+    );
+    expect(target).toEqual({ providerName: 'mlx', model: 'qwen3.8-27b-q4' });
+  });
+
+  it('ds4 is eligible, and leads when it is the install default', async () => {
+    const target = await resolveEnrichTarget(
+      storeWith({
+        provider: 'ds4',
+        defaultModel: { 'llama-cpp': 'small-4b', ds4: 'deepseek-v4-flash-284b-q2' },
+      }),
+      { boekwachter: { id: 'b', name: 'Mhairi' } },
+    );
+    expect(target).toEqual({ providerName: 'ds4', model: 'deepseek-v4-flash-284b-q2' });
+  });
+
+  it('falls back to a configured ds4 even when it is not the install default', async () => {
+    const target = await resolveEnrichTarget(
+      storeWith({ provider: 'copilot', defaultModel: { ds4: 'deepseek-v4-flash-284b-q2' } }),
+      { boekwachter: { id: 'b', name: 'Mhairi' } },
+    );
+    expect(target).toEqual({ providerName: 'ds4', model: 'deepseek-v4-flash-284b-q2' });
+  });
+
+  it('a cloud install default does not lead — local-first still holds', async () => {
+    const target = await resolveEnrichTarget(
+      storeWith({
+        provider: 'codex-cli',
+        defaultModel: { 'codex-cli': 'gpt-5.6-sol', mlx: 'qwen-local' },
+      }),
+      { boekwachter: { id: 'b', name: 'Mhairi' } },
+    );
+    expect(target).toEqual({ providerName: 'mlx', model: 'qwen-local' });
+  });
+
   it('the Night Shift override outranks the Boekwachter pin', async () => {
     const target = await resolveEnrichTarget(
       storeWith({
@@ -56,5 +100,32 @@ describe('resolveEnrichTarget', () => {
       },
     );
     expect(target).toEqual({ providerName: 'openai', model: 'gpt-night' });
+  });
+});
+
+describe('enrichLocalProviderOrder', () => {
+  it('leads with a local install default', () => {
+    expect(enrichLocalProviderOrder('mlx', 'linux', 'x64')[0]).toBe('mlx');
+    expect(enrichLocalProviderOrder('ds4', 'darwin', 'arm64')[0]).toBe('ds4');
+  });
+
+  it("leads with the platform's engine when the default is cloud", () => {
+    // The stale-entry bug returns for every cloud-default install if this
+    // falls back to raw list order: llama-cpp sorts first and wins on an
+    // Apple Silicon machine whose live selection is mlx.
+    expect(enrichLocalProviderOrder('anthropic-cli', 'darwin', 'arm64')[0]).toBe('mlx');
+    expect(enrichLocalProviderOrder('copilot', 'linux', 'x64')[0]).toBe('llama-cpp');
+    expect(enrichLocalProviderOrder(undefined, 'darwin', 'arm64')[0]).toBe('mlx');
+  });
+
+  it('falls back to plain list order where no engine ships', () => {
+    expect(enrichLocalProviderOrder('copilot', 'darwin', 'x64')).toEqual(ENRICH_LOCAL_PROVIDERS);
+  });
+
+  it('always offers every local engine exactly once', () => {
+    for (const preferred of [undefined, 'mlx', 'ds4', 'anthropic-cli'] as const) {
+      const order = enrichLocalProviderOrder(preferred, 'darwin', 'arm64');
+      expect([...order].sort()).toEqual([...ENRICH_LOCAL_PROVIDERS].sort());
+    }
   });
 });

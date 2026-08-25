@@ -1,6 +1,10 @@
 import type { CraftbookTemplateManifest } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { craftbookCommandName, renderCraftbookCommand } from './craftbook-command.js';
+import {
+  craftbookCommandName,
+  renderCraftbookCommand,
+  seedableParamDefault,
+} from './craftbook-command.js';
 
 // Only the fields the renderer reads; cast through the manifest type.
 function manifest(partial: {
@@ -63,5 +67,35 @@ describe('renderCraftbookCommand', () => {
     });
     expect(renderCraftbookCommand(m, { deep: 'false' })).toBe('b');
     expect(renderCraftbookCommand(m, { deep: 'true' })).toBe('b true');
+  });
+});
+
+describe('seedableParamDefault', () => {
+  it('returns a plain declared default', () => {
+    expect(seedableParamDefault({ default: 'medium' })).toBe('medium');
+    expect(seedableParamDefault({ default: false })).toBe(false);
+    expect(seedableParamDefault({ default: 3 })).toBe(3);
+  });
+
+  it('returns undefined when nothing is declared', () => {
+    expect(seedableParamDefault(undefined)).toBeUndefined();
+    expect(seedableParamDefault({})).toBeUndefined();
+  });
+
+  it('withholds a default that is itself a runtime template', () => {
+    // Seeding this renders it back into the staged command as an explicit
+    // param, which bypasses the server's default resolution and reaches
+    // the gate as a literal the unresolved-placeholder guard rejects.
+    expect(seedableParamDefault({ default: '{{task.dir}}' })).toBeUndefined();
+    expect(seedableParamDefault({ default: '{{ task.dir }}' })).toBeUndefined();
+    expect(seedableParamDefault({ default: 'reviews/{{task.num}}' })).toBeUndefined();
+  });
+
+  it('leaves the whole schema unseeded end-to-end, so no token is staged', () => {
+    const m = manifest({
+      id: 'security-architecture-review',
+      paramSchema: { type: 'object', properties: { workPath: { default: '{{task.dir}}' } } },
+    });
+    expect(renderCraftbookCommand(m, {})).toBe('security-architecture-review');
   });
 });

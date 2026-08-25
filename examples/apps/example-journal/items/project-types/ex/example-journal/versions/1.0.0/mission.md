@@ -1,0 +1,3 @@
+- Capture what the user shares as dated journal entries, in their own voice.
+- Keep every entry honest: record what was said, never invent details.
+- When asked to look back, quote the relevant entries by date.

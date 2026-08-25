@@ -1757,3 +1757,367 @@ describe('completion gates — unsatisfiable under writes-off', () => {
     expect(outcome.gate.message).toContain('pr-review.md');
   });
 });
+
+describe('completion gates — draft overlay', () => {
+  async function draftingTask(gate: unknown) {
+    const task = await tasks.create(
+      'default',
+      {
+        title: 'Drafted change',
+        description: 'A drafting task whose gate must judge the proposed tree.',
+        assignee: { kind: 'user' },
+        steps: gatedSteps(gate),
+      },
+      { draftsDiffpack: true },
+    );
+    expect(task.diffpackId).toBe(String(task.num));
+    return task;
+  }
+
+  it('approves a deliverable that exists only in the draft overlay', async () => {
+    const { DiffpackDraftStore } = await import('../diffpack/draft-store.js');
+    const drafts = new DiffpackDraftStore(store);
+    tasks.setDraftReader(drafts);
+    const task = await draftingTask({
+      at: 'completion',
+      checks: [{ kind: 'minBytes', file: 'index.html', bytes: 100 }],
+    });
+    await drafts.write('default', task.diffpackId!, 'index.html', 'x'.repeat(200));
+
+    const outcome = await tasks.completeStepChecked(
+      'default',
+      task.num,
+      task.craftbook.steps[0]!.id,
+    );
+    expect(outcome.status).toBe('advanced');
+  });
+
+  it('rejects on the DRAFTED content of a file the workspace copy would pass', async () => {
+    const { DiffpackDraftStore } = await import('../diffpack/draft-store.js');
+    const drafts = new DiffpackDraftStore(store);
+    tasks.setDraftReader(drafts);
+    const task = await draftingTask({
+      at: 'completion',
+      checks: [{ kind: 'contains', file: 'src/app.js', pattern: 'MARKER' }],
+    });
+    // The real workspace file satisfies the check; the draft rewrote it and
+    // dropped the marker. A workspace-reading gate would falsely approve.
+    await writeWorkspaceFile('src/app.js', 'const MARKER = 1;\n');
+    await drafts.write('default', task.diffpackId!, 'src/app.js', 'const other = 2;\n');
+
+    const outcome = await tasks.completeStepChecked(
+      'default',
+      task.num,
+      task.craftbook.steps[0]!.id,
+    );
+    expect(outcome.status).toBe('held');
+  });
+
+  it('lists (workspace minus proposed deletions) plus drafted paths', async () => {
+    const { DiffpackDraftStore } = await import('../diffpack/draft-store.js');
+    const drafts = new DiffpackDraftStore(store);
+    tasks.setDraftReader(drafts);
+    const task = await draftingTask({
+      at: 'completion',
+      checks: [{ kind: 'fileCount', ext: ['.html'], min: 2 }],
+    });
+    // Workspace: two .html files. Draft: deletes one, adds two new ones.
+    // Overlay listing = 2 - 1 + 2 = 3 → min 2 passes; a deletions-blind
+    // listing that missed drafted paths would count only the workspace pair.
+    await writeWorkspaceFile('a.html', '<p>a</p>');
+    await writeWorkspaceFile('b.html', '<p>b</p>');
+    await drafts.delete('default', task.diffpackId!, 'b.html');
+    await drafts.write('default', task.diffpackId!, 'c.html', '<p>c</p>');
+    await drafts.write('default', task.diffpackId!, 'd.html', '<p>d</p>');
+
+    const ws = tasks.gateWorkspaceReader('default', {
+      ref: task.ref,
+      diffpackId: task.diffpackId,
+    });
+    const listed = await ws.list();
+    expect(listed).toContain('a.html');
+    expect(listed).toContain('c.html');
+    expect(listed).toContain('d.html');
+    expect(listed).not.toContain('b.html');
+
+    const outcome = await tasks.completeStepChecked(
+      'default',
+      task.num,
+      task.craftbook.steps[0]!.id,
+    );
+    expect(outcome.status).toBe('advanced');
+  });
+
+  it('falls back to the real workspace (with a warning) when no draft reader is wired', async () => {
+    const task = await draftingTask({
+      at: 'completion',
+      checks: [{ kind: 'minBytes', file: 'real.txt', bytes: 5 }],
+    });
+    await writeWorkspaceFile('real.txt', 'workspace content');
+    const outcome = await tasks.completeStepChecked(
+      'default',
+      task.num,
+      task.craftbook.steps[0]!.id,
+    );
+    expect(outcome.status).toBe('advanced');
+  });
+});
+
+describe('delivery-mode resolution (diffpackCapable)', () => {
+  function installCapableBook(opts: { file: string; diffpackCapable?: boolean }) {
+    tasks.setCraftbookResolver({
+      async resolve(id: string) {
+        return {
+          craftbook: {
+            id,
+            name: 'Fix a bug',
+            ...(opts.diffpackCapable === false ? {} : { diffpackCapable: true }),
+            steps: [
+              {
+                id: 'fix',
+                name: 'Fix',
+                gate: {
+                  at: 'completion',
+                  checks: [{ kind: 'contains', file: opts.file, pattern: 'MARKER' }],
+                },
+                next: 'done',
+              },
+              { id: 'done', name: 'Done', terminal: true },
+            ],
+            entryStepId: 'fix',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+          },
+          sourceId: 'bundled',
+        } as never;
+      },
+    });
+  }
+
+  it('propose mode stamps diffpackId on a capable book and records the capability', async () => {
+    installCapableBook({ file: 'src/x.js' });
+    const task = await tasks.create('default', {
+      title: 'Fix it',
+      description: 'Propose-mode run of a diffpackCapable catalog book.',
+      assignee: { kind: 'user' },
+      craftbookId: 'bug-fix',
+      deliveryMode: 'propose',
+    });
+    expect(task.diffpackId).toBe(String(task.num));
+    expect(task.craftbook.diffpackCapable).toBe(true);
+  });
+
+  it('rejects propose mode on a book that is not diffpackCapable', async () => {
+    installCapableBook({ file: 'src/x.js', diffpackCapable: false });
+    await expect(
+      tasks.create('default', {
+        title: 'Fix it',
+        description: 'Propose-mode request against a book without the capability.',
+        assignee: { kind: 'user' },
+        craftbookId: 'bug-fix',
+        deliveryMode: 'propose',
+      }),
+    ).rejects.toThrow(/not diffpackCapable/);
+  });
+
+  it('auto mode proposes for an unattended (night-shift) run', async () => {
+    installCapableBook({ file: 'src/x.js' });
+    const task = await tasks.create('default', {
+      title: 'Nightly fix',
+      description: 'Auto delivery mode on an unattended run drafts a proposal.',
+      assignee: { kind: 'user' },
+      craftbookId: 'bug-fix',
+      nightShift: { enabled: true },
+    });
+    expect(task.diffpackId).toBe(String(task.num));
+  });
+
+  it('auto mode proposes when the crew holds no workspace write grant', async () => {
+    installCapableBook({ file: 'src/x.js' });
+    await store.updateProject('default', { managedWorkspaceWritePolicy: 'deny' });
+    const task = await tasks.create('default', {
+      title: 'Fix on locked workspace',
+      description: 'Auto delivery mode drafts when the workspace is not writable.',
+      assignee: { kind: 'user' },
+      craftbookId: 'bug-fix',
+    });
+    expect(task.diffpackId).toBe(String(task.num));
+  });
+
+  it('auto mode edits in place for an attended run on a writable workspace', async () => {
+    installCapableBook({ file: 'src/x.js' });
+    const task = await tasks.create('default', {
+      title: 'Attended fix',
+      description: 'Auto delivery mode edits directly when someone is watching.',
+      assignee: { kind: 'user' },
+      craftbookId: 'bug-fix',
+    });
+    expect(task.diffpackId).toBeUndefined();
+  });
+
+  it('edit mode never overrides a service draftsDiffpack binding', async () => {
+    installCapableBook({ file: 'src/x.js' });
+    const task = await tasks.create(
+      'default',
+      {
+        title: 'Night host',
+        description: 'A caller-owned drafting binding survives an edit-mode request.',
+        assignee: { kind: 'user' },
+        craftbookId: 'bug-fix',
+        deliveryMode: 'edit',
+      },
+      { draftsDiffpack: true },
+    );
+    expect(task.diffpackId).toBe(String(task.num));
+  });
+
+  it('the same book clears its gate identically in edit and propose modes', async () => {
+    const { DiffpackDraftStore } = await import('../diffpack/draft-store.js');
+    const drafts = new DiffpackDraftStore(store);
+    tasks.setDraftReader(drafts);
+    const CONTENT = 'const MARKER = "fixed";\n';
+
+    installCapableBook({ file: 'src/mode-a.js' });
+    const proposeTask = await tasks.create('default', {
+      title: 'Propose run',
+      description: 'Mode-agnostic book run in propose mode judges the draft.',
+      assignee: { kind: 'user' },
+      craftbookId: 'bug-fix',
+      deliveryMode: 'propose',
+    });
+    await drafts.write('default', proposeTask.diffpackId!, 'src/mode-a.js', CONTENT);
+    const proposeOutcome = await tasks.completeStepChecked('default', proposeTask.num, 'fix');
+    expect(proposeOutcome.status).toBe('advanced');
+    // The proposal never touched the project.
+    expect(await store.readProjectWorkspaceFile('default', 'src/mode-a.js')).toBeNull();
+
+    installCapableBook({ file: 'src/mode-b.js' });
+    const editTask = await tasks.create('default', {
+      title: 'Edit run',
+      description: 'Mode-agnostic book run in edit mode judges the workspace.',
+      assignee: { kind: 'user' },
+      craftbookId: 'bug-fix',
+      deliveryMode: 'edit',
+    });
+    expect(editTask.diffpackId).toBeUndefined();
+    await writeWorkspaceFile('src/mode-b.js', CONTENT);
+    const editOutcome = await tasks.completeStepChecked('default', editTask.num, 'fix');
+    expect(editOutcome.status).toBe('advanced');
+  });
+
+  it('a sealed and applied proposal lands the same bytes an edit run writes', async () => {
+    const { DiffpackDraftStore } = await import('../diffpack/draft-store.js');
+    const { DiffpackManager } = await import('../diffpack/manager.js');
+    const drafts = new DiffpackDraftStore(store);
+    tasks.setDraftReader(drafts);
+    const CONTENT = 'const MARKER = "equivalent";\n';
+
+    installCapableBook({ file: 'src/apply-me.js' });
+    const task = await tasks.create('default', {
+      title: 'Propose then apply',
+      description: 'Applying the sealed proposal reproduces the edit-mode result.',
+      assignee: { kind: 'user' },
+      craftbookId: 'bug-fix',
+      deliveryMode: 'propose',
+    });
+    await drafts.write('default', task.diffpackId!, 'src/apply-me.js', CONTENT);
+    expect((await tasks.completeStepChecked('default', task.num, 'fix')).status).toBe('advanced');
+
+    const diffpacks = new DiffpackManager({ home, store, tasks });
+    await diffpacks.ensureForDraft('default', task.diffpackId!);
+    const sealed = await diffpacks.seal('default', task.diffpackId!);
+    expect(sealed.status).toBe('ready');
+    expect(sealed.files.map((f) => f.path)).toEqual(['src/apply-me.js']);
+
+    await diffpacks.apply('default', task.diffpackId!);
+    expect(await store.readProjectWorkspaceFile('default', 'src/apply-me.js')).toBe(CONTENT);
+  });
+});
+
+describe('completion gates — commandEvidence receipts', () => {
+  it('verifies runs by task/step attribution and activation window', async () => {
+    const { HistoryManager } = await import('../history/manager.js');
+    const history = new HistoryManager(home);
+    tasks = new TaskManager(store, history);
+    tasks.setScriptRunner(new ScriptRunner({ store, chat }));
+
+    const task = await tasks.create('default', {
+      title: 'Fix with proof',
+      description: 'A commandEvidence gate reads the run receipts, not claims.',
+      assignee: { kind: 'user' },
+      steps: gatedSteps({
+        at: 'completion',
+        checks: [{ kind: 'commandEvidence', script: 'test', expect: 'pass' }],
+      }),
+    });
+    const buildId = task.craftbook.steps[0]!.id;
+    const receipt = (details: Record<string, unknown>) =>
+      history.log({
+        kind: 'workspace.script.run',
+        projectId: 'default',
+        summary: 'Ran npm run test',
+        details: { name: 'test', args: [], durationMs: 10, timedOut: false, ...details },
+      });
+
+    // No receipt at all → prescriptive reject.
+    const none = await tasks.completeStepChecked('default', task.num, buildId);
+    expect(none.status).toBe('held');
+    if (none.status === 'held') {
+      expect(none.gate.message).toMatch(/No `npm run test` run was observed/);
+    }
+
+    // A receipt from ANOTHER task/step must not count.
+    await receipt({ exitCode: 0, taskRef: 'default/999', stepId: buildId });
+    await receipt({ exitCode: 0, taskRef: task.ref, stepId: 'other-step' });
+    // Nor an unattributed one (ad-hoc chat run).
+    await receipt({ exitCode: 0 });
+    const foreign = await tasks.completeStepChecked('default', task.num, buildId);
+    expect(foreign.status).toBe('held');
+
+    // A failing attributed run → reject naming the exit code.
+    await receipt({
+      exitCode: 1,
+      taskRef: task.ref,
+      stepId: buildId,
+      stderrTail: '2 tests failed',
+    });
+    const failing = await tasks.completeStepChecked('default', task.num, buildId);
+    expect(failing.status).toBe('held');
+    if (failing.status === 'held') {
+      expect(failing.gate.message).toMatch(/exit 1/);
+      expect(failing.gate.message).toMatch(/2 tests failed/);
+    }
+
+    // A later passing attributed run → the latest wins, gate advances.
+    await receipt({ exitCode: 0, taskRef: task.ref, stepId: buildId });
+    const passing = await tasks.completeStepChecked('default', task.num, buildId);
+    expect(passing.status).toBe('advanced');
+  });
+
+  it('defers with a note on a drafting task', async () => {
+    const { HistoryManager } = await import('../history/manager.js');
+    const history = new HistoryManager(home);
+    tasks = new TaskManager(store, history);
+    tasks.setScriptRunner(new ScriptRunner({ store, chat }));
+
+    const task = await tasks.create(
+      'default',
+      {
+        title: 'Propose with deferred proof',
+        description: 'commandEvidence defers honestly while drafting a proposal.',
+        assignee: { kind: 'user' },
+        steps: gatedSteps({
+          at: 'completion',
+          checks: [{ kind: 'commandEvidence', script: 'test', expect: 'pass' }],
+        }),
+      },
+      { draftsDiffpack: true },
+    );
+    const outcome = await tasks.completeStepChecked(
+      'default',
+      task.num,
+      task.craftbook.steps[0]!.id,
+    );
+    expect(outcome.status).toBe('advanced');
+  });
+});

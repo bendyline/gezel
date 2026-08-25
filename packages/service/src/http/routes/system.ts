@@ -121,6 +121,31 @@ export function systemRoutes(ctx: ServiceContext): Hono {
    * schema does not declare is stripped instead of shipped to a public
    * issue tracker.
    */
+  /**
+   * OS power intent for the Electron shell, combining every reason this
+   * machine should not idle-sleep right now.
+   *
+   * Night shift owns the scheduled case. The live case is work someone is
+   * waiting on: a laptop that idle-sleeps mid-turn freezes the daemon, the
+   * engine, and the socket between them, and the user comes back to a turn
+   * that made no progress. Deliberately NOT held for background or ambient
+   * chores — see `ChatManager.hasInteractiveLocalWork`.
+   *
+   * Worth being plain about the ceiling: on macOS this drives a
+   * `prevent-app-suspension` blocker, which stops IDLE sleep only. Nothing in
+   * userspace overrides a closed lid, which is why the daemon's deadlines are
+   * sleep-aware rather than relying on staying awake.
+   */
+  app.get('/power-intent', (c) => {
+    const nightShift = ctx.nightShift.getPowerIntent();
+    const liveWork = ctx.chat.hasInteractiveLocalWork();
+    return c.json({
+      keepAwake: nightShift.keepAwake || liveWork,
+      wakeAtIso: nightShift.wakeAtIso,
+      reason: nightShift.keepAwake ? 'night-shift' : liveWork ? 'active-work' : null,
+    });
+  });
+
   app.get('/diagnostics', async (c) => {
     const diagnostics = await collectSystemDiagnosticsCached({
       home: ctx.home,

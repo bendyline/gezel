@@ -57,11 +57,13 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     ],
   },
   'accessibility-retrofit': {
+    runAsCraftbookTask: true,
+    timeoutMs: 40 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8; generated smoke spec passed 6 deterministic checks.',
+        'Tactical 2.0.0 sidecar (seeded a11y violations incl. a decorative-image trap; structural repair oracle).',
     },
     gaps: ['Add Playwright behavior checks for the class-specific controls.'],
   },
@@ -247,13 +249,128 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     ],
   },
   'bug-fix-tdd': {
+    runAsCraftbookTask: true,
+    timeoutMs: 40 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks.',
+        'The 2.0.0 tactical sidecar seeds a boundary defect with a green suite, requires red-then-green command receipts through the real task graph, and a mutant oracle proves the regression guard bites.',
     },
-    gaps: ['Run the generated self-tests in a sandbox and gate on exit code.'],
+    gaps: ['Run the task-attributed workflow across local model tiers.'],
+  },
+  // ── Tactical fleet v2 (compiled track — authoring/tactical/) ──
+  // Every fleet book runs as a REAL craftbook task: the sidecars assert
+  // taskGraph.requireCraftbookTask, seed a concrete defect/target, and grade
+  // with executable oracles. Timeouts sized for the 7-8 step quality loop
+  // on local models.
+  'hotfix-flow': {
+    runAsCraftbookTask: true,
+    timeoutMs: 35 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
+    coverage: {
+      status: 'implemented',
+      notes: 'Tactical 2.0.0 sidecar (seeded crash, minimal-diff + rollback discipline).',
+    },
+    gaps: ['Run across local model tiers.'],
+  },
+  'flaky-test-fix': {
+    runAsCraftbookTask: true,
+    timeoutMs: 45 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
+    coverage: {
+      status: 'implemented',
+      notes:
+        'Tactical 1.0.0 sidecar (order-dependence flake; 5x consecutive-green oracle + leak-reseed mutant).',
+    },
+    gaps: ['Run across local model tiers.'],
+  },
+  'apply-review-findings': {
+    runAsCraftbookTask: true,
+    timeoutMs: 40 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
+    coverage: {
+      status: 'implemented',
+      notes:
+        'Tactical 1.0.0 sidecar (seeded findings JSON in the artifacts drawer; all three findings must genuinely close).',
+    },
+    gaps: ['Run across local model tiers.'],
+  },
+  'nightly-fix-sweep': {
+    timeoutMs: 45 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
+    coverage: {
+      status: 'implemented',
+      notes:
+        'Hand-authored 1.0.0 sidecar: write-denied workspace forces auto-propose; asserts a sealed proposal (history), the four-heading notes contract via the drafting shards, and byte-identical workspace fixtures. Fanout host - runs as a real task automatically.',
+    },
+    gaps: ['Run across local model tiers.'],
+  },
+  'refactor-module': {
+    runAsCraftbookTask: true,
+    timeoutMs: 45 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
+    coverage: {
+      status: 'implemented',
+      notes:
+        'Tactical 2.0.0 sidecar (duplicated logic; behavior-equivalence matrix + duplication-marker oracle, green-before/green-after receipts).',
+    },
+    gaps: ['Run across local model tiers.'],
+  },
+  'perf-optimization': {
+    runAsCraftbookTask: true,
+    timeoutMs: 45 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
+    coverage: {
+      status: 'implemented',
+      notes:
+        'Tactical 2.0.0 sidecar (instrumented O(n^2) hot path; deterministic op-count budget oracle, measure-first discipline).',
+    },
+    gaps: ['Run across local model tiers.'],
+  },
+  'type-safety-pass': {
+    runAsCraftbookTask: true,
+    timeoutMs: 40 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
+    coverage: {
+      status: 'implemented',
+      notes:
+        'Tactical 2.0.0 sidecar (seeded unsafe patterns with behavioral consequences; structural + behavioral oracles).',
+    },
+    gaps: ['Run across local model tiers.'],
+  },
+  'dependency-upgrade': {
+    runAsCraftbookTask: true,
+    timeoutMs: 45 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
+    coverage: {
+      status: 'implemented',
+      notes:
+        'Tactical 1.0.0 sidecar (vendored v1->v2 upgrade with renamed API; staged green receipts).',
+    },
+    gaps: ['Run across local model tiers.'],
+  },
+  'codemod-sweep': {
+    runAsCraftbookTask: true,
+    timeoutMs: 35 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
+    coverage: {
+      status: 'implemented',
+      notes:
+        'Tactical 1.0.0 sidecar (rename sweep with a tricky template-literal site and a legitimate exclusion; zero-residual oracle).',
+    },
+    gaps: ['Run across local model tiers.'],
+  },
+  'ux-update': {
+    runAsCraftbookTask: true,
+    timeoutMs: 35 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
+    coverage: {
+      status: 'implemented',
+      notes:
+        'Tactical 1.0.0 sidecar (move-search-into-header change; structural oracle keeps the keyboard shortcut wired).',
+    },
+    gaps: ['Run across local model tiers.'],
   },
   'build-loop': {
     coverage: {
@@ -355,11 +472,13 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add Playwright behavior checks for the class-specific controls.'],
   },
   'ci-pipeline': {
+    runAsCraftbookTask: true,
+    timeoutMs: 35 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8; generated external-automation smoke spec passed 6 deterministic checks.',
+        'Tactical 2.0.0 sidecar (real workflow YAML; oracle forbids invented scripts and requires detected commands only).',
     },
     gaps: ['Add active fake CLI/HTTP execution modes for deeper integration coverage.'],
   },
@@ -1003,15 +1122,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     },
     gaps: ['Add active binary/media fixture assertions for deeper media-pipeline coverage.'],
   },
-  'hotfix-flow': {
-    coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
-      notes:
-        'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks.',
-    },
-    gaps: ['Run the generated self-tests in a sandbox and gate on exit code.'],
-  },
   'html-arcade-game': {
     runAsCraftbookTask: true,
     timeoutMs: 35 * 60_000,
@@ -1518,15 +1628,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     },
     gaps: ['Add active fake CLI/HTTP execution modes for deeper integration coverage.'],
   },
-  'perf-optimization': {
-    coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
-      notes:
-        'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks after missing-deliverable feedback.',
-    },
-    gaps: ['Run the generated self-tests in a sandbox and gate on exit code.'],
-  },
   'photo-cull': {
     coverage: {
       status: 'validated',
@@ -1720,15 +1821,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       'MISMATCH: the craftbook builds an interactive index.html spreadsheet, but this eval grades a prose analysis.md the book never mentions. The eval prompt drives the run (direct-worker, not runAsCraftbookTask) so it grades the prompt, but a model that invokes the book will build the wrong artifact. Realigning changes what this measures from office analysis to HTML app building — a suite-composition decision.',
     ],
   },
-  'refactor-module': {
-    coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
-      notes:
-        'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks.',
-    },
-    gaps: ['Run the generated self-tests in a sandbox and gate on exit code.'],
-  },
   'regex-builder': {
     coverage: {
       status: 'validated',
@@ -1866,6 +1958,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add a fake kubectl/queue simulator and require the generated steps to be executable.'],
   },
   'schema-migration': {
+    // The bespoke hand-authored scenario (real tsc signal) stays the runnable
+    // mapping; the tactical 2.0.0 sidecar ships alongside for the contract
+    // tests and future sidecar-driven runs.
     scenarioId: 'schema-migration',
     existingScenarioId: 'schema-migration',
     coverage: {
@@ -2128,11 +2223,13 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     ],
   },
   'test-suite-backfill': {
+    runAsCraftbookTask: true,
+    timeoutMs: 45 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
+      status: 'implemented',
       notes:
-        'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks.',
+        'Tactical 2.0.0 sidecar (untested date-range module; mutant oracle requires the model-written suite to catch at least 2 of 3 seeded mutations).',
     },
     gaps: ['Run the generated self-tests in a sandbox and gate on exit code.'],
   },
@@ -2191,15 +2288,6 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
         'Validated locally with gemma4-e4b-q8; generated media smoke spec passed 5 deterministic checks.',
     },
     gaps: ['Add active binary/media fixture assertions for deeper media-pipeline coverage.'],
-  },
-  'type-safety-pass': {
-    coverage: {
-      status: 'validated',
-      localModels: ['gemma4-e4b-q4'],
-      notes:
-        'Validated locally with gemma4-e4b-q8; generated code smoke spec passed 7 deterministic checks.',
-    },
-    gaps: ['Run the generated self-tests in a sandbox and gate on exit code.'],
   },
   'version-bump': {
     coverage: {

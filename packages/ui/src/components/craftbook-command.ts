@@ -20,6 +20,32 @@ export function craftbookCommandName(m: CraftbookCommandManifest): string {
   return c && c.length > 0 ? c : m.id;
 }
 
+/**
+ * A declared `default` the launcher may seed into its form, or `undefined`
+ * when the server has to resolve it instead.
+ *
+ * A default that is itself a runtime template (`{{task.dir}}`) belongs to
+ * the server: `TaskManager.create` expands it against the task's reserved
+ * context, which only exists once the task has a number. Seeding it into
+ * the form looks harmless — the field shows the same string the craftbook
+ * declared — but the form renders its values back into the staged command,
+ * the terminal parses them as EXPLICIT params, and an explicit param
+ * deliberately bypasses default resolution. The literal `{{…}}` then rides
+ * into every gate path built from it, where the unresolved-placeholder
+ * guard correctly refuses to run the gate at all
+ * (security-architecture-review's `workPath`, task gezel/7).
+ *
+ * Leaving it unseeded renders no token, which is exactly the "no override
+ * supplied" case the server already handles.
+ */
+export function seedableParamDefault(def: { default?: unknown } | undefined): unknown {
+  if (!def || def.default === undefined) return undefined;
+  if (typeof def.default === 'string' && /\{\{\s*[a-zA-Z0-9_.-]+\s*\}\}/.test(def.default)) {
+    return undefined;
+  }
+  return def.default;
+}
+
 /** Ordered scalar param keys + their declared types, read structurally. */
 function paramEntries(m: CraftbookCommandManifest): Array<{ key: string; type: string }> {
   const schema = m.paramSchema as

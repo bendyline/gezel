@@ -145,7 +145,12 @@ export function nightShiftRoutes(ctx: ServiceContext): Hono {
   // Powers the moon menu's "Done last night" and the Home "Last night" tab.
   app.get('/review', async (c) => {
     const review = await buildNightShiftReview(
-      { store: ctx.store, tasks: ctx.tasks, reportActions: ctx.reportActions },
+      {
+        store: ctx.store,
+        tasks: ctx.tasks,
+        reportActions: ctx.reportActions,
+        diffpacks: ctx.diffpacks,
+      },
       ctx.nightShift.currentWindow(),
       new Date(),
     );

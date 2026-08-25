@@ -74,10 +74,11 @@ jobs:
     name: Build, lint, typecheck, and unit tests
     needs: workflow-policy
     runs-on: ubuntu-latest
-    # Runtime coverage executes the Vitest suites a second time with V8
-    # instrumentation after the ordinary unit pass. A progressing run reached
-    # the previous 45-minute ceiling during service coverage; leave headroom
-    # for the remaining package sweeps and ordinary hosted-runner variance.
+    # Runtime coverage used to tail this job; it is now the separate
+    # `coverage` job below, for the reasons recorded there. What remains is
+    # build/typecheck/lint plus stability pass 1 — ~25 min before coverage was
+    # folded in. 60 stays as headroom for suite growth rather than because the
+    # ceiling is close.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -101,8 +102,6 @@ jobs:
         run: pnpm test:ci
       - name: Enforce direct-import test-surface floors
         run: pnpm test:surface
-      - name: Measure executable V8 coverage
-        run: pnpm test:coverage
       - name: Preserve direct-import test-surface inventory
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -113,6 +112,40 @@ jobs:
           # step fails, do not add a second, misleading artifact failure.
           if-no-files-found: ignore
           retention-days: 30
+
+  coverage:
+    name: Executable V8 coverage
+    needs: workflow-policy
+    runs-on: ubuntu-latest
+    # A FOURTH execution of the UI, service and package suites, this one under
+    # V8 instrumentation. It is a separate job because it reports rather than
+    # gates: `unit` (stability pass 1) and `stability` (passes 2 and 3) have
+    # already run these suites to completion, so a coverage timeout must never
+    # be able to fail the correctness gate — and run concurrently it costs no
+    # extra wall clock at all.
+    #
+    # Serialised into `unit` it drove that job from 25 to 58 min against a
+    # 60 min ceiling between 2026-08-19 and 2026-08-22, having already forced
+    # that ceiling from 45 to 60, and it blew the npm release gate outright
+    # (see publish-npm.yml). Adding a suite is cheap here and expensive there;
+    # keep it that way.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+      - run: pnpm build
+      - name: Install Chromium
+        # Required for the same reasons as in `unit` and `stability`, and this
+        # job needs both: it instruments the evals suite, whose scenarios
+        # launch a real headless chromium, and the service suite, whose
+        # page-check tests gate on the shared ~/.cache/ms-playwright existing.
+        # Without it those tests silently skip and the report under-counts.
+        run: pnpm --filter @bendyline/gezel-evals exec playwright install --with-deps chromium
+      - name: Measure executable V8 coverage
+        run: pnpm test:coverage
       - name: Preserve executable coverage reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

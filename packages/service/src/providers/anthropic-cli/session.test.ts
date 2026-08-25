@@ -4,6 +4,7 @@ import { SessionResumeError } from '../types.js';
 import type { ClaudeReasoningEffort } from './reasoning.js';
 import { AnthropicCliSession, isResumeFailureSignal } from './session.js';
 import type { ClaudeWorkerPool, ClaudeWorkerSpec, PoolSnapshot } from './worker-pool.js';
+import type { WorkerTurnHooks } from './worker.js';
 
 /**
  * The session class is a thin façade over `ClaudeWorkerPool` after the
@@ -25,6 +26,8 @@ interface MockPoolControl {
   nextRunTurn: () => Promise<string> | string;
   /** Optional per-session captured upstream id, surfaced via snapshot(). */
   capturedClaudeSessionId?: string;
+  /** Hooks handed to the most recent `runTurn`, so tests can drive them. */
+  lastHooks?: WorkerTurnHooks;
 }
 
 function makeMockPool(): MockPoolControl {
@@ -35,7 +38,8 @@ function makeMockPool(): MockPoolControl {
     nextRunTurn: () => 'reply',
   };
   const fakePool: Partial<ClaudeWorkerPool> = {
-    runTurn: async (spec, prompt, _hooks, sendOpts) => {
+    runTurn: async (spec, prompt, hooks, sendOpts) => {
+      ctrl.lastHooks = hooks;
       ctrl.runTurnCalls.push({
         spec,
         prompt,
@@ -166,5 +170,81 @@ describe('isResumeFailureSignal', () => {
     expect(isResumeFailureSignal({ stderr: 'No such session.', exitCode: 1 })).toBe(true);
     expect(isResumeFailureSignal({ stderr: 'session has expired', exitCode: 1 })).toBe(true);
     expect(isResumeFailureSignal({ stderr: 'unrelated network blip', exitCode: 1 })).toBe(false);
+  });
+});
+
+describe('AnthropicCliSession — reasoning capture', () => {
+  it('accumulates thinking across the turn and republishes it on the reasoning channel', async () => {
+    const ctrl = makeMockPool();
+    const session = buildSession(ctrl.pool);
+    const streamed: string[] = [];
+    session.onReasoningDelta((chunk) => streamed.push(chunk));
+
+    ctrl.nextRunTurn = () => {
+      // One `sendAndWait` spans the whole agentic loop, so a turn routinely
+      // carries several thinking blocks.
+      ctrl.lastHooks?.emitReasoningDelta('first block. ');
+      ctrl.lastHooks?.emitReasoningDelta('second block.');
+      return 'the reply';
+    };
+
+    const text = await session.sendAndWait('go');
+    expect(text).toBe('the reply');
+    expect(streamed.join('')).toBe('first block. second block.');
+    expect(session.getLastTurnReasoning()).toBe('first block. second block.');
+  });
+
+  it('returns undefined rather than an empty string when nothing was captured', async () => {
+    const ctrl = makeMockPool();
+    const session = buildSession(ctrl.pool);
+    await session.sendAndWait('go');
+    expect(session.getLastTurnReasoning()).toBeUndefined();
+  });
+
+  it('resets between turns so a quiet turn does not inherit the previous trace', async () => {
+    const ctrl = makeMockPool();
+    const session = buildSession(ctrl.pool);
+
+    ctrl.nextRunTurn = () => {
+      ctrl.lastHooks?.emitReasoningDelta('turn one thinking');
+      return 'a';
+    };
+    await session.sendAndWait('go');
+    expect(session.getLastTurnReasoning()).toBe('turn one thinking');
+
+    ctrl.nextRunTurn = () => 'b';
+    await session.sendAndWait('again');
+    expect(session.getLastTurnReasoning()).toBeUndefined();
+  });
+
+  it('keeps the partial trace when the turn fails, for cancel-time salvage', async () => {
+    const ctrl = makeMockPool();
+    const session = buildSession(ctrl.pool);
+
+    ctrl.nextRunTurn = () => {
+      ctrl.lastHooks?.emitReasoningDelta('got this far');
+      throw new Error('turn timed out');
+    };
+    await expect(session.sendAndWait('go')).rejects.toThrow('turn timed out');
+    expect(session.getLastTurnReasoning()).toBe('got this far');
+  });
+
+  it('forwards tool-arg fragments and warnings to their own channels', async () => {
+    const ctrl = makeMockPool();
+    const session = buildSession(ctrl.pool);
+    const args: Array<{ name: string; chunk: string }> = [];
+    const warnings: string[] = [];
+    session.onToolArgsDelta((name, chunk) => args.push({ name, chunk }));
+    session.onWarning((message) => warnings.push(message));
+
+    ctrl.nextRunTurn = () => {
+      ctrl.lastHooks?.emitToolArgsDelta('write_artifact', '{"content":"…', { id: 'toolu_a' });
+      ctrl.lastHooks?.emitWarning('Claude subscription rate limit (five-hour): rejected.');
+      return 'ok';
+    };
+    await session.sendAndWait('go');
+
+    expect(args).toEqual([{ name: 'write_artifact', chunk: '{"content":"…' }]);
+    expect(warnings).toEqual(['Claude subscription rate limit (five-hour): rejected.']);
   });
 });

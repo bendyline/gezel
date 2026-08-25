@@ -13,10 +13,7 @@ import {
  * swap silently deleted the tuning block and nobody noticed for days"
  * into a CI failure at commit time.
  */
-const KNOWN_GAPS: ReadonlyArray<`${string} ${string}`> = [
-  'gpt-oss-120b-q4 missing-tuning-sampling',
-  'gpt-oss-20b-q4 missing-tuning-sampling',
-];
+const KNOWN_GAPS: ReadonlyArray<`${string} ${string}`> = [];
 
 describe('chat-model manifest lint (ratchet over real catalog data)', () => {
   const report = lintAllChatModelManifests();

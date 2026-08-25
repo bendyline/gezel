@@ -4,12 +4,16 @@ import {
   type GezelSummary,
   type ProviderName,
   createLogger,
+  isLocalProvider,
 } from '@bendyline/gezel';
 import { CompletionBlockedError } from '../chat/large-content.js';
 import type { ChatManager } from '../chat/manager.js';
 import { safeJoin } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
+import { resolveDefaultProviderName } from '../providers/default-provider.js';
+import { isEngineBusyError } from '../providers/native/capacity-broker.js';
 import { shadowDocFilesPaths } from './docs.js';
+import { type EnrichOutcome, classifyEnrichFailure } from './enrich-breaker.js';
 import {
   type EnrichBudget,
   REVIEW_BUDGET,
@@ -85,6 +89,13 @@ export interface EnrichCompletion {
   text: string;
   model: string;
   provenance?: IndexProvenance;
+  /**
+   * The call never reached a model: the pool would not evict a busy engine to
+   * make room. Carried as a field rather than thrown so every consumer keeps
+   * its existing empty-reply path (area-pass skips, review re-queues); only
+   * callers that spend a retry budget need to read it.
+   */
+  deferred?: true;
 }
 
 export type EnrichCompletionResult = string | EnrichCompletion;
@@ -93,6 +104,7 @@ export interface ResolvedEnrichCompletion {
   text: string;
   model: string;
   provenance?: IndexProvenance;
+  deferred?: true;
 }
 
 /** Resolve legacy bare-string completions and runtime attributed completions. */
@@ -111,6 +123,7 @@ export function resolveEnrichCompletion(
     text: result.text,
     model: result.model,
     ...(result.provenance ? { provenance: result.provenance } : {}),
+    ...(result.deferred ? { deferred: result.deferred } : {}),
   };
 }
 
@@ -156,8 +169,55 @@ export interface EnrichResult {
 }
 
 // Local providers we'll use for summaries. Embeddings are always local and run
-// regardless of whether one of these is configured.
-export const ENRICH_LOCAL_PROVIDERS: ProviderName[] = ['llama-cpp', 'mlx', 'ollama'];
+// regardless of whether one of these is configured. This order is only the last
+// resort — `enrichLocalProviderOrder` leads with the configured or the
+// platform's engine before falling through to it.
+export const ENRICH_LOCAL_PROVIDERS: ProviderName[] = ['llama-cpp', 'mlx', 'ollama', 'ds4'];
+
+/**
+ * The local engines to consider, most-preferred first.
+ *
+ * A fixed list order is wrong here because `config.defaultModel` is a
+ * per-provider map that remembers a model for every engine the user has ever
+ * pointed at — nothing clears the old entry when they switch. Wild-caught: an
+ * install running mlx/qwen3.8-27b-q4 kept indexing on a leftover
+ * llama-cpp/muse-glimmer-30b-q4 pin, because llama-cpp happened to sort first
+ * and the resolver never consulted `config.provider` at all.
+ *
+ * Two leads, in order:
+ *
+ *   1. `config.provider`, when it is a local engine — the engine the user
+ *      actually runs.
+ *   2. Otherwise the engine THIS platform ships (`resolveDefaultProviderName`,
+ *      the same helper first-run uses, so the enricher and the first-run model
+ *      pin can't disagree). A cloud/CLI default must not lead — indexing stays
+ *      local-first unless explicitly opted in via the Night Shift override or a
+ *      Boekwachter pin — but neither may it hand the choice to list order, or
+ *      the stale-entry bug simply returns for every cloud-default install.
+ *      Wild-caught a second time: flipping the default to `anthropic-cli` put
+ *      the same muse-glimmer pin back in front of a live mlx selection.
+ *
+ * The list is the last resort: a lead with no `defaultModel` entry falls
+ * through it as before.
+ */
+export function enrichLocalProviderOrder(
+  preferred: ProviderName | null | undefined,
+  platform?: NodeJS.Platform,
+  arch?: string,
+): ProviderName[] {
+  const eligible = (name: ProviderName | null | undefined): name is ProviderName =>
+    name != null && isLocalProvider(name) && ENRICH_LOCAL_PROVIDERS.includes(name);
+  let lead: ProviderName | null = eligible(preferred) ? preferred : null;
+  if (!lead) {
+    // A `null` config, not the caller's: we want the platform engine here even
+    // though a provider IS configured — handing the config back would just
+    // echo the cloud name we already declined.
+    const platformEngine = resolveDefaultProviderName(null, platform, arch);
+    if (eligible(platformEngine)) lead = platformEngine;
+  }
+  if (!lead) return ENRICH_LOCAL_PROVIDERS;
+  return [lead, ...ENRICH_LOCAL_PROVIDERS.filter((name) => name !== lead)];
+}
 
 export interface EnrichTargetOptions {
   nightShift?: boolean;
@@ -166,9 +226,10 @@ export interface EnrichTargetOptions {
 
 /**
  * Resolve the model used by autonomous indexing work. Local-first: absent an
- * explicit choice, only local engines are considered. A cloud target is
- * accepted through exactly two explicit acts — the Night Shift override, or
- * a provider AND model both pinned on the Boekwachter's own frontmatter.
+ * explicit choice, only local engines are considered, and among those the
+ * install default engine + its model lead. A cloud target is accepted through
+ * exactly two explicit acts — the Night Shift override, or a provider AND
+ * model both pinned on the Boekwachter's own frontmatter.
  */
 export async function resolveEnrichTarget(
   store: Store,
@@ -195,7 +256,7 @@ export async function resolveEnrichTarget(
     model = opts.boekwachter.model;
   }
   if (!providerName || !model) {
-    for (const name of ENRICH_LOCAL_PROVIDERS) {
+    for (const name of enrichLocalProviderOrder(cfg?.provider)) {
       const configuredModel = cfg?.defaultModel?.[name];
       if (configuredModel) {
         providerName = name;
@@ -217,13 +278,13 @@ export async function resolveEnrichTarget(
 /**
  * The first configured local engine — the blocked-content fallback target
  * when a cloud enricher refuses a file on policy grounds. Same resolution as
- * resolveEnrichTarget's local-first branch.
+ * resolveEnrichTarget's local-first branch, install default first.
  */
 async function resolveLocalFallbackTarget(
   store: Store,
 ): Promise<{ providerName: ProviderName; model: string } | null> {
   const cfg = await store.readConfig().catch(() => null);
-  for (const name of ENRICH_LOCAL_PROVIDERS) {
+  for (const name of enrichLocalProviderOrder(cfg?.provider)) {
     const model = cfg?.defaultModel?.[name];
     if (model) return { providerName: name, model };
   }
@@ -284,6 +345,14 @@ export async function buildEnrichDeps(
     boekwachter?: Pick<GezelSummary, 'id' | 'name' | 'provider' | 'model'>;
     /** Project owning the indexed paths, for queue and chat activity context. */
     projectId?: string;
+    /**
+     * Observe every summarizer/reviewer completion so a caller can back off
+     * when the target stops answering. `withPolicyFallback` swallows failures
+     * into `''` on purpose — files have their own capped-attempt gate — which
+     * leaves no other way to tell "this file was unusable" from "the engine
+     * has not answered in an hour".
+     */
+    onOutcome?: (outcome: EnrichOutcome) => void;
   } = {},
 ): Promise<EnrichDeps> {
   const { embedBatch } = await import('../memory/embeddings.js');
@@ -365,20 +434,25 @@ export async function buildEnrichDeps(
     ) =>
     async (prompt: string, activity?: string): Promise<EnrichCompletionResult> => {
       try {
-        return await primary(prompt, activity);
+        const completion = await primary(prompt, activity);
+        opts.onOutcome?.('ok');
+        return completion;
       } catch (err) {
         // Cancellation is lifecycle control, not a failed model attempt. Let
         // it unwind the batch so quit/drive-stop never burns a file's retry
         // budget or falls through to another engine during shutdown.
         if (isAbortError(err)) throw err;
         const message = errorMessage(err);
+        opts.onOutcome?.(classifyEnrichFailure(err));
         if (isPolicyBlockMessage(message)) {
           if (fallback && fallbackTarget) {
             log.warn(
               `${label} blocked by ${providerName} policy filter; retrying on ${fallbackTarget.providerName}:${fallbackTarget.model}`,
             );
             try {
-              return await fallback(prompt, activity);
+              const completion = await fallback(prompt, activity);
+              opts.onOutcome?.('ok');
+              return completion;
             } catch (fallbackErr) {
               if (isAbortError(fallbackErr)) throw fallbackErr;
               // Local-engine failure is transient (deferred, cold, busy) —
@@ -390,6 +464,14 @@ export async function buildEnrichDeps(
           // No local engine to fall back to: the block is deterministic for
           // this content, so tell callers to stop spending retries on it.
           throw new CompletionBlockedError(message);
+        }
+        if (isEngineBusyError(err)) {
+          // Contention, not a failure: another engine was mid-turn and the
+          // pool would not evict it. Nothing was asked of a model, so the
+          // caller must not charge this to the file (see `deferred`). Logged
+          // at info — on a busy machine this is ordinary, not a fault.
+          log.info(`${label} deferred — ${message}`);
+          return { text: '', model, deferred: true };
         }
         log.warn(`${label} one-shot failed: ${message}`);
         return '';
@@ -678,6 +760,12 @@ export async function enrichFile(
   //    file's content is unchanged but its enrichment was invalidated.
   let summary = store.getSummary(file.hash) ?? '';
   let blockedByPolicy = false;
+  // Why the summarize came back empty, recorded on the gate row so the status
+  // popover can say what went wrong and not just that something did.
+  let failureReason: string | undefined;
+  // The target refused to make room (another engine mid-turn). Nothing was
+  // asked of a model, so no attempt budget may be spent on this file.
+  let targetUnavailable = false;
   if (summary) {
     result.summarized = true;
   } else if (content?.trim()) {
@@ -688,10 +776,12 @@ export async function enrichFile(
         deps,
       );
       summary = completion.text.trim();
+      if (completion.deferred) targetUnavailable = true;
     } catch (err) {
       if (isAbortError(err)) throw err;
       summary = '';
       if (err instanceof CompletionBlockedError) blockedByPolicy = true;
+      failureReason = err instanceof Error ? err.message : String(err);
     }
     if (summary) {
       store.upsertSummary({
@@ -712,7 +802,13 @@ export async function enrichFile(
   //     changes. Skipped when the file summary was policy-blocked: this
   //     prompt carries the same content, so it would just burn another
   //     refused request.
-  if (!blockedByPolicy && file.kind === 'code' && deps.model && content?.trim()) {
+  if (
+    !blockedByPolicy &&
+    !targetUnavailable &&
+    file.kind === 'code' &&
+    deps.model &&
+    content?.trim()
+  ) {
     if (
       store.symbolSummariesFor(file.path, file.hash).size === 0 &&
       store.symbolSummaryAttempts(file.hash) < MAX_ENRICH_ATTEMPTS
@@ -735,6 +831,7 @@ export async function enrichFile(
             deps,
           );
           raw = completion.text;
+          if (completion.deferred) targetUnavailable = true;
         } catch (err) {
           if (isAbortError(err)) throw err;
           raw = '';
@@ -748,7 +845,7 @@ export async function enrichFile(
             completion?.model ?? deps.model,
             completion?.provenance,
           );
-        } else {
+        } else if (!targetUnavailable) {
           store.markSymbolSummaryAttempt(file.hash);
         }
       }
@@ -784,15 +881,31 @@ export async function enrichFile(
   // embeddings-only coverage is the intended steady state there.
   const summaryFailed = !result.summarized && Boolean(deps.model) && Boolean(content?.trim());
   if (summaryFailed) {
-    if (blockedByPolicy) {
+    if (targetUnavailable) {
+      // Deliberately no `markEnrichAttempt`: the drain cap (30s) is shorter
+      // than a single long-context prefill on this class of machine, so every
+      // sweep overlapping a big chat turn is doomed. Charging those would let
+      // three minutes of ordinary contention permanently retire a file's
+      // budget — "stays unsummarized until its content changes" — for a call
+      // no model ever saw.
+      log.info(
+        `deferring ${file.path}: the enrich target was busy — no attempt spent, it stays queued`,
+      );
+    } else if (blockedByPolicy) {
       // Deterministic refusal with no fallback engine — retrying the same
       // content is pure waste, so consume the whole attempt budget at once.
-      store.markEnrichSkipped(file.hash);
+      store.markEnrichSkipped(
+        file.hash,
+        failureReason ?? 'the provider blocked this file’s content (policy filter)',
+      );
       log.warn(
         `skipping ${file.path}: the provider blocked its content (policy filter) — it stays unsummarized until its content changes`,
       );
     } else {
-      const attempts = store.markEnrichAttempt(file.hash);
+      const attempts = store.markEnrichAttempt(
+        file.hash,
+        failureReason ?? 'the summarizer returned nothing for this file',
+      );
       if (attempts >= MAX_ENRICH_ATTEMPTS) {
         log.warn(
           `giving up on ${file.path} after ${attempts} failed summarize attempts — it stays unsummarized until its content changes`,

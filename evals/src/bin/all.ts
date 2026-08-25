@@ -51,6 +51,7 @@ import { isSuccessfulMatrix, runMatrix } from '../batch.ts';
 import { acquireEvalDeviceLockIfNeeded } from '../eval-device-lock.ts';
 import { checkGpuPanicGate } from '../gpu-panic-guard.ts';
 import { assertLocalEngineSource } from '../model-sources.ts';
+import { PreflightExcludedError } from '../preflight.ts';
 import { defaultModelFor, defaultProvider } from '../providers.ts';
 import { getScenario, listScenarios } from '../scenarios/index.ts';
 import { installEvalSignalHandlers } from '../signal-handler.ts';
@@ -281,5 +282,8 @@ async function main() {
 
 main().catch((err) => {
   console.error('[evals] fatal:', err);
-  process.exit(2);
+  // Exit 3 means "the probe refused this model", which a sweep driver can
+  // retry; exit 2 stays "operator/setup error", which it must not. Without
+  // the split, `scorecard.ts` saw one code for both and skipped the cell.
+  process.exit(err instanceof PreflightExcludedError ? 3 : 2);
 });

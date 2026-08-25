@@ -67,12 +67,53 @@ work resumes on its own when a quota window resets (if the machine is
 awake) or the next night, and the moon menu says what's being protected
 and why. Gezels on local models spend nothing and are never held.
 
+## Fixes that arrive as proposals
+
+A project with both a **Boekwachter** and a **developer** on its crew gets one
+more kind of night work: the Boekwachter finds problems in your files, and
+overnight the developer works through them.
+
+What arrives in the morning is not a changed project. It's a set of **change
+proposals** — one per group of problems the developer judged worth fixing
+together, each with the reasoning written out and the exact edits laid out
+line by line. Your files are untouched. You read the proposal, look at the
+diff, and apply it if you agree.
+
+That's deliberate, and it has a useful consequence: **it works on folders your
+crew isn't allowed to edit.** You never have to hand over write access to get
+a fix drafted. It also works with nothing but the model on your own machine —
+no network, no service, nobody's cloud.
+
+Proposals live in the project's **Proposals** tab, which appears once there's
+something in it. Each one shows:
+
+- what the developer changed and why, what they were unsure of, and how to
+  check it
+- every file it touches, with the diff
+- **Apply** (all of it, or one file at a time), **Export** (a zip of patches
+  you can `git apply` yourself), or **Dismiss**
+
+Two things it will tell you plainly. If a file changed after the proposal was
+written — you edited it, or a teammate did — the proposal is marked **out of
+date** and applying it asks you to confirm first, naming the files that moved.
+And if two proposals touch the same file, both say so, because applying one
+will put the other out of date.
+
+You can start the same thing by hand any time: open a file the Boekwachter has
+flagged, and hit **Fix** on the issue. It doesn't wait for nightfall, and it
+produces the same reviewable proposal.
+
+If you'd rather your crew didn't do this, turn off nightly fixing in the
+project's settings. It's on by default only because you assembled a crew that
+can do it.
+
 ## The morning review
 
 When the window closes, gezel gathers what the shift accomplished and
 puts it where you'll see it: the moon menu grows a **Done last night**
 list, the Home greeting gains a **Last night** tab, and a single
-question card summarizes the night with links to every report.
+question card summarizes the night with links to every report and every
+change proposal waiting on you.
 
 Reports can go further than prose. A recommendation that is genuinely
 one click away — fire a craftbook, delegate a fix, apply a reviewed set

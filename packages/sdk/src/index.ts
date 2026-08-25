@@ -8,6 +8,7 @@
  * of user code.
  */
 
+import type { IndexReadinessReport, WorkspaceIndexStatus } from '@bendyline/gezel';
 import { RpcClient } from './rpc.js';
 import type { InferInput, InferOutput, ScriptInputs, ScriptMeta, ScriptOutputs } from './types.js';
 
@@ -584,6 +585,31 @@ export interface GezelSDK<TInput = Record<string, unknown>> {
   };
 
   /**
+   * The project's **workspace index** — status of the static scan and the
+   * AI tiers, plus a bounded "make it fresh" ensure. Requires `index.read`
+   * for {@link GezelSDK.index.status | status} and `index.refresh` for
+   * {@link GezelSDK.index.ensureFresh | ensureFresh}.
+   */
+  index: {
+    /** Current index status (static state + enrichment/review coverage). */
+    status(): Promise<WorkspaceIndexStatus>;
+    /**
+     * Make the index as fresh as it can get within an awake-time budget:
+     * awaited static re-scan, then an AI-tier catch-up drive raced against
+     * the budget. Always resolves with an honest readiness report — on a
+     * crew with no Boekwachter the AI tiers are reported unachievable
+     * rather than awaited, and an expired budget leaves the drive running
+     * in the background.
+     *
+     * @param opts.waitBudgetMs - Awake-time wait budget (default 180s,
+     *   capped at 240s to stay inside the script run timeout).
+     * @param opts.reviews - Also wait for the per-file AI review tier
+     *   (default true).
+     */
+    ensureFresh(opts?: { waitBudgetMs?: number; reviews?: boolean }): Promise<IndexReadinessReport>;
+  };
+
+  /**
    * **Nested scripts** — run another script in the same project and get
    * its stamped output back. No capability is required to call, but the
    * nested script runs under its own `meta.requires`. Nesting is limited
@@ -677,6 +703,14 @@ export const gezel: GezelSDK = {
   },
   mcp: {
     call: (tool, args) => rpc.call('mcp.call', { tool, args }),
+  },
+  index: {
+    status: () => rpc.call<WorkspaceIndexStatus>('index.status'),
+    ensureFresh: (opts) =>
+      rpc.call<IndexReadinessReport>('index.ensureFresh', {
+        ...(opts?.waitBudgetMs !== undefined ? { waitBudgetMs: opts.waitBudgetMs } : {}),
+        ...(opts?.reviews !== undefined ? { reviews: opts.reviews } : {}),
+      }),
   },
   http: {
     request: (url, opts) =>

@@ -163,6 +163,25 @@ async function evaluateOne(
     }
     case 'prometheusAlerts':
       return evaluatePrometheusAlerts(check, ws);
+    case 'nodeRuns':
+      // The runtime's `nodeRuns` needs an injected sandbox executor and
+      // fail-closes without one — which made every sidecar carrying it
+      // latently red in the harness (wild-caught: root-cause-investigation
+      // and bug-fix-tdd both ship one). Here the harness IS allowed to
+      // execute: reuse the nodeScriptPasses materialize-and-run path, with
+      // exit 0 as the only contract (no required output).
+      return evaluateNodeScriptPasses(
+        {
+          kind: 'nodeScriptPasses',
+          script: check.file,
+          ...(check.timeoutMs ? { timeoutMs: check.timeoutMs } : {}),
+        },
+        ws,
+        // Exit code is the whole contract: a node:test file run directly
+        // prints TAP diagnostics ("# fail 0") that the output heuristic
+        // would misread as failure text on a green run.
+        { skipOutputHeuristic: true },
+      );
     case 'nodeScriptPasses':
       return evaluateNodeScriptPasses(check, ws);
     case 'binaryDocument':
@@ -208,6 +227,15 @@ async function evaluateOne(
       const message = ts.flattenDiagnosticMessageText(firstError.messageText, ' ');
       return `${check.file} does not parse: ${message}${position} - the file will not load until this is fixed (commonly a truncated file or an unbalanced brace).`;
     }
+    case 'commandEvidence':
+      // Advisory in the GRADER: run receipts live in the eval daemon's
+      // history, which this after-the-fact check pass cannot see, and
+      // there is no live user to approve first-use commands in a harness
+      // run anyway. Execution claims are graded by the eval's own
+      // executable oracles (`nodeScriptPasses` on a seeded test/oracle),
+      // which prove red/green directly. Inside the eval's real task run
+      // the RUNTIME still enforces this check with real receipts.
+      return null;
     default:
       // Every remaining core gate-check kind (recordSchema, tableShape,
       // valuesSubsetOf, valueGrounding, citationsResolve, judge, …)
@@ -226,6 +254,7 @@ async function evaluateOne(
 async function evaluateNodeScriptPasses(
   check: Extract<CraftbookEvalGateCheck, { kind: 'nodeScriptPasses' }>,
   ws: CraftbookEvalWorkspace,
+  opts: { skipOutputHeuristic?: boolean } = {},
 ): Promise<string | null> {
   const script = normalizeWorkspacePath(check.script);
   if (!script) return `nodeScriptPasses script path is unsafe: ${check.script}`;
@@ -250,7 +279,9 @@ async function evaluateNodeScriptPasses(
         timeout: check.timeoutMs ?? 10_000,
         maxBuffer: 1024 * 1024,
       });
-      const failureOutput = nodeExecSuccessFailureDetail(output.stdout, output.stderr);
+      const failureOutput = opts.skipOutputHeuristic
+        ? null
+        : nodeExecSuccessFailureDetail(output.stdout, output.stderr);
       if (failureOutput) {
         return `${script} reported failure output despite exit 0: ${failureOutput}\nRepair hint: Let assertion failures throw out of the test process, or set process.exitCode = 1 when a test case fails. Do not catch assertion errors only to print them and continue.`;
       }

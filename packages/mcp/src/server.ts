@@ -74,6 +74,7 @@ import { createPatientFetch, createTrustingFetch } from '@bendyline/gezel-client
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { advanceHandoffNote } from './advance-note.js';
 import { commandResultIsError } from './command-result.js';
 import {
   RootTurnInvocationCache,
@@ -145,6 +146,7 @@ import {
 } from './tool-contracts.js';
 import {
   ALWAYS_REGISTERED_TOOLS,
+  HOST_CALLBACK_TOOLS,
   LEGACY_SPELLING_BY_CANONICAL,
   RESERVED_TOOL_NAMES,
   canonicalToolName,
@@ -254,23 +256,137 @@ async function concreteWorkspaceTarget(path: string): Promise<ConcreteWorkspaceT
   return target;
 }
 
+/**
+ * The change proposal this session is drafting into, if any (`task.diffpackId`,
+ * forwarded by ChatManager). When set, the workspace WRITE tools keep their
+ * names and their arguments but land in the pack's draft tree instead of the
+ * project workspace, and reads fall through to the real file until the pack
+ * has its own copy.
+ *
+ * Keeping the tool names is the point. A model drafting a fix calls
+ * `replace_in_file` exactly as it always has, so every prompt, behavior, and
+ * hard-won error string still applies — and it can work on a folder gezels
+ * hold no write grant for, because nothing is written there until the user
+ * applies the proposal. The step prompt tells the model plainly that it is
+ * proposing rather than editing; the sandbox is scoped, not secret.
+ */
+const diffpackId = process.env.GEZEL_DIFFPACK_ID ?? '';
+const isDrafting = diffpackId !== '';
+
+/**
+ * The subset of the client the file-editing tools use, so a draft-routing
+ * adapter can stand in for the real client at those call sites without
+ * reimplementing the other two hundred methods.
+ */
+type WorkspaceEditApi = Pick<
+  GezelClient,
+  | 'readProjectWorkspaceFile'
+  | 'statProjectWorkspacePath'
+  | 'writeProjectWorkspaceFile'
+  | 'replaceInProjectWorkspaceFile'
+  | 'replaceLinesInProjectWorkspaceFile'
+  | 'insertAtMarkerInProjectWorkspaceFile'
+  | 'applyPatchToProjectWorkspaceFile'
+  | 'rmProjectWorkspacePath'
+>;
+
+/** Adapter mapping the workspace edit surface onto one pack's draft tree. */
+function draftEditApi(client: GezelClient, packId: string): WorkspaceEditApi {
+  return {
+    readProjectWorkspaceFile: (id, filePath) => client.readDiffpackDraftFile(id, packId, filePath),
+    statProjectWorkspacePath: (id, filePath) => client.statDiffpackDraftPath(id, packId, filePath),
+    writeProjectWorkspaceFile: async (id, body) => {
+      await client.writeDiffpackDraftFile(id, packId, { path: body.path, content: body.content });
+      return { ok: true as const, path: body.path };
+    },
+    replaceInProjectWorkspaceFile: (id, body) =>
+      client.replaceInDiffpackDraftFile(id, packId, body),
+    replaceLinesInProjectWorkspaceFile: (id, body) =>
+      client.replaceLinesInDiffpackDraftFile(id, packId, body),
+    insertAtMarkerInProjectWorkspaceFile: (id, body) =>
+      client.insertAtMarkerInDiffpackDraftFile(id, packId, body),
+    applyPatchToProjectWorkspaceFile: () => {
+      // `apply_patch` is withheld from a drafting roster, but a stale roster
+      // or a hand-rolled call must not silently fall through to the real
+      // workspace. Refuse loudly and name the tools that do work: a
+      // hand-authored hunk is the one edit shape models reliably get wrong,
+      // and the runtime computes the diff from before/after anyway.
+      throw new Error(
+        'apply_patch is unavailable while drafting a change proposal. Use replace_in_file, replace_lines, or write_file — the diff is generated for you.',
+      );
+    },
+    rmProjectWorkspacePath: async (id, filePath) => {
+      await client.deleteDiffpackDraftPath(id, packId, filePath);
+      return { ok: true as const };
+    },
+  };
+}
+
+/**
+ * The active task's artifact folder (`task.artifactDir`, forwarded by
+ * ChatManager). That namespace lives in the ARTIFACTS DRAWER — a workspace
+ * write "into" it lands beside the real deliverable, invisible to every
+ * gate, and the model then re-writes the same wrong surface through nudge
+ * after nudge (wild-caught: a bug-fix eval died with repro.md written
+ * workspace-side three times). Scoped to the exact folder of THIS session's
+ * task, so a project that legitimately keeps a `tasks/` source directory is
+ * untouched outside that task's own numbered folder.
+ */
+const sessionTaskArtifactDir = (process.env.GEZEL_TASK_ARTIFACT_DIR ?? '').replace(/\/+$/, '');
+
+function assertNotTaskArtifactNamespace(target: ConcreteWorkspaceTarget): void {
+  if (!sessionTaskArtifactDir || target.kind !== 'current') return;
+  const p = target.path.replace(/\\/g, '/').replace(/^\.\//, '');
+  if (p === sessionTaskArtifactDir || p.startsWith(`${sessionTaskArtifactDir}/`)) {
+    throw new Error(
+      `\`${p}\` is this task's working folder in the ARTIFACTS DRAWER, not the project workspace. Write it with \`write_artifact({ path: ${JSON.stringify(p)}, ... })\` and read it back with \`read_artifact\` — the workspace file tools cannot reach the drawer.`,
+    );
+  }
+}
+
+/**
+ * The client the editing tools should use for one target.
+ *
+ * While drafting, a write to a LINKED sibling project is refused rather than
+ * silently redirected: a pack belongs to one project, so there is nowhere
+ * honest to put such an edit.
+ */
+function editClient(target: ConcreteWorkspaceTarget): WorkspaceEditApi {
+  assertNotTaskArtifactNamespace(target);
+  const client = workspaceClient(target);
+  if (!isDrafting) return client;
+  if (target.kind === 'linked') {
+    throw new Error(
+      `Cannot edit ${target.displayPath} while drafting a change proposal — a proposal covers one project. Read from linked projects freely, but make your changes in this one.`,
+    );
+  }
+  return draftEditApi(client, diffpackId);
+}
+
 async function readWorkspaceFile(path: string) {
   const target = await concreteWorkspaceTarget(path);
-  const result = await workspaceClient(target).readProjectWorkspaceFile(
-    target.projectId,
-    target.path,
-  );
+  // Reads go through the draft view when drafting, so the model sees its own
+  // in-progress edits rather than the untouched file it just changed.
+  const client =
+    isDrafting && target.kind === 'current'
+      ? draftEditApi(workspaceClient(target), diffpackId)
+      : workspaceClient(target);
+  const result = await client.readProjectWorkspaceFile(target.projectId, target.path);
   return { ...result, path: target.displayPath };
 }
 
 async function statWorkspacePath(path: string) {
   const target = await concreteWorkspaceTarget(path);
-  return workspaceClient(target).statProjectWorkspacePath(target.projectId, target.path);
+  const client =
+    isDrafting && target.kind === 'current'
+      ? draftEditApi(workspaceClient(target), diffpackId)
+      : workspaceClient(target);
+  return client.statProjectWorkspacePath(target.projectId, target.path);
 }
 
 async function writeWorkspaceFile(path: string, content: string) {
   const target = await concreteWorkspaceTarget(path);
-  return workspaceClient(target).writeProjectWorkspaceFile(target.projectId, {
+  return editClient(target).writeProjectWorkspaceFile(target.projectId, {
     path: target.path,
     content,
     ...(gezelId ? { gezelId } : {}),
@@ -504,8 +620,13 @@ const originalRegister = server.tool.bind(server) as (name: string, ...rest: unk
   // Gezel's tool contract is deliberately closed, so make the SDK's stored
   // schema strict after registration. This keeps tools/list and runtime
   // validation aligned without rewriting every legacy registration call.
+  //
+  // Host-harness callbacks are the deliberate exception: their arguments are
+  // authored by an external CLI whose payload grows between releases, so a
+  // key we don't know about is a version skew to tolerate, not a violation
+  // to reject. See HOST_CALLBACK_TOOLS.
   const rawShape = rest.find(isZodRawShape);
-  if (rawShape) {
+  if (rawShape && !HOST_CALLBACK_TOOLS.has(name)) {
     stored.inputSchema = z.strictObject(rawShape);
   }
   installAliasDispatchOnce();
@@ -2302,7 +2423,7 @@ server.tool(
   async ({ path, find, replace, occurrence, partial }) => {
     try {
       const target = await concreteWorkspaceTarget(path);
-      const targetApi = workspaceClient(target);
+      const targetApi = editClient(target);
       const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
       const result = await targetApi.replaceInProjectWorkspaceFile(target.projectId, {
         path: target.path,
@@ -2372,7 +2493,7 @@ server.tool(
   async ({ path, startLine, endLine, content, partial }) => {
     try {
       const target = await concreteWorkspaceTarget(path);
-      const targetApi = workspaceClient(target);
+      const targetApi = editClient(target);
       const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
       const result = await targetApi.replaceLinesInProjectWorkspaceFile(target.projectId, {
         path: target.path,
@@ -2441,7 +2562,7 @@ server.tool(
   async ({ path, diff, partial }) => {
     try {
       const target = await concreteWorkspaceTarget(path);
-      const targetApi = workspaceClient(target);
+      const targetApi = editClient(target);
       const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
       const result = await targetApi.applyPatchToProjectWorkspaceFile(target.projectId, {
         path: target.path,
@@ -2503,7 +2624,7 @@ server.tool(
   async ({ path, marker, content, where, partial }) => {
     try {
       const target = await concreteWorkspaceTarget(path);
-      const targetApi = workspaceClient(target);
+      const targetApi = editClient(target);
       const before = await targetApi.readProjectWorkspaceFile(target.projectId, target.path);
       const result = await targetApi.insertAtMarkerInProjectWorkspaceFile(target.projectId, {
         path: target.path,
@@ -2561,7 +2682,7 @@ server.tool(
   async ({ path, recursive }) => {
     try {
       const target = await concreteWorkspaceTarget(path);
-      await workspaceClient(target).rmProjectWorkspacePath(target.projectId, target.path, {
+      await editClient(target).rmProjectWorkspacePath(target.projectId, target.path, {
         ...(recursive ? { recursive } : {}),
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
@@ -2764,6 +2885,10 @@ server.tool(
         ...(timeoutMs ? { timeoutMs } : {}),
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
+        // Receipt attribution for commandEvidence gates — env-derived, so a
+        // model cannot stamp another step's receipt.
+        ...(sessionTaskRef ? { taskRef: sessionTaskRef } : {}),
+        ...(sessionStepId ? { stepId: sessionStepId } : {}),
       });
       return commandToolResult(`npm run ${script}`, res);
     } catch (err) {
@@ -2793,6 +2918,8 @@ server.tool(
         ...(timeoutMs ? { timeoutMs } : {}),
         ...(gezelId ? { gezelId } : {}),
         ...(sessionId ? { sessionId } : {}),
+        ...(sessionTaskRef ? { taskRef: sessionTaskRef } : {}),
+        ...(sessionStepId ? { stepId: sessionStepId } : {}),
       });
       return commandToolResult(`npx ${bin}`, res);
     } catch (err) {
@@ -3612,6 +3739,11 @@ server.tool(
         : '';
     return {
       content: [{ type: 'text' as const, text: header + res.content + sliceTail }],
+      structuredContent: {
+        requestedPath: clean,
+        resolvedPath: res.path,
+        fuzzy: res.fuzzy,
+      },
     };
   },
 );
@@ -3704,6 +3836,11 @@ server.tool(
             text: `No matches for /${pattern}/ in ${res.path} (${res.totalLines} lines).`,
           },
         ],
+        structuredContent: {
+          requestedPath: clean,
+          resolvedPath: res.path,
+          fuzzy: res.fuzzy,
+        },
       };
     }
     const lines: string[] = [];
@@ -3731,7 +3868,14 @@ server.tool(
         `…[truncated: ${res.totalMatches - res.matches.length} more match(es). Re-run with a tighter pattern or a larger \`maxMatches\` if needed.]`,
       );
     }
-    return { content: [{ type: 'text' as const, text: lines.join('\n') }] };
+    return {
+      content: [{ type: 'text' as const, text: lines.join('\n') }],
+      structuredContent: {
+        requestedPath: clean,
+        resolvedPath: res.path,
+        fuzzy: res.fuzzy,
+      },
+    };
   },
 );
 
@@ -4068,6 +4212,27 @@ server.tool(
       if (syntax && !syntax.ok) {
         return {
           content: [{ type: 'text' as const, text: syntax.message }],
+          isError: true,
+        };
+      }
+    }
+    // Artifact writes are whole-file replacements. Reject malformed JSON
+    // before crossing the store boundary so a tool call cut off by a local
+    // model's output cap cannot replace the last complete ledger with a
+    // syntactically broken prefix. This is intentionally extension-scoped:
+    // scratch Markdown/source artifacts retain their existing validation and
+    // `force` semantics, while a `.json` artifact is never useful malformed.
+    if (clean.toLowerCase().endsWith('.json')) {
+      try {
+        JSON.parse(content);
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Refusing to replace ${clean}: the new content is not valid JSON (${err instanceof Error ? err.message : String(err)}). The previous artifact was left unchanged. Re-emit one complete valid JSON value; if it cannot fit in one tool call, split the deliverable or use a deterministic script to assemble it.`,
+            },
+          ],
           isError: true,
         };
       }
@@ -9125,11 +9290,7 @@ server.tool(
     const active = task.craftbook.steps.find((s) => s.id === task.activeStepId);
     const assigneeId =
       active?.assignee?.kind === 'gezel' ? active.assignee.gezelId : active?.suggestedGezelId;
-    const handoffNote = assigneeId
-      ? ` Started ${assigneeId} on it — they now have an open session with the task in context.`
-      : task.status === 'complete'
-        ? ' Task is now complete (terminal step).'
-        : ' (No gezel is assigned to the new step, so no handoff was started.)';
+    const handoffNote = advanceHandoffNote({ status: task.status, assigneeId });
     const text = `Completed step "${stepId}" on ${ref}. Active step is now "${active?.name ?? task.activeStepId ?? '(none)'}".${handoffNote}`;
     return okResult(
       TaskToolOutputSchema,
@@ -10752,6 +10913,41 @@ server.tool(
   },
 );
 
+const NPM_AUDIT_UNREADABLE_LOCKFILES = new Set([
+  'pnpm-lock.yaml',
+  'yarn.lock',
+  'bun.lockb',
+  'bun.lock',
+]);
+
+/**
+ * Render the dependency/advisory count with its provenance, so "0 with
+ * advisories" is never shown for a measurement that never happened.
+ */
+function advisoryLine(
+  total: number,
+  withAdvisories: number,
+  sca?: { engine: string | null; measured: boolean; lockfiles: string[] },
+): string {
+  if (!sca) {
+    return `dependencies: ${total} (${withAdvisories} with advisories — provenance unknown; re-run security_scan)`;
+  }
+  if (!sca.measured) {
+    const why = sca.engine ? `${sca.engine} produced no usable audit` : 'no SCA tool on this host';
+    return `dependencies: ${total} (advisories NOT measured — ${why}; install osv-scanner)`;
+  }
+  const uncovered =
+    sca.engine === 'npm-audit'
+      ? sca.lockfiles.filter((p) =>
+          NPM_AUDIT_UNREADABLE_LOCKFILES.has(p.slice(p.lastIndexOf('/') + 1)),
+        )
+      : [];
+  const partial = uncovered.length
+    ? ` — npm audit cannot read ${uncovered.join(', ')}; advisory coverage is partial`
+    : '';
+  return `dependencies: ${total} (${withAdvisories} with advisories via ${sca.engine}${partial})`;
+}
+
 server.tool(
   'security_scan',
   'Run (or refresh) the whole-repo security analysis: build the dependency inventory and, when semgrep / osv-scanner / gitleaks are installed on the host, ingest their findings. The cheap built-in pattern/entropy scan already runs continuously in the index; call this once at the start of a deep security review to populate dependency advisories and tool findings, then query with security_overview / scan_findings / list_dependencies.',
@@ -10780,7 +10976,7 @@ server.tool(
             .map(([k, n]) => `${k}=${n}`)
             .join(' ') || '(none)'
         }`,
-        `dependencies: ${res.dependencies} (${res.advisories} with advisories)`,
+        advisoryLine(res.dependencies, res.advisories, res.sca),
       ].join('\n');
       return { content: [{ type: 'text' as const, text }] };
     } catch (err) {
@@ -10825,7 +11021,7 @@ server.tool(
             .join(' ') || '(none)'
         }`,
         `attack surface: ${res.attackSurface.entryPoints} entry points, ${res.attackSurface.routes} routes, ${res.attackSurface.authBoundaries} auth boundaries, ${res.attackSurface.secretTouchpoints} secret touchpoints, ${res.attackSurface.taintSources} taint sources`,
-        `dependencies: ${res.dependencies.total} (${res.dependencies.withAdvisories} with advisories)`,
+        advisoryLine(res.dependencies.total, res.dependencies.withAdvisories, res.provenance?.sca),
         `candidate systemic themes:\n${themes || '  (none recurring across ≥3 files)'}`,
       ].join('\n');
       return { content: [{ type: 'text' as const, text }] };
@@ -10989,7 +11185,7 @@ server.tool(
           (d) =>
             `${d.name}@${d.version ?? '?'}${d.direct ? '' : ' (transitive)'}${d.advisoryIds.length ? ` — ${d.maxSeverity} advisories: ${d.advisoryIds.join(', ')}` : ''}${d.license ? ` [${d.license}]` : ''}`,
         );
-      const head = `${res.total} dependencies, ${res.withAdvisories} with advisories`;
+      const head = advisoryLine(res.total, res.withAdvisories, res.provenance?.sca);
       return {
         content: [{ type: 'text' as const, text: `${head}\n${lines.join('\n') || '(none)'}` }],
       };
@@ -12094,7 +12290,16 @@ if (process.env.GEZEL_PERMISSION_PROMPT === '1') {
       tool_name: z.string().describe('Name of the tool the CLI is requesting permission for.'),
       input: z
         .record(z.string(), z.unknown())
+        .default({})
         .describe('Arguments the CLI wants to call the requested tool with.'),
+      // Correlation id the CLI stamps on the originating tool_use block.
+      // We don't need it — the verdict is returned on the same call — but it
+      // must be *declared* rather than merely tolerated so the advertised
+      // schema tells the truth about what the CLI sends.
+      tool_use_id: z
+        .string()
+        .optional()
+        .describe('Id of the CLI tool_use block this request belongs to. Accepted, not used.'),
     },
     async ({ tool_name, input }) => {
       try {

@@ -28,13 +28,20 @@ import type {
   VideoModelPullEvent,
 } from '@bendyline/gezel';
 import type {
+  AiAppDetail,
   AmbientDashboardDisplayTarget,
   AmbientDashboardStatusResponse,
   AmbientDashboardTheme,
   AnswerQuestionRequest,
+  AppServeRotateKeyRequest,
+  AppServeSiteStatus,
+  AppServeStartRequest,
+  AppServeStartResponse,
   AppendTaskNoteRequest,
   AppendTaskNoteResponse,
   AppliedProjectType,
+  ApplyDiffpackRequest,
+  ApplyDiffpackResponse,
   ApplyPatchToProjectWorkspaceFileRequest,
   ApplyProjectTypeRequest,
   ArchiveExtractRequest,
@@ -88,6 +95,8 @@ import type {
   DeviceSafetyPolicyConfig,
   DiffFilesRequest,
   DiffFilesResponse,
+  DiffpackResponse,
+  DismissDiffpackResponse,
   DismissReportActionRequest,
   DocumentMediaExportRequest,
   DraftScriptRequest,
@@ -128,9 +137,8 @@ import type {
   GetBoekwachterIssueRequest,
   GetBoekwachterIssueResponse,
   GetScriptSourceResponse,
-  GezappDependency,
-  GezappEmbeddedKind,
   GezappManifest,
+  GezappRegistryEntry,
   GezelGender,
   GezelGrowthResponse,
   GezelIconHistoryResponse,
@@ -177,6 +185,7 @@ import type {
   HandboekRenderMode,
   HandboekToc,
   HealthResponse,
+  ImportAiAppResult,
   ImportCustomMcpConfigRequest,
   ImportCustomMcpConfigResponse,
   InsertAtMarkerInProjectWorkspaceFileRequest,
@@ -188,10 +197,13 @@ import type {
   InvokePageToolRequest,
   InvokePageToolResponse,
   InvokeSessionToolResponse,
+  ListAiAppsResponse,
+  ListAppServeSitesResponse,
   ListChatSessionsResponse,
   ListCodeReviewsResponse,
   ListCraftbooksResponse,
   ListDependenciesResponse,
+  ListDiffpacksResponse,
   ListEntityMentionsRequest,
   ListEntityMentionsResponse,
   ListFileIssuesRequest,
@@ -252,6 +264,8 @@ import type {
   ProjectResponse,
   ProjectSearchRequest,
   ProjectSearchResponse,
+  ProjectTypeApplyPlan,
+  ProjectTypeStatusResponse,
   ProviderName,
   Question,
   ReadArtifactSliceOpts,
@@ -268,6 +282,7 @@ import type {
   ReferenceFileLocationResponse,
   ReferencePreviewRequest,
   ReferencePreviewResponse,
+  RemoveAiAppResponse,
   RenameGezelRequest,
   RenderImageRequest,
   RenderImageResponse,
@@ -652,6 +667,19 @@ export interface TaskRunnerState {
     /** True while night work is held by the cloud quota reserve. */
     quotaHold?: boolean;
   };
+}
+
+/**
+ * Outcome of `retryTask`. `dispatched: false` still means the task was
+ * flipped back to active — `reason` says why no turn was queued (except
+ * `not-paused`, where nothing was touched at all).
+ */
+export interface TaskRetryResult {
+  task: Task;
+  dispatched: boolean;
+  gezelId?: string;
+  assigneeName?: string;
+  reason?: 'not-paused' | 'no-active-step' | 'spawn-host' | 'no-assignee' | 'project-inactive';
 }
 
 export interface ProjectContinuationResponse {
@@ -1791,6 +1819,13 @@ export interface LlamaCppInstalledModel {
    */
   contextCeilingTokens?: number;
   quantization?: string;
+  /**
+   * What the model file declares about itself (`general.file_type`), sent
+   * only when the catalog's `quantization` names no bit depth. The model
+   * table renders this instead, so a hand-authored catalog label like
+   * `K-Quant-17GB` never lands in a column of `~4` / `~8`.
+   */
+  ggufQuantization?: string;
   chatTemplatePresent: boolean;
   architecture?: string;
   /**
@@ -2560,6 +2595,135 @@ export class GezelClient {
       `/api/projects/${encodeURIComponent(projectId)}/report-actions/dismiss`,
       body,
     );
+  }
+
+  // ---------- diffpacks ----------
+
+  /** Change proposals a gezel drafted for this project, newest first. */
+  listDiffpacks(projectId: string): Promise<ListDiffpacksResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(projectId)}/diffpacks`);
+  }
+
+  /** One proposal plus its notes markdown, in a single round trip. */
+  getDiffpack(projectId: string, packId: string): Promise<DiffpackResponse> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(projectId)}/diffpacks/${encodeURIComponent(packId)}`,
+    );
+  }
+
+  /**
+   * Apply a proposal to the workspace — all of it, or the `paths` subset.
+   *
+   * This is a USER-initiated write: the drafting gezel never touched the
+   * workspace, so this succeeds on a folder gezels hold no write grant for.
+   * 409 `drifted` means a target changed since the proposal was drafted;
+   * re-request with `allowDrifted` only after showing the user which files.
+   */
+  applyDiffpack(
+    projectId: string,
+    packId: string,
+    body: ApplyDiffpackRequest = {},
+  ): Promise<ApplyDiffpackResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/diffpacks/${encodeURIComponent(packId)}/apply`,
+      body,
+    );
+  }
+
+  dismissDiffpack(projectId: string, packId: string): Promise<DismissDiffpackResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/diffpacks/${encodeURIComponent(packId)}/dismiss`,
+    );
+  }
+
+  /** Download the proposal as a zip of patches + notes + `git apply` instructions. */
+  async exportDiffpack(projectId: string, packId: string): Promise<Blob> {
+    const url = `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/diffpacks/${encodeURIComponent(packId)}/export`;
+    const res = await this.fetchImpl(url, {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    if (!res.ok) throw new Error(`diffpack export failed: ${res.status}`);
+    return res.blob();
+  }
+
+  /* ── diffpack drafting ──────────────────────────────────────────────
+   *
+   * The re-rooted twin of the `/workspace/*` edit surface, used by a session
+   * that is drafting a change proposal. Same request and response shapes: the
+   * MCP tools calling these are the same tools with the same names, and only
+   * the sink moves.
+   */
+
+  readDiffpackDraftFile(
+    projectId: string,
+    packId: string,
+    filePath: string,
+  ): Promise<{ path: string; content: string; size?: number }> {
+    return this.request(
+      'GET',
+      `${this.draftBase(projectId, packId)}/read?path=${encodeURIComponent(filePath)}`,
+    );
+  }
+
+  statDiffpackDraftPath(
+    projectId: string,
+    packId: string,
+    filePath: string,
+  ): Promise<{ kind: 'file' | 'dir' | 'missing'; size?: number; mtime?: string }> {
+    return this.request(
+      'GET',
+      `${this.draftBase(projectId, packId)}/stat?path=${encodeURIComponent(filePath)}`,
+    );
+  }
+
+  writeDiffpackDraftFile(
+    projectId: string,
+    packId: string,
+    body: { path: string; content: string },
+  ): Promise<WorkspaceEditResponse> {
+    return this.request('PUT', `${this.draftBase(projectId, packId)}/file`, body);
+  }
+
+  replaceInDiffpackDraftFile(
+    projectId: string,
+    packId: string,
+    body: { path: string; find: string; replace: string; occurrence?: number | 'all' },
+  ): Promise<WorkspaceEditResponse> {
+    return this.request('POST', `${this.draftBase(projectId, packId)}/replace`, body);
+  }
+
+  replaceLinesInDiffpackDraftFile(
+    projectId: string,
+    packId: string,
+    body: { path: string; startLine: number; endLine: number; content: string },
+  ): Promise<WorkspaceEditResponse> {
+    return this.request('POST', `${this.draftBase(projectId, packId)}/replace-lines`, body);
+  }
+
+  insertAtMarkerInDiffpackDraftFile(
+    projectId: string,
+    packId: string,
+    body: { path: string; marker: string; content: string; where?: 'before' | 'after' },
+  ): Promise<WorkspaceEditResponse> {
+    return this.request('POST', `${this.draftBase(projectId, packId)}/insert-at-marker`, body);
+  }
+
+  deleteDiffpackDraftPath(
+    projectId: string,
+    packId: string,
+    filePath: string,
+  ): Promise<{ ok: true }> {
+    return this.request(
+      'DELETE',
+      `${this.draftBase(projectId, packId)}/path?path=${encodeURIComponent(filePath)}`,
+    );
+  }
+
+  private draftBase(projectId: string, packId: string): string {
+    return `/api/projects/${encodeURIComponent(projectId)}/diffpacks/${encodeURIComponent(packId)}/draft`;
   }
 
   // ---------- meester status report ----------
@@ -5205,6 +5369,20 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/apply-project-type`, body);
   }
 
+  /** Dry-run `applyProjectType`: same request body, no writes. */
+  preflightProjectType(id: string, body: ApplyProjectTypeRequest): Promise<ProjectTypeApplyPlan> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/apply-project-type/preflight`,
+      body,
+    );
+  }
+
+  /** Applied type vs installed AI App, plus per-seed drift. */
+  projectTypeStatus(id: string): Promise<ProjectTypeStatusResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/project-type/status`);
+  }
+
   /** Package an exact-version AI App into a `.gezapp` artifact. */
   exportAiApp(
     id: string,
@@ -5219,23 +5397,101 @@ export class GezelClient {
   }
 
   /** Preview or install a `.gezapp` artifact. */
-  importAiApp(
-    id: string,
-    body: { path: string; confirm?: boolean },
-  ): Promise<{
-    manifest: GezappManifest;
-    items: Array<{ kind: GezappEmbeddedKind; id: string; version: string }>;
-    dependencies: GezappDependency[];
-    missingDependencies: GezappDependency[];
-    packageSha256: string;
-    installed?: {
-      appId: string;
-      version: string;
-      receiptPath: string;
-      alreadyPresent: boolean;
-    };
-  }> {
+  importAiApp(id: string, body: { path: string; confirm?: boolean }): Promise<ImportAiAppResult> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/ai-apps/import`, body);
+  }
+
+  // ── AI App management (global /api/ai-apps) ──
+
+  /** Installed AI Apps: registry entries + receipt snapshots. */
+  listAiApps(): Promise<ListAiAppsResponse> {
+    return this.request('GET', '/api/ai-apps');
+  }
+
+  /** One installed app with its manifest, live dependency check, and applied projects. */
+  getAiApp(appId: string): Promise<AiAppDetail> {
+    return this.request('GET', `/api/ai-apps/${encodeURIComponent(appId)}`);
+  }
+
+  /**
+   * Preview (default) or install (`confirm`) a `.gezapp` package from raw
+   * bytes. Idempotent: re-sending installed bytes re-registers without
+   * touching disk; same version with different bytes is refused.
+   */
+  async importAiAppPackage(
+    data: Blob | ArrayBuffer | Uint8Array,
+    opts?: { confirm?: boolean },
+  ): Promise<ImportAiAppResult> {
+    const url = `${this.baseUrl}/api/ai-apps/import${opts?.confirm ? '?confirm=1' : ''}`;
+    const body =
+      data instanceof Blob
+        ? data
+        : data instanceof Uint8Array
+          ? data
+          : new Uint8Array(data as ArrayBuffer);
+    const res = await this.fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/octet-stream',
+        Authorization: `Bearer ${this.token}`,
+      },
+      body,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      let message = text;
+      try {
+        const parsed = JSON.parse(text) as { error?: string };
+        if (parsed.error) message = parsed.error;
+      } catch {
+        // Non-JSON error body — surface it verbatim.
+      }
+      throw new Error(message || `AI App import failed (${res.status})`);
+    }
+    return res.json() as Promise<ImportAiAppResult>;
+  }
+
+  /** Flip an installed app's enabled flag. */
+  setAiAppEnabled(appId: string, enabled: boolean): Promise<{ entry: GezappRegistryEntry }> {
+    return this.request('PATCH', `/api/ai-apps/${encodeURIComponent(appId)}`, { enabled });
+  }
+
+  /** Uninstall an app (registry entry + version dirs unless `keepFiles`). */
+  removeAiApp(appId: string, opts?: { keepFiles?: boolean }): Promise<RemoveAiAppResponse> {
+    return this.request(
+      'DELETE',
+      `/api/ai-apps/${encodeURIComponent(appId)}${opts?.keepFiles ? '?keepFiles=1' : ''}`,
+    );
+  }
+
+  // ── App serve (shareable AI App mini-sites) ──
+
+  /** Start serving a project's applied app; the 201 carries the site key. */
+  startAppServe(body: AppServeStartRequest): Promise<AppServeStartResponse> {
+    return this.request('POST', '/api/app-serve', body);
+  }
+
+  listAppServeSites(): Promise<ListAppServeSitesResponse> {
+    return this.request('GET', '/api/app-serve');
+  }
+
+  getAppServeSite(siteId: string): Promise<AppServeSiteStatus> {
+    return this.request('GET', `/api/app-serve/${encodeURIComponent(siteId)}`);
+  }
+
+  rotateAppServeKey(
+    siteId: string,
+    body?: AppServeRotateKeyRequest,
+  ): Promise<{ siteKey: string; shareUrl: string }> {
+    return this.request(
+      'POST',
+      `/api/app-serve/${encodeURIComponent(siteId)}/rotate-key`,
+      body ?? {},
+    );
+  }
+
+  stopAppServeSite(siteId: string): Promise<{ ok: true }> {
+    return this.request('DELETE', `/api/app-serve/${encodeURIComponent(siteId)}`);
   }
 
   // ── Connectors (external-data sources) ────────────────────────────────────
@@ -6170,6 +6426,20 @@ export class GezelClient {
     return this.request('GET', '/api/night-shift/power-intent');
   }
 
+  /**
+   * The same directive, widened to every reason the machine should not
+   * idle-sleep — the night shift plus live work someone is waiting on. Prefer
+   * this over {@link getNightShiftPowerIntent}, which stays for older daemons
+   * a newly-updated shell may have adopted.
+   */
+  getSystemPowerIntent(): Promise<{
+    keepAwake: boolean;
+    wakeAtIso: string | null;
+    reason: 'night-shift' | 'active-work' | null;
+  }> {
+    return this.request('GET', '/api/system/power-intent');
+  }
+
   toolReadDocAsMarkdown(
     id: string,
     body: ReadDocAsMarkdownRequest,
@@ -6295,6 +6565,8 @@ export class GezelClient {
       timeoutMs?: number;
       gezelId?: string;
       sessionId?: string;
+      taskRef?: string;
+      stepId?: string;
     },
   ): Promise<RunWorkspaceCommandResult> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/run-package-script`, body);
@@ -6308,6 +6580,8 @@ export class GezelClient {
       timeoutMs?: number;
       gezelId?: string;
       sessionId?: string;
+      taskRef?: string;
+      stepId?: string;
     },
   ): Promise<RunWorkspaceCommandResult & { resolvedBinPath?: string }> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/run-npx`, body);
@@ -6985,6 +7259,21 @@ export class GezelClient {
       'POST',
       `/api/projects/${encodeURIComponent(projectId)}/tasks/${num}/status`,
       { status },
+    );
+  }
+
+  /**
+   * "Try again" on a task that paused for help: reset the recovery
+   * counters that tripped the pause, flip it back to active, and re-drive
+   * the assignee immediately. `dispatched: false` with a `reason` means the
+   * task is active again but nothing was queued (a spawn host, an inactive
+   * project, or a stale view of an already-running task).
+   */
+  retryTask(projectId: string, num: number): Promise<TaskRetryResult> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/tasks/${num}/retry`,
+      {},
     );
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { composeFitnessBadge } from './fitness-badge.js';
+import { composeFitnessBadge, fitnessThroughput } from './fitness-badge.js';
 import type { ModelFitResult } from './model-fit.js';
 import type { ModelFitnessRecord } from './schemas/model-fitness.js';
 
@@ -180,5 +180,62 @@ describe('composeFitnessBadge', () => {
     expect(composeFitnessBadge({ ramFit: fits, fitness: fresh(record()) }).detail).not.toContain(
       'Memory fit',
     );
+  });
+});
+
+describe('fitnessThroughput', () => {
+  const rep = (
+    overrides: Partial<NonNullable<ModelFitnessRecord['representativeContext']>> = {},
+  ): ModelFitnessRecord =>
+    record({
+      representativeContext: {
+        targetPromptTokens: 20_000,
+        promptTokens: 19_891,
+        cachedPromptTokens: 124,
+        completionTokens: 1588,
+        durationMs: 62_655,
+        ttftMs: 16_279,
+        promptTokensPerSec: null,
+        genTokensPerSec: 34.2,
+        ...overrides,
+      },
+    });
+
+  it('returns null for a record with no representative turn', () => {
+    expect(fitnessThroughput(record())).toBeNull();
+  });
+
+  it('returns null when the turn recorded no prompt count', () => {
+    expect(fitnessThroughput(rep({ promptTokens: null }))).toBeNull();
+  });
+
+  it('prefers the engine-reported prefill rate', () => {
+    const t = fitnessThroughput(rep({ promptTokensPerSec: 900 }));
+    expect(t?.prefillTokensPerSec).toBe(900);
+    expect(t?.prefillSource).toBe('engine');
+  });
+
+  it('derives prefill from time-to-first-token when the engine reports none', () => {
+    // ds4-server reports no prefill timing, and the derived number is the
+    // whole measurement there. The probe's warm second turn makes TTFT a
+    // fair proxy: (19891 - 124) / 16.279s.
+    const t = fitnessThroughput(rep());
+    expect(t?.prefillSource).toBe('first-token');
+    expect(t?.prefillTokensPerSec).toBeCloseTo(1214.3, 1);
+    expect(t?.evaluatedPromptTokens).toBe(19_767);
+  });
+
+  it('refuses to derive a rate from a prompt that was almost entirely cached', () => {
+    // Dividing a handful of uncached tokens by a whole TTFT measures the
+    // cache lookup, not the model.
+    const t = fitnessThroughput(rep({ cachedPromptTokens: 19_800 }));
+    expect(t?.prefillTokensPerSec).toBeNull();
+    expect(t?.prefillSource).toBeNull();
+  });
+
+  it('carries the decode rate and startup latency through unchanged', () => {
+    const t = fitnessThroughput(rep());
+    expect(t?.decodeTokensPerSec).toBe(34.2);
+    expect(t?.ttftMs).toBe(16_279);
   });
 });

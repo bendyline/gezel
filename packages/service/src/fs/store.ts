@@ -40,6 +40,7 @@ import {
   type InstalledPackage,
   type InstalledToolset,
   InstalledToolsetSchema,
+  KeyedLock,
   type MeesterStatusReport,
   MeesterStatusReportSchema,
   type MeesterStatusState,
@@ -63,6 +64,8 @@ import {
   type ProjectNudgeConfig,
   ProjectSchema,
   type ProjectTabVisibility,
+  type ProjectTypeOverlay,
+  ProjectTypeOverlaySchema,
   type ProviderName,
   type Question,
   type RetrievalPolicy,
@@ -141,6 +144,7 @@ import {
   projectTerminalsDir,
   projectToolsetsFile,
   projectToolsetsInstallDir,
+  projectTypeOverlayFile,
   sharedToolsetsFile,
   sharedToolsetsInstallDir,
   systemInstalledToolsetsFile,
@@ -151,15 +155,6 @@ import {
   userProjectDir,
 } from '@bendyline/gezel/paths';
 import { applyPatch, parsePatch } from 'diff';
-import {
-  type FileInventoryIndex,
-  artifactPathsOf,
-  buildFileInventoryIndex,
-  hasQualifiedReferenceMismatch,
-  matchReferencedFilesWithIndex,
-  referencedFilesFromArtifactPaths,
-} from '../chat/file-references.js';
-import { matchReferencedTasksInContent } from '../chat/task-references.js';
 import { createGitIgnoreResolver } from '../git/ignore.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
 import { parseGitHubUrl, sameGitHubRepo } from '../github/url.js';
@@ -167,10 +162,20 @@ import { sanitizeSvg } from '../icon/sanitize.js';
 import type { MemoryKind } from '../memory/daily-markdown.js';
 import { PoppetjeManager } from '../poppetje/manager.js';
 import {
+  type FileInventoryIndex,
+  artifactPathsOf,
+  buildFileInventoryIndex,
+  hasQualifiedReferenceMismatch,
+  matchReferencedFilesWithIndex,
+  referencedFilesFromArtifactPaths,
+} from '../references/file-references.js';
+import { matchReferencedTasksInContent } from '../references/task-references.js';
+import {
   type WorkspaceEditResult,
   buildWorkspaceEditResult,
-  findAllOccurrences,
-  findFlexibleMatch,
+  computeInsertAtMarker,
+  computeReplaceInFile,
+  computeReplaceLines,
   readFileForEditOrThrow,
 } from '../workspace/edit.js';
 import { WorkspaceEditError, WorkspaceWriteDeniedError } from '../workspace/errors.js';
@@ -195,7 +200,12 @@ import {
   type ProjectArtifactSliceResult,
   ProjectArtifactsStore,
 } from './project-artifacts-store.js';
-import { intoWorkspaceRelative, resolveInside, safeJoin } from './safe-paths.js';
+import {
+  assertNoTemplatePlaceholderPath,
+  intoWorkspaceRelative,
+  resolveInside,
+  safeJoin,
+} from './safe-paths.js';
 import { TaskFilesStore } from './task-files-store.js';
 import {
   type WalkDirResult,
@@ -375,8 +385,8 @@ export class Store {
   private readonly memories: MemoryStore;
   private readonly taskFiles: TaskFilesStore;
   private projectCreationTail: Promise<void> = Promise.resolve();
-  private readonly findingLifecycleLocks = new Map<string, Promise<unknown>>();
-  private readonly boekwachterIssueLocks = new Map<string, Promise<unknown>>();
+  private readonly findingLifecycleLocks = new KeyedLock();
+  private readonly boekwachterIssueLocks = new KeyedLock();
 
   /**
    * Notified after every session persist/delete — the single choke point all
@@ -2398,6 +2408,29 @@ export class Store {
   }
 
   /**
+   * Read the project-type overlay manifest (which seed files the applied
+   * type deployed, and their app-owned content hashes). Per-machine state in
+   * the private sidecar — deliberately NOT workspace-gated, so drift can be
+   * reported even on a read-only workspace. Null when never applied here.
+   */
+  async readProjectTypeOverlay(projectId: string): Promise<ProjectTypeOverlay | null> {
+    try {
+      const raw = await readFile(projectTypeOverlayFile(this.home, projectId), 'utf8');
+      return ProjectTypeOverlaySchema.parse(JSON.parse(raw));
+    } catch {
+      return null;
+    }
+  }
+
+  async writeProjectTypeOverlay(projectId: string, overlay: ProjectTypeOverlay): Promise<void> {
+    await mkdir(projectPrivateDir(this.home, projectId), { recursive: true });
+    await writeFileAtomic(
+      projectTypeOverlayFile(this.home, projectId),
+      `${JSON.stringify(ProjectTypeOverlaySchema.parse(overlay), null, 2)}\n`,
+    );
+  }
+
+  /**
    * Create a project-local gezel in the workspace `.gezel/gezels/` folder.
    * Mirrors {@link createGezel} (same identity helpers + poppetje
    * generation) but targets the repo-travelling store. For the canonical
@@ -2923,6 +2956,13 @@ export class Store {
   /**
    * Materialize current review output into durable BW records. Review rows are
    * disposable and content-hash keyed; these records intentionally are not.
+   *
+   * The path and fingerprint lookups are built once up front. Scanning
+   * `Object.values(state.issues)` per observation *and* per issue was
+   * quadratic, and both factors grow with the same thing — a repo with 2.4k
+   * reviewed paths and 7.7k open findings spent ~10s of blocked event loop
+   * here, on every workspace file the UI opened (`file-review` reconciles
+   * before it reads).
    */
   async observeProjectBoekwachterReviews(
     id: string,
@@ -2934,9 +2974,21 @@ export class Store {
       let changed = false;
       const at = nowIso();
 
+      const recordsByPath = new Map<string, ProjectBoekwachterIssueRecord[]>();
+      const recordByFingerprint = new Map<string, ProjectBoekwachterIssueRecord>();
+      const fingerprintKey = (path: string, fingerprint: string) => `${path}\0${fingerprint}`;
+      for (const record of Object.values(state.issues)) {
+        const forPath = recordsByPath.get(record.path);
+        if (forPath) forPath.push(record);
+        else recordsByPath.set(record.path, [record]);
+        // First writer wins, matching the `.find()` this replaced.
+        const key = fingerprintKey(record.path, record.fingerprint);
+        if (!recordByFingerprint.has(key)) recordByFingerprint.set(key, record);
+      }
+
       for (const observation of observations) {
         const path = observation.path.replaceAll('\\', '/');
-        const pathRecords = Object.values(state.issues).filter((record) => record.path === path);
+        const pathRecords = recordsByPath.get(path) ?? [];
         for (const record of pathRecords) {
           if (record.lastCheckedContentHash === observation.contentHash) continue;
           record.lastCheckedContentHash = observation.contentHash;
@@ -2946,9 +2998,7 @@ export class Store {
 
         for (const issue of observation.issues) {
           const fingerprint = boekwachterIssueFingerprint(path, issue);
-          const record = Object.values(state.issues).find(
-            (candidate) => candidate.path === path && candidate.fingerprint === fingerprint,
-          );
+          const record = recordByFingerprint.get(fingerprintKey(path, fingerprint));
           if (!record) {
             const ref = `BW-${state.nextNumber++}`;
             const created: ProjectBoekwachterIssueRecord = {
@@ -2968,6 +3018,11 @@ export class Store {
               lastCheckedContentHash: observation.contentHash,
             };
             state.issues[created.id] = created;
+            // Keep the lookups live: a later observation of the same path must
+            // see this record, exactly as the old full scan of `state.issues` did.
+            pathRecords.push(created);
+            if (!recordsByPath.has(path)) recordsByPath.set(path, pathRecords);
+            recordByFingerprint.set(fingerprintKey(path, fingerprint), created);
             changed = true;
             continue;
           }
@@ -3182,27 +3237,11 @@ export class Store {
   }
 
   private async withBoekwachterIssueLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.boekwachterIssueLocks.get(id) ?? Promise.resolve();
-    const run = previous.then(fn, fn);
-    const tracked: Promise<unknown> = run.finally(() => {
-      if (this.boekwachterIssueLocks.get(id) === tracked) {
-        this.boekwachterIssueLocks.delete(id);
-      }
-    });
-    this.boekwachterIssueLocks.set(id, tracked);
-    return run;
+    return this.boekwachterIssueLocks.run(id, fn);
   }
 
   private async withFindingLifecycleLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.findingLifecycleLocks.get(id) ?? Promise.resolve();
-    const run = previous.then(fn, fn);
-    const tracked: Promise<unknown> = run.finally(() => {
-      if (this.findingLifecycleLocks.get(id) === tracked) {
-        this.findingLifecycleLocks.delete(id);
-      }
-    });
-    this.findingLifecycleLocks.set(id, tracked);
-    return run;
+    return this.findingLifecycleLocks.run(id, fn);
   }
 
   /**
@@ -3229,8 +3268,8 @@ export class Store {
     );
   }
 
-  /** Per-project chains serializing {@link touchProject}'s metadata bumps. */
-  private readonly touchChains = new Map<string, Promise<void>>();
+  /** Per-project lock serializing {@link touchProject}'s metadata bumps. */
+  private readonly touchChains = new KeyedLock();
 
   async touchProject(id: string): Promise<void> {
     // Serialized per project AND best-effort. Every workspace write ends in
@@ -3240,25 +3279,19 @@ export class Store {
     // rename holds), silently-lost bumps elsewhere. And the caller's actual
     // write already succeeded by the time we run: a failed TIMESTAMP bump
     // must never convert that success into a 500.
-    const prev = this.touchChains.get(id) ?? Promise.resolve();
-    const next = prev
-      .then(async () => {
+    await this.touchChains.run(id, async () => {
+      try {
         const meta = await this.tryGetProjectMeta(id);
         if (!meta) return;
         const updated: Project = { ...meta, updatedAt: nowIso() };
         await this.writeProjectMeta(updated);
-      })
-      .catch((err) => {
+      } catch (err) {
         log.warn(
           `touchProject(${id}) failed (updatedAt bump only — the triggering write succeeded):`,
           err instanceof Error ? err.message : err,
         );
-      });
-    this.touchChains.set(id, next);
-    void next.finally(() => {
-      if (this.touchChains.get(id) === next) this.touchChains.delete(id);
+      }
     });
-    await next;
   }
 
   /**
@@ -3349,6 +3382,8 @@ export class Store {
       leanProfile?: boolean;
       /** Missing/true indexes the workspace; false opts the project out. */
       indexingEnabled?: boolean;
+      /** Missing/true allows overnight bug fixing; false opts the project out. */
+      nightlyFixesEnabled?: boolean;
       workspaceScriptTimeoutMs?: number;
       status?: 'active' | 'readonly' | 'inactive' | 'stable';
       /** Buried in project navigation. Archiving always forces inactive. */
@@ -3489,6 +3524,9 @@ export class Store {
           : {}),
       ...(patch.leanProfile !== undefined ? { leanProfile: patch.leanProfile } : {}),
       ...(patch.indexingEnabled !== undefined ? { indexingEnabled: patch.indexingEnabled } : {}),
+      ...(patch.nightlyFixesEnabled !== undefined
+        ? { nightlyFixesEnabled: patch.nightlyFixesEnabled }
+        : {}),
       ...(patch.workspaceScriptTimeoutMs !== undefined
         ? { workspaceScriptTimeoutMs: patch.workspaceScriptTimeoutMs }
         : {}),
@@ -3567,6 +3605,12 @@ export class Store {
       patch.indexingEnabled !== (meta.indexingEnabled !== false)
     ) {
       metaChanged.push('indexingEnabled');
+    }
+    if (
+      patch.nightlyFixesEnabled !== undefined &&
+      patch.nightlyFixesEnabled !== (meta.nightlyFixesEnabled !== false)
+    ) {
+      metaChanged.push('nightlyFixesEnabled');
     }
     if (patch.archived !== undefined && patch.archived !== (meta.archived ?? false)) {
       metaChanged.push('archived');
@@ -3821,8 +3865,8 @@ export class Store {
    * call and returns `{ added: false }`. Logs a `project.gezel.joined`
    * history event on the first add only, with `details.source`
    * carrying the trigger (`'voorman' | 'session' | 'message' | 'task'
-   * | 'manual'`) so the audit trail captures *why* the gezel showed
-   * up in the roster.
+   * | 'project-type' | 'manual'`) so the audit trail captures *why* the
+   * gezel showed up in the roster.
    *
    * Permissive: missing project → no-op (matches `writeProjectNudgeState`);
    * missing gezel → still adds the id and logs with the id as the
@@ -3836,7 +3880,7 @@ export class Store {
     projectId: string,
     gezelId: string,
     opts?: {
-      source?: 'voorman' | 'session' | 'message' | 'task' | 'manual';
+      source?: 'voorman' | 'session' | 'message' | 'task' | 'project-type' | 'manual';
     },
   ): Promise<{ added: boolean }> {
     const meta = await this.tryGetProjectMeta(projectId);
@@ -4547,7 +4591,7 @@ export class Store {
    */
   async assertWorkspaceWritable(
     id: string,
-    opts?: { initiatedByGezel?: boolean; path?: string | string[] },
+    opts?: { initiatedByGezel?: boolean; userInitiated?: boolean; path?: string | string[] },
   ): Promise<
     | { ok: true; workspaceDir: string; external: boolean }
     | {
@@ -4559,11 +4603,35 @@ export class Store {
     const meta = await this.tryGetProjectMeta(id);
     const resolved = this.resolveWorkspaceDir(id, meta);
     const managedWritePolicy = projectManagedWorkspaceWritePolicy(meta);
-    if (resolved.source === 'workingDir' && managedWritePolicy !== 'allow') {
+    // `userInitiated` waives ONLY the external-consent branch, and only for
+    // callers that can prove the write is the user's own act — today the
+    // diffpack apply route, where a gezel drafted a proposal it could not
+    // write and the user clicked Apply. The consent this branch protects is
+    // "gezels may edit my folder", which such a write does not claim. Path
+    // containment, journaling, and history are unaffected. Never pass it from
+    // an MCP tool or any other model-reachable surface.
+    if (
+      resolved.source === 'workingDir' &&
+      managedWritePolicy !== 'allow' &&
+      opts?.userInitiated !== true
+    ) {
       return { ok: false, reason: 'external-consent-required', workingDir: resolved.dir };
     }
     if (opts?.initiatedByGezel && managedWritePolicy === 'deny') {
       return { ok: false, reason: 'disabled-by-project', workingDir: resolved.dir };
+    }
+    // Every workspace-mutating sink already hands its target path here, which
+    // makes this the one place a model-initiated write can be checked for an
+    // unresolved `{{param}}` token before it becomes a directory on disk. It
+    // THROWS rather than returning a denial on purpose: the denial shape is
+    // for policy failures ("the path was fine, the project says no"), and the
+    // next line of every caller can already surface a `PathSafetyError` from
+    // `resolveInside`. Gezel-initiated only — a user scaffolding a
+    // cookiecutter tree by hand means those braces literally.
+    if (opts?.initiatedByGezel) {
+      for (const p of Array.isArray(opts.path) ? opts.path : [opts.path ?? '']) {
+        assertNoTemplatePlaceholderPath(p);
+      }
     }
     return {
       ok: true,
@@ -4594,9 +4662,11 @@ export class Store {
     filePath: string,
     content: string,
     ctx?: JournalContext,
+    opts?: { userInitiated?: boolean },
   ): Promise<void> {
     const gate = await this.assertWorkspaceWritable(id, {
       initiatedByGezel: !!ctx?.gezelId,
+      ...(opts?.userInitiated ? { userInitiated: true } : {}),
       path: filePath,
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
@@ -4642,59 +4712,7 @@ export class Store {
     const full = await resolveInside(gate.workspaceDir, args.path);
     const oldContent = await readFileForEditOrThrow(full, args.path);
 
-    const matches = findAllOccurrences(oldContent, args.find);
-    const notFound = () =>
-      new WorkspaceEditError(
-        `pattern not found in ${args.path}. The file's content may have changed since you last read it — re-read and try again.`,
-        'pattern-not-found',
-      );
-
-    let newContent: string;
-    if (args.occurrence === 'all') {
-      if (matches.length === 0) throw notFound();
-      newContent = oldContent.split(args.find).join(args.replace);
-    } else if (typeof args.occurrence === 'number') {
-      const pos = matches[args.occurrence - 1];
-      if (pos === undefined) {
-        if (matches.length === 0) throw notFound();
-        throw new WorkspaceEditError(
-          `occurrence ${args.occurrence} out of range — found ${matches.length} match(es) in ${args.path}`,
-          'occurrence-out-of-range',
-        );
-      }
-      newContent =
-        oldContent.slice(0, pos) + args.replace + oldContent.slice(pos + args.find.length);
-    } else if (matches.length === 1) {
-      const pos = matches[0]!;
-      newContent =
-        oldContent.slice(0, pos) + args.replace + oldContent.slice(pos + args.find.length);
-    } else if (matches.length > 1) {
-      throw new WorkspaceEditError(
-        `pattern matches ${matches.length} places in ${args.path}; specify occurrence=<1-based index> or 'all'.`,
-        'ambiguous-match',
-      );
-    } else {
-      // No exact match. Fall back to a whitespace-flexible, line-based
-      // match so a botched-indentation or gutter-pasted `find` still
-      // lands instead of bouncing the model into a full-file rewrite.
-      const flexible = findFlexibleMatch(oldContent, args.find);
-      if (flexible.kind === 'ambiguous') {
-        throw new WorkspaceEditError(
-          `pattern matches ${flexible.count} places in ${args.path} (ignoring whitespace); add more surrounding lines to \`find\` so it is unique, or use \`replace_lines\`.`,
-          'ambiguous-match',
-        );
-      }
-      if (flexible.kind === 'none') throw notFound();
-      newContent =
-        oldContent.slice(0, flexible.start) + args.replace + oldContent.slice(flexible.end);
-    }
-
-    if (newContent === oldContent) {
-      throw new WorkspaceEditError(
-        `replace_in_file is a no-op on ${args.path} — \`find\` and \`replace\` produced identical content.`,
-        'identity-edit',
-      );
-    }
+    const newContent = computeReplaceInFile(oldContent, args);
 
     await writeFileAtomic(full, newContent);
     await appendJournalEntry(this.home, id, 'write', args.path, { content: newContent, ctx });
@@ -4731,38 +4749,7 @@ export class Store {
     const full = await resolveInside(gate.workspaceDir, args.path);
     const oldContent = await readFileForEditOrThrow(full, args.path);
 
-    if (args.endLine < args.startLine) {
-      throw new WorkspaceEditError(
-        `endLine (${args.endLine}) is before startLine (${args.startLine}) in ${args.path}.`,
-        'invalid-range',
-      );
-    }
-
-    const newlineStyle = oldContent.includes('\r\n') ? '\r\n' : '\n';
-    const hadTrailingNewline = oldContent.endsWith('\n');
-    const body = hadTrailingNewline ? oldContent.slice(0, -newlineStyle.length) : oldContent;
-    const lines = body === '' ? [] : body.split(/\r?\n/);
-    const total = lines.length;
-
-    if (args.startLine > total) {
-      throw new WorkspaceEditError(
-        `startLine ${args.startLine} is past the end of ${args.path} (${total} line(s)). Re-read the file for current line numbers, or use \`append_to_file\` to add to the end.`,
-        'line-out-of-range',
-      );
-    }
-    const endLine = Math.min(args.endLine, total);
-
-    const inserted = args.content === '' ? [] : args.content.replace(/\r?\n$/, '').split(/\r?\n/);
-    const next = [...lines.slice(0, args.startLine - 1), ...inserted, ...lines.slice(endLine)];
-    let newContent = next.join(newlineStyle);
-    if (hadTrailingNewline && newContent !== '') newContent += newlineStyle;
-
-    if (newContent === oldContent) {
-      throw new WorkspaceEditError(
-        `replace_lines is a no-op on ${args.path} — the new content matches lines ${args.startLine}-${endLine}.`,
-        'identity-edit',
-      );
-    }
+    const newContent = computeReplaceLines(oldContent, args);
 
     await writeFileAtomic(full, newContent);
     await appendJournalEntry(this.home, id, 'write', args.path, { content: newContent, ctx });
@@ -4859,9 +4846,11 @@ export class Store {
     id: string,
     edits: Array<{ path: string; diff: string }>,
     ctx?: JournalContext,
+    opts?: { userInitiated?: boolean },
   ): Promise<{ ok: boolean; results: Array<{ path: string; ok: boolean; error?: string }> }> {
     const gate = await this.assertWorkspaceWritable(id, {
       initiatedByGezel: !!ctx?.gezelId,
+      ...(opts?.userInitiated ? { userInitiated: true } : {}),
       path: edits.map((e) => e.path),
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
@@ -4964,26 +4953,7 @@ export class Store {
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const full = await resolveInside(gate.workspaceDir, args.path);
     const oldContent = await readFileForEditOrThrow(full, args.path);
-    const matches = findAllOccurrences(oldContent, args.marker);
-    if (matches.length === 0) {
-      throw new WorkspaceEditError(
-        `marker not found in ${args.path}. Re-read the file and pass a literal substring that appears exactly once.`,
-        'marker-not-found',
-      );
-    }
-    if (matches.length > 1) {
-      throw new WorkspaceEditError(
-        `marker matches ${matches.length} places in ${args.path}; pick a longer literal substring that's unique.`,
-        'marker-ambiguous',
-      );
-    }
-    const pos = matches[0]!;
-    const newContent =
-      where === 'after'
-        ? oldContent.slice(0, pos + args.marker.length) +
-          args.content +
-          oldContent.slice(pos + args.marker.length)
-        : oldContent.slice(0, pos) + args.content + oldContent.slice(pos);
+    const newContent = computeInsertAtMarker(oldContent, { ...args, where });
     await writeFileAtomic(full, newContent);
     await appendJournalEntry(this.home, id, 'write', args.path, { content: newContent, ctx });
     const result = buildWorkspaceEditResult(args.path, oldContent, newContent);
@@ -5074,11 +5044,12 @@ export class Store {
   async rmProjectWorkspacePath(
     id: string,
     filePath: string,
-    opts: { recursive?: boolean } = {},
+    opts: { recursive?: boolean; userInitiated?: boolean } = {},
     ctx?: JournalContext,
   ): Promise<void> {
     const gate = await this.assertWorkspaceWritable(id, {
       initiatedByGezel: !!ctx?.gezelId,
+      ...(opts.userInitiated ? { userInitiated: true } : {}),
       path: filePath,
     });
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
@@ -5244,8 +5215,8 @@ export class Store {
     this.notifySessionChange({ type: 'write', gezelId: session.gezelId, sessionId: session.id });
   }
 
-  /** Per-session chains serializing {@link mutateSession}'s read-modify-writes. */
-  private readonly sessionMutationChains = new Map<string, Promise<void>>();
+  /** Per-session lock serializing {@link mutateSession}'s read-modify-writes. */
+  private readonly sessionMutationChains = new KeyedLock();
 
   /**
    * Serialized read-modify-write on one session file.
@@ -5274,26 +5245,13 @@ export class Store {
     mutate: (session: ChatSession) => unknown,
   ): Promise<boolean> {
     const key = `${gezelId}/${sessionId}`;
-    const prev = this.sessionMutationChains.get(key) ?? Promise.resolve();
-    const run = prev.then(async () => {
+    return this.sessionMutationChains.run(key, async () => {
       const session = await this.getSession(gezelId, sessionId);
       if (!session) return false;
       if ((await mutate(session)) === false) return false;
       await this.writeSession(session);
       return true;
     });
-    // The chain tail must never carry a rejection — a failed mutation
-    // would otherwise poison every queued mutation behind it. The caller
-    // still sees the error through `run`.
-    const next = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.sessionMutationChains.set(key, next);
-    void next.then(() => {
-      if (this.sessionMutationChains.get(key) === next) this.sessionMutationChains.delete(key);
-    });
-    return run;
   }
 
   /**

@@ -15,8 +15,9 @@ import { sha256 } from './hash.js';
  * eager invalidation, no writes at edit time.
  */
 
-/** Bump when buildReviewPrompt's scaffold changes enough to warrant re-review. */
-export const REVIEW_PROMPT_VERSION = 1;
+/** Bump when buildReviewPrompt's scaffold changes enough to warrant re-review.
+ *  v2: continuation marker at window cut points + spurious-truncation merge filter. */
+export const REVIEW_PROMPT_VERSION = 2;
 
 export interface ResolvedRubric {
   kind: string;

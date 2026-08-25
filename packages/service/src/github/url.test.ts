@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { authenticatedCloneUrl, parseGitHubUrl, sameGitHubRepo, sharedCloneKey } from './url.js';
+import { parseGitHubUrl, sameGitHubRepo, sharedCloneKey } from './url.js';
 
 describe('parseGitHubUrl', () => {
   it('parses an https URL with .git suffix', () => {
@@ -16,6 +16,13 @@ describe('parseGitHubUrl', () => {
   it('parses an https URL without .git suffix', () => {
     const p = parseGitHubUrl('https://github.com/octocat/Hello-World');
     expect(p?.repo).toBe('Hello-World');
+    expect(p?.cloneUrl).toBe('https://github.com/octocat/Hello-World.git');
+  });
+
+  it('strips pasted URL credentials from the canonical and clone URLs', () => {
+    const p = parseGitHubUrl('https://stale-user:stale-token@github.com/octocat/Hello-World.git');
+    expect(p?.host).toBe('github.com');
+    expect(p?.canonical).toBe('https://github.com/octocat/Hello-World');
     expect(p?.cloneUrl).toBe('https://github.com/octocat/Hello-World.git');
   });
 
@@ -88,34 +95,6 @@ describe('sameGitHubRepo', () => {
         'https://github.bendyline.com/octocat/Hello-World',
       ),
     ).toBe(false);
-  });
-});
-
-describe('authenticatedCloneUrl', () => {
-  it('injects an x-access-token user', () => {
-    const url = authenticatedCloneUrl('https://github.com/o/r.git', 'ghp_abc');
-    expect(url).toBe('https://x-access-token:ghp_abc@github.com/o/r.git');
-  });
-
-  it('passes through when no token is given', () => {
-    expect(authenticatedCloneUrl('https://github.com/o/r.git')).toBe('https://github.com/o/r.git');
-    expect(authenticatedCloneUrl('https://github.com/o/r.git', null)).toBe(
-      'https://github.com/o/r.git',
-    );
-  });
-
-  it('replaces an existing user prefix', () => {
-    const url = authenticatedCloneUrl('https://stale@github.com/o/r.git', 'ghp_abc');
-    expect(url).toBe('https://x-access-token:ghp_abc@github.com/o/r.git');
-  });
-
-  it('encodes special characters in the token', () => {
-    const url = authenticatedCloneUrl('https://github.com/o/r.git', 'ghp/with@chars');
-    expect(url).toContain('x-access-token:ghp%2Fwith%40chars@github.com');
-  });
-
-  it('does not touch non-https URLs', () => {
-    expect(authenticatedCloneUrl('git@github.com:o/r.git', 'ghp')).toBe('git@github.com:o/r.git');
   });
 });
 

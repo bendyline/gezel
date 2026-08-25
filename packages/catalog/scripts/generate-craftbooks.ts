@@ -138,6 +138,29 @@ async function main(): Promise<void> {
     // history without letting regeneration overwrite immutable releases.
     'report-pdf',
     'narrated-slideshow',
+    // Tactical-fleet v2: these ids are now owned by the tactical compiled
+    // track (gilde authoring/tactical/ + generate-tactical-craftbooks.ts).
+    // Their gallery specs stay as taxonomy history; regeneration must never
+    // resurrect the 1.0.x graphs over the fleet releases.
+    'bug-fix-tdd',
+    'hotfix-flow',
+    'refactor-module',
+    'perf-optimization',
+    'type-safety-pass',
+    'schema-migration',
+    'test-suite-backfill',
+    'ci-pipeline',
+    'accessibility-retrofit',
+    // Retired (tombstoned) ids absorbed by fleet survivors — never
+    // regenerate a version for a tombstoned identity.
+    'investigate-root-cause',
+    'release-pipeline-ci',
+    'feature-flag-release',
+    'alt-text-pass',
+    'live-browser-qa',
+    'changelog-cut',
+    'changelog-writeup',
+    'runbook',
   ];
 
   // Seeds + curated books are authoritative. Gallery specs add NEW ids; any

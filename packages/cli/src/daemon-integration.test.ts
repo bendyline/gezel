@@ -37,17 +37,31 @@ async function runCli(...args: string[]): Promise<{ stdout: string; stderr: stri
   return runCliAtHome(gezelHome, ...args);
 }
 
+/**
+ * Env for a spawned CLI child, minus the vitest markers.
+ *
+ * These children run the real `dist` build, so `VITEST` in their environment
+ * is a lie with teeth: the service reads it to pick the in-process fallbacks
+ * that exist because worker entrypoints aren't built under vitest. A CLI run
+ * that boots its own service then loads the embedding model on its main
+ * thread and cannot exit until that load finishes — the whole reason this
+ * suite used to hit its deadline.
+ */
+function childEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extra };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('VITEST')) delete env[key];
+  }
+  return env;
+}
+
 async function runCliAtHome(
   home: string,
   ...args: string[]
 ): Promise<{ stdout: string; stderr: string }> {
   return execFileAsync(process.execPath, [cliEntry, '--home', home, ...args], {
     cwd: process.cwd(),
-    env: {
-      ...process.env,
-      GEZEL_HOME: home,
-      GEZEL_MOCK_PROVIDER: '1',
-    },
+    env: childEnv({ GEZEL_HOME: home, GEZEL_MOCK_PROVIDER: '1' }),
     // connectOwned gives a cold daemon up to 20s to start. Keep the outer
     // process budget larger than that contract so execFile cannot kill the
     // CLI before it can report its own success or startup failure.
@@ -251,15 +265,14 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
           // retrieval. Keep the empty project cwd separate from the service
           // home so the indexer cannot ingest state the daemon is still writing.
           cwd: runCwd,
-          env: {
-            ...process.env,
+          env: childEnv({
             GEZEL_HOME: runHome,
             GEZEL_MOCK_PROVIDER: '1',
             GEZEL_DISABLE_MACHINE_ENGINE: '1',
             GEZEL_SKIP_SYSTEM_BOOTSTRAP: '1',
             GEZEL_SECRETS_BACKEND: 'file',
             GEZEL_LOG_LEVEL: 'info',
-          },
+          }),
           // Cold service startup and shutdown contend with the other
           // integration workers in a full package run. Keep the child
           // deadline below the test deadline so failures surface from the
@@ -293,4 +306,66 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
     const { tasks } = await client.listProjectTasks(project!.id);
     expect(tasks.some((task) => task.craftbook.id === 'security-architecture-review')).toBe(true);
   });
+
+  it('adds, lists, toggles, and removes an AI App through the app subcommand', async () => {
+    // Build the fixture .gezapp through the daemon's own exporter — the
+    // export route writes it into the default project's artifacts drawer,
+    // and this test owns that home directory.
+    const exported = await client.exportAiApp('default', { typeId: 'just-chat' });
+    const fixturePath = join(gezelHome, 'projects', 'default', 'artifacts', exported.artifactPath);
+
+    const added = await runCli('app', 'add', fixturePath, '--yes');
+    expect(added.stderr).toBe('');
+    expect(added.stdout).toContain('Installed just-chat@');
+
+    const again = await runCli('app', 'add', fixturePath, '--yes');
+    expect(again.stdout).toContain('already installed — no changes');
+
+    const list = await runCli('app', 'list');
+    expect(list.stdout).toContain('just-chat');
+    expect(list.stdout).toContain('enabled');
+
+    const folder = await mkdtemp(join(tmpdir(), 'gezel-app-apply-'));
+    try {
+      const applied = await runCliAtHome(
+        gezelHome,
+        '--project',
+        folder,
+        'app',
+        'apply',
+        'just-chat',
+        '--yes',
+      );
+      expect(applied.stdout).toContain('Applied just-chat@');
+
+      const status = await runCliAtHome(gezelHome, '--project', folder, 'app', 'status');
+      expect(status.stdout).toContain('just-chat');
+      expect(status.stdout).not.toContain('Update available');
+
+      const noop = await runCliAtHome(
+        gezelHome,
+        '--project',
+        folder,
+        'app',
+        'apply',
+        'just-chat',
+        '--yes',
+      );
+      expect(noop.stdout).toContain('already applied');
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+
+    const disabled = await runCli('app', 'disable', 'just-chat');
+    expect(disabled.stdout).toContain('Disabled just-chat@');
+
+    const show = await runCli('app', 'show', 'just-chat');
+    expect(show.stdout).toContain('state: disabled');
+
+    const removed = await runCli('app', 'remove', 'just-chat', '--yes');
+    expect(removed.stdout).toContain('Uninstalled just-chat');
+
+    const empty = await runCli('app', 'list');
+    expect(empty.stdout).toContain('No AI Apps installed');
+  }, 90_000);
 });

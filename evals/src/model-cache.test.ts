@@ -1,14 +1,23 @@
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   adoptHistoricalLlamaCppAlias,
   assertMlxSourceComplete,
+  ensureWarmModel,
   isModelInstalled,
+  linkModelIntoTrial,
   staleInstallReason,
 } from './model-cache.ts';
 import { _resetSourceIndexCache } from './model-sources.ts';
+
+const spawnMocks = vi.hoisted(() => ({
+  spawnTrialDaemon: vi.fn(),
+  shutdownTrialDaemon: vi.fn(),
+}));
+
+vi.mock('./spawn.ts', () => spawnMocks);
 
 function makeDir(files: string[]): string {
   const dir = mkdtempSync(join(tmpdir(), 'gezel-mlx-src-'));
@@ -53,11 +62,92 @@ function writeInstall(
 }
 
 afterEach(() => {
+  spawnMocks.spawnTrialDaemon.mockReset();
+  spawnMocks.shutdownTrialDaemon.mockReset();
   if (originalGildeDataDir === undefined) delete process.env.GEZEL_GILDE_DATA_DIR;
   else process.env.GEZEL_GILDE_DATA_DIR = originalGildeDataDir;
   _resetSourceIndexCache();
   if (syntheticDataDir) rmSync(syntheticDataDir, { recursive: true, force: true });
   syntheticDataDir = undefined;
+});
+
+describe('ensureWarmModel', () => {
+  it('forwards cancellation, suppresses product companions, and exposes any unexpected one', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'gezel-model-warm-'));
+    const modelId = 'warm-test-model';
+    const modelDir = join(root, 'engines', 'llama-cpp', 'models', modelId);
+    const controller = new AbortController();
+    const logs: string[] = [];
+    const install = vi.fn(
+      async (
+        _id: string,
+        onEvent: (event: Record<string, unknown>) => void,
+        _signal?: AbortSignal,
+        _options?: { skipCompanion?: boolean },
+      ) => {
+        onEvent({
+          type: 'companion',
+          kind: 'image-recognition',
+          id: 'vision-test',
+          name: 'Vision Test',
+          bytesWritten: 50,
+          totalBytes: 100,
+        });
+        mkdirSync(modelDir, { recursive: true });
+        writeFileSync(join(modelDir, 'weights.gguf'), 'weights');
+        writeFileSync(
+          join(modelDir, 'manifest.json'),
+          JSON.stringify({ weightsFilename: 'weights.gguf' }),
+        );
+        onEvent({ type: 'done', id: modelId });
+      },
+    );
+    spawnMocks.spawnTrialDaemon.mockResolvedValue({
+      client: {
+        updateConfig: vi.fn().mockResolvedValue(undefined),
+        installLlamaCppModel: install,
+      },
+    });
+    spawnMocks.shutdownTrialDaemon.mockResolvedValue(undefined);
+
+    try {
+      await ensureWarmModel({
+        cacheRoot: root,
+        engine: 'llama-cpp',
+        modelId,
+        llamaBin: 'fake-llama-server',
+        signal: controller.signal,
+        log: (line) => logs.push(line),
+      });
+
+      expect(install).toHaveBeenCalledWith(modelId, expect.any(Function), controller.signal, {
+        skipCompanion: true,
+      });
+      expect(logs.join('\n')).toContain(
+        'unexpected companion Vision Test: 50% (50/100) despite skipCompanion',
+      );
+      expect(spawnMocks.shutdownTrialDaemon).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not spawn a warm daemon when cancellation already fired', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      ensureWarmModel({
+        cacheRoot: join(tmpdir(), 'gezel-model-warm-aborted'),
+        engine: 'llama-cpp',
+        modelId: 'warm-test-model',
+        llamaBin: 'fake-llama-server',
+        signal: controller.signal,
+        log: () => {},
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(spawnMocks.spawnTrialDaemon).not.toHaveBeenCalled();
+  });
 });
 
 describe('assertMlxSourceComplete', () => {
@@ -113,6 +203,37 @@ describe('isModelInstalled', () => {
 
     writeFileSync(join(modelDir, 'weights.safetensors'), 'complete');
     await expect(isModelInstalled(root, 'sd-cpp', 'sdxl-lightning-4step')).resolves.toBe(true);
+  });
+});
+
+describe('linkModelIntoTrial', () => {
+  it('materializes a real model directory instead of a rejected directory symlink', async () => {
+    const cacheRoot = mkdtempSync(join(tmpdir(), 'gezel-model-cache-'));
+    const trialHome = mkdtempSync(join(tmpdir(), 'gezel-model-trial-'));
+    const source = join(cacheRoot, 'engines', 'mlx', 'models', 'ornith1.5-9b-q4');
+    mkdirSync(join(source, 'nested'), { recursive: true });
+    writeFileSync(join(source, 'manifest.json'), '{"model":"ornith"}');
+    writeFileSync(join(source, 'nested', 'weights.safetensors'), 'weights');
+
+    try {
+      await linkModelIntoTrial({
+        cacheRoot,
+        trialHome,
+        engine: 'mlx',
+        modelId: 'ornith1.5-9b-q4',
+      });
+
+      const destination = join(trialHome, 'engines', 'mlx', 'models', 'ornith1.5-9b-q4');
+      expect(lstatSync(destination).isDirectory()).toBe(true);
+      expect(lstatSync(destination).isSymbolicLink()).toBe(false);
+      expect(readFileSync(join(destination, 'manifest.json'), 'utf8')).toContain('ornith');
+      expect(readFileSync(join(destination, 'nested', 'weights.safetensors'), 'utf8')).toBe(
+        'weights',
+      );
+    } finally {
+      rmSync(cacheRoot, { recursive: true, force: true });
+      rmSync(trialHome, { recursive: true, force: true });
+    }
   });
 });
 
@@ -258,7 +379,7 @@ describe('staleInstallReason', () => {
     ).resolves.toMatch(/sha256/);
   });
   // The MLX path cannot self-heal: those weights live in the user's dev home
-  // and the harness only symlinks them, so `runner.ts` fails the trial with a
+  // and the harness only clones them, so `runner.ts` fails the trial with a
   // re-pull instruction instead of evicting. Wild-caught 2026-07-31 —
   // correcting four gemma MLX sources left every installed copy stale, and the
   // re-test meant to validate the fix would have re-run the old weights.

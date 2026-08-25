@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type {
   CreateTaskRequest,
+  IndexReadinessReport,
   ScriptCapability,
   TaskCraftbookStep,
   UpdateTaskRequest,
+  WorkspaceIndexStatus,
 } from '@bendyline/gezel';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
@@ -98,6 +100,19 @@ export interface DispatcherDeps {
    * actual value at call time.
    */
   credentials?: CredentialRegistry;
+  /**
+   * Optional. When provided, the `index.*` methods forward to it. Wired
+   * by `service.ts` after the workspace-index and enrichment managers are
+   * constructed (they come up later in boot than the runner); until then
+   * those calls return a typed error.
+   */
+  index?: {
+    status(projectId: string): Promise<WorkspaceIndexStatus>;
+    ensureFresh(
+      projectId: string,
+      opts: { waitBudgetMs?: number; reviews?: boolean },
+    ): Promise<IndexReadinessReport>;
+  };
 }
 
 export class CapabilityDeniedError extends Error {
@@ -459,6 +474,28 @@ export function buildDispatcher(deps: DispatcherDeps): {
           throw new Error('mcp.call is not yet wired into ScriptRunner');
         }
         return deps.mcpCall(ctx, tool, args);
+      },
+    },
+
+    'index.status': {
+      capability: 'index.read',
+      handler: async (ctx) => {
+        if (!deps.index) throw new Error('index.status is not available (no index access wired)');
+        return deps.index.status(ctx.projectId);
+      },
+    },
+    'index.ensureFresh': {
+      capability: 'index.refresh',
+      handler: async (ctx, params) => {
+        if (!deps.index) {
+          throw new Error('index.ensureFresh is not available (no index access wired)');
+        }
+        const waitBudgetMs = param<number>(params, 'waitBudgetMs');
+        const reviews = param<boolean>(params, 'reviews');
+        return deps.index.ensureFresh(ctx.projectId, {
+          ...(typeof waitBudgetMs === 'number' ? { waitBudgetMs } : {}),
+          ...(typeof reviews === 'boolean' ? { reviews } : {}),
+        });
       },
     },
 

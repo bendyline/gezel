@@ -81,6 +81,21 @@ describe('securityReport gate', () => {
     expect(r.findingCount).toBe(3);
   });
 
+  it('falls back to a per-path read when the listing misses a real file', async () => {
+    const files: Record<string, string> = {
+      ...REAL_FILES,
+      'security-review/REPORT.md': GOOD_REPORT,
+      'security-review/findings.json': GOOD_FINDINGS,
+    };
+    const truncated: WorkspaceLike = {
+      read: async (f) => files[f] ?? null,
+      list: async () => ['security-review/REPORT.md', 'security-review/findings.json'],
+    };
+    const r = await securityReport(truncated, 'security-review/REPORT.md', opts);
+    expect(r.ok).toBe(true);
+    expect(r.findingCount).toBe(3);
+  });
+
   it('rejects and names a fabricated file citation', async () => {
     const findings = JSON.stringify([
       {

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "kind": "gezel-template",
+  "id": "example-habit-coach",
+  "name": "Habit Coach",
+  "description": "A quiet, encouraging coach who tracks habits without nagging.",
+  "role": "Coach",
+  "tags": ["example"],
+  "maintainer": {
+    "name": "Gezel"
+  },
+  "license": "MIT",
+  "yankedVersions": []
+}

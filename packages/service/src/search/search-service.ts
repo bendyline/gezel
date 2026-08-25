@@ -8,7 +8,7 @@ import type { Store } from '../fs/store.js';
 import { isLibraryInternalPath } from '../fs/sync-junk.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import type { GlobalIndex } from '../index-store/global-index.js';
-import { embedQuery } from '../memory/embeddings.js';
+import { embedQuery, embeddingPipelineStatus } from '../memory/embeddings.js';
 import type { MemoryManager } from '../memory/manager.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
 
@@ -319,6 +319,8 @@ export class SearchService {
       offset?: number;
       /** Keep only results under this forward-slashed path prefix. */
       pathPrefix?: string;
+      /** Answer from the keyword arms rather than wait for a cold embedder. */
+      skipColdEmbedder?: boolean;
     },
   ): Promise<{
     results: UnifiedSearchResult[];
@@ -338,6 +340,7 @@ export class SearchService {
       includeShared: opts.includeShared !== false,
       ...(opts.sources ? { sources: new Set(opts.sources) } : {}),
       ...(opts.projectIds[0] ? { primaryProjectId: opts.projectIds[0] } : {}),
+      ...(opts.skipColdEmbedder ? { skipColdEmbedder: true } : {}),
       // Scale per-source fetch with paging depth so page 2 has material to
       // page into; identical to PER_SOURCE_RESULTS at offset 0.
       perSourceResults: Math.min(25, Math.max(PER_SOURCE_RESULTS, Math.ceil(fetchDepth / 6))),
@@ -570,6 +573,14 @@ export class SearchService {
       perSourceResults?: number;
       /** The session project — resolves the knowledge-catalog policy. */
       primaryProjectId?: string;
+      /**
+       * Run keyword-only rather than wait for a cold/warming embedder. The
+       * model load is tens of seconds on a fresh install (minutes under
+       * memory pressure), and a chat turn's implicit retrieval must never
+       * hold the user's message hostage for it — same rule the auto-recall
+       * path follows. Explicit searches leave this off and wait.
+       */
+      skipColdEmbedder?: boolean;
     },
   ): Promise<{
     results: UnifiedSearchResult[];
@@ -588,10 +599,20 @@ export class SearchService {
 
     // Embed the query once; thread the vector into every per-project call.
     let vector: number[] | null = null;
-    try {
-      vector = await embedQuery(query);
-    } catch {
-      vector = null; // embeddings disabled → keyword/FTS only, no memory hits
+    const embedderStatus = embeddingPipelineStatus();
+    const embedderCold = embedderStatus === 'cold' || embedderStatus === 'warming';
+    if (scope?.skipColdEmbedder && embedderCold) {
+      // Answer from the keyword arms alone. Warming is the service's job (a
+      // deferred boot warm); kicking it from here would start a model load
+      // inside short-lived processes — `gezel run --standalone` boots a
+      // service, answers, and exits, and an in-process load outlives it.
+      log.debug(`skipping the vector arm while embeddings are ${embedderStatus}`);
+    } else {
+      try {
+        vector = await embedQuery(query);
+      } catch {
+        vector = null; // embeddings disabled → keyword/FTS only, no memory hits
+      }
     }
 
     // A scope that blows its per-scope budget means the results genuinely

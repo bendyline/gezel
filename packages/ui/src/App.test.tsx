@@ -331,6 +331,7 @@ describe('Night Shift header status', () => {
       windowEnd: new Date(Date.now() + 3 * 60 * 60_000).toISOString(),
       tasksCompleted: [finished],
       reports: [],
+      diffpacks: [],
     });
     const running = render(<App />);
     await user.click(await screen.findByRole('button', { name: 'Night Shift: on (scheduled)' }));
@@ -344,6 +345,7 @@ describe('Night Shift header status', () => {
       windowEnd: new Date(Date.now() - 4 * 60 * 60_000).toISOString(),
       tasksCompleted: [finished],
       reports: [],
+      diffpacks: [],
     });
     render(<App />);
     await user.click(await screen.findByRole('button', { name: 'Night Shift: off' }));

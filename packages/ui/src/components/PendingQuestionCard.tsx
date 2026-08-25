@@ -1,9 +1,11 @@
 import type {
+  ClaudeUserQuestionIntent,
   NpmInstallApprovalDecision,
   NpmInstallApprovalPackage,
   Question,
   Task,
 } from '@bendyline/gezel';
+import { parseTaskRef } from '@bendyline/gezel';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { RenderedMarkdown } from './chat-bubbles.js';
@@ -112,6 +114,15 @@ function QuestionBody({
       <ToolPermissionForm question={question} onAnswered={onAnswered} onOpenInChat={onOpenInChat} />
     );
   }
+  if (question.intent?.kind === 'claude-user-question') {
+    return (
+      <ClaudeUserQuestionForm
+        question={question}
+        onAnswered={onAnswered}
+        onOpenInChat={onOpenInChat}
+      />
+    );
+  }
   if (question.intent?.kind === 'toolset-install-approval') {
     return (
       <ToolsetInstallApprovalForm
@@ -141,6 +152,9 @@ function QuestionBody({
   }
   if (question.intent?.kind === 'night-shift-review') {
     return <NightShiftReviewCard question={question} onAnswered={onAnswered} />;
+  }
+  if (question.intent?.kind === 'task-paused') {
+    return <TaskPausedCard question={question} onAnswered={onAnswered} />;
   }
   return <PendingForm question={question} onAnswered={onAnswered} onOpenInChat={onOpenInChat} />;
 }
@@ -251,6 +265,118 @@ function NightShiftReviewCard({
       </div>
     </div>
   );
+}
+
+// ── Task paused for help ────────────────────────────────────────────
+//
+// A background task that hit a wall files this card (gate budget spent,
+// plateau, stalled step, spent task budget, a gate that couldn't run).
+// Dismissing it only collapses the card — the task stays paused — so the
+// card also carries the one move that gets the work going again:
+// "Try again" resets the recovery counters that tripped the pause, flips
+// the task active, and re-drives the assignee. Whether a second attempt
+// can succeed is the user's call: some pauses (a craftbook gate pinned on
+// a parameter that was never supplied) need an edit first, and the button
+// is there for the person who just made it.
+
+function TaskPausedCard({
+  question,
+  onAnswered,
+}: {
+  question: Question;
+  onAnswered?: (q: Question) => void;
+}) {
+  const [submitting, setSubmitting] = useState<'retry' | 'dismiss' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [held, setHeld] = useState<string | null>(null);
+
+  const dismiss = useCallback(async () => {
+    if (submitting) return;
+    setSubmitting('dismiss');
+    setError(null);
+    try {
+      const updated = await api.answerQuestion(question.id, { selectedChoices: [0] });
+      onAnswered?.(updated);
+    } catch (err) {
+      setError((err as Error).message ?? 'Failed to dismiss.');
+      setSubmitting(null);
+    }
+  }, [question.id, submitting, onAnswered]);
+
+  const retry = useCallback(async () => {
+    if (submitting) return;
+    const ref = question.taskRef ? parseTaskRef(question.taskRef) : null;
+    if (!ref) {
+      setError("This card doesn't name a task to retry.");
+      return;
+    }
+    setSubmitting('retry');
+    setError(null);
+    setHeld(null);
+    try {
+      const result = await api.retryTask(ref.projectId, ref.num);
+      // A hold that the user can act on keeps the card open with the
+      // explanation; anything else means the task is moving (or was
+      // already), so the card has done its job.
+      const blocking =
+        result.reason === 'no-active-step' ||
+        result.reason === 'no-assignee' ||
+        result.reason === 'project-inactive'
+          ? result.reason
+          : null;
+      if (blocking) {
+        setHeld(retryHoldText(blocking));
+        setSubmitting(null);
+        return;
+      }
+      const updated = await api.answerQuestion(question.id, { selectedChoices: [0] });
+      onAnswered?.(updated);
+    } catch (err) {
+      setError((err as Error).message ?? 'Failed to restart the task.');
+      setSubmitting(null);
+    }
+  }, [question.id, question.taskRef, submitting, onAnswered]);
+
+  return (
+    <div className="pending-question pending-question-pending">
+      <ContextStrip question={question} />
+      <div className="pending-question-prompt">
+        <RenderedMarkdown markdown={question.prompt} />
+      </div>
+      {held && <p className="pending-question-hold muted">{held}</p>}
+      {error && <p className="pending-question-error">{error}</p>}
+      <div className="pending-question-actions">
+        <button
+          type="button"
+          className="pending-question-submit"
+          onClick={() => void retry()}
+          disabled={submitting !== null || !question.taskRef}
+        >
+          {submitting === 'retry' ? 'Restarting…' : 'Try again'}
+        </button>
+        <button
+          type="button"
+          className="pending-question-skip subtle"
+          onClick={() => void dismiss()}
+          disabled={submitting !== null}
+        >
+          {submitting === 'dismiss' ? 'Saving…' : 'Dismiss'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Why the retry didn't put anyone back to work, in the user's terms. */
+function retryHoldText(reason: 'no-active-step' | 'no-assignee' | 'project-inactive'): string {
+  switch (reason) {
+    case 'no-active-step':
+      return 'The task is active again, but no step is current — open it and start one.';
+    case 'no-assignee':
+      return 'The task is active again, but its current step has nobody assigned — open it and pick a gezel.';
+    case 'project-inactive':
+      return "The task is active again, but this project isn't taking background work right now. Set it active in the project's settings.";
+  }
 }
 
 // ── Image generation approval (cloud provider cost gate) ───────────
@@ -511,7 +637,8 @@ function ToolPermissionForm({
       {Object.keys(intent.toolInput).length > 0 && (
         <details className="pending-question-tool-args" open>
           <summary>Arguments</summary>
-          <pre>
+          {/* biome-ignore lint/a11y/noNoninteractiveTabindex: this overflow viewport must be keyboard-scrollable. */}
+          <pre tabIndex={0}>
             <code>{argsPretty}</code>
           </pre>
         </details>
@@ -687,7 +814,18 @@ function AnsweredView({ question }: { question: Question }) {
 
 // ── Pending (interactive form) ──────────────────────────────────────
 
-function PendingForm({
+// ── Claude CLI AskUserQuestion (answered via the permission broker) ─
+//
+// The service's permission route intercepts Claude's native
+// AskUserQuestion tool and re-shapes each entry into a real question
+// card: the intent carries what the plain Question can't hold — option
+// descriptions, the CLI's short header chip, and the position within a
+// multi-question call. The answer flows back to the still-running
+// `claude` subprocess as `updatedInput.answers`, so the dismiss hints
+// differ from a plain question's: the gezel is mid-turn and continues
+// either way.
+
+function ClaudeUserQuestionForm({
   question,
   onAnswered,
   onOpenInChat,
@@ -695,6 +833,47 @@ function PendingForm({
   question: Question;
   onAnswered?: (q: Question) => void;
   onOpenInChat?: (question: Question) => void;
+}) {
+  const intent = question.intent as ClaudeUserQuestionIntent;
+  const kicker = [
+    intent.header,
+    intent.questionCount > 1
+      ? `question ${intent.questionIndex + 1} of ${intent.questionCount}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <PendingForm
+      question={question}
+      onAnswered={onAnswered}
+      onOpenInChat={onOpenInChat}
+      kicker={kicker || undefined}
+      choiceDescriptions={intent.options.map((o) => o.description)}
+      skipHint="Dismiss without answering. The gezel is still working and will carry on without this input."
+      justDoHint="Tell the gezel to decide on its own, using sensible defaults."
+    />
+  );
+}
+
+function PendingForm({
+  question,
+  onAnswered,
+  onOpenInChat,
+  kicker,
+  choiceDescriptions,
+  skipHint,
+  justDoHint,
+}: {
+  question: Question;
+  onAnswered?: (q: Question) => void;
+  onOpenInChat?: (question: Question) => void;
+  /** Small muted line above the prompt (header chip, "question 2 of 3"). */
+  kicker?: string;
+  /** Per-choice description lines, index-aligned with `question.choices`. */
+  choiceDescriptions?: (string | undefined)[];
+  skipHint?: string;
+  justDoHint?: string;
 }) {
   const allowWriteIn = question.allowWriteIn ?? true;
   const multi = question.multiSelect ?? false;
@@ -780,6 +959,7 @@ function PendingForm({
   return (
     <div className="pending-question pending-question-pending">
       <ContextStrip question={question} />
+      {kicker && <span className="pending-question-label muted">{kicker}</span>}
       <div className="pending-question-prompt">
         <RenderedMarkdown markdown={question.prompt} />
       </div>
@@ -804,11 +984,18 @@ function PendingForm({
               <button
                 key={choice}
                 type="button"
-                className={`pending-question-choice${selected.has(i) ? ' is-selected' : ''}`}
+                className={`pending-question-choice${selected.has(i) ? ' is-selected' : ''}${choiceDescriptions?.[i] ? ' pending-question-choice-described' : ''}`}
                 onClick={() => toggleChoice(i)}
                 aria-pressed={selected.has(i)}
               >
-                {choice}
+                {choiceDescriptions?.[i] ? (
+                  <>
+                    <span className="pending-question-choice-title">{choice}</span>
+                    <span className="pending-question-choice-desc">{choiceDescriptions[i]}</span>
+                  </>
+                ) : (
+                  choice
+                )}
               </button>
             ),
           )}
@@ -841,7 +1028,10 @@ function PendingForm({
               className="pending-question-skip subtle"
               onClick={() => void submit('silent-skip')}
               disabled={submitting}
-              title="Dismiss the question. The gezel keeps doing nothing — its turn already ended."
+              title={
+                skipHint ??
+                'Dismiss the question. The gezel keeps doing nothing — its turn already ended.'
+              }
             >
               Skip
             </button>
@@ -850,7 +1040,10 @@ function PendingForm({
               className="pending-question-skip subtle"
               onClick={() => void submit('just-do-whatever')}
               disabled={submitting}
-              title="Tell the gezel to proceed without your input, using sensible defaults."
+              title={
+                justDoHint ??
+                'Tell the gezel to proceed without your input, using sensible defaults.'
+              }
             >
               Just do whatever
             </button>

@@ -1,4 +1,5 @@
 export type { CheckResult, WorkspaceLike } from './types.js';
+export { citedPathKey, cleanCitedPath, createCitedPathChecker } from './workspace-exists.js';
 export {
   MIN_INLINE_JS_BYTES,
   detectTypeScriptOnlySyntax,
@@ -54,6 +55,11 @@ export {
   type SecurityReportResult,
 } from './security-report.js';
 export {
+  codebaseReviewReport,
+  type CodebaseReviewReportOptions,
+  type CodebaseReviewReportResult,
+} from './codebase-review-report.js';
+export {
   dataTableSniff,
   isRealIsoDate,
   parseCsv,
@@ -103,3 +109,9 @@ export {
   type PlanStructureResult,
   type PlanStructureSpec,
 } from './plan.js';
+export {
+  mergeCorpusCoverageShards,
+  type CorpusCoverageLedger,
+  type CorpusCoverageMergeResult,
+  type CorpusCoverageShardInput,
+} from './corpus-coverage.js';

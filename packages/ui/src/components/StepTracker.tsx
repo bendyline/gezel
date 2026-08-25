@@ -62,11 +62,131 @@ interface StepTrackerProps<T extends StepTrackerStep> {
   /** Bench-variant decoration per step. Ignored in `compact`. */
   stepOf?: (step: T, idx: number) => StepMeta;
   /**
+   * How a step reads to assistive tech. `tab` (default) is right where the
+   * tracker switches a docked step panel. `button` is for a read-only
+   * progress display whose steps merely lead somewhere else — it keeps the
+   * tracker out of any surrounding tablist and marks the current step with
+   * `aria-current`.
+   */
+  stepRole?: 'tab' | 'button';
+  /**
+   * `compact` only: wrap the chain in the horizontal-scroll scaffold the
+   * bench always uses, instead of letting it wrap onto more rows. Pair with
+   * a container that constrains the width (`min-width: 0`).
+   */
+  scroll?: boolean;
+  /**
+   * Keep this step scrolled to the middle of the viewport — "where am I"
+   * stays readable without dragging. Only meaningful when scrolling.
+   */
+  centerStepId?: string | null;
+  /**
    * Bench-only terminal marker pinned to the right end of the rail when the
    * whole task has finished — the task's own end state (not any step's).
    * `tone` picks the dot's color; `word` is the caption beneath it.
    */
   terminal?: { word: string; tone: 'complete' | 'canceled' };
+}
+
+/**
+ * Horizontal-scroll scaffold shared by the bench and the scrolling compact
+ * tracker. The viewport scrolls natively (so trackpad/wheel work) with its
+ * native scrollbar hidden, and a synthetic thumb is mirrored ABOVE the
+ * track — a bottom scrollbar would sever the selected step's connection to
+ * the panel docked below it.
+ */
+function TrackerScroll({
+  children,
+  remeasureKey,
+  centerStepId,
+}: {
+  children: ReactNode;
+  /** Changes when the content width can have changed without the box resizing. */
+  remeasureKey: number;
+  /** Step to keep in the middle of the viewport. */
+  centerStepId?: string | null;
+}) {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [box, setBox] = useState({ left: 0, client: 0, scroll: 0 });
+  const max = Math.max(0, box.scroll - box.client);
+  const overflowing = max > 1;
+  const thumbFrac = box.scroll > 0 ? Math.min(1, box.client / box.scroll) : 1;
+  const thumbLeftFrac = max > 0 ? box.left / max : 0;
+
+  const measure = useCallback(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    setBox({ left: vp.scrollLeft, client: vp.clientWidth, scroll: vp.scrollWidth });
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies(remeasureKey): a step-count change alters scrollWidth without resizing the viewport box, so the ResizeObserver never fires for it — the extra dep IS the re-measure trigger.
+  useLayoutEffect(() => {
+    measure();
+    const vp = viewportRef.current;
+    if (!vp || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(vp);
+    return () => ro.disconnect();
+  }, [measure, remeasureKey]);
+
+  // Re-centre when the step changes, when the content grows, or when the
+  // viewport is resized — box.client is the resize signal. Matched against
+  // the data attribute rather than a selector so a step id needs no escaping.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: neither the step count nor the viewport width is read here, but both change where the centred step sits — they ARE the re-centre triggers.
+  useLayoutEffect(() => {
+    if (!centerStepId) return;
+    const vp = viewportRef.current;
+    if (!vp) return;
+    const el = Array.from(vp.querySelectorAll<HTMLElement>('[data-step-id]')).find(
+      (candidate) => candidate.dataset.stepId === centerStepId,
+    );
+    if (!el) return;
+    const vpRect = vp.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+    const delta = elRect.left + elRect.width / 2 - (vpRect.left + vpRect.width / 2);
+    if (Math.abs(delta) > 1) vp.scrollLeft += delta;
+  }, [centerStepId, remeasureKey, box.client]);
+
+  const drag = useRef<{ x: number; left: number } | null>(null);
+  const onThumbDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    drag.current = { x: e.clientX, left: box.left };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  };
+  const onThumbMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const d = drag.current;
+    const vp = viewportRef.current;
+    if (!d || !vp) return;
+    const usable = box.client * (1 - thumbFrac);
+    if (usable <= 0) return;
+    vp.scrollLeft = d.left + ((e.clientX - d.x) / usable) * max;
+  };
+  const onThumbUp = () => {
+    drag.current = null;
+  };
+
+  return (
+    <div className="bench-scroll">
+      {overflowing && (
+        <div className="bench-scrollbar" aria-hidden="true">
+          <div
+            className="bench-scrollbar-thumb"
+            style={{
+              width: `${thumbFrac * 100}%`,
+              left: `${thumbLeftFrac * (1 - thumbFrac) * 100}%`,
+            }}
+            onPointerDown={onThumbDown}
+            onPointerMove={onThumbMove}
+            onPointerUp={onThumbUp}
+            onPointerCancel={onThumbUp}
+          />
+        </div>
+      )}
+      <div className="bench-viewport" ref={viewportRef} onScroll={measure}>
+        {children}
+      </div>
+    </div>
+  );
 }
 
 function statusGlyph(status: StepStatus): string {
@@ -102,56 +222,12 @@ export function StepTracker<T extends StepTrackerStep>({
   addLabel = 'Add',
   variant = 'compact',
   stepOf,
+  stepRole = 'tab',
+  scroll = false,
+  centerStepId,
   terminal,
 }: StepTrackerProps<T>) {
   const dragId = useRef<string | null>(null);
-
-  // Horizontal scroll for the bench: the viewport scrolls natively (so
-  // trackpad/wheel work), its native scrollbar is hidden, and a synthetic
-  // thumb is mirrored ABOVE the rail — a bottom scrollbar would sever the
-  // selected step's connection to the docked panel below. Steps carry a
-  // min-width so they never crush into each other; past the viewport width the
-  // bench scrolls instead.
-  const benchViewportRef = useRef<HTMLDivElement | null>(null);
-  const [bench, setBench] = useState({ left: 0, client: 0, scroll: 0 });
-  const benchMax = Math.max(0, bench.scroll - bench.client);
-  const benchOverflowing = benchMax > 1;
-  const thumbFrac = bench.scroll > 0 ? Math.min(1, bench.client / bench.scroll) : 1;
-  const thumbLeftFrac = benchMax > 0 ? bench.left / benchMax : 0;
-
-  const measureBench = useCallback(() => {
-    const vp = benchViewportRef.current;
-    if (!vp) return;
-    setBench({ left: vp.scrollLeft, client: vp.clientWidth, scroll: vp.scrollWidth });
-  }, []);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies(steps.length): a step-count change alters scrollWidth without resizing the viewport box, so the ResizeObserver never fires for it — the extra dep IS the re-measure trigger.
-  useLayoutEffect(() => {
-    measureBench();
-    const vp = benchViewportRef.current;
-    if (!vp || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measureBench);
-    ro.observe(vp);
-    return () => ro.disconnect();
-  }, [measureBench, steps.length]);
-
-  const benchDrag = useRef<{ x: number; left: number } | null>(null);
-  const onThumbDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    benchDrag.current = { x: e.clientX, left: bench.left };
-    e.currentTarget.setPointerCapture(e.pointerId);
-    e.preventDefault();
-  };
-  const onThumbMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const d = benchDrag.current;
-    const vp = benchViewportRef.current;
-    if (!d || !vp) return;
-    const usable = bench.client * (1 - thumbFrac);
-    if (usable <= 0) return;
-    vp.scrollLeft = d.left + ((e.clientX - d.x) / usable) * benchMax;
-  };
-  const onThumbUp = () => {
-    benchDrag.current = null;
-  };
 
   const move = (fromId: string, toId: string, placeAfter: boolean) => {
     if (!onReorder || fromId === toId) return;
@@ -204,136 +280,124 @@ export function StepTracker<T extends StepTrackerStep>({
 
   if (variant === 'bench') {
     return (
-      <div className="bench-scroll">
-        {benchOverflowing && (
-          <div className="bench-scrollbar" aria-hidden="true">
-            <div
-              className="bench-scrollbar-thumb"
-              style={{
-                width: `${thumbFrac * 100}%`,
-                left: `${thumbLeftFrac * (1 - thumbFrac) * 100}%`,
-              }}
-              onPointerDown={onThumbDown}
-              onPointerMove={onThumbMove}
-              onPointerUp={onThumbUp}
-              onPointerCancel={onThumbUp}
-            />
-          </div>
-        )}
-        <div className="bench-viewport" ref={benchViewportRef} onScroll={measureBench}>
-          <nav className="step-tracker step-bench" aria-label={ariaLabel} role="tablist">
-            <span className="step-rail" aria-hidden="true" />
-            {steps.length === 0 && (
-              <span className="step-tracker-empty muted small">No steps yet —</span>
-            )}
-            {steps.map((step, idx) => {
-              const status = statusOf ? statusOf(step, idx) : 'pending';
-              const selected = step.id === selectedStepId;
-              const isEntry = entryStepId != null && step.id === entryStepId;
-              const meta = stepOf?.(step, idx) ?? {};
-              const num = String(idx + 1).padStart(2, '0');
-              const cls = [
-                'bench-step',
-                `status-${status}`,
-                selected ? 'selected' : '',
-                isEntry ? 'entry' : '',
-              ]
-                .filter(Boolean)
-                .join(' ');
-              return (
-                <div key={step.id} className={cls}>
-                  <span className="bench-step-assignee">
-                    {meta.assigneeControl ??
-                      (meta.assigneeName && (
-                        <>
-                          <span className="bench-step-assignee-name">{meta.assigneeName}</span>
-                          {meta.assigneeRole && (
-                            <span className="bench-step-assignee-role">{meta.assigneeRole}</span>
-                          )}
-                        </>
-                      ))}
-                  </span>
-                  <span className="bench-step-stage">
-                    <button
-                      type="button"
-                      className="bench-step-marker"
-                      onClick={() => onSelect(step.id)}
-                      onKeyDown={(e) => handleKey(e, idx)}
-                      disabled={busy}
-                      role="tab"
-                      aria-selected={selected}
-                      {...dndProps(step.id)}
-                      title={stepTitle(step, status, isEntry)}
-                    >
-                      {meta.figure ?? (
-                        <span className="bench-peg" aria-hidden="true">
-                          {status === 'done' ? '✓' : isEntry && status === 'pending' ? '▸' : ''}
-                        </span>
-                      )}
-                    </button>
-                  </span>
-                  <button
-                    type="button"
-                    className="bench-step-foot"
-                    onClick={() => onSelect(step.id)}
-                    disabled={busy}
-                    tabIndex={-1}
-                    title={stepTitle(step, status, isEntry)}
-                  >
-                    <span className="bench-step-num">{num}</span>
-                    <span className="bench-step-name">{step.name}</span>
-                    {meta.statusWord && (
-                      <span className="bench-step-status">{meta.statusWord}</span>
-                    )}
-                  </button>
-                </div>
-              );
-            })}
-            {onAddStep && (
-              <div className="bench-step bench-step-add">
-                <span className="bench-step-assignee" />
+      <TrackerScroll remeasureKey={steps.length} centerStepId={centerStepId}>
+        <nav className="step-tracker step-bench" aria-label={ariaLabel} role="tablist">
+          <span className="step-rail" aria-hidden="true" />
+          {steps.length === 0 && (
+            <span className="step-tracker-empty muted small">No steps yet —</span>
+          )}
+          {steps.map((step, idx) => {
+            const status = statusOf ? statusOf(step, idx) : 'pending';
+            const selected = step.id === selectedStepId;
+            const isEntry = entryStepId != null && step.id === entryStepId;
+            const meta = stepOf?.(step, idx) ?? {};
+            const num = String(idx + 1).padStart(2, '0');
+            const cls = [
+              'bench-step',
+              `status-${status}`,
+              selected ? 'selected' : '',
+              isEntry ? 'entry' : '',
+            ]
+              .filter(Boolean)
+              .join(' ');
+            return (
+              <div key={step.id} className={cls} data-step-id={step.id}>
+                <span className="bench-step-assignee">
+                  {meta.assigneeControl ??
+                    (meta.assigneeName && (
+                      <>
+                        <span className="bench-step-assignee-name">{meta.assigneeName}</span>
+                        {meta.assigneeRole && (
+                          <span className="bench-step-assignee-role">{meta.assigneeRole}</span>
+                        )}
+                      </>
+                    ))}
+                </span>
                 <span className="bench-step-stage">
                   <button
                     type="button"
                     className="bench-step-marker"
-                    onClick={onAddStep}
+                    onClick={() => onSelect(step.id)}
+                    onKeyDown={(e) => handleKey(e, idx)}
                     disabled={busy}
-                    title="Add a step"
-                    aria-label="Add a step"
+                    role="tab"
+                    aria-selected={selected}
+                    {...dndProps(step.id)}
+                    title={stepTitle(step, status, isEntry)}
                   >
-                    <span className="bench-peg is-add" aria-hidden="true">
-                      +
-                    </span>
+                    {meta.figure ?? (
+                      <span className="bench-peg" aria-hidden="true">
+                        {status === 'done' ? '✓' : isEntry && status === 'pending' ? '▸' : ''}
+                      </span>
+                    )}
                   </button>
                 </span>
-                <span className="bench-step-foot">
-                  <span className="bench-step-num" aria-hidden="true" />
-                  <span className="bench-step-name muted">{addLabel}</span>
-                </span>
+                <button
+                  type="button"
+                  className="bench-step-foot"
+                  onClick={() => onSelect(step.id)}
+                  disabled={busy}
+                  tabIndex={-1}
+                  title={stepTitle(step, status, isEntry)}
+                >
+                  <span className="bench-step-num">{num}</span>
+                  <span className="bench-step-name">{step.name}</span>
+                  {meta.statusWord && <span className="bench-step-status">{meta.statusWord}</span>}
+                </button>
               </div>
-            )}
-            {terminal && (
-              <div className={`bench-step bench-step-terminal terminal-${terminal.tone}`}>
-                <span className="bench-step-assignee" />
-                <span className="bench-step-stage">
-                  <span className="bench-peg bench-peg-terminal" aria-hidden="true">
-                    {terminal.tone === 'complete' ? '✓' : '✕'}
+            );
+          })}
+          {onAddStep && (
+            <div className="bench-step bench-step-add">
+              <span className="bench-step-assignee" />
+              <span className="bench-step-stage">
+                <button
+                  type="button"
+                  className="bench-step-marker"
+                  onClick={onAddStep}
+                  disabled={busy}
+                  title="Add a step"
+                  aria-label="Add a step"
+                >
+                  <span className="bench-peg is-add" aria-hidden="true">
+                    +
                   </span>
+                </button>
+              </span>
+              <span className="bench-step-foot">
+                <span className="bench-step-num" aria-hidden="true" />
+                <span className="bench-step-name muted">{addLabel}</span>
+              </span>
+            </div>
+          )}
+          {terminal && (
+            <div className={`bench-step bench-step-terminal terminal-${terminal.tone}`}>
+              <span className="bench-step-assignee" />
+              <span className="bench-step-stage">
+                <span className="bench-peg bench-peg-terminal" aria-hidden="true">
+                  {terminal.tone === 'complete' ? '✓' : '✕'}
                 </span>
-                <span className="bench-step-foot">
-                  <span className="bench-step-num" aria-hidden="true" />
-                  <span className="bench-step-status">{terminal.word}</span>
-                </span>
-              </div>
-            )}
-          </nav>
-        </div>
-      </div>
+              </span>
+              <span className="bench-step-foot">
+                <span className="bench-step-num" aria-hidden="true" />
+                <span className="bench-step-status">{terminal.word}</span>
+              </span>
+            </div>
+          )}
+        </nav>
+      </TrackerScroll>
     );
   }
 
-  return (
-    <nav className="step-tracker" aria-label={ariaLabel} role="tablist">
+  // A tracker whose steps merely lead elsewhere is not a tablist, and must
+  // not join the tablist of whatever surrounds it (the chat rail has one).
+  const asTabs = stepRole === 'tab';
+  const chain = (
+    <nav
+      className="step-tracker"
+      aria-label={ariaLabel}
+      {...(asTabs ? { role: 'tablist' } : { role: 'group' })}
+    >
       {steps.length === 0 && <span className="step-tracker-empty muted small">No steps yet —</span>}
       {steps.map((step, idx) => {
         const status = statusOf ? statusOf(step, idx) : 'pending';
@@ -348,15 +412,16 @@ export function StepTracker<T extends StepTrackerStep>({
           .filter(Boolean)
           .join(' ');
         return (
-          <span key={step.id} className="step-dot-wrap">
+          <span key={step.id} className="step-dot-wrap" data-step-id={step.id}>
             <button
               type="button"
               className={stepCls}
               onClick={() => onSelect(step.id)}
               onKeyDown={(e) => handleKey(e, idx)}
               disabled={busy}
-              role="tab"
-              aria-selected={selected}
+              {...(asTabs
+                ? { role: 'tab' as const, 'aria-selected': selected }
+                : { 'aria-current': selected ? ('step' as const) : undefined })}
               {...dndProps(step.id)}
               title={stepTitle(step, status, isEntry)}
             >
@@ -392,5 +457,12 @@ export function StepTracker<T extends StepTrackerStep>({
         </>
       )}
     </nav>
+  );
+
+  if (!scroll) return chain;
+  return (
+    <TrackerScroll remeasureKey={steps.length} centerStepId={centerStepId}>
+      {chain}
+    </TrackerScroll>
   );
 }

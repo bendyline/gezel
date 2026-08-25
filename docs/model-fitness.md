@@ -113,10 +113,30 @@ the pure [composeFitnessBadge](../packages/core/src/fitness-badge.ts):
   in a moment.
 - **`not checked yet`** — no fresh record; run the check.
 
-Badges appear on the installed-models table (Settings → Local models) with the
-run/re-run action, and as a warn pill on the ModelPicker when a selected local
+Under the badge, the same cell prints the **prefill rate** — how fast the model
+*read* the check prompt. Decode alone is a half-answer on a large model: a
+DwarfStar build streams routed experts from SSD and can write at a comfortable
+rate while still taking a minute and a half to read 20K tokens, and that wait is
+what the user feels. Only llama-server and MLX report their own prefill timing;
+where the engine reports none, [fitnessThroughput](../packages/core/src/fitness-badge.ts)
+derives it from uncached prompt tokens ÷ time-to-first-output and marks it
+approximate (`prefill ~235 t/s`). The probe's warm second turn is what makes
+that fair — the engine is already loaded, so the pre-first-token window *is*
+prefill. Measured against four records whose engine did report a rate (388,
+498, 2437 and 3797 t/s), the derived value came in 0.4–1.2% low in every case;
+it lags by the first token's own decode and nothing else. A turn served almost entirely from prompt cache is left blank rather
+than reported: dividing a handful of uncached tokens by a whole TTFT measures
+the cache lookup, not the model.
+
+Badges appear on the installed-models table of every supervised engine —
+Settings → Local models, MLX, and DwarfStar — with the run/re-run action in the
+row's overflow menu, and as a warn pill on the ModelPicker when a selected local
 model has a fresh non-admitted record. They never disable a model — a warn pill
-next to a model you deliberately want is information, not a veto.
+next to a model you deliberately want is information, not a veto. The DwarfStar
+page lists downloadable builds in the same table as installed ones (its
+downloads run to hundreds of GB, so the memory and context guidance has to be
+readable before one starts); those rows say `after download`, because the check
+measures *this* machine and there is nothing to measure yet.
 
 ## Fleet policy by hardware class
 
@@ -232,4 +252,5 @@ dedicated routing eval opts back in via `TrialOptions.enableModelRouting`.
 | HTTP surface | [packages/service/src/http/routes/model-fitness.ts](../packages/service/src/http/routes/model-fitness.ts) |
 | Routing ranker (pure) | [packages/service/src/chat/model-routing.ts](../packages/service/src/chat/model-routing.ts) |
 | Floor derivation + threading | [packages/service/src/tasks/runner.ts](../packages/service/src/tasks/runner.ts), [chat/manager.ts](../packages/service/src/chat/manager.ts) |
-| UI badges + hints | [packages/ui/src/components/LlamaCppModelManager.tsx](../packages/ui/src/components/LlamaCppModelManager.tsx), [ModelPicker.tsx](../packages/ui/src/components/ModelPicker.tsx) |
+| UI fitness column (shared) | [packages/ui/src/components/ModelFitnessCell.tsx](../packages/ui/src/components/ModelFitnessCell.tsx) |
+| UI badges + hints | [packages/ui/src/components/LlamaCppModelManager.tsx](../packages/ui/src/components/LlamaCppModelManager.tsx), [MlxModelManager.tsx](../packages/ui/src/components/MlxModelManager.tsx), [Ds4ModelManager.tsx](../packages/ui/src/components/Ds4ModelManager.tsx), [ModelPicker.tsx](../packages/ui/src/components/ModelPicker.tsx) |

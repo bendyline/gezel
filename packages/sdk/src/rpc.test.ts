@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
   writes: [] as string[],
+  writeOutcomes: [] as Array<number | { code: string }>,
   sockets: [] as Array<{
     handlers: Map<string, (...args: unknown[]) => void>;
     emit(event: string, ...args: unknown[]): void;
@@ -11,8 +12,13 @@ const state = vi.hoisted(() => ({
 vi.mock('node:fs', () => ({
   readFileSync: vi.fn(() => ''),
   writeSync: vi.fn((_fd: number, buffer: Buffer, offset: number, length: number) => {
-    state.writes.push(buffer.subarray(offset, offset + length).toString('utf8'));
-    return length;
+    const outcome = state.writeOutcomes.shift();
+    if (typeof outcome === 'object') {
+      throw Object.assign(new Error(outcome.code), { code: outcome.code });
+    }
+    const written = Math.min(outcome ?? length, length);
+    state.writes.push(buffer.subarray(offset, offset + written).toString('utf8'));
+    return written;
   }),
 }));
 
@@ -43,6 +49,7 @@ import { RpcClient } from './rpc.js';
 
 beforeEach(() => {
   state.writes.length = 0;
+  state.writeOutcomes.length = 0;
   state.sockets.length = 0;
   delete process.env.GEZEL_SCRIPT_RUNTIME;
 });
@@ -69,6 +76,18 @@ describe('RpcClient framing', () => {
 
     expect(state.writes.join('')).toBe('{"method":"output","params":{"ok":true}}\n');
     expect(state.sockets).toHaveLength(0);
+  });
+
+  it.each(['EAGAIN', 'EWOULDBLOCK'])('retries partial writes after %s', (code) => {
+    state.writeOutcomes.push(8, { code });
+    const client = new RpcClient();
+    const value = 'x'.repeat(128);
+
+    client.notify('output', { value });
+
+    expect(state.writes.join('')).toBe(
+      `${JSON.stringify({ method: 'output', params: { value } })}\n`,
+    );
   });
 
   it('correlates a fragmented response with its pending call', async () => {

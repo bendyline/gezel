@@ -60,16 +60,47 @@ export function NightReviewPanel({ review }: { review: NightShiftReviewResponse 
   );
 
   const actionTotal = review.reports.reduce((n, r) => n + r.actionCounts.suggested, 0);
+  const proposals = review.diffpacks;
 
   return (
     <div className="home-workshop-status-report" role="tabpanel" data-testid="night-review-panel">
       <p className="home-workshop-night-summary">
         {review.tasksCompleted.length} task{review.tasksCompleted.length === 1 ? '' : 's'} finished
         overnight, {review.reports.length} report{review.reports.length === 1 ? '' : 's'} written
+        {proposals.length > 0
+          ? `, ${proposals.length} change proposal${proposals.length === 1 ? '' : 's'} waiting`
+          : ''}
         {actionTotal > 0
           ? ` — ${actionTotal} suggested action${actionTotal === 1 ? '' : 's'} to review.`
           : '.'}
       </p>
+      {/* Proposals lead the panel: they are the part of the night that is
+          waiting on a decision rather than on being read. */}
+      {proposals.length > 0 && (
+        <div className="home-workshop-night-reports">
+          {proposals.map((pack) => (
+            <button
+              key={`${pack.projectId}:${pack.packId}`}
+              type="button"
+              className="home-workshop-night-report-row"
+              onClick={() =>
+                window.dispatchEvent(
+                  new CustomEvent('gezel:open-tab', {
+                    detail: { kind: 'project', id: pack.projectId, activate: true },
+                  }),
+                )
+              }
+            >
+              <span className="home-workshop-night-report-title">{pack.title}</span>
+              <span className="muted small">
+                {pack.projectName} · {pack.fileCount} file{pack.fileCount === 1 ? '' : 's'} · +
+                {pack.additions} −{pack.deletions}
+                {pack.drifted ? ' · out of date' : ''}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
       {primary && (
         <div className="home-workshop-status-body">
           {primaryDoc ? (

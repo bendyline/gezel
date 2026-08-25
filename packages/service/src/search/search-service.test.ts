@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Mock the embedding pipeline so the content fan-out doesn't load
 // transformers.js (and so we can assert it's called exactly once).
 const embedMock = vi.fn(async (_text: string) => [0.1, 0.2, 0.3]);
+const embeddingStatusMock = vi.fn(() => 'ready' as 'cold' | 'warming' | 'ready');
 vi.mock('../memory/embeddings.js', () => ({
   embed: (text: string) => embedMock(text),
   embedQuery: (text: string) => embedMock(text),
+  embeddingPipelineStatus: () => embeddingStatusMock(),
 }));
 
 import type { Store } from '../fs/store.js';
@@ -100,6 +102,7 @@ function makeService(
 
 beforeEach(() => {
   embedMock.mockClear();
+  embeddingStatusMock.mockReturnValue('ready');
 });
 
 describe('fuzzyScore', () => {
@@ -535,6 +538,41 @@ describe('SearchService.searchProject', () => {
     });
     expect(code as unknown as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
     expect(results.map((result) => result.retrievalSource)).toEqual(['shared']);
+  });
+
+  it('answers from the keyword arms rather than wait for a cold embedder', async () => {
+    const code = vi.fn(async () => ({
+      results: [{ path: 'src/physics.ts', lineStart: 1, snippet: 'physics', score: 0.8 }],
+      engine: 'fts',
+      truncated: false,
+    })) as unknown as ContentIndex['searchCode'];
+    const svc = makeService({ projects: [{ id: 'p1', name: 'Driving Game' }], code });
+    embeddingStatusMock.mockReturnValue('warming');
+
+    const { results } = await svc.searchProject('physics', {
+      projectIds: ['p1'],
+      skipColdEmbedder: true,
+    });
+
+    expect(embedMock).not.toHaveBeenCalled();
+    expect((code as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[2]).not.toHaveProperty(
+      'queryVector',
+    );
+    expect(results.map((result) => result.path)).toContain('src/physics.ts');
+  });
+
+  it('waits for the embedder when the caller did not opt out', async () => {
+    const code = vi.fn(async () => ({
+      results: [],
+      engine: 'fts',
+      truncated: false,
+    })) as unknown as ContentIndex['searchCode'];
+    const svc = makeService({ projects: [{ id: 'p1', name: 'Driving Game' }], code });
+    embeddingStatusMock.mockReturnValue('cold');
+
+    await svc.searchProject('physics', { projectIds: ['p1'] });
+
+    expect(embedMock).toHaveBeenCalledTimes(1);
   });
 });
 

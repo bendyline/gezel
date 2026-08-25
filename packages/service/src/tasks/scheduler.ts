@@ -383,11 +383,28 @@ export class TaskScheduler {
     const sender = project?.voormanGezelId ?? opts.meesterGezelId;
     if (!sender || sender === assignee) return;
 
+    // `requireChange` deliberately prevents the idle auto-advance above:
+    // only a write observed during a model turn can clear that gate. The
+    // deliverable can therefore already exist here (for example, a turn
+    // wrote it and then aborted before its progress was settled). Inspect
+    // the actual surface so the recovery prompt never falsely says the
+    // file is missing and sends a small model back into a rewrite loop.
+    const deliverableExists = step.advanceWhen?.file
+      ? await (step.advanceWhen.artifact
+          ? this.store.readProjectArtifact(task.projectId, step.advanceWhen.file)
+          : this.store.readProjectWorkspaceFile(task.projectId, step.advanceWhen.file)
+        )
+          .then((content) => content !== null)
+          .catch(() => false)
+      : undefined;
+
     await this.chat.messageGezel({
       fromGezelId: sender,
       toGezelIdOrName: assignee,
       projectId: task.projectId,
-      text: gateFrozen ? stuckStepGateNudgeText(task, step) : stuckStepNudgeText(task, step),
+      text: gateFrozen
+        ? stuckStepGateNudgeText(task, step)
+        : stuckStepNudgeText(task, step, deliverableExists),
       // Resume the exact task-step thread. Without these fields the nudge
       // falls into lobby chat and task tools lose their step-scoped env.
       taskRef: task.ref,
@@ -1024,9 +1041,15 @@ function stepActivityMs(step: TaskCraftbookStep): number {
  * Deliberately concrete (names the deliverable + the advance tool) — a
  * vague "any update?" is what let the step stall in the first place.
  */
-function stuckStepNudgeText(task: Task, step: TaskCraftbookStep): string {
+function stuckStepNudgeText(
+  task: Task,
+  step: TaskCraftbookStep,
+  deliverableExists?: boolean,
+): string {
   const deliverable = step.advanceWhen?.file
-    ? ` The deliverable \`${step.advanceWhen.file}\`${step.advanceWhen.artifact ? ' (in the artifacts drawer)' : ''} isn't there yet.`
+    ? deliverableExists
+      ? ` The deliverable \`${step.advanceWhen.file}\`${step.advanceWhen.artifact ? ' (in the artifacts drawer)' : ''} exists, but it has not cleared this step's progress gate yet. Continue from the existing file; do not claim it is missing.`
+      : ` The deliverable \`${step.advanceWhen.file}\`${step.advanceWhen.artifact ? ' (in the artifacts drawer)' : ''} isn't there yet.`
     : '';
   const howTo =
     'Pick up where you left off: follow the step procedure in your prompt, write the deliverable with the tool it names, then call `advance_task_step` to hand off. ' +

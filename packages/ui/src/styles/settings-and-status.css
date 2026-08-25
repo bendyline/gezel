@@ -162,11 +162,32 @@
 }
 .settings-nav-group-label {
   flex: 1 1 auto;
+  min-width: 0;
   /* A touch of left padding so the label has breathing room inside its
      selection bubble rather than hugging the left border, while staying
      clearly left of its indented children below. */
   padding-left: 0.4rem;
   font-weight: 600;
+}
+
+/* A group header may carry a second line summarising what the group is set
+   to (the AI header names the default engine + model). The title keeps the
+   header weight; the subline reads as caption text. */
+.settings-nav-group-title {
+  display: block;
+}
+.settings-nav-group-sub {
+  display: block;
+  margin-top: 0.1rem;
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  line-height: 1.25;
+  opacity: 0.62;
+  /* One line — a long engine + model pair truncates rather than pushing the
+     rest of the nav down. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .settings-panel {
@@ -1620,6 +1641,58 @@
 .project-index-panel-details dd {
   margin: 0;
   text-align: right;
+}
+
+/* Skipped-summary hover: the count alone can't be acted on, the paths can. */
+.project-index-skipped-trigger {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: right;
+  cursor: help;
+  text-decoration: underline dotted color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 0.15em;
+}
+
+.gz-tooltip-content:has(> .project-index-skipped-tip) {
+  max-width: 26rem;
+}
+
+.project-index-skipped-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  text-align: left;
+}
+
+.project-index-skipped-tip ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project-index-skipped-tip li {
+  display: flex;
+  flex-direction: column;
+}
+
+.project-index-skipped-path {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.project-index-skipped-reason,
+.project-index-skipped-more,
+.project-index-skipped-note {
+  color: color-mix(in srgb, currentColor 70%, transparent);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
 }
 
 .project-index-panel-footer {

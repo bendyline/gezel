@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { projectLocalIndexDbFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveImportEdges } from '../filemap/affinity.js';
+import type { Store } from '../fs/store.js';
+import { ContentIndex } from '../index-store/content-index.js';
 import { runWorkspaceContentIndex } from '../index-store/content-indexer.js';
 import { IndexStore } from '../index-store/index-store.js';
 import { runSecurityScan } from './scan.js';
@@ -35,6 +37,12 @@ const FIXTURE: Record<string, string> = {
     'const apiKey = "sk_live_9fKd83jZq0PqLmN4vTx7Bc12";\nmodule.exports = { apiKey };\n',
   'src/exec.js':
     "const cp = require('child_process');\nfunction convert(req) {\n  return cp.exec('convert ' + req.query.file);\n}\nmodule.exports = convert;\n",
+  // Non-npm grammars whose import specifiers must NOT become npm dependencies,
+  // plus JS import shapes the sweep must and must not pick up.
+  'native/util.py': 'import asyncio\nfrom PIL import Image\n',
+  'native/main.c': '#include <windows.h>\n#include <stdio.h>\n',
+  'src/plugins.js':
+    "const undeclared = require('leftpad-classic');\nasync function load(base, name) {\n  return import(`${base}/plugins/${name}.js`);\n}\nmodule.exports = load;\n",
 };
 
 let dir: string;
@@ -85,9 +93,36 @@ describe('security-intel end-to-end', () => {
     const secret = byCat('secret').find((f) => f.filePath === 'src/config.js');
     expect(secret?.evidence ?? '').not.toContain('sk_live_9fKd83jZq0PqLmN4vTx7Bc12');
 
-    // 3. Dependency inventory picked up the declared package.
+    // 3. Dependency inventory: declared + JS-imported npm packages only. The
+    //    Python/C specifiers and the interpolated dynamic import must not mint
+    //    npm dependency rows (the cstdint/asyncio pollution class).
     const deps = s.dependencies();
-    expect(deps.some((d) => d.name === 'lodash')).toBe(true);
+    const depNames = new Set(deps.map((d) => d.name));
+    expect(depNames.has('lodash')).toBe(true);
+    expect(depNames.has('leftpad-classic')).toBe(true);
+    expect(depNames.has('asyncio')).toBe(false);
+    expect(depNames.has('PIL')).toBe(false);
+    expect(depNames.has('windows.h')).toBe(false);
+    expect(depNames.has('stdio.h')).toBe(false);
+    expect([...depNames].some((n) => n.includes('${'))).toBe(false);
+
+    // Garbage import rows that predate the extractor fix (or arrive from a
+    // future grammar) are fenced out by npm-name validation on the next scan.
+    s.putImports('src/plugins.js', 'h-stale', [{ raw: '${pathToFileURL(path).href}?v=${name}' }]);
+    await runSecurityScan(s, dir, { useExternalTools: false });
+    expect(s.dependencies().some((d) => d.name.includes('${'))).toBe(false);
+
+    // 3b. Scan provenance: no SCA tool ran, so the advisory count is marked
+    //     unmeasured — never an unearned zero.
+    expect(scan.sca).toEqual({ engine: null, measured: false, lockfiles: [] });
+    const prov = JSON.parse(s.getMeta('security_scan_provenance') ?? 'null');
+    expect(prov?.sca?.measured).toBe(false);
+    expect(prov?.toolsAvailable).toEqual({
+      semgrep: false,
+      osvScanner: false,
+      gitleaks: false,
+      npm: false,
+    });
 
     // 4. Import-graph reachability: index.js transitively reaches the vulnerable
     //    route files (the basis of trace_taint's blast-radius walk).
@@ -100,5 +135,27 @@ describe('security-intel end-to-end', () => {
     expect(fromIndex).toContain('src/routes/orders.js');
 
     s.close();
+
+    // 5. The provenance round-trips through the ContentIndex read surfaces, so
+    //    security_overview / list_dependencies can render "never measured"
+    //    instead of an unearned "0 with advisories".
+    const ci = new ContentIndex(
+      {
+        projectWorkspaceDir: async () => dir,
+        projectArtifactsDir: () => join(dir, '.gezel', 'artifacts'),
+      } as unknown as Store,
+      join(dir, '.gezel-home'),
+    );
+    const rescan = await ci.securityScan('proj', { useExternalTools: false });
+    expect(rescan.ran).toBe(true);
+    expect(rescan.sca).toEqual({ engine: null, measured: false, lockfiles: [] });
+
+    const overview = await ci.securityOverview('proj');
+    expect(overview.scanned).toBe(true);
+    expect(overview.provenance?.sca).toEqual({ engine: null, measured: false, lockfiles: [] });
+    expect(overview.provenance?.toolsAvailable.osvScanner).toBe(false);
+
+    const listed = await ci.listDependencies('proj');
+    expect(listed.provenance?.sca.measured).toBe(false);
   });
 });

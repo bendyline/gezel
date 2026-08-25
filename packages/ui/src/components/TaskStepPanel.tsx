@@ -60,6 +60,7 @@ export function TaskStepPanel({
   const [standardScripts, setStandardScripts] = useState<ListScriptsResponse['scripts'] | null>(
     null,
   );
+  const [sharedScripts, setSharedScripts] = useState<ListScriptsResponse['scripts'] | null>(null);
 
   useEffect(() => {
     descDraft.current = phase?.description ?? '';
@@ -84,6 +85,14 @@ export function TaskStepPanel({
       })
       .catch(() => {
         if (!cancelled) setStandardScripts([]);
+      });
+    api
+      .listUserScripts()
+      .then((res) => {
+        if (!cancelled) setSharedScripts(res.scripts);
+      })
+      .catch(() => {
+        if (!cancelled) setSharedScripts([]);
       });
     return () => {
       cancelled = true;
@@ -235,14 +244,22 @@ export function TaskStepPanel({
               moment="enter"
               refs={normalizeScriptRefs(phase.onEnter)}
               projectId={task.projectId}
-              libraries={{ project: projectScripts, standard: standardScripts }}
+              libraries={{
+                project: projectScripts,
+                standard: standardScripts,
+                shared: sharedScripts,
+              }}
               busy={busy}
               onChange={(refs) => onPatch(phase.id, { onEnter: refs })}
             />
             <StepGateRow
               gate={phase.gate}
               projectId={task.projectId}
-              libraries={{ project: projectScripts, standard: standardScripts }}
+              libraries={{
+                project: projectScripts,
+                standard: standardScripts,
+                shared: sharedScripts,
+              }}
               busy={busy}
               stepOptions={task.craftbook.steps.map((s) => ({ id: s.id, name: s.name }))}
               onChange={(gate) => onPatch(phase.id, { gate })}
@@ -251,7 +268,11 @@ export function TaskStepPanel({
               moment="exit"
               refs={normalizeScriptRefs(phase.onExit)}
               projectId={task.projectId}
-              libraries={{ project: projectScripts, standard: standardScripts }}
+              libraries={{
+                project: projectScripts,
+                standard: standardScripts,
+                shared: sharedScripts,
+              }}
               busy={busy}
               onChange={(refs) => onPatch(phase.id, { onExit: refs })}
             />

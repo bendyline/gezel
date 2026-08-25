@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "title": "Reading digest from circle notes",
+  "objective": "Turn seeded meeting notes into a grounded digest report in the artifacts drawer.",
+  "tags": ["report"],
+  "prompt": "Run the Reading digest craftbook for our circle.",
+  "setup": {
+    "projectName": "Evening Reading Circle",
+    "about": "A reading circle currently on The Winter Orchard, chapter 8.",
+    "files": [
+      {
+        "path": "circle.json",
+        "content": "{\n  \"book\": { \"title\": \"The Winter Orchard\", \"chapter\": 8 },\n  \"members\": [\"Ada\", \"Joris\", \"Mei\"],\n  \"meetsOn\": \"Thursdays\"\n}\n"
+      },
+      {
+        "path": "notes/2026-08-13.md",
+        "content": "# 13 August\n\nAda, Joris, and Mei met. We covered chapters 5-6. Long argument about whether the orchard is a character; Joris says yes, Mei says it is scenery with weather. Favorite passage: the frost inventory. Next: chapters 7-8.\n"
+      },
+      {
+        "path": "notes/2026-08-20.md",
+        "content": "# 20 August\n\nEveryone came. Chapters 7-8. The letter chapter split the group; Ada read the closing paragraph aloud. Decided to slow down: only chapter 9 for next week.\n"
+      }
+    ]
+  },
+  "success": {
+    "summary": "A digest report lands in the artifacts drawer, grounded in the two seeded notes files.",
+    "deliverables": [
+      {
+        "path": "reports/reading-digest.md",
+        "kind": "markdown-report",
+        "artifact": true,
+        "minBytes": 400
+      }
+    ]
+  },
+  "rubric": {
+    "artifact": {
+      "path": "reports/reading-digest.md",
+      "kind": "markdown"
+    },
+    "axes": [
+      {
+        "name": "Grounding",
+        "description": "Everything in \"What we said\" traces to the seeded notes; no invented opinions or members."
+      },
+      {
+        "name": "Specificity",
+        "description": "The next-time questions are specific to this book and stretch, not generic book-club filler."
+      }
+    ]
+  }
+}

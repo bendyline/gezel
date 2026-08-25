@@ -33,6 +33,8 @@ import { RemoteServersPanel } from '../components/RemoteServersPanel.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
 import { StorageUsageCard } from '../components/StorageUsageCard.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
+import { shortModelName } from '../components/model-display-name.js';
+import { providerLabel } from '../components/provider-label.js';
 import { useCopilotAvailability } from '../components/useCopilotAvailability.js';
 import { useTotalRamBytes } from '../components/useTotalRamBytes.js';
 import { Poppetje } from '../poppetje/index.js';
@@ -1204,6 +1206,54 @@ export function SettingsView() {
   const showAnthropicProvider =
     provider === 'anthropic' || nightShiftProvider === 'anthropic' || hasAnthropicKey;
 
+  // Subline under the "Artificial Intelligence" nav header: which engine and
+  // model a new chat gets by default. Answering that used to mean opening the
+  // tab and reading two controls.
+  //
+  // Only the on-device engines get a name lookup, and only through their own
+  // installed-model listing — the generic /api/models route reaches out to the
+  // provider (and can auto-start Ollama), which is too much to spend on a nav
+  // label. Cloud providers show the configured id, which is already the name
+  // people use for those models ("gpt-5.5").
+  const configuredDefaultModel = config?.defaultModel?.[provider];
+  const [defaultModelName, setDefaultModelName] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (provider !== 'mlx' && provider !== 'llama-cpp' && provider !== 'ds4') {
+      setDefaultModelName(configuredDefaultModel);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res =
+          provider === 'mlx'
+            ? await api.listMlxModels()
+            : provider === 'ds4'
+              ? await api.listDs4Models()
+              : await api.listLlamaCppModels();
+        if (cancelled) return;
+        // With no configured default the engine runs the first installed
+        // model, the same fallback the header engine pill reports.
+        const models = res.models ?? [];
+        const match = configuredDefaultModel
+          ? models.find((m) => m.id === configuredDefaultModel)
+          : models[0];
+        setDefaultModelName(match?.name ?? configuredDefaultModel);
+      } catch {
+        if (!cancelled) setDefaultModelName(configuredDefaultModel);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, configuredDefaultModel]);
+
+  const aiDefaultSubline = useMemo(() => {
+    const engine = providerLabel(provider, uiPlatform);
+    const model = shortModelName(defaultModelName);
+    return `Default: ${engine}${model ? ` · ${model}` : ''}`;
+  }, [provider, uiPlatform, defaultModelName]);
+
   const nightShiftProviderChoices: Array<{
     id: ProviderName;
     label: string;
@@ -1316,11 +1366,15 @@ export function SettingsView() {
                     type="button"
                     data-testid={`settings-nav-${s.id}`}
                     className={`settings-nav-item settings-nav-group-label${section === s.id ? ' settings-nav-item-active' : ''}`}
+                    title={s.groupHeader === 'ai' ? aiDefaultSubline : undefined}
                     onClick={() =>
                       navigates ? setSection(s.id) : toggleGroup(s.groupHeader as SettingsGroup)
                     }
                   >
-                    {s.label}
+                    <span className="settings-nav-group-title">{s.label}</span>
+                    {s.groupHeader === 'ai' && (
+                      <span className="settings-nav-group-sub">{aiDefaultSubline}</span>
+                    )}
                   </button>
                 </li>
               );

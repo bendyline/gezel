@@ -9,7 +9,15 @@ import AdmZip from 'adm-zip';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import { applyProjectType } from './apply.js';
-import { importGezapp, packGezapp, readGezapp, verifyGezapp } from './gezapp.js';
+import {
+  importGezapp,
+  listGezapps,
+  packGezapp,
+  readGezapp,
+  removeGezapp,
+  setGezappEnabled,
+  verifyGezapp,
+} from './gezapp.js';
 
 let home: string;
 let bundled: CatalogService;
@@ -224,5 +232,110 @@ describe('.gezapp package round-trip', () => {
       Buffer.from(JSON.stringify({ schemaVersion: 1, name: 'legacy', items: [] })),
     );
     expect(() => readGezapp(zip.toBuffer())).toThrow(/invalid \.gezapp manifest/);
+  });
+});
+
+describe('install-level management', () => {
+  it('lists installed apps with receipts and on-disk versions', async () => {
+    const { buffer, manifest } = await packGezapp(
+      { catalog: bundled },
+      { typeId: 'language-trainer' },
+    );
+    await importGezapp({ home, catalog: bundled }, buffer, { confirm: true });
+    const apps = await listGezapps(home);
+    expect(apps).toHaveLength(1);
+    expect(apps[0]?.entry).toMatchObject({
+      appId: 'language-trainer',
+      version: manifest.entry.version,
+      enabled: true,
+    });
+    expect(apps[0]?.receipt?.manifest.name).toBe(manifest.name);
+    expect(apps[0]?.versionsOnDisk).toEqual([manifest.entry.version]);
+  });
+
+  it('lists nothing on a fresh home', async () => {
+    expect(await listGezapps(home)).toEqual([]);
+  });
+
+  it('disable hides the app from the catalog; enable restores it', async () => {
+    const { buffer } = await packGezapp({ catalog: bundled }, { typeId: 'language-trainer' });
+    await importGezapp({ home, catalog: bundled }, buffer, { confirm: true });
+    const installedOnly = new CatalogService([new InstalledAiAppsSource(home)]);
+    expect(await installedOnly.get('project-type', 'language-trainer')).not.toBeNull();
+
+    const disabled = await setGezappEnabled(home, 'language-trainer', false);
+    expect(disabled?.enabled).toBe(false);
+    expect(await installedOnly.get('project-type', 'language-trainer')).toBeNull();
+
+    const enabled = await setGezappEnabled(home, 'language-trainer', true);
+    expect(enabled?.enabled).toBe(true);
+    expect(await installedOnly.get('project-type', 'language-trainer')).not.toBeNull();
+  });
+
+  it('setGezappEnabled returns null for an unknown app', async () => {
+    expect(await setGezappEnabled(home, 'no-such-app', false)).toBeNull();
+  });
+
+  it('remove drops the registry entry and deletes the version dirs', async () => {
+    const { buffer, manifest } = await packGezapp(
+      { catalog: bundled },
+      { typeId: 'language-trainer' },
+    );
+    await importGezapp({ home, catalog: bundled }, buffer, { confirm: true });
+    const removed = await removeGezapp(home, 'language-trainer');
+    expect(removed).toEqual({
+      appId: 'language-trainer',
+      removedVersions: [manifest.entry.version],
+      keptVersions: [],
+    });
+    expect(await listGezapps(home)).toEqual([]);
+    expect(existsSync(aiAppItemsDir(home, 'language-trainer', manifest.entry.version))).toBe(false);
+    const installedOnly = new CatalogService([new InstalledAiAppsSource(home)]);
+    expect(await installedOnly.get('project-type', 'language-trainer')).toBeNull();
+  });
+
+  it('remove returns null for an unknown app', async () => {
+    expect(await removeGezapp(home, 'no-such-app')).toBeNull();
+  });
+
+  it('keepFiles leaves the bytes, and a re-import re-adopts them untouched', async () => {
+    const { buffer, manifest } = await packGezapp(
+      { catalog: bundled },
+      { typeId: 'language-trainer' },
+    );
+    await importGezapp({ home, catalog: bundled }, buffer, { confirm: true });
+    const removed = await removeGezapp(home, 'language-trainer', { keepFiles: true });
+    expect(removed?.keptVersions).toEqual([manifest.entry.version]);
+    expect(await listGezapps(home)).toEqual([]);
+    expect(existsSync(aiAppReceiptFile(home, 'language-trainer', manifest.entry.version))).toBe(
+      true,
+    );
+
+    const again = await importGezapp({ home, catalog: bundled }, buffer, { confirm: true });
+    expect(again.installed).toMatchObject({ appId: 'language-trainer', alreadyPresent: true });
+    const apps = await listGezapps(home);
+    expect(apps[0]?.entry.enabled).toBe(true);
+  });
+
+  it('serializes a remove racing an install — no lost registry update', async () => {
+    const language = await packGezapp({ catalog: bundled }, { typeId: 'language-trainer' });
+    const chat = await packGezapp({ catalog: bundled }, { typeId: 'just-chat' });
+    await importGezapp({ home, catalog: bundled }, language.buffer, { confirm: true });
+    await Promise.all([
+      removeGezapp(home, 'language-trainer'),
+      importGezapp({ home, catalog: bundled }, chat.buffer, { confirm: true }),
+    ]);
+    const apps = await listGezapps(home);
+    expect(apps.map((app) => app.entry.appId)).toEqual(['just-chat']);
+  });
+
+  it('re-importing installed bytes re-enables a disabled app', async () => {
+    const { buffer } = await packGezapp({ catalog: bundled }, { typeId: 'language-trainer' });
+    await importGezapp({ home, catalog: bundled }, buffer, { confirm: true });
+    await setGezappEnabled(home, 'language-trainer', false);
+    const again = await importGezapp({ home, catalog: bundled }, buffer, { confirm: true });
+    expect(again.installed?.alreadyPresent).toBe(true);
+    const apps = await listGezapps(home);
+    expect(apps[0]?.entry.enabled).toBe(true);
   });
 });

@@ -633,6 +633,39 @@ describe('on-demand drives + night catch-up', () => {
     expect(refreshStatic.mock.calls.map((c) => c[0])).toEqual(['a', 'c']);
     expect(calls.filter((c) => c === 'static')).toHaveLength(2);
   });
+
+  it('fires the drained hook after the sweep, so downstream work sees a current index', async () => {
+    const { mgr } = makeDriveFixture({ projects: [{ id: 'a' }] });
+    const drained = vi.fn();
+    mgr.setOnCatchUpDrained(drained);
+
+    const run = mgr.catchUpAll();
+    expect(drained).not.toHaveBeenCalled();
+    await run;
+    await vi.waitFor(() => expect(drained).toHaveBeenCalledTimes(1));
+  });
+
+  it('does not fire the drained hook on an aborted sweep', async () => {
+    // The window closed mid-sweep. Planning work that the runner would hold
+    // until tomorrow anyway is wasted, and it would plan against a partial index.
+    const { mgr } = makeDriveFixture({ projects: [{ id: 'a' }] });
+    const drained = vi.fn();
+    mgr.setOnCatchUpDrained(drained);
+
+    const run = mgr.catchUpAll();
+    mgr.cancelCatchUp();
+    await run;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(drained).not.toHaveBeenCalled();
+  });
+
+  it('survives a hook that throws', async () => {
+    const { mgr } = makeDriveFixture({ projects: [{ id: 'a' }] });
+    mgr.setOnCatchUpDrained(() => {
+      throw new Error('planner exploded');
+    });
+    await expect(mgr.catchUpAll()).resolves.toBeUndefined();
+  });
 });
 
 describe('buildEnrichDeps enricher override', () => {

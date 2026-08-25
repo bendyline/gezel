@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "version": "1.0.0",
+  "releasedAt": "2026-08-24T00:00:00Z",
+  "mode": "solo",
+  "leadLabel": "Coach",
+  "aboutTemplate": "about.md",
+  "missionTemplate": "mission.md",
+  "gezels": [
+    {
+      "templateId": "example-habit-coach",
+      "voorman": true
+    }
+  ],
+  "scripts": {
+    "streaks-report": "import { defineScript, gezel } from '@bendyline/gezel-sdk';\n\nexport const meta = defineScript({\n  name: 'streaks-report',\n  description: 'Summarize check-in counts for every habit in habits.json.',\n  kind: 'action',\n  inputs: {},\n  outputs: {\n    report: { type: 'string', description: 'One line per habit with its check-in count.' },\n  },\n  requires: ['workspace.read'],\n} as const);\n\nconst raw = await gezel.fs.read('habits.json').catch(() => '{\"habits\":[]}');\nconst data = JSON.parse(raw) as { habits: Array<{ name: string; log: string[] }> };\nconst lines = data.habits.map((habit) => `${habit.name}: ${habit.log.length} check-ins`);\ngezel.output({ report: lines.join('\\n') || 'No habits yet.' });\n"
+  },
+  "tools": [
+    {
+      "name": "record_habit",
+      "description": "Add a new habit to track.",
+      "script": "habit-store",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": ["name"]
+      },
+      "bind": {
+        "action": "add"
+      }
+    },
+    {
+      "name": "log_habit",
+      "description": "Log a check-in for a habit (used by the dashboard).",
+      "script": "habit-store",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": ["name"]
+      },
+      "bind": {
+        "action": "log"
+      },
+      "reaction": {
+        "gezel": "example-habit-coach",
+        "hideSeed": true,
+        "prompt": "[Habit board]: The user just logged \"{{output.logged}}\" from the dashboard. Reply with one short encouraging line; mention the check-in count only if it is notable."
+      }
+    },
+    {
+      "name": "get_streaks",
+      "description": "Summarize check-in counts across every habit.",
+      "script": "streaks-report",
+      "inputs": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "pages": {
+    "entry": "dashboard/index.html",
+    "api": 1,
+    "reads": [
+      {
+        "source": "workspace",
+        "path": "habits.json"
+      }
+    ],
+    "tools": ["log_habit"]
+  },
+  "workspaceSeed": ["habits.json"]
+}

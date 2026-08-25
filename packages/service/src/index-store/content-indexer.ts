@@ -48,8 +48,11 @@ const MAX_FILES = 50_000;
  * v3: html/css/vue/svelte classify as code — existing rows hold the old
  *     'other' kind, and only this bump re-extracts them (the mtime/size gate
  *     would otherwise keep an unchanged index.html unreviewable forever).
+ * v4: exec-regex precision (sink.command-exec no longer matches arbitrary
+ *     `.exec(` receivers) + dynamic-import edges only from constant string
+ *     specifiers — flushes the stale findings and template-literal imports.
  */
-const EXTRACTOR_VERSION = 3;
+const EXTRACTOR_VERSION = 4;
 
 /**
  * PNG text keys worth putting in the search index, in priority order. Skips

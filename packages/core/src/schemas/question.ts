@@ -146,6 +146,41 @@ export const ToolPermissionIntentSchema = z.object({
 export type ToolPermissionIntent = z.infer<typeof ToolPermissionIntentSchema>;
 
 /**
+ * A clarifying question asked by Claude CLI's built-in `AskUserQuestion`
+ * tool, intercepted by the tool-permission broker
+ * (`POST /api/permissions/request-and-wait`) and re-shaped into a real
+ * question card instead of a generic Allow/Deny permission blob. The
+ * broker answers the CLI through the permission contract: the user's
+ * selection is folded into `updatedInput.answers` on allow, so the tool
+ * call itself succeeds with the answer — there is no "allow" to grant.
+ *
+ * The gezel `Question`'s own `prompt` / `choices` / `multiSelect` carry
+ * the render-ready shape; this intent adds what those can't hold — the
+ * per-option descriptions, the CLI's short `header` chip, and the
+ * position within a multi-question call — and marks the answer route to
+ * skip follow-up-turn seeding (the `claude` subprocess is mid-turn,
+ * synchronously awaiting the verdict, exactly like `tool-permission`).
+ */
+export const ClaudeUserQuestionOptionSchema = z.object({
+  label: z.string().min(1),
+  description: z.string().optional(),
+});
+export type ClaudeUserQuestionOption = z.infer<typeof ClaudeUserQuestionOptionSchema>;
+
+export const ClaudeUserQuestionIntentSchema = z.object({
+  kind: z.literal('claude-user-question'),
+  /** The CLI's short topic chip for the question (e.g. "Gate block"). */
+  header: z.string().optional(),
+  /** Options with descriptions; labels mirror the Question's `choices`. */
+  options: z.array(ClaudeUserQuestionOptionSchema),
+  /** 0-based position within the originating multi-question call. */
+  questionIndex: z.number().int().min(0),
+  /** Total questions in the originating call (cards appear sequentially). */
+  questionCount: z.number().int().min(1),
+});
+export type ClaudeUserQuestionIntent = z.infer<typeof ClaudeUserQuestionIntentSchema>;
+
+/**
  * Approval for a craftbook's missing zero-configuration MCP toolset.
  *
  * Trusted, pinned first-party dependencies (currently DocBlocks) install
@@ -315,6 +350,7 @@ export const QuestionIntentSchema = z.discriminatedUnion('kind', [
   }),
   CommandApprovalIntentSchema,
   ToolPermissionIntentSchema,
+  ClaudeUserQuestionIntentSchema,
   ToolsetInstallApprovalIntentSchema,
   ImageGenerationApprovalIntentSchema,
   VideoGenerationApprovalIntentSchema,

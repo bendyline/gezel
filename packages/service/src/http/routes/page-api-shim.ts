@@ -19,6 +19,12 @@ import type { PageApiBootstrap } from '@bendyline/gezel';
  *    to same-origin capability fetches (the capability is in the
  *    document URL; `pages.reads` scopes were folded at mint), tool
  *    invokes reject with code 'unavailable', refresh() reloads.
+ *  - `serve` (app-serve mini-site; selected by `bootstrap.serve`): every
+ *    call rides the SAME queue/ceiling machinery but travels as a
+ *    same-origin fetch against the head API under the visitor cookie —
+ *    invoke and read hit `/app/api/*`, `data.url()` maps to `/data/*`,
+ *    watch polls stats with a post-invoke kick, refresh() reloads. No
+ *    credential ever reaches the page; the parent relay is not involved.
  *  - `demo` is NOT this shim: raw files opened outside gezel have no
  *    server. Gilde ships a paste-in stub that defines `window.gezel`
  *    only when the real one is absent.
@@ -52,6 +58,8 @@ if (window.gezel) return;
 var B=${JSON.stringify(bootstrap)};
 var D=${JSON.stringify(DEFAULTS)};
 var embedded=window.parent!==window;
+var S=B.serve||null;
+var mode=S?'serve':(embedded?'embedded':'browser');
 var seq=0;var sid=Math.random().toString(36).slice(2,8);
 var pending={};var inflight=0;var queue=[];
 var watches={};var themeSubs=[];
@@ -87,12 +95,56 @@ function dispatch(){
       delete pending[j.id];inflight-=1;dispatch();
       j.reject(err('timeout','gezel: '+j.kindLabel+' timed out'));
     };})(job),job.timeoutMs);
-    post(job.msg);
+    if(S)serveSend(job.msg);else post(job.msg);
   }
+}
+
+// Serve transport: the same queue/ceiling machinery, but each job travels as
+// a same-origin fetch against the head API (visitor cookie auth) and settles
+// itself. A job the timeout already rejected settles into nothing.
+function serveStatusCode(code){
+  if(code===401||code===403||code===404)return 'not-allowed';
+  if(code===429)return 'rate-limited';
+  if(code===400||code===413||code===422)return 'invalid-input';
+  return 'unavailable';
+}
+function serveSend(m){
+  var url,payload;
+  if(m.kind==='invoke'){
+    url=S.apiBase+'/invoke';payload={tool:m.tool};
+    if(m.input)payload.input=m.input;
+  }else{
+    url=S.apiBase+'/read';payload={op:m.op,source:m.source,path:m.path};
+    if(m.as)payload.as=m.as;
+    if(m.maxBytes)payload.maxBytes=m.maxBytes;
+  }
+  fetch(url,{method:'POST',headers:{'content-type':'application/json'},credentials:'same-origin',cache:'no-store',body:JSON.stringify(payload)}).then(function(res){
+    return res.json().catch(function(){return {};}).then(function(body){
+      settle(m.id,function(job){
+        if(m.kind==='invoke'){
+          if(!res.ok){job.reject(err(body.errorCode||serveStatusCode(res.status),body.error||('gezel: invoke failed ('+res.status+')'),body.runId));return;}
+          if(body.status&&body.status!=='ok'){job.reject(err(body.errorCode||'script-error',body.error||'tool invoke failed',body.runId));return;}
+          job.resolve({output:body.output,runId:body.runId,reaction:body.reaction});
+          kickPollers();
+        }else{
+          if(!res.ok){job.reject(err(body.errorCode||serveStatusCode(res.status),body.error||('gezel: read failed ('+res.status+')')));return;}
+          job.resolve(body);
+        }
+      });
+    });
+  }).catch(function(e){
+    settle(m.id,function(job){job.reject(err('unavailable','gezel: network error ('+((e&&e.message)||e)+')'));});
+  });
+}
+// Read-your-write: after a successful serve invoke, sweep active watches
+// soon instead of waiting out the polling interval.
+var pollers=[];
+function kickPollers(){
+  for(var i=0;i<pollers.length;i++){try{pollers[i]();}catch(_){}}
 }
 function enqueue(kindLabel,msg,timeoutMs){
   return new Promise(function(resolve,reject){
-    if(!embedded){reject(err('unavailable','gezel: not embedded in Gezel'));return;}
+    if(!embedded&&!S){reject(err('unavailable','gezel: not embedded in Gezel'));return;}
     if(queue.length>=D.maxQueued){reject(err('rate-limited','gezel: too many queued calls'));return;}
     queue.push({id:msg.id,msg:msg,resolve:resolve,reject:reject,timeoutMs:timeoutMs,kindLabel:kindLabel,timer:0});
     dispatch();
@@ -182,7 +234,7 @@ function browserRead(op,source,path,as){
 function readOp(op,path,opts){
   opts=opts||{};
   var source=opts.source||'workspace';
-  if(embedded){
+  if(embedded||S){
     var msg={__gezelPage:1,kind:'read',id:mintId(),op:op,source:source,path:String(path)};
     if(op==='read'){
       if(opts.as==='bytes')msg.as='bytes';
@@ -194,11 +246,11 @@ function readOp(op,path,opts){
 }
 
 var api={
-  page:{api:1,projectId:B.projectId,source:'type',entry:B.entry,typeName:B.typeName,params:B.params,mode:embedded?'embedded':'browser'},
+  page:{api:1,projectId:B.projectId,source:'type',entry:B.entry,typeName:B.typeName,params:B.params,mode:mode},
   tools:{
     list:function(){return B.tools.slice();},
     invoke:function(tool,input){
-      if(!embedded)return Promise.reject(err('unavailable','gezel: tools require the Gezel app (open this page in Gezel)'));
+      if(!embedded&&!S)return Promise.reject(err('unavailable','gezel: tools require the Gezel app (open this page in Gezel)'));
       var msg={__gezelPage:1,kind:'invoke',id:mintId(),tool:String(tool)};
       if(input&&typeof input==='object'&&!Array.isArray(input))msg.input=input;
       return enqueue('invoke',msg,D.invokeTimeoutMs);
@@ -221,21 +273,32 @@ var api={
         post({__gezelPage:1,kind:'watch',id:id,source:source,path:String(path)});
         return function(){delete watches[id];post({__gezelPage:1,kind:'unwatch',id:id});};
       }
-      // Browser mode: local polling over the capability.
+      // Serve + browser modes: local polling (serve stats ride the head API).
       var last=null;var stopped=false;
       var interval=Math.max(1000,opts.intervalMs||D.watchIntervalMs);
+      var statOnce=S?function(){return readOp('stat',path,{source:source});}:function(){return browserRead('stat',source,String(path));};
       function tick(){
         if(stopped)return;
-        browserRead('stat',source,String(path)).then(function(d){
+        statOnce().then(function(d){
           if(!stopped&&last!==null&&d.etag!==last)try{cb({path:String(path),etag:d.etag});}catch(_){}
           last=d.etag;
         }).catch(function(){}).then(function(){if(!stopped)timer=setTimeout(tick,interval);});
       }
       var timer=setTimeout(tick,interval);
-      return function(){stopped=true;clearTimeout(timer);};
+      var kick=function(){if(!stopped){clearTimeout(timer);timer=setTimeout(tick,150);}};
+      if(S)pollers.push(kick);
+      return function(){
+        stopped=true;clearTimeout(timer);
+        var i=pollers.indexOf(kick);if(i>=0)pollers.splice(i,1);
+      };
     },
     url:function(path,opts){
-      var u=capabilityUrl((opts&&opts.source)||'workspace',String(path));
+      var source=(opts&&opts.source)||'workspace';
+      if(S){
+        var enc=String(path).split('/').map(encodeURIComponent).join('/');
+        return S.dataBase+'/'+source+'/'+enc;
+      }
+      var u=capabilityUrl(source,String(path));
       if(!u)throw err('unavailable','gezel: no capability in document URL');
       return u;
     },
@@ -250,6 +313,9 @@ var api={
   },
 };
 
+if(S&&typeof matchMedia==='function'){
+  try{matchMedia('(prefers-color-scheme: dark)').addEventListener('change',function(e){setTheme(e.matches?'dark':'light');});}catch(_){}
+}
 Object.defineProperty(window,'gezel',{value:api,writable:false,configurable:false});
 if(embedded)post({__gezelPage:1,kind:'hello'});
 })();</script>`;

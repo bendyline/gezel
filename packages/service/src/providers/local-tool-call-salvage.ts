@@ -3314,17 +3314,24 @@ function stripTrailingCommas(json: string): string {
 // logic three ways.
 
 /**
- * Tool names that can land partial bytes safely (the call already
- * implies "overwrite or extend a file"). When truncation happens
+ * Tool names that can land partial bytes and then continue them through a
+ * tool in the same drawer. When truncation happens
  * mid-content for one of these, the framework synthesizes the call
  * with the partial bytes received so far and appends a continuation
  * hint to the tool result instructing the model to issue
  * `append_to_file` for the missing tail.
  *
- * Excludes tools whose semantics would be corrupted by partial args
+ * `write_artifact` is deliberately excluded. Artifact writes are atomic
+ * whole-file replacements and there is no `append_artifact`; landing a
+ * prefix destroys the last complete artifact and the old continuation hint
+ * named a workspace tool that could not reach it. It remains a payload
+ * mutation below so rejected cap-length calls still receive honest recovery
+ * guidance.
+ *
+ * Also excludes tools whose semantics would be corrupted by partial args
  * (e.g. `read_artifact`, `start_project`, `set_task_status`).
  */
-const WRITE_SHAPED_TOOL_NAMES = new Set(['write_file', 'write_artifact', 'append_to_file']);
+const WRITE_SHAPED_TOOL_NAMES = new Set(['write_file', 'append_to_file']);
 
 /**
  * Mutation tools whose arguments carry a content payload large enough for
@@ -3343,6 +3350,7 @@ const WRITE_SHAPED_TOOL_NAMES = new Set(['write_file', 'write_artifact', 'append
  */
 const PAYLOAD_MUTATION_TOOL_NAMES = new Set([
   ...WRITE_SHAPED_TOOL_NAMES,
+  'write_artifact',
   'insert_at_marker',
   'replace_in_file',
   'replace_lines',
@@ -3384,7 +3392,7 @@ export interface TruncationSalvageResult {
  *
  * Tries the JSON-envelope detector first (more structurally
  * informative than the prose one), falls back to prose. Gated on:
- *   - tool name being write-shaped (write_file / write_artifact / append_to_file)
+ *   - tool name being safely continuable (write_file / append_to_file)
  *   - `path` arg present and string
  *   - `content` arg present and string
  *

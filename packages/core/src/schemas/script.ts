@@ -36,6 +36,8 @@ export const NamedScriptCapabilitySchema = z.enum([
   'tasks.write',
   'memory.read',
   'memory.write',
+  'index.read',
+  'index.refresh',
 ]);
 export type NamedScriptCapability = z.infer<typeof NamedScriptCapabilitySchema>;
 

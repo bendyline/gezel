@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CatalogService } from '@bendyline/gezel-catalog';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatEventBus } from '../chat/events.js';
 import { ChatManager } from '../chat/manager.js';
 import { Store } from '../fs/store.js';
@@ -67,18 +67,22 @@ async function writeScript(name: string, source: string): Promise<void> {
 
 describe('TaskManager phase hooks — onEnter with autoAdvanceOnSuccess', () => {
   it('auto-advances to the next phase when the script succeeds', async () => {
-    await writeScript(
-      'mark-done',
-      `
-        import { gezel, defineScript } from '@bendyline/gezel-sdk';
-        export const meta = defineScript({
-          name: 'mark-done',
-          description: 'a no-op phase gate that always succeeds.',
-          outputs: { ok: { type: 'boolean', description: 'success' } },
-        });
-        gezel.output({ ok: true });
-      `,
-    );
+    const handoff = vi.fn(async () => {});
+    tasks.setStepActivatedHook(handoff);
+    const run = vi.fn(async () => ({
+      id: 'entry-setup',
+      projectId: 'default',
+      scriptName: 'mark-done',
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      status: 'ok' as const,
+      trigger: { kind: 'manual' as const, userInitiated: true as const },
+      inputs: {},
+      output: { ok: true },
+      calls: [],
+      logs: '',
+    }));
+    tasks.setScriptRunner({ run } as unknown as ScriptRunner);
 
     const task = await tasks.create('default', {
       title: 'Auto-advance demo',
@@ -88,7 +92,7 @@ describe('TaskManager phase hooks — onEnter with autoAdvanceOnSuccess', () => 
         {
           name: 'First',
           assignee: { kind: 'user' },
-          onEnter: { name: 'mark-done', autoAdvanceOnSuccess: true },
+          onEnter: { name: 'mark-done', scope: 'standard', autoAdvanceOnSuccess: true },
         },
         {
           name: 'Second',
@@ -97,12 +101,84 @@ describe('TaskManager phase hooks — onEnter with autoAdvanceOnSuccess', () => 
       ],
     });
 
-    // Before completing any phase, trigger the first one's onEnter
-    // manually by starting from phase 0. Complete phase 0 → should
-    // run mark-done for Second (because Second has no onEnter here).
-    // Actually here we want to assert that completing First runs the
-    // onEnter of Second *if* Second has an onEnter; so add one.
-    expect(task.activeStepId).toBe(task.craftbook.steps[0]!.id);
+    const [first, second] = task.craftbook.steps;
+    expect(task.activeStepId).toBe(second!.id);
+    expect(first!.onEnterCompletedAt).toBe(first!.lastActivatedAt);
+    expect(run).toHaveBeenCalledTimes(1);
+    // The create route dispatches the current step returned by create(); the
+    // auto-advance cascade must not also enqueue it through this hook.
+    expect(handoff).not.toHaveBeenCalled();
+  });
+
+  it('does not repeat setup for an already-prepared activation', async () => {
+    const run = vi.fn(async () => ({
+      id: 'prepare-once',
+      projectId: 'default',
+      scriptName: 'prepare-once',
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      status: 'ok' as const,
+      trigger: { kind: 'manual' as const, userInitiated: true as const },
+      inputs: {},
+      output: { ok: true },
+      calls: [],
+      logs: '',
+    }));
+    tasks.setScriptRunner({ run } as unknown as ScriptRunner);
+
+    const task = await tasks.create('default', {
+      title: 'Prepare once',
+      assignee: { kind: 'user' },
+      steps: [
+        {
+          name: 'Prepared work',
+          assignee: { kind: 'user' },
+          onEnter: { name: 'prepare-once', scope: 'standard' },
+        },
+      ],
+    });
+
+    expect(task.craftbook.steps[0]!.onEnterCompletedAt).toBe(
+      task.craftbook.steps[0]!.lastActivatedAt,
+    );
+    await tasks.ensureActiveStepEntered('default', task.num);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('pauses before handoff when entry-step setup fails', async () => {
+    tasks.setScriptRunner({
+      run: async () => ({
+        id: 'broken-entry-setup',
+        projectId: 'default',
+        scriptName: 'prepare-corpus',
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        status: 'error' as const,
+        trigger: { kind: 'manual' as const, userInitiated: true as const },
+        inputs: {},
+        calls: [],
+        logs: 'missing source manifest',
+        error: 'corpus preparation failed',
+      }),
+    } as unknown as ScriptRunner);
+
+    const task = await tasks.create('default', {
+      title: 'Setup must finish before handoff',
+      assignee: { kind: 'user' },
+      steps: [
+        {
+          name: 'Review corpus',
+          assignee: { kind: 'user' },
+          onEnter: { name: 'prepare-corpus', scope: 'standard' },
+        },
+      ],
+    });
+
+    expect(task.status).toBe('paused');
+    expect(task.craftbook.steps[0]!.onEnterCompletedAt).toBeUndefined();
+    const notes = await tasks.listNotes('default', task.num);
+    expect(notes.at(-1)?.text).toContain('# Step setup failed — task paused');
+    expect(notes.at(-1)?.text).toContain('corpus preparation failed');
   });
 
   it.runIf(process.platform === 'darwin')(

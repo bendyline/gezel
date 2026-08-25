@@ -122,12 +122,14 @@ export class LlamaCppLogFile {
 
   private async rollIfNeeded(): Promise<void> {
     if (this.today() !== this.currentDay) {
-      await this.close();
+      // We are already running inside `pendingWrites`; calling the public
+      // close() here would wait for that same promise chain and deadlock.
+      await this.closeStream();
       await this.openForToday();
       return;
     }
     if (this.bytesWritten < this.maxBytes) return;
-    await this.close();
+    await this.closeStream();
     this.rollIndex += 1;
     const rolled = join(this.dir, `${this.baseName}-${this.currentDay}-${this.rollIndex}.log`);
     this.currentPath = rolled;
@@ -182,11 +184,22 @@ export class LlamaCppLogFile {
 
   /** Wait for all in-flight writes to flush, then return. */
   async flush(): Promise<void> {
+    // Initialization is intentionally asynchronous so constructing the logger
+    // never blocks provider setup. With no queued `write()` call, however,
+    // pendingWrites alone does not observe it.
+    await this.readyPromise;
     await this.pendingWrites;
   }
 
   async close(): Promise<void> {
-    await this.pendingWrites;
+    // Incident-only lifecycles may close before any ordinary log line is
+    // queued. Wait for init so it cannot open a fresh stream after close has
+    // returned and raced the caller's directory cleanup.
+    await this.flush();
+    await this.closeStream();
+  }
+
+  private async closeStream(): Promise<void> {
     if (!this.stream) return;
     const s = this.stream;
     this.stream = null;

@@ -23,8 +23,11 @@
  * Nothing caught it. The installer was correct, the signature was valid, the
  * hash matched the native release, and the binary's own `--self-test` passed —
  * it is compiled from the same stale source, so it asserts the stale contract.
- * The binary also carries no version resource, so `ProductVersion` is blank and
- * old cannot be told from new by inspection.
+ * That incident-era binary also carried no version resource at all. Hosts now
+ * stamp VERSIONINFO with their native release version (src/version.rc.in),
+ * which identifies the build but cannot substitute for this check: the
+ * version names which release compiled the binary, not which env keys it
+ * compiles in, so a stale pin still passes any version comparison.
  *
  * The check that does work is the crude one: the compiled binary stores its
  * `L"..."` literals as UTF-16LE in `.rdata`, so the keys are greppable. This

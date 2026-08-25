@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "kind": "project-type",
+  "id": "example-journal",
+  "name": "Example Journal",
+  "description": "The smallest complete AI App: one project type, one gezel, two templates.",
+  "tags": ["example", "journal"],
+  "category": "writing",
+  "maintainer": {
+    "name": "Gezel"
+  },
+  "license": "MIT",
+  "yankedVersions": []
+}

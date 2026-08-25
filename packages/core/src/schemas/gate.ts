@@ -297,6 +297,33 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     externalOptional: z.boolean().optional(),
   }),
   /**
+   * Require a real command run during this activation, verified against the
+   * service-written run receipts (`workspace.script.run` / `workspace.npx.run`
+   * history events — the model cannot forge them, and the gate never
+   * executes anything itself). Exactly one of `script` (a package.json
+   * script name) or `bin` (an npx binary) names the command; `args` must
+   * match the receipt's extra args exactly (default: argless). `expect`
+   * judges the LATEST matching run's exit code — `'fail'` is the
+   * red-before-green half of a repro-first fix (the failing test must
+   * actually fail), `'pass'` is the suite-green proof after it. A timed-out
+   * run satisfies neither. On a drafting task the project's commands run
+   * against the unmodified tree, so `onDraft: 'defer'` (the default)
+   * approves with an explicit "execution deferred until Apply" note instead
+   * of demanding a receipt that would be a lie; `'require'` hard-blocks
+   * instead. Books standardize on the argless canonical invocation because
+   * command approvals pin one invocation hash per script name.
+   */
+  z.object({
+    kind: z.literal('commandEvidence'),
+    script: z.string().min(1).optional(),
+    bin: z.string().min(1).optional(),
+    args: z.array(z.string()).optional(),
+    expect: z.enum(['pass', 'fail']),
+    minRuns: z.number().int().positive().optional(),
+    onDraft: z.enum(['defer', 'require']).optional(),
+    label: z.string().min(1).optional(),
+  }),
+  /**
    * A PR-review coverage ledger must name every changed path materialized in
    * a connector corpus. The ledger is JSON (`reviewedFiles` by default) in
    * the workspace, or in the artifacts drawer when `artifact` — a review of

@@ -409,6 +409,36 @@ The companion feature is the **exporter**: "package this project as a custom pro
 type" — a Meester-assisted lift of a project's accumulated craftbooks, scripts, pages,
 and gezel into a multi-item bundle. Users grow a project organically, then share it.
 
+### Source folders (the authoring format)
+
+The authoring form of a `.gezapp` is a **source folder**: a minimal `gezapp.json`
+(`format: "gezel-ai-app-source"`, `schemaVersion: 1`, optional `entry` pin and
+`publisher`) beside the same `items/` tree the archive carries. Everything heavy on the
+packed manifest — the item list, per-item sha-256, the dependency lock,
+`minGezelVersion`, `createdAt`, `signature` — is derived from the tree at pack time and
+is a validation error when hand-written. Because layout equals archive layout, an
+unzipped export is already a valid source folder (its stale packed `manifest.json` is
+tolerated with a warning).
+
+Scripts may be authored **inline** (the version manifest's `scripts` map — the form
+models handle best) or as **sidecar files** at `versions/<v>/scripts/<name>.ts` (better
+for people and typecheckers). `packGezappFromSource` folds sidecars into the map and
+drops the files, so the shipped format is unchanged; the same name in both forms is an
+error. Sidecar meta names must equal their filename stem, enforced with the craftbook
+scripts-map rule.
+
+Tooling lives on `@bendyline/gezel-service/gezapp`
+([gezapp-source.ts](../packages/service/src/project-type/gezapp-source.ts)) and needs no
+daemon: `validateGezappSource` (collect-all findings with stable rule ids; assembles the
+in-memory package and runs the same `verifyGezapp` an install runs, then layers
+authoring-only checks — referenced files, craftbook graphs via `craftbookFromDoc`,
+script diagnostics, page syntax/theme, offline dependency availability),
+`packGezappFromSource`, and `renderGezappAuthoringSchemaFiles` (every catalog schema
+plus both gezapp manifests, rendered live from core Zod). The CLI surface is
+`gezel app new | validate | pack | schemas`; worked samples live in
+[examples/apps](../examples/apps/README.md) and are kept working by
+`examples-apps.test.ts`.
+
 ## Deliberate exclusions
 
 - **`plugin-sdk` stays dormant.** Script-tools supersede its stdin/stdout tool model;

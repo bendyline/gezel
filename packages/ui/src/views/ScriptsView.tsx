@@ -7,6 +7,21 @@ import { RunResult, ScriptInputFields, buildDefaultInputs } from '../components/
 
 type ScriptEntry = ListScriptsResponse['scripts'][number];
 
+/**
+ * Sentinel for the cross-project library in the source picker. The
+ * library is the `user` resolution scope (~/.gezel/scripts) — scripts
+ * there belong to no single project and any project's task steps can
+ * attach them, which is what makes it the place to put anything shared.
+ */
+const SHARED_LIBRARY = 'shared-library';
+
+/**
+ * Shared scripts still need a project to run *in* — the runner scopes a
+ * run's workspace, artifacts and run record to one. Absent a pinned
+ * project we use `default`, the bucket every install already has.
+ */
+const SHARED_RUN_PROJECT = 'default';
+
 export interface ScriptsViewProps {
   /** Pin to a single project (used by the per-project view). */
   projectId?: string;
@@ -14,7 +29,7 @@ export interface ScriptsViewProps {
 
 export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [projectFilter, setProjectFilter] = useState(projectId ?? '');
+  const [source, setSource] = useState<string>(projectId ?? SHARED_LIBRARY);
   const [scripts, setScripts] = useState<ScriptEntry[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -23,27 +38,28 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
   const [lastRun, setLastRun] = useState<RunScriptResponse | null>(null);
   const [creating, setCreating] = useState(false);
 
+  const shared = source === SHARED_LIBRARY;
+  const runProjectId = shared ? (projectId ?? SHARED_RUN_PROJECT) : source;
+
   useEffect(() => {
     if (projectId !== undefined) {
-      setProjectFilter(projectId);
+      setSource(projectId);
       return;
     }
     api
       .listProjects()
-      .then((r) => {
-        setProjects(r.projects);
-        if (!projectFilter && r.projects[0]) setProjectFilter(r.projects[0].id);
-      })
+      .then((r) => setProjects(r.projects))
       .catch((err) => setError((err as Error).message));
-  }, [projectId, projectFilter]);
+  }, [projectId]);
 
-  const refresh = useCallback(async (pid: string) => {
-    if (!pid) {
-      setScripts([]);
-      return;
-    }
+  const refresh = useCallback(async (src: string) => {
     try {
-      const res = await api.listProjectScripts(pid);
+      const res =
+        src === SHARED_LIBRARY
+          ? await api.listUserScripts()
+          : src
+            ? await api.listProjectScripts(src)
+            : { scripts: [] };
       setScripts(res.scripts);
     } catch (err) {
       setError((err as Error).message);
@@ -51,8 +67,16 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
   }, []);
 
   useEffect(() => {
-    if (projectFilter) void refresh(projectFilter);
-  }, [projectFilter, refresh]);
+    void refresh(source);
+  }, [source, refresh]);
+
+  // Keep a script selected at all times — the picker offers no "pick one"
+  // placeholder, so the first entry stands in until the user chooses.
+  useEffect(() => {
+    setSelected((current) =>
+      current && scripts.some((s) => s.name === current) ? current : (scripts[0]?.name ?? null),
+    );
+  }, [scripts]);
 
   const selectedScript = useMemo(
     () => scripts.find((s) => s.name === selected) ?? null,
@@ -71,12 +95,13 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
   }, [selectedScript]);
 
   const runSelected = useCallback(async () => {
-    if (!selectedScript || !projectFilter) return;
+    if (!selectedScript) return;
     setRunning(true);
     setError(null);
     try {
-      const res = await api.runProjectScript(projectFilter, {
+      const res = await api.runProjectScript(runProjectId, {
         name: selectedScript.name,
+        ...(shared ? { scope: 'user' as const } : {}),
         input: inputValues,
       });
       setLastRun(res);
@@ -85,18 +110,23 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
     } finally {
       setRunning(false);
     }
-  }, [selectedScript, projectFilter, inputValues]);
+  }, [selectedScript, runProjectId, shared, inputValues]);
 
   const openEditor = useCallback(
     (name: string) => {
-      if (!projectFilter) return;
       window.dispatchEvent(
         new CustomEvent('gezel:open-tab', {
-          detail: { kind: 'script', projectId: projectFilter, name, activate: true },
+          detail: {
+            kind: 'script',
+            projectId: runProjectId,
+            name,
+            ...(shared ? { scope: 'user' as const } : {}),
+            activate: true,
+          },
         }),
       );
     },
-    [projectFilter],
+    [runProjectId, shared],
   );
 
   return (
@@ -106,15 +136,15 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
         <div className="scripts-view__toolbar">
           {projectId === undefined && (
             <label className="scripts-view__field">
-              <span>Project</span>
+              <span>Scripts from</span>
               <select
-                value={projectFilter}
+                value={source}
                 onChange={(e) => {
-                  setProjectFilter(e.target.value);
+                  setSource(e.target.value);
                   setSelected(null);
                 }}
               >
-                <option value="">— pick —</option>
+                <option value={SHARED_LIBRARY}>Shared library</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -127,10 +157,9 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
             <span>Script</span>
             <select
               value={selected ?? ''}
-              disabled={!projectFilter || scripts.length === 0}
+              disabled={scripts.length === 0}
               onChange={(e) => setSelected(e.target.value || null)}
             >
-              <option value="">{scripts.length === 0 ? '— none —' : '— pick —'}</option>
               {scripts.map((s) => (
                 <option key={s.name} value={s.name}>
                   {s.meta.name}
@@ -141,7 +170,6 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
           <button
             type="button"
             className="primary scripts-view__new"
-            disabled={!projectFilter}
             onClick={() => setCreating(true)}
           >
             New script
@@ -154,12 +182,14 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
       <div className="scripts-view__detail">
         {scripts.length === 0 ? (
           <p className="scripts-view__empty">
-            No scripts yet. Scripts are small automations that run when task phases start or finish
-            — create one to get going.
+            {shared
+              ? 'No shared scripts yet. Scripts here belong to no single project — every project can run them — so this is the place for anything more than one job needs.'
+              : 'No scripts yet. Scripts are small automations that run when task phases start or finish — create one to get going.'}
           </p>
         ) : selectedScript ? (
           <ScriptDetail
             entry={selectedScript}
+            shared={shared}
             inputValues={inputValues}
             onInputChange={setInputValues}
             running={running}
@@ -172,11 +202,13 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
 
       <NewScriptDialog
         open={creating}
-        projectId={projectFilter}
+        projectId={runProjectId}
+        {...(shared ? { scope: 'user' as const } : {})}
         onClose={() => setCreating(false)}
         onCreated={(name) => {
           setCreating(false);
-          void refresh(projectFilter);
+          void refresh(source);
+          setSelected(name);
           openEditor(name);
         }}
       />
@@ -186,6 +218,7 @@ export function ScriptsView({ projectId }: ScriptsViewProps = {}) {
 
 function ScriptDetail({
   entry,
+  shared,
   inputValues,
   onInputChange,
   running,
@@ -194,6 +227,7 @@ function ScriptDetail({
   lastRun,
 }: {
   entry: ScriptEntry;
+  shared: boolean;
   inputValues: Record<string, unknown>;
   onInputChange: (next: Record<string, unknown>) => void;
   running: boolean;
@@ -207,6 +241,7 @@ function ScriptDetail({
       <header>
         <h2>{meta.name}</h2>
         <p>{meta.description}</p>
+        {shared && <p className="muted small">In the shared library — every project can run it.</p>}
         <CapabilityPills requires={meta.requires} />
       </header>
 

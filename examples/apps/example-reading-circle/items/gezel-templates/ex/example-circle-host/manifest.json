@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "kind": "gezel-template",
+  "id": "example-circle-host",
+  "name": "Circle Host",
+  "description": "Hosts the reading circle: keeps the conversation moving and the members heard.",
+  "role": "Host",
+  "tags": ["example"],
+  "maintainer": {
+    "name": "Gezel"
+  },
+  "license": "MIT",
+  "yankedVersions": []
+}

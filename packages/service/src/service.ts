@@ -8,13 +8,22 @@ import {
   type GezelConfig,
   type ServiceRole,
   createLogger,
+  formatSuspension,
   isEngagementAllowed,
   normalizeStepGate,
   nowIso,
+  onSuspension,
   parseTaskRef,
   projectAllowsAmbientWork,
+  startSuspendMonitor,
+  stopSuspendMonitor,
 } from '@bendyline/gezel';
-import { type ExternalFolders, type TaskAssignee, resolveSecurityPolicy } from '@bendyline/gezel';
+import {
+  type ExternalFolders,
+  KeyedLock,
+  type TaskAssignee,
+  resolveSecurityPolicy,
+} from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { electronNativeBinCandidates } from '@bendyline/gezel-client/node';
 import {
@@ -26,6 +35,7 @@ import {
 import { gezelHome, gezelPaths, readConfigRaw } from '@bendyline/gezel/paths';
 import { type ServerType, serve } from '@hono/node-server';
 import { AmbientDashboardGenerator } from './ambient/dashboard-generator.js';
+import { createAppServeController } from './app-serve/controller.js';
 import { defaultCacheBudgetMb } from './cache/budget.js';
 import { SessionCacheController } from './cache/controller.js';
 import { ChannelManager } from './channels/manager.js';
@@ -33,7 +43,6 @@ import { ChatEventBus } from './chat/events.js';
 import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
 import { createCodexSetupManager } from './codex-setup/manager.js';
 import { ConnectorActionManager } from './connectors/actions.js';
-import { ProjectLocks } from './connectors/lock.js';
 import { ConnectorManager, corpusDirFor } from './connectors/manager.js';
 import { registerBlueskyAdapters } from './connectors/natives/bluesky-posts.js';
 import { registerCalendarAdapters } from './connectors/natives/calendar-google.js';
@@ -52,6 +61,8 @@ import {
   listGlobalCraftbookCandidates,
 } from './craftbook/suggest.js';
 import { DebugFlag } from './debug/flag.js';
+import { DiffpackManager } from './diffpack/manager.js';
+import { planNightFixes } from './diffpack/night-fix-planner.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { reuseVerifiedElectronNativeBinaries } from './engines/electron-native-reuse.js';
 import { effectiveEngineRelease } from './engines/native-manifest.js';
@@ -62,7 +73,7 @@ import { ActivityTracker } from './fs/activity-tracker.js';
 import { ensurePrivateUserHome } from './fs/home-permissions.js';
 import { mimeTypeForFilename } from './fs/media-types.js';
 import { Store } from './fs/store.js';
-import { ensureDefaultBoekwachter } from './gezels/autonomous-roles.js';
+import { ensureDefaultBoekwachter, resolveProjectBoekwachter } from './gezels/autonomous-roles.js';
 import { GildeUpdateManager } from './gilde-updates/manager.js';
 import { GitManager } from './git/manager.js';
 import { CodeReviewManager } from './git/reviews.js';
@@ -102,6 +113,7 @@ import { GlobalIndexManager } from './index-store/global-index-manager.js';
 import { GlobalIndex } from './index-store/global-index.js';
 import { readImageStaticMeta } from './index-store/image-meta.js';
 import { IndexingJobControl, ensureIndexingJobTask } from './index-store/indexing-job.js';
+import { ensureIndexFresh } from './index-store/readiness.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
 import { KnowledgeManager } from './knowledge/manager.js';
@@ -159,6 +171,7 @@ import {
 } from './search/search-service.js';
 import { openSecretStore } from './secrets/index.js';
 import { seedSecretsFromEnvFile } from './secrets/seed.js';
+import { observeShutdownStep } from './shutdown-progress.js';
 import { runSystemBootstrap } from './system-toolsets/bootstrap.js';
 import { SystemToolsetInstallRegistry } from './system-toolsets/install-registry.js';
 import { SystemStatusBus } from './system-toolsets/status-bus.js';
@@ -180,9 +193,11 @@ import { type CraftbookInvoker, TerminalManager } from './terminal/manager.js';
 import { HF_CACHE_DIR_ENV, transformersCacheDir } from './transformers-cache.js';
 import { createVSCodeSetupManager } from './vscode-setup/manager.js';
 import { WorkspaceIndexManager } from './workspace/index-manager.js';
+import { ensureCommandApprovalQuestions } from './workspace/scripts.js';
 import { WorkspaceWatchManager } from './workspace/watch-manager.js';
 
 const log = createLogger('service');
+const powerLog = createLogger('power');
 
 /**
  * Collapses an editor autosave burst (or a gezel writing several documents in
@@ -368,6 +383,17 @@ function ensureBundledNodeOnPath(): void {
 
 export async function startService(opts: StartServiceOptions = {}): Promise<RunningService> {
   const home = opts.home ?? gezelHome();
+  // Sleep-aware clock, started before anything can arm a deadline. Every
+  // long-running budget in the daemon — engine turns, one-shots, MCP tool
+  // calls, engine idle eviction — is measured in awake time, and a budget
+  // built before the monitor runs would silently keep the old wall-clock
+  // semantics for its whole life.
+  startSuspendMonitor();
+  const suspendLogOff = onSuspension((event) => {
+    powerLog.warn(
+      `host resumed after ${formatSuspension(event.suspendedMs)} suspended — in-flight deadlines were credited that time rather than charged for it`,
+    );
+  });
   discoverManagedScriptRuntimes(home);
   // Make sure shell-shim child processes can find `node` on PATH (see
   // helper above). Has to run before anything spawns a child — the
@@ -1017,6 +1043,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   let indexEnrichmentRef: IndexEnrichmentManager | null = null;
   const taskRunner = new TaskRunner({
     store,
+    prepareActiveStep: (projectId, num) => tasks.ensureActiveStepEntered(projectId, num),
     dispatcher: {
       startHandoffSession: (args) => chat.startHandoffSession(args),
       cancelHandoffSession: (sessionId) => chat.cancelInflight(sessionId),
@@ -1220,7 +1247,23 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   const { installCraftbookScripts, installLocalCraftbookScripts } = await import(
     './scripts/install.js'
   );
-  tasks.setTaskCreatedHook(async ({ projectId, sources }) => {
+  tasks.setTaskCreatedHook(async ({ projectId, task, sources }) => {
+    // A book that verifies its work by running project commands
+    // (`commandEvidence` gates) declares them as `commands` needs; raise
+    // their first-use approval questions NOW so the user answers at
+    // launch instead of the run stalling steps later. Fire-and-forget —
+    // an unanswered question just means the mid-task path asks again.
+    if (task.craftbook.commands && task.craftbook.commands.length > 0) {
+      await ensureCommandApprovalQuestions({
+        store,
+        home,
+        projectId,
+        needs: task.craftbook.commands,
+        requestedBy: `The "${task.craftbook.name}" craftbook (task ${task.ref})`,
+      }).catch((err) => {
+        log.warn(`[tasks] kickoff command approvals for ${task.ref} failed: ${String(err)}`);
+      });
+    }
     for (const src of sources) {
       // Local craftbooks (editor-authored) carry their scripts on disk —
       // copy from the local template dir rather than the bundled catalog.
@@ -1401,18 +1444,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         if (gateProject && !projectAllowsAmbientWork(gateProject)) return;
         const attempt = newStep.attemptCount ?? 1;
         const onFail = gate.onReject ?? task.craftbook.entryStepId;
-        const reader: GateWorkspaceReader = {
-          read: (f) => store.readProjectWorkspaceFile(projectId, f).catch(() => null),
-          list: async () =>
-            (await store.listProjectWorkspaceRecursive(projectId).catch(() => []))
-              .filter((e) => !e.isDirectory)
-              .map((e) => e.path),
-          readArtifact: (f) => store.readProjectArtifact(projectId, f).catch(() => null),
-          listArtifacts: async () =>
-            (await store.listProjectArtifactsRecursive(projectId).catch(() => []))
-              .filter((e) => !e.isDirectory)
-              .map((e) => e.path),
-        };
+        // Shared with completion gates: for a drafting task this reader is
+        // the diffpack overlay, so activation gates judge the proposed tree.
+        const reader: GateWorkspaceReader = tasks.gateWorkspaceReader(projectId, task);
         const outcome = await evaluateStepGate({
           gate,
           ws: reader,
@@ -1804,6 +1838,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     catalog,
     chat,
   });
+  // Diffpacks: change sets a gezel drafted into artifacts for the user to
+  // review and apply. The workspace is never written by the drafting side.
+  const diffpacks = new DiffpackManager({ home, store, tasks, history });
+  // Gates, activation gates, and the advanceWhen watcher judge a drafting
+  // task against the draft overlay (proposed tree), not the real workspace.
+  tasks.setDraftReader(diffpacks.drafts);
+  chat.setDraftReader(diffpacks.drafts);
   // Morning review question: once per settled night window (deduped on
   // the window key against the question store, so restarts and
   // slept-through-window-end catch-ups never double-ask), summarize what
@@ -1818,7 +1859,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       return;
     }
     const review = await buildNightShiftReview(
-      { store, tasks, reportActions },
+      { store, tasks, reportActions, diffpacks },
       nightShift.currentWindow(),
       new Date(),
     );
@@ -1906,6 +1947,12 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     await codeReviews
       .settleForTask(projectId, task.ref, outcome)
       .catch((err) => log.warn(`[service] review settle failed for ${task.ref}: ${String(err)}`));
+    // A completed drafting task seals its pack; a canceled one discards the
+    // draft tree, because a half-finished proposal is worse than none — the
+    // user cannot tell which parts the gezel stood behind.
+    await diffpacks
+      .settleForTask(projectId, task.ref, outcome)
+      .catch((err) => log.warn(`[service] diffpack settle failed for ${task.ref}: ${String(err)}`));
     // Report actions can live in a different project than their fired
     // task (the oversight report delegates cross-project), so this settle
     // scans records by taskRef rather than trusting projectId.
@@ -2045,12 +2092,56 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     },
   });
   indexEnrichmentRef = indexEnrichment;
+  // Night bug fixing: once the shift's index sweep drains, hand every
+  // qualifying project's open Boekwachter issues to its developer, who drafts
+  // change proposals into artifacts. Runs here rather than on activation so
+  // it plans against tonight's findings, not last night's. The gate is crew
+  // composition — a Boekwachter and a developer on the roster — and nothing
+  // it produces touches the workspace.
+  indexEnrichment.setOnCatchUpDrained(async () => {
+    if (!nightShift.isActive()) return;
+    await planNightFixes({
+      store,
+      tasks,
+      taskRunner,
+      contentIndex,
+      catalog,
+      diffpacks,
+      history,
+      nightShiftWindow: () => nightShift.currentWindow(),
+    }).catch((err) => log.warn(`[diffpack] night fix planning failed: ${String(err)}`));
+  });
   // Scan-complete → immediate embed drain: the moment a workspace scan
   // enrolls files, the always-on local embed tiers start filling vectors —
   // no 3-minute OS-idle wait, no Boekwachter. This is what makes semantic
   // search real minutes after a fresh install points gezel at a folder.
   workspaceIndex.setOnScanComplete((projectId) => {
     indexEnrichment.drainEmbedOnly(projectId);
+  });
+  // `gezel.index.*` for sandboxed scripts: the readiness surface craftbook
+  // hooks use to make "this review depends on a current index" real. Wired
+  // here (not at runner construction) because both index managers come up
+  // after the runner in boot order — same late-binding shape as setMcpCall.
+  scriptRunner.setIndexAccess({
+    status: (projectId) => workspaceIndex.statusForUi(projectId),
+    ensureFresh: (projectId, opts) =>
+      ensureIndexFresh(
+        {
+          workspaceIndex: {
+            statusForUi: (id) => workspaceIndex.statusForUi(id),
+            refreshAndWait: (id) => workspaceIndex.refreshAndWait(id),
+          },
+          enrichment: {
+            drive: (id, driveOpts) => indexEnrichment.drive(id, driveOpts),
+            awaitDrive: (id) => indexEnrichment.awaitDrive(id),
+            driveMode: (id) => indexEnrichment.driveMode(id),
+          },
+          resolveBoekwachter: (id) => resolveProjectBoekwachter(store, id).catch(() => null),
+          isPaused: () => indexingJob.isPaused(),
+        },
+        projectId,
+        opts,
+      ),
   });
   // FS watcher for the MRU-top workspaces — turns an on-disk change into a
   // near-immediate refresh instead of waiting for the polling tick.
@@ -2076,7 +2167,11 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   registerLinkedInAdapters();
   registerGitHubReleasesAdapters();
   registerGitHubWikiAdapters();
-  const connectorLocks = new ProjectLocks();
+  // Sync passes, binding mutations, and action commits all read-modify-write
+  // the same project state (project.json bindings, the corpus, the `_actions`
+  // staging dirs), so the sync manager and the action manager share ONE lock —
+  // a commit can't race a sync or a concurrent discard on the same project.
+  const connectorLocks = new KeyedLock();
   const connectors = new ConnectorManager({
     store,
     secrets,
@@ -2435,6 +2530,13 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   const childProcessSpawn = await probeChildProcessSpawn();
   if (childProcessSpawn === 'denied') log.error(`[spawn] ${SPAWN_DENIED_MESSAGE}`);
 
+  // App-serve sites — per-site visitor listeners for shared AI App
+  // mini-sites. A product feature: the machine-engine role never serves.
+  const appServe =
+    serviceRole === 'machine-engine'
+      ? undefined
+      : createAppServeController({ store, catalog, chat, chatEvents, history, scriptRunner });
+
   const context: ServiceContext = {
     serviceRole,
     home,
@@ -2457,12 +2559,14 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     catalog,
     gildeUpdates,
     ...(knowledge ? { knowledge } : {}),
+    ...(appServe ? { appServe } : {}),
     handboek,
     secrets,
     git,
     gitHubPrs,
     codeReviews,
     reportActions,
+    diffpacks,
     connectors,
     connectorActions,
     renderer,
@@ -3035,33 +3139,38 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     cert,
     webUiToken,
     async stop() {
+      const shutdownStep = <T>(name: string, action: () => T | Promise<T>) =>
+        observeShutdownStep(name, action, { warn: (message) => log.warn(message) });
+      log.info('[service] shutdown started');
+      suspendLogOff();
+      stopSuspendMonitor();
       scheduler.stop();
       nightShift.stop();
       // Quiesce chat before tearing down any callback dependencies. In
       // particular, keep the HTTP listener alive while MCP subprocesses and
       // active provider turns unwind; otherwise their service callbacks fail
       // as the misleading transport error "fetch failed".
-      await chat.beginShutdown();
-      await taskRunner.stop();
+      await shutdownStep('chat begin', () => chat.beginShutdown());
+      await shutdownStep('task runner', () => taskRunner.stop());
       memoryHealth.stop();
       memoryCompactor.stop();
       digestGenerator.stop();
       gildeUpdates.stop();
-      await knowledge?.stop();
+      await shutdownStep('knowledge workers', async () => knowledge?.stop());
       keurmeesterDigest.stop();
       meesterStatus.stop();
       ambientDashboard.stop();
-      await activityTracker.stop();
+      await shutdownStep('activity tracker', () => activityTracker.stop());
       if (libraryRefreshTimer) {
         clearTimeout(libraryRefreshTimer);
         libraryRefreshTimer = null;
       }
-      await workspaceIndex.stop();
+      await shutdownStep('workspace index', () => workspaceIndex.stop());
       workspaceWatch.stop();
-      await indexEnrichment.stop();
+      await shutdownStep('index enrichment', () => indexEnrichment.stop());
       globalIndexManager.stop();
       // An open document-edit window would otherwise lose its audit event.
-      await store.flushDocumentAudit().catch(() => {});
+      await shutdownStep('document audit flush', () => store.flushDocumentAudit().catch(() => {}));
       connectorSync.stop();
       cacheController.stop();
       imagePulls.clear();
@@ -3071,37 +3180,44 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       videoPulls.clear();
       engineBinaries.clear();
       systemToolsetInstalls.clear();
-      await imageProvider.shutdown();
-      await videoProvider.shutdown();
-      await stt.shutdown();
-      await tts.shutdown();
+      await shutdownStep('image provider', () => imageProvider.shutdown());
+      await shutdownStep('video provider', () => videoProvider.shutdown());
+      await shutdownStep('speech recognition', () => stt.shutdown());
+      await shutdownStep('speech synthesis', () => tts.shutdown());
       if (idleSummarizerTimer) clearInterval(idleSummarizerTimer);
-      await channels.stop();
-      await remoteServing.stop();
-      await ollamaEmulation.stop();
-      await codexSetup.stop();
-      await opencodeSetup.stop();
-      await piSetup.stop();
-      await vscodeSetup.stop();
-      await machineEngine?.stop();
-      await closePairedRemoteFetches(remotes);
+      await shutdownStep('channels', () => channels.stop());
+      await shutdownStep('app serve', async () => appServe?.stopAll());
+      await shutdownStep('remote serving', () => remoteServing.stop());
+      await shutdownStep('Ollama emulation', () => ollamaEmulation.stop());
+      await shutdownStep('Codex setup', () => codexSetup.stop());
+      await shutdownStep('OpenCode setup', () => opencodeSetup.stop());
+      await shutdownStep('pi setup', () => piSetup.stop());
+      await shutdownStep('VS Code setup', () => vscodeSetup.stop());
+      await shutdownStep('machine engine', async () => machineEngine?.stop());
+      await shutdownStep('paired remote fetches', () => closePairedRemoteFetches(remotes));
       if (previewServer) {
-        await new Promise<void>((resolve) => {
-          let settled = false;
-          const finish = () => {
-            if (settled) return;
-            settled = true;
-            resolve();
-          };
-          previewServer?.close(() => finish());
-          const s = previewServer as unknown as { closeAllConnections?: () => void };
-          s.closeAllConnections?.();
-          setTimeout(finish, 2_000).unref();
-        });
+        await shutdownStep(
+          'preview server',
+          () =>
+            new Promise<void>((resolve) => {
+              let settled = false;
+              const finish = () => {
+                if (settled) return;
+                settled = true;
+                resolve();
+              };
+              previewServer?.close(() => finish());
+              const s = previewServer as unknown as { closeAllConnections?: () => void };
+              s.closeAllConnections?.();
+              setTimeout(finish, 2_000).unref();
+            }),
+        );
       }
-      await chat.drainBackground();
-      // Shut providers down while the service backchannel is still alive.
-      await chat.shutdown().catch(() => {});
+      // ChatManager.shutdown owns the one bounded background drain. Calling
+      // drainBackground separately here used to spend the same 15-second
+      // budget twice when one fire-and-forget task never settled, consuming
+      // Electron's complete 30-second graceful-quit window.
+      await shutdownStep('chat manager', () => chat.shutdown().catch(() => {}));
       // Initiate graceful close, but don't block forever waiting for
       // SSE streams to wind down. Active streams hold the server open
       // until each handler's keepalive loop notices the disconnect —
@@ -3109,40 +3225,45 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       // settle time can exceed Vitest's `afterAll` hook budget. Force
       // the issue: tell active HTTP/1 connections to close, destroy
       // any active HTTP/2 sessions, and cap the wait.
-      await new Promise<void>((resolve) => {
-        let settled = false;
-        const finish = () => {
-          if (settled) return;
-          settled = true;
-          resolve();
-        };
-        server.close(() => finish());
-        const s = server as unknown as {
-          closeAllConnections?: () => void;
-          closeIdleConnections?: () => void;
-        };
-        s.closeIdleConnections?.();
-        s.closeAllConnections?.();
-        // http2: there's no closeAllConnections; iterate active sessions.
-        const http2Server = server as unknown as { _sessions?: Set<{ destroy?: () => void }> };
-        for (const sess of http2Server._sessions ?? []) {
-          try {
-            sess.destroy?.();
-          } catch {
-            /* ignore */
-          }
-        }
-        // Hard cap — sockets will be released by GC / OS when the
-        // process exits or the next test starts.
-        setTimeout(finish, 2_000).unref();
-      });
+      await shutdownStep(
+        'HTTP server',
+        () =>
+          new Promise<void>((resolve) => {
+            let settled = false;
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              resolve();
+            };
+            server.close(() => finish());
+            const s = server as unknown as {
+              closeAllConnections?: () => void;
+              closeIdleConnections?: () => void;
+            };
+            s.closeIdleConnections?.();
+            s.closeAllConnections?.();
+            // http2: there's no closeAllConnections; iterate active sessions.
+            const http2Server = server as unknown as { _sessions?: Set<{ destroy?: () => void }> };
+            for (const sess of http2Server._sessions ?? []) {
+              try {
+                sess.destroy?.();
+              } catch {
+                /* ignore */
+              }
+            }
+            // Hard cap — sockets will be released by GC / OS when the
+            // process exits or the next test starts.
+            setTimeout(finish, 2_000).unref();
+          }),
+      );
       // Kill all persistent terminal shells. Without this, the bash
       // (or PowerShell) children spawned by the per-thread pool stay
       // resident past the daemon's exit until their idle timers
       // fire — same orphan pattern as the chat MlxProvider above.
-      await terminals.shutdown().catch(() => {});
-      await renderer.stop();
-      await runtimeLock.release();
+      await shutdownStep('terminal sessions', () => terminals.shutdown().catch(() => {}));
+      await shutdownStep('image renderer', () => renderer.stop());
+      await shutdownStep('runtime lock', () => runtimeLock.release());
+      log.info('[service] shutdown complete');
     },
   };
 }

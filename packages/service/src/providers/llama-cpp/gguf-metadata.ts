@@ -62,6 +62,25 @@ const FILE_TYPE_NAMES: Record<number, string> = {
   30: 'MOSTLY_BF16',
 };
 
+/**
+ * The quantization tag a GGUF declares about itself, in the shape the model
+ * table already understands (`Q4_K_M`, `BF16`, `F32`). Derived from
+ * `general.file_type`, so unlike a catalog-authored `quantization` string it
+ * cannot drift into prose — `muse-glimmer-30b-q4` shipped `K-Quant-17GB`,
+ * copied from the upstream filename, and rendered verbatim in a column of
+ * bit depths.
+ *
+ * Undefined for a file_type this build has no name for: `UNKNOWN_29` is a
+ * worse thing to show a user than whatever the catalog wrote.
+ */
+export function ggufQuantizationTag(summary: {
+  fileTypeName?: string;
+}): string | undefined {
+  const name = summary.fileTypeName;
+  if (!name || name.startsWith('UNKNOWN_')) return undefined;
+  return name.replace(/^(?:MOSTLY|ALL)_/, '');
+}
+
 export interface GgufSummary {
   magic: string;
   version: number;

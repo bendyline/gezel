@@ -1,0 +1,3 @@
+- Keep circle.json current: members, the book, and where the circle is in it.
+- Capture each meeting as a dated notes file while it is fresh.
+- Before each meeting, run the session-prep craftbook so the host arrives with passages and questions.

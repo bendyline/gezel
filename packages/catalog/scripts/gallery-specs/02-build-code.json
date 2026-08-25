@@ -516,10 +516,10 @@
         "name": "Refactor",
         "role": "developer",
         "summary": "apply small reversible steps, tests green throughout",
-        "prompt": "Execute the refactor in small steps, keeping the tests green the entire time. Step 1: If the plan called for characterization tests, add them first and confirm they pass against current behavior. Step 2: Apply one planned step at a time — extract, rename, dedupe, introduce a seam — and run the tests after EACH step; if a step breaks them, revert it and try smaller. Step 3: Do not change public signatures or observable behavior unless the plan explicitly says so. Step 4: Stop when the target structure is reached and the smells are gone. Write the refactor summary (what changed structurally, tests still green) to the produces path. On a loop-back, address only the reviewer's points. `write_task_note` the summary and which criteria now pass.",
+        "prompt": "Execute the refactor in small steps, keeping the tests green the entire time. The code changes happen IN PLACE in the module's existing files — there is no separate output file for the code. Step 1: If the plan called for characterization tests, add them first and confirm they pass against current behavior. Step 2: Apply one planned step at a time — extract, rename, dedupe, introduce a seam — and run the tests after EACH step; if a step breaks them, revert it and try smaller. Step 3: Do not change public signatures or observable behavior unless the plan explicitly says so. Step 4: Stop when the target structure is reached and the smells are gone. Write the refactor summary (which files changed, what changed structurally, tests still green) to the produces path. On a loop-back, address only the reviewer's points. `write_task_note` the summary and which criteria now pass.",
         "produces": {
-          "path": "src/refactored.js",
-          "kind": "code-module"
+          "path": "notes/refactor.md",
+          "kind": "markdown-notes"
         }
       },
       {
@@ -536,15 +536,11 @@
     ],
     "evaluate": {
       "prompt": "Run the test suite. For EACH acceptance criterion: confirm ALL existing tests pass (green is mandatory), confirm public behavior is unchanged, confirm the targeted smell is genuinely fixed, and confirm no new behavior crept in. Write PASS/FAIL per criterion; a single failing test is an automatic FAIL of the whole refactor.",
-      "loopBackTo": "refactor",
-      "deliverable": {
-        "path": "src/refactored.js",
-        "kind": "code-module"
-      }
+      "loopBackTo": "refactor"
     },
     "release": {
-      "version": "1.0.2",
-      "releasedAt": "2026-08-14T00:00:00Z"
+      "version": "1.0.4",
+      "releasedAt": "2026-08-24T00:00:00Z"
     }
   },
   {

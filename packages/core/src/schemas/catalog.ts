@@ -1,8 +1,10 @@
 import { z } from 'zod';
+import { CraftbookCategorySchema } from '../craftbook-categories.js';
 import { ProjectIconIdSchema } from '../project-icons.js';
 import { TaskAssigneeSchema } from './assignee.js';
 import {
   CraftbookBasedOnSchema,
+  CraftbookCommandNeedSchema,
   CraftbookConnectorNeedSchema,
   CraftbookRequirementSchema,
   CraftbookRunModesSchema,
@@ -10,6 +12,7 @@ import {
   CraftbookSpawnSchema,
   CraftbookStepSchema,
   CraftbookToolsetNeedSchema,
+  ModelTierSchema,
 } from './craftbook.js';
 import { ProviderNameSchema } from './gezel.js';
 import { HookSpecSchema } from './hook.js';
@@ -105,9 +108,9 @@ export const LicenseMetaShape = {
  *
  * A score alone is never enough: every surface routes through
  * `isRecommendedModel` (`packages/core/src/recommendation.ts`), which also
- * requires `licenseClass === 'open'` and — for chat models, which declare it —
- * `supportsTools !== false`. So a stray score on a restricted or tool-less
- * model is ignored rather than trusted.
+ * requires `licenseClass === 'open'`, no `retired` tag, and — for chat models,
+ * which declare it — `supportsTools !== false`. So a stray score on a
+ * restricted, retired, or tool-less model is ignored rather than trusted.
  */
 export const RecoMetaShape = {
   recoScore: z.number().int().positive().optional(),
@@ -653,6 +656,13 @@ export const CraftbookTemplateIdentitySchema = IdentityCommonSchema.extend({
   /** Coarse project-lifecycle shelf used by craftbook browsers. */
   role: CraftbookRoleSchema.default('general'),
   /**
+   * Subject shelf — what kind of work the recipe is about, independent of
+   * where in a project's life it fits. Optional because third-party and
+   * pre-category manifests predate it; `resolveCraftbookCategory` falls back
+   * to tag inference when it is absent.
+   */
+  category: CraftbookCategorySchema.optional(),
+  /**
    * Optional workflow tag for filtering / Gilde browser facets
    * (e.g. "review-loop", "publish-pipeline"). Free-form.
    */
@@ -725,6 +735,12 @@ export const CraftbookTemplateVersionManifestSchema = z.object({
    * live API. See {@link CraftbookConnectorNeedSchema}.
    */
   connectors: z.array(CraftbookConnectorNeedSchema).optional(),
+  /** Command needs for commandEvidence gates (see CraftbookCommandNeedSchema). */
+  commands: z.array(CraftbookCommandNeedSchema).optional(),
+  /** Authored mode-agnostic — see `CraftbookSchema.diffpackCapable`. */
+  diffpackCapable: z.boolean().optional(),
+  /** Minimum model tier for the whole book (see CraftbookSchema.capabilityFloor). */
+  capabilityFloor: ModelTierSchema.optional(),
 });
 export type CraftbookTemplateVersionManifest = z.infer<
   typeof CraftbookTemplateVersionManifestSchema
@@ -747,6 +763,8 @@ export const CraftbookTemplateManifestSchema = z.object({
   version: z.string(),
   releasedAt: z.string(),
   role: CraftbookRoleSchema.default('general'),
+  /** Mirrored from the identity — see CraftbookTemplateIdentitySchema. */
+  category: CraftbookCategorySchema.optional(),
   workflow: z.string().optional(),
   about: z.string(),
   steps: z.array(CraftbookStepSchema).min(1),
@@ -787,6 +805,12 @@ export const CraftbookTemplateManifestSchema = z.object({
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
   /** Connector dependencies (mirrored from the version manifest). */
   connectors: z.array(CraftbookConnectorNeedSchema).optional(),
+  /** Command needs (mirrored from the version manifest). */
+  commands: z.array(CraftbookCommandNeedSchema).optional(),
+  /** Authored mode-agnostic (mirrored from the version manifest). */
+  diffpackCapable: z.boolean().optional(),
+  /** Whole-book model-tier floor (mirrored from the version manifest). */
+  capabilityFloor: ModelTierSchema.optional(),
 });
 export type CraftbookTemplateManifest = z.infer<typeof CraftbookTemplateManifestSchema>;
 
@@ -2433,6 +2457,44 @@ export const GezappRegistrySchema = z.object({
   apps: z.array(GezappRegistryEntrySchema).default([]),
 });
 export type GezappRegistry = z.infer<typeof GezappRegistrySchema>;
+
+/**
+ * The root `gezapp.json` of an AI App *source folder* — the authoring form
+ * of a `.gezapp`. Deliberately minimal: everything heavy on the packed
+ * manifest (`items` + per-item sha256, `createdAt`, `dependencies`,
+ * `minGezelVersion`, `signature`) is derived from the `items/` tree by
+ * `gezel app pack`, never hand-maintained. Strict so an author who pastes
+ * packed-manifest fields here gets told they are generated, not silently
+ * carried stale.
+ */
+export const GezappSourceManifestSchema = z
+  .object({
+    format: z.literal('gezel-ai-app-source'),
+    schemaVersion: z.literal(1),
+    /**
+     * Optional entry pin. When the items tree holds exactly one project
+     * type, both fields are discovered; `version` defaults to the highest
+     * semver version folder present.
+     */
+    entry: z
+      .object({
+        projectType: z.string().regex(IdRegex).optional(),
+        version: z.string().regex(SemverRegex).optional(),
+      })
+      .optional(),
+    /** Defaults to the entry project type identity's maintainer at pack time. */
+    publisher: z
+      .object({
+        name: z.string().min(1),
+        url: z.string().url().optional(),
+      })
+      .optional(),
+  })
+  .strict();
+export type GezappSourceManifest = z.infer<typeof GezappSourceManifestSchema>;
+
+/** The source-folder manifest filename beside `items/`. */
+export const GEZAPP_SOURCE_MANIFEST_FILENAME = 'gezapp.json';
 
 // ─ .gezmodel portable model bundles ──────────────────────────────────────
 //

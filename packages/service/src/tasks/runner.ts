@@ -35,7 +35,10 @@
  * service boot, `rehydrateFromStore` scans all `active` tasks and
  * enqueues a handoff for any whose current phase has an assignee
  * and no open session yet. This backfills pending work the
- * previous process was supposed to do before it stopped.
+ * previous process was supposed to do before it stopped. The final
+ * dispatch boundary prepares any unmarked `onEnter` setup first, so a
+ * process that stopped between activation and setup cannot hand a worker
+ * incomplete inputs after restart.
  */
 
 import {
@@ -44,10 +47,10 @@ import {
   type TaskWaitReason,
   type TaskWaitState,
   createLogger,
+  effectiveCapabilityFloor,
   getEngagementMode,
   isTaskWorkAllowed,
   projectAllowsAmbientWork,
-  roleCapabilityFloor,
 } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { LLMProvider, ProviderName } from '../providers/types.js';
@@ -86,8 +89,12 @@ export interface PendingHandoff {
    * read "Koray has handed step report to you" to Koray.
    */
   fromGezelId?: string;
-  /** `'entry'` for a fresh launch (no prior step); defaults to `'handoff'`. */
-  kind?: 'handoff' | 'entry';
+  /**
+   * `'entry'` for a fresh launch (no prior step), `'retry'` for a
+   * user-driven "try again" on a task that paused for help; defaults to
+   * `'handoff'`.
+   */
+  kind?: 'handoff' | 'entry' | 'retry';
   /** Step activation timestamp captured when this handoff was enqueued. */
   activationAt?: string;
   /** Reuse the latest persisted session for this task step after a service restart. */
@@ -137,7 +144,7 @@ export interface TaskRunnerDispatcher {
     stepId: string;
     fromGezelName?: string;
     fromGezelId?: string;
-    kind?: 'handoff' | 'entry';
+    kind?: 'handoff' | 'entry' | 'retry';
     /** Naming presentation pinned by the task that owns this handoff. */
     roleBasedNameOnlyMode?: boolean;
     /**
@@ -191,6 +198,18 @@ export interface TaskRunnerOptions {
   store: Store;
   dispatcher: TaskRunnerDispatcher;
   /**
+   * Prepare a current step's deterministic `onEnter` work before dispatch.
+   * Optional for lightweight runner tests; production wires TaskManager's
+   * durable preparation path here.
+   */
+  prepareActiveStep?: (
+    projectId: string,
+    num: number,
+  ) => Promise<{
+    status: 'ready' | 'advanced' | 'failed' | 'not-active';
+    task: Task;
+  }>;
+  /**
    * Tick cadence. 5000ms is plenty — a tick too fast is noise; too
    * slow and the queue feels sluggish after a provider drains.
    */
@@ -230,6 +249,7 @@ export interface TaskRunnerOptions {
 export class TaskRunner {
   private readonly store: Store;
   private readonly dispatcher: TaskRunnerDispatcher;
+  private readonly prepareActiveStep: TaskRunnerOptions['prepareActiveStep'];
   private readonly tickIntervalMs: number;
   private readonly now: () => number;
   private readonly isNightShiftActive: () => boolean;
@@ -260,6 +280,7 @@ export class TaskRunner {
   constructor(opts: TaskRunnerOptions) {
     this.store = opts.store;
     this.dispatcher = opts.dispatcher;
+    this.prepareActiveStep = opts.prepareActiveStep;
     this.tickIntervalMs = opts.tickIntervalMs ?? 5_000;
     this.now = opts.now ?? Date.now;
     this.isNightShiftActive = opts.isNightShiftActive ?? (() => false);
@@ -433,6 +454,7 @@ export class TaskRunner {
         reason: 'dispatching',
         gezelId: dispatch.gezelId,
         stepId: dispatch.stepId,
+        sessionId: dispatch.sessionId,
         since: new Date(dispatch.dispatchedAt).toISOString(),
       });
     }
@@ -586,11 +608,38 @@ export class TaskRunner {
       if (!projectId || !Number.isFinite(num)) {
         continue; // malformed — drop.
       }
-      const task = await this.store.readTask(projectId, num).catch(() => null);
+      let task = await this.store.readTask(projectId, num).catch(() => null);
       if (!task || task.status !== 'active' || task.activeStepId !== handoff.stepId) {
         continue;
       }
-      const currentStep = task.craftbook.steps.find((step) => step.id === handoff.stepId);
+      let currentStep = task.craftbook.steps.find((step) => step.id === handoff.stepId);
+      const activationAt = currentStep?.lastActivatedAt ?? currentStep?.createdAt;
+      const needsPreparation =
+        currentStep?.onEnter !== undefined && currentStep.onEnterCompletedAt !== activationAt;
+      if (needsPreparation && this.prepareActiveStep) {
+        try {
+          const entrance = await this.prepareActiveStep(projectId, num);
+          if (entrance.status === 'failed' || entrance.status === 'not-active') continue;
+          // Auto-advance invalidates this queued handoff. The normal step
+          // activation hook enqueues the successor during preparation.
+          if (entrance.status === 'advanced') continue;
+          task = entrance.task;
+          currentStep = task.craftbook.steps.find((step) => step.id === handoff.stepId);
+          if (task.status !== 'active' || task.activeStepId !== handoff.stepId || !currentStep) {
+            continue;
+          }
+        } catch (err) {
+          // A transient preparation exception must not fall open. Keep the
+          // handoff queued so the next tick can retry; handled script failures
+          // return `failed` above after TaskManager pauses the task.
+          log.error(
+            `[task-runner] step preparation failed for ${handoff.taskRef}/${handoff.stepId}:`,
+            err instanceof Error ? err.message : err,
+          );
+          keep.push(handoff);
+          continue;
+        }
+      }
       if (
         handoff.activationAt &&
         currentStep?.lastActivatedAt &&
@@ -721,7 +770,11 @@ export class TaskRunner {
       // (maybeResolveStepRole keeps `suggestedRole` intact when it
       // stamps `suggestedGezelId`, so the role is available here).
       const step = task.craftbook?.steps.find((s) => s.id === handoff.stepId);
-      const floor = step?.capabilityFloor ?? roleCapabilityFloor(step?.suggestedRole) ?? undefined;
+      // Effective floor = explicit step floor, else max(role floor,
+      // whole-book floor) — see effectiveCapabilityFloor.
+      const floor = step
+        ? (effectiveCapabilityFloor(step, task.craftbook) ?? undefined)
+        : undefined;
 
       // Dispatch. `startHandoffSession` is itself fire-and-forget
       // internally (spawns a session, detaches the first send), so

@@ -313,6 +313,29 @@ export type AlwaysRegisteredToolName = (typeof ALWAYS_REGISTERED_TOOLS)[number];
 export type ConditionallyRegisteredToolName = keyof typeof CONDITIONALLY_REGISTERED_TOOLS;
 
 /**
+ * Tools an external host harness calls, never the model.
+ *
+ * Their argument shape is owned by that harness, not by gezel, so it grows
+ * whenever the harness ships a new version. Gezel's closed-schema contract
+ * (`z.strictObject` in server.ts) is right for the model-facing surface —
+ * a hallucinated argument should be rejected loudly — and exactly wrong
+ * here: a field the vendor added is not a mistake to reject, it is the new
+ * contract. Registration keeps these schemas open so unknown keys are
+ * stripped rather than raising `-32602`.
+ *
+ * The cost of getting this wrong is not local to the callback. Claude
+ * Code's `--permission-prompt-tool` points at `request_tool_permission`,
+ * and every tool that is NOT on `--allowedTools` routes through it — so a
+ * single rejected key takes down every third-party toolset (DocBlocks,
+ * Playwright, GitHub, …) for the whole `anthropic-cli` provider while
+ * auto-approved gezel-mcp tools keep working, which reads like a
+ * per-toolset fault and is not one. That is what `tool_use_id` did.
+ */
+export const HOST_CALLBACK_TOOLS: ReadonlySet<string> = Object.freeze(
+  new Set<string>(['request_tool_permission']),
+);
+
+/**
  * Legacy spelling → canonical name for every tool renamed in the
  * snake_case standardization. The old names never appear in `tools/list`
  * (zero prompt cost) but stay callable forever: pinned gilde role

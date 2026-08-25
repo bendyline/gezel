@@ -70,7 +70,8 @@ import {
 } from '../../models/storage-roots.js';
 import { checkDiskSpace, describeDiskShortfall } from '../../utils/disk-space.js';
 import { downloadWithRetry } from '../../utils/download-with-retry.js';
-import { readGgufSummary } from './gguf-metadata.js';
+import { ggufQuantizationTag, readGgufSummary } from './gguf-metadata.js';
+import { backfillGgufQuantization } from './gguf-quantization-backfill.js';
 
 export type { IncompleteModelDownloadInfo } from '../../models/storage-roots.js';
 
@@ -107,6 +108,14 @@ export interface InstalledLlamaCppModel {
   contextWindow?: number;
   /** Quantization tag (Q4_K_M / Q8_0 / …) lifted from the catalog source block. */
   quantization?: string;
+  /**
+   * What the GGUF header itself declares (`general.file_type`), when the
+   * catalog's tag names no bit depth. The catalog string is hand-authored
+   * content and can be anything — `muse-glimmer-30b-q4` shipped
+   * `K-Quant-17GB` — so the model table falls back to this rather than
+   * printing a filename fragment in a column of `~4` / `~8`.
+   */
+  ggufQuantization?: string;
   /** Empty when `tokenizer.chat_template` is missing — surfaced in the UI as a warning. */
   chatTemplatePresent: boolean;
   /** Complete payload hashes used when adopting a read-only machine model. */
@@ -262,6 +271,8 @@ interface InstalledManifest {
   catalogVersion: string;
   huggingfaceRepo: string;
   quantization?: string;
+  /** `general.file_type` from the weights, recorded at install; backfilled on read for older copies. */
+  ggufQuantization?: string;
   contextWindow?: number;
   architecture?: string;
   chatTemplatePresent: boolean;
@@ -1018,6 +1029,9 @@ export class LlamaCppModelManager {
     const catalogPayload = describeCatalogPayload(manifest, this.engine);
     const payloadFingerprint =
       catalogPayload && !skipSha ? catalogPayloadFingerprint(catalogPayload) : undefined;
+    // Recorded next to the catalog's tag, never instead of it: the catalog
+    // names the build a user chose, the header names what the bytes are.
+    const declaredQuantization = ggufQuantizationTag(summary);
     const installed: InstalledManifest = {
       id: catalogId,
       name: manifest.name,
@@ -1040,6 +1054,7 @@ export class LlamaCppModelManager {
       ...(mmprojEntry ? { mmprojFilename: mmprojEntry.destFilename } : {}),
       ...(draftModelEntry ? { draftModelFilename: draftModelEntry.destFilename } : {}),
       ...(src.quantization ? { quantization: src.quantization } : {}),
+      ...(declaredQuantization ? { ggufQuantization: declaredQuantization } : {}),
       ...(summary.contextLength ? { contextWindow: Number(summary.contextLength) } : {}),
       ...(summary.architecture ? { architecture: summary.architecture } : {}),
       chatTemplatePresent: !summary.chatTemplateMissing,
@@ -1141,6 +1156,18 @@ export class LlamaCppModelManager {
           .then((s) => s.size)
           .catch(() => 0)
       : 0;
+    // Absent on every copy installed before the field existed, and on those
+    // the catalog tag is the only thing the table has to show.
+    const ggufQuantization =
+      parsed.ggufQuantization ??
+      (await backfillGgufQuantization({
+        engine: this.engine,
+        id,
+        modelDir: join(root, id),
+        weightsFilename: parsed.weightsFilename,
+        ...(parsed.quantization ? { catalogQuantization: parsed.quantization } : {}),
+        writable: resolve(root) === resolve(this.storageRoots.writableRoot),
+      }));
     return {
       id: parsed.id,
       name: parsed.name,
@@ -1158,6 +1185,7 @@ export class LlamaCppModelManager {
         : {}),
       ...(parsed.contextWindow ? { contextWindow: parsed.contextWindow } : {}),
       ...(parsed.quantization ? { quantization: parsed.quantization } : {}),
+      ...(ggufQuantization ? { ggufQuantization } : {}),
       chatTemplatePresent: parsed.chatTemplatePresent ?? true,
       ...(parsed.architecture ? { architecture: parsed.architecture } : {}),
       ...(parsed.catalogVersion ? { catalogVersion: parsed.catalogVersion } : {}),

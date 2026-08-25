@@ -7,7 +7,7 @@ import { type Store, boekwachterIssueFingerprint } from '../fs/store.js';
 import { ContentIndex } from './content-index.js';
 import { runWorkspaceContentIndex } from './content-indexer.js';
 import type { EnrichDeps } from './enrich.js';
-import { parseFileReviewReply, sanitizeMermaid } from './review.js';
+import { buildReviewPrompt, parseFileReviewReply, sanitizeMermaid } from './review.js';
 import { type ResolvedRubric, resolveRubrics } from './rubrics.js';
 
 /**
@@ -22,12 +22,15 @@ let home: string;
 let artifacts: string;
 let ci: ContentIndex;
 let durableIssues: Array<Record<string, unknown>>;
+/** Paths handed to each `observeProjectBoekwachterReviews` call, in order. */
+let observedBatches: string[][];
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'gezel-review-'));
   home = await mkdtemp(join(tmpdir(), 'gezel-review-home-'));
   artifacts = join(home, 'artifacts');
   durableIssues = [];
+  observedBatches = [];
   ci = new ContentIndex(
     {
       projectWorkspaceDir: async () => dir,
@@ -45,6 +48,7 @@ beforeEach(async () => {
           }>;
         }>,
       ) => {
+        observedBatches.push(observations.map((observation) => observation.path));
         for (const observation of observations) {
           for (const existing of durableIssues.filter((row) => row.path === observation.path)) {
             existing.lastCheckedAt = '2026-08-12T00:00:00.000Z';
@@ -153,6 +157,31 @@ describe('ContentIndex.review end-to-end', () => {
     expect(map.health).toMatchObject({ reviewedFiles: 3, avgHealth: 6, minorIssues: 3 });
   });
 
+  // Opening a file in the Workspace calls file-review. Reconciling every
+  // reviewed path on that click is work proportional to the whole repo, and
+  // it blocks the daemon's event loop: on a 2.4k-path backlog it cost several
+  // seconds per click, which reads as the app hanging on every file switch.
+  it('reconciles only the opened file, while the list surface still sweeps all', async () => {
+    await mkdir(join(dir, 'src'), { recursive: true });
+    await writeFile(join(dir, 'src', 'a.ts'), 'export const one = 1;\n');
+    await writeFile(join(dir, 'src', 'b.ts'), 'export const two = 2;\n');
+    await runWorkspaceContentIndex(dir, 'c', artifacts);
+    await ci.review(
+      'c',
+      deps(async () => VALID_REPLY),
+      10,
+      await builtinRubrics(),
+    );
+
+    observedBatches = [];
+    await ci.fileReview('c', 'src/a.ts');
+    expect(observedBatches).toEqual([['src/a.ts']]);
+
+    observedBatches = [];
+    await ci.listFileIssues('c', {});
+    expect(observedBatches).toEqual([['src/a.ts', 'src/b.ts']]);
+  });
+
   it('retains an old issue but labels its line stale after the file hash changes', async () => {
     await seedCode();
     await ci.review(
@@ -233,6 +262,104 @@ describe('ContentIndex.review end-to-end', () => {
     } finally {
       delete process.env.GEZEL_COMPLETION_BUDGET_CHARS;
     }
+  });
+
+  it('drops a mid-window truncation claim from the merged review', async () => {
+    process.env.GEZEL_COMPLETION_BUDGET_CHARS = '4500';
+    try {
+      await mkdir(join(dir, 'src'), { recursive: true });
+      const body = Array.from(
+        { length: 120 },
+        (_, i) => `export const v${String(i + 1).padStart(3, '0')} = ${'1'.repeat(24)};`,
+      ).join('\n');
+      await writeFile(join(dir, 'src', 'big.ts'), body);
+      await runWorkspaceContentIndex(dir, 'c', artifacts);
+
+      // Mid windows carry the continuation marker; the EOF window does not.
+      // A model that ignores it and reports truncation must not set the file's
+      // health — that was the live false-2/10 mechanism.
+      const review = vi.fn(async (prompt: string) => {
+        const mid = prompt.includes('the file continues after line');
+        return JSON.stringify({
+          notes_md: mid ? 'looks chopped' : 'clean tail',
+          issues: mid
+            ? [{ severity: 'major', category: 'bug', message: 'File is truncated mid-array' }]
+            : [],
+          health: mid ? 2 : 7,
+          health_reason: mid ? 'File is truncated mid-array and cannot compile' : 'fine',
+        });
+      });
+      await ci.review('c', deps(review), 10, await builtinRubrics());
+      expect(review.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+      const res = await ci.fileReview('c', 'src/big.ts');
+      expect(res.review?.health).toBe(7);
+      expect(res.review?.healthReason).toBe('fine');
+      expect(res.review?.issues.some((i) => /truncat/i.test(i.message))).toBe(false);
+    } finally {
+      delete process.env.GEZEL_COMPLETION_BUDGET_CHARS;
+    }
+  });
+
+  it('keeps a truncation verdict from the window that shows the end of the file', async () => {
+    process.env.GEZEL_COMPLETION_BUDGET_CHARS = '4500';
+    try {
+      await mkdir(join(dir, 'src'), { recursive: true });
+      const body = Array.from(
+        { length: 120 },
+        (_, i) => `export const v${String(i + 1).padStart(3, '0')} = ${'1'.repeat(24)};`,
+      ).join('\n');
+      await writeFile(join(dir, 'src', 'big.ts'), body);
+      await runWorkspaceContentIndex(dir, 'c', artifacts);
+
+      // The EOF window really can see a broken ending — its claim is honest.
+      const review = vi.fn(async (prompt: string) => {
+        const mid = prompt.includes('the file continues after line');
+        return JSON.stringify({
+          notes_md: 'notes',
+          issues: [],
+          health: mid ? 7 : 2,
+          health_reason: mid ? 'fine' : 'File is truncated; the last statement is unfinished',
+        });
+      });
+      await ci.review('c', deps(review), 10, await builtinRubrics());
+
+      const res = await ci.fileReview('c', 'src/big.ts');
+      expect(res.review?.health).toBe(2);
+      expect(res.review?.healthReason).toContain('truncated');
+    } finally {
+      delete process.env.GEZEL_COMPLETION_BUDGET_CHARS;
+    }
+  });
+
+  it('marks window cut points in the prompt, but never the end of the file', async () => {
+    const rubric = (await builtinRubrics()).get('code');
+    expect(rubric).toBeTruthy();
+    const file = {
+      path: 'src/a.ts',
+      hash: 'h',
+      size: 10,
+      mtimeMs: 0,
+      lang: 'typescript',
+      kind: 'code',
+      modality: 'code' as const,
+      trivial: false,
+      indexedAt: '',
+      loc: 120,
+    };
+    const content = 'const a = 1;\nconst b = 2;';
+    const mid = buildReviewPrompt(file, content, rubric as ResolvedRubric, {
+      window: { index: 0, count: 3, lineStart: 1, lineEnd: 40, totalLines: 120 },
+    });
+    expect(mid.prompt).toContain('the file continues after line 40');
+
+    const eof = buildReviewPrompt(file, content, rubric as ResolvedRubric, {
+      window: { index: 2, count: 3, lineStart: 81, lineEnd: 120, totalLines: 120 },
+    });
+    expect(eof.prompt).not.toContain('the file continues');
+
+    const whole = buildReviewPrompt(file, content, rubric as ResolvedRubric);
+    expect(whole.prompt).not.toContain('the file continues');
   });
 
   it('terminally skips unreviewable files instead of wedging the queue', async () => {

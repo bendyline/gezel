@@ -152,8 +152,8 @@ importers:
         specifier: workspace:*
         version: link:../ui
       '@electron/asar':
-        specifier: ^4.2.1
-        version: 4.2.1
+        specifier: ^4.3.0
+        version: 4.3.0
       '@electron/notarize':
         specifier: ^3.1.1
         version: 3.1.1(supports-color@8.1.1)
@@ -170,8 +170,8 @@ importers:
         specifier: ^3.3.1
         version: 3.3.1
       electron:
-        specifier: ^43.2.0
-        version: 43.2.0(supports-color@8.1.1)
+        specifier: ^43.4.1
+        version: 43.4.1(supports-color@8.1.1)
       electron-builder:
         specifier: ^26.15.3
         version: 26.15.3(electron-builder-squirrel-windows@26.15.3)(supports-color@8.1.1)
@@ -219,8 +219,8 @@ importers:
         specifier: workspace:*
         version: link:../core
       '@bendyline/gilde':
-        specifier: 0.1.39
-        version: 0.1.39
+        specifier: 0.1.41
+        version: 0.1.41
       tar:
         specifier: 7.5.21
         version: 7.5.21
@@ -936,8 +936,8 @@ packages:
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
     engines: {node: '>=18'}
 
-  '@bendyline/gilde@0.1.39':
-    resolution: {integrity: sha512-sjfIdFF5ZI0yEHG+5ol7ig8d81eVn75+BP0Qklgwh8NTvUdQF1HLKf7ydSLgVCtLIqZXW3NFLk/rtDUFFA6Yvw==}
+  '@bendyline/gilde@0.1.41':
+    resolution: {integrity: sha512-TZ9sKyYTa+xY6UaSL5HCMCdOejTlS03G05X/Kz138eDkkRG8kypbw7Q05c09f+fqHH5SninKs11Ap3U2Gp031Q==}
 
   '@bendyline/squisq-cli@2.6.0':
     resolution: {integrity: sha512-uQUCAg6jhHFiDiMDjxmI1kwvF5tLurxxtE5W0TdC11uofu7l30Wqrhjh9MXpYeeDK4GzQk0923BMbDiZR4bP2Q==}
@@ -1182,8 +1182,8 @@ packages:
     engines: {node: '>=10.12.0'}
     hasBin: true
 
-  '@electron/asar@4.2.1':
-    resolution: {integrity: sha512-rGyEe7iy52zxiWuihV/h/AqQrFkx7YnUUJKW1bdufVDHCzIMP/XDrDI/NOzv/LLtzt3NduAzNa475WRmRnmswQ==}
+  '@electron/asar@4.3.0':
+    resolution: {integrity: sha512-k/FFC/NQoTykGBi/Ga4L4KorsAKDdkK0LfNVG90eUG6vPVpJaL3iR9V1ZLbzBAF3QpojK5DcaGOdQOheKZv4JQ==}
     engines: {node: '>=22.12.0'}
     hasBin: true
 
@@ -3720,6 +3720,7 @@ packages:
   '@xmldom/xmldom@0.9.11':
     resolution: {integrity: sha512-tW8bcK3hsG0/uqSnNz6TK4BkcuZSezoU7DlnYssILmZDktPnSHHuDJJFM0AJv+13gz2r0iGdrj6qqKeUnxXEDg==}
     engines: {node: '>=14.6'}
+    deprecated: this version has critical issues, please update to the latest version
 
   '@zone-eu/mailsplit@5.4.14':
     resolution: {integrity: sha512-rz0FQOhN3Vq1XrSeSSa9+dPcaFbBxmQPjiZm6zS9oxdVHV7rOWIAYX3yP2YAUf0qBncY8CI+NogzPCmMVrMXcw==}
@@ -4668,8 +4669,8 @@ packages:
     resolution: {integrity: sha512-bO3y10YikuUwUuDUQRM4KfwNkKhnpVO7IPdbsrejwN9/AABJzzTQ4GeHwyzNSrVO+tEH3/Np255a3sVZpZDjvg==}
     engines: {node: '>=8.0.0'}
 
-  electron@43.2.0:
-    resolution: {integrity: sha512-80zvrgG7ZRXD+tD0IyLvrnN9n+veSxadMRsMaC9wKKP3iUbtC7rGM8+dVuCmOb0Rrwwv8ESW4awnUZh9Hbp1fA==}
+  electron@43.4.1:
+    resolution: {integrity: sha512-5b+EuiwkgG5iRcsEL34rimgRpkYp15SsfZOa0pC5kXs0Tb82TH4n95rpQzTZa7yRCbA7tm0WoEbuBL6NaAhAcA==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -8199,7 +8200,7 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@bendyline/gilde@0.1.39': {}
+  '@bendyline/gilde@0.1.41': {}
 
   '@bendyline/squisq-cli@2.6.0(supports-color@8.1.1)':
     dependencies:
@@ -8501,7 +8502,7 @@ snapshots:
       glob: 7.2.3
       minimatch: 3.1.5
 
-  '@electron/asar@4.2.1':
+  '@electron/asar@4.3.0':
     dependencies:
       glob: 13.0.6
       minimatch: 10.2.5
@@ -11930,7 +11931,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron@43.2.0(supports-color@8.1.1):
+  electron@43.4.1(supports-color@8.1.1):
     dependencies:
       '@electron-internal/extract-zip': 1.0.4
       '@electron/get': 5.0.0(supports-color@8.1.1)

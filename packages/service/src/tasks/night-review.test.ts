@@ -1,10 +1,11 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_NIGHT_SHIFT_WINDOW } from '@bendyline/gezel';
 import { BundledSource, CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ChatManager } from '../chat/manager.js';
+import { DiffpackManager } from '../diffpack/manager.js';
 import { Store } from '../fs/store.js';
 import { ReportActionManager } from '../report-actions/report-action-manager.js';
 import { TaskManager } from './manager.js';
@@ -16,6 +17,7 @@ let dataDir: string;
 let store: Store;
 let tasks: TaskManager;
 let reportActions: ReportActionManager;
+let diffpacks: DiffpackManager;
 
 // Default window 22:00 → 06:00 local; "this morning" is 09:00 on the 21st,
 // so last night's window is keyed 2026-06-20.
@@ -36,6 +38,7 @@ beforeEach(async () => {
     catalog: new CatalogService([new BundledSource({ dataDir, noIndex: true })]),
     chat: null as unknown as ChatManager,
   });
+  diffpacks = new DiffpackManager({ home, store, tasks });
 });
 
 afterEach(async () => {
@@ -92,7 +95,7 @@ describe('buildNightShiftReview', () => {
     );
 
     const review = await buildNightShiftReview(
-      { store, tasks, reportActions },
+      { store, tasks, reportActions, diffpacks },
       DEFAULT_NIGHT_SHIFT_WINDOW,
       NOW,
     );
@@ -113,7 +116,7 @@ describe('buildNightShiftReview', () => {
     // The freshly written artifact's mtime is "now" — outside last night's
     // window — so first confirm it is excluded…
     const stale = await buildNightShiftReview(
-      { store, tasks, reportActions },
+      { store, tasks, reportActions, diffpacks },
       DEFAULT_NIGHT_SHIFT_WINDOW,
       NOW,
     );
@@ -123,7 +126,7 @@ describe('buildNightShiftReview', () => {
     // current window (always-open window for determinism).
     const insideNow = new Date(Date.now() + 1000);
     const review = await buildNightShiftReview(
-      { store, tasks, reportActions },
+      { store, tasks, reportActions, diffpacks },
       { startHour: 0, endHour: 0 },
       insideNow,
     );
@@ -133,11 +136,73 @@ describe('buildNightShiftReview', () => {
   it('returns an empty review when nothing ran', async () => {
     await store.createProject({ name: 'Quiet' });
     const review = await buildNightShiftReview(
-      { store, tasks, reportActions },
+      { store, tasks, reportActions, diffpacks },
       DEFAULT_NIGHT_SHIFT_WINDOW,
       NOW,
     );
     expect(review.tasksCompleted).toHaveLength(0);
     expect(review.reports).toHaveLength(0);
+  });
+});
+
+describe('change proposals in the morning review', () => {
+  async function seedPack(packId: string, status: 'ready' | 'dismissed'): Promise<void> {
+    await store.createProject({ name: 'Fixture' });
+    const wd = await store.projectWorkspaceDir('fixture');
+    await mkdir(wd, { recursive: true });
+    await writeFile(join(wd, `${packId}.ts`), 'before\n', 'utf8');
+    await diffpacks.ensure('fixture', packId, {
+      title: `Proposal ${packId}`,
+      origin: { kind: 'boekwachter-issue', issueRefs: [`BW-${packId}`] },
+      taskRef: `fixture/${packId}`,
+    });
+    await diffpacks.drafts.write('fixture', packId, `${packId}.ts`, 'after\n');
+    await diffpacks.seal('fixture', packId);
+    if (status === 'dismissed') await diffpacks.dismiss('fixture', packId);
+  }
+
+  it('lists proposals still waiting on the user', async () => {
+    await seedPack('1', 'ready');
+    const review = await buildNightShiftReview(
+      { store, tasks, reportActions, diffpacks },
+      DEFAULT_NIGHT_SHIFT_WINDOW,
+      NOW,
+    );
+    expect(review.diffpacks).toEqual([
+      {
+        packId: '1',
+        projectId: 'fixture',
+        projectName: 'Fixture',
+        title: 'Proposal 1',
+        status: 'ready',
+        fileCount: 1,
+        additions: 1,
+        deletions: 1,
+        issueRefs: ['BW-1'],
+        drifted: false,
+      },
+    ]);
+  });
+
+  it('drops proposals the user already answered', async () => {
+    await seedPack('1', 'dismissed');
+    const review = await buildNightShiftReview(
+      { store, tasks, reportActions, diffpacks },
+      DEFAULT_NIGHT_SHIFT_WINDOW,
+      NOW,
+    );
+    expect(review.diffpacks).toEqual([]);
+  });
+
+  it('flags a proposal whose target moved under it', async () => {
+    await seedPack('1', 'ready');
+    const wd = await store.projectWorkspaceDir('fixture');
+    await writeFile(join(wd, '1.ts'), 'edited by hand\n', 'utf8');
+    const review = await buildNightShiftReview(
+      { store, tasks, reportActions, diffpacks },
+      DEFAULT_NIGHT_SHIFT_WINDOW,
+      NOW,
+    );
+    expect(review.diffpacks[0]?.drifted).toBe(true);
   });
 });

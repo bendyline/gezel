@@ -119,6 +119,149 @@ export function findFlexibleMatch(haystack: string, needle: string): FlexibleMat
 }
 
 /**
+ * The `replace_in_file` transform, as a pure function of the old content.
+ *
+ * Lives here rather than inline in the Store method because the diffpack
+ * draft store needs the identical semantics — including the whitespace-
+ * flexible fallback and every error string, which models are trained on by
+ * repetition. Two copies would drift, and the copy the model hit would be
+ * the one nobody tested.
+ *
+ * `occurrence` defaults to "exactly one match required"; multi-match paths
+ * require an explicit 1-based index or `'all'`. Deliberately strict —
+ * silently editing a different match than the model intended is the failure
+ * mode this avoids.
+ */
+export function computeReplaceInFile(
+  oldContent: string,
+  args: { path: string; find: string; replace: string; occurrence?: number | 'all' },
+): string {
+  const matches = findAllOccurrences(oldContent, args.find);
+  const notFound = () =>
+    new WorkspaceEditError(
+      `pattern not found in ${args.path}. The file's content may have changed since you last read it — re-read and try again.`,
+      'pattern-not-found',
+    );
+
+  let newContent: string;
+  if (args.occurrence === 'all') {
+    if (matches.length === 0) throw notFound();
+    newContent = oldContent.split(args.find).join(args.replace);
+  } else if (typeof args.occurrence === 'number') {
+    const pos = matches[args.occurrence - 1];
+    if (pos === undefined) {
+      if (matches.length === 0) throw notFound();
+      throw new WorkspaceEditError(
+        `occurrence ${args.occurrence} out of range — found ${matches.length} match(es) in ${args.path}`,
+        'occurrence-out-of-range',
+      );
+    }
+    newContent = oldContent.slice(0, pos) + args.replace + oldContent.slice(pos + args.find.length);
+  } else if (matches.length === 1) {
+    const pos = matches[0]!;
+    newContent = oldContent.slice(0, pos) + args.replace + oldContent.slice(pos + args.find.length);
+  } else if (matches.length > 1) {
+    throw new WorkspaceEditError(
+      `pattern matches ${matches.length} places in ${args.path}; specify occurrence=<1-based index> or 'all'.`,
+      'ambiguous-match',
+    );
+  } else {
+    // No exact match. Fall back to a whitespace-flexible, line-based
+    // match so a botched-indentation or gutter-pasted `find` still
+    // lands instead of bouncing the model into a full-file rewrite.
+    const flexible = findFlexibleMatch(oldContent, args.find);
+    if (flexible.kind === 'ambiguous') {
+      throw new WorkspaceEditError(
+        `pattern matches ${flexible.count} places in ${args.path} (ignoring whitespace); add more surrounding lines to \`find\` so it is unique, or use \`replace_lines\`.`,
+        'ambiguous-match',
+      );
+    }
+    if (flexible.kind === 'none') throw notFound();
+    newContent =
+      oldContent.slice(0, flexible.start) + args.replace + oldContent.slice(flexible.end);
+  }
+
+  if (newContent === oldContent) {
+    throw new WorkspaceEditError(
+      `replace_in_file is a no-op on ${args.path} — \`find\` and \`replace\` produced identical content.`,
+      'identity-edit',
+    );
+  }
+  return newContent;
+}
+
+/**
+ * The `replace_lines` transform. Preserves the file's newline style and
+ * trailing-newline presence; `endLine` is clamped to the file length and
+ * `content` may be empty (deletes the range).
+ */
+export function computeReplaceLines(
+  oldContent: string,
+  args: { path: string; startLine: number; endLine: number; content: string },
+): string {
+  if (args.endLine < args.startLine) {
+    throw new WorkspaceEditError(
+      `endLine (${args.endLine}) is before startLine (${args.startLine}) in ${args.path}.`,
+      'invalid-range',
+    );
+  }
+
+  const newlineStyle = oldContent.includes('\r\n') ? '\r\n' : '\n';
+  const hadTrailingNewline = oldContent.endsWith('\n');
+  const body = hadTrailingNewline ? oldContent.slice(0, -newlineStyle.length) : oldContent;
+  const lines = body === '' ? [] : body.split(/\r?\n/);
+  const total = lines.length;
+
+  if (args.startLine > total) {
+    throw new WorkspaceEditError(
+      `startLine ${args.startLine} is past the end of ${args.path} (${total} line(s)). Re-read the file for current line numbers, or use \`append_to_file\` to add to the end.`,
+      'line-out-of-range',
+    );
+  }
+  const endLine = Math.min(args.endLine, total);
+
+  const inserted = args.content === '' ? [] : args.content.replace(/\r?\n$/, '').split(/\r?\n/);
+  const next = [...lines.slice(0, args.startLine - 1), ...inserted, ...lines.slice(endLine)];
+  let newContent = next.join(newlineStyle);
+  if (hadTrailingNewline && newContent !== '') newContent += newlineStyle;
+
+  if (newContent === oldContent) {
+    throw new WorkspaceEditError(
+      `replace_lines is a no-op on ${args.path} — the new content matches lines ${args.startLine}-${endLine}.`,
+      'identity-edit',
+    );
+  }
+  return newContent;
+}
+
+/** The `insert_at_marker` transform. The marker must appear exactly once. */
+export function computeInsertAtMarker(
+  oldContent: string,
+  args: { path: string; marker: string; content: string; where?: 'before' | 'after' },
+): string {
+  const where = args.where ?? 'after';
+  const matches = findAllOccurrences(oldContent, args.marker);
+  if (matches.length === 0) {
+    throw new WorkspaceEditError(
+      `marker not found in ${args.path}. Re-read the file and pass a literal substring that appears exactly once.`,
+      'marker-not-found',
+    );
+  }
+  if (matches.length > 1) {
+    throw new WorkspaceEditError(
+      `marker matches ${matches.length} places in ${args.path}; pick a longer literal substring that's unique.`,
+      'marker-ambiguous',
+    );
+  }
+  const pos = matches[0]!;
+  return where === 'after'
+    ? oldContent.slice(0, pos + args.marker.length) +
+        args.content +
+        oldContent.slice(pos + args.marker.length)
+    : oldContent.slice(0, pos) + args.content + oldContent.slice(pos);
+}
+
+/**
  * Read a file's UTF-8 content for editing, mapping any read failure
  * (ENOENT, EISDIR, EACCES, etc.) to a `WorkspaceEditError` whose
  * message is shaped for the model — telling it the file isn't there

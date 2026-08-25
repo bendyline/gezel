@@ -96,4 +96,69 @@ describe('runGit process safety', () => {
       stderr: 'fatal: not a git repository',
     });
   });
+
+  it.each([
+    ['ordinary', ['clone', 'https://github.com/o/r.git', '/tmp/worktree']],
+    ['bare', ['clone', '--bare', '--filter=blob:none', 'https://github.com/o/r.git', '/tmp/bare']],
+  ])(
+    'keeps a GitHub token out of spawned argv for an authenticated %s clone',
+    async (_kind, cloneArgs) => {
+      const child = fakeChild();
+      spawnMock.mockReturnValue(child);
+      const sentinel = 'GEZEL_CLONE_AUTH_SENTINEL';
+
+      const pending = runGit(
+        ['-c', `http.extraheader=AUTHORIZATION: Bearer ${sentinel}`, ...cloneArgs],
+        { redact: [sentinel] },
+      );
+      queueMicrotask(() => child.emit('close', 0));
+      await pending;
+
+      const [command, spawnedArgs, options] = spawnMock.mock.calls[0]!;
+      expect(command).toBe('git');
+      expect(spawnedArgs).toEqual([
+        '-c',
+        'safe.bareRepository=all',
+        '-c',
+        'credential.interactive=false',
+        ...cloneArgs,
+      ]);
+      expect(spawnedArgs.join(' ')).not.toContain(sentinel);
+      expect(spawnedArgs.join(' ')).not.toContain('http.extraheader');
+      expect(options.env).toEqual(
+        expect.objectContaining({
+          GIT_CONFIG_COUNT: '1',
+          GIT_CONFIG_KEY_0: 'http.extraheader',
+          GIT_CONFIG_VALUE_0: `AUTHORIZATION: Bearer ${sentinel}`,
+        }),
+      );
+    },
+  );
+
+  it('redacts an authenticated clone token from a failing git error', async () => {
+    const child = fakeChild();
+    spawnMock.mockReturnValue(child);
+    const sentinel = 'GEZEL_FAILING_CLONE_AUTH_SENTINEL';
+
+    const pending = runGit(
+      [
+        '-c',
+        `http.extraheader=AUTHORIZATION: Bearer ${sentinel}`,
+        'clone',
+        'https://github.com/o/r.git',
+        '/tmp/worktree',
+      ],
+      { redact: [sentinel] },
+    );
+    queueMicrotask(() => {
+      child.stderr.emit('data', Buffer.from(`fatal: rejected Bearer ${sentinel}`));
+      child.emit('close', 128);
+    });
+
+    const error = await pending.catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).not.toContain(sentinel);
+    expect((error as { stderr: string }).stderr).not.toContain(sentinel);
+    expect((error as Error).message).toContain('***');
+  });
 });

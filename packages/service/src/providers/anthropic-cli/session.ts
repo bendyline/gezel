@@ -8,6 +8,7 @@ import type {
   ProviderSessionState,
   SendAndWaitOpts,
   SessionOpts,
+  ToolArgsDeltaMeta,
   ToolCallEvent,
   TurnUsage,
 } from '../types.js';
@@ -52,6 +53,15 @@ const TURN_TIMEOUT_DEFAULT_MS = 600_000;
 export class AnthropicCliSession extends StreamingSessionBase implements LLMSession {
   private claudeSessionIdCache: string | null;
   private aborted = false;
+  /**
+   * Chain-of-thought captured this turn, aggregated across every thinking
+   * block the CLI produced (a single `sendAndWait` covers the whole
+   * agentic loop, so one turn routinely holds several). Accumulated here
+   * rather than in the worker because a turn that times out or is
+   * cancelled still rejects through the worker, and ChatManager reads
+   * this on exactly that path to salvage the partial trace.
+   */
+  private lastTurnReasoning = '';
 
   constructor(private readonly deps: SessionDeps) {
     super();
@@ -60,6 +70,15 @@ export class AnthropicCliSession extends StreamingSessionBase implements LLMSess
 
   async sendAndWait(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
     return runInQueue(this.deps.queue, opts?.queue, () => this.sendAndWaitInner(prompt, opts));
+  }
+
+  /**
+   * Reasoning captured on the most recent turn. Returns `undefined` (not
+   * `''`) when the turn produced none, so ChatManager can skip writing
+   * `ChatMessage.reasoning` entirely.
+   */
+  getLastTurnReasoning(): string | undefined {
+    return this.lastTurnReasoning.length > 0 ? this.lastTurnReasoning : undefined;
   }
 
   providerState(): ProviderSessionState {
@@ -87,6 +106,8 @@ export class AnthropicCliSession extends StreamingSessionBase implements LLMSess
 
   private async sendAndWaitInner(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
     if (this.aborted) throw new Error('[anthropic-cli] session was disconnected');
+
+    this.lastTurnReasoning = '';
 
     const turnTimeoutMs = opts?.timeoutMs ?? TURN_TIMEOUT_DEFAULT_MS;
 
@@ -135,7 +156,14 @@ export class AnthropicCliSession extends StreamingSessionBase implements LLMSess
   private buildTurnHooks(): WorkerTurnHooks {
     return {
       emitDelta: (text: string) => this.emitDelta(text),
+      emitReasoningDelta: (text: string) => {
+        this.lastTurnReasoning += text;
+        this.emitReasoningDelta(text);
+      },
       emitHeartbeat: (label?: string) => this.emitHeartbeat(label),
+      emitToolArgsDelta: (name: string, chunk: string, meta?: ToolArgsDeltaMeta) =>
+        this.emitToolArgsDelta(name, chunk, meta),
+      emitWarning: (message: string) => this.emitWarning(message),
       emitUsage: (usage: TurnUsage) => this.emitUsage(usage),
       ...(this.deps.onToolCall
         ? { onToolCall: (ev: ToolCallEvent) => this.deps.onToolCall?.(ev) }

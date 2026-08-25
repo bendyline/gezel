@@ -10,7 +10,7 @@ import {
 } from './task-handoff-note.js';
 
 /**
- * The strings below are the four `startHandoffSession` seeds from
+ * The strings below are the five `startHandoffSession` seeds from
  * packages/service/src/chat/manager.ts, verbatim. If a seed is reworded
  * there and not here, the card silently falls back to the raw paragraph —
  * which is the exact regression this suite exists to catch.
@@ -25,6 +25,8 @@ const ADVANCE_SEED =
   'Task default/11 has advanced to the next step — `write-deck`, which is yours as well. Please continue: follow the step instructions already in your prompt — make the first tool call they name this turn.';
 const RESUME_SEED =
   'The service restarted while task default/11 was still active on step `review`. Continue this existing task thread from the progress and tool evidence above.';
+const RETRY_SEED =
+  'You paused on step `model-system` of task gezel/7, and the user has asked you to try again. Call `read_task_notes` first — the newest note says why it stopped.';
 
 describe('parseTaskHandoffNote', () => {
   it('reads sender, step and task off a named hand-off', () => {
@@ -76,6 +78,14 @@ describe('parseTaskHandoffNote', () => {
     });
   });
 
+  it('recognises a user-driven retry', () => {
+    expect(parseTaskHandoffNote(RETRY_SEED)).toEqual({
+      kind: 'retry',
+      taskRef: 'gezel/7',
+      stepId: 'model-system',
+    });
+  });
+
   it('leaves other machine-authored turns alone', () => {
     expect(parseTaskHandoffNote('The user opened report.md while you were working.')).toBeNull();
     expect(parseTaskHandoffNote('ship it')).toBeNull();
@@ -109,6 +119,9 @@ describe('handoffHeadline', () => {
     expect(handoffHeadline(parseTaskHandoffNote(RESUME_SEED)!, 'Maya')).toBe(
       'Maya picked the review step back up after a restart.',
     );
+    expect(handoffHeadline(parseTaskHandoffNote(RETRY_SEED)!, 'Wren')).toBe(
+      'Wren is trying the model system step again.',
+    );
   });
 });
 
@@ -125,11 +138,12 @@ describe('handoffContextLine', () => {
 });
 
 describe('handoffKindLabel', () => {
-  it('names which of the four dispatch shapes this is', () => {
+  it('names which of the five dispatch shapes this is', () => {
     expect(handoffKindLabel(parseTaskHandoffNote(HANDOFF_SEED)!)).toBe('Hand-off');
     expect(handoffKindLabel(parseTaskHandoffNote(ENTRY_SEED)!)).toBe('New task');
     expect(handoffKindLabel(parseTaskHandoffNote(ADVANCE_SEED)!)).toBe('Next step');
     expect(handoffKindLabel(parseTaskHandoffNote(RESUME_SEED)!)).toBe('Resumed');
+    expect(handoffKindLabel(parseTaskHandoffNote(RETRY_SEED)!)).toBe('Try again');
   });
 });
 

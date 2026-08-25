@@ -151,7 +151,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
     ],
     suggestedTuningProfile: 'thinking-general',
     gateAffinity: [],
-    defaultBooks: ['investigate-root-cause', 'release-readiness-review', 'bug-fix-tdd'],
+    defaultBooks: ['root-cause-investigation', 'release-readiness-review', 'bug-fix-tdd'],
     capabilityFloor: 'medium',
   },
   // Reviewer: full read+write+git surface plus `web` (and Playwright via
@@ -181,7 +181,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
     gateAffinity: [std('checkCitationsResolve')],
     defaultBooks: [
       'pull-request-review',
-      'design-review',
+      'code-review',
       'deep-security-review',
       'pr-security-review',
       'test-coverage-review',
@@ -346,7 +346,13 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
     // checkHtmlComplete / checkJsParses / test gates per task), so there
     // is no useful role-wide default here.
     gateAffinity: [],
-    defaultBooks: ['build-loop', 'bug-fix-tdd', 'rest-api', 'refactor-module', 'cli-tool'],
+    defaultBooks: [
+      'build-loop',
+      'bug-fix-tdd',
+      'refactor-module',
+      'test-suite-backfill',
+      'apply-review-findings',
+    ],
     capabilityFloor: 'small',
   },
   // Web/frontend developer — generic dev surface plus `web`, and the
@@ -575,4 +581,24 @@ export function roleCapabilityFloor(role: string | undefined): ModelTier | null 
 export function meetsCapabilityFloor(tier: ModelTier, role: string | undefined): boolean {
   const floor = roleCapabilityFloor(role);
   return floor === null ? true : tierAtLeast(tier, floor);
+}
+
+/**
+ * The floor a craftbook step actually dispatches with. An explicit
+ * `step.capabilityFloor` keeps its documented absolute-override contract;
+ * otherwise the step's role floor and the book's template-level floor are
+ * two independent minimums, so they compose by MAX — a `small` role step
+ * inside a book that declares `capabilityFloor: 'medium'` needs medium.
+ * Null when nothing declares a floor (no routing constraint).
+ */
+export function effectiveCapabilityFloor(
+  step: { capabilityFloor?: ModelTier; suggestedRole?: string },
+  book?: { capabilityFloor?: ModelTier } | null,
+): ModelTier | null {
+  if (step.capabilityFloor) return step.capabilityFloor;
+  const roleFloor = roleCapabilityFloor(step.suggestedRole);
+  const bookFloor = book?.capabilityFloor ?? null;
+  if (roleFloor === null) return bookFloor;
+  if (bookFloor === null) return roleFloor;
+  return tierAtLeast(roleFloor, bookFloor) ? roleFloor : bookFloor;
 }

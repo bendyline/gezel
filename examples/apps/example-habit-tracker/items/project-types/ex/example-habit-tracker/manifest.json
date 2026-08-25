@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "kind": "project-type",
+  "id": "example-habit-tracker",
+  "name": "Example Habit Tracker",
+  "description": "A habit tracker demonstrating seeds, script tools, page reactions, and an Output page.",
+  "tags": ["example", "habits"],
+  "category": "growth",
+  "maintainer": {
+    "name": "Gezel"
+  },
+  "license": "MIT",
+  "yankedVersions": []
+}

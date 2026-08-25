@@ -1,3 +1,4 @@
+import { recordSuspensionForTests, resetSuspendClockForTests } from '@bendyline/gezel';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   NativeEngineSupervisor,
@@ -335,6 +336,52 @@ not a process row
     await new Promise((r) => setTimeout(r, 160));
     expect(sup.currentBaseUrl()).toBeUndefined();
     expect(logs.some((l) => /idle timeout — stopping/.test(l))).toBe(true);
+  });
+
+  it('does not count host sleep as idle time when releasing VRAM', async () => {
+    const fakeSpawn = (() =>
+      makeFakeChild(4247) as unknown as ReturnType<
+        typeof import('node:child_process').spawn
+      >) as unknown as typeof import('node:child_process').spawn;
+    const fakeFetch: typeof fetch = async () => new Response('ok', { status: 200 });
+    const logs: string[] = [];
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: 'fake-engine',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9997',
+      }),
+      spawn: fakeSpawn,
+      fetchImpl: fakeFetch,
+      startupTimeoutMs: 2_000,
+      healthIntervalMs: 10_000_000,
+      idleTimeoutMs: 40,
+      freezeTimeoutMs: 0,
+      isBusy: () => false,
+      onLog: (l) => logs.push(l),
+    });
+
+    try {
+      await sup.ensureRunning();
+      // The host was asleep for 300ms of the wall clock that follows. A
+      // resident model must not be unloaded for idleness nobody could have
+      // avoided — on a real machine this was unloading a 27B model on every
+      // ~16 min dark-wake cycle, so the next turn paid a full cold load.
+      recordSuspensionForTests(300);
+
+      await new Promise((r) => setTimeout(r, 200));
+      expect(sup.currentBaseUrl()).toBe('http://127.0.0.1:9997');
+      expect(logs.some((l) => /idle timeout — stopping/.test(l))).toBe(false);
+
+      // ...but the deferral must re-arm, not cancel. Once 40ms of AWAKE time
+      // has genuinely passed, the engine still releases its VRAM.
+      await new Promise((r) => setTimeout(r, 500));
+      expect(sup.currentBaseUrl()).toBeUndefined();
+      expect(logs.some((l) => /idle timeout — stopping/.test(l))).toBe(true);
+    } finally {
+      resetSuspendClockForTests();
+      await sup.stop('stop');
+    }
   });
 
   it('flushes and releases an idle engine early under memory pressure', async () => {

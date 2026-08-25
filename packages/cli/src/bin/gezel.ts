@@ -890,6 +890,216 @@ knowledge
     }
   });
 
+const appCmd = program
+  .command('app')
+  .description('Manage AI Apps (.gezapp) installed on this machine');
+
+type AppCommandModule = typeof import('../app-command.js');
+const loadAppCommand = async (): Promise<AppCommandModule> => {
+  const appModule = '../app-command.js';
+  return (await import(appModule)) as AppCommandModule;
+};
+
+type AppAuthorCommandModule = typeof import('../app-author-command.js');
+const loadAppAuthorCommand = async (): Promise<AppAuthorCommandModule> => {
+  // Separate seam from app-command: the authoring module carries the
+  // TypeScript compiler (script diagnostics), which daemon-backed app
+  // subcommands must never pay for.
+  const appAuthorModule = '../app-author-command.js';
+  return (await import(appAuthorModule)) as AppAuthorCommandModule;
+};
+
+appCmd
+  .command('add <file>')
+  .description('Install a .gezapp AI App (idempotent; a newer version upgrades)')
+  .option('--yes', 'skip the confirmation prompt')
+  .option('--force', 'allow downgrading to an older version')
+  .option('--json', 'print the machine-readable result')
+  .action(async (file: string, opts: { yes?: boolean; force?: boolean; json?: boolean }) => {
+    const { runAppAdd } = await loadAppCommand();
+    await runAppAdd(await connectOwned(cliGlobals()), file, opts);
+  });
+
+appCmd
+  .command('update <file>')
+  .description('Upgrade an installed AI App from a newer .gezapp')
+  .option('--force', 'allow downgrading to an older version')
+  .option('--json', 'print the machine-readable result')
+  .action(async (file: string, opts: { force?: boolean; json?: boolean }) => {
+    const { runAppUpdate } = await loadAppCommand();
+    await runAppUpdate(await connectOwned(cliGlobals()), file, opts);
+  });
+
+appCmd
+  .command('list')
+  .description('List installed AI Apps')
+  .option('--json', 'print the machine-readable result')
+  .action(async (opts: { json?: boolean }) => {
+    const { runAppList } = await loadAppCommand();
+    await runAppList(await connectOwned(cliGlobals()), opts);
+  });
+
+appCmd
+  .command('show <appId>')
+  .description('Show one installed AI App: manifest, dependencies, applied projects')
+  .option('--json', 'print the machine-readable result')
+  .action(async (appId: string, opts: { json?: boolean }) => {
+    const { runAppShow } = await loadAppCommand();
+    await runAppShow(await connectOwned(cliGlobals()), appId, opts);
+  });
+
+appCmd
+  .command('remove <appId>')
+  .description('Uninstall an AI App (projects it outfitted keep their copies)')
+  .option('--yes', 'skip the confirmation prompt')
+  .option('--keep-files', 'unregister only; leave the version dirs on disk')
+  .action(async (appId: string, opts: { yes?: boolean; keepFiles?: boolean }) => {
+    const { runAppRemove } = await loadAppCommand();
+    await runAppRemove(await connectOwned(cliGlobals()), appId, opts);
+  });
+
+appCmd
+  .command('enable <appId>')
+  .description('Enable a disabled AI App')
+  .action(async (appId: string) => {
+    const { runAppSetEnabled } = await loadAppCommand();
+    await runAppSetEnabled(await connectOwned(cliGlobals()), appId, true);
+  });
+
+/** Folder for `app apply`/`app status`: the `--project` global or the cwd. */
+const appCommandFolder = (): string => {
+  const p = cliGlobals().project;
+  return p === undefined || p === true || p === false ? process.cwd() : p;
+};
+
+appCmd
+  .command('apply <appId>')
+  .description('Apply an installed AI App to this folder (links or creates a project here)')
+  .option('--version <version>', 'pin a specific installed type version')
+  .option(
+    '--param <key=value>',
+    'set an adoption param (repeatable)',
+    (pair: string, prior: string[]) => [...prior, pair],
+    [] as string[],
+  )
+  .option('--yes', 'skip the confirmation prompt')
+  .option('--refresh', 're-apply even when this version is already applied')
+  .option('--force', 'apply over a different app already applied here')
+  .option('--json', 'print the machine-readable result')
+  .action(
+    async (
+      appId: string,
+      opts: {
+        version?: string;
+        param: string[];
+        yes?: boolean;
+        refresh?: boolean;
+        force?: boolean;
+        json?: boolean;
+      },
+    ) => {
+      const { runAppApply } = await loadAppCommand();
+      await runAppApply(await connectOwned(cliGlobals()), appId, appCommandFolder(), opts);
+    },
+  );
+
+appCmd
+  .command('status')
+  .description("Show this folder's applied AI App, drift, and available updates")
+  .option('--json', 'print the machine-readable result')
+  .action(async (opts: { json?: boolean }) => {
+    const { runAppStatus } = await loadAppCommand();
+    await runAppStatus(await connectOwned(cliGlobals()), appCommandFolder(), opts);
+  });
+
+appCmd
+  .command('serve [target...]')
+  .description(
+    "Serve this folder's applied AI App as a shareable mini-site (`serve status` / `serve stop` manage sites)",
+  )
+  .option('--port <n>', 'fixed port (default: ephemeral)', (v: string) => Number.parseInt(v, 10))
+  .option('--host <ip>', 'bind address, an IP literal (default 127.0.0.1)')
+  .option(
+    '--allow-host <name>',
+    'accept this reverse-proxy/tunnel hostname (repeatable)',
+    (name: string, prior: string[]) => [...prior, name],
+    [] as string[],
+  )
+  .option('--chat', 'let visitors chat with the project lead (no tools)')
+  .option('--public', 'skip the site key — anyone reaching the port may visit')
+  .option('--key <site-key>', 'pin the site key for a stable share link (min 24 chars)')
+  .option('--detach', 'leave the site running in the daemon and exit')
+  .option('--open', 'open the share link in a browser')
+  .option('--all', 'with `serve stop`: stop every site')
+  .option('--json', 'print the machine-readable result')
+  .action(
+    async (
+      target: string[] | undefined,
+      opts: {
+        port?: number;
+        host?: string;
+        allowHost: string[];
+        chat?: boolean;
+        public?: boolean;
+        key?: string;
+        detach?: boolean;
+        open?: boolean;
+        all?: boolean;
+        json?: boolean;
+      },
+    ) => {
+      const { runAppServe } = await loadAppCommand();
+      await runAppServe(await connectOwned(cliGlobals()), target ?? [], appCommandFolder(), opts);
+    },
+  );
+
+appCmd
+  .command('disable <appId>')
+  .description('Disable an AI App without uninstalling it')
+  .action(async (appId: string) => {
+    const { runAppSetEnabled } = await loadAppCommand();
+    await runAppSetEnabled(await connectOwned(cliGlobals()), appId, false);
+  });
+
+appCmd
+  .command('new <id>')
+  .description('Scaffold a minimal AI App source folder')
+  .option('--dir <parent>', 'parent directory (defaults to the current folder)')
+  .option('--with-page', 'include an Output page wired to the example tool')
+  .action(async (id: string, opts: { dir?: string; withPage?: boolean }) => {
+    const { runAppNew } = await loadAppAuthorCommand();
+    await runAppNew(id, opts);
+  });
+
+appCmd
+  .command('validate <target>')
+  .description('Validate an AI App source folder or .gezapp file (no daemon needed)')
+  .option('--json', 'print the machine-readable findings')
+  .action(async (target: string, opts: { json?: boolean }) => {
+    const { runAppValidate } = await loadAppAuthorCommand();
+    await runAppValidate(target, opts);
+  });
+
+appCmd
+  .command('pack <folder>')
+  .description('Validate and pack an AI App source folder into a .gezapp')
+  .option('-o, --out <file>', 'output path (defaults to <appId>-<version>.gezapp)')
+  .option('--json', 'print the machine-readable result')
+  .action(async (folder: string, opts: { out?: string; json?: boolean }) => {
+    const { runAppPack } = await loadAppAuthorCommand();
+    await runAppPack(folder, opts);
+  });
+
+appCmd
+  .command('schemas')
+  .description('The JSON Schemas an AI App author codes against, rendered from this build')
+  .option('--out <dir>', 'write the schema files into a directory')
+  .option('--json', 'print one combined JSON object')
+  .action(async (opts: { out?: string; json?: boolean }) => {
+    const { runAppSchemas } = await loadAppAuthorCommand();
+    await runAppSchemas(opts);
+  });
+
 const task = program.command('task').description('Manage tasks');
 
 task

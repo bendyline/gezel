@@ -180,7 +180,12 @@ export interface SessionOpts {
    */
   priorMessages?: Array<
     | { role: 'user' | 'assistant'; content: string }
-    | { role: 'assistant'; content: string; toolCalls: ExternalToolCall[] }
+    | {
+        role: 'assistant';
+        content: string;
+        toolCalls: ExternalToolCall[];
+        reasoning?: string;
+      }
     | { role: 'tool'; content: string; toolCallId: string }
   >;
   /**

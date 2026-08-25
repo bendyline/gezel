@@ -796,6 +796,7 @@ function craftbookManifestFromDoc(
     version,
     releasedAt: doc.releasedAt,
     role: identity.role,
+    ...(identity.category ? { category: identity.category } : {}),
     ...(identity.workflow ? { workflow: identity.workflow } : {}),
     // The prose lives inline on the doc (`description`) — there is no
     // separate about.md file to point at. `get()` surfaces it directly.
@@ -813,9 +814,12 @@ function craftbookManifestFromDoc(
     ...(doc.requirements ? { requirements: doc.requirements } : {}),
     ...(doc.runModes ? { runModes: doc.runModes } : {}),
     ...(doc.toolsets ? { toolsets: doc.toolsets } : {}),
+    ...(doc.commands ? { commands: doc.commands } : {}),
     ...(doc.connectors ? { connectors: doc.connectors } : {}),
     ...(doc.hooks ? { hooks: doc.hooks } : {}),
     ...(doc.spawn ? { spawn: doc.spawn } : {}),
+    ...(doc.diffpackCapable ? { diffpackCapable: true } : {}),
+    ...(doc.capabilityFloor ? { capabilityFloor: doc.capabilityFloor } : {}),
     availableVersions,
   };
 }
@@ -938,6 +942,7 @@ function mergeIdentityAndVersion(
       version: version.version,
       releasedAt: version.releasedAt,
       role: identity.role,
+      ...(identity.category ? { category: identity.category } : {}),
       ...(identity.workflow ? { workflow: identity.workflow } : {}),
       about: version.about,
       steps: version.steps,

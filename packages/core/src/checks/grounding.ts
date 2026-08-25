@@ -1,4 +1,5 @@
 import type { CheckResult, WorkspaceLike } from './types.js';
+import { createCitedPathChecker } from './workspace-exists.js';
 
 /**
  * Grounding + citation checks — the anti-fabrication vocabulary.
@@ -116,13 +117,35 @@ export function valueGrounding(
  *   3. a backticked path containing a slash `` `dir/file.ext` ``
  */
 const DEFAULT_CITATION_RE =
-  /\(source:\s*([^)\s]+)(?:\s+\[[^\]]*\])*\s*\)|\]\(\s*(?!#)([^)\s]+?)\s*\)|`([^`]*\/[^`]+)`/gi;
+  // The inline-path form excludes newlines AND spaces on purpose: a path
+  // contains neither, and without the exclusions two failure families
+  // appear (both wild-caught). An UNBALANCED backtick lets the span swallow
+  // sentences until the next stray backtick; and even with balanced spans,
+  // the CLOSER of one legitimate span pairs with the OPENER of the next, so
+  // the prose BETWEEN two `code` spans — which mentions a path — became one
+  // giant unresolvable "citation" and honest work read as fabricated.
+  /\(source:\s*([^)\s]+)(?:\s+\[[^\]]*\])*\s*\)|\]\(\s*(?!#)([^)\s]+?)\s*\)|`([^`\s]*\/[^`\s]+)`/gi;
+
+/**
+ * Fenced code blocks are excerpts, not citations. The inline backtick-path
+ * form's character class crosses newlines, so a ``` fence whose body
+ * contains a slash was captured WHOLE as one "cited path" (wild-caught: a
+ * repro note's ```js excerpt became the unresolvable citation
+ * `js\nconst BULK_THRESHOLD = 10;…` and the gate called honest work
+ * fabricated). A dangling unclosed fence is stripped to end-of-text for
+ * the same reason.
+ */
+function stripFencedBlocks(text: string): string {
+  return text
+    .replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$/gm, '')
+    .replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*$/m, '');
+}
 
 function extractCitations(text: string, re: RegExp): string[] {
   const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
   const global = new RegExp(re.source, flags);
   const out: string[] = [];
-  for (const m of text.matchAll(global)) {
+  for (const m of stripFencedBlocks(text).matchAll(global)) {
     const cap = m.slice(1).find((x) => x !== undefined) ?? m[0];
     if (cap) out.push(cap);
   }
@@ -134,14 +157,6 @@ function cleanCitation(raw: string): string {
     .trim()
     .replace(/^[<'"`(]+/, '')
     .replace(/[>'"`).,;:]+$/, '');
-}
-
-function normalizePath(p: string): string {
-  return p
-    .trim()
-    .toLowerCase()
-    .replace(/^\.?\//, '')
-    .replace(/^workspace\//, '');
 }
 
 export interface CitationsResult extends CheckResult {
@@ -156,7 +171,9 @@ export interface CitationsResult extends CheckResult {
 /**
  * Every source `file` cites must exist. File-path citations are resolved
  * against the workspace listing (tolerant of leading `./`, `/`, and
- * `workspace/`, case-insensitive). URLs cannot be fetched offline, so
+ * `workspace/`, case-insensitive), with a per-path read probe for listing
+ * misses — the listing is capped and dotfile-blind, see
+ * `createCitedPathChecker`. URLs cannot be fetched offline, so
  * they pass unless `corpus` is supplied, in which case every cited path
  * AND URL must be a member of the allowlist. The anti-fabrication gate.
  */
@@ -191,7 +208,7 @@ export async function citationsResolve(
 
   const cites = [...new Set(extractCitations(content, re).map(cleanCitation).filter(Boolean))];
   const min = opts.minCitations ?? 1;
-  const listing = new Set((await ws.list()).map(normalizePath));
+  const citedPathExists = createCitedPathChecker(ws);
   const corpus = opts.corpus ? new Set(opts.corpus.map((c) => c.toLowerCase())) : null;
 
   const resolved: string[] = [];
@@ -204,14 +221,19 @@ export async function citationsResolve(
       if (corpus && !corpus.has(c.toLowerCase())) unresolved.push(c);
       continue;
     }
-    if (listing.has(normalizePath(c)) || corpus?.has(c.toLowerCase())) resolved.push(c);
+    if (corpus?.has(c.toLowerCase()) || (await citedPathExists(c))) resolved.push(c);
     else unresolved.push(c);
   }
 
   if (cites.length < min) {
     return {
       ok: false,
-      detail: `${file} has ${cites.length} citation(s), need ≥ ${min} — cite the source path/URL for each claim.`,
+      // Name the accepted FORMS, not just the rule: a model that wrote the
+      // right paths as plain prose ("File: src/pricing.js, line 8") reads
+      // "cite the source" as already satisfied and rewrites content instead
+      // of adding markup, looping to gate exhaustion (wild-caught:
+      // deepseek-v4 with a flawless diagnosis, three identical rejections).
+      detail: `${file} has ${cites.length} recognizable citation(s), need ≥ ${min}. Only these forms count as citations: a backticked path like \`src/file.js\`, a markdown link like [name](src/file.js), or (source: src/file.js). Plain prose paths are not counted — wrap each cited file path in backticks.`,
       resolved,
       unresolved,
       urls,

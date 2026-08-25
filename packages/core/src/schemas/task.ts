@@ -4,6 +4,7 @@ import {
   AdvanceWhenSchema,
   CraftbookBasedOnSchema,
   CraftbookBranchSchema,
+  CraftbookCommandNeedSchema,
   CraftbookConnectorNeedSchema,
   CraftbookSchema,
   CraftbookScriptsSchema,
@@ -125,6 +126,13 @@ export const TaskCraftbookStepSchema = CraftbookStepSchema.extend({
   attemptCount: z.number().int().nonnegative().optional(),
   lastActivatedAt: z.string().optional(),
   /**
+   * Activation timestamp whose `onEnter` hooks completed successfully.
+   * Compared to `lastActivatedAt` so overlapping kickoff/retry paths can
+   * distinguish an already-prepared activation from one that still needs
+   * its deterministic setup.
+   */
+  onEnterCompletedAt: z.string().optional(),
+  /**
    * Completion-gate rejections since this step last activated. Distinct
    * from `attemptCount` (which counts ACTIVATIONS — loop-backs): a
    * rejection holds the step active without re-activating it. Reset by
@@ -245,6 +253,8 @@ export const TaskCraftbookSchema = z.object({
   paramSchema: z.record(z.string(), z.unknown()).optional(),
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
   connectors: z.array(CraftbookConnectorNeedSchema).optional(),
+  /** Command needs snapshotted for kickoff approval — see CraftbookCommandNeedSchema. */
+  commands: z.array(CraftbookCommandNeedSchema).optional(),
   /**
    * Embedded script sources snapshotted from the source craftbook, so the
    * task's gate/lifecycle scripts execute from its own copy — `scope:
@@ -258,6 +268,15 @@ export const TaskCraftbookSchema = z.object({
    * {@link CraftbookSpawnSchema}.
    */
   spawn: CraftbookSpawnSchema.optional(),
+  /**
+   * Snapshotted from the source craftbook: this book is authored
+   * mode-agnostic and an invocation may run it in drafting mode. See
+   * `CraftbookSchema.diffpackCapable`; whether THIS run actually drafts is
+   * `TaskSchema.diffpackId`, resolved at create.
+   */
+  diffpackCapable: z.boolean().optional(),
+  /** Whole-book model-tier floor snapshotted from the source craftbook. */
+  capabilityFloor: ModelTierSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
   /**
@@ -379,6 +398,15 @@ export const TaskSchema = z.object({
    * the convention existed; readers fall back to `tasks/<num>`.
    */
   artifactDir: z.string().optional(),
+  /**
+   * When set, this task drafts a diffpack instead of editing the workspace:
+   * its session's workspace-write tools are re-rooted at
+   * `artifacts/diffpacks/<diffpackId>/after/`, reads fall through to the real
+   * file, and `apply_patch` is withheld so the model never hand-authors a
+   * hunk. Stamped by the service at create / fanout-materialize time — never
+   * by callers, because it is a capability boundary, not a preference.
+   */
+  diffpackId: z.string().optional(),
   /**
    * Provenance for service-materialized tasks (today: project-type
    * schedule hosts). The dedup key that makes re-applying a type
@@ -537,6 +565,19 @@ export const CreateTaskRequestSchema = z
     createdBy: TaskAssigneeSchema.optional(),
     /** Preserve the launcher's naming presentation across task handoffs. */
     roleBasedNameOnlyMode: z.boolean().optional(),
+    /**
+     * How the run's file edits land, for a `diffpackCapable` craftbook:
+     * `'edit'` writes the workspace directly, `'propose'` drafts a diffpack
+     * change proposal the user reviews and applies, and `'auto'` (the
+     * default when absent) proposes for unattended runs (night-shift/cron,
+     * or a workspace the crew cannot write) and edits otherwise.
+     * `'propose'` on a book that is not `diffpackCapable` is rejected —
+     * the book's gates would judge the wrong tree. `'edit'` never overrides
+     * a service-internal `draftsDiffpack` binding: that flag is a capability
+     * boundary owned by the caller that knows the run's intent (see
+     * `TaskSchema.diffpackId`).
+     */
+    deliveryMode: z.enum(['auto', 'edit', 'propose']).optional(),
     /**
      * Enqueue the entry-step handoff immediately after create — the
      * single-channel kickoff (there is no "tell a gezel about work"
@@ -762,9 +803,10 @@ export type NewTaskStep = z.infer<typeof NewTaskStepSchema>;
  * Why a task that is `active` and assigned still has not produced any
  * chat. Ordered from "moving shortly" to "parked on purpose".
  *
- * `'dispatching'` is the narrow window after the runner handed the
- * handoff to a provider but before the first turn persists a message —
- * the work IS starting, it just has nothing to show yet.
+ * `'dispatching'` means the runner has handed the handoff to a provider.
+ * It holds for as long as that session is in flight, not just until the
+ * first message lands — so a surface that reads it as "nothing to show
+ * yet" must check `sessionId` against what it can already see.
  */
 export const TaskWaitReasonSchema = z.enum([
   'dispatching',
@@ -796,6 +838,15 @@ export const TaskWaitStateSchema = z.object({
   /** Gezel the queued step belongs to. */
   gezelId: z.string(),
   stepId: z.string().optional(),
+  /**
+   * The handoff session the dispatch is running in. Only ever set for
+   * `'dispatching'` — queued work has no session yet. It is what lets a
+   * chat surface tell "handed off, nothing to show" apart from "handed
+   * off and already talking": a brand-new handoff session's live rows
+   * carry no `taskRef` until the first canonical refresh, so the session
+   * id is the only correlation available while the turn is in flight.
+   */
+  sessionId: z.string().optional(),
   /** ISO time the handoff went onto the queue. */
   since: z.string(),
 });

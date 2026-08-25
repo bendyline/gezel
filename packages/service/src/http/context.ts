@@ -1,6 +1,7 @@
 import type { ProviderName, ServiceRole } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { AmbientDashboardGenerator } from '../ambient/dashboard-generator.js';
+import type { AppServeController } from '../app-serve/controller.js';
 import type { ChannelManager } from '../channels/manager.js';
 import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
@@ -8,6 +9,7 @@ import type { CodexSetupManager } from '../codex-setup/manager.js';
 import type { ConnectorActionManager } from '../connectors/actions.js';
 import type { ConnectorManager } from '../connectors/manager.js';
 import type { DebugFlag } from '../debug/flag.js';
+import type { DiffpackManager } from '../diffpack/manager.js';
 import type { EngineBinaryRegistry } from '../engines/registry.js';
 import type { ModelFitnessManager } from '../fitness/manager.js';
 import type { JobManager } from '../folders/job-manager.js';
@@ -113,6 +115,11 @@ export interface ServiceContext {
    */
   knowledge?: KnowledgeManager;
   /**
+   * App-serve sites: per-site visitor listeners serving an applied AI App
+   * as a shareable mini-site. Absent on the machine-engine role.
+   */
+  appServe?: AppServeController;
+  /**
    * The built-in documentation engine (TOC + articles, personalized per
    * render mode). Backs `/api/handboek` and the `how_do_i` MCP tool.
    */
@@ -124,6 +131,8 @@ export interface ServiceContext {
   codeReviews: CodeReviewManager;
   /** Lifecycle of report-embedded action requests (```gezel-action blocks). */
   reportActions: ReportActionManager;
+  /** Proposed change sets a gezel drafted for the user to review and apply. */
+  diffpacks: DiffpackManager;
   connectors: ConnectorManager;
   connectorActions: ConnectorActionManager;
   renderer: ImageRenderer;

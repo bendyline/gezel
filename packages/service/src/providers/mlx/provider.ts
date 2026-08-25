@@ -28,7 +28,12 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { createLogger, leaksUntaggedReasoning } from '@bendyline/gezel';
+import {
+  AwakeBudget,
+  createAwakeTimeout,
+  createLogger,
+  leaksUntaggedReasoning,
+} from '@bendyline/gezel';
 import type { ToolsMlxTemplateFixConfig } from '../../model-profile/behaviors/tools-mlx-template-fix.js';
 import type { TurnRambleDetectionConfig } from '../../model-profile/behaviors/turn-ramble-detection.js';
 import {
@@ -65,6 +70,7 @@ import {
   foldPostActionRumination,
   foldPreToolPreamble,
   formatToolMenu,
+  isWriteShapedToolName,
   parseGemmaNativeToolCall,
   parseGemmaToolCall,
   parseJsonEnvelopeToolCalls,
@@ -1186,7 +1192,17 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     }
 
     const totalTimeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    const deadline = Date.now() + totalTimeoutMs;
+    // Budget in awake time, not wall clock. A laptop that naps mid-turn used
+    // to burn the whole budget while frozen and die on the wake-up burst
+    // reporting a duration it never got — `afterMs=1002151` against a 180s
+    // budget, of which 822s were macOS dark-wake sleep. `AwakeBudget` holds
+    // still across a suspension and gives up on its own terms when one nap is
+    // long enough to mean the machine was put away for good.
+    const budget = new AwakeBudget(totalTimeoutMs);
+    const turnTimeoutError = () =>
+      new Error(
+        `[Mac AI] timed out after ${Math.round(totalTimeoutMs / 1000)}s${budget.describeSuspension()}`,
+      );
     const start = Date.now();
     const seq = ++this.sendSeq;
     const debugOn = this.deps.debug?.isEnabled() === true;
@@ -1461,10 +1477,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         lastIterationFirstTokenAt = null;
         lastIterationFinishedAt = null;
 
-        const remaining = deadline - Date.now();
-        if (remaining <= 0) {
-          throw new Error(`[Mac AI] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
-        }
+        if (budget.expired()) throw turnTimeoutError();
 
         const baseUrl = await this.deps.resolveBaseUrl();
         const body: Record<string, unknown> = {
@@ -1641,11 +1654,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         }
 
         const externalSignal = opts?.queue?.signal;
-        const engineWaitRemaining = deadline - Date.now();
-        if (engineWaitRemaining <= 0) {
-          throw new Error(`[Mac AI] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
-        }
-        const engineDeadlineSignal = AbortSignal.timeout(engineWaitRemaining);
+        if (budget.expired()) throw turnTimeoutError();
+        // Sleep-aware: `AbortSignal.timeout` fires the instant the host
+        // resumes, which would drop a queued turn that never had its slot.
+        const engineDeadline = createAwakeTimeout(budget.remainingMs());
+        const engineDeadlineSignal = engineDeadline.signal;
         const engineWaitSignal = externalSignal
           ? AbortSignal.any([externalSignal, engineDeadlineSignal])
           : engineDeadlineSignal;
@@ -1660,11 +1673,13 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             if (externalSignal?.aborted) {
               throw new Error('[Mac AI] turn cancelled by caller');
             }
-            if (engineDeadlineSignal.aborted) {
-              throw new Error(`[Mac AI] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
-            }
+            if (engineDeadlineSignal.aborted) throw turnTimeoutError();
           }
           throw err;
+        } finally {
+          // The signal only guards the wait for a slot; the turn's own ticker
+          // owns the deadline from here.
+          engineDeadline.dispose();
         }
         let engineRequestReleased = false;
         const releaseEngineRequestOnce = () => {
@@ -1674,9 +1689,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           releaseEngineRequest();
         };
         releaseActiveEngineRequest = releaseEngineRequestOnce;
-        if (Date.now() >= deadline) {
+        if (budget.expired()) {
           releaseEngineRequestOnce();
-          throw new Error(`[Mac AI] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
+          throw turnTimeoutError();
         }
         const ctrl = new AbortController();
         // Tag which trigger fired the abort — distinguishes the
@@ -1692,21 +1707,20 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           if (externalSignal.aborted) onExternalAbort();
           else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
         }
-        // Wallclock-based deadline poll. The naive `setTimeout(remaining)`
-        // pauses when macOS suspends the process during sleep, so a
-        // turn started just before sleep stays "Preparing" for the
-        // duration of the nap + the original budget — the user sees a
-        // multi-thousand-second hang with no abort. A recurring
-        // interval that compares `Date.now()` to the wallclock
-        // `deadline` self-corrects on wake: setInterval also pauses
-        // during sleep, but the first post-wake tick sees the
-        // wallclock has moved past the deadline and aborts within ~2s
-        // of resume. Drift is bounded by the poll interval, not the
-        // sleep duration.
+        // Deadline poll rather than a single armed timer. A `setTimeout`
+        // armed before a suspension fires the instant the host resumes, so
+        // the turn dies on the wake-up burst; polling re-reads the awake
+        // budget each tick, so a nap defers the abort instead of causing it.
+        // Drift is bounded by the poll interval, never by the sleep duration.
+        // `budget.expired()` also covers the give-up case — one nap long
+        // enough that the engine's SSE stream is not worth waiting on.
         const deadlineTicker = setInterval(() => {
-          if (Date.now() < deadline) return;
+          if (!budget.expired()) return;
           abortReason ??= 'timer';
-          log.error(`turn#${seq}.${turn} ABORT-FIRED reason=timer afterMs=${Date.now() - start}`);
+          log.error(
+            `turn#${seq}.${turn} ABORT-FIRED reason=timer afterMs=${Date.now() - start} ` +
+              `awakeMs=${Math.round(totalTimeoutMs - budget.remainingMs())} suspendedMs=${budget.suspendedMs()}`,
+          );
           ctrl.abort();
           clearInterval(deadlineTicker);
         }, 2_000);
@@ -1854,7 +1868,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               // first byte" when the model was clearly working.
               throw new Error(buildPreFirstByteAbortMessage(this.lastPrefillEvent));
             }
-            throw new Error(`[Mac AI] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
+            throw turnTimeoutError();
           }
           throw new Error(
             `[Mac AI] couldn't reach the engine at ${baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
@@ -2250,7 +2264,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                 `[Mac AI] no output for ${Math.round(STREAMING_IDLE_MS / 1000)}s mid-stream; aborting (${stats}). This is usually mlx_vlm.server stalling SSE — retry the turn; if it keeps happening, restart the engine in Settings → On-device.`,
               );
             } else {
-              throw new Error(`[Mac AI] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
+              throw turnTimeoutError();
             }
           }
           // Not one of our aborts (those are AbortErrors, handled above).
@@ -2337,6 +2351,20 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             parseGemmaToolCall(body, knownToolNames) ??
             parseGemmaNativeToolCall(body, knownToolNames);
           if (parsed) {
+            // An EOS-flushed artifact call is only a prefix of an atomic
+            // whole-file replacement, and the artifact drawer has no append
+            // primitive. Do not destroy the previous artifact with it.
+            if (
+              eosFlushedIndices.has(bodyIdx) &&
+              parsed.name === 'write_artifact' &&
+              typeof parsed.arguments.content === 'string' &&
+              typeof parsed.arguments.path === 'string'
+            ) {
+              this.emitWarning(
+                'The model hit its output limit while replacing an artifact. The incomplete write was skipped and the previous artifact was preserved; split or deterministically assemble the deliverable before retrying.',
+              );
+              continue;
+            }
             const id = `repair-${seq}-${turn}-${repairedCalls.length}`;
             repairedCalls.push({
               id,
@@ -2358,10 +2386,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             // tail rather than re-emit the whole file.
             if (eosFlushedIndices.has(bodyIdx)) {
               const args = parsed.arguments;
-              const isWriteShaped =
-                parsed.name === 'write_file' ||
-                parsed.name === 'write_artifact' ||
-                parsed.name === 'append_to_file';
+              const isWriteShaped = isWriteShapedToolName(parsed.name);
               if (
                 isWriteShaped &&
                 typeof args.content === 'string' &&
@@ -2498,6 +2523,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         ) {
           const glmSpans = findGlmToolCallSpans(turnContent, knownToolNames);
           for (const [idx, parsed] of glmSpans.entries()) {
+            if (parsed.truncated && !isWriteShapedToolName(parsed.name)) {
+              this.emitWarning(
+                `The model's \`${parsed.name}\` call was cut off mid-stream and was skipped so a partial mutation could not land. Retry with a smaller payload.`,
+              );
+              continue;
+            }
             const id = `glm-repair-${seq}-${turn}-${idx}`;
             glmRepaired.push({
               id,
@@ -2551,6 +2582,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             }
           }
           for (const [idx, parsed] of hermesSpans.entries()) {
+            if (parsed.truncated && !isWriteShapedToolName(parsed.name)) {
+              this.emitWarning(
+                `The model's \`${parsed.name}\` call was cut off mid-stream and was skipped so a partial mutation could not land. Retry with a smaller payload.`,
+              );
+              continue;
+            }
             const id = `hermes-repair-${seq}-${turn}-${idx}`;
             hermesRepaired.push({
               id,

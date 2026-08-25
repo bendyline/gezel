@@ -35,11 +35,12 @@ import type {
   SearchImagesResponse,
   SecurityFindingWire,
   SecurityOverviewResponse,
+  SecurityScanProvenance,
   SecurityScanResponse,
   SymbolContext,
   TraceTaintResponse,
 } from '@bendyline/gezel';
-import { isSharedLibraryProject, nowIso } from '@bendyline/gezel';
+import { SecurityScanProvenanceSchema, isSharedLibraryProject, nowIso } from '@bendyline/gezel';
 import {
   fallbackProjectIndexDir,
   fallbackProjectVillageFile,
@@ -874,6 +875,7 @@ export class ContentIndex {
         total: deps.length,
         withAdvisories: deps.filter((d) => d.advisoryIds.length > 0).length,
         scanned: !!index.getMeta('security_scanned_at'),
+        ...maybeScanProvenance(index),
       };
     } finally {
       index.close();
@@ -950,6 +952,7 @@ export class ContentIndex {
           withAdvisories: deps.filter((d) => d.advisoryIds.length > 0).length,
         },
         systemicCandidates,
+        ...maybeScanProvenance(index),
       };
     } finally {
       index.close();
@@ -1066,6 +1069,13 @@ export class ContentIndex {
        * embed on demand (the single-project MCP-tool path).
        */
       queryVector?: number[];
+      /**
+       * Answer from the keyword arm rather than wait for a cold/warming
+       * embedder. Set by callers riding a user's chat turn: the model load
+       * costs tens of seconds on a fresh install, and implicit retrieval must
+       * never hold the turn hostage for it.
+       */
+      skipColdEmbedder?: boolean;
     } = {},
   ): Promise<SearchCodeResponse> {
     const opened = await this.open(projectId);
@@ -1081,8 +1091,13 @@ export class ContentIndex {
           queryVector = opts.queryVector;
         } else {
           try {
-            const { embedQuery } = await import('../memory/embeddings.js');
-            queryVector = await embedQuery(query);
+            const { embedQuery, embeddingPipelineStatus } = await import('../memory/embeddings.js');
+            const status = embeddingPipelineStatus();
+            if (opts.skipColdEmbedder && (status === 'cold' || status === 'warming')) {
+              queryVector = null; // the service's deferred boot warm owns the load
+            } else {
+              queryVector = await embedQuery(query);
+            }
           } catch {
             queryVector = null; // embeddings disabled → keyword only
           }
@@ -1164,6 +1179,7 @@ export class ContentIndex {
     searchReady: number;
     pending: number;
     skipped: number;
+    skippedFiles: Array<{ path: string; attempts: number; reason?: string }>;
     shadowsPending: number;
     embedOnlyPending: number;
     embedModel?: string;
@@ -1683,8 +1699,13 @@ export class ContentIndex {
     try {
       const fileRec = opened.index.getFile(relPath);
       const currentHash = await currentIndexedHash(opened.index, opened.workspaceDir, relPath);
-      const currentObservations = opened.index.currentFileReviewIssues();
-      await this.store.observeProjectBoekwachterReviews(projectId, currentObservations);
+      // Only this file's observation: the caller asked about one path, and the
+      // whole-project materialization belongs to the review pass that produced
+      // the rows (see `reviewPass`), not to opening a file in the UI.
+      await this.store.observeProjectBoekwachterReviews(
+        projectId,
+        opened.index.currentFileReviewIssuesForPath(relPath),
+      );
       const trackedIssues = await this.boekwachterIssuesForPath(projectId, relPath, currentHash);
       if (!fileRec?.hash) {
         return {
@@ -1776,14 +1797,20 @@ export class ContentIndex {
         limit: 1,
       });
       const records = await this.store.listProjectBoekwachterIssues(projectId);
+      // Findings cluster on the same files, so resolve each path's live hash
+      // once rather than per record — a stat + index read per finding is
+      // thousands of syscalls on a repo-sized backlog.
+      const hashByPath = new Map<string, Promise<string | null>>();
       const matching = filterAndSortBoekwachterIssues(
         await Promise.all(
-          records.map(async (record) =>
-            toBoekwachterIssueWire(
-              record,
-              await currentIndexedHash(index, opened.workspaceDir, record.path),
-            ),
-          ),
+          records.map(async (record) => {
+            let hash = hashByPath.get(record.path);
+            if (!hash) {
+              hash = currentIndexedHash(index, opened.workspaceDir, record.path);
+              hashByPath.set(record.path, hash);
+            }
+            return toBoekwachterIssueWire(record, await hash);
+          }),
         ),
         req,
       );
@@ -1814,9 +1841,15 @@ export class ContentIndex {
       return record ? toBoekwachterIssueWire(record, null) : null;
     }
     try {
+      // A ref names a record that already exists, so reconcile only its file.
+      // Falling back to the whole project keeps a ref that has not been
+      // materialized yet resolvable.
+      const known = await this.store.getProjectBoekwachterIssue(projectId, ref);
       await this.store.observeProjectBoekwachterReviews(
         projectId,
-        opened.index.currentFileReviewIssues(),
+        known
+          ? opened.index.currentFileReviewIssuesForPath(known.path)
+          : opened.index.currentFileReviewIssues(),
       );
       const record = await this.store.getProjectBoekwachterIssue(projectId, ref);
       return record
@@ -1912,12 +1945,13 @@ export class ContentIndex {
   async searchLibrary(
     projectId: string,
     query: string,
-    opts: { maxResults?: number; queryVector?: number[] } = {},
+    opts: { maxResults?: number; queryVector?: number[]; skipColdEmbedder?: boolean } = {},
   ): Promise<SearchDocumentsResponse> {
     const maxResults = opts.maxResults ?? 10;
     const code = await this.searchCode(projectId, query, {
       maxResults,
       ...(opts.queryVector ? { queryVector: opts.queryVector } : {}),
+      ...(opts.skipColdEmbedder ? { skipColdEmbedder: true } : {}),
     });
     if (code.engine === 'unavailable') return { results: [], engine: 'unavailable' };
     const artifactsDir = this.store.projectArtifactsDir(projectId);
@@ -2562,6 +2596,21 @@ function cosine(a: Float32Array, b: Float32Array): number {
 // ── security-intel helpers ──────────────────────────────────────────────────
 
 const EMPTY_COUNTS = { total: 0, bySeverity: {}, byCategory: {}, bySource: {} };
+
+/**
+ * The persisted provenance of the last security_scan, as a spreadable
+ * optional field. Absent (empty object) on pre-provenance databases and on
+ * unparseable values — the renderer treats absence as "provenance unknown".
+ */
+function maybeScanProvenance(index: IndexStore): { provenance?: SecurityScanProvenance } {
+  const raw = index.getMeta('security_scan_provenance');
+  if (!raw) return {};
+  try {
+    return { provenance: SecurityScanProvenanceSchema.parse(JSON.parse(raw)) };
+  } catch {
+    return {};
+  }
+}
 
 const ENTRY_RE =
   /(^|\/)(index|main|app|server|cli|worker|handler)\.(ts|tsx|js|mjs|cjs|py|go|rs|rb|php|java)$/i;

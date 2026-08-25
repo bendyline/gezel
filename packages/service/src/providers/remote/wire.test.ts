@@ -59,6 +59,7 @@ describe('remote wire contract', () => {
           role: 'assistant',
           content: '',
           toolCalls: [{ id: 't1', name: 'read_file', arguments: '{}' }],
+          reasoning: 'I need the file before continuing.',
         },
         { role: 'tool', content: 'file body', toolCallId: 't1' },
       ],
@@ -67,6 +68,12 @@ describe('remote wire contract', () => {
       queue: { lane: 'background', affinity: false },
     });
     expect(parsed.priorMessages).toHaveLength(3);
+    expect(parsed.priorMessages[1]).toEqual({
+      role: 'assistant',
+      content: '',
+      toolCalls: [{ id: 't1', name: 'read_file', arguments: '{}' }],
+      reasoning: 'I need the file before continuing.',
+    });
     expect(parsed.tools?.[0]?.name).toBe('read_file');
   });
 

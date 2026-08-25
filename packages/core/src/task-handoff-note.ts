@@ -17,7 +17,7 @@
  * there, change the matching pattern here (the test pins both).
  */
 
-export type TaskHandoffKind = 'handoff' | 'entry' | 'advance' | 'resume';
+export type TaskHandoffKind = 'handoff' | 'entry' | 'advance' | 'resume' | 'retry';
 
 export interface TaskHandoffNote {
   kind: TaskHandoffKind;
@@ -25,7 +25,7 @@ export interface TaskHandoffNote {
   taskRef: string;
   /** Craftbook step id, as authored (`review`, `write-deck`). */
   stepId: string;
-  /** Previous step's gezel. Absent on `entry`/`advance`/`resume`, and on
+  /** Previous step's gezel. Absent on `entry`/`advance`/`resume`/`retry`, and on
    *  a hand-off whose sender could not be resolved (deleted gezel, or
    *  role-based-name-only mode withholding the name). */
   fromName?: string;
@@ -43,6 +43,8 @@ const ENTRY_PREFACE_RE =
 const ADVANCE_RE =
   /^Task (\S+?) has advanced to the next step — `([^`]+)`, which is yours as well\./;
 const RESUME_RE = /^The service restarted while task (\S+?) was still active on step `([^`]+)`\./;
+const RETRY_RE =
+  /^You paused on step `([^`]+)` of task (\S+?), and the user has asked you to try again\./;
 
 /**
  * Recognise a task dispatch seed. Returns `null` for every other
@@ -68,6 +70,9 @@ export function parseTaskHandoffNote(content: string): TaskHandoffNote | null {
 
   const resume = RESUME_RE.exec(text);
   if (resume) return { kind: 'resume', taskRef: resume[1]!, stepId: resume[2]! };
+
+  const retry = RETRY_RE.exec(text);
+  if (retry) return { kind: 'retry', taskRef: retry[2]!, stepId: retry[1]! };
 
   // Entry seeds are prefixed with the craftbook + step-arc preface, so the
   // assignment sentence is matched anywhere in the text rather than anchored.
@@ -119,6 +124,8 @@ export function handoffHeadline(note: TaskHandoffNote, receiver: string): string
       return sentenceCase(`${receiver} continues with the ${step} step.`);
     case 'resume':
       return sentenceCase(`${receiver} picked the ${step} step back up after a restart.`);
+    case 'retry':
+      return sentenceCase(`${receiver} is trying the ${step} step again.`);
   }
 }
 
@@ -137,6 +144,8 @@ export function handoffKindLabel(note: TaskHandoffNote): string {
       return 'Next step';
     case 'resume':
       return 'Resumed';
+    case 'retry':
+      return 'Try again';
   }
 }
 
@@ -161,6 +170,8 @@ export function handoffSummary(note: TaskHandoffNote): string {
       return `Continuing with the ${step} step.`;
     case 'resume':
       return `Picked the ${step} step back up after a restart.`;
+    case 'retry':
+      return `Trying the ${step} step again.`;
   }
 }
 

@@ -36,6 +36,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./gezapp": {
+      "types": "./dist/gezapp.d.ts",
+      "import": "./dist/gezapp.js"
+    },
     "./handboek": {
       "types": "./dist/handboek.d.ts",
       "import": "./dist/handboek.js"

@@ -90,6 +90,11 @@ export class MockProvider implements LLMProvider {
     message: string;
     fields?: Record<string, unknown>;
   }> = [];
+  /** Errors thrown after scripted MCP calls complete on a send. */
+  private readonly postToolSendFailureQueue: Array<{
+    message: string;
+    fields?: Record<string, unknown>;
+  }> = [];
   /** Per-send deliberate delays for deterministic SessionQueue tests. */
   private readonly sendDelayQueue: number[] = [];
   /**
@@ -211,6 +216,18 @@ export class MockProvider implements LLMProvider {
   }
 
   /**
+   * Make the next `sendAndWait` fail after its scripted MCP calls finish.
+   * This reproduces a provider/tool-loop guard abort that follows a durable
+   * mutation, rather than a transport failure before the turn does work.
+   */
+  scriptSendFailureAfterToolCalls(
+    message = '[mock] turn aborted after tool calls',
+    fields?: Record<string, unknown>,
+  ): void {
+    this.postToolSendFailureQueue.push({ message, ...(fields ? { fields } : {}) });
+  }
+
+  /**
    * Delay the next `sendAndWait` call by `ms` before emitting its
    * scripted response. Used by SessionQueue tests to prove that a
    * queued message waits for the current turn, not just for the
@@ -311,6 +328,11 @@ export class MockProvider implements LLMProvider {
   /** @internal */
   nextScriptedSendFailure(): { message: string; fields?: Record<string, unknown> } | undefined {
     return this.sendFailureQueue.shift();
+  }
+
+  /** @internal */
+  nextPostToolSendFailure(): { message: string; fields?: Record<string, unknown> } | undefined {
+    return this.postToolSendFailureQueue.shift();
   }
 
   /** @internal */
@@ -521,6 +543,11 @@ class MockSession extends StreamingSessionBase implements LLMSession {
         const output = await this.bridges.callTool(call.name, call.arguments);
         this.provider.recordToolOutput(call.name, output);
       }
+    }
+
+    const postToolFailure = this.provider.nextPostToolSendFailure();
+    if (postToolFailure) {
+      throw Object.assign(new Error(postToolFailure.message), postToolFailure.fields ?? {});
     }
 
     const text = this.provider.nextScriptedResponse(prompt);

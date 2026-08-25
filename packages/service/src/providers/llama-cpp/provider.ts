@@ -23,7 +23,13 @@
  */
 
 import * as os from 'node:os';
-import { WORKSPACE_READ_MAX_FILES, createLogger, leaksUntaggedReasoning } from '@bendyline/gezel';
+import {
+  AwakeBudget,
+  WORKSPACE_READ_MAX_FILES,
+  createAwakeTimeout,
+  createLogger,
+  leaksUntaggedReasoning,
+} from '@bendyline/gezel';
 import { Agent, fetch as undiciFetch } from 'undici';
 import type { TurnRambleDetectionConfig } from '../../model-profile/behaviors/turn-ramble-detection.js';
 import {
@@ -2582,7 +2588,12 @@ interface LlamaCppSessionDeps {
   volatileContext?: string;
   priorMessages: Array<
     | { role: 'user' | 'assistant'; content: string }
-    | { role: 'assistant'; content: string; toolCalls: ExternalToolCall[] }
+    | {
+        role: 'assistant';
+        content: string;
+        toolCalls: ExternalToolCall[];
+        reasoning?: string;
+      }
     | { role: 'tool'; content: string; toolCallId: string }
   >;
   bridges: McpBridgePool;
@@ -2786,6 +2797,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             type: 'function' as const,
             function: { name: tc.name, arguments: tc.arguments },
           })),
+          ...(deps.replayReasoningContent && m.reasoning ? { reasoning_content: m.reasoning } : {}),
         });
         continue;
       }
@@ -3119,7 +3131,15 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
 
   private async sendAndWaitInner(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
     const totalTimeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    const deadline = Date.now() + totalTimeoutMs;
+    // Awake-time budget — see the same construction in the MLX provider. A
+    // host suspension freezes this process, llama-server, and the socket
+    // between them alike, so wall clock spent asleep is time no turn could
+    // have used and must not be charged against it.
+    const budget = new AwakeBudget(totalTimeoutMs);
+    const turnTimeoutError = () =>
+      new Error(
+        `[llama-cpp] timed out after ${Math.round(totalTimeoutMs / 1000)}s${budget.describeSuspension()}`,
+      );
     const start = Date.now();
 
     // Images only ride along when the server has a projector loaded. Otherwise
@@ -3313,10 +3333,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
 
     try {
       for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
-        const remaining = deadline - Date.now();
-        if (remaining <= 0) {
-          throw new Error(`[llama-cpp] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
-        }
+        if (budget.expired()) throw turnTimeoutError();
 
         // Check every iteration, including the first. Tool schemas can fill
         // most of a local context window before a single result exists, and
@@ -3325,11 +3342,9 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
         await this.maybeCompactMidLoop();
 
         const engineRequestLabel = `${(opts?.queue?.sessionId ?? 'anonymous').slice(0, 8)}#${turn}`;
-        const engineWaitRemaining = deadline - Date.now();
-        if (engineWaitRemaining <= 0) {
-          throw new Error(`[llama-cpp] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
-        }
-        const engineDeadlineSignal = AbortSignal.timeout(engineWaitRemaining);
+        if (budget.expired()) throw turnTimeoutError();
+        const engineDeadline = createAwakeTimeout(budget.remainingMs());
+        const engineDeadlineSignal = engineDeadline.signal;
         const engineWaitSignal = opts?.queue?.signal
           ? AbortSignal.any([opts.queue.signal, engineDeadlineSignal])
           : engineDeadlineSignal;
@@ -3344,11 +3359,13 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             if (opts?.queue?.signal?.aborted) {
               throw new Error('[llama-cpp] turn cancelled by caller');
             }
-            if (engineDeadlineSignal.aborted) {
-              throw new Error(`[llama-cpp] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
-            }
+            if (engineDeadlineSignal.aborted) throw turnTimeoutError();
           }
           throw err;
+        } finally {
+          // The signal only guards the wait for a slot; the turn's own ticker
+          // owns the deadline from here.
+          engineDeadline.dispose();
         }
         let engineRequestReleased = false;
         const releaseEngineRequestOnce = () => {
@@ -3358,9 +3375,9 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           releaseEngineRequest();
         };
         releaseActiveEngineRequest = releaseEngineRequestOnce;
-        if (Date.now() >= deadline) {
+        if (budget.expired()) {
           releaseEngineRequestOnce();
-          throw new Error(`[llama-cpp] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
+          throw turnTimeoutError();
         }
 
         const releaseGpuLease = await this.deps.acquireGpuLease?.();
@@ -4160,15 +4177,12 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           if (externalSignal.aborted) onExternalAbort();
           else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
         }
-        // Wallclock-based deadline poll. `setTimeout(remaining)` pauses
-        // when macOS suspends the process during sleep, so a turn
-        // started just before sleep effectively re-anchors its
-        // timeout to wake time. setInterval also pauses, but the
-        // first post-wake tick sees `Date.now() >= deadline` and
-        // aborts within the poll period — drift bounded by the 2 s
-        // interval, not the sleep duration.
+        // Deadline poll rather than a single armed timer: a `setTimeout` armed
+        // before a suspension fires the instant the host resumes, killing a
+        // turn that never got its budget. Polling re-reads the awake budget,
+        // so a nap defers the abort; drift stays bounded by the 2 s interval.
         const hardTimer = setInterval(() => {
-          if (Date.now() < deadline) return;
+          if (!budget.expired()) return;
           abortKind = 'hard';
           ctrl.abort();
           clearInterval(hardTimer);
@@ -4579,7 +4593,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 `[llama-cpp] no output for ${Math.round(streamingIdleMs / 1000)}s mid-stream; aborting (${stats}).`,
               );
             }
-            throw new Error(`[llama-cpp] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
+            throw turnTimeoutError();
           }
           throw new Error(
             `[llama-cpp] /v1/chat/completions unreachable at ${baseUrl}: ${err instanceof Error ? err.message : String(err)}`,
@@ -5345,7 +5359,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 );
               }
             } else {
-              throw new Error(`[llama-cpp] timed out after ${Math.round(totalTimeoutMs / 1000)}s`);
+              throw turnTimeoutError();
             }
           }
           if (!recoveredFromRamble && !recoveredFromIdleStall) throw err;

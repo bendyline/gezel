@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "kind": "project-type",
+  "id": "example-reading-circle",
+  "name": "Example Reading Circle",
+  "description": "A book-club workspace demonstrating a crew, embedded and catalog craftbooks, a night-shift schedule, and a toolset dependency.",
+  "tags": ["example", "books"],
+  "category": "creative",
+  "maintainer": {
+    "name": "Gezel"
+  },
+  "license": "MIT",
+  "yankedVersions": []
+}

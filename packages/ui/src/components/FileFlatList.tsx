@@ -64,7 +64,20 @@ export function FileFlatList({
               </span>
               {detail && <span className="file-flat-card-detail">{detail}</span>}
             </button>
-            {trailing && <span className="tree-row-trailing">{trailing}</span>}
+            {trailing && (
+              // The badges sit outside the label button, so a click on the
+              // issue count landed on dead space — the one part of the row a
+              // triage reader aims at. Redundant with the label, so it stays
+              // out of the tab order.
+              <button
+                type="button"
+                className="tree-row-trailing tree-row-trailing-select"
+                tabIndex={-1}
+                onClick={() => onSelect(entry)}
+              >
+                {trailing}
+              </button>
+            )}
           </div>
         );
       })}

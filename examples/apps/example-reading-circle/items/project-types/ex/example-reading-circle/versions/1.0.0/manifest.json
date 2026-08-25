@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "version": "1.0.0",
+  "releasedAt": "2026-08-24T00:00:00Z",
+  "params": {
+    "type": "object",
+    "properties": {
+      "circleName": {
+        "type": "string",
+        "title": "What is the circle called?",
+        "default": "Evening"
+      }
+    }
+  },
+  "nameTemplate": "{{circleName}} Reading Circle",
+  "aboutTemplate": "about.md",
+  "missionTemplate": "mission.md",
+  "gezels": [
+    {
+      "templateId": "example-circle-host",
+      "voorman": true
+    },
+    {
+      "templateId": "example-circle-archivist"
+    }
+  ],
+  "toolsets": [
+    {
+      "id": "web-search",
+      "need": "required",
+      "reason": "The reading-digest craftbook searches for book context; installing it at adoption lets the night-shift schedule arm."
+    }
+  ],
+  "craftbooks": ["session-prep", "example-reading-digest"],
+  "schedules": [
+    {
+      "runMode": "night-shift",
+      "craftbook": "example-reading-digest",
+      "consent": "ask",
+      "overlap": "skip"
+    }
+  ],
+  "workspaceSeed": ["circle.json"]
+}

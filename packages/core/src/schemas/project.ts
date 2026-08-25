@@ -170,6 +170,34 @@ export const ProjectTypeProvenanceSchema = z.object({
 });
 export type ProjectTypeProvenance = z.infer<typeof ProjectTypeProvenanceSchema>;
 
+/** One seed file the applied project type wrote into the workspace. */
+export const AppliedSeedRecordSchema = z.object({
+  /** Workspace-relative path; artifact seeds are prefixed `artifacts/`. */
+  path: z.string(),
+  /** sha256 (hex) of the rendered content as last written by an apply. */
+  sha256: z.string(),
+  /** Type version that wrote this content. */
+  typeVersion: z.string(),
+  writtenAt: z.string(),
+});
+export type AppliedSeedRecord = z.infer<typeof AppliedSeedRecordSchema>;
+
+/**
+ * The overlay manifest: which files the applied project type deployed, and
+ * what the app-owned content hashed to. Stored per-machine in the project's
+ * private sidecar (`projectTypeOverlayFile`), never in the workspace — it is
+ * how a later apply distinguishes a user-modified seed (kept under
+ * `seedPolicy: 'preserve'`) from a stale-but-untouched one (refreshed).
+ */
+export const ProjectTypeOverlaySchema = z.object({
+  schemaVersion: z.literal(1),
+  typeId: z.string(),
+  typeVersion: z.string(),
+  appliedAt: z.string(),
+  seeds: z.array(AppliedSeedRecordSchema).default([]),
+});
+export type ProjectTypeOverlay = z.infer<typeof ProjectTypeOverlaySchema>;
+
 /**
  * Project shape. `crew` (the default) is the original behavior — the voorman
  * recruits and coordinates a team of specialists. `solo` is a "job": a single
@@ -283,6 +311,18 @@ export const ProjectSchema = z.object({
    * the user can override it later in Project Settings.
    */
   indexingEnabled: z.boolean().optional(),
+  /**
+   * Per-project switch for overnight bug fixing. Missing = ON, which is
+   * deliberate: the capability already gates itself on the project having
+   * both a Boekwachter and a developer on the roster, so a user who assembled
+   * that crew has asked for it. This field exists to turn it OFF without
+   * disbanding the crew.
+   *
+   * Nothing it produces touches the workspace — the developer drafts
+   * diffpacks the user applies — but it does spend model time overnight, so
+   * the off switch has to exist and has to be findable.
+   */
+  nightlyFixesEnabled: z.boolean().optional(),
   /**
    * Which knowledge catalogs are in scope for sessions here. Absent =
    * inherit the user's global enabled set. Unresolvable refs under
@@ -456,6 +496,18 @@ export function projectAllowsAmbientWork(project: {
   // (automatic via the task lifecycle vs. a deliberate user choice) —
   // for the scheduler's purposes they're all "don't nudge."
   return status === 'active';
+}
+
+/**
+ * True when the project has not opted out of overnight bug fixing. Missing =
+ * on; see `nightlyFixesEnabled`. This is only the *user's* half of the gate —
+ * the planner additionally requires a Boekwachter and a developer on the
+ * roster, and `projectAllowsAmbientWork`.
+ */
+export function projectAllowsNightlyFixes(project: {
+  nightlyFixesEnabled?: boolean;
+}): boolean {
+  return project.nightlyFixesEnabled !== false;
 }
 
 export const InstalledPackageSchema = z.object({

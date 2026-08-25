@@ -1,5 +1,5 @@
-import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
-import { mkdir, readFile, readdir, rm, symlink } from 'node:fs/promises';
+import { constants, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
+import { copyFile, mkdir, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { chatModelInstallIdentity } from './model-sources.ts';
@@ -306,6 +306,9 @@ interface InstallEvent {
   type: 'progress' | 'verifying' | 'extracting-metadata' | 'done' | 'error' | string;
   bytesWritten?: number;
   totalBytes?: number;
+  kind?: string;
+  id?: string;
+  name?: string;
   warning?: string;
   error?: string;
 }
@@ -333,8 +336,11 @@ export async function ensureWarmModel(opts: {
   llamaBin?: string;
   /** sd-server binary, required for sd-cpp warming. */
   sdBin?: string;
+  /** Abort the warm-up when the owning eval receives SIGINT/SIGTERM. */
+  signal?: AbortSignal;
   log: (line: string) => void;
 }): Promise<void> {
+  opts.signal?.throwIfAborted();
   if (opts.engine === 'llama-cpp' && !opts.llamaBin) {
     throw new Error('ensureWarmModel: llama-cpp engine requires llamaBin');
   }
@@ -400,6 +406,7 @@ export async function ensureWarmModel(opts: {
     }
 
     let lastPct = -1;
+    let lastCompanionBucket = -1;
     const handler = (event: InstallEvent) => {
       if (event.type === 'progress') {
         const pct = event.totalBytes
@@ -415,6 +422,21 @@ export async function ensureWarmModel(opts: {
         log(`[cache] ${engine}/${modelId} verifying`);
       } else if (event.type === 'extracting-metadata') {
         log(`[cache] ${engine}/${modelId} extracting metadata`);
+      } else if (event.type === 'companion') {
+        // Text-model eval warming explicitly suppresses companions below.
+        // Keep this visible if that service contract ever regresses instead
+        // of making another multi-GB pull look like a metadata-parser hang.
+        const pct = event.totalBytes
+          ? Math.floor(((event.bytesWritten ?? 0) / event.totalBytes) * 100)
+          : 0;
+        const bucket = Math.floor(pct / 5) * 5;
+        if (bucket !== lastCompanionBucket || event.error) {
+          const label = event.name ?? event.id ?? event.kind ?? 'unknown companion';
+          log(
+            `[cache] unexpected companion ${label}: ${pct}% (${event.bytesWritten ?? 0}/${event.totalBytes ?? 0}) despite skipCompanion${event.error ? ` — ${event.error}` : ''}`,
+          );
+          lastCompanionBucket = bucket;
+        }
       } else if (event.type === 'done') {
         log(
           `[cache] ${engine}/${modelId} install done${event.warning ? ` (warning: ${event.warning})` : ''}`,
@@ -425,9 +447,15 @@ export async function ensureWarmModel(opts: {
     };
 
     if (engine === 'llama-cpp') {
-      await spawned.client.installLlamaCppModel(modelId, handler);
+      // Evals warm exactly the model under test. The product install route
+      // normally adds a multi-GB image-recognition companion for text-only
+      // models and withholds `done` until that second pull finishes. That is
+      // useful product behavior, but unrelated and misleading here.
+      await spawned.client.installLlamaCppModel(modelId, handler, opts.signal, {
+        skipCompanion: true,
+      });
     } else {
-      await spawned.client.pullImageModel(modelId, handler);
+      await spawned.client.pullImageModel(modelId, handler, opts.signal);
     }
 
     if (!(await isModelInstalled(cacheRoot, engine, modelId))) {
@@ -441,11 +469,18 @@ export async function ensureWarmModel(opts: {
 }
 
 /**
- * Make a warm-cache model visible inside the trial home. We junction the
- * per-model directory (so the trial provider's installed-models loader
- * finds the model). Junctions on Windows + symlinks elsewhere both behave
- * like real directories; the loaders don't realpath, so the link looks
- * exactly like a normally-installed model.
+ * Make a warm-cache model visible inside the trial home as a real directory.
+ * Product model stores deliberately reject symlinks and junctions, so the
+ * eval harness cannot mount a cached model by linking its top-level folder.
+ * Clone-copying keeps the trial isolated while remaining cheap on APFS and
+ * other copy-on-write filesystems; COPYFILE_FICLONE falls back to an ordinary
+ * copy where reflinks are unavailable.
+ *
+ * Linking the folder instead fails as `refusing a linked or non-directory
+ * model-store path`, which the daemon reports as "no model is installed yet"
+ * and the trial only surfaces ~300 s later as a `chat-stalled` soft-timeout —
+ * five minutes downstream of the real cause, and it hits every model, so a
+ * whole sweep measures nothing.
  */
 export async function linkModelIntoTrial(opts: {
   cacheRoot: string;
@@ -458,8 +493,22 @@ export async function linkModelIntoTrial(opts: {
   const link = modelDirInHome(trialHome, engine, modelId);
   await mkdir(dirname(link), { recursive: true });
   if (existsSync(link)) return;
-  // 'junction' on win32 needs an absolute target (Node enforces this); 'dir'
-  // on POSIX makes a directory symlink.
-  const type = process.platform === 'win32' ? 'junction' : 'dir';
-  await symlink(target, link, type);
+  await cloneDirectory(target, link);
+}
+
+async function cloneDirectory(source: string, destination: string): Promise<void> {
+  await mkdir(destination, { recursive: true });
+  const entries = await readdir(source, { withFileTypes: true });
+  for (const entry of entries) {
+    const sourcePath = join(source, entry.name);
+    const destinationPath = join(destination, entry.name);
+    if (entry.isDirectory()) {
+      await cloneDirectory(sourcePath, destinationPath);
+      continue;
+    }
+    if (!entry.isFile()) {
+      throw new Error(`refusing to clone linked or non-file model payload: ${sourcePath}`);
+    }
+    await copyFile(sourcePath, destinationPath, constants.COPYFILE_FICLONE);
+  }
 }

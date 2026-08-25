@@ -178,6 +178,12 @@ Rules:
   `.pending-question-choice`, and `.catalog-category` (plus their wrappers)
   are aliased into the recipe pending markup migration. When touching one of
   those surfaces, move it to the `gz-*` classes and delete its alias.
+- **Keys with a description line** follow the `.gz-key--stacked` shape:
+  label on top, a smaller muted hint beneath, left-aligned, wrapping
+  allowed. `.pending-question-choice-described` (Claude CLI AskUserQuestion
+  options, where each choice carries an explanation) is the current
+  example. The hint is `--text-xs` in `--text-muted` — it must never
+  compete with the label.
 - **No new fully-rounded controls.** If you're reaching for
   `border-radius: 999px` on anything with a text label, it should almost
   certainly be a key or a small-radius chip instead.
@@ -444,6 +450,17 @@ skeleton the same way — extend it rather than fork it. Lead the gallery
 with the curated, context-relevant subset (e.g. craftbooks recommended
 for the project's type) and keep the full catalog one rail-click away.
 
+**Shelve a big catalog by subject, not by lifecycle.** A rail whose shelves
+answer "where in a project's life does this fit?" collapses on a large
+catalog — New Task's 255 craftbooks landed in two piles, the larger one
+("General work", 195 books) holding recipes about media, household admin,
+and marketing alongside the code work the person actually came for. Shelves
+come from `CRAFTBOOK_CATEGORY_META`, grouped by family with the uppercase
+eyebrow (`.gz-npd-rail-group`) between groups; a shelf with no matching book
+is not drawn, so the same rail reads as a codebase's rail on a codebase and a
+household rail on a household project. The eyebrow is suppressed where the
+rail turns into a horizontal scroller — a stacked heading has no row to head.
+
 **Questions with an attached document.** When a pending question carries a
 document — a night-shift report, a draft plan — the document is not a
 ten-line teaser stacked above the answer keys. `PendingQuestionCard` lifts
@@ -458,6 +475,18 @@ pattern: the document's own `#`/`##` headings are pulled back to panel
 scale (a report title must not out-shout the question it belongs to), and
 an *answered* card — which collapses to one line — stays single-column,
 because a full-height panel beside one sentence reads as broken.
+
+**A question drawer answers, so the answer keys stay on screen.** The Updates
+drawer hangs from the header and stops short of the window's bottom edge; what
+it holds is a control surface, not a page. When the question is longer than the
+room available, the *body* is what gives — it shrinks and scrolls inside itself
+while the task strip, answer keys, note field, and Submit row keep their size
+(`.app-questions-overlay` in
+[styles/app-shell.css](../packages/ui/src/styles/app-shell.css) is a flex
+column with `min-height: 0` down every level to the body). A long question that
+pushes Submit under the bottom edge reads as a broken dialog, not as a
+scrollable one, because nothing on screen says there is more below. The
+drawer's own scrollbar remains as the fallback for a very short window.
 
 **Mid-turn composer actions.** While a gezel is working, the composer keeps
 accepting text. With an empty draft the toolbar shows only the quiet

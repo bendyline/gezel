@@ -4,6 +4,7 @@ import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { GezelJsonEditor } from './GezelJsonEditor.js';
+import { seedableParamDefault } from './craftbook-command.js';
 
 /**
  * The project's suggested recurring work ("night work"): craftbook runs
@@ -263,9 +264,10 @@ function SuggestedWorkParamForm({
     for (const [key, def] of Object.entries(props)) {
       const propertyId = paramProjectProperty(def);
       const fromProperty = propertyId ? projectProperties?.[propertyId] : undefined;
+      const seed = seedableParamDefault(def);
       if (fromProperty !== undefined) out[key] = fromProperty;
       else if (item.params?.[key] !== undefined) out[key] = item.params[key];
-      else if (def && def.default !== undefined) out[key] = def.default;
+      else if (seed !== undefined) out[key] = seed;
     }
     return out;
   });

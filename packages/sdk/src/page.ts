@@ -19,6 +19,11 @@
  *  - `browser` — an "Open in browser" tab with no embedding parent. Data
  *    reads fall back to same-origin capability fetches; `tools.invoke`
  *    rejects with code `'unavailable'`; `refresh()` reloads the page.
+ *  - `serve` — the page is a shareable mini-site served by the daemon's
+ *    app-serve head (`gezel app serve`). Nothing degrades: `tools.invoke`
+ *    and `data.*` travel as same-origin fetches against the head API under
+ *    the visitor's cookie; `data.watch` polls; `refresh()` reloads. The
+ *    page still never sees a credential.
  *  - `demo` — a raw file opened outside gezel entirely. The real shim is
  *    never present there; gilde ships a paste-in stub that defines
  *    `window.gezel` only when the real one is absent.
@@ -38,7 +43,7 @@ export const GEZEL_PAGE_API_VERSION = 1 as const;
 export type GezelPageReadSource = 'workspace' | 'artifacts';
 
 /** How the page is being viewed; see the module doc for what each mode degrades. */
-export type GezelPageMode = 'embedded' | 'browser' | 'demo';
+export type GezelPageMode = 'embedded' | 'browser' | 'serve' | 'demo';
 
 /** Error codes a rejected page-API call carries (`GezelPageError.code`). */
 export type GezelPageErrorCode =

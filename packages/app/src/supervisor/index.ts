@@ -650,6 +650,34 @@ export class SupervisedService extends EventEmitter {
     }, HEALTH_POLL_INTERVAL_MS);
   }
 
+  /**
+   * Forgive health-check state accrued across a host suspension.
+   *
+   * The watch polls every 15s and restarts the daemon after 3 consecutive
+   * failures. A machine coming out of sleep fires every overdue probe at once
+   * into a daemon that is itself still being rescheduled, and three of those
+   * land inside 45s — a restart triggered by the wake-up, not by anything
+   * wrong. The daemon survives suspension perfectly well; give it a clean
+   * slate and one skipped interval to answer in.
+   */
+  noteHostResumed(): void {
+    if (this.consecutiveHealthFailures > 0) {
+      this.opts.logger?.info?.(
+        `[supervisor] host resumed — discarding ${this.consecutiveHealthFailures} health failure(s) that straddled the suspension`,
+      );
+    }
+    this.consecutiveHealthFailures = 0;
+    this.lastHealthFailure = undefined;
+    if (!this.healthTimer) return;
+    // Re-arm the interval so the first post-resume probe is a fresh one rather
+    // than the overdue tick the OS is about to deliver.
+    clearInterval(this.healthTimer);
+    const generation = this.healthGeneration;
+    this.healthTimer = setInterval(() => {
+      void this.tick(generation);
+    }, HEALTH_POLL_INTERVAL_MS);
+  }
+
   private stopHealthWatch(): void {
     this.healthGeneration += 1;
     if (this.healthTimer) {

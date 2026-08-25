@@ -27,6 +27,15 @@ describe('RecommendedBadge', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('hides for a retired model even when a stale recommendation score remains', () => {
+    const { container } = render(
+      <RecommendedBadge
+        manifest={{ recoScore: 99, licenseClass: 'open', supportsTools: true, tags: ['retired'] }}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it('still shows for media manifests, which declare no supportsTools at all', () => {
     render(<RecommendedBadge manifest={{ recoScore: 10, licenseClass: 'open' }} />);
     expect(screen.getByText(/Recommended/)).toBeInTheDocument();

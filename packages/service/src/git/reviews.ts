@@ -8,7 +8,13 @@ import type {
   ProjectDetail,
   Task,
 } from '@bendyline/gezel';
-import { CodeReviewRecordSchema, createLogger, nowIso, parseTaskRef } from '@bendyline/gezel';
+import {
+  CodeReviewRecordSchema,
+  KeyedLock,
+  createLogger,
+  nowIso,
+  parseTaskRef,
+} from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { projectCodeReviewsFile } from '@bendyline/gezel/paths';
 import type { ChatManager } from '../chat/manager.js';
@@ -69,7 +75,7 @@ interface CodeReviewsFile {
  * the record lock.
  */
 export class CodeReviewManager {
-  private readonly locks = new Map<string, Promise<unknown>>();
+  private readonly locks = new KeyedLock();
 
   constructor(private readonly deps: CodeReviewManagerDeps) {}
 
@@ -335,22 +341,12 @@ export class CodeReviewManager {
     projectId: string,
     fn: (reviews: CodeReviewRecord[]) => Promise<{ record: T; changed: boolean }>,
   ): Promise<T> {
-    const previous = this.locks.get(projectId) ?? Promise.resolve();
-    const run = previous.then(async () => {
+    return this.locks.run(projectId, async () => {
       const reviews = await this.readRecords(projectId);
       const { record, changed } = await fn(reviews);
       if (changed) await this.writeRecords(projectId, reviews);
       return record;
     });
-    const tracked: Promise<unknown> = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.locks.set(projectId, tracked);
-    void tracked.then(() => {
-      if (this.locks.get(projectId) === tracked) this.locks.delete(projectId);
-    });
-    return run;
   }
 }
 

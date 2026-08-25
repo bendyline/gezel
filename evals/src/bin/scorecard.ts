@@ -263,6 +263,17 @@ function main(): void {
   mkdirSync(sweepRoot, { recursive: true });
 
   const results: ScorecardModelResult[] = [];
+  /**
+   * Cells that produced no measurement, with why.
+   *
+   * A skipped cell used to vanish into scrollback: the row simply had no
+   * entry for that suite, which reads as "not measured yet" rather than
+   * "we tried and could not". `mistral-7b-q4` lost its whole core cell to
+   * a flaky probe in the 2026-08-22 sweep and the gap was only caught by
+   * hand. Collected here and reprinted at the end, where the operator is
+   * actually looking.
+   */
+  const unmeasured: Array<{ modelId: string; suiteId: string; reason: string }> = [];
   const ingestOnly = Boolean(args.flags['ingest-only']);
 
   /**
@@ -284,36 +295,38 @@ function main(): void {
       const matrixRoot = join(sweepRoot, model.id, suiteId);
       if (!ingestOnly) {
         console.log(`\n[scorecard] ${model.id} × ${suiteId} (${count} trials/scenario)`);
-        const run = spawnSync(
-          'pnpm',
-          [
-            'eval:all',
-            '--suite',
-            suiteId,
-            ...(verify ? ['--scenarios', VERIFY_SCENARIOS.join(',')] : []),
-            '--count',
-            String(count),
-            // Honor the count for EVERY scenario. Without this the matrix
-            // caps per-scenario trials at `suggestedTrials`, which is 1 for
-            // every craftbook scenario — so a `--count 3` sweep quietly
-            // measured six of thirteen productivity tasks exactly once and
-            // the suite could not support a published rate.
-            '--count-strict',
-            '--model',
-            model.id,
-            '--provider',
-            model.engine,
-            // No inline --llm-judge: `eval:all` never read it (only bin/run.ts
-            // does), so it rode along dead on every sweep while looking like
-            // judging was wired. Judging is a post-hoc pass — see
-            // `pnpm eval:judge-sweep --run-id <id>` — which is also what makes
-            // one judge score the whole sweep instead of whatever the backend
-            // resolved to at each cell's completion time.
-            '--runs-dir',
-            matrixRoot,
-          ],
-          { cwd: repoRoot, stdio: 'inherit' },
-        );
+        const runCell = (): ReturnType<typeof spawnSync> =>
+          spawnSync(
+            'pnpm',
+            [
+              'eval:all',
+              '--suite',
+              suiteId,
+              ...(verify ? ['--scenarios', VERIFY_SCENARIOS.join(',')] : []),
+              '--count',
+              String(count),
+              // Honor the count for EVERY scenario. Without this the matrix
+              // caps per-scenario trials at `suggestedTrials`, which is 1 for
+              // every craftbook scenario — so a `--count 3` sweep quietly
+              // measured six of thirteen productivity tasks exactly once and
+              // the suite could not support a published rate.
+              '--count-strict',
+              '--model',
+              model.id,
+              '--provider',
+              model.engine,
+              // No inline --llm-judge: `eval:all` never read it (only bin/run.ts
+              // does), so it rode along dead on every sweep while looking like
+              // judging was wired. Judging is a post-hoc pass — see
+              // `pnpm eval:judge-sweep --run-id <id>` — which is also what makes
+              // one judge score the whole sweep instead of whatever the backend
+              // resolved to at each cell's completion time.
+              '--runs-dir',
+              matrixRoot,
+            ],
+            { cwd: repoRoot, stdio: 'inherit' },
+          );
+        const run = runCell();
         // `eval:all` exits 1 whenever the matrix is not 100% clean, which is
         // the NORMAL outcome for a real model — the whole point of measuring.
         // Gating ingestion on the exit code meant only a flawless model was
@@ -321,10 +334,28 @@ function main(): void {
         // The matrix summary's own `status` is the honest signal: `complete`
         // means it measured what it set out to, whatever the pass rate.
         // Exit 2 is an argument/setup error and has no summary to read.
-        if (run.status === 2) {
+        // Exit 3 is a preflight exclusion, which can be transient: a model
+        // with shaky tool-call adherence admits on one attempt and fails the
+        // next. One retry costs a probe (~10s) and is the difference between
+        // measuring the model and silently dropping it. A second exclusion is
+        // treated as real and recorded, not swallowed.
+        let attempt = run;
+        if (attempt.status === 3) {
           console.error(
-            `[scorecard] ${model.id} × ${suiteId} failed to start (exit 2); skipping this cell`,
+            `[scorecard] ${model.id} × ${suiteId} excluded by preflight; retrying once`,
           );
+          attempt = runCell();
+        }
+        if (attempt.status === 3) {
+          const reason = 'preflight excluded it twice (probe refused the model)';
+          console.error(`[scorecard] ${model.id} × ${suiteId} ${reason}; not measured`);
+          unmeasured.push({ modelId: model.id, suiteId, reason });
+          continue;
+        }
+        if (attempt.status === 2) {
+          const reason = 'failed to start (exit 2 — operator/setup error)';
+          console.error(`[scorecard] ${model.id} × ${suiteId} ${reason}; not measured`);
+          unmeasured.push({ modelId: model.id, suiteId, reason });
           continue;
         }
       }
@@ -332,6 +363,7 @@ function main(): void {
       const summaryPath = join(matrixRoot, 'summary.json');
       if (!existsSync(summaryPath)) {
         console.error(`[scorecard] no summary at ${summaryPath}; skipping`);
+        unmeasured.push({ modelId: model.id, suiteId, reason: 'no summary.json was written' });
         continue;
       }
       const matrix = JSON.parse(readFileSync(summaryPath, 'utf8')) as MatrixSummary;
@@ -341,6 +373,11 @@ function main(): void {
         console.error(
           `[scorecard] ${model.id} × ${suiteId} finished ${matrix.status}; not ingesting a partial measurement`,
         );
+        unmeasured.push({
+          modelId: model.id,
+          suiteId,
+          reason: `matrix finished ${matrix.status}, not complete`,
+        });
         continue;
       }
       console.log(
@@ -388,6 +425,22 @@ function main(): void {
       );
       persist();
     }
+  }
+
+  if (unmeasured.length > 0) {
+    // Loud and last, because a missing cell is indistinguishable from an
+    // un-run one once the sweep scrolls past. Naming the resume command
+    // matters as much as naming the gap: the same --run-id merges the
+    // recovered cell into the existing table rather than starting a
+    // second, incomparable sweep.
+    console.error(`\n[scorecard] ${unmeasured.length} cell(s) NOT MEASURED:`);
+    for (const cell of unmeasured) {
+      console.error(`  ${cell.modelId} × ${cell.suiteId} — ${cell.reason}`);
+    }
+    const ids = [...new Set(unmeasured.map((cell) => cell.modelId))].join(',');
+    console.error(
+      `  retry: pnpm eval:scorecard --count ${count} --run-id ${runId} --models ${ids}\n`,
+    );
   }
 
   if (results.length === 0) {

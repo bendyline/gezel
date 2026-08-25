@@ -102,10 +102,16 @@ import {
   type ListGitHubWorkflowRunsResponse,
   ListGitHubWorkflowRunsResponseSchema,
 } from './api/git.js';
+import {
+  GezappDependencySchema,
+  GezappEmbeddedKindSchema,
+  GezappManifestSchema,
+} from './catalog.js';
 import { ChannelsConfigSchema } from './channels.js';
 import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeCompatSchema, CodexPermissionModeSchema } from './codex.js';
 import { CraftbookSuggestionSchema } from './craftbook.js';
+import { DiffpackSummarySchema } from './diffpack.js';
 import { EntityIdSchema } from './entity-id.js';
 import { FileReviewIssueSeveritySchema, FileReviewWireSchema } from './file-review.js';
 import {
@@ -134,6 +140,7 @@ import {
   ProjectNudgeConfigSchema,
   ProjectSchema,
   ProjectTabVisibilitySchema,
+  ProjectTypeProvenanceSchema,
 } from './project.js';
 import { NpmInstallApprovalDecisionSchema, QuestionSchema } from './question.js';
 import { RecognitionModeSchema } from './recognition.js';
@@ -3918,6 +3925,13 @@ export const UpdateProjectRequestSchema = z.object({
    */
   indexingEnabled: z.boolean().optional(),
   /**
+   * Turn overnight bug fixing on or off for this project. Missing = ON when
+   * the project has both a Boekwachter and a developer on its roster; this
+   * only exists so a user with that crew can stop the night work without
+   * disbanding it.
+   */
+  nightlyFixesEnabled: z.boolean().optional(),
+  /**
    * Project-level operational status. `active` (default) lets ambient
    * gezel work flow; `readonly` and `inactive` pause meester nudges,
    * auto-phase-advance handoffs, cron-tick recording, and boot-time
@@ -3988,6 +4002,20 @@ export const ApplyProjectTypeRequestSchema = z.object({
   version: z.string().optional(),
   /** Param values collected at adoption, substituted into templates + seed files. */
   params: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Seed-file collision policy. `overwrite` (the default, the original
+   * behavior) re-renders and writes every declared seed. `preserve` keeps
+   * files the user modified since the last apply — reported in
+   * `seedsSkipped` — while still writing new seeds and refreshing
+   * stale-but-untouched ones against the overlay manifest.
+   */
+  seedPolicy: z.enum(['overwrite', 'preserve']).optional(),
+  /**
+   * Reuse a roster gezel with the same `templateId` instead of minting a
+   * fresh one — makes re-apply idempotent for non-lean types. Lean types
+   * always reuse from the global pool regardless.
+   */
+  reuseRosterGezels: z.boolean().optional(),
 });
 export type ApplyProjectTypeRequest = z.infer<typeof ApplyProjectTypeRequestSchema>;
 
@@ -4023,6 +4051,8 @@ export const AppliedProjectTypeSchema = z.object({
   ),
   scriptsInstalled: z.array(z.string()),
   workspaceSeeded: z.array(z.string()),
+  /** Seed files kept because the user modified them (`seedPolicy: 'preserve'`). */
+  seedsSkipped: z.array(z.string()).default([]),
   /** Toolset ids registered into the project scope on adoption (http-mcp — just a URL). */
   toolsetsInstalled: z.array(z.string()),
   /**
@@ -4082,6 +4112,152 @@ export const CreateTypedProjectResponseSchema = z.object({
   applied: AppliedProjectTypeSchema,
 });
 export type CreateTypedProjectResponse = z.infer<typeof CreateTypedProjectResponseSchema>;
+
+/** What an apply would do to one declared seed file, per the requested policy. */
+export const SeedPlanStateSchema = z.enum(['new', 'unchanged', 'update', 'keep-modified']);
+export type SeedPlanState = z.infer<typeof SeedPlanStateSchema>;
+
+/**
+ * The dry-run report for `POST /:id/apply-project-type/preflight` — what an
+ * apply with the same body would materialize, computed without writing
+ * anything. Validation problems surface as a 400, not as a plan.
+ */
+export const ProjectTypeApplyPlanSchema = z.object({
+  typeId: z.string(),
+  version: z.string(),
+  source: z.string(),
+  gezels: z.array(
+    z.object({
+      templateId: z.string(),
+      voorman: z.boolean(),
+      /** True when an existing gezel would be reused instead of minted. */
+      reuse: z.boolean(),
+    }),
+  ),
+  scripts: z.array(z.string()),
+  seeds: z.array(z.object({ path: z.string(), state: SeedPlanStateSchema })),
+  toolsets: z.object({
+    /** http-mcp toolsets registered on adoption. */
+    installNow: z.array(z.string()),
+    /** npm-package / builtin / unresolvable — installed explicitly later. */
+    deferred: z.array(z.string()),
+  }),
+  craftbooks: z.array(z.string()),
+  schedules: z.array(
+    z.object({
+      craftbook: z.string(),
+      cron: z.string().optional(),
+      consent: z.enum(['ask', 'auto', 'disabled']),
+    }),
+  ),
+  pages: z.boolean(),
+});
+export type ProjectTypeApplyPlan = z.infer<typeof ProjectTypeApplyPlanSchema>;
+
+export const ProjectTypeSeedStateSchema = z.enum(['ok', 'modified', 'missing', 'untracked']);
+export type ProjectTypeSeedState = z.infer<typeof ProjectTypeSeedStateSchema>;
+
+/**
+ * `GET /:id/project-type/status` — the applied type vs the installed AI App,
+ * plus per-seed drift against the overlay manifest. `untracked` marks a
+ * declared seed with no overlay record (e.g. the folder moved machines, or
+ * the apply predates overlay tracking).
+ */
+export const ProjectTypeStatusResponseSchema = z.object({
+  projectId: z.string(),
+  provenance: ProjectTypeProvenanceSchema.nullable(),
+  installedApp: z
+    .object({ appId: z.string(), version: z.string(), enabled: z.boolean() })
+    .nullable(),
+  updateAvailable: z.boolean(),
+  seeds: z.array(z.object({ path: z.string(), state: ProjectTypeSeedStateSchema })),
+});
+export type ProjectTypeStatusResponse = z.infer<typeof ProjectTypeStatusResponseSchema>;
+
+// ─ AI App management (global /api/ai-apps) ─────────────────────────
+//
+// The install-level view over `~/.gezel/ai-apps/`. Distinct from the
+// project-nested export/import routes, which move `.gezapp` bytes through a
+// project's artifacts drawer: these shapes manage the machine's registry of
+// installed apps regardless of any project.
+
+/** One installed AI App as reported by `GET /api/ai-apps`. */
+export const AiAppStatusSchema = z.object({
+  appId: z.string(),
+  version: z.string(),
+  packageSha256: z.string(),
+  installedAt: z.string(),
+  enabled: z.boolean(),
+  /** Review snapshot from the install receipt; null when the receipt is unreadable. */
+  name: z.string().nullable(),
+  description: z.string().nullable(),
+  publisher: z.object({ name: z.string(), url: z.string().optional() }).nullable(),
+  itemCount: z.number().int(),
+  dependencyCount: z.number().int(),
+  /** Every version directory present on disk for this app (rollback material). */
+  versionsOnDisk: z.array(z.string()),
+});
+export type AiAppStatus = z.infer<typeof AiAppStatusSchema>;
+
+export const ListAiAppsResponseSchema = z.object({
+  apps: z.array(AiAppStatusSchema),
+});
+export type ListAiAppsResponse = z.infer<typeof ListAiAppsResponseSchema>;
+
+/** A project outfitted by this app (matched on `projectType` provenance). */
+export const AiAppAppliedProjectSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** Type version the project was outfitted with — may lag the installed app. */
+  version: z.string(),
+});
+export type AiAppAppliedProject = z.infer<typeof AiAppAppliedProjectSchema>;
+
+export const AiAppDetailSchema = AiAppStatusSchema.extend({
+  /** Full receipt manifest; null when the receipt is unreadable. */
+  manifest: GezappManifestSchema.nullable(),
+  /** Dependency locks that do not currently resolve from the catalog. */
+  missingDependencies: z.array(GezappDependencySchema),
+  appliedProjects: z.array(AiAppAppliedProjectSchema),
+});
+export type AiAppDetail = z.infer<typeof AiAppDetailSchema>;
+
+export const UpdateAiAppRequestSchema = z.object({
+  enabled: z.boolean(),
+});
+export type UpdateAiAppRequest = z.infer<typeof UpdateAiAppRequestSchema>;
+
+export const RemoveAiAppResponseSchema = z.object({
+  appId: z.string(),
+  removedVersions: z.array(z.string()),
+  /** Version dirs left on disk — `keepFiles`, or a delete failure (see logs). */
+  keptVersions: z.array(z.string()),
+  appliedProjects: z.array(AiAppAppliedProjectSchema),
+});
+export type RemoveAiAppResponse = z.infer<typeof RemoveAiAppResponseSchema>;
+
+/**
+ * Wire shape of a `.gezapp` import, preview and confirmed alike. Mirrors the
+ * service engine's result: `installed` is present only after a confirmed
+ * install; `previous` only when the same app id was already registered.
+ */
+export const ImportAiAppResultSchema = z.object({
+  manifest: GezappManifestSchema,
+  items: z.array(z.object({ kind: GezappEmbeddedKindSchema, id: z.string(), version: z.string() })),
+  dependencies: z.array(GezappDependencySchema),
+  missingDependencies: z.array(GezappDependencySchema),
+  packageSha256: z.string(),
+  installed: z
+    .object({
+      appId: z.string(),
+      version: z.string(),
+      receiptPath: z.string(),
+      alreadyPresent: z.boolean(),
+    })
+    .optional(),
+  previous: z.object({ version: z.string(), enabled: z.boolean() }).optional(),
+});
+export type ImportAiAppResult = z.infer<typeof ImportAiAppResultSchema>;
 
 export const ProjectResponseSchema = ProjectDetailSchema;
 
@@ -4852,18 +5028,43 @@ export const SecurityScanRequestSchema = z.object({
 });
 export type SecurityScanRequest = z.infer<typeof SecurityScanRequestSchema>;
 
+const SecurityToolsAvailableSchema = z.object({
+  semgrep: z.boolean(),
+  osvScanner: z.boolean(),
+  gitleaks: z.boolean(),
+  npm: z.boolean(),
+});
+
+/** How the last dependency-advisory (SCA) measurement actually happened —
+ *  the answer to "did we look and find nothing, or never look at all?". */
+export const ScaProvenanceSchema = z.object({
+  /** SCA tool attempted, or null when none is installed. A string (not an
+   *  enum) so future engines don't require a wire change. */
+  engine: z.string().nullable(),
+  /** True only when the tool produced a real scan result — an advisory count
+   *  without this is not a measurement. */
+  measured: z.boolean(),
+  /** Lockfiles present in the workspace, so a reader can judge coverage
+   *  (npm audit reads only npm lockfiles; osv-scanner reads most). */
+  lockfiles: z.array(z.string()),
+});
+
+export const SecurityScanProvenanceSchema = z.object({
+  scannedAt: z.string(),
+  engines: z.array(z.string()),
+  toolsAvailable: SecurityToolsAvailableSchema,
+  sca: ScaProvenanceSchema,
+});
+export type SecurityScanProvenance = z.infer<typeof SecurityScanProvenanceSchema>;
+
 export const SecurityScanResponseSchema = z.object({
   ran: z.boolean(),
   engines: z.array(z.string()),
-  toolsAvailable: z.object({
-    semgrep: z.boolean(),
-    osvScanner: z.boolean(),
-    gitleaks: z.boolean(),
-    npm: z.boolean(),
-  }),
+  toolsAvailable: SecurityToolsAvailableSchema,
   findingCounts: FindingCountsSchema,
   dependencies: z.number().int().nonnegative(),
   advisories: z.number().int().nonnegative(),
+  sca: ScaProvenanceSchema.optional(),
 });
 export type SecurityScanResponse = z.infer<typeof SecurityScanResponseSchema>;
 
@@ -4939,6 +5140,8 @@ export const ListDependenciesResponseSchema = z.object({
   withAdvisories: z.number().int().nonnegative(),
   /** false until `security_scan` has populated the inventory. */
   scanned: z.boolean(),
+  /** Absent on pre-provenance databases; re-running security_scan sets it. */
+  provenance: SecurityScanProvenanceSchema.optional(),
 });
 export type ListDependenciesResponse = z.infer<typeof ListDependenciesResponseSchema>;
 
@@ -4967,6 +5170,8 @@ export const SecurityOverviewResponseSchema = z.object({
       severity: SecuritySeveritySchema,
     }),
   ),
+  /** Absent on pre-provenance databases; re-running security_scan sets it. */
+  provenance: SecurityScanProvenanceSchema.optional(),
 });
 export type SecurityOverviewResponse = z.infer<typeof SecurityOverviewResponseSchema>;
 
@@ -5782,6 +5987,21 @@ export const WorkspaceIndexStatusSchema = z.object({
        */
       skipped: z.number().int().nonnegative().optional(),
       /**
+       * The skipped files themselves (capped), so the status popover can name
+       * what was dropped and why instead of showing a bare count the user
+       * cannot act on. `reason` is the last recorded failure; absent for files
+       * capped out before the reason was recorded.
+       */
+      skippedFiles: z
+        .array(
+          z.object({
+            path: z.string(),
+            attempts: z.number().int().nonnegative(),
+            reason: z.string().optional(),
+          }),
+        )
+        .optional(),
+      /**
        * Images/audio still awaiting an AI shadow description. The drive works
        * this tier BEFORE summaries, so a fresh full scan can be busy here
        * while `summarized` sits still — surface it, or the scan looks stuck.
@@ -5983,6 +6203,13 @@ export const NightShiftReviewResponseSchema = z.object({
   windowEnd: z.string(),
   tasksCompleted: z.array(NightShiftCompletedTaskSchema),
   reports: z.array(NightShiftReportSchema),
+  /**
+   * Change proposals the night drafted that are still waiting on the user.
+   * Kept separate from `reports`: a report is something to read, a proposal
+   * is something to decide about, and collapsing the two would bury the only
+   * item in the review that needs an answer.
+   */
+  diffpacks: z.array(DiffpackSummarySchema),
 });
 export type NightShiftReviewResponse = z.infer<typeof NightShiftReviewResponseSchema>;
 

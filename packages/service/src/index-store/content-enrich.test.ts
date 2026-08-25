@@ -340,6 +340,14 @@ describe('summary retry gate (markEnrichAttempt)', () => {
     expect(counts!.summarized).toBe(0);
     expect(counts!.embedded).toBe(0); // attempt rows are not "embedded"
     expect(counts!.pending).toBe(0); // gave-up is terminal until the content changes
+    // A bare count can't be acted on — the status popover names the file.
+    expect(counts!.skippedFiles).toEqual([
+      {
+        path: 'src/a.ts',
+        attempts: 3,
+        reason: 'the summarizer returned nothing for this file',
+      },
+    ]);
   });
 
   it('consumes the gate immediately when no model is configured (embeddings-only)', async () => {
@@ -369,6 +377,54 @@ describe('summary retry gate (markEnrichAttempt)', () => {
     expect(counts!.summarized).toBe(0);
     expect(counts!.pending).toBe(0);
     expect(counts!.skipped).toBe(1);
+    expect(counts!.skippedFiles).toEqual([
+      { path: 'src/a.ts', attempts: 3, reason: 'Request blocked.' },
+    ]);
+  });
+
+  it('a busy engine defers the file without spending an attempt', async () => {
+    await seed();
+    let calls = 0;
+    const deps: EnrichDeps = {
+      summarize: async () => {
+        calls++;
+        // What buildEnrichDeps returns when the pool refuses to evict a busy
+        // engine: the call never reached a model. Charging these would retire
+        // the file's budget after three sweeps of ordinary contention.
+        return calls <= 5
+          ? { text: '', model: 'test-model', deferred: true as const }
+          : { text: 'Defines the number one.', model: 'test-model' };
+      },
+      embed: fakeEmbed,
+      model: 'test-model',
+    };
+    // Well past MAX_ENRICH_ATTEMPTS — the file must still be readmitted.
+    for (let i = 0; i < 5; i++) {
+      expect((await ci.enrich('c', deps, 10))!.files).toBe(1);
+    }
+    const counts = await ci.enrichmentCounts('c');
+    expect(counts!.pending).toBe(1); // still queued, not given up on
+    expect(counts!.skipped).toBe(0);
+    const done = await ci.enrich('c', deps, 10);
+    expect(done!.summarized).toBe(1);
+  });
+
+  it('the symbol pass is skipped while the target is unavailable', async () => {
+    await seed();
+    const prompts: string[] = [];
+    const deps: EnrichDeps = {
+      summarize: async (prompt: string) => {
+        prompts.push(prompt);
+        return { text: '', model: 'test-model', deferred: true as const };
+      },
+      embed: fakeEmbed,
+      model: 'test-model',
+    };
+    await ci.enrich('c', deps, 10);
+    // One call: re-asking the same busy pool for symbol one-liners would just
+    // burn the symbol budget for the same reason.
+    expect(prompts.length).toBe(1);
+    expect(prompts.some((p) => p.startsWith('For each listed symbol'))).toBe(false);
   });
 
   it('shutdown cancellation does not consume the file retry budget', async () => {

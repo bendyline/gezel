@@ -1103,17 +1103,20 @@ describe('ProjectsView', () => {
     expect(api.toolFileReview).toHaveBeenCalledWith('pj-alpha', { path: 'notes/audit.md' });
     expect(within(pane).getByRole('button', { name: 'Fix' })).toBeInTheDocument();
 
+    // Turning managed edits off does NOT take Fix away: a fix is drafted as a
+    // change proposal the user applies, so it works on a workspace gezels may
+    // not write — the case that needs it most.
     const editsSelect = () =>
       screen
         .getAllByTestId('mock-select')
         .find((select) => within(select).queryByRole('option', { name: 'Can edit' }));
     fireEvent.change(editsSelect()!, { target: { value: 'off' } });
     await waitFor(() => {
-      expect(within(pane).queryByRole('button', { name: 'Fix' })).toBeNull();
       expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', {
         managedWorkspaceWritePolicy: 'deny',
       });
     });
+    expect(within(pane).getByRole('button', { name: 'Fix' })).toBeInTheDocument();
 
     fireEvent.change(editsSelect()!, { target: { value: 'on' } });
     await waitFor(() => {
@@ -1308,6 +1311,70 @@ describe('ProjectsView', () => {
       'grave.md',
       'many.md',
     ]);
+  });
+
+  it('opens the file with the Boekwachter pane when a triage row badge is clicked', async () => {
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      managedWorkspaceWritePolicy: 'deny',
+    } as never);
+    vi.mocked(api.readProjectWorkspaceFile).mockResolvedValue({
+      path: 'notes/audit.md',
+      content: '# Audit',
+    } as never);
+    vi.mocked(api.toolListFileIssues).mockResolvedValue({
+      issues: [
+        trackedWorkspaceIssue,
+        { ...trackedWorkspaceIssue, id: 'issue-2', ref: 'BW-2', severity: 'major' },
+      ],
+      counts: { total: 2, bySeverity: { minor: 1, major: 1 }, byCategory: { clarity: 2 } },
+      truncated: false,
+      indexed: true,
+      reviewedFiles: 1,
+      eligibleFiles: 1,
+    } as never);
+    vi.mocked(api.toolFileReview).mockResolvedValue({
+      path: 'notes/audit.md',
+      found: true,
+      review: {
+        notesMd: 'A concise audit with one unresolved ownership question.',
+        issues: [
+          {
+            severity: 'minor',
+            category: 'clarity',
+            message: 'The conclusion does not identify an owner.',
+            line: 12,
+          },
+        ],
+        health: 8,
+        healthReason: 'Clear and useful, with one actionable omission.',
+        model: 'qwen-test',
+        provider: 'mock',
+        gezelName: 'Boekwachter',
+        reviewedAt: '2026-08-11T12:00:00.000Z',
+      },
+      trackedIssues: [trackedWorkspaceIssue],
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+
+    const tray = await screen.findByRole('radiogroup', { name: 'File list view' });
+    fireEvent.click(within(tray).getByRole('radio', { name: 'Files by issues' }));
+
+    // The severity badge, not the file name: it sits outside the label button
+    // and is what a triage reader actually aims at.
+    const badge = await screen.findByText('1 major · 1 minor');
+    fireEvent.click(badge);
+
+    const pane = await screen.findByRole('complementary', { name: 'Boekwachter index results' });
+    expect(
+      await within(pane).findByText('Clear and useful, with one actionable omission.'),
+    ).toBeInTheDocument();
+    expect(api.toolFileReview).toHaveBeenCalledWith('pj-alpha', { path: 'notes/audit.md' });
   });
 
   it('offers workspace file mutations only when the write policy allows them', async () => {
@@ -1836,6 +1903,35 @@ describe('ProjectsView', () => {
       render(<ProjectsView forceProjectId="pj-alpha" compact />);
       const chat = await screen.findByTestId('project-chat');
       expect(chat.getAttribute('data-compact')).toBe('true');
+    });
+  });
+
+  it('lets a project opt out of overnight fixing, and defaults it on', async () => {
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      gezelIds: [],
+    } as never);
+    vi.mocked(api.updateProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      gezelIds: [],
+      nightlyFixesEnabled: false,
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+
+    const toggle = await screen.findByRole('checkbox', { name: /Fix problems overnight/ });
+    // Unset means on: the crew that unlocks it is the opt-in.
+    expect(toggle).toBeChecked();
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', { nightlyFixesEnabled: false });
     });
   });
 });

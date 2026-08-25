@@ -41,7 +41,12 @@ async function readSizeTooltip(memory: HTMLElement): Promise<string> {
   return tooltips[0]?.textContent ?? '';
 }
 
-function catalogModel(id: string, name: string, category: 'general' | 'coding') {
+function catalogModel(
+  id: string,
+  name: string,
+  category: 'general' | 'coding',
+  tags: string[] = [],
+) {
   return {
     source: { id: 'bundled', label: 'Bundled' },
     manifest: {
@@ -51,7 +56,7 @@ function catalogModel(id: string, name: string, category: 'general' | 'coding') 
       name,
       version: '1.0.0',
       description: 'test model',
-      tags: [],
+      tags,
       maintainer: {
         name: 'Google',
         url: 'https://huggingface.co/google/gemma-4-31B-it',
@@ -111,6 +116,37 @@ describe('LlamaCppModelManager local model list', () => {
     expect(screen.getByRole('columnheader', { name: 'Context size' })).toBeInTheDocument();
     expect(screen.getByText('64K')).toBeInTheDocument();
     expect(screen.queryByText('128K')).not.toBeInTheDocument();
+  });
+
+  it('shows the bit depth the model file declares when the catalog label has none', async () => {
+    vi.mocked(api.listLlamaCppModels).mockResolvedValue({
+      models: [
+        {
+          id: 'muse-glimmer-30b-q4',
+          name: 'Muse Glimmer (30B, Q4)',
+          approxSizeBytes: 16_756_681_056,
+          installedAt: '2026-08-10T00:00:00.000Z',
+          weightsPath: '/tmp/muse-glimmer-30b-q4/model.gguf',
+          contextWindow: 131_072,
+          effectiveContextWindow: 131_072,
+          // Lifted from the upstream GGUF filename by whoever authored the
+          // catalog entry — it names no bit depth at all.
+          quantization: 'K-Quant-17GB',
+          ggufQuantization: 'Q4_K_M',
+          chatTemplatePresent: true,
+        },
+      ],
+    } as never);
+
+    render(<LlamaCppModelManager />);
+
+    expect(await screen.findByText('muse-glimmer-30b-q4')).toBeInTheDocument();
+    expect(screen.getByText('~4')).toBeInTheDocument();
+    expect(screen.queryByText('K-Quant-17GB')).not.toBeInTheDocument();
+    expect(screen.getByText('~4').closest('td')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/exact format: Q4_K_M \(the catalog calls it K-Quant-17GB\)/),
+    );
   });
 
   it('tags a per-model context override as custom in the Context size column', async () => {
@@ -380,6 +416,25 @@ describe('LlamaCppModelManager local model list', () => {
     expect(screen.queryByRole('button', { name: 'All' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'General' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Coding' })).not.toBeInTheDocument();
+  });
+
+  it('hides retired catalog models until Show all models is selected', async () => {
+    vi.mocked(api.listCatalogItems).mockResolvedValue({
+      items: [
+        catalogModel('current-model', 'Current Model', 'general'),
+        catalogModel('retired-model', 'Retired Model', 'general', ['retired']),
+      ],
+    } as never);
+
+    render(<LlamaCppModelManager />);
+
+    expect(await screen.findByText('Current Model')).toBeInTheDocument();
+    expect(screen.queryByText('Retired Model')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show all models' }));
+
+    expect(await screen.findByText('Retired Model')).toBeInTheDocument();
+    expect(screen.getByText('retired')).toHaveClass('catalog-item-tag--retired');
   });
 
   it('places maker and customization credit directly below the model title', async () => {

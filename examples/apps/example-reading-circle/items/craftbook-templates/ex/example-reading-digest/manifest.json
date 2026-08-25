@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "kind": "craftbook-template",
+  "id": "example-reading-digest",
+  "name": "Reading digest",
+  "description": "Turn the circle's recent notes into a digest report with context and next questions.",
+  "role": "general",
+  "tags": ["example", "report"],
+  "maintainer": {
+    "name": "Gezel"
+  },
+  "license": "MIT",
+  "yankedVersions": []
+}

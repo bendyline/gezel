@@ -395,6 +395,23 @@ describe('McpBridge', () => {
     expect(readBack).toContain('<h1>Task report</h1>');
   });
 
+  it('preserves the previous JSON artifact when a replacement is truncated or malformed', async () => {
+    const path = 'tasks/1/coverage.json';
+    const complete = '{"reviewedFiles":["a.ts","b.ts"]}';
+    const first = await bridge.callTool('write_artifact', { path, content: complete });
+    expect(first).not.toMatch(/ERROR:/);
+
+    const rejected = await bridge.callTool('write_artifact', {
+      path,
+      content: '{"reviewedFiles":["a.ts",',
+    });
+    expect(rejected).toContain('not valid JSON');
+    expect(rejected).toContain('previous artifact was left unchanged');
+
+    const readBack = await bridge.callTool('read_artifact', { path });
+    expect(readBack).toBe(complete);
+  });
+
   it('redirects exact expected markdown deliverables from side drawers into the workspace', async () => {
     const expectedBridge = new McpBridge();
     await expectedBridge.start({

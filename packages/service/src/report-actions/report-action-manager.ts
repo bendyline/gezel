@@ -7,6 +7,7 @@ import type {
   ReportActionsResponse,
 } from '@bendyline/gezel';
 import {
+  KeyedLock,
   ReportActionRecordSchema,
   createLogger,
   nowIso,
@@ -82,7 +83,7 @@ interface ReportActionsFile {
  * done OUTSIDE the lock.
  */
 export class ReportActionManager {
-  private readonly locks = new Map<string, Promise<unknown>>();
+  private readonly locks = new KeyedLock();
   private readonly fires = new Map<string, Promise<FireReportActionResponse>>();
 
   constructor(private readonly deps: ReportActionManagerDeps) {}
@@ -571,21 +572,11 @@ export class ReportActionManager {
     projectId: string,
     fn: (rows: ReportActionRecord[]) => Promise<{ record: T; changed: boolean }>,
   ): Promise<T> {
-    const previous = this.locks.get(projectId) ?? Promise.resolve();
-    const run = previous.then(async () => {
+    return this.locks.run(projectId, async () => {
       const rows = await this.readRecords(projectId);
       const { record, changed } = await fn(rows);
       if (changed) await this.writeRecords(projectId, rows);
       return record;
     });
-    const tracked: Promise<unknown> = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.locks.set(projectId, tracked);
-    void tracked.then(() => {
-      if (this.locks.get(projectId) === tracked) this.locks.delete(projectId);
-    });
-    return run;
   }
 }

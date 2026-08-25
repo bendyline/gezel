@@ -992,6 +992,76 @@ describe('TaskManager spawn craftbooks & children', () => {
     });
   });
 
+  it('binds every shard of a proposal-drafting host to its own proposal', async () => {
+    // Fail-safe, not fail-open: a shard that came up unbound would send its
+    // edits to the real workspace, which is the one outcome the whole
+    // change-proposal feature exists to prevent. The id is derived from the
+    // child's own task number, never supplied by a model.
+    const parent = await tasks.create(
+      'website',
+      {
+        title: 'Nightly fixes',
+        assignee: { kind: 'user' },
+        steps: [{ name: 'Triage' }],
+        spawnsSteps: [{ name: 'Draft' }],
+        cron: { expression: '0 9 * * *' },
+      },
+      { draftsDiffpack: true },
+    );
+    expect(parent.diffpackId).toBe(String(parent.num));
+
+    const first = await tasks.spawnChild(parent.ref);
+    const second = await tasks.spawnChild(parent.ref);
+    expect(first.diffpackId).toBe(String(first.num));
+    expect(second.diffpackId).toBe(String(second.num));
+    expect(first.diffpackId).not.toBe(second.diffpackId);
+  });
+
+  it("resolves {{diffpack.dir}} to each shard's own proposal folder", async () => {
+    // `{{task.num}}` cannot be used here: create() froze the spawn template
+    // with the HOST's context, so every shard would target the host's pack.
+    const parent = await tasks.create(
+      'website',
+      {
+        title: 'Nightly fixes',
+        assignee: { kind: 'user' },
+        steps: [{ name: 'Triage' }],
+        spawnsSteps: [
+          {
+            name: 'Draft',
+            prompt: 'Write your notes to {{diffpack.dir}}/notes.md',
+            advanceWhen: { file: '{{diffpack.dir}}/notes.md', artifact: true },
+          },
+        ],
+        cron: { expression: '0 9 * * *' },
+      },
+      { draftsDiffpack: true },
+    );
+
+    const first = await tasks.spawnChild(parent.ref);
+    const second = await tasks.spawnChild(parent.ref);
+    for (const child of [first, second]) {
+      const step = child.craftbook.steps[0]!;
+      expect(step.prompt).toContain(`diffpacks/${child.num}/notes.md`);
+      expect(step.advanceWhen?.file).toBe(`diffpacks/${child.num}/notes.md`);
+    }
+    expect(first.craftbook.steps[0]?.advanceWhen?.file).not.toBe(
+      second.craftbook.steps[0]?.advanceWhen?.file,
+    );
+  });
+
+  it('leaves shards of an ordinary host unbound so they edit normally', async () => {
+    const parent = await tasks.create('website', {
+      title: 'Ordinary',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Wait' }],
+      spawnsSteps: [{ name: 'Work' }],
+      cron: { expression: '0 9 * * *' },
+    });
+    const child = await tasks.spawnChild(parent.ref);
+    expect(child.diffpackId).toBeUndefined();
+  });
+
   it('spawnChild inherits the host artifact folder — shards share one namespace', async () => {
     // The host's collect-barrier gates were interpolated with the HOST's
     // number; a per-child folder would leave them watching an empty dir.
@@ -1736,6 +1806,74 @@ describe('TaskManager craftbookParams interpolation', () => {
     expect(task.craftbookParams?.workPath).toBe(dir);
     expect(step.prompt).toBe(`Write ${dir}/scope.md and cite ${dir}/sources.md.`);
     expect(step.advanceWhen?.file).toBe(`${dir}/scope.md`);
+  });
+
+  it('resolves a reserved runtime token supplied as an explicit param, and only that', async () => {
+    // The launcher form seeds declared defaults into its fields and renders
+    // them back into the staged command, so `workPath`'s `{{task.dir}}`
+    // default arrives as an EXPLICIT override — the one side that skips
+    // `resolveCraftbookParamDefaults`. `interpolateStepsContext` is
+    // single-pass, so every gate path built from `{{workPath}}` reached
+    // `step-gate.ts` as a literal `{{task.dir}}` and the gate refused to
+    // run at all (security-architecture-review 2.0.4, step `model-system`).
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            ...bookWithPlaceholders,
+            id,
+            paramSchema: {
+              type: 'object',
+              properties: {
+                workPath: { type: 'string', default: '{{task.dir}}' },
+                note: { type: 'string' },
+              },
+            },
+            steps: [
+              {
+                id: 'scope',
+                name: 'Scope',
+                prompt: 'Write {{workPath}}/security/review-scope.md. Template: {{note}}',
+                gate: {
+                  at: 'completion',
+                  checks: [
+                    {
+                      kind: 'minBytes',
+                      file: '{{workPath}}/security/review-scope.md',
+                      bytes: 1000,
+                      artifact: true,
+                    },
+                  ],
+                },
+                terminal: true,
+              },
+            ],
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+    const task = await tasks.create('website', {
+      title: 'Security architecture review',
+      craftbookId: 'spec-doc',
+      assignee: { kind: 'user' },
+      craftbookParams: {
+        workPath: '{{task.dir}}',
+        // A caller's own `{{…}}` text stays byte-for-byte: only the four
+        // reserved runtime keys are resolved inside overrides.
+        note: 'emit {{heading}} verbatim',
+      },
+    });
+    const dir = `tasks/${task.num}`;
+    const step = task.craftbook.steps[0]!;
+    expect(task.craftbookParams?.workPath).toBe(dir);
+    expect(task.craftbookParams?.note).toBe('emit {{heading}} verbatim');
+    expect(step.prompt).toBe(
+      `Write ${dir}/security/review-scope.md. Template: emit {{heading}} verbatim`,
+    );
+    expect((step.gate as { checks: Array<{ file: string }> }).checks[0]?.file).toBe(
+      `${dir}/security/review-scope.md`,
+    );
   });
 
   it('leaves the snapshot byte-identical when no params are given', async () => {

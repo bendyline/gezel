@@ -28,6 +28,7 @@ function run(input: {
   errored?: Array<[string, string]>;
   pinnedSessionId?: string;
   groupedTaskRefs?: string[];
+  finishedTaskRefs?: string[];
   liveTools?: Array<[string, string]>;
 }) {
   return selectThreadPills({
@@ -37,6 +38,7 @@ function run(input: {
     now: NOW,
     ...(input.pinnedSessionId ? { pinnedSessionId: input.pinnedSessionId } : {}),
     ...(input.groupedTaskRefs ? { groupedTaskRefs: new Set(input.groupedTaskRefs) } : {}),
+    ...(input.finishedTaskRefs ? { finishedTaskRefs: new Set(input.finishedTaskRefs) } : {}),
     ...(input.liveTools ? { liveTools: new Map(input.liveTools) } : {}),
   });
 }
@@ -193,6 +195,50 @@ describe('selectThreadPills task grouping', () => {
       groupedTaskRefs: ['p1/4'],
     });
     expect(taskPills.get('p1/4')?.sessionId).toBe('new');
+  });
+});
+
+describe('selectThreadPills settled tasks', () => {
+  it('drops an idle thread whose task is done or canceled', () => {
+    const { pills, overflow } = run({
+      sessions: [
+        session('independent', 1 * HOUR),
+        session('done-task', 1 * HOUR, { taskRef: 'p1/7' }),
+      ],
+      finishedTaskRefs: ['p1/7'],
+    });
+    expect(ids(pills)).toEqual(['independent']);
+    expect(overflow).toEqual([]);
+  });
+
+  it('keeps a settled task thread that is streaming or errored', () => {
+    const { pills } = run({
+      sessions: [
+        session('live', 1 * HOUR, { taskRef: 'p1/7' }),
+        session('broke', 2 * HOUR, { taskRef: 'p1/8' }),
+      ],
+      inflight: ['live'],
+      errored: [['broke', 'provider timeout']],
+      finishedTaskRefs: ['p1/7', 'p1/8'],
+    });
+    expect(ids(pills)).toEqual(['live', 'broke']);
+  });
+
+  it('keeps the pinned thread even when its task is settled', () => {
+    const { pills } = run({
+      sessions: [session('reading-it', 1 * HOUR, { taskRef: 'p1/7' })],
+      pinnedSessionId: 'reading-it',
+      finishedTaskRefs: ['p1/7'],
+    });
+    expect(ids(pills)).toEqual(['reading-it']);
+  });
+
+  it('leaves an unsettled task thread alone', () => {
+    const { pills } = run({
+      sessions: [session('paused-task', 1 * HOUR, { taskRef: 'p1/9' })],
+      finishedTaskRefs: ['p1/7'],
+    });
+    expect(ids(pills)).toEqual(['paused-task']);
   });
 });
 

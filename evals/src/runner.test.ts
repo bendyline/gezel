@@ -26,6 +26,7 @@ import {
   llamaCppReasoningEvalLaunchOverrides,
   localEvalDeviceSafetyConfig,
   makeTrialId,
+  modelWarmFailure,
   pickPoisonedSessionsForRecovery,
   poisonedRecoveryFailureFingerprint,
   pollUntilDone,
@@ -68,6 +69,25 @@ describe('eval run directory resolution', () => {
   it('leaves absolute paths unchanged', () => {
     const absolute = join(tmpdir(), 'gezel-eval-treatment');
     expect(resolveEvalRunsDir(absolute)).toBe(absolute);
+  });
+});
+
+describe('model warm failure classification', () => {
+  it('records an aborted warm-up as an operator interruption', () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    expect(modelWarmFailure(new Error('The operation was aborted'), controller.signal)).toEqual({
+      reason: 'interrupted (SIGINT/SIGTERM); cleanup ran',
+      failureMode: 'interrupted',
+    });
+  });
+
+  it('keeps genuine warm-up failures classified as spawn errors', () => {
+    expect(modelWarmFailure(new Error('checksum mismatch'))).toEqual({
+      reason: 'model warm failed: checksum mismatch',
+      failureMode: 'spawn-error',
+    });
   });
 });
 

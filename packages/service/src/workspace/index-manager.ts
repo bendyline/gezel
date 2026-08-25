@@ -5,6 +5,7 @@ import {
   type DiscoveredCommand,
   type DiscoveredInstruction,
   type DiscoveredSkill,
+  KeyedLock,
   type WorkspaceCommandIndex,
   type WorkspaceIndexMeta,
   type WorkspaceIndexStatus,
@@ -127,7 +128,7 @@ export class WorkspaceIndexManager {
   private readonly state = new Map<string, ProjectIndexState>();
   /** Per-project promise chain so two concurrent scans on the same
    *  project serialize rather than racing on the disk. */
-  private readonly locks = new Map<string, Promise<unknown>>();
+  private readonly locks = new KeyedLock();
   /**
    * Parsed `files.json` per project, revalidated against the file's own
    * mtime + size so it can never go stale. `files.json` runs to megabytes
@@ -190,7 +191,7 @@ export class WorkspaceIndexManager {
     await Promise.allSettled([
       ...this.backgroundTicks,
       ...[...this.state.values()].flatMap((state) => (state.inflight ? [state.inflight] : [])),
-      ...this.locks.values(),
+      this.locks.drain(),
     ]);
   }
 
@@ -706,15 +707,7 @@ export class WorkspaceIndexManager {
   }
 
   private async withLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
-    const prev = this.locks.get(projectId);
-    const next = (prev ?? Promise.resolve()).then(fn, fn);
-    this.locks.set(
-      projectId,
-      next.finally(() => {
-        if (this.locks.get(projectId) === next) this.locks.delete(projectId);
-      }),
-    );
-    return next;
+    return this.locks.run(projectId, fn);
   }
 }
 

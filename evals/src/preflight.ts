@@ -625,6 +625,26 @@ export async function ensurePreflightAdmission(
   return report;
 }
 
+/**
+ * A model the probe refused, as distinct from an operator error.
+ *
+ * Both used to surface as a bare `Error` and therefore as the same exit
+ * code, so callers could not tell "this model failed the probe" from
+ * "you passed a bad flag". They need different handling: a bad flag is
+ * deterministic and retrying is pointless, while an exclusion can be
+ * transient — a model with shaky tool-call adherence admits on one
+ * attempt and fails the next, which silently cost `mistral-7b-q4` an
+ * entire core cell in the 2026-08-22 sweep.
+ */
+export class PreflightExcludedError extends Error {
+  readonly report: PreflightReport;
+  constructor(report: PreflightReport) {
+    super(formatPreflightFailure(report));
+    this.name = 'PreflightExcludedError';
+    this.report = report;
+  }
+}
+
 export function formatPreflightFailure(report: PreflightReport): string {
   const failed = Object.entries(report.checks)
     .filter(([, c]) => !c.ok)

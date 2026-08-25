@@ -43,6 +43,9 @@ export function runtimeCraftbookFromTemplate(
     // the step prompts AND the gate patterns, and the reviewer fell back to
     // live API calls — the exact failure the connector mirror replaced.
     ...(m.connectors ? { connectors: m.connectors } : {}),
+    // Command needs ride in so kickoff can raise their first-use approval
+    // questions and the tools block can say what is pre-approved.
+    ...(m.commands ? { commands: m.commands } : {}),
     ...(m.paramSchema ? { paramSchema: m.paramSchema } : {}),
     ...(m.command ? { command: m.command } : {}),
     ...(m.requirements ? { requirements: m.requirements } : {}),
@@ -52,6 +55,10 @@ export function runtimeCraftbookFromTemplate(
     // task snapshot carries it — the runtime reads `task.craftbook.spawn`
     // at fanout time (see the onStepActivated fanout branch in service.ts).
     ...(m.spawn ? { spawn: m.spawn } : {}),
+    // Mode-agnostic declaration: `TaskManager.create` reads it to resolve
+    // the run's delivery mode (edit in place vs draft a diffpack proposal).
+    ...(m.diffpackCapable ? { diffpackCapable: true } : {}),
+    ...(m.capabilityFloor ? { capabilityFloor: m.capabilityFloor } : {}),
     createdAt: m.releasedAt,
     updatedAt: m.releasedAt,
   };

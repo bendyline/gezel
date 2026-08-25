@@ -3,7 +3,10 @@ import {
   type CatalogKind,
   type LicenseClass,
   type ModelAttribution,
+  RETIRED_MODEL_TAG,
+  RETIRED_MODEL_TOOLTIP,
   type ToolsetCategory,
+  isRetiredModel,
   modelAttribution,
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -81,9 +84,12 @@ function catalogModelAttribution(item: CatalogItemSummary): ModelAttribution | n
  * kind-specific `action` footer, so every model catalog shows it in the same
  * place instead of wherever its manager happened to render it.
  */
-function catalogModelReco(
-  item: CatalogItemSummary,
-): { recoScore?: number; licenseClass?: LicenseClass; supportsTools?: boolean } | null {
+function catalogModelReco(item: CatalogItemSummary): {
+  recoScore?: number;
+  licenseClass?: LicenseClass;
+  supportsTools?: boolean;
+  tags?: readonly string[];
+} | null {
   const m = item.manifest;
   if (m.kind === 'chat-model' || m.kind === 'image-model' || m.kind === 'video-model') return m;
   return null;
@@ -254,6 +260,7 @@ export function CatalogBrowser({
         {visible.map((item) => {
           const attribution = catalogModelAttribution(item);
           const reco = catalogModelReco(item);
+          const retired = isRetiredModel(item.manifest);
           return (
             <li key={`${item.sourceId}:${item.manifest.id}`} className="catalog-item">
               <div className="catalog-item-header">
@@ -275,11 +282,15 @@ export function CatalogBrowser({
                   {item.manifest.tags.length > 0 && (
                     <div className="catalog-item-tags">
                       {item.manifest.tags.map((t) => {
-                        const tip = tagTooltips?.[t.toLowerCase()];
+                        const normalizedTag = t.trim().toLowerCase();
+                        const retiredTag = normalizedTag === RETIRED_MODEL_TAG;
+                        const tip =
+                          tagTooltips?.[normalizedTag] ??
+                          (retiredTag ? RETIRED_MODEL_TOOLTIP : undefined);
                         const pill = (
                           <span
                             key={t}
-                            className="catalog-item-tag"
+                            className={`catalog-item-tag${retiredTag ? ' catalog-item-tag--retired' : ''}`}
                             style={tip ? { cursor: 'help' } : undefined}
                           >
                             {t}
@@ -294,7 +305,7 @@ export function CatalogBrowser({
                       })}
                     </div>
                   )}
-                  {reco && <RecommendedBadge manifest={reco} />}
+                  {reco && !retired && <RecommendedBadge manifest={reco} />}
                 </div>
               </div>
               <p className="catalog-item-description">{item.manifest.description}</p>

@@ -316,6 +316,8 @@
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  /* Pills sit inside buttons, which default to white ink on the accent fill. */
+  color: var(--text);
   white-space: nowrap;
 }
 
@@ -323,6 +325,20 @@
 
 .new-script-dialog {
   max-width: 560px;
+}
+
+/* Title and actions are pinned; everything between them scrolls. The
+   dialog is capped at 85vh, and without an explicit scroller the tail —
+   the name field and Create — spills past the panel onto the overlay,
+   where the transparent-backed action buttons read as ghosts. */
+.new-script-dialog__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* Focus rings on the edge fields would otherwise clip against the
+     scroll box; the negative margin keeps the content aligned. */
+  padding: 2px;
+  margin: 0 -2px;
 }
 
 .new-script-field {
@@ -356,7 +372,23 @@
   border-radius: 8px;
   padding: 10px;
   background: var(--panel);
+  /* The base button rule is white-on-accent; a panel-filled card has to
+     take the ink back or the title reads as near-invisible. */
+  color: var(--text);
   cursor: pointer;
+}
+
+.new-script-template:hover:not(:disabled):not(.active) {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+
+.new-script-template strong {
+  color: var(--text);
+}
+
+.new-script-template .muted {
+  color: var(--muted);
 }
 
 .new-script-template.active {

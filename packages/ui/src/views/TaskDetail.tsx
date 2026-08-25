@@ -319,6 +319,31 @@ export function TaskDetail({
     }
   };
 
+  // Flipping a paused task back to active on its own leaves the counters
+  // that paused it spent — the scheduler re-escalates and pauses it right
+  // back. Retry clears them and re-drives the assignee in one move.
+  const retry = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.retryTask(task.projectId, task.num);
+      await onChanged(result.task);
+      if (!result.dispatched && result.reason && result.reason !== 'not-paused') {
+        setError(
+          result.reason === 'project-inactive'
+            ? "The task is active again, but this project isn't taking background work right now."
+            : result.reason === 'spawn-host'
+              ? 'The schedule is active again — its next run starts on time.'
+              : 'The task is active again, but nobody could be put to work on its current step.',
+        );
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const activate = async (force = false) => {
     setBusy(true);
     setError(null);
@@ -505,12 +530,24 @@ export function TaskDetail({
               </button>
             </div>
           ) : (
-            <TaskStatusKeys
-              value={task.status}
-              options={isSystemJob ? SYSTEM_JOB_STATUS_VALUES : undefined}
-              disabled={busy}
-              onChange={(status) => void setStatus(status)}
-            />
+            <>
+              <TaskStatusKeys
+                value={task.status}
+                options={isSystemJob ? SYSTEM_JOB_STATUS_VALUES : undefined}
+                disabled={busy}
+                onChange={(status) => void setStatus(status)}
+              />
+              {task.status === 'paused' && (
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={busy}
+                  onClick={() => void retry()}
+                >
+                  {busy ? 'Restarting…' : 'Try again'}
+                </button>
+              )}
+            </>
           )}
           {isSystemJob ? (
             <div

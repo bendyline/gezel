@@ -94,6 +94,7 @@ describe('RemoteSession', () => {
       n += 1;
       if (n === 1) {
         return sseResponse([
+          { type: 'reasoning', text: 'I need to inspect the file first.' },
           { type: 'delta', text: 'Let me read it. ' },
           {
             type: 'tool_call',
@@ -155,9 +156,11 @@ describe('RemoteSession', () => {
         (m) =>
           m.role === 'assistant' &&
           Array.isArray(m.toolCalls) &&
-          (m.toolCalls as unknown[]).length === 1,
+          (m.toolCalls as unknown[]).length === 1 &&
+          m.reasoning === 'I need to inspect the file first.',
       ),
     ).toBe(true);
+    expect(session.getLastTurnReasoning()).toBe('I need to inspect the file first.');
 
     // A advertised its local bridge tools on the wire; B never executed them.
     const tools = calls[0]!.tools as Array<{ name: string }>;

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
   CatalogItemIdentitySchema,
@@ -14,6 +14,7 @@ import {
   type GezappManifest,
   GezappManifestSchema,
   type GezappRegistry,
+  type GezappRegistryEntry,
   GezappRegistrySchema,
   GezelTemplateVersionManifestSchema,
   ProjectTypeVersionManifestSchema,
@@ -214,9 +215,157 @@ function mergeDependency(
   });
 }
 
+// Internal helpers shared with the source-folder authoring module
+// (`gezapp-source.ts`); renamed on export so their scope stays clear.
+export {
+  KIND_DIR as GEZAPP_KIND_DIR,
+  hashItemFiles as hashGezappItemFiles,
+  isSafeArchivePath as isSafeGezappArchivePath,
+  itemPath as gezappItemPath,
+};
+
+export interface GezappDependencyLockInputs {
+  /** The entry project type's toolset references. */
+  typeToolsets: Array<{
+    id: string;
+    need: 'required' | 'suggested';
+    sourceId?: string;
+    reason?: string;
+  }>;
+  /** Embedded gezel-template payloads (suggested tools/model become optional locks). */
+  roles: Array<{ id: string; suggestedTools: string[]; suggestedModel?: string }>;
+  /** Embedded craftbook payloads — template items and type-private docs alike. */
+  craftbooks: Array<{
+    id: string;
+    toolsets?: Array<{
+      toolsetId: string;
+      optional?: boolean;
+      sourceId?: string;
+      minVersion?: string;
+      reason?: string;
+    }>;
+    connectors?: Array<{ typeId: string; optional?: boolean; sourceId?: string; reason?: string }>;
+  }>;
+}
+
+/**
+ * Resolve the exact external dependency lock for a package's contents.
+ * Collects problems (a required dependency missing from the catalog, a
+ * version conflict, a semver floor violation) instead of throwing so the
+ * source-folder validator can report all of them; `packGezapp` keeps its
+ * historical throw-on-first behavior on top.
+ */
+export async function resolveGezappDependencyLock(
+  catalog: CatalogService,
+  inputs: GezappDependencyLockInputs,
+): Promise<{ dependencies: GezappDependency[]; problems: string[] }> {
+  const dependencies = new Map<string, GezappDependency>();
+  const problems: string[] = [];
+  const add = async (
+    input: Omit<GezappDependency, 'version'> & { minVersion?: string },
+  ): Promise<void> => {
+    try {
+      mergeDependency(dependencies, await resolveExternalDependency(catalog, input));
+    } catch (err) {
+      problems.push(errorMessage(err));
+    }
+  };
+  for (const ref of inputs.typeToolsets) {
+    await add({
+      kind: 'toolset',
+      id: ref.id,
+      required: ref.need === 'required',
+      ...(ref.sourceId ? { sourceId: ref.sourceId } : {}),
+      ...(ref.reason ? { reason: ref.reason } : {}),
+    });
+  }
+  for (const role of inputs.roles) {
+    for (const id of role.suggestedTools) {
+      await add({ kind: 'toolset', id, required: false, reason: `Suggested by role ${role.id}` });
+    }
+    if (role.suggestedModel) {
+      await add({
+        kind: 'chat-model',
+        id: role.suggestedModel,
+        required: false,
+        reason: `Suggested by role ${role.id}`,
+      });
+    }
+  }
+  for (const craftbook of inputs.craftbooks) {
+    for (const ref of craftbook.toolsets ?? []) {
+      await add({
+        kind: 'toolset',
+        id: ref.toolsetId,
+        required: !ref.optional,
+        ...(ref.sourceId ? { sourceId: ref.sourceId } : {}),
+        ...(ref.minVersion ? { minVersion: ref.minVersion } : {}),
+        ...(ref.reason ? { reason: ref.reason } : {}),
+      });
+    }
+    for (const ref of craftbook.connectors ?? []) {
+      await add({
+        kind: 'connector-type',
+        id: ref.typeId,
+        required: !ref.optional,
+        ...(ref.sourceId ? { sourceId: ref.sourceId } : {}),
+        ...(ref.reason ? { reason: ref.reason } : {}),
+      });
+    }
+  }
+  return {
+    dependencies: [...dependencies.values()].sort((a, b) =>
+      `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`),
+    ),
+    problems,
+  };
+}
+
 export interface PackGezappResult {
   buffer: Buffer;
   manifest: GezappManifest;
+}
+
+/**
+ * Assemble the final `.gezapp` bytes from package-relative item files
+ * (`items/…`) plus the root manifest, enforcing the archive safety rules
+ * and quotas shared with `readGezapp`.
+ */
+export function buildGezappArchive(
+  files: ReadonlyMap<string, Buffer>,
+  manifest: GezappManifest,
+): Buffer {
+  const zip = new AdmZip();
+  const archiveNames = new Set<string>();
+  let expandedBytes = 0;
+  const addArchiveFile = (path: string, content: Buffer): void => {
+    if (!isSafeArchivePath(path)) throw new Error(`unsafe catalog path for .gezapp: ${path}`);
+    const portableName = path.toLowerCase();
+    if (archiveNames.has(portableName)) {
+      throw new Error(`duplicate or case-colliding .gezapp file: ${path}`);
+    }
+    if (content.length > GEZAPP_MAX_FILE_BYTES) {
+      throw new Error(`${path} exceeds ${GEZAPP_MAX_FILE_BYTES} byte file limit`);
+    }
+    if (archiveNames.size + 1 > GEZAPP_MAX_FILES) {
+      throw new Error(`.gezapp exceeds ${GEZAPP_MAX_FILES} file limit`);
+    }
+    expandedBytes += content.length;
+    if (expandedBytes > GEZAPP_MAX_UNCOMPRESSED_BYTES) {
+      throw new Error(`.gezapp exceeds ${GEZAPP_MAX_UNCOMPRESSED_BYTES} byte expanded limit`);
+    }
+    archiveNames.add(portableName);
+    zip.addFile(path, content);
+  };
+  for (const [path, content] of [...files.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    addArchiveFile(path, content);
+  }
+  addArchiveFile('manifest.json', Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`));
+  const buffer = zip.toBuffer();
+  if (buffer.length > GEZAPP_MAX_ARCHIVE_BYTES) {
+    throw new Error(`.gezapp exceeds ${GEZAPP_MAX_ARCHIVE_BYTES} byte archive limit`);
+  }
+  return buffer;
 }
 
 /** Build one exact-version AI App package from a catalog project type. */
@@ -299,109 +448,47 @@ export async function packGezapp(
     addTarget(detail);
   }
 
-  const dependencies = new Map<string, GezappDependency>();
-  for (const ref of typeDetail.manifest.toolsets) {
-    mergeDependency(
-      dependencies,
-      await resolveExternalDependency(deps.catalog, {
-        kind: 'toolset',
-        id: ref.id,
-        required: ref.need === 'required',
-        ...(ref.sourceId ? { sourceId: ref.sourceId } : {}),
-        ...(ref.reason ? { reason: ref.reason } : {}),
-      }),
-    );
-  }
-
+  const lockInputs: GezappDependencyLockInputs = {
+    typeToolsets: typeDetail.manifest.toolsets,
+    roles: [],
+    craftbooks: [],
+  };
   for (const target of targets.values()) {
     if (target.detail.manifest.kind === 'gezel-template') {
-      for (const id of target.detail.manifest.suggestedTools) {
-        mergeDependency(
-          dependencies,
-          await resolveExternalDependency(deps.catalog, {
-            kind: 'toolset',
-            id,
-            required: false,
-            reason: `Suggested by role ${target.id}`,
-          }),
-        );
-      }
-      const modelId = target.detail.manifest.suggestedModel;
-      if (modelId) {
-        mergeDependency(
-          dependencies,
-          await resolveExternalDependency(deps.catalog, {
-            kind: 'chat-model',
-            id: modelId,
-            required: false,
-            reason: `Suggested by role ${target.id}`,
-          }),
-        );
-      }
+      lockInputs.roles.push({
+        id: target.id,
+        suggestedTools: target.detail.manifest.suggestedTools,
+        ...(target.detail.manifest.suggestedModel
+          ? { suggestedModel: target.detail.manifest.suggestedModel }
+          : {}),
+      });
     }
     if (target.detail.manifest.kind === 'craftbook-template') {
-      for (const ref of target.detail.manifest.toolsets ?? []) {
-        mergeDependency(
-          dependencies,
-          await resolveExternalDependency(deps.catalog, {
-            kind: 'toolset',
-            id: ref.toolsetId,
-            required: !ref.optional,
-            ...(ref.sourceId ? { sourceId: ref.sourceId } : {}),
-            ...(ref.minVersion ? { minVersion: ref.minVersion } : {}),
-            ...(ref.reason ? { reason: ref.reason } : {}),
-          }),
-        );
-      }
-      for (const ref of target.detail.manifest.connectors ?? []) {
-        mergeDependency(
-          dependencies,
-          await resolveExternalDependency(deps.catalog, {
-            kind: 'connector-type',
-            id: ref.typeId,
-            required: !ref.optional,
-            ...(ref.sourceId ? { sourceId: ref.sourceId } : {}),
-            ...(ref.reason ? { reason: ref.reason } : {}),
-          }),
-        );
-      }
+      lockInputs.craftbooks.push({
+        id: target.id,
+        ...(target.detail.manifest.toolsets ? { toolsets: target.detail.manifest.toolsets } : {}),
+        ...(target.detail.manifest.connectors
+          ? { connectors: target.detail.manifest.connectors }
+          : {}),
+      });
     }
   }
+  const lock = await resolveGezappDependencyLock(deps.catalog, lockInputs);
+  if (lock.problems.length > 0) throw new Error(lock.problems[0]);
 
-  const zip = new AdmZip();
-  const archiveNames = new Set<string>();
-  let expandedBytes = 0;
-  const addArchiveFile = (path: string, content: Buffer): void => {
-    if (!isSafeArchivePath(path)) throw new Error(`unsafe catalog path for .gezapp: ${path}`);
-    const portableName = path.toLowerCase();
-    if (archiveNames.has(portableName)) {
-      throw new Error(`duplicate or case-colliding .gezapp file: ${path}`);
-    }
-    if (content.length > GEZAPP_MAX_FILE_BYTES) {
-      throw new Error(`${path} exceeds ${GEZAPP_MAX_FILE_BYTES} byte file limit`);
-    }
-    if (archiveNames.size + 1 > GEZAPP_MAX_FILES) {
-      throw new Error(`.gezapp exceeds ${GEZAPP_MAX_FILES} file limit`);
-    }
-    expandedBytes += content.length;
-    if (expandedBytes > GEZAPP_MAX_UNCOMPRESSED_BYTES) {
-      throw new Error(`.gezapp exceeds ${GEZAPP_MAX_UNCOMPRESSED_BYTES} byte expanded limit`);
-    }
-    archiveNames.add(portableName);
-    zip.addFile(path, content);
-  };
+  const files = new Map<string, Buffer>();
   const items: GezappItem[] = [];
   let minGezelVersion: string | undefined;
   for (const target of targets.values()) {
-    const files = await collectTargetFiles(deps.catalog, target);
-    for (const file of files) {
-      addArchiveFile(`items/${itemPath(target)}/${file.rel}`, file.content);
+    const collected = await collectTargetFiles(deps.catalog, target);
+    for (const file of collected) {
+      files.set(`items/${itemPath(target)}/${file.rel}`, file.content);
     }
     items.push({
       kind: target.kind,
       id: target.id,
       version: target.version,
-      sha256: hashItemFiles(files),
+      sha256: hashItemFiles(collected),
     });
     minGezelVersion = maxMinGezelVersion(minGezelVersion, target.detail.manifest.minGezelVersion);
   }
@@ -417,20 +504,13 @@ export async function packGezapp(
     ...(minGezelVersion ? { minGezelVersion } : {}),
     signature: { status: 'unsigned' },
     items,
-    dependencies: [...dependencies.values()].sort((a, b) =>
-      `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`),
-    ),
+    dependencies: lock.dependencies,
     provenance: {
       source: typeDetail.sourceId,
       ...(opts.exportedFromProject ? { exportedFromProject: opts.exportedFromProject } : {}),
     },
   });
-  addArchiveFile('manifest.json', Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`));
-  const buffer = zip.toBuffer();
-  if (buffer.length > GEZAPP_MAX_ARCHIVE_BYTES) {
-    throw new Error(`.gezapp exceeds ${GEZAPP_MAX_ARCHIVE_BYTES} byte archive limit`);
-  }
-  return { buffer, manifest };
+  return { buffer: buildGezappArchive(files, manifest), manifest };
 }
 
 export interface ReadGezappResult {
@@ -700,7 +780,8 @@ async function readRegistry(home: string): Promise<GezappRegistry> {
   }
 }
 
-async function missingDependencies(
+/** Dependency locks that do not currently resolve from the catalog. */
+export async function missingGezappDependencies(
   catalog: CatalogService,
   dependencies: GezappDependency[],
 ): Promise<GezappDependency[]> {
@@ -812,7 +893,7 @@ export async function importGezapp(
       `.gezapp requires Gezel ${parsed.manifest.minGezelVersion} or newer (this build supports ${currentVersion})`,
     );
   }
-  const missing = await missingDependencies(deps.catalog, parsed.manifest.dependencies);
+  const missing = await missingGezappDependencies(deps.catalog, parsed.manifest.dependencies);
   const result: ImportGezappResult = {
     manifest: parsed.manifest,
     items: parsed.manifest.items.map(({ kind, id, version }) => ({ kind, id, version })),
@@ -929,5 +1010,136 @@ export async function importGezapp(
         alreadyPresent: false,
       },
     };
+  });
+}
+
+// ─ install-level management (list / enable / remove) ─────────────────────
+
+export interface InstalledGezapp {
+  entry: GezappRegistryEntry;
+  /** Null when the receipt is unreadable — reported, never fatal. */
+  receipt: GezappInstallReceipt | null;
+  /** Version dirs on disk for this app, oldest first (rollback material). */
+  versionsOnDisk: string[];
+}
+
+function bySemverTolerant(a: string, b: string): number {
+  try {
+    return compareSemver(a, b);
+  } catch {
+    return a.localeCompare(b);
+  }
+}
+
+async function versionDirsOnDisk(home: string, appId: string): Promise<string[]> {
+  const entries = await readdir(join(aiAppsRoot(home), appId), { withFileTypes: true }).catch(
+    () => [],
+  );
+  return entries
+    .filter((entry) => entry.isDirectory() && !entry.name.includes('.staging-'))
+    .map((entry) => entry.name)
+    .sort(bySemverTolerant);
+}
+
+async function readReceipt(
+  home: string,
+  appId: string,
+  version: string,
+): Promise<GezappInstallReceipt | null> {
+  try {
+    return GezappInstallReceiptSchema.parse(
+      JSON.parse(await readFile(aiAppReceiptFile(home, appId, version), 'utf8')),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Every registered AI App with its receipt and on-disk version dirs. */
+export async function listGezapps(home: string): Promise<InstalledGezapp[]> {
+  const registry = await readRegistry(home);
+  const result: InstalledGezapp[] = [];
+  for (const entry of registry.apps) {
+    result.push({
+      entry,
+      receipt: await readReceipt(home, entry.appId, entry.version),
+      versionsOnDisk: await versionDirsOnDisk(home, entry.appId),
+    });
+  }
+  return result.sort((a, b) => a.entry.appId.localeCompare(b.entry.appId));
+}
+
+/** Flip an installed app's enabled flag. Returns null when not installed. */
+export async function setGezappEnabled(
+  home: string,
+  appId: string,
+  enabled: boolean,
+): Promise<GezappRegistryEntry | null> {
+  return withGezappInstallLock(async () => {
+    const registry = await readRegistry(home);
+    const entry = registry.apps.find((candidate) => candidate.appId === appId);
+    if (!entry) return null;
+    if (entry.enabled !== enabled) {
+      entry.enabled = enabled;
+      await mkdir(aiAppsRoot(home), { recursive: true });
+      await writeFileAtomic(aiAppsRegistryFile(home), `${JSON.stringify(registry, null, 2)}\n`);
+      log.info(`[manage] ${enabled ? 'enabled' : 'disabled'} AI App ${appId}`);
+    }
+    return entry;
+  });
+}
+
+export interface RemoveGezappResult {
+  appId: string;
+  removedVersions: string[];
+  keptVersions: string[];
+}
+
+/**
+ * Uninstall an AI App. The registry entry is dropped FIRST — the registry is
+ * the activation point, so unmounting before touching bytes closes the window
+ * where a catalog read could resolve a half-deleted version. Version-dir
+ * deletion failures (e.g. Windows EBUSY under an open reader) are reported in
+ * `keptVersions`, never fatal: a leftover dir with a valid receipt is
+ * harmlessly re-adopted by a later import of the same bytes.
+ */
+export async function removeGezapp(
+  home: string,
+  appId: string,
+  opts: { keepFiles?: boolean } = {},
+): Promise<RemoveGezappResult | null> {
+  return withGezappInstallLock(async () => {
+    const registry = await readRegistry(home);
+    if (!registry.apps.some((candidate) => candidate.appId === appId)) return null;
+    const next: GezappRegistry = {
+      schemaVersion: 1,
+      apps: registry.apps.filter((candidate) => candidate.appId !== appId),
+    };
+    await mkdir(aiAppsRoot(home), { recursive: true });
+    await writeFileAtomic(aiAppsRegistryFile(home), `${JSON.stringify(next, null, 2)}\n`);
+
+    const versions = await versionDirsOnDisk(home, appId);
+    const removedVersions: string[] = [];
+    const keptVersions: string[] = [];
+    if (opts.keepFiles) {
+      keptVersions.push(...versions);
+    } else {
+      const appDir = join(aiAppsRoot(home), appId);
+      for (const version of versions) {
+        try {
+          await rm(join(appDir, version), { recursive: true, force: true });
+          removedVersions.push(version);
+        } catch (err) {
+          log.warn(`[manage] could not delete ${appId}@${version}: ${errorMessage(err)}`);
+          keptVersions.push(version);
+        }
+      }
+      if (keptVersions.length === 0)
+        await rm(appDir, { recursive: true, force: true }).catch(() => {});
+    }
+    log.info(
+      `[manage] uninstalled AI App ${appId} (removed ${removedVersions.length} version dir${removedVersions.length === 1 ? '' : 's'})`,
+    );
+    return { appId, removedVersions, keptVersions };
   });
 }

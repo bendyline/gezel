@@ -57,6 +57,7 @@ import {
 import { collapseCraftbookForTier as collapseCraftbookPass } from '@bendyline/gezel';
 import { evaluateDeliverableGate } from '../chat/deliverable-gate.js';
 import { installedToolsetIds } from '../craftbook/applicable.js';
+import type { DraftOverlayReader } from '../diffpack/draft-store.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { ScriptRunner } from '../scripts/runner.js';
@@ -211,6 +212,9 @@ function snapshotCraftbookForTask(book: Craftbook, now: string): TaskCraftbook {
     // Snapshot connector needs so a running task records the corpus it was
     // launched against without re-resolving the catalog book.
     ...(book.connectors ? { connectors: book.connectors } : {}),
+    // Snapshot command needs so the kickoff hook can raise their first-use
+    // approval questions from the task record alone.
+    ...(book.commands ? { commands: book.commands } : {}),
     // Snapshot embedded script sources so the task's gate/lifecycle
     // scripts execute from its own copy (scope 'craftbook' refs resolve
     // here first — see runGateScript/runStepScript).
@@ -218,6 +222,12 @@ function snapshotCraftbookForTask(book: Craftbook, now: string): TaskCraftbook {
     // Snapshot the declarative per-item fanout config so the runtime reads
     // `task.craftbook.spawn` when the `spawnFanout` step activates.
     ...(book.spawn ? { spawn: book.spawn } : {}),
+    // Snapshot the mode-agnostic declaration so the task records that its
+    // book allowed drafting (the run's actual mode is `task.diffpackId`).
+    ...(book.diffpackCapable ? { diffpackCapable: true } : {}),
+    // Snapshot the whole-book floor so dispatch routing reads it from the
+    // task record alone (effectiveCapabilityFloor).
+    ...(book.capabilityFloor ? { capabilityFloor: book.capabilityFloor } : {}),
     createdAt: now,
     updatedAt: now,
   };
@@ -331,6 +341,39 @@ function resolveCraftbookParamDefaults(
 }
 
 /**
+ * Resolve ONLY the reserved runtime tokens (`{{task.dir}}` and its
+ * siblings) inside caller-supplied params. Everything else in an override
+ * survives byte-for-byte — inline templates, examples, and quoted source
+ * text are the caller's data, which is why overrides otherwise skip
+ * {@link resolveCraftbookParamDefaults} entirely.
+ *
+ * That exemption had a hole. A craftbook that declares
+ * `workPath: { default: '{{task.dir}}' }` gets that default seeded into
+ * the launcher form, rendered straight back out as a staged command token,
+ * and parsed as an EXPLICIT override — so the value that was supposed to
+ * be resolved by the defaults fixpoint arrives on the side that skips it.
+ * `interpolateStepsContext` is single-pass, so the gate's `{{workPath}}`
+ * resolved to a literal `{{task.dir}}` and `step-gate.ts` refused to run
+ * eight checks no deliverable could satisfy (security-architecture-review
+ * 2.0.4, task gezel/7, step `model-system`).
+ *
+ * Safe where a general re-substitution pass would not be: these four keys
+ * are reserved, a caller cannot declare them, and no caller ever means the
+ * literal token. Applied before the defaults resolve so the fixpoint sees
+ * concrete override values, and before persistence so
+ * {@link taskInterpolationContext}'s "already fully resolved" contract
+ * holds for every step added later.
+ */
+function resolveRuntimeTokensInParams(
+  params: Record<string, string>,
+  runtime: Record<string, string>,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(params).map(([key, value]) => [key, interpolateContext(value, runtime)]),
+  );
+}
+
+/**
  * Substitute `{{ key }}` placeholders with per-child context values.
  * Plain string substitution only — no templating engine (mirrors the
  * `TaskVariation.context` contract). Unknown placeholders are left intact
@@ -428,18 +471,31 @@ function interpolateStepsContext(
  * `create()` interpolates the whole recipe once; a step that arrives later
  * (add_task_step, set_step_deliverable's patch) skipped that walk, so a
  * `{{task.dir}}` in its gate would reach `step-gate.ts`'s unresolved-
- * placeholder guard and hard-fail as an infrastructure error. Persisted
- * `craftbookParams` are already fully resolved (reserved runtime values
- * never land there), so spreading them first and the runtime values last
- * preserves create()'s reserved-wins semantics.
+ * placeholder guard and hard-fail as an infrastructure error. Spreading
+ * the persisted params first and the runtime values last preserves
+ * create()'s reserved-wins semantics.
+ *
+ * The persisted params run back through {@link resolveRuntimeTokensInParams}
+ * rather than being trusted as-is: create() now resolves them before
+ * persisting, but tasks launched before that fix carry a literal
+ * `{{task.dir}}` on disk, and a single-pass substitution would hand it
+ * straight to the gate a second time.
  */
 function taskInterpolationContext(task: Task): Record<string, string> {
-  return {
-    ...(task.craftbookParams ?? {}),
+  const runtime = {
     'task.num': String(task.num),
     'task.ref': task.ref,
     'task.projectId': task.projectId,
     'task.dir': task.artifactDir ?? `tasks/${task.num}`,
+    // Present only on drafting tasks — legacy content compatibility; v2
+    // mode-agnostic books never reference these tokens.
+    ...(task.diffpackId
+      ? { 'diffpack.id': task.diffpackId, 'diffpack.dir': `diffpacks/${task.diffpackId}` }
+      : {}),
+  };
+  return {
+    ...resolveRuntimeTokensInParams(task.craftbookParams ?? {}, runtime),
+    ...runtime,
   };
 }
 
@@ -635,6 +691,11 @@ export interface CompleteStepOpts {
   cause?: 'gate' | 'user' | 'model' | 'auto' | 'sweep';
 }
 
+type CompleteStepInternalOpts = CompleteStepOpts & {
+  /** The create route will dispatch the returned current step itself. */
+  suppressHandoff?: boolean;
+};
+
 export interface GateHoldInfo {
   /** The prescriptive rejection text for the working session. */
   message: string;
@@ -670,6 +731,11 @@ export interface GateHoldInfo {
 export type CompleteStepOutcome =
   | { status: 'advanced'; task: Task }
   | { status: 'held'; task: Task; gate: GateHoldInfo };
+
+export type StepEntranceOutcome = {
+  status: 'ready' | 'advanced' | 'failed' | 'not-active';
+  task: Task;
+};
 
 function formatGateScriptDiagnostics(runs: StepGateOutcome['runs']): string {
   return runs
@@ -811,6 +877,75 @@ export class TaskManager {
     this.keurmeester = keurmeester;
   }
   private keurmeester?: import('../keurmeester/manager.js').KeurmeesterManager;
+
+  /**
+   * Wire the diffpack draft overlay. Set by service.ts after the
+   * DiffpackManager exists (same cycle-avoidance as setKeurmeester). When a
+   * task drafts a change proposal (`task.diffpackId`), its gates and
+   * deliverable checks must judge the PROPOSED tree — drafted copies first,
+   * live files as fallback, tombstoned paths as absent. Without this, a
+   * drafting task's workspace-path gate reads the untouched real file:
+   * it rejects a newly-created deliverable forever, and worse, approves a
+   * stale original the draft has already rewritten.
+   */
+  setDraftReader(reader: DraftOverlayReader): void {
+    this.draftReader = reader;
+  }
+  private draftReader?: DraftOverlayReader;
+
+  /**
+   * The workspace view a gate evaluates against for `task`. For ordinary
+   * tasks this is the live workspace + artifacts drawer. For a drafting task
+   * it is the draft overlay: `read`/`readBytes` resolve drafted content
+   * first, and `list` is (workspace − proposed deletions) ∪ drafted paths.
+   * Artifact methods are never overlaid — the artifacts drawer is real in
+   * both modes. Public so the activation-gate hook in service.ts evaluates
+   * against the same view as completion gates.
+   */
+  gateWorkspaceReader(
+    projectId: string,
+    task: Pick<Task, 'ref' | 'diffpackId'>,
+  ): GateWorkspaceReader {
+    const packId = task.diffpackId;
+    const drafts = this.draftReader;
+    if (packId && !drafts) {
+      log.warn(
+        `${task.ref} drafts diffpack ${packId} but no draft reader is wired — gates read the real workspace`,
+      );
+    }
+    const overlay = packId && drafts ? { packId, drafts } : undefined;
+    return {
+      read: (f) =>
+        overlay
+          ? overlay.drafts.read(projectId, overlay.packId, f).catch(() => null)
+          : this.store.readProjectWorkspaceFile(projectId, f).catch(() => null),
+      list: async () => {
+        const entries = await this.store.listProjectWorkspaceRecursive(projectId).catch(() => []);
+        const files = entries.filter((e) => !e.isDirectory).map((e) => e.path);
+        if (!overlay) return files;
+        const [drafted, deletions] = await Promise.all([
+          overlay.drafts.listDraftedPaths(projectId, overlay.packId).catch(() => [] as string[]),
+          overlay.drafts.listDeletions(projectId, overlay.packId).catch(() => [] as string[]),
+        ]);
+        const deleted = new Set(deletions);
+        const out = new Set(files.filter((f) => !deleted.has(f)));
+        for (const path of drafted) out.add(path);
+        return [...out];
+      },
+      // Byte reader for image-signature checks (fileCount.verifyImageBytes).
+      readBytes: (f) =>
+        overlay
+          ? overlay.drafts.readBinary(projectId, overlay.packId, f).catch(() => null)
+          : this.store.readProjectWorkspaceBinary(projectId, f).catch(() => null),
+      readArtifact: (f) => this.store.readProjectArtifact(projectId, f).catch(() => null),
+      readArtifactBytes: async (f) =>
+        (await this.store.readProjectArtifactBinary(projectId, f).catch(() => null))?.data ?? null,
+      listArtifacts: async () =>
+        (await this.store.listProjectArtifactsRecursive(projectId).catch(() => []))
+          .filter((e) => !e.isDirectory)
+          .map((e) => e.path),
+    };
+  }
   /**
    * Per-(task, step) judge-call budget for `judge` gate checks — a
    * reject-loop must not burn frontier spend on every attempt. Reset
@@ -951,6 +1086,13 @@ export class TaskManager {
        * `CreateTaskRequest` on purpose — HTTP/MCP callers cannot forge it.
        */
       origin?: Task['origin'];
+      /**
+       * This task drafts a change proposal: its workspace-write tools re-root
+       * at `artifacts/diffpacks/<task.num>/after/` and the project files are
+       * never touched. Service-only for the same reason as `origin` — it is a
+       * capability boundary, not something a prompt should be able to set.
+       */
+      draftsDiffpack?: boolean;
     },
   ): Promise<Task> {
     const project = await this.store.getProject(projectId);
@@ -1149,12 +1291,47 @@ export class TaskManager {
       }
     }
     const artifactDir = `tasks/${num}`;
+    // ── Delivery-mode resolution ───────────────────────────────────────
+    // `extras.draftsDiffpack` (service callers — night fix, Boekwachter
+    // routes) is absolute: it is a capability boundary owned by the caller
+    // that knows the run's intent, and a request-level `deliveryMode:
+    // 'edit'` never overrides it. A `diffpackCapable` book additionally
+    // lets the INVOCATION elect drafting: explicitly (`'propose'`), or via
+    // `'auto'` for runs nobody attends (night-shift/cron) and for
+    // workspaces the crew holds no write grant for — where drafting is the
+    // difference between a proposal in the morning and a hard write
+    // failure. The book itself never knows the mode.
+    const requestedDeliveryMode = input.deliveryMode ?? 'auto';
+    if (
+      requestedDeliveryMode === 'propose' &&
+      !mainBook.diffpackCapable &&
+      !extras?.draftsDiffpack
+    ) {
+      throw new Error(
+        `craftbook "${mainBook.id}" is not diffpackCapable, so it cannot run in propose mode — its gates and prompts are not authored to evaluate through a draft overlay. Launch it with deliveryMode "edit" (or omit deliveryMode).`,
+      );
+    }
+    const unattendedRun = Boolean(input.nightShift?.enabled || input.cron);
+    const draftsDiffpack =
+      Boolean(extras?.draftsDiffpack) ||
+      (Boolean(mainBook.diffpackCapable) &&
+        (requestedDeliveryMode === 'propose' ||
+          (requestedDeliveryMode === 'auto' &&
+            (unattendedRun || !projectManagedWorkspaceWritable(project)))));
     const runtimeCraftbookContext = {
       'task.num': String(num),
       'task.ref': buildTaskRef(projectId, num),
       'task.projectId': projectId,
       'task.dir': artifactDir,
+      // Resolved for drafting tasks so older content that addresses the
+      // pack folder keeps working. v2 mode-agnostic books must NOT use
+      // these — their deliverables live at mode-neutral locations.
+      ...(draftsDiffpack ? { 'diffpack.id': String(num), 'diffpack.dir': `diffpacks/${num}` } : {}),
     };
+    Object.assign(
+      craftbookParamOverrides,
+      resolveRuntimeTokensInParams(craftbookParamOverrides, runtimeCraftbookContext),
+    );
     effectiveCraftbookParams = {
       ...resolveCraftbookParamDefaults(
         declaredCraftbookDefaults,
@@ -1207,11 +1384,20 @@ export class TaskManager {
     // `spawnBook`/`mainBook`, which may still be the resolver's cached
     // template — writing through would leak one task's params into the
     // next launch of the same craftbook.
+    // The SPAWN template must keep `{{diffpack.*}}` un-interpolated: those
+    // tokens are per-shard (spawnChild resolves them with the CHILD's pack
+    // id), and a drafting host's own context would otherwise consume them
+    // here with the host's folder — every shard would then draft into one
+    // pack. Host steps keep the full context (the non-fanout Boekwachter
+    // path legitimately addresses its own pack).
+    const spawnTemplateContext = Object.fromEntries(
+      Object.entries(craftbookInterpolationContext).filter(([key]) => !key.startsWith('diffpack.')),
+    );
     if (spawnsCraftbook) {
-      interpolateStepsContext(spawnsCraftbook.steps, craftbookInterpolationContext);
+      interpolateStepsContext(spawnsCraftbook.steps, spawnTemplateContext);
     }
     if (craftbook.spawn) {
-      craftbook.spawn = interpolateContextDeep(craftbook.spawn, craftbookInterpolationContext);
+      craftbook.spawn = interpolateContextDeep(craftbook.spawn, spawnTemplateContext);
     }
     const activeStepId = craftbook.entryStepId;
     if (!isDraft) {
@@ -1257,6 +1443,7 @@ export class TaskManager {
       ...(input.spawnsCraftbookParams && Object.keys(input.spawnsCraftbookParams).length > 0
         ? { spawnsCraftbookParams: input.spawnsCraftbookParams }
         : {}),
+      ...(draftsDiffpack ? { diffpackId: String(num) } : {}),
       activeStepId,
       ...(input.parentTaskRef ? { parentTaskRef: input.parentTaskRef } : {}),
       artifactDir,
@@ -1323,6 +1510,24 @@ export class TaskManager {
       }
     }
 
+    let activatedTask = task;
+    if (!isDraft && !fanout) {
+      const entryStep = activatedTask.craftbook.steps.find((s) => s.id === activeStepId);
+      if (entryStep) {
+        const entrance = await this.runActivatedStepOnEnter(
+          projectId,
+          activatedTask,
+          entryStep,
+          0,
+          true,
+        );
+        activatedTask = entrance.task;
+        if (entrance.status === 'failed') {
+          return activatedTask;
+        }
+      }
+    }
+
     if (!isDraft && fanout && spawnsCraftbook) {
       const materialized = await this.materializeFanout(projectId, num);
       return materialized.parent;
@@ -1333,12 +1538,14 @@ export class TaskManager {
     // too. Returning the paused task is what stops the dispatch: it
     // guards on `status === 'active'`.
     if (!isDraft && !fanout) {
-      const entryStep = craftbook.steps.find((s) => s.id === activeStepId);
-      if (entryStep && (await this.pauseIfStepUnsatisfiable(projectId, task, entryStep))) {
-        return { ...task, status: 'paused' };
+      const entryStep = activatedTask.craftbook.steps.find(
+        (s) => s.id === activatedTask.activeStepId,
+      );
+      if (entryStep && (await this.pauseIfStepUnsatisfiable(projectId, activatedTask, entryStep))) {
+        return { ...activatedTask, status: 'paused' };
       }
     }
-    return task;
+    return activatedTask;
   }
 
   async get(projectId: string, num: number): Promise<Task | null> {
@@ -1651,19 +1858,24 @@ export class TaskManager {
       details: { ref: next.ref, entryStepId: entry },
     });
     const entryStep = next.craftbook.steps.find((s) => s.id === entry);
-    if (entryStep && this.onStepActivated) {
+    const entrance = entryStep
+      ? await this.runActivatedStepOnEnter(projectId, next, entryStep, 0)
+      : ({ status: 'ready', task: next } satisfies StepEntranceOutcome);
+    if (entrance.status !== 'ready') return entrance.task;
+    const preparedStep = entrance.task.craftbook.steps.find((s) => s.id === entry);
+    if (preparedStep && this.onStepActivated) {
       try {
         await this.onStepActivated({
           projectId,
-          task: next,
-          newStep: entryStep,
-          completedStep: entryStep,
+          task: entrance.task,
+          newStep: preparedStep,
+          completedStep: preparedStep,
         });
       } catch (err) {
         log.error('[tasks] onStepActivated hook failed on activate:', err);
       }
     }
-    return next;
+    return entrance.task;
   }
 
   async setAssignee(projectId: string, num: number, assignee: TaskAssignee): Promise<Task> {
@@ -2041,7 +2253,9 @@ export class TaskManager {
       summary: `Activated step "${step.name}" on ${next.ref}`,
       details: { ref: next.ref, stepId },
     });
-    return next;
+    const activatedStep = next.craftbook.steps.find((candidate) => candidate.id === stepId);
+    if (!activatedStep) return next;
+    return (await this.runActivatedStepOnEnter(projectId, next, activatedStep, 0)).task;
   }
 
   /**
@@ -2240,7 +2454,7 @@ export class TaskManager {
     stepId: string,
     nextArg: string | undefined,
     cascadeDepth: number,
-    opts: CompleteStepOpts,
+    opts: CompleteStepInternalOpts,
   ): Promise<CompleteStepOutcome> {
     const task = await this.requireTask(projectId, num);
     const idx = task.craftbook.steps.findIndex((s) => s.id === stepId);
@@ -2465,65 +2679,40 @@ export class TaskManager {
       });
 
       if (newStep) {
-        // Run ALL onEnter refs in order; a ref auto-advances when ITS
-        // OWN predicate matches ITS OWN output (predictable — a later
-        // setup script is never skipped because an earlier one matched).
-        let autoAdvance = false;
-        for (const ref of normalizeScriptRefs(newStep.onEnter)) {
-          const enterRun = await this.runStepScript(
-            projectId,
-            updated,
-            newStep,
-            'enter',
-            ref,
-          ).catch((err) => {
-            log.error('[tasks] step onEnter script failed:', err);
-            return null;
-          });
-          if (enterRun && enterRun.status === 'ok' && shouldAutoAdvance(ref, enterRun.output)) {
-            autoAdvance = true;
-          }
+        const entrance = await this.runActivatedStepOnEnter(
+          projectId,
+          updated,
+          newStep,
+          cascadeDepth,
+          opts.suppressHandoff,
+        );
+        if (entrance.status === 'failed' || entrance.status === 'advanced') {
+          return { status: 'advanced', task: entrance.task };
         }
-
-        if (autoAdvance) {
-          if (cascadeDepth + 1 > STEP_CASCADE_CAP) {
-            log.warn(
-              `[tasks] cascade cap (${STEP_CASCADE_CAP}) hit for ${updated.ref}; pausing task.`,
-            );
-            await this.setStatus(projectId, num, 'paused');
-            return { status: 'advanced', task: { ...updated, status: 'paused' } };
-          }
-          // A held cascade (the next step's own completion gate
-          // rejected) stops the chain; THIS step still advanced — the
-          // rejection note is already on the downstream step.
-          const cascaded = await this.completeStepInternal(
-            projectId,
-            num,
-            newStep.id,
-            undefined,
-            cascadeDepth + 1,
-            { cause: 'auto' },
-          );
-          return { status: 'advanced', task: cascaded.task };
+        const preparedTask = entrance.task;
+        const preparedStep = preparedTask.craftbook.steps.find((s) => s.id === newStep.id)!;
+        if (opts.suppressHandoff) {
+          return { status: 'advanced', task: preparedTask };
         }
 
         // No auto-advance → fire the handoff hook so a gezel picks up,
         // unless nobody could satisfy the step under current policy.
-        if (await this.pauseIfStepUnsatisfiable(projectId, updated, newStep)) {
-          return { status: 'advanced', task: { ...updated, status: 'paused' } };
+        if (await this.pauseIfStepUnsatisfiable(projectId, preparedTask, preparedStep)) {
+          return { status: 'advanced', task: { ...preparedTask, status: 'paused' } };
         }
         if (this.onStepActivated) {
           try {
             await this.onStepActivated({
               projectId,
-              task: updated,
-              newStep,
+              task: preparedTask,
+              newStep: preparedStep,
               completedStep: completedStep as TaskCraftbookStep,
             });
           } catch (err) {
             log.error('[tasks] onStepActivated hook failed:', err);
           }
         }
+        return { status: 'advanced', task: preparedTask };
       }
     }
     return { status: 'advanced', task: updated };
@@ -2876,22 +3065,9 @@ export class TaskManager {
       };
     }
 
-    const ws: GateWorkspaceReader = {
-      read: (f) => this.store.readProjectWorkspaceFile(projectId, f).catch(() => null),
-      list: async () =>
-        (await this.store.listProjectWorkspaceRecursive(projectId).catch(() => []))
-          .filter((e) => !e.isDirectory)
-          .map((e) => e.path),
-      // Byte reader for image-signature checks (fileCount.verifyImageBytes).
-      readBytes: (f) => this.store.readProjectWorkspaceBinary(projectId, f).catch(() => null),
-      readArtifact: (f) => this.store.readProjectArtifact(projectId, f).catch(() => null),
-      readArtifactBytes: async (f) =>
-        (await this.store.readProjectArtifactBinary(projectId, f).catch(() => null))?.data ?? null,
-      listArtifacts: async () =>
-        (await this.store.listProjectArtifactsRecursive(projectId).catch(() => []))
-          .filter((e) => !e.isDirectory)
-          .map((e) => e.path),
-    };
+    // For a drafting task this is the draft overlay, so the gate judges the
+    // proposed tree rather than the untouched workspace.
+    const ws = this.gateWorkspaceReader(projectId, task);
     const outcome = await evaluateStepGate({
       gate,
       ws,
@@ -2986,6 +3162,58 @@ export class TaskManager {
           }
           return { observable: true, matches };
         },
+        commandEvidence: async ({ scope, name, args }) => {
+          if (!this.history) return { observable: false, runs: [] };
+          const events = await this.history.listEvents({
+            projectId,
+            kinds: [scope === 'script' ? 'workspace.script.run' : 'workspace.npx.run'],
+            ...(step.lastActivatedAt ? { from: step.lastActivatedAt } : {}),
+          });
+          const sameArgs = (value: unknown): boolean => {
+            const eventArgs = Array.isArray(value)
+              ? value.filter((v): v is string => typeof v === 'string')
+              : [];
+            return eventArgs.length === args.length && eventArgs.every((v, i) => v === args[i]);
+          };
+          // `listEvents` returns newest-first, but its stable sort leaves
+          // SAME-millisecond events in append order (oldest of the tie
+          // first) — and two quick runs can land in one millisecond. Track
+          // the position and re-sort with it as the tiebreaker so "latest
+          // run" is really the latest.
+          const runs = events
+            .map((event, index) => ({ event, index }))
+            .filter(({ event }) => {
+              const details = event.details as Record<string, unknown> | undefined;
+              if (!details) return false;
+              // Attribution comes from the MCP env, not model args — a
+              // receipt from another task or step never counts here.
+              if (details.taskRef !== task.ref || details.stepId !== step.id) return false;
+              if (details.name !== name) return false;
+              return sameArgs(details.args);
+            })
+            .sort((a, b) =>
+              a.event.at < b.event.at ? 1 : a.event.at > b.event.at ? -1 : b.index - a.index,
+            )
+            .map(({ event }) => {
+              const details = event.details as Record<string, unknown>;
+              return {
+                exitCode: typeof details.exitCode === 'number' ? details.exitCode : 1,
+                timedOut: details.timedOut === true,
+                at: event.at,
+                ...(typeof details.stderrTail === 'string'
+                  ? { stderrTail: details.stderrTail }
+                  : {}),
+                ...(typeof details.stdoutTail === 'string'
+                  ? { stdoutTail: details.stdoutTail }
+                  : {}),
+              };
+            });
+          return {
+            observable: true,
+            ...(task.diffpackId ? { drafting: true } : {}),
+            runs,
+          };
+        },
       },
     });
 
@@ -3068,7 +3296,13 @@ export class TaskManager {
     // naming the real cause and the real fixes — instead of charging the
     // budget and then demanding `write_file` from a roster it was
     // stripped from.
-    const unsatFiles = await this.unsatisfiableWorkspaceGateFiles(projectId, step, gate, outcome);
+    const unsatFiles = await this.unsatisfiableWorkspaceGateFiles(
+      projectId,
+      task,
+      step,
+      gate,
+      outcome,
+    );
     if (unsatFiles) {
       const fileList =
         unsatFiles.length > 0 ? unsatFiles.map((f) => `\`${f}\``).join(', ') : 'files';
@@ -3446,7 +3680,7 @@ export class TaskManager {
         ? task.craftbook.steps.find((s) => s.id === task.activeStepId)
         : undefined;
       if (!step) return false;
-      if (!(await this.unsatisfiableStepWorkspaceFiles(projectId, step))) return false;
+      if (!(await this.unsatisfiableStepWorkspaceFiles(projectId, task, step))) return false;
     }
     return true;
   }
@@ -3466,8 +3700,14 @@ export class TaskManager {
    */
   private async unsatisfiableStepWorkspaceFiles(
     projectId: string,
+    task: Pick<Task, 'diffpackId'>,
     step: Pick<TaskCraftbookStep, 'advanceWhen' | 'gate'>,
   ): Promise<string[] | null> {
+    // A drafting task's workspace writes are re-rooted into the diffpack
+    // overlay, and its gates read through that overlay — the writes-off
+    // policy cannot make its deliverable unwinnable. That is the point of
+    // proposing on a locked workspace.
+    if (task.diffpackId) return null;
     const project = await this.store.getProject(projectId).catch(() => null);
     if (!project || projectManagedWorkspaceWritable(project)) return null;
     const files = new Set<string>();
@@ -3506,7 +3746,7 @@ export class TaskManager {
     task: Task,
     step: Pick<TaskCraftbookStep, 'id' | 'name' | 'advanceWhen' | 'gate'>,
   ): Promise<boolean> {
-    const files = await this.unsatisfiableStepWorkspaceFiles(projectId, step);
+    const files = await this.unsatisfiableStepWorkspaceFiles(projectId, task, step);
     if (!files) return false;
     const fileList = files.map((f) => `\`${f}\``).join(', ');
     await this.setStatus(projectId, task.num, 'paused').catch(() => {});
@@ -3546,10 +3786,14 @@ export class TaskManager {
    */
   private async unsatisfiableWorkspaceGateFiles(
     projectId: string,
+    task: Pick<Task, 'diffpackId'>,
     step: Pick<TaskCraftbookStep, 'advanceWhen' | 'gate'>,
     gate: NormalizedStepGate,
     outcome: StepGateOutcome,
   ): Promise<string[] | null> {
+    // Drafting tasks: see unsatisfiableStepWorkspaceFiles — the overlay
+    // makes workspace deliverables writable regardless of policy.
+    if (task.diffpackId) return null;
     const project = await this.store.getProject(projectId).catch(() => null);
     if (!project || projectManagedWorkspaceWritable(project)) return null;
     const workspaceChecks = new Map<string, string | undefined>();
@@ -3564,7 +3808,7 @@ export class TaskManager {
       return [...new Set(failingWorkspace.map((o) => o.file).filter((f): f is string => !!f))];
     }
     if (!outcome.runs.some((r) => r.decision === 'reject')) return null;
-    return await this.unsatisfiableStepWorkspaceFiles(projectId, step);
+    return await this.unsatisfiableStepWorkspaceFiles(projectId, task, step);
   }
 
   /**
@@ -3704,8 +3948,14 @@ export class TaskManager {
     ref: ScriptRef,
   ): Promise<ScriptRun | null> {
     if (!this.scriptRunner) return null;
-    const config = await this.store.readConfig();
-    if (!isEngagementAllowed(config)) return null;
+    // Standard scripts are trusted product code and must be able to prepare
+    // deterministic step inputs even when autonomous/model work is paused.
+    // This mirrors runGateScript; project/craftbook scripts retain the
+    // engagement-policy ceiling.
+    if (ref.scope !== 'standard') {
+      const config = await this.store.readConfig();
+      if (!isEngagementAllowed(config)) return null;
+    }
     return this.scriptRunner.run({
       projectId,
       scriptName: ref.name,
@@ -3714,6 +3964,123 @@ export class TaskManager {
       inputs: ref.inputs,
       trigger: { kind: 'step', taskRef: task.ref, stepId: step.id, moment },
     });
+  }
+
+  /**
+   * Run one freshly-activated step's deterministic setup before its handoff.
+   * A successful marker is persisted before dispatch, so overlapping kickoff
+   * paths cannot repeat a completed setup. A failed setup pauses the task with
+   * a durable diagnosis instead of dispatching a model against inputs the
+   * prompt falsely claims already exist.
+   */
+  private async runActivatedStepOnEnter(
+    projectId: string,
+    task: Task,
+    step: TaskCraftbookStep,
+    cascadeDepth: number,
+    suppressHandoff = false,
+  ): Promise<StepEntranceOutcome> {
+    const refs = normalizeScriptRefs(step.onEnter);
+    if (refs.length === 0) return { status: 'ready', task };
+    const activationAt = step.lastActivatedAt ?? step.createdAt;
+    if (step.onEnterCompletedAt === activationAt) {
+      return { status: 'ready', task };
+    }
+
+    let autoAdvance = false;
+    for (const ref of refs) {
+      let run: ScriptRun | null;
+      try {
+        run = await this.runStepScript(projectId, task, step, 'enter', ref);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        const paused = await this.pauseForStepEntranceFailure(projectId, task, step, ref, detail);
+        return { status: 'failed', task: paused };
+      }
+      if (!run) {
+        const paused = await this.pauseForStepEntranceFailure(
+          projectId,
+          task,
+          step,
+          ref,
+          'The script runner is unavailable or current engagement policy does not allow this script.',
+        );
+        return { status: 'failed', task: paused };
+      }
+      if (run.status !== 'ok') {
+        const logs = run.logs.trim();
+        const logTail = logs.length > 1_500 ? logs.slice(-1_500) : logs;
+        const detail = [
+          run.error ?? 'The script reported an error.',
+          `Run ID: ${run.id}`,
+          ...(logTail ? [`Log tail:\n${logTail}`] : []),
+        ].join('\n\n');
+        const paused = await this.pauseForStepEntranceFailure(projectId, task, step, ref, detail);
+        return { status: 'failed', task: paused };
+      }
+      if (shouldAutoAdvance(ref, run.output)) autoAdvance = true;
+    }
+
+    const now = nowIso();
+    const prepared: Task = {
+      ...task,
+      craftbook: {
+        ...task.craftbook,
+        steps: task.craftbook.steps.map((candidate) =>
+          candidate.id === step.id ? { ...candidate, onEnterCompletedAt: activationAt } : candidate,
+        ),
+        updatedAt: now,
+      },
+      updatedAt: now,
+    };
+    await this.store.writeTask(prepared);
+
+    if (!autoAdvance) return { status: 'ready', task: prepared };
+    if (cascadeDepth + 1 > STEP_CASCADE_CAP) {
+      log.warn(`[tasks] cascade cap (${STEP_CASCADE_CAP}) hit for ${prepared.ref}; pausing task.`);
+      const paused = await this.setStatus(projectId, prepared.num, 'paused');
+      return { status: 'failed', task: paused };
+    }
+    const cascaded = await this.completeStepInternal(
+      projectId,
+      prepared.num,
+      step.id,
+      undefined,
+      cascadeDepth + 1,
+      { cause: 'auto', ...(suppressHandoff ? { suppressHandoff: true } : {}) },
+    );
+    return { status: 'advanced', task: cascaded.task };
+  }
+
+  private async pauseForStepEntranceFailure(
+    projectId: string,
+    task: Task,
+    step: TaskCraftbookStep,
+    ref: ScriptRef,
+    detail: string,
+  ): Promise<Task> {
+    log.error(
+      `[tasks] step onEnter script failed for ${task.ref}/${step.id} (${ref.name}): ${detail}`,
+    );
+    await this.appendNote(projectId, task.num, {
+      text: `# Step setup failed — task paused\n\nThe \`onEnter\` script \`${ref.name}\` could not prepare step "${step.name}" (\`${step.id}\`). The assignee was not dispatched because the step's promised inputs may be missing.\n\n${detail}\n\nFix the script/runtime problem, then use Try again so setup runs before the next handoff.`,
+      author: { kind: 'user' },
+      stepId: step.id,
+    }).catch(() => {});
+    const current = await this.requireTask(projectId, task.num);
+    if (current.status !== 'active' || current.activeStepId !== step.id) return current;
+    return this.setStatus(projectId, task.num, 'paused');
+  }
+
+  /** Prepare the current activation before a retry or another dispatch path. */
+  async ensureActiveStepEntered(projectId: string, num: number): Promise<StepEntranceOutcome> {
+    const task = await this.requireTask(projectId, num);
+    if (task.status !== 'active' || !task.activeStepId) {
+      return { status: 'not-active', task };
+    }
+    const step = task.craftbook.steps.find((candidate) => candidate.id === task.activeStepId);
+    if (!step) return { status: 'not-active', task };
+    return this.runActivatedStepOnEnter(projectId, task, step, 0);
   }
 
   // ── Notes / sessions ───────────────────────────────────────────
@@ -3846,12 +4213,14 @@ export class TaskManager {
             completedAt: _co,
             attemptCount: _ac,
             lastActivatedAt: _la,
+            onEnterCompletedAt: _entered,
             ...recipe
           } = s;
           void _ca;
           void _co;
           void _ac;
           void _la;
+          void _entered;
           return recipe;
         }),
       },
@@ -3861,7 +4230,20 @@ export class TaskManager {
     // step prompts and gate/advanceWhen file paths become the concrete
     // values BEFORE the child is written + dispatched, so the child's turn
     // and its gate both see the resolved per-item data.
-    if (variation?.context) interpolateStepsContext(childCraftbook.steps, variation.context);
+    // A shard of a proposal-drafting host writes into its OWN proposal, whose
+    // id is this child's task number. `{{task.num}}` cannot express that:
+    // `create()` already interpolated the spawn template with the HOST's
+    // context, so every shard would silently target the host's pack. Hence a
+    // dedicated token resolved here, where the child's number is known.
+    const shardContext: Record<string, string> = {
+      ...(variation?.context ?? {}),
+      ...(parent.diffpackId
+        ? { 'diffpack.id': String(num), 'diffpack.dir': `diffpacks/${num}` }
+        : {}),
+    };
+    if (Object.keys(shardContext).length > 0) {
+      interpolateStepsContext(childCraftbook.steps, shardContext);
+    }
     const activeStepId = childCraftbook.entryStepId;
     // First activation of the child's entry step → attemptCount 1.
     childCraftbook.steps = bumpStepActivation(childCraftbook.steps, activeStepId, now);
@@ -3917,6 +4299,18 @@ export class TaskManager {
       craftbook: childCraftbook,
       ...(childSources.length > 0 ? { sourceCraftbookIds: childSources } : {}),
       ...(parent.spawnsCraftbookParams ? { craftbookParams: parent.spawnsCraftbookParams } : {}),
+      // `packId` is the reserved diffpack binding (see `resolveDiffpackId`):
+      // a shard that carries one drafts into that change proposal, so its
+      // workspace-write tools re-root at the pack instead of the workspace.
+      // Per-child, because a fanout exists precisely to give each cluster of
+      // issues its own reviewable proposal.
+      // A shard of a proposal-drafting host drafts its OWN proposal — one per
+      // cluster, which is why the fanout exists. Derived from the child's task
+      // number rather than passed in: if this were model-supplied, a mangled
+      // value would silently unbind the child and send its edits to the real
+      // workspace, which is the one outcome this whole feature exists to
+      // prevent. Fail-safe, not fail-open.
+      ...(parent.diffpackId ? { diffpackId: String(num) } : {}),
       // A child of a night-shift host is itself night-shift work — the
       // runner gates its dispatch to an active shift. The child is a plain
       // task (no cron/spawn), so `onceADay` doesn't carry over.
@@ -3966,19 +4360,26 @@ export class TaskManager {
       details: { parentRef: parent.ref, childRef: child.ref, title: child.title },
     });
 
-    if (this.onStepActivated) {
+    const entrance = await this.runActivatedStepOnEnter(child.projectId, child, firstStep, 0);
+    if (entrance.status !== 'ready') return entrance.task;
+    const preparedChild = entrance.task;
+    const preparedFirstStep = preparedChild.craftbook.steps.find(
+      (step) => step.id === activeStepId,
+    );
+
+    if (preparedFirstStep && this.onStepActivated) {
       try {
         await this.onStepActivated({
-          projectId: child.projectId,
-          task: child,
-          newStep: firstStep,
-          completedStep: firstStep,
+          projectId: preparedChild.projectId,
+          task: preparedChild,
+          newStep: preparedFirstStep,
+          completedStep: preparedFirstStep,
         });
       } catch (err) {
         log.error('[tasks] onStepActivated hook failed on spawnChild:', err);
       }
     }
-    return child;
+    return preparedChild;
   }
 
   /**
@@ -4147,6 +4548,7 @@ function bumpStepActivation(
     // signature and the trailing-run score resets to 1.
     const {
       completedAt: _done,
+      onEnterCompletedAt: _entered,
       gateAttempts: _ga,
       gateProgressAttempts: _gpa,
       lastGateReject: _lgr,
@@ -4155,6 +4557,7 @@ function bumpStepActivation(
       ...rest
     } = s;
     void _done;
+    void _entered;
     void _ga;
     void _gpa;
     void _lgr;

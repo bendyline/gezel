@@ -63,6 +63,9 @@ export const HistoryEventKindSchema = z.enum([
   'project.github.synced',
   'project.review.requested',
   'project.review.settled',
+  'project.diffpack.sealed',
+  'project.diffpack.applied',
+  'project.diffpack.dismissed',
   'project.connector.bound',
   'project.connector.unbound',
   'project.connector.synced',
@@ -121,6 +124,27 @@ export const HistoryEventKindSchema = z.enum([
    * bundled pin when this is the first live activation.
    */
   'gilde.updated',
+  /**
+   * An AI App (.gezapp) was installed or upgraded through the global
+   * management surface. `details` carries
+   * `{ appId, version, previousVersion?, alreadyPresent }`.
+   */
+  'ai-app.installed',
+  /** `details` carries `{ appId, version, removedVersions, keptVersions }`. */
+  'ai-app.removed',
+  'ai-app.enabled',
+  'ai-app.disabled',
+  /**
+   * An installed AI App was applied to a project. `details` carries
+   * `{ appId, version }`; the project association rides `projectId`.
+   */
+  'ai-app.applied',
+  /**
+   * An app-serve site started/stopped serving a project's AI App as a
+   * shareable mini-site. `details` carries `{ siteId, typeId?, port?, chat? }`.
+   */
+  'app-serve.started',
+  'app-serve.stopped',
   /**
    * A third-party app completed a chat turn through the public
    * OpenAI-compatible surface (`/v1/responses`, `/v1/chat/completions`) or the Ollama

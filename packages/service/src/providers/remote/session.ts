@@ -199,6 +199,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
       total += message.content.length;
       if ('toolCalls' in message) total += JSON.stringify(message.toolCalls).length;
       if ('toolCallId' in message) total += message.toolCallId.length;
+      if ('reasoning' in message && message.reasoning) total += message.reasoning.length;
     }
     if (!this.deps.bridges.isEmpty()) {
       for (const tool of this.deps.bridges.getOpenAITools()) total += JSON.stringify(tool).length;
@@ -254,7 +255,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
             `[remote] turn timed out after ${Math.round(this.deps.timeoutMs / 1000)}s`,
           );
         }
-        const { text, toolCalls, queueWaitMs } = await this.postInfer(
+        const { text, toolCalls, reasoning, queueWaitMs } = await this.postInfer(
           nextPrompt,
           priorMessages,
           opts,
@@ -282,7 +283,12 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
         // and supplies results on its next request through priorMessages.
         if (toolCalls.length > 0 && this.capturesCallerTools) {
           this.capturedCalls = toolCalls.map((call) => ({ ...call }));
-          priorMessages.push({ role: 'assistant', content: text, toolCalls });
+          priorMessages.push({
+            role: 'assistant',
+            content: text,
+            toolCalls,
+            ...(reasoning ? { reasoning } : {}),
+          });
           this.transcript = [...priorMessages];
           return fullText;
         }
@@ -293,7 +299,12 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           return fullText;
         }
 
-        priorMessages.push({ role: 'assistant', content: text, toolCalls });
+        priorMessages.push({
+          role: 'assistant',
+          content: text,
+          toolCalls,
+          ...(reasoning ? { reasoning } : {}),
+        });
 
         // Execute the model's tool calls LOCALLY on A, then continue the loop.
         // The adaptive cap uses the broker-admitted numCtx, exactly like the
@@ -441,7 +452,12 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     priorMessages: PriorMessageWire[],
     opts?: SendAndWaitOpts,
     includeAttachments = true,
-  ): Promise<{ text: string; toolCalls: ExternalToolCall[]; queueWaitMs: number }> {
+  ): Promise<{
+    text: string;
+    toolCalls: ExternalToolCall[];
+    reasoning: string;
+    queueWaitMs: number;
+  }> {
     for (;;) {
       try {
         return await this.postInferOnce(
@@ -485,7 +501,12 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     opts: SendAndWaitOpts | undefined,
     includeAttachments: boolean,
     grammarFallback: RemoteToolGrammarFallback,
-  ): Promise<{ text: string; toolCalls: ExternalToolCall[]; queueWaitMs: number }> {
+  ): Promise<{
+    text: string;
+    toolCalls: ExternalToolCall[];
+    reasoning: string;
+    queueWaitMs: number;
+  }> {
     const tools = this.advertisedTools(grammarFallback);
 
     const body: RemoteInferRequest = {
@@ -561,6 +582,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
     }
 
     let text = '';
+    let reasoning = '';
     let toolCalls: ExternalToolCall[] = [];
     let errFrame: { code: string; message: string } | null = null;
 
@@ -613,6 +635,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
           );
           break;
         case 'reasoning':
+          reasoning += frame.text;
           this.lastReasoning = (this.lastReasoning ?? '') + frame.text;
           break;
         case 'warning':
@@ -679,7 +702,7 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
         `[remote] ${(errFrame as { code: string }).code}: ${(errFrame as { message: string }).message}`,
       );
     }
-    return { text, toolCalls, queueWaitMs };
+    return { text, toolCalls, reasoning, queueWaitMs };
   }
 
   private advertisedTools(

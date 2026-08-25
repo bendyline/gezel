@@ -7,7 +7,13 @@
  * source should choose a source-oriented path instead of silently falling
  * back to the workspace drawer.
  */
-export const ACCESSORY_ARTIFACT_PREFIXES = ['notes/', 'reviews/', 'reports/', 'tasks/'] as const;
+export const ACCESSORY_ARTIFACT_PREFIXES = [
+  'notes/',
+  'reviews/',
+  'reports/',
+  'tasks/',
+  'diffpacks/',
+] as const;
 
 /**
  * Authoring-time paths may still carry the per-task-folder template forms:

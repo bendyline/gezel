@@ -2,11 +2,22 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BundledSource, CatalogService } from '@bendyline/gezel-catalog';
-import { projectScriptFile } from '@bendyline/gezel/paths';
+import {
+  aiAppsRegistryFile,
+  aiAppsRoot,
+  projectScriptFile,
+  projectTypeOverlayFile,
+} from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import { TaskManager } from '../tasks/manager.js';
-import { applyProjectType, preflightProjectType, renderProjectTypeTemplate } from './apply.js';
+import {
+  applyProjectType,
+  planProjectTypeApply,
+  preflightProjectType,
+  projectTypeStatus,
+  renderProjectTypeTemplate,
+} from './apply.js';
 
 let home: string;
 let dataDir: string;
@@ -620,5 +631,184 @@ describe('applyProjectType', () => {
     await expect(
       applyProjectType({ store, catalog, home }, { projectId: project.id, typeId: 'ghost' }),
     ).rejects.toThrow(/not found/);
+  });
+});
+
+describe('seed policy, overlay, and roster reuse', () => {
+  const deps = () => ({ store, catalog, home });
+
+  it('preserve keeps user edits, refreshes stale seeds, and tracks the overlay', async () => {
+    const project = await store.createProject({ name: 'Spanish' });
+    const wsDir = await store.projectWorkspaceDir(project.id);
+    const seedPath = join(wsDir, 'progress.json');
+
+    await applyProjectType(deps(), {
+      projectId: project.id,
+      typeId: 'language-trainer',
+      params: { language: 'Spanish' },
+    });
+    expect(JSON.parse(await readFile(seedPath, 'utf8')).language).toBe('Spanish');
+    const overlayFirst = await store.readProjectTypeOverlay(project.id);
+    expect(overlayFirst?.seeds.map((seed) => seed.path)).toEqual(['progress.json']);
+
+    // Stale-but-unmodified: the re-render differs (new param), the file
+    // still holds the app's last-written bytes — preserve refreshes it.
+    const second = await applyProjectType(deps(), {
+      projectId: project.id,
+      typeId: 'language-trainer',
+      params: { language: 'French' },
+      seedPolicy: 'preserve',
+      reuseRosterGezels: true,
+    });
+    expect(second.seedsSkipped).toEqual([]);
+    expect(second.workspaceSeeded).toContain('progress.json');
+    expect(JSON.parse(await readFile(seedPath, 'utf8')).language).toBe('French');
+    const overlaySecond = await store.readProjectTypeOverlay(project.id);
+
+    // User modification: preserve keeps the file and reports it, and the
+    // overlay keeps recording the app's last-written content (French).
+    await writeFile(seedPath, '{"language":"Frisian","level":9}\n');
+    const third = await applyProjectType(deps(), {
+      projectId: project.id,
+      typeId: 'language-trainer',
+      params: { language: 'German' },
+      seedPolicy: 'preserve',
+      reuseRosterGezels: true,
+    });
+    expect(third.seedsSkipped).toEqual(['progress.json']);
+    expect(third.workspaceSeeded).not.toContain('progress.json');
+    expect(JSON.parse(await readFile(seedPath, 'utf8')).language).toBe('Frisian');
+    const overlayThird = await store.readProjectTypeOverlay(project.id);
+    expect(overlayThird?.seeds[0]?.sha256).toBe(overlaySecond?.seeds[0]?.sha256);
+
+    // The default policy still overwrites the user's file (original behavior).
+    const fourth = await applyProjectType(deps(), {
+      projectId: project.id,
+      typeId: 'language-trainer',
+      params: { language: 'German' },
+      reuseRosterGezels: true,
+    });
+    expect(fourth.seedsSkipped).toEqual([]);
+    expect(JSON.parse(await readFile(seedPath, 'utf8')).language).toBe('German');
+  });
+
+  it('reuseRosterGezels makes re-apply idempotent for the whole crew', async () => {
+    const project = await store.createProject({ name: 'Crew' });
+    const first = await applyProjectType(deps(), {
+      projectId: project.id,
+      typeId: 'language-trainer',
+      params: { language: 'Spanish' },
+    });
+    expect(first.gezelsCreated).toHaveLength(2);
+    const roster = (await store.getProject(project.id))?.gezelIds ?? [];
+    for (const created of first.gezelsCreated) expect(roster).toContain(created.id);
+
+    const beforeCount = (await store.listGezels()).length;
+    const second = await applyProjectType(deps(), {
+      projectId: project.id,
+      typeId: 'language-trainer',
+      params: { language: 'Spanish' },
+      reuseRosterGezels: true,
+    });
+    expect((await store.listGezels()).length).toBe(beforeCount);
+    expect(second.gezelsCreated.map((g) => g.id).sort()).toEqual(
+      first.gezelsCreated.map((g) => g.id).sort(),
+    );
+  });
+
+  it('planProjectTypeApply reports the plan without writing anything', async () => {
+    const project = await store.createProject({ name: 'Plan' });
+    const plan = await planProjectTypeApply(deps(), {
+      projectId: project.id,
+      typeId: 'language-trainer',
+      params: { language: 'Spanish' },
+      seedPolicy: 'preserve',
+    });
+    expect(plan.version).toBe('1.0.0');
+    expect(plan.seeds).toEqual([{ path: 'progress.json', state: 'new' }]);
+    expect(plan.gezels.map((g) => g.reuse)).toEqual([false, false]);
+    expect(plan.scripts).toEqual(['progress-store']);
+    expect(plan.toolsets).toEqual({ installNow: ['web-search'], deferred: [] });
+    expect(plan.schedules).toEqual([
+      { craftbook: 'daily-lesson', cron: '0 18 * * *', consent: 'ask' },
+    ]);
+    expect(plan.pages).toBe(true);
+    const wsDir = await store.projectWorkspaceDir(project.id);
+    await expect(readFile(join(wsDir, 'progress.json'), 'utf8')).rejects.toThrow();
+    expect(await store.readProjectTypeOverlay(project.id)).toBeNull();
+
+    // After an apply + a user edit, the same plan flags the kept file and
+    // the roster reuse.
+    await applyProjectType(deps(), {
+      projectId: project.id,
+      typeId: 'language-trainer',
+      params: { language: 'Spanish' },
+    });
+    await writeFile(join(wsDir, 'progress.json'), 'user content\n');
+    const replan = await planProjectTypeApply(deps(), {
+      projectId: project.id,
+      typeId: 'language-trainer',
+      params: { language: 'Spanish' },
+      seedPolicy: 'preserve',
+      reuseRosterGezels: true,
+    });
+    expect(replan.seeds).toEqual([{ path: 'progress.json', state: 'keep-modified' }]);
+    expect(replan.gezels.map((g) => g.reuse)).toEqual([true, true]);
+  });
+
+  it('projectTypeStatus reports drift, installs, and update availability', async () => {
+    const project = await store.createProject({ name: 'Status' });
+    await applyProjectType(deps(), {
+      projectId: project.id,
+      typeId: 'language-trainer',
+      params: { language: 'Spanish' },
+    });
+
+    const before = await projectTypeStatus(deps(), project.id);
+    expect(before.provenance?.id).toBe('language-trainer');
+    expect(before.installedApp).toBeNull();
+    expect(before.updateAvailable).toBe(false);
+    expect(before.seeds).toEqual([{ path: 'progress.json', state: 'ok' }]);
+
+    // A user edit reports as modified; a delete as missing.
+    const wsDir = await store.projectWorkspaceDir(project.id);
+    await writeFile(join(wsDir, 'progress.json'), 'user content\n');
+    expect((await projectTypeStatus(deps(), project.id)).seeds).toEqual([
+      { path: 'progress.json', state: 'modified' },
+    ]);
+    await rm(join(wsDir, 'progress.json'));
+    expect((await projectTypeStatus(deps(), project.id)).seeds).toEqual([
+      { path: 'progress.json', state: 'missing' },
+    ]);
+
+    // A newer installed registry entry flips updateAvailable.
+    await mkdir(aiAppsRoot(home), { recursive: true });
+    await writeFile(
+      aiAppsRegistryFile(home),
+      JSON.stringify({
+        schemaVersion: 1,
+        apps: [
+          {
+            appId: 'language-trainer',
+            version: '9.9.9',
+            packageSha256: 'a'.repeat(64),
+            installedAt: new Date().toISOString(),
+            enabled: true,
+          },
+        ],
+      }),
+    );
+    const after = await projectTypeStatus(deps(), project.id);
+    expect(after.installedApp).toEqual({
+      appId: 'language-trainer',
+      version: '9.9.9',
+      enabled: true,
+    });
+    expect(after.updateAvailable).toBe(true);
+
+    // A lost overlay (folder moved machines) degrades to `untracked`.
+    await rm(projectTypeOverlayFile(home, project.id));
+    const untracked = await projectTypeStatus(deps(), project.id);
+    expect(untracked.seeds).toEqual([{ path: 'progress.json', state: 'untracked' }]);
   });
 });

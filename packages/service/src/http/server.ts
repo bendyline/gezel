@@ -19,8 +19,10 @@ import { mountMachineEngineHints } from './machine-engine-hints.js';
 import { openAiErrorEnvelope } from './openai-compat/error-envelope.js';
 import { requireOpenAiEndpointsEnabled } from './openai-endpoints-gate.js';
 import { PreviewCapabilityStore } from './preview-capability.js';
+import { aiAppRoutes } from './routes/ai-apps.js';
 import { aiRoutes } from './routes/ai.js';
 import { ambientDashboardRoutes } from './routes/ambient-dashboard.js';
+import { appServeRoutes } from './routes/app-serve.js';
 import { askRoutes } from './routes/asks.js';
 import { audioRoutes } from './routes/audio.js';
 import { cacheRoutes } from './routes/cache.js';
@@ -33,6 +35,7 @@ import { configRoutes } from './routes/config.js';
 import { connectorRoutes } from './routes/connectors.js';
 import { craftbookRoutes } from './routes/craftbooks.js';
 import { credentialRoutes } from './routes/credentials.js';
+import { diffpackRoutes } from './routes/diffpacks.js';
 import { documentMediaExportRoutes } from './routes/document-media-export.js';
 import { documentRoutes } from './routes/documents.js';
 import { ds4Routes } from './routes/ds4.js';
@@ -586,6 +589,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/projects', suggestedWorkRoutes(ctx));
   // Report-embedded action requests at /api/projects/:id/report-actions/*
   app.route('/api/projects', reportActionRoutes(ctx));
+  app.route('/api/projects', diffpackRoutes(ctx));
   // Per-project GitHub operations live at /api/projects/:id/github/*
   app.route('/api/projects', gitRoutes(ctx, 'git'));
   // Legacy alias: the same local-git routes under the old /github segment,
@@ -662,6 +666,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   app.route('/api/system-toolsets', systemToolsetRoutes(ctx));
   app.route('/api/gilde-updates', gildeUpdateRoutes(ctx));
   app.route('/api/knowledge', knowledgeRoutes(ctx));
+  app.route('/api/ai-apps', aiAppRoutes(ctx));
+  app.route('/api/app-serve', appServeRoutes(ctx));
   app.route('/api/codex-setup', codexSetupRoutes(ctx));
   app.route('/api/opencode-setup', opencodeSetupRoutes(ctx));
   app.route('/api/pi-setup', piSetupRoutes(ctx));

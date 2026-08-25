@@ -103,7 +103,10 @@ function buildSpec(sessionId: string): ClaudeWorkerSpec {
 
 const noopHooks: WorkerTurnHooks = {
   emitDelta: () => {},
+  emitReasoningDelta: () => {},
   emitHeartbeat: () => {},
+  emitToolArgsDelta: () => {},
+  emitWarning: () => {},
   emitUsage: (_u: TurnUsage) => {},
 };
 

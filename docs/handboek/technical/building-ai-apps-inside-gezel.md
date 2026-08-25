@@ -13,220 +13,135 @@ subcategory:
 
 An AI App is a reusable experience that runs *inside* Gezel: a tailored project, a purpose-built crew, repeatable craftbooks, scripts, data, and an optional interactive dashboard. A language trainer, research room, board game, or client-service workspace can all use the same underlying pieces while feeling like a distinct application.
 
-The project type is the composition root and installer. Public AI Apps normally arrive through the [Gezel Gilde project-type collection](https://gezelgilde.com/toolsets/#project-types); private or experimental apps can be shared as `.gezapp` packages.
+The project type is the composition root and installer. Public AI Apps arrive through the [Gezel Gilde project-type collection](https://gezelgilde.com/toolsets/#project-types); private or experimental apps travel as `.gezapp` packages. Both start life as the same thing: a source folder you can build with the command line, by hand, or with an AI agent — this article is the guide to that folder.
 
 An AI App is different from a connected app. A connected app runs in its own process and interface and reaches Gezel through `@bendyline/gezel-app-sdk`. See [Building connected apps with gezel-app-sdk](building-connected-apps-with-gezel-app-sdk.md) when that is what you are building.
 
+## Build one in five minutes
+
+The command line owns the whole loop — scaffold, edit, validate, pack, install, apply — and none of it needs the service running:
+
+```bash
+gezel app new my-app --with-page     # a complete, working source folder
+cd my-app
+# edit items/ — the role's about.md and the version manifest are the heart
+gezel app validate .                 # every finding at once; --json for tooling
+gezel app pack .                     # -> my-app-1.0.0.gezapp
+gezel app add my-app-1.0.0.gezapp --yes
+cd ~/the/folder/for/it && gezel app apply my-app
+```
+
+`apply` outfits the current folder as a project: it creates the crew from the embedded role templates, installs craftbooks and scripts, seeds the data files, and pins the Output page. From there, iterate — edit the source, `validate`, `pack`, `add` (an upgrade), and `apply --refresh`; `gezel app status` reports seed drift, and `gezel app serve` shares the finished page (and optional visitor chat) as a mini-site.
+
+Three worked samples of graded size live in [examples/apps](https://github.com/bendyline/gezel/tree/main/examples/apps) — `example-journal` (the minimal shape), `example-habit-tracker` (state, tools, a live page), and `example-reading-circle` (a crew, craftbooks, schedules, dependencies). Copying the smallest one that fits beats starting empty.
+
+## Or start from a working project
+
+The other on-ramp is to prototype the experience as an ordinary project first: settle the crew roles in conversation, work through each craftbook, run the scripts by hand, and decide which files are durable state versus generated artifacts.
+
+When the composition feels right, ask a gezel with the project-management tools to export the type applied to that project. Gezel writes a `.gezapp` into the project artifacts — and a `.gezapp` is a renamed zip of exactly the source layout below, so unzip it, drop in a small `gezapp.json`, and keep iterating with `validate` and `pack`.
+
+## The source folder
+
+A source folder is a `gezapp.json` beside an `items/` tree. The tree is the same layout the packed archive and the installed app use (items sharded by the first two characters of their id, identity separate from versioned content), which is why exports round-trip:
+
+```text
+my-app/
+  gezapp.json                        the source manifest — small on purpose
+  items/
+    project-types/my/my-app/
+      manifest.json                  identity: id, name, description, maintainer
+      versions/1.0.0/
+        manifest.json                the composition root (everything below hangs off it)
+        about.md                     param-templated project context
+        mission.md
+        records.json                 seed data (workspaceSeed)
+        scripts/
+          record-store.ts            sidecar script — folded inline at pack
+        craftbooks/
+          review-records.json        type-private craftbook document
+        pages/
+          dashboard/index.html       the Output page
+    gezel-templates/my/my-app-lead/
+      manifest.json                  role identity (kind, id, name, role)
+      versions/1.0.0/
+        manifest.json                points at about.md
+        about.md                     the role's working character
+    craftbook-templates/my/my-app-review/
+      manifest.json
+      versions/1.0.0/
+        craftbook.json               the reusable craftbook document
+        test.json                    its eval sidecar
+```
+
+`gezapp.json` stays small on purpose — `format: "gezel-ai-app-source"`, `schemaVersion: 1`, and optionally an `entry` pin and a `publisher`. The item list, per-item SHA-256 hashes, the external dependency lock, `minGezelVersion`, and timestamps are all derived from the tree by `gezel app pack`; writing them by hand is a validation error, not a convention.
+
+Scripts have two equal authoring forms. The version manifest's `scripts` map holds inline TypeScript strings — the form models author most reliably — and `versions/<v>/scripts/<name>.ts` holds the same scripts as real files, which people and typecheckers prefer. Pack folds sidecars into the map and drops the files, so the shipped app is byte-identical either way; defining one name in both forms is a validation error.
+
+Craftbooks also have two homes. A procedure private to this app lives embedded at `versions/<v>/craftbooks/<id>.json` — it ships inside the project type and appears in no catalog. A reusable procedure is its own `craftbook-templates/` item with a `craftbook.json` and a `test.json` eval sidecar — or simply a reference to an existing recipe in the [Gilde craftbook collection](https://gezelgilde.com/craftbooks/). The version manifest's `craftbooks` list references both by id, and an embedded document wins over a catalog item with the same id.
+
 ## The parts of an AI App
 
-| Part | What it contributes today |
+| Part | What it contributes |
 | --- | --- |
-| Project type | The identity, version, setup parameters, project templates, crew roster, tab defaults, and references to every other part |
-| Gezel role templates | The role name, description, `about.md` instructions, suggested tools, and optional tuning guidance for each crew member |
-| Craftbooks | Repeatable procedures installed into each project; they may be private to the type or referenced from the [Gilde craftbook collection](https://gezelgilde.com/craftbooks/) |
-| Scripts and tools | Capability-declared TypeScript run by Gezel's sandbox; a manifest can expose a script as a schema-validated tool for a gezel or dashboard |
-| Output page | A read-limited HTML, CSS, and JavaScript experience pinned into the project's Output tab; one entry page can implement several views or routes |
-| Data | JSON, Markdown, media, and other ordinary files seeded into the project workspace or artifacts and then read by scripts, gezels, and the page |
+| Project type | Identity, version, setup params, project templates, crew roster, and references to every other part |
+| Gezel role templates | Each crew member's name, role, and `about.md` working character; one entry can be the voorman, or a solo type presents its one gezel under a custom `leadLabel`. Browse the [Gilde role collection](https://gezelgilde.com/roles/) before writing a new one |
+| Craftbooks | Repeatable procedures installed into each project — embedded (type-private) or referenced catalog items |
+| Scripts and tools | Capability-declared TypeScript run in Gezel's sandbox; a `tools` entry exposes a script as a schema-validated tool for a gezel or the page |
+| Output page | A read-limited HTML/CSS/JS experience pinned into the project's Output tab |
+| Data | Ordinary JSON, Markdown, and media files seeded into the workspace or artifacts |
 | Schedules | Consent-gated scheduled or Night Shift craftbook runs |
-| Toolsets | Catalog references for capabilities the project needs or suggests; toolset code is not embedded in the project type |
+| Toolsets | Catalog references for capabilities the project needs or suggests; toolset code is never embedded |
 
-The result is composition rather than a general plug-in runtime:
+Nothing installs merely because Gezel detects a suitable project type: adoption is explicit, params render as a form and substitute into `nameTemplate`, the about/mission templates, and seed files, and toolsets and schedules remain subject to consent and security policy.
 
-```text
-Gilde project type or .gezapp package
-                 ↓ explicit adoption
-project + crew + craftbooks + scripts + data + Output page
-                 ↓ ordinary use
-chat, page actions, scheduled work, and editable project files
-```
+## Scripts, tools, and the Output page
 
-Nothing is installed merely because Gezel detects a suitable project type. Adoption is explicit, and toolsets and schedules remain subject to consent and security policy.
+Each script declares its capabilities, inputs, outputs, and whether it is an action or gate through `@bendyline/gezel-sdk`; the [Writing scripts with gezel-sdk](writing-scripts-with-gezel-sdk.md) article covers that contract. Adoption copies the scripts into the project with provenance.
 
-## Build one today
+A `tools` entry gives a script a stable name, a JSON Schema `inputs` object validated before every run, and static `bind` values so several narrow tools can share one script without letting the caller replace the bound operation. A tool listed in `pages.tools` is page-only — kept off the model's roster — and can carry a `reaction` that summons a named gezel when the page invokes it, with the tool output interpolated into the reaction prompt.
 
-There is no AI App builder or `gezel app new` command yet. The supported public authoring path is source-first in the [Gilde repository](https://github.com/bendyline/gilde):
-
-1. Prototype the experience as an ordinary project. Settle the crew roles, work through each craftbook, run the scripts by hand, and decide which files are durable state versus generated artifacts.
-2. Give the composition a project-type id and version. Add separate role-template items for crew members whose instructions should be reusable or versioned.
-3. Move default project context into `about.md` and `mission.md`, turn initial data into seed files, and place type-private craftbooks under the version's `craftbooks/` folder.
-4. Put SDK script source in the version manifest's `scripts` map, expose only the narrow tools the gezels or page need, and declare every capability and input schema.
-5. Build the Output page against `window.gezel`, declare its readable paths and callable tools, and test both light and dark themes.
-6. From the Gilde checkout, run `npm run fix` and `npm run check`. When developing Gilde and Gezel side by side, run `pnpm link:gilde` from the Gezel checkout so the local daemon and tests see the edited catalog content.
-7. Contribute the type to Gilde for normal distribution. After a type is resolvable by a Gezel installation, export a `.gezapp` for controlled private sharing.
-
-This workflow is deliberately candid: the catalog files are the authoring surface today. The desktop app can use and share a finished type, but it cannot yet assemble those files from a prototype for you.
-
-## The catalog layout
-
-The source of a public AI App is a slice of the Gilde catalog. Items are sharded by the first two characters of their id and keep identity separate from versioned content:
-
-```text
-data/
-  project-types/
-    my/
-      my-app/
-        manifest.json
-        versions/
-          1.0.0/
-            manifest.json
-            about.md
-            mission.md
-            records.json
-            craftbooks/
-              review-records.json
-            pages/
-              dashboard/
-                index.html
-  gezel-templates/
-    my/
-      my-app-lead/
-        manifest.json
-        versions/
-          1.0.0/
-            manifest.json
-            about.md
-```
-
-The root project-type manifest supplies stable identity:
-
-```json
-{
-  "schemaVersion": 1,
-  "kind": "project-type",
-  "id": "my-app",
-  "name": "My AI App",
-  "description": "A focused workspace for reviewing records with a gezel.",
-  "tags": ["review", "records"],
-  "maintainer": { "name": "Your company" },
-  "license": "MIT",
-  "yankedVersions": []
-}
-```
-
-The version manifest describes what adoption installs. This shortened example shows the main seams; script source is represented by a placeholder to keep it readable:
-
-```json
-{
-  "schemaVersion": 1,
-  "version": "1.0.0",
-  "releasedAt": "2026-01-01T00:00:00Z",
-  "params": {
-    "type": "object",
-    "properties": {
-      "recordLabel": { "type": "string", "title": "What do you call a record?", "default": "case" }
-    },
-    "required": ["recordLabel"]
-  },
-  "nameTemplate": "{{recordLabel}} review",
-  "aboutTemplate": "about.md",
-  "missionTemplate": "mission.md",
-  "gezels": [{ "templateId": "my-app-lead", "voorman": true }],
-  "craftbooks": ["review-records"],
-  "scripts": { "record-store": "<TypeScript source>" },
-  "tools": [
-    {
-      "name": "add_record",
-      "description": "Add one record to the app data.",
-      "script": "record-store",
-      "inputs": {
-        "type": "object",
-        "properties": { "title": { "type": "string" } },
-        "required": ["title"]
-      },
-      "bind": { "action": "add" }
-    }
-  ],
-  "pages": {
-    "entry": "dashboard/index.html",
-    "api": 1,
-    "reads": [{ "source": "workspace", "path": "records.json" }],
-    "tools": ["add_record"]
-  },
-  "workspaceSeed": ["records.json"]
-}
-```
-
-Project parameters use a JSON Schema-like object. Gezel renders them as an adoption form and substitutes their values into the suggested project name, the project about and mission templates, and seeded files. A type can also set project shape and tab visibility, inherit a built-in project category with `extends`, seed artifacts instead of workspace files, suggest or require toolsets, and declare scheduled craftbooks.
-
-## Roles and craftbooks
-
-Each `gezels` entry references a versioned `gezel-template`; role instructions are not buried inside the project-type manifest. The template's `about.md` becomes the gezel's working character and method. One referenced role can be marked as the *voorman*—Dutch for foreman—or a solo type can present that gezel under a domain-specific label such as “Tutor” or “Opponent.” Browse the [Gilde role collection](https://gezelgilde.com/roles/) before creating a new role, because an existing one may already fit.
-
-A project type lists craftbook ids. For a procedure used only by this type, place a Craftbook document at `versions/{version}/craftbooks/{id}.json`; an embedded document wins over a catalog item with the same id. For a reusable procedure, reference a `craftbook-template` from Gilde. On adoption Gezel copies the resolved craftbook into the project, where it becomes editable. Reapplying the type does not overwrite a copy the user has changed.
-
-## Scripts, tools, data, and schemas
-
-The released project-type manifest currently stores each script as TypeScript source in its `scripts` map. Adoption copies those scripts into the project with provenance. Each script declares its capabilities, inputs, outputs, and whether it is an action or gate through `@bendyline/gezel-sdk`; the [Writing scripts with gezel-sdk](writing-scripts-with-gezel-sdk.md) article covers that contract.
-
-A `tools` entry gives a script a stable tool name and description. Its `inputs` object is JSON Schema and is validated before the script runs. Static `bind` values let several narrow tools share one script without letting the caller replace the bound operation. The same tool can be exposed to a gezel or allowlisted for the Output page; page-only tools are kept off the model's tool roster.
-
-There is no app-specific database or schema registry today. Custom app state is normally an ordinary JSON, Markdown, or media file whose shape is owned by your script and page code. Schemas currently appear at these boundaries:
-
-- `params` describes the setup form.
-- `tools[].inputs` validates a tool call.
-- Script metadata describes direct script inputs and outputs.
-- A craftbook can declare its own parameter schema.
-
-If several components share a data shape, keep a TypeScript type and a small runtime validator in your authoring source, then make schema migration an explicit script operation. Gezel preserves the files, but it does not yet migrate arbitrary app data for you.
-
-## Building the Output page
-
-The Output page is served from the selected project-type version and runs in a null-origin sandbox. Set `pages.api` to `1` and use the injected `window.gezel` API. Typed definitions are available from `@bendyline/gezel-sdk/page`.
+The Output page runs in a sandbox and codes against the injected `window.gezel` API (typed definitions in `@bendyline/gezel-sdk/page`; set `pages.api` to `1`). Every readable file must appear in `pages.reads` and every callable tool in `pages.tools` — there is deliberately no raw page write API, so state changes flow through declared tools and stay auditable:
 
 ```js
-const records = await gezel.data.read('records.json');
-render(records);
-
-const stopWatching = gezel.data.watch('records.json', async () => {
-  render(await gezel.data.read('records.json'));
-});
-
+const records = await gezel.data.read('records.json', { as: 'json' });
+gezel.data.watch('records.json', render);
 const { output } = await gezel.tools.invoke('add_record', { title: 'First review' });
 ```
 
-Every readable file or subtree must appear in `pages.reads`, and every callable action must appear in `pages.tools`; the service checks both declarations on every request. There is deliberately no raw page write API. A page changes state through a declared script tool, which leaves an auditable run and can optionally summon a gezel to react. The page should also follow `gezel.ui.theme` and use `gezel.data.url()` for media.
+Pages must work in both themes: declare `color-scheme: light dark`, drive colors through variables, and override them in an `@media (prefers-color-scheme: dark)` block — the validator warns when a page hardcodes light colors.
 
-One project type currently pins one Output entry page. That page may contain several screens or client-side routes, but Gezel does not yet let a type add several first-class project tabs.
+## Validate, pack, and share
 
-## Packaging and delivery today
+`gezel app validate` collects every finding at once, in layers: folder shape and portable paths, every manifest and craftbook parsed with the same schemas the runtime uses, the exact verification an install runs (hashes, reference closure, dependency locks), referenced files and craftbook step graphs, script diagnostics from the real TypeScript compiler, page syntax and theme checks, and offline dependency availability. Errors mean install or adoption would break; warnings are advisory.
 
-Public, broadly useful AI Apps should be contributed to Gilde. The released project type, its roles, craftbooks, and assets then travel in the exact-pinned `@bendyline/gilde` catalog used by Gezel. Models remain separate catalog choices—browse the [Gilde model collection](https://gezelgilde.com/models/)—and are not bundled into an AI App.
+`gezel app pack` derives the manifest and produces the `.gezapp` — a renamed zip holding the root manifest and the `items/` tree, with a SHA-256 digest per embedded item. Exactly one entry project type travels, along with every role and craftbook template it references; toolsets, connectors, and models stay outside as an exact-version dependency lock — models remain separate catalog choices (browse the [Gilde model collection](https://gezelgilde.com/models/)) and are never bundled into an app. Version 1 packages are explicitly `unsigned` — hashes detect corruption, not authorship, so install only from sources you trust.
 
-For private sharing, Gezel uses `.gezapp`. It is a renamed zip with a root `manifest.json`, an `items/` tree, and a SHA-256 digest for every embedded catalog item. Version 1 packages contain:
+Installation is `gezel app add`: a first pass previews publisher, contents, compatibility, conflicts, and missing dependencies without writing anything; the confirmed pass installs atomically under `~/.gezel/ai-apps/`, records a receipt, and mounts the app as one catalog source. Import never executes package contents, and `gezel app list/show/enable/disable/remove/update` manage the installed lifecycle.
 
-- Exactly one entry project type at an exact version, including its pages, seeds, assets, scripts, and private embedded craftbooks.
-- Every gezel role template and standalone craftbook template referenced by that version.
-- An exact dependency lock for referenced toolsets, connectors, and models. These dependencies remain external to the archive and must be available before installation.
-- A minimum Gezel version, publisher details, an explicit signature status, and content hashes.
+For public distribution, contribute the same `items/` content to the [Gilde repository](https://github.com/bendyline/gilde) — the catalog and a `.gezapp` share the layout, so a private app can graduate to the public collection without restructuring.
 
-Only the selected version of each item is included. A `.gezapp` does not embed toolsets, models, connector executables, or arbitrary npm code.
+## For AI agents building apps
 
-Ask a gezel with the project-management tools to export the type applied to the current project. Gezel writes the `.gezapp` into project artifacts. On another installation, place that file in a project's artifacts and ask a gezel to import it. The first import call previews the publisher, contents, compatibility, hashes, conflicts, and missing dependencies without writing anything. A second, confirmed call installs the package atomically under `~/.gezel/ai-apps/`, records an installation receipt, and mounts it as one catalog source. Import never executes the contents.
+An AI agent building an app should work the same loop a person does, with the machine-readable ends of it:
 
-The v1 signature status is `unsigned`. Hashes detect corruption and tampering after packaging, but they do not establish who published the app. Only install packages from a source you trust.
-
-The current exporter packages the catalog definition, not the organic state of the current project. Changes made after adoption—edited scripts, a newly written craftbook, accumulated data, or a redesigned dashboard—are not automatically turned back into a new project-type version.
-
-## The `.gezapp` contract
-
-`.gezapp` is the customer-facing package for one AI App, not a generic bag of unrelated catalog content. Its entry project type defines the experience; referenced roles and craftbooks travel with it; external executable and model dependencies stay locked by identity and exact version. Gezel validates the archive's paths, size limits, schemas, reference closure, hashes, compatibility, dependencies, and conflicts before it mounts the package.
-
-The mounted-unit design preserves the relationship between the installed items and the app that supplied them. That makes receipts, inspection, disabling, replacement, and a future uninstall flow possible without scattering copied files through several local catalog directories.
+- `gezel app schemas --out schemas` (or `--json`) — the JSON Schemas for every catalog content file plus the packed and source gezapp manifests, rendered live from the running build so they can never be stale.
+- `gezel app validate <folder> --json` — the findings list with stable rule ids; fix and re-run until `ok` is true, then `pack`.
+- [examples/apps](https://github.com/bendyline/gezel/tree/main/examples/apps) — three complete source folders of graded complexity, each kept working against the real service by the repository's test suite.
+- `gezel app new` — a guaranteed-valid starting shape when no sample is at hand.
 
 ## What still needs improvement
 
-The runtime pieces are farther along than the authoring experience. These are the largest gaps visible from today's implementation:
+The authoring loop above is real, but the surrounding lifecycle still has gaps:
 
 | Gap | What is needed |
 | --- | --- |
-| App builder | A guided UI or CLI that scaffolds the type, role, page, craftbook, script, and seed files and validates them together |
-| Project-to-app export | A deliberate diff and review flow that converts an organic project into a new project-type version instead of exporting only its original catalog item |
-| Import interface | File picking, bundle review, conflict handling, and export/download controls in the desktop app rather than a project-artifact and gezel-tool flow |
-| Updates and drift | A three-way reconcile view for a new type version versus the installed provenance versus user-edited scripts, craftbooks, documents, and data |
-| Schema evolution | App data-version declarations, migrations, backup, and rollback for custom JSON or other records |
-| Dashboard surface | First-class page templates, development preview, diagnostics, and possibly more than one app-owned project page |
-| Testing | A standard AI App test kit covering adoption, schema validation, scripts, page tools, craftbooks, permissions, local models, and upgrades |
-| Portable script sandbox | A consistent OS-enforced path for user-edited scripts on every supported platform; today provenance-verified catalog scripts have a more portable execution path than modified or newly authored scripts |
-| Catalog workflow | A supported local authoring source, publish command, signing story, and private registry path alongside public Gilde contributions |
+| Project-to-app export | Export packages the catalog definition; a diff-and-review flow that turns organic project changes (edited scripts, new craftbooks, a redesigned page) into a new version does not exist yet |
+| Import interface | The desktop app still routes import through project artifacts and gezel tools; file picking, bundle review, and conflict handling belong in the UI the way the CLI already has them |
+| Updates and drift | `gezel app status` reports per-seed drift and `apply` preserves user-modified seeds, but scripts still overwrite on upgrade and there is no three-way reconcile view |
+| Schema evolution | App data-version declarations, migrations, backup, and rollback for custom records |
+| Dashboard surface | First-class page templates, an in-app development preview, diagnostics, and possibly more than one app-owned project tab |
+| Craftbook test harness | `test.json` sidecars are validated at authoring time, but the eval harness does not yet run an installed app's craftbook tests |
+| Signing and registries | v1 signature status is `unsigned`; a signing story and a private registry path alongside public Gilde contributions |
 
-Until those exist, treat the project type as the canonical source of an AI App. Use Gilde for public distribution, `.gezapp` for controlled sharing of an already-authored type, and ordinary projects for prototypes whose composition is still changing.
+Until those close, treat the source folder as the canonical form of an AI App: Gilde for public distribution, `.gezapp` for controlled sharing, and ordinary projects for prototypes whose composition is still changing.

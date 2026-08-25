@@ -177,6 +177,24 @@ export type ParentToPageMessage = z.infer<typeof ParentToPageMessageSchema>;
 /* ───────────────────────── bootstrap (server-injected) ──────────────────── */
 
 /**
+ * Baked into the shim when the page is served by the app-serve head (a
+ * shareable mini-site) instead of the in-app Output pane. Its presence
+ * selects mode `serve`: `tools.invoke`/`data.*` go over same-origin fetch
+ * against these bases (visitor cookie auth) rather than the postMessage
+ * relay. All paths are same-origin relative — the shim never learns an
+ * absolute daemon address, and no bearer ever reaches the page.
+ */
+export const PageApiServeBootstrapSchema = z.object({
+  /** Base for the head API, e.g. `/app/api`. */
+  apiBase: z.string(),
+  /** Base for direct data/media GETs (`data.url()`), e.g. `/data`. */
+  dataBase: z.string(),
+  /** Whether this site accepts visitor chat (pages may show/hide chat UI). */
+  chat: z.boolean(),
+});
+export type PageApiServeBootstrap = z.infer<typeof PageApiServeBootstrapSchema>;
+
+/**
  * Static facts baked into the shim at serve time by the preview route's
  * `type` branch. Everything here is server-authoritative — the page never
  * derives identity from its own URL again.
@@ -191,5 +209,7 @@ export const PageApiBootstrapSchema = z.object({
   params: z.record(z.string(), z.unknown()),
   /** Declared page-invokable tool names (pages.tools ∩ tools[]). */
   tools: z.array(z.string()),
+  /** Present only when served by the app-serve head (selects mode `serve`). */
+  serve: PageApiServeBootstrapSchema.optional(),
 });
 export type PageApiBootstrap = z.infer<typeof PageApiBootstrapSchema>;

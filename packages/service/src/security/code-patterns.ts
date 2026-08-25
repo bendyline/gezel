@@ -77,7 +77,11 @@ const CODE_PATTERNS: readonly CodePattern[] = [
     category: 'command-injection',
     severity: 'high',
     title: 'Shell command from exec()/execSync() — verify args are not attacker-controlled',
-    re: /\b(child_process\.)?(exec|execSync)\s*\(/,
+    // Member `.exec(` only via child_process-ish receivers: a bare `\bexec`
+    // matches after `.` too, which flagged every `regex.exec(`/`db.exec(`
+    // in the corpus (430 findings, ~6 genuine). Bare calls stay covered via
+    // the lookbehind; `execSync` is unique enough to allow any receiver.
+    re: /(?:\b(?:child_process|childProcess|cp)\s*\.\s*exec|(?<![.\w$])exec|\bexecSync)\s*\(/,
   },
   {
     ruleId: 'sink.command-template',

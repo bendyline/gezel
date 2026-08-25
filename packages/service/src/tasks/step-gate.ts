@@ -33,6 +33,15 @@ const TEMPLATE_PLACEHOLDER = /\{\{\s*[a-zA-Z0-9_.-]+\s*\}\}/g;
  * No assignee can repair this, so it is an infrastructure fault — it
  * pauses for a human instead of charging attempts and climbing the
  * repair ladder.
+ *
+ * The rejection copy has to say that outright. An earlier version told the
+ * assignee to "fix the craftbook or relaunch with that parameter", neither of
+ * which a gezel can do, and on task gezel/7 the retry took the only remaining
+ * reading: it wrote its deliverable to the literal `{{task.dir}}/…` path to
+ * make the check match. That is unreachable — this branch returns before any
+ * check is evaluated — and it left a real directory named `{{task.dir}}` in
+ * the artifacts drawer. `assertNoTemplatePlaceholderPath` now refuses the
+ * write; the message names the dead end so it is not attempted.
  */
 function unresolvedGatePlaceholders(gate: NormalizedStepGate): string[] {
   const found: string[] = [];
@@ -135,7 +144,7 @@ export async function evaluateStepGate(opts: {
   if (unresolved.length > 0) {
     return {
       decision: 'reject',
-      message: `Gate configuration error: ${unresolved.join(', ')} still contains an unresolved template placeholder, so this gate can never pass. The craftbook references a launch parameter that was not supplied. Fix the craftbook or relaunch with that parameter — no deliverable can satisfy it.`,
+      message: `Gate configuration error: ${unresolved.join(', ')} still contains an unresolved template placeholder, so this gate can never pass — it is checking a path or pattern that is the literal "{{…}}" text. Nothing you can do in this task will fix it. Do not write a file to the literal path and do not restate the token in a note: the gate rejects on configuration before any check runs, so neither is read, and both leave stray files behind. Stop here. A person has to correct the craftbook or its launch parameters and relaunch the task.`,
       infrastructureError: true,
       skipped,
       runs,

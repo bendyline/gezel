@@ -15,8 +15,13 @@ const actionScripts = scripts.filter((name) => !name.startsWith('check'));
 
 describe('standard script contracts', () => {
   it('keeps the expected standard library breadth', () => {
-    expect(gateScripts).toHaveLength(34);
-    expect(actionScripts).toEqual(['publishCorpusBatches.ts', 'storeRecords.ts']);
+    expect(gateScripts).toHaveLength(37);
+    expect(actionScripts).toEqual([
+      'ensureIndexFresh.ts',
+      'mergeCorpusCoverage.ts',
+      'publishCorpusBatches.ts',
+      'storeRecords.ts',
+    ]);
   });
 
   it.each(scripts)('%s has loadable, discoverable metadata', async (filename) => {

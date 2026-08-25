@@ -1,9 +1,13 @@
 import {
+  CRAFTBOOK_CATEGORY_FAMILY_META,
+  CRAFTBOOK_CATEGORY_META,
   CRAFTBOOK_ROLE_META,
   type CatalogItemSummary,
+  type CraftbookCategory,
   type CraftbookRole,
   type CraftbookSummary,
   type CreateTaskRequest,
+  resolveCraftbookCategory,
   visibleCatalogItems,
 } from '@bendyline/gezel';
 
@@ -14,6 +18,8 @@ export interface StartCraftbook extends CraftbookSummary {
   tags: string[];
   /** Project-lifecycle shelf supplied by the catalog. */
   role: CraftbookRole;
+  /** Subject shelf — authored by the catalog or inferred from tags. */
+  category: CraftbookCategory;
 }
 
 export interface StartCraftbookCategory {
@@ -48,6 +54,7 @@ export function normalizeCraftbooks(
       stepCount: manifest.steps.length,
       tags: manifest.tags ?? [],
       role: manifest.role ?? 'general',
+      category: resolveCraftbookCategory(manifest),
     });
   }
   return [...byId.values()].sort((left, right) => left.name.localeCompare(right.name));
@@ -55,8 +62,10 @@ export function normalizeCraftbooks(
 
 /**
  * First-stage `/do` choices. The active project's curated recommendation
- * is first, followed by project-local work, lifecycle-role shelves that have
- * at least one match, and an escape hatch containing the complete inventory.
+ * is first, followed by project-local work, subject shelves that have at
+ * least one match, and an escape hatch containing the complete inventory.
+ * Shelves arrive in family order (any-work, code, non-code) and name their
+ * family in the hint, since a flat list has no room for group headings.
  */
 export function craftbookCategories(
   books: ReadonlyArray<StartCraftbook>,
@@ -87,15 +96,38 @@ export function craftbookCategories(
     });
   }
 
-  for (const role of CRAFTBOOK_ROLE_META) {
-    const bookIds = new Set(books.filter((book) => book.role === role.id).map((book) => book.id));
-    if (bookIds.size === 0) continue;
-    categories.push({
-      id: `role:${role.id}`,
-      label: role.label,
-      hint: countLabel(bookIds.size),
-      bookIds,
-    });
+  const starterMeta = CRAFTBOOK_ROLE_META.find((role) => role.id === 'project-starter');
+  if (starterMeta) {
+    const bookIds = new Set(
+      books.filter((book) => book.role === 'project-starter').map((book) => book.id),
+    );
+    if (bookIds.size > 0) {
+      categories.push({
+        id: `role:${starterMeta.id}`,
+        label: starterMeta.label,
+        hint: countLabel(bookIds.size),
+        bookIds,
+      });
+    }
+  }
+
+  for (const family of CRAFTBOOK_CATEGORY_FAMILY_META) {
+    for (const meta of CRAFTBOOK_CATEGORY_META) {
+      if (meta.family !== family.id) continue;
+      const bookIds = new Set(
+        books.filter((book) => book.category === meta.id).map((book) => book.id),
+      );
+      if (bookIds.size === 0) continue;
+      categories.push({
+        id: `category:${meta.id}`,
+        label: meta.label,
+        hint:
+          family.id === 'universal'
+            ? countLabel(bookIds.size)
+            : `${family.label} · ${countLabel(bookIds.size)}`,
+        bookIds,
+      });
+    }
   }
 
   categories.push({

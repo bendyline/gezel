@@ -8,6 +8,7 @@ export {
   DEFAULT_TOOLSET_GROUPS,
   ROLES,
   ROLE_ALIASES,
+  effectiveCapabilityFloor,
   meetsCapabilityFloor,
   resolveRoleId,
   roleCapabilityFloor,

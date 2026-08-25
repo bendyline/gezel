@@ -38,7 +38,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { createLogger } from '@bendyline/gezel';
+import { KeyedLock, createLogger } from '@bendyline/gezel';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 
 const log = createLogger('uv');
@@ -157,7 +157,7 @@ export class UvRuntime {
    * second observes the first's finished venv via the fast-path
    * instead of rebuilding it.
    */
-  private readonly venvLocks = new Map<string, Promise<void>>();
+  private readonly venvLocks = new KeyedLock();
 
   constructor(opts: UvRuntimeOptions) {
     this.home = opts.home;
@@ -183,21 +183,7 @@ export class UvRuntime {
     // call for the same venv don't both run createVenv() concurrently
     // (see `venvLocks`). The second caller, chained after the first,
     // hits the manifest fast-path and returns the already-built venv.
-    const tail = this.venvLocks.get(opts.name) ?? Promise.resolve();
-    const result = tail.then(
-      () => this.ensureVenvSerial(opts),
-      () => this.ensureVenvSerial(opts),
-    );
-    // Store a non-rejecting guard as the new tail so a failed install
-    // doesn't poison the chain for the next caller.
-    this.venvLocks.set(
-      opts.name,
-      result.then(
-        () => undefined,
-        () => undefined,
-      ),
-    );
-    return result;
+    return this.venvLocks.run(opts.name, () => this.ensureVenvSerial(opts));
   }
 
   private async ensureVenvSerial(opts: EnsureVenvOptions): Promise<VenvHandle> {

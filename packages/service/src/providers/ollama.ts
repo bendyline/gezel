@@ -38,6 +38,7 @@ import {
   findUnrecognizedToolEnvelope,
   findXmlTagToolCallSpans,
   foldPreToolPreamble,
+  isWriteShapedToolName,
   parseJsonEnvelopeToolCalls,
   salvageWriteShapedTruncation,
   stripClaudeInvokeToolCallsFromText,
@@ -1142,7 +1143,19 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
           // Streaming-truncated Hermes — same recovery as the mlx
           // provider. Wild-caught on Qwen 3.6 27B writing files past
           // max_tokens, never emitting `</parameter>` or `</function>`.
-          return findHermesFunctionToolCallSpansLenient(turnText, knownToolNames);
+          const lenient = findHermesFunctionToolCallSpansLenient(turnText, knownToolNames);
+          const unsafe = lenient.filter(
+            (parsed) => parsed.truncated && !isWriteShapedToolName(parsed.name),
+          );
+          if (unsafe.length > 0) {
+            turnText = stripHermesFunctionToolCallsFromText(turnText, unsafe);
+            this.emitWarning(
+              `The model's \`${unsafe[0]!.name}\` call was cut off mid-stream and was skipped so a partial mutation could not land. Retry with a smaller payload.`,
+            );
+          }
+          return lenient.filter(
+            (parsed) => !parsed.truncated || isWriteShapedToolName(parsed.name),
+          );
         })();
         // Shell-style `<tool_call>name key="value"` per line, no
         // close, no JSON envelope. Wild-caught on Qwen 3.6 27B —

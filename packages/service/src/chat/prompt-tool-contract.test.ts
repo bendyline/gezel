@@ -170,6 +170,34 @@ describe('lintPromptToolContract', () => {
     );
   });
 
+  it('toolDescription treats call-shaped names as tool references', () => {
+    // In a tool description the surrounding context already establishes that
+    // a call-shaped name is a tool, so an unknown one is a fabrication risk
+    // even without a call/invoke cue.
+    const prose = 'Complements fetch_entries(path), which returns raw rows.';
+    const asProse = lintPromptToolContract({ prompt: prose, availableTools: [] });
+    const asDescription = lintPromptToolContract({
+      prompt: prose,
+      availableTools: [],
+      toolDescription: true,
+    });
+
+    expect(asProse).toEqual({ errors: [], warnings: [] });
+    expect(asDescription.errors).toEqual([
+      expect.objectContaining({ rule: 'unknown-tool-name', tool: 'fetch_entries' }),
+    ]);
+  });
+
+  it('toolDescription keeps known and negatively-referenced tools unflagged', () => {
+    const report = lintPromptToolContract({
+      prompt: 'Use read_file(path) for workspace files; do not use fetch_rows(query) here.',
+      availableTools: ['read_file'],
+      toolDescription: true,
+    });
+
+    expect(report).toEqual({ errors: [], warnings: [] });
+  });
+
   it('rejects a false file-capability denial', () => {
     const report = lintPromptToolContract({
       prompt: 'You have no file writing tools this turn.',

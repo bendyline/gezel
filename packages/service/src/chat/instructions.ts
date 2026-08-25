@@ -1062,6 +1062,37 @@ ${artifactsLine}
       `### Current task: ${t.ref} — "${t.title}"`,
       `Status: **${t.status}**. Assigned to: **${assigneeLabel}**.`,
     ];
+    // Drafting mode is a property of the RUN, injected by the runtime — a
+    // craftbook must read identically whether it edits in place or drafts a
+    // proposal, so no book carries this prose itself. Saying it plainly is
+    // load-bearing: a gezel that believes it edited the workspace writes
+    // "fixed" into its task notes, and that claim flows into the issue
+    // lifecycle and the review card the user reads.
+    if (t.diffpackId) {
+      const editToolsWired =
+        availableTools === undefined ||
+        ['write_file', 'replace_in_file', 'replace_lines'].some((name) =>
+          availableToolNameSet.has(name),
+        );
+      const toolSentence = editToolsWired
+        ? 'Use `read_file`, `write_file`, `replace_in_file`, and `replace_lines` exactly as you always do. They behave normally and you will read your own edits back — but they land in the proposal.'
+        : 'Your file edits land in the proposal, and you will read your own edits back.';
+      lines.push(
+        [
+          '#### Change-proposal mode',
+          '',
+          `You are drafting CHANGE PROPOSAL DP-${t.diffpackId}, not editing this project.`,
+          '',
+          toolSentence,
+          'The project files do not change until a person reviews the proposal and clicks',
+          'Apply. Never claim you "fixed" or "applied" anything; you proposed it.',
+          '',
+          'Anything that RUNS the project — scripts, tests, a build — still sees the',
+          'unmodified files, so it cannot confirm your change. Say what you could not',
+          'verify rather than implying you did.',
+        ].join('\n'),
+      );
+    }
     // Fanout children advertise the HOST's folder (artifactDir is inherited
     // at spawn) — shards share one namespace so collect gates resolve.
     // Roster-gated: naming a tool the turn didn't wire is a documented
@@ -1211,7 +1242,7 @@ ${artifactsLine}
       const smallOrLeaky =
         localModelTier === 'tiny' || localModelTier === 'small' || leaksUntaggedReasoning(modelId);
       const procedureMomentumHint = smallOrLeaky
-        ? ' Start with the first tool action the procedure names, then chain the minimum tool calls needed to complete the current procedure stage. A read-only call gives you context; it is not completion when the procedure still requires a write, edit, script, or other action. Do not plan the remaining steps in prose.'
+        ? ' At the start of a fresh step turn, begin with the first tool action the procedure names, then chain the minimum tool calls needed to complete the current procedure stage. A successful tool result means that action is complete: continue to the next procedure action instead of starting over. A read-only call gives you context; it is not completion when the procedure still requires a write, edit, script, or other action. Do not plan the remaining steps in prose.'
         : '';
       // Name the authored first action, not one inferred from the
       // deliverable extension. For example, an HTML step may explicitly
@@ -1225,10 +1256,10 @@ ${artifactsLine}
             ? firstInputTool
             : firstAvailableProcedureTool(task.step.prompt ?? '', availableToolNameSet);
         if (firstProcedureTool) {
-          firstActionAnchor = ` First action: call \`${firstProcedureTool}\` exactly as the procedure specifies.`;
+          firstActionAnchor = ` First action (once only): call \`${firstProcedureTool}\` exactly as the procedure specifies. After its successful tool result appears in this turn, treat that first action as complete and do not call it again unless the procedure explicitly requires a later repeat; continue with the next procedure action.`;
         }
       }
-      activeTaskAnchor = `\n\n---\n\n**You are mid-craftbook step: \`${task.task.ref}\` — "${task.task.title}"${stepLabel}.** The **Step procedure** block above contains your exact instructions for this turn — those instructions take precedence over your default \`about.md\` persona. Read the procedure, identify the FIRST tool it tells you to call, and call it. Do NOT call \`read_task_notes\` to find the procedure; it's in the prompt above. Do NOT default to \`write_file\` if the procedure says otherwise.${onExitHint}${gateReminder}${procedureMomentumHint}${firstActionAnchor}`;
+      activeTaskAnchor = `\n\n---\n\n**You are mid-craftbook step: \`${task.task.ref}\` — "${task.task.title}"${stepLabel}.** The **Step procedure** block above contains your exact instructions for this turn — those instructions take precedence over your default \`about.md\` persona. At the start of a fresh step turn, read the procedure and begin with the FIRST tool action it names. If this turn's transcript already contains a successful result for that action, it is complete; continue with the next procedure action instead of starting over. Do NOT call \`read_task_notes\` to find the procedure; it's in the prompt above. Do NOT default to \`write_file\` if the procedure says otherwise.${onExitHint}${gateReminder}${procedureMomentumHint}${firstActionAnchor}`;
     } else {
       const resumeAction = availableToolNameSet.has('read_task_notes')
         ? `call \`read_task_notes({ ref: "${task.task.ref}" })\` for the latest, then take the next concrete step with the tools wired this turn`

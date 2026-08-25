@@ -28,6 +28,16 @@ Consequence for supervisor Branch-1 remote mode (`service:{url,token}` in
 layer above. It works only through a tunnel that lands on the remote
 daemon's loopback.
 
+## Sharing an AI App with visitors: app serve
+
+Giving *other people* access to one app's pages (and optionally a chat with
+its lead gezel) is a different problem from reaching your own daemon, and it
+has a first-class answer: `gezel app serve` (docs/app-serve.md) starts a
+separate per-site listener with visitor-grade auth — a share-link key,
+per-visitor cookies, hard rate limits, and no first-party credentials
+anywhere in its responses. Use that for mini-sites; use the tunnels below
+when *you* need your own full product API/UI from another machine.
+
 ## Supported interim: loopback-preserving tunnels
 
 A tunnel (SSH `-L`, Tailscale toward loopback, or any TCP relay whose far

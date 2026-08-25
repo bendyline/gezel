@@ -1,0 +1,11 @@
+{
+  "format": "gezel-ai-app-source",
+  "schemaVersion": 1,
+  "entry": {
+    "projectType": "example-reading-circle",
+    "version": "1.0.0"
+  },
+  "publisher": {
+    "name": "Gezel"
+  }
+}

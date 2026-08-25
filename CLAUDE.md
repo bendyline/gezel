@@ -340,6 +340,63 @@ the resolved security policy. Copilot's SDK-native built-ins (`bash`,
 bypass those layers. An explicit install-level or per-gezel
 `sandboxCopilot: false` is the deliberate compatibility escape hatch.
 
+### Diffpack (change proposal)
+
+A bundle of file edits a gezel drafted **without touching the project**. The
+gezel edits normally; the runtime collects the result into a reviewable pack in
+the artifacts drawer; the user reads it and clicks Apply. Nothing reaches the
+workspace until that click — which is what lets a developer gezel work on a
+folder gezels hold no write grant for, and what lets the night shift produce
+work you review in the morning instead of waking up to a mutated tree.
+
+Three pieces make it work:
+
+- **The sink moves, the tools do not.** A task with `diffpackId` set puts its
+  session in drafting mode: `write_file`, `replace_in_file`, `replace_lines`,
+  `insert_at_marker`, and `delete_path` keep their names and their arguments
+  but land in `artifacts/diffpacks/<packId>/after/`, and `read_file` falls
+  through to the real file until the pack has its own copy. Every prompt,
+  behavior, and hard-won error string still applies because the transforms
+  are literally the same functions ([workspace/edit.ts](packages/service/src/workspace/edit.ts)'s
+  `computeReplaceInFile` and friends, shared with the workspace path).
+  `apply_patch` is withheld from a drafting roster — a hand-authored unified
+  hunk is the one edit shape models reliably get wrong, and the runtime derives
+  the diff from before/after anyway. The step prompt says plainly that this is
+  a proposal, because a gezel that believes it edited the workspace writes
+  "fixed" into its task notes and that claim flows into the issue lifecycle
+  and the review card.
+- **Sealing.** When the drafting task completes, the settle hook diffs every
+  drafted file against the workspace *as it stands then*, writes the sidecars,
+  and records each file's sha256 as `baseHash`. Identity drafts are dropped;
+  a pack that proposed nothing is `failed`, not `ready`.
+- **Drift and overlap are computed at read time, never stored.** Both are
+  functions of the current workspace and the other live packs, so persisting
+  them would need a writer on every external edit — and the edit that matters
+  is the one made outside gezel. Same call the Boekwachter issue's `stale` bit
+  makes.
+
+Applying passes `userInitiated` to `Store.assertWorkspaceWritable`, which
+waives **only** the external-consent branch: the gezel never wrote, so the
+user's click is the write. That flag must never be passed from an MCP tool or
+any other model-reachable surface — [http/routes/diffpacks.ts](packages/service/src/http/routes/diffpacks.ts)
+is its only caller.
+
+Ids are always the drafting task's `num`, including a fanout shard's — nothing
+to mint, and no second numbering scheme beside `BW-n`. A shard addresses its
+own pack through the `{{diffpack.dir}}` token, **not** `{{task.num}}`, which
+`TaskManager.create` already froze to the host's number when it snapshotted
+the spawn template.
+
+Overnight, [diffpack/night-fix-planner.ts](packages/service/src/diffpack/night-fix-planner.ts)
+runs when the night shift's index catch-up drains (so it plans against tonight's
+findings) and hands each qualifying project's open Boekwachter issues to its
+developer. The gate is crew composition, per the `resolveProjectAutonomousGezel`
+convention: a **Boekwachter** and a **developer** on the roster, plus
+`projectAllowsAmbientWork` and the `nightlyFixesEnabled` opt-out (missing =
+on). It never recruits — conjuring the gezel that unlocks the feature would
+make the gate meaningless. The developer clusters the issues and the runtime
+fans out one shard, and therefore one proposal, per cluster.
+
 ### History (audit log)
 
 A first-class, append-only log of meaningful events across the install. Stored as JSONL at `~/.gezel/history.jsonl` (global) and `~/.gezel/projects/{id}/history.jsonl` (per-project). `HistoryManager` (in `packages/service/src/history/manager.ts`) owns both writes and reads.
@@ -369,6 +426,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
 - [`packages/service/src/providers/`](packages/service/src/providers/) — the pluggable LLM layer plus the MCP bridge.
 - [`packages/service/src/meester/prompt.ts`](packages/service/src/meester/prompt.ts) — the curated Meester about.md and name list.
 - [`packages/mcp/src/server.ts`](packages/mcp/src/server.ts) — every MCP tool. Add new capabilities here.
+- [`packages/service/src/diffpack/`](packages/service/src/diffpack/) — change proposals: the copy-on-write draft store, the record/seal/apply manager, and the night planner.
 - [`packages/ui/src/views/`](packages/ui/src/views/) — one file per top-level tab; the entire user-facing surface.
 
 ## Conventions
@@ -386,6 +444,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/history.jsonl` and `~/.gezel/projects/{id}/history.jsonl` — append-only, owned by [HistoryManager](packages/service/src/history/manager.ts)
   - `~/.gezel/keurmeester/` — append-only JSONL intervention case records plus generated digest reports, owned by [KeurmeesterManager](packages/service/src/keurmeester/manager.ts)
   - `~/.gezel/ambient/` — ambient-dashboard PNGs (dated `dashboard-*.png` + stable `latest.png`) with the generator's `state.json`, owned by [AmbientDashboardGenerator](packages/service/src/ambient/dashboard-generator.ts); plus the Electron wallpaper applier's `applied-a/b.png` slots and `display-state.json`, owned by [ambient-display/runtime.ts](packages/app/src/ambient-display/runtime.ts). Regenerable, safe to delete — except `display-state.json`, which holds the restore record for the user's pre-gezel wallpaper
+  - `~/.gezel/ai-apps/` — installed AI App (.gezapp) packages: `registry.json` (the atomic activation point) plus immutable `{appId}/{version}/` slices with receipts, owned by [project-type/gezapp.ts](packages/service/src/project-type/gezapp.ts) (`importGezapp`/`listGezapps`/`setGezappEnabled`/`removeGezapp`, all serialized on its install lock); surfaced at `/api/ai-apps` and `gezel app`
   - `~/.gezel/gilde/` — opt-in live catalog content cache (`versions/<v>/` holding extracted `@bendyline/gilde` releases + `state.json`), owned by [GildeUpdateManager](packages/service/src/gilde-updates/manager.ts); rebuildable, safe to delete — the bundled pin is the permanent fallback
   - `~/.gezel/gezels/{id}/memories/index/` — sqlite-vec index (`mem.db`), owned by [MemoryManager](packages/service/src/memory/manager.ts)
   - `~/.gezel/index/global.db` — home-scoped FTS mirror of session transcripts and the history log, owned by [GlobalIndexManager](packages/service/src/index-store/global-index-manager.ts); rebuildable cache, safe to delete. Documents are NOT here: the shared library is a project and its content lives in that project's index (ADR 0006), which is forced home-side so no database rides the user's — possibly cloud-synced — documents folder
@@ -396,6 +455,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/system-toolsets/` — two classes of pinned entry. **Eager** ones (Playwright + its Chromium) install at boot via [system-toolsets/bootstrap.ts](packages/service/src/system-toolsets/bootstrap.ts). **On-demand** ones (`onDemand: true` in the manifest — today only `@github/copilot-sdk`) install only when the user asks, through [system-toolsets/install-registry.ts](packages/service/src/system-toolsets/install-registry.ts). Read them back with `resolveInstalledSystemLibrary`, not `resolveSystemLibraryPath`: the strict resolver returns `null` on a version mismatch, which is right for eager entries the bootstrap upgrades in place, and would un-install every existing user of an on-demand entry the moment its pin moved.
   - `~/.gezel/knowledge/` — installed `.gezk` knowledge catalogs: `registry.json` (the authoritative per-user record of installed/enabled catalogs), immutable extracted versions under `catalogs/<publisher>/<catalog>/<version>/<digest16>/`, and resumable `downloads/`. Owned by [KnowledgeRegistry](packages/service/src/knowledge/registry.ts) + [KnowledgeManager](packages/service/src/knowledge/manager.ts); catalog SQLite is only ever opened read-only+immutable, on the knowledge worker thread
   - `~/.gezel/git-clones/` and per-project checkouts (`workingDir`, `<workingDir>/gh/`, or the project workspace) — git working copies, owned by [git/manager.ts](packages/service/src/git/manager.ts)'s `resolveCheckout`
+  - `~/.gezel/projects/{id}/diffpacks.json` plus `artifacts/diffpacks/<packId>/` — change proposals a gezel drafted but never applied, owned by [diffpack/manager.ts](packages/service/src/diffpack/manager.ts). The pack folder holds `after/` (the copy-on-write draft tree the re-rooted workspace-write tools land in), `files/` (the sealed single-file unified diffs), `notes.md`, and `manifest.json`. `after/` and `files/` are written straight to disk by [diffpack/draft-store.ts](packages/service/src/diffpack/draft-store.ts) and are write-denied through the artifact store (`isReservedDiffpackArtifactPath`), so a model cannot forge a diff it never drafted; `notes.md` stays writable because explaining the fix is the model's job
   - `~/.gezel/projects/{id}/code-reviews.json` — durable code-review records (kickoff → task ref → settled outcome), owned by [git/reviews.ts](packages/service/src/git/reviews.ts)'s `CodeReviewManager`; the snapshot inputs and reports live in the project artifacts drawer under `reviews/<reviewId>/`
   - `~/.gezel/sandbox/` — sandboxed script runs, owned by [sandbox/runner.ts](packages/service/src/sandbox/runner.ts)
   - `~/.gezel/python/` — uv runtime, owned by [python/uv-runtime.ts](packages/service/src/python/uv-runtime.ts)
@@ -410,6 +470,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - Power-user override: a per-gezel `~/.gezel/gezels/{id}/tools.md` file fully **replaces** the auto-injected listing when present. The gezel's owner accepts responsibility for keeping it accurate. Path helper: [`gezelToolsPath`](packages/core/src/paths.ts). Drift in this file is detected by `ensureState`'s rebuild check the same way `about.md` drift is.
 - **Editing prompts.** Read [docs/prompt-stack.md](docs/prompt-stack.md) first — it maps every layer of the system prompt, the per-turn prelude/nudge channel, and how delivery differs per provider (local vs cloud). Prompt text lives in exactly two homes: universal/standing text in `buildInstructions` in [packages/service/src/chat/manager.ts](packages/service/src/chat/manager.ts) (which also holds `CONTINUATION_NUDGE`, `VOORMAN_IDLE_NUDGE`, `CLOSING_SUMMARY_NUDGE`), and model-conditional text as a behavior in [packages/service/src/model-profile/behaviors/](packages/service/src/model-profile/behaviors/) (tier defaults in [defaults.ts](packages/service/src/model-profile/defaults.ts), toggleable per daemon via `GEZEL_FORCE_BEHAVIORS`/`GEZEL_REMOVE_BEHAVIORS`). These prompts compound — guardrail + about + project context can pass 2000 tokens before the user's question — so verbosity costs attention at depth, especially on small local models. Imperative over explanatory, and ask "is this for the model or for a future engineer?" before adding a block. Measure real sizes with `GEZEL_PROMPT_BREAKDOWN=1`.
 - **Supervisor branches extract their disk/process logic into a sibling helper with its own test.** [extract-bundle.ts](packages/app/src/supervisor/extract-bundle.ts), [extract-node.ts](packages/app/src/supervisor/extract-node.ts), [extract-pnpm.ts](packages/app/src/supervisor/extract-pnpm.ts), [native-bin.ts](packages/app/src/supervisor/native-bin.ts), and [llama-backend.ts](packages/app/src/supervisor/llama-backend.ts) are the exemplar pattern. New supervisor branches follow the same shape so [index.ts](packages/app/src/supervisor/index.ts) stays an orchestrator.
+- **Long-running deadlines budget in AWAKE time, not wall clock.** Anything that can outlive a laptop nap — engine turns, one-shots, MCP tool calls, engine idle eviction — measures its budget with [`AwakeBudget`](packages/core/src/suspend-clock.ts) / `createAwakeTimeout`, never `Date.now() + ms` or `AbortSignal.timeout`. A host suspension freezes the daemon, the engine subprocess, and the socket between them alike, so wall clock spent asleep is time the work could not possibly have used; charging it produces failures like `afterMs=1002151 [Mac AI] timed out after 180s`, where the 822 s difference was macOS dark-wake sleep. Suspension is self-detected by a heartbeat that notices its own gap (`startSuspendMonitor`, started in `startService`), so it works identically embedded, spawned, and as a system service — Electron's `powerMonitor` is a refinement on top, never the mechanism. Two rules follow: poll a deadline rather than arming a single timer (an armed timer fires on the wake-up burst, which IS the bug), and dispose the poll when the work finishes — a per-call timer left running for a 35-minute budget is the sort of background wakeup that stops a CPU idling.
 - **Use the logger, not `console`.** Production code logs through [packages/core/src/log.ts](packages/core/src/log.ts) (`createLogger('chat')`, `.debug/.info/.warn/.error`). Levels are gated by `GEZEL_LOG_LEVEL` (`debug|info|warn|error|silent`, default `info`). `console.*` is reserved for one-shot CLI output and tests.
 - **Electron changes require a full rebuild**. The service is bundled into the Electron bundle at build time; `pnpm app` does `pnpm build && electron .`.
 - **No emojis in committed files** unless a user explicitly requested one (the ⭐ Meester badge in the sidebar is the exception — the user asked for it).
@@ -510,4 +571,9 @@ For automated coverage, [packages/cli/src/daemon-integration.test.ts](packages/c
 | A document isn't findable in search | Is the `shared` project indexing? `GET /api/projects/<sharedId>/index/status`. Check the path isn't filtered as an outside-in twin or sync junk ([fs/sync-junk.ts](packages/service/src/fs/sync-junk.ts)). For a keywordless query, the match may be falling under `VECTOR_ARM_MIN_SIMILARITY` ([index-store.ts](packages/service/src/index-store/index-store.ts)) — that floor is embedder-specific and does not survive a model swap unmeasured |
 | Search returns the same documents for every query | The vector arm lost its floor. KNN always returns its k nearest rows, and rank fusion scores a rank-0 vector hit at a flat 1.0, so an unfloored arm outranks genuine keyword matches with the whole corpus |
 | A `.gezel/` dir or `*.db` appeared in the documents folder | The home-side index placement was bypassed — `projectContentIndexDbFile(..., { forceHomeSide })` in [content-index.ts](packages/service/src/index-store/content-index.ts)'s `open` |
+| A gezel's edits vanished — the file is unchanged | It was drafting a change proposal, not editing. Check `task.diffpackId`; the edits are in `artifacts/diffpacks/<packId>/after/` and land in the workspace only when the user applies from the project's Proposals tab |
+| A drafting shard wrote into the wrong pack folder | Its step used `{{task.num}}`, which `TaskManager.create` froze to the HOST's number when it snapshotted the spawn template. Spawn steps address their own pack with `{{diffpack.dir}}` |
+| Applying a proposal 409s with `drifted` | The target file changed since the proposal was sealed (`baseHash` mismatch). The UI names the files and offers to apply anyway; a hunk that genuinely no longer fits is still refused by the patcher |
+| A timeout reports far less elapsed than the log shows | The host slept through it. Look for a silent gap in the service log followed by several unrelated timers firing within milliseconds of each other, then confirm with `pmset -g log \| grep -E "Entering Sleep state\|DarkWake"`. The budget should have been an `AwakeBudget` — see the awake-time convention above |
+| A resident model unloads for no reason, and the next turn cold-loads | Idle eviction charged host sleep as idle time. `NativeEngineSupervisor` keeps `lastUsedAwakeAt` for the decision and `lastUsedAt` only for display; a re-arm (not an early return) is what keeps the eviction from leaking |
 | A task was created but nobody started it ("active", no chat) | Nothing resolved for the entry step, so `dispatchTaskEntry` returned `no-entry-gezel` — check the step's `suggestedRole`/`assignee`. A workspace SKILL.md names no role at all, which is why invocation goes through the voorman-triage scaffold in [skill-invocation.ts](packages/service/src/workspace/skill-invocation.ts) |
