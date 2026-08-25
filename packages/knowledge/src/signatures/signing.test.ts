@@ -1,11 +1,13 @@
-import type { KnowledgeCatalogManifest } from '@bendyline/gezel';
+import type { KnowledgeCatalogManifest, KnowledgeRegistryIndex } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import { canonicalizeJson } from './jcs.js';
 import {
   generateKnowledgeSigningKeyPair,
   knowledgeKeyId,
   signManifest,
+  signRegistryIndex,
   verifyManifestSignature,
+  verifyRegistryIndex,
 } from './signing.js';
 
 describe('canonicalizeJson (RFC 8785)', () => {
@@ -148,5 +150,54 @@ describe('manifest signing', () => {
     const keys = generateKnowledgeSigningKeyPair();
     expect(knowledgeKeyId(keys.publicKeyPem)).toBe(keys.keyId);
     expect(keys.keyId).toMatch(/^[0-9a-f]{16}$/);
+  });
+});
+
+describe('registry index signing', () => {
+  const index = (): KnowledgeRegistryIndex => ({
+    kind: 'gezel-knowledge-registry',
+    formatVersion: 1,
+    publisher: { id: 'qualla', name: 'Qualla' },
+    generatedAt: '2026-01-01T00:00:00.000Z',
+    catalogs: [
+      {
+        catalogId: 'world-history',
+        version: '2026.08.0',
+        name: 'World History',
+        language: 'en',
+        documents: 100_000,
+        archiveBytes: 1_234_567,
+        contentDigest: 'a'.repeat(64),
+        url: 'https://gezelgilde.com/_knowledge/catalogs/world-history/2026.08.0/world-history-2026.08.0.gezk',
+        license: { name: 'CC BY-SA 4.0', attributionRequired: true },
+        sourceSnapshot: { name: 'enwiki', date: '2026-08-01' },
+      },
+    ],
+  });
+
+  it('signs and verifies with the manifest discipline', () => {
+    const keys = generateKnowledgeSigningKeyPair();
+    const signed = signRegistryIndex(index(), keys.privateKeyPem);
+    expect(signed.signature?.keyId).toBe(keys.keyId);
+    expect(
+      verifyRegistryIndex(signed, [{ keyId: keys.keyId, publicKeyPem: keys.publicKeyPem }]),
+    ).toEqual({ ok: true, keyId: keys.keyId });
+  });
+
+  it('rejects an edited row, an unsigned index, and an unknown key', () => {
+    const keys = generateKnowledgeSigningKeyPair();
+    const other = generateKnowledgeSigningKeyPair();
+    const anchors = [{ keyId: keys.keyId, publicKeyPem: keys.publicKeyPem }];
+    const signed = signRegistryIndex(index(), keys.privateKeyPem);
+
+    const edited = {
+      ...signed,
+      catalogs: [{ ...signed.catalogs[0]!, contentDigest: 'b'.repeat(64) }],
+    };
+    expect(verifyRegistryIndex(edited, anchors).ok).toBe(false);
+    expect(verifyRegistryIndex(index(), anchors).ok).toBe(false);
+    expect(
+      verifyRegistryIndex(signed, [{ keyId: other.keyId, publicKeyPem: other.publicKeyPem }]).ok,
+    ).toBe(false);
   });
 });

@@ -6301,6 +6301,51 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     );
   });
 
+  it('gives a diffpack task safe edit tools when the workspace itself is read-only', async () => {
+    await store.createGezel({ name: 'Dev', role: 'developer' });
+    const proj = await store.createProject({ name: 'Read-only checkout' });
+    await store.updateProject(proj.id, { managedWorkspaceWritePolicy: 'deny' });
+    const { TaskManager } = await import('../tasks/manager.js');
+    const taskMgr = new TaskManager(store);
+    const task = await taskMgr.create(
+      proj.id,
+      {
+        title: 'Fix the targeted finding',
+        description: 'Investigate one indexed finding, propose the smallest safe fix, and verify it.',
+        assignee: { kind: 'gezel', gezelId: 'dev' },
+        steps: [{ id: 'fix', name: 'Fix and verify', terminal: true }],
+      },
+      { draftsDiffpack: true },
+    );
+
+    const session = await manager.createSession({
+      gezelId: 'dev',
+      projectId: proj.id,
+      taskRef: task.ref,
+      stepId: task.activeStepId,
+    });
+    mock.script('proposal drafted');
+    await manager.send(session.id, 'start the targeted fix');
+
+    const create = mock.calls.find((c) => c.kind === 'create');
+    const allow = create!.opts!.toolAllowlist!;
+    expect(allow.has('write_file')).toBe(true);
+    expect(allow.has('replace_in_file')).toBe(true);
+    expect(allow.has('replace_lines')).toBe(true);
+    expect(allow.has('delete_path')).toBe(true);
+    // These operations have no draft-overlay implementation and must never
+    // fall through to the real workspace during proposal mode.
+    expect(allow.has('apply_patch')).toBe(false);
+    expect(allow.has('copy_artifact_to_workspace')).toBe(false);
+    expect(allow.has('make_dir')).toBe(false);
+    expect(allow.has('rename')).toBe(false);
+
+    const sys = create!.opts!.systemMessage!;
+    expect(sys).toContain('#### Change-proposal mode');
+    expect(sys).toContain(`CHANGE PROPOSAL DP-${task.diffpackId}`);
+    expect(sys).not.toContain('Built-in file tools are read-only for this session');
+  });
+
   it('keeps internal-workspace projects writable under super-lockdown (no edits-off note)', async () => {
     // The global policy no longer gates workspace writes — a fresh
     // internal project (a checkers board, a scratch notebook) stays

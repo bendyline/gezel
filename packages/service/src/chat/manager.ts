@@ -14585,11 +14585,14 @@ export class ChatManager {
       }
     }
 
-    // Per-project workspace writability — the single write gate (see
-    // projectManagedWorkspaceWritable in core). Drives the workspace-fs-write
-    // tool strip and the prompt's "edits off" posture note; the global
-    // allowFileEdits deliberately does not.
-    const workspaceWritable = projectManagedWorkspaceWritable(project);
+    // Per-project workspace writability is normally the single write gate
+    // (see projectManagedWorkspaceWritable in core). A drafting task is the
+    // deliberate exception: its managed file tools are writable because the
+    // MCP bridge re-roots them into the diffpack draft tree. Treat that sink
+    // as writable here so the tool filter does not strip the very tools the
+    // proposal needs; the real workspace remains untouched and read-only.
+    const workspaceWritable =
+      projectManagedWorkspaceWritable(project) || Boolean(taskContext?.task.diffpackId);
     const isProjectVoorman = project?.voormanGezelId === record.gezelId;
     const latestUserTextForToolFilter =
       pendingUserText ?? latestUserMessageContent(record.messages);
@@ -14665,15 +14668,18 @@ export class ChatManager {
       },
     });
     // A drafting session composes its change through before/after edits and
-    // the runtime derives the diff. `apply_patch` asks the model to author a
-    // unified hunk instead — the one edit shape models reliably get wrong —
-    // so it is withheld from BOTH surfaces. Both, because the prompt block
-    // and the wired roster must agree: promising a tool the turn cannot make
-    // is the McKinley Park failure (ADR 0001).
+    // the runtime derives the diff. Keep only operations implemented by the
+    // draft adapter: apply_patch deliberately refuses hand-authored hunks,
+    // while mkdir/rename/binary-copy still target the real workspace. They
+    // must be withheld from BOTH surfaces so proposal mode can never leak a
+    // mutation into a writable checkout and never promises a tool that will
+    // merely hit the read-only project gate (ADR 0001).
     const withheldWhileDrafting = <T extends Set<string> | null | undefined>(allowlist: T): T => {
-      if (!taskContext?.task.diffpackId || !allowlist?.has('apply_patch')) return allowlist;
+      if (!taskContext?.task.diffpackId || !allowlist) return allowlist;
       const next = new Set(allowlist);
-      next.delete('apply_patch');
+      for (const tool of ['apply_patch', 'copy_artifact_to_workspace', 'make_dir', 'rename']) {
+        next.delete(tool);
+      }
       return next as T;
     };
     const promptToolAllowlist = withheldWhileDrafting(promptSurface.allowlist);

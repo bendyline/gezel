@@ -15,7 +15,7 @@ import {
   verify as cryptoVerify,
   generateKeyPairSync,
 } from 'node:crypto';
-import type { KnowledgeCatalogManifest } from '@bendyline/gezel';
+import type { KnowledgeCatalogManifest, KnowledgeRegistryIndex } from '@bendyline/gezel';
 import { canonicalizeJson } from './jcs.js';
 
 export interface KnowledgeTrustAnchor {
@@ -82,7 +82,52 @@ export function verifyManifestSignature(
   manifest: KnowledgeCatalogManifest,
   anchors: readonly KnowledgeTrustAnchor[],
 ): ManifestSignatureVerdict {
-  const signature = manifest.signature;
+  return verifySignedDocument(manifest, anchors);
+}
+
+/**
+ * The publisher registry (`_knowledge/registry/index.json`) signs with the
+ * same discipline as a catalog manifest: Ed25519 over JCS(document minus
+ * `signature`). The signing side lives in Qualla's release command; readers
+ * (the machine broker's resolver, Settings → available catalogs) verify.
+ */
+export function signRegistryIndex(
+  index: KnowledgeRegistryIndex,
+  privateKeyPem: string,
+): KnowledgeRegistryIndex {
+  const key = createPrivateKey(privateKeyPem);
+  const publicKeyPem = createPublicKey(key).export({ type: 'spki', format: 'pem' }).toString();
+  const { signature: _omitted, ...unsigned } = index;
+  const value = cryptoSign(
+    null,
+    Buffer.from(canonicalizeJson(unsigned), 'utf8'),
+    key,
+  ).toString('base64');
+  return {
+    ...index,
+    signature: {
+      algorithm: 'ed25519',
+      keyId: knowledgeKeyId(publicKeyPem),
+      canonicalization: 'rfc8785',
+      value,
+    },
+  };
+}
+
+export function verifyRegistryIndex(
+  index: KnowledgeRegistryIndex,
+  anchors: readonly KnowledgeTrustAnchor[],
+): ManifestSignatureVerdict {
+  return verifySignedDocument(index, anchors);
+}
+
+function verifySignedDocument(
+  document: {
+    signature?: { algorithm: 'ed25519'; keyId: string; canonicalization: 'rfc8785'; value: string };
+  },
+  anchors: readonly KnowledgeTrustAnchor[],
+): ManifestSignatureVerdict {
+  const signature = document.signature;
   if (!signature) return { ok: false, reason: 'unsigned' };
   const anchor = anchors.find((a) => a.keyId === signature.keyId);
   if (!anchor) {
@@ -92,9 +137,10 @@ export function verifyManifestSignature(
     if (knowledgeKeyId(anchor.publicKeyPem) !== signature.keyId) {
       return { ok: false, reason: 'unknown-key', detail: 'anchor keyId does not match its key' };
     }
+    const { signature: _omitted, ...unsigned } = document;
     const ok = cryptoVerify(
       null,
-      manifestSigningPayload(manifest),
+      Buffer.from(canonicalizeJson(unsigned), 'utf8'),
       createPublicKey(anchor.publicKeyPem),
       Buffer.from(signature.value, 'base64'),
     );

@@ -103,6 +103,13 @@ export interface CompileKnowledgeCatalogOptions {
   finalizeManifest?: (manifest: KnowledgeCatalogManifest) => KnowledgeCatalogManifest;
   onProgress?: (progress: { phase: string; done: number; total: number }) => void;
   embedBatchSize?: number;
+  /**
+   * TEST/EVAL override of the 200k shard target (gezk-format-v1.md §3.1) —
+   * lets a small corpus build multi-shard so routing recall can be measured
+   * against a scan-all control without a 2M-document corpus. Production
+   * builds must not set it: the constant IS the format's scale design.
+   */
+  shardTargetChunks?: number;
 }
 
 export interface CompileReport {
@@ -166,7 +173,8 @@ export async function compileKnowledgeCatalog(
   const totalChunks = prepared.reduce((sum, p) => sum + p.chunks.length, 0);
 
   // ── shard assignment (greedy, topic-affine — §3.2) ────────────────────────
-  const embedded = totalChunks <= SHARD_TARGET_CHUNKS;
+  const shardTarget = opts.shardTargetChunks ?? SHARD_TARGET_CHUNKS;
+  const embedded = totalChunks <= shardTarget;
   const shardOf = new Map<string, number>();
   let shardCount = 1;
   if (embedded) {
@@ -175,7 +183,7 @@ export async function compileKnowledgeCatalog(
     let current = 0;
     let filled = 0;
     for (const p of prepared) {
-      if (filled > 0 && filled + p.chunks.length > SHARD_TARGET_CHUNKS) {
+      if (filled > 0 && filled + p.chunks.length > shardTarget) {
         current++;
         filled = 0;
       }
@@ -551,7 +559,7 @@ export async function compileKnowledgeCatalog(
       chunking: opts.chunkingProfile,
       topics: opts.topics.map((t) => ({ id: t.id, name: t.name })),
       router: {
-        shardTargetChunks: SHARD_TARGET_CHUNKS,
+        shardTargetChunks: shardTarget,
         shards: routerShardStats.sort((a, b) => a.id - b.id),
         totalCentroids: routerShardStats.reduce((sum, s) => sum + s.centroids, 0),
       },

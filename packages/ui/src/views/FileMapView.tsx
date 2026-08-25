@@ -21,6 +21,7 @@ import { api } from '../api.js';
 import { FileMap, type MapRendererKind, defaultRenderer } from '../components/FileMap/FileMap.js';
 import { townStyleForBlock, townStyleLabel } from '../components/FileMap/iso/town-style.js';
 import { MarkdownField } from '../components/MarkdownField.js';
+import { monacoLanguageForIndexedLanguage } from '../components/monaco-language.js';
 import { navigateToTab } from '../components/nav-actions.js';
 import { DropdownChevron } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
@@ -839,7 +840,7 @@ export function FileMapView({ projectId }: { projectId: string }) {
                     <FileView
                       path={file.path}
                       content={file.content}
-                      language={selected.lang ?? undefined}
+                      language={monacoLanguageForIndexedLanguage(selected.lang)}
                       sourceReveal={sourceReveal?.path === file.path ? sourceReveal : undefined}
                       findings={findings}
                       activeFinding={activeFinding}

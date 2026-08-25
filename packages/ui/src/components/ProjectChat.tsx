@@ -419,14 +419,14 @@ function ProjectChatBody({
     () =>
       pickChatPlaceholder({
         role: isVoorman ? 'voorman' : 'other',
-        gezelName: selectedGezel.name,
+        gezelName: selectedName,
         gezelGender: selectedGezel.gender,
         projectName: project.name,
         fixedFunctionTool: selectedGezel.fixedFunction?.tool,
       }),
     [
       isVoorman,
-      selectedGezel.name,
+      selectedName,
       selectedGezel.gender,
       project.name,
       selectedGezel.fixedFunction?.tool,
@@ -521,8 +521,8 @@ function ProjectChatBody({
             {...(sessionFocusRequest ? { sessionFocusRequest } : {})}
             emptyPlaceholder={
               isVoorman
-                ? `Talk to ${selectedGezel.name} about running "${project.name}" — planning tasks, delegating, or checking progress.`
-                : `Chat with ${selectedGezel.name} about what ${selectedGezelPronouns.subject} ${selectedGezelPronouns.presentBe} working on in "${project.name}".`
+                ? `Talk to ${selectedName} about running "${project.name}" — planning tasks, delegating, or checking progress.`
+                : `Chat with ${selectedName} about what ${selectedGezelPronouns.subject} ${selectedGezelPronouns.presentBe} working on in "${project.name}".`
             }
           />
           <div className="project-chat-compose-shell">

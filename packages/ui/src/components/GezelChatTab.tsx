@@ -2,6 +2,7 @@ import {
   type ChatSessionSource,
   type GezelDetail,
   type ProjectForGezel,
+  displayName,
   pronounFormsForGender,
 } from '@bendyline/gezel';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -14,6 +15,7 @@ import { ProjectTimeline } from './ProjectTimeline.js';
 import { SessionSwitcher } from './SessionSwitcher.js';
 import { pickChatPlaceholder } from './chat-placeholder.js';
 import { type OpenSessionIntent, consumeOpenSession } from './pending-open-session.js';
+import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 const ALL_PROJECTS = '__ALL__';
 const LAST_PROJECT_KEY_PREFIX = 'gezel:chat:last-project:';
@@ -312,6 +314,8 @@ function GezelChatBody({
   focusSessionId?: string;
   sessionFocusRequest?: { sessionId: string; requestKey: number; messageIndex?: number };
 }) {
+  const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
+  const gezelDisplayName = displayName(gezel, roleBasedNameOnlyMode);
   const [sessionId, setSessionId] = useState<string>(focusSessionId ?? '');
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
   const [composerFocusRequestKey, setComposerFocusRequestKey] = useState(0);
@@ -332,8 +336,8 @@ function GezelChatBody({
   // user is talking to.
   const emptyPlaceholder = useMemo(() => {
     const pronouns = pronounFormsForGender(gezel.gender);
-    return `Talk to ${gezel.name} about what ${pronouns.subject} ${pronouns.presentBe} working on in this project.`;
-  }, [gezel.name, gezel.gender]);
+    return `Talk to ${gezelDisplayName} about what ${pronouns.subject} ${pronouns.presentBe} working on in this project.`;
+  }, [gezelDisplayName, gezel.gender]);
 
   // Composer placeholder picks from the role-aware pool so the copy
   // nudges the user toward the right kind of conversation. Voorman
@@ -343,12 +347,18 @@ function GezelChatBody({
     () =>
       pickChatPlaceholder({
         role: project.precedence === 'voorman' ? 'voorman' : 'other',
-        gezelName: gezel.name,
+        gezelName: gezelDisplayName,
         gezelGender: gezel.gender,
         projectName: project.projectName,
         fixedFunctionTool: gezel.fixedFunction?.tool,
       }),
-    [project.precedence, project.projectName, gezel.name, gezel.gender, gezel.fixedFunction?.tool],
+    [
+      project.precedence,
+      project.projectName,
+      gezelDisplayName,
+      gezel.gender,
+      gezel.fixedFunction?.tool,
+    ],
   );
 
   return (
@@ -449,6 +459,8 @@ function GezelChatBody({
  * back to the `default` project (the implicit bucket every install has).
  */
 function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
+  const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
+  const gezelDisplayName = displayName(gezel, roleBasedNameOnlyMode);
   const [focused, setFocused] = useState<{
     sessionId: string;
     projectId: string;
@@ -456,20 +468,20 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
   } | null>(null);
 
   const emptyPlaceholder = useMemo(
-    () => `No chats with ${gezel.name} yet — start one below.`,
-    [gezel.name],
+    () => `No chats with ${gezelDisplayName} yet — start one below.`,
+    [gezelDisplayName],
   );
 
   const composerPlaceholder = useMemo(
     () =>
       pickChatPlaceholder({
         role: 'other',
-        gezelName: gezel.name,
+        gezelName: gezelDisplayName,
         gezelGender: gezel.gender,
         projectName: focused ? undefined : 'default',
         fixedFunctionTool: gezel.fixedFunction?.tool,
       }),
-    [gezel.name, gezel.gender, focused, gezel.fixedFunction?.tool],
+    [gezelDisplayName, gezel.gender, focused, gezel.fixedFunction?.tool],
   );
 
   const composerProjectId = focused?.projectId ?? 'default';

@@ -63,6 +63,7 @@ import {
   WebSearchRequestSchema,
   type WebSearchResponse,
   WikipediaSearchRequestSchema,
+  projectManagedWorkspaceWritable,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
@@ -686,7 +687,8 @@ export function toolRoutes(ctx: ServiceContext): Hono {
 
   app.post('/:id/tools/delegate-finding', async (c) => {
     const id = c.req.param('id');
-    if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
+    const project = await ctx.store.getProject(id);
+    if (!project) return c.json({ error: 'project not found' }, 404);
     const body = DelegateSecurityFindingRequestSchema.parse(await c.req.json());
     const finding = await ctx.contentIndex.findingByFingerprint(id, body.fingerprint);
     if (!finding) return c.json({ error: 'finding not found' }, 404);
@@ -730,10 +732,10 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       null,
       2,
     );
-    const task = await ctx.tasks.create(id, {
+    const createInput = {
       title: `Resolve ${finding.severity} finding in ${finding.path.split('/').pop() ?? finding.path}`,
       description: `Investigate, safely fix, and verify the indexed ${finding.severity} finding “${finding.title}” at ${at}.`,
-      assignee: { kind: 'gezel', gezelId: developer.gezelId },
+      assignee: { kind: 'gezel' as const, gezelId: developer.gezelId },
       steps: [
         {
           id: 'resolve-finding',
@@ -751,7 +753,13 @@ export function toolRoutes(ctx: ServiceContext): Hono {
           ].join('\n'),
         },
       ],
-    });
+    };
+    // A targeted finding remains actionable when the user has not granted
+    // managed writes to the checkout: give the worker the ordinary edit tools,
+    // but re-root them into a reviewable diffpack instead of the workspace.
+    const task = projectManagedWorkspaceWritable(project)
+      ? await ctx.tasks.create(id, createInput)
+      : await ctx.tasks.create(id, createInput, { draftsDiffpack: true });
     await ctx.contentIndex.setFindingStatus(id, finding.fingerprint, 'in_progress', task.ref);
     const dispatch = await dispatchTaskEntry(
       { store: ctx.store, taskRunner: ctx.taskRunner, history: ctx.history },
