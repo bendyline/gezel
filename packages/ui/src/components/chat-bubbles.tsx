@@ -1338,6 +1338,12 @@ export interface StreamingBubbleProps {
    */
   errorDetail?: ChatTurnErrorDetail;
   /**
+   * Contextual recovery controls supplied by the timeline (for example,
+   * Retry + Acknowledge). When absent, the bubble keeps its standalone
+   * report-error fallback used by tests and narrower embedding surfaces.
+   */
+  errorActions?: import('react').ReactNode;
+  /**
    * When set, the turn is sitting in the provider queue — waiting for
    * other turns to finish before it can start. The "thinking" label
    * is replaced with its numbered place in the model queue so the user
@@ -1768,6 +1774,7 @@ export function StreamingBubble({
   fontScale,
   error,
   errorDetail,
+  errorActions,
   queueAhead,
   lastActivityAt,
   hasProgress,
@@ -2292,12 +2299,13 @@ export function StreamingBubble({
           )}
         {failed && (
           <div className="msg-failed-banner">
-            ✗ Turn stopped before finishing. {error}{' '}
-            {!isUserCancelledTurnError(error) && (
-              <ReportErrorLink
-                report={{ surface: 'chat-turn', message: error ?? '', detail: errorDetail }}
-              />
-            )}
+            <div>✗ Turn stopped before finishing. {error}</div>
+            {errorActions ??
+              (!isUserCancelledTurnError(error) && (
+                <ReportErrorLink
+                  report={{ surface: 'chat-turn', message: error ?? '', detail: errorDetail }}
+                />
+              ))}
           </div>
         )}
       </div>

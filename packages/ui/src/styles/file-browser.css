@@ -1578,6 +1578,45 @@ button.danger {
   font-size: 0.85rem;
 }
 
+.timeline-session-error-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  line-height: 1.45;
+}
+
+.timeline-session-error-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.timeline-session-error-action {
+  padding: 0.32rem 0.7rem;
+  border-radius: var(--radius-md);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.timeline-session-error-action-primary {
+  background: var(--accent);
+  color: white;
+}
+
+.timeline-session-error-action:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.timeline-session-error-action-error {
+  margin: 0.5rem 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
 /* First-run on-device install banner — shown on Home while the
    bootstrapped Gemma 4 model is still downloading (or failed).
    Goes away automatically when the model appears on disk. */
@@ -1701,6 +1740,10 @@ button.danger {
   text-decoration: underline;
   font: inherit;
   cursor: pointer;
+}
+
+.timeline-session-error-actions .timeline-session-error-link {
+  margin-left: 0.1rem;
 }
 
 .timeline-session-error-link:hover {

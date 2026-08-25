@@ -5610,6 +5610,7 @@ export class Store {
           ...(s.model ? { sessionModel: s.model } : {}),
           ...(s.archived ? { sessionArchived: true } : {}),
           ...(s.lastTurnError ? { sessionLastTurnError: s.lastTurnError } : {}),
+          ...(s.lastTurnErrorDetail ? { sessionLastTurnErrorDetail: s.lastTurnErrorDetail } : {}),
           ...(s.taskRef ? { taskRef: s.taskRef } : {}),
           ...(s.stepId ? { stepId: s.stepId } : {}),
           ...(handoff ? { handoffFrom: handoff } : {}),

@@ -492,6 +492,7 @@ describe('Store session CRUD', () => {
           signal: 'SIGILL',
           diagnostics: { model: 'gemma4-26b-q4', contextTotal: 32768, flashAttention: true },
         },
+        messages: [{ role: 'user', content: 'go', at: '2026-04-14T10:00:00Z' }],
       }),
     );
     const hit = await store.getSession('ada', 'crashed');
@@ -503,6 +504,9 @@ describe('Store session CRUD', () => {
       signal: 'SIGILL',
       diagnostics: { model: 'gemma4-26b-q4', contextTotal: 32768, flashAttention: true },
     });
+
+    const timeline = await store.listTimeline({ gezelId: 'ada', limit: 50 });
+    expect(timeline.messages[0]?.sessionLastTurnErrorDetail).toEqual(hit?.lastTurnErrorDetail);
   });
 
   it('reads a session written before the structured detail existed', async () => {

@@ -4957,13 +4957,23 @@ export class GezelClient {
   }
 
   /**
-   * Clear the poisoned state on every session in a project (the chat banner's
-   * Continue button). One engine crash poisons several sessions, so a
-   * project-wide reset is what gets the project working again. Returns the
-   * number of sessions cleared.
+   * Clear the poisoned state on every session in a project (the failed-turn
+   * banner's Acknowledge action). One engine crash poisons several sessions,
+   * so a project-wide reset is what gets the project working again. Returns
+   * the number of sessions cleared.
    */
   clearProjectErrors(projectId: string): Promise<{ cleared: number }> {
     return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/clear-errors`);
+  }
+
+  /**
+   * Re-run the input behind a session's most recent failed turn. The service
+   * appends a hidden retry seed, so the provider receives the original input
+   * again without duplicating the person's message in the visible transcript.
+   * The live result arrives over the ordinary chat event stream.
+   */
+  retryChatSessionTurn(sessionId: string): Promise<{ accepted: true; sessionId: string }> {
+    return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/retry`);
   }
 
   /**

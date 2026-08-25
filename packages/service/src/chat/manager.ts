@@ -5612,6 +5612,40 @@ export class ChatManager {
     return cleared;
   }
 
+  /**
+   * Re-run the input that produced a session's persisted failed-turn state.
+   * The retry seed is hidden from the transcript: the person already has one
+   * visible copy of their request, and duplicating it would make Retry look
+   * like a second user send. The model still receives the exact original
+   * input, with cross-gezel/system provenance preserved where it matters.
+   *
+   * This accepts quickly and tracks the actual turn in the same background
+   * set as the ordinary HTTP send path. Success clears `lastTurnError` through
+   * the normal turn commit; another failure replaces it with the new error.
+   */
+  async retryLastTurn(sessionId: string): Promise<{ accepted: true; sessionId: string }> {
+    const record = await this.getSessionRecord(sessionId);
+    if (!record) throw new Error(`session ${sessionId} not found`);
+    if (!record.lastTurnError) throw new Error('this session has no failed turn to retry');
+    if (this.inflight.has(sessionId) || (this.pendingSends.get(sessionId)?.length ?? 0) > 0) {
+      throw new Error('a turn is already in progress for this session');
+    }
+
+    const failedInput = [...record.messages].reverse().find((message) => message.role === 'user');
+    if (!failedInput) throw new Error('the failed turn has no input to retry');
+
+    const retry = this.send(sessionId, failedInput.content, {
+      hidden: true,
+      ...(failedInput.from ? { from: failedInput.from } : {}),
+      ...(failedInput.origin === 'system' ? { messageOrigin: 'system' as const } : {}),
+    }).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn(`[chat] failed-turn retry failed for ${sessionId}: ${message}`);
+    });
+    this.trackBackground(retry);
+    return { accepted: true, sessionId };
+  }
+
   async archiveSession(sessionId: string): Promise<ChatSession> {
     const record = await this.getSessionRecord(sessionId);
     if (!record) throw new Error(`session ${sessionId} not found`);

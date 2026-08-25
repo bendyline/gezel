@@ -752,6 +752,42 @@ describe('ChatManager — send + persistence', () => {
     expect(disk!.lastTurnErrorDetail).toBeUndefined();
   });
 
+  it('retries the failed input without duplicating the visible user message', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptSendFailure(
+      '[Mac AI] the on-device engine dropped the connection mid-turn. Retry the turn.',
+      NATIVE_CRASH_FIELDS,
+    );
+    await expect(manager.send(session.id, 'finish the report')).rejects.toThrow();
+
+    mock.script('Recovered reply');
+    await expect(manager.retryLastTurn(session.id)).resolves.toEqual({
+      accepted: true,
+      sessionId: session.id,
+    });
+    await manager.drainBackground();
+
+    const disk = await store.getSession('ada', session.id);
+    expect(disk!.lastTurnError).toBeUndefined();
+    expect(disk!.lastTurnErrorDetail).toBeUndefined();
+    expect(
+      disk!.messages.map((message) => [message.role, message.content, message.hidden]),
+    ).toEqual([
+      ['user', 'finish the report', undefined],
+      ['assistant', '', undefined],
+      ['user', 'finish the report', true],
+      ['assistant', 'Recovered reply', undefined],
+    ]);
+
+    const timeline = await store.listTimeline({ gezelId: 'ada', limit: 50 });
+    expect(timeline.messages.filter((message) => message.role === 'user')).toHaveLength(1);
+  });
+
+  it('refuses retry when the session has no failed turn', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    await expect(manager.retryLastTurn(session.id)).rejects.toThrow(/no failed turn/i);
+  });
+
   it('clears the structured detail through clearLastTurnError', async () => {
     // Guards the early-return in `clearLastTurnError`, which used to bail
     // on `lastTurnError === undefined` alone.

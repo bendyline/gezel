@@ -756,6 +756,19 @@ use toasts for errors. If the operation is dismissable, show the error
 until the next user action; if it blocks something, show it until the user
 fixes it.
 
+**A red error names both exits.** A persistent red alert never uses an
+ambiguous verb such as “Continue” for dismissal. When the user can remove the
+alert without fixing its cause, label that action **Acknowledge** and say in
+its tooltip what scope it clears. When the failure is genuinely recoverable,
+offer a separate, primary **Retry** (or a more specific repair verb) that
+actually performs the recovery. Retry is contextual: prefer structured error
+classification, with a narrow compatibility fallback for older errors whose
+own copy explicitly recommends retrying; deterministic failures and “do not
+retry” conditions do not get it. Keep both actions in a distinct row beneath
+the explanation, disable them while one is running, and surface a failed
+action inline instead of swallowing it. The failed-turn banner and its live
+streaming twin are the reference.
+
 **A failed tool says why, in the thread.** A red ✗ on a tool row is a
 status, not an explanation, and burying the reason in a tooltip or behind
 the collapsed step expando makes a gezel look stuck for no stated cause —

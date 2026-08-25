@@ -797,6 +797,9 @@ export function ChatTimelineView({
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sessionErrorActions, setSessionErrorActions] = useState<
+    Map<string, { busy?: 'acknowledge' | 'retry'; error?: string }>
+  >(new Map());
   const [gezels, setGezels] = useState<Map<string, GezelSummary>>(new Map());
   const [projects, setProjects] = useState<Map<string, Project>>(new Map());
   /**
@@ -949,6 +952,7 @@ export function ChatTimelineView({
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setSessionErrorActions(new Map());
     setMessages([]);
     setTerminalEntries([]);
     setHasMore(false);
@@ -2021,6 +2025,27 @@ export function ChatTimelineView({
         setLiveBump((n) => n + 1);
         onToolActivity?.(tool);
       } else if (event.type === 'complete') {
+        // A committed assistant message means the retry (or an ordinary
+        // follow-up) recovered this session. Clear the durable banner copy
+        // immediately rather than waiting for a snapshot merge whose older
+        // in-memory row may win deduplication.
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.sessionId === sessionId
+              ? {
+                  ...message,
+                  sessionLastTurnError: undefined,
+                  sessionLastTurnErrorDetail: undefined,
+                }
+              : message,
+          ),
+        );
+        setSessionErrorActions((prev) => {
+          if (!prev.has(sessionId)) return prev;
+          const next = new Map(prev);
+          next.delete(sessionId);
+          return next;
+        });
         // `complete` fires per iteration of the manager's
         // continuation loop, not per user-facing turn. The actual
         // end-of-work signal is `done`. Deleting the slot here
@@ -2094,6 +2119,23 @@ export function ChatTimelineView({
           });
         }
       } else if (event.type === 'error') {
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.sessionId === sessionId
+              ? {
+                  ...message,
+                  sessionLastTurnError: event.error,
+                  sessionLastTurnErrorDetail: event.errorDetail,
+                }
+              : message,
+          ),
+        );
+        setSessionErrorActions((prev) => {
+          if (!prev.has(sessionId)) return prev;
+          const next = new Map(prev);
+          next.delete(sessionId);
+          return next;
+        });
         // Preserve the streaming slot — the user was watching tokens
         // come in, and wiping the bubble on error leaves them staring at
         // a blank space wondering whether their question was heard. Tag
@@ -3033,6 +3075,143 @@ export function ChatTimelineView({
     </>
   );
 
+  const setSessionAction = (
+    sessionId: string,
+    state: { busy?: 'acknowledge' | 'retry'; error?: string } | null,
+  ) => {
+    setSessionErrorActions((prev) => {
+      const next = new Map(prev);
+      if (state) next.set(sessionId, state);
+      else next.delete(sessionId);
+      return next;
+    });
+  };
+
+  const acknowledgeFailedTurn = async (sessionId: string, projectId: string) => {
+    setSessionAction(sessionId, { busy: 'acknowledge' });
+    try {
+      await api.clearProjectErrors(projectId);
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.projectId === projectId
+            ? {
+                ...message,
+                sessionLastTurnError: undefined,
+                sessionLastTurnErrorDetail: undefined,
+              }
+            : message,
+        ),
+      );
+      // The live failed bubble preserves partial streamed content. Its
+      // synthetic persisted twin already carries that content, so retire the
+      // red live shell and reconcile the durable row when the alert is acked.
+      let retiredLiveError = false;
+      for (const [liveSessionId, slot] of liveRef.current) {
+        if (slot.projectId !== projectId || !slot.error) continue;
+        liveRef.current.delete(liveSessionId);
+        retiredLiveError = true;
+      }
+      if (retiredLiveError) {
+        setLiveBump((n) => n + 1);
+        void refreshLatest();
+      }
+      setSessionErrorActions((prev) => {
+        const next = new Map(prev);
+        for (const message of messagesRef.current) {
+          if (message.projectId === projectId) next.delete(message.sessionId);
+        }
+        return next;
+      });
+      window.dispatchEvent(
+        new CustomEvent('gezel:session-error-cleared', { detail: { projectId } }),
+      );
+    } catch {
+      setSessionAction(sessionId, {
+        error: 'Could not clear the alert. Check the connection and try again.',
+      });
+    }
+  };
+
+  const retryFailedTurn = async (sessionId: string) => {
+    setSessionAction(sessionId, { busy: 'retry' });
+    try {
+      await api.retryChatSessionTurn(sessionId);
+      // Keep the action disabled until the normal complete/error event settles
+      // the attempt. A hidden retry seed will replace a preserved failed live
+      // slot with the new thinking bubble as soon as the daemon starts it.
+    } catch {
+      setSessionAction(sessionId, {
+        error: 'Retry could not start. Check the connection or settings, then try again.',
+      });
+    }
+  };
+
+  const failedTurnActions = (
+    sessionId: string,
+    errorMessage: string,
+    errorDetail: ChatTurnErrorDetail | undefined,
+    projectId: string | null,
+    reportSurface: 'session-error' | 'chat-turn',
+  ) => {
+    const action = sessionErrorActions.get(sessionId);
+    const busy = action?.busy;
+    const retryable = isRetryableFailedTurn(errorMessage, errorDetail);
+    return (
+      <>
+        <div className="timeline-session-error-actions" aria-label="Failed turn actions">
+          {retryable && (
+            <button
+              type="button"
+              className="timeline-session-error-action timeline-session-error-action-primary"
+              disabled={busy !== undefined}
+              onClick={() => void retryFailedTurn(sessionId)}
+            >
+              {busy === 'retry' ? 'Retrying…' : 'Retry'}
+            </button>
+          )}
+          {isModelUnavailableError(errorMessage) && (
+            <button
+              type="button"
+              className="timeline-session-error-action secondary"
+              disabled={busy !== undefined}
+              onClick={() =>
+                window.dispatchEvent(
+                  new CustomEvent('gezel:navigate', {
+                    detail: { view: 'settings', section: 'defaults' },
+                  }),
+                )
+              }
+            >
+              Open Settings
+            </button>
+          )}
+          {projectId && (
+            <button
+              type="button"
+              className="timeline-session-error-action secondary"
+              title="Clear this project's failed-turn alerts without rerunning the work"
+              disabled={busy !== undefined}
+              onClick={() => void acknowledgeFailedTurn(sessionId, projectId)}
+            >
+              {busy === 'acknowledge' ? 'Acknowledging…' : 'Acknowledge'}
+            </button>
+          )}
+          {!isUserCancelledTurnError(errorMessage) && (
+            <ReportErrorLink
+              className="timeline-session-error-link"
+              report={{ surface: reportSurface, message: errorMessage, detail: errorDetail }}
+            />
+          )}
+        </div>
+        {action?.error && (
+          <p className="timeline-session-error-action-error" role="alert">
+            {action.error}
+          </p>
+        )}
+      </>
+    );
+  };
+
   if (loading && messages.length === 0) {
     return (
       <div className="chat-timeline chat-timeline-loading">
@@ -3074,6 +3253,7 @@ export function ChatTimelineView({
   // return, instead of just their own message with nothing below.
   let prevSessionId: string | null = null;
   let prevSessionError: string | null = null;
+  let prevSessionErrorDetail: ChatTurnErrorDetail | undefined;
   let prevSessionProjectId: string | null = null;
   // Sessions we've already rendered a divider for in this view. When
   // another session's threads land between two turns of the same
@@ -3122,7 +3302,12 @@ export function ChatTimelineView({
     }
   }
   const els: React.ReactNode[] = [];
-  const emitSessionErrorBanner = (sid: string, error: string, projectId: string | null) => {
+  const emitSessionErrorBanner = (
+    sid: string,
+    error: string,
+    errorDetail: ChatTurnErrorDetail | undefined,
+    projectId: string | null,
+  ) => {
     els.push(
       <div
         key={`session-error:${sid}`}
@@ -3130,59 +3315,15 @@ export function ChatTimelineView({
         // Scroll target for the sidebar's failed-turn indicator — see
         // `focusSession` above.
         data-session-error={sid}
+        role="alert"
       >
-        ✗ Last turn failed: {error}
-        {isModelUnavailableError(error) && (
-          <>
-            {' '}
-            <button
-              type="button"
-              className="timeline-session-error-link"
-              onClick={() =>
-                window.dispatchEvent(
-                  new CustomEvent('gezel:navigate', {
-                    detail: { view: 'settings', section: 'defaults' },
-                  }),
-                )
-              }
-            >
-              Open Settings →
-            </button>
-          </>
-        )}
-        {projectId && (
-          <>
-            {' '}
-            <button
-              type="button"
-              className="timeline-session-error-link"
-              title="Clear the failed-turn state across this project so ambient work resumes"
-              onClick={() => {
-                // One engine crash poisons several of a project's sessions, so
-                // "Continue" clears them all: the project goes active again and
-                // every failed-turn banner drops (no separate collapsed state).
-                void api
-                  .clearProjectErrors(projectId)
-                  .then(() => {
-                    setMessages((prev) =>
-                      prev.map((m) =>
-                        m.projectId === projectId ? { ...m, sessionLastTurnError: undefined } : m,
-                      ),
-                    );
-                    window.dispatchEvent(
-                      new CustomEvent('gezel:session-error-cleared', { detail: { projectId } }),
-                    );
-                  })
-                  .catch(() => {});
-              }}
-            >
-              Continue
-            </button>
-          </>
-        )}{' '}
-        {!isUserCancelledTurnError(error) && (
-          <ReportErrorLink report={{ surface: 'session-error', message: error }} />
-        )}
+        <div className="timeline-session-error-body">
+          <span aria-hidden="true">✗</span>
+          <span>
+            <strong>Last turn failed.</strong> {error}
+          </span>
+        </div>
+        {failedTurnActions(sid, error, errorDetail, projectId, 'session-error')}
       </div>,
     );
   };
@@ -3386,6 +3527,17 @@ export function ChatTimelineView({
         {...(fontScale !== 1 ? { fontScale } : {})}
         {...(slot.error ? { error: slot.error } : {})}
         {...(slot.errorDetail ? { errorDetail: slot.errorDetail } : {})}
+        {...(slot.error
+          ? {
+              errorActions: failedTurnActions(
+                sessionId,
+                slot.error,
+                slot.errorDetail,
+                slot.projectId,
+                'chat-turn',
+              ),
+            }
+          : {})}
         {...(slot.queueAhead !== undefined ? { queueAhead: slot.queueAhead } : {})}
         {...(slot.wirePulseCount && slot.wirePulseCount > 0
           ? { wirePulseCount: slot.wirePulseCount }
@@ -3569,7 +3721,12 @@ export function ChatTimelineView({
     if (!anchorRow) continue;
     if (sid !== prevSessionId) {
       if (prevSessionId && prevSessionError && !liveRef.current.has(prevSessionId)) {
-        emitSessionErrorBanner(prevSessionId, prevSessionError, prevSessionProjectId);
+        emitSessionErrorBanner(
+          prevSessionId,
+          prevSessionError,
+          prevSessionErrorDetail,
+          prevSessionProjectId,
+        );
       }
       const isContinuing = seenSessionIds.has(sid);
       els.push(
@@ -3588,6 +3745,7 @@ export function ChatTimelineView({
       seenSessionIds.add(sid);
       prevSessionId = sid;
       prevSessionError = null;
+      prevSessionErrorDetail = undefined;
       prevSessionProjectId = null;
     }
     // Session-level error metadata rides on every message row of the
@@ -3595,6 +3753,7 @@ export function ChatTimelineView({
     const errorSource = item.root ?? item.replies.find((r) => r.kind === 'message');
     if (errorSource && errorSource.kind === 'message' && errorSource.msg.sessionLastTurnError) {
       prevSessionError = errorSource.msg.sessionLastTurnError;
+      prevSessionErrorDetail = errorSource.msg.sessionLastTurnErrorDetail;
       prevSessionProjectId = errorSource.msg.projectId;
     }
 
@@ -3680,7 +3839,12 @@ export function ChatTimelineView({
   }
   // Trailing banner for the final session in the stream.
   if (prevSessionId && prevSessionError && !liveRef.current.has(prevSessionId)) {
-    emitSessionErrorBanner(prevSessionId, prevSessionError, prevSessionProjectId);
+    emitSessionErrorBanner(
+      prevSessionId,
+      prevSessionError,
+      prevSessionErrorDetail,
+      prevSessionProjectId,
+    );
   }
 
   // Surface the active session's context-window status (if any) as
@@ -4006,6 +4170,21 @@ function findLastForSession(
 
 function isModelUnavailableError(message: string): boolean {
   return /model\s+.*\bnot available\b/i.test(message) || /\bunknown model\b/i.test(message);
+}
+
+/**
+ * Retry is contextual, not a reflex attached to every red surface. Prefer the
+ * daemon's structured classification; keep a narrow prose fallback for older
+ * daemons and MLX failures whose user-facing copy explicitly recommends a
+ * retry. Deterministic "do not retry"/unrunnable failures never get the action.
+ */
+export function isRetryableFailedTurn(message: string, detail?: ChatTurnErrorDetail): boolean {
+  if (isUserCancelledTurnError(message) || isModelUnavailableError(message)) return false;
+  if (/\bdo not retry\b|\bcannot run on this machine\b/i.test(message)) return false;
+  if (detail?.code === 'native-engine-crash') return true;
+  return /\bretry the turn\b|\bsend (?:the )?message again\b|\bretry \(the cache is warm now\)|\btry a shorter prompt, retry\b/i.test(
+    message,
+  );
 }
 
 const NO_FILES: readonly ReferencedFile[] = [];

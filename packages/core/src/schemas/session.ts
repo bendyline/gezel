@@ -574,6 +574,13 @@ export const TimelineMessageSchema = z.object({
    * on every message that shares the session.
    */
   sessionLastTurnError: z.string().optional(),
+  /**
+   * Structured twin of {@link sessionLastTurnError}. The failed-turn banner
+   * uses this to offer recovery actions only when the daemon classified the
+   * failure as recoverable (for example, a native engine crash), instead of
+   * scraping every new provider's prose forever.
+   */
+  sessionLastTurnErrorDetail: ChatTurnErrorDetailSchema.optional(),
   taskRef: z.string().optional(),
   stepId: z.string().optional(),
   handoffFrom: z.object({ gezelId: z.string(), sessionId: z.string() }).optional(),
