@@ -1342,13 +1342,11 @@ describe('salvageWriteShapedTruncation — shared Layer-3 helper', () => {
     expect(result.strippedContent).toBe('');
   });
 
-  it('synthesizes a call from a truncated JSON-envelope write_file', () => {
+  it('does not synthesize a truncated artifact overwrite with no append recovery path', () => {
     const text = '{"tool": "write_artifact", "args": {"path": "out.txt", "content": "hello\\nworld';
     const result = salvageWriteShapedTruncation(text, WRITE_KNOWN, 'envelope-prefix');
-    expect(result.synthesizedCall).not.toBeNull();
-    expect(result.synthesizedCall!.name).toBe('write_artifact');
-    expect(result.synthesizedCall!.argsObject.path).toBe('out.txt');
-    expect(result.synthesizedCall!.argsObject.content).toContain('hello\nworld');
+    expect(result.synthesizedCall).toBeNull();
+    expect(result.wanted).toBe('write_artifact');
   });
 
   it('returns null for non-write-shaped tools', () => {
@@ -1400,6 +1398,15 @@ describe('appendTruncationHintToToolResult', () => {
     expect(after).toBe(before);
   });
 
+  it('does not prescribe workspace append recovery for an artifact overwrite', () => {
+    const before = 'Wrote tasks/13/pr-review-coverage.json';
+    const after = appendTruncationHintToToolResult(before, 'write_artifact', {
+      path: 'tasks/13/pr-review-coverage.json',
+      content: '{"reviewedFiles":[',
+    });
+    expect(after).toBe(before);
+  });
+
   it("skips when the tool result is an ERROR (write didn't land)", () => {
     const before = 'ERROR: file path is outside workspace';
     const after = appendTruncationHintToToolResult(before, 'write_file', {
@@ -1411,11 +1418,11 @@ describe('appendTruncationHintToToolResult', () => {
 
   it('is idempotent — calling twice produces the same output', () => {
     const before = 'Wrote 4 bytes';
-    const once = appendTruncationHintToToolResult(before, 'write_artifact', {
+    const once = appendTruncationHintToToolResult(before, 'write_file', {
       path: 'x.html',
       content: 'data',
     });
-    const twice = appendTruncationHintToToolResult(once, 'write_artifact', {
+    const twice = appendTruncationHintToToolResult(once, 'write_file', {
       path: 'x.html',
       content: 'data',
     });
@@ -1658,10 +1665,15 @@ describe('appendCapTruncationHintToRejectedWrite', () => {
 
 describe('write-shaped vs payload-mutation tool sets', () => {
   it('keeps whole-file semantics narrow and cap detection wide', () => {
-    for (const name of ['write_file', 'write_artifact', 'append_to_file']) {
+    for (const name of ['write_file', 'append_to_file']) {
       expect(isWriteShapedToolName(name), name).toBe(true);
       expect(isPayloadMutationToolName(name), name).toBe(true);
     }
+    // The artifact drawer has no append/edit primitive. A truncated
+    // write_artifact must be rejected atomically, but still participates in
+    // cap detection so the model receives the correct blocker guidance.
+    expect(isWriteShapedToolName('write_artifact')).toBe(false);
+    expect(isPayloadMutationToolName('write_artifact')).toBe(true);
     // Payload-carrying, but a partial one never lands on disk — so these
     // must stay out of the `{path, content}` salvage/repair paths while
     // still being visible to cap detection.

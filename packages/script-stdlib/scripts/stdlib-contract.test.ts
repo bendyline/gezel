@@ -15,9 +15,10 @@ const actionScripts = scripts.filter((name) => !name.startsWith('check'));
 
 describe('standard script contracts', () => {
   it('keeps the expected standard library breadth', () => {
-    expect(gateScripts).toHaveLength(36);
+    expect(gateScripts).toHaveLength(37);
     expect(actionScripts).toEqual([
       'ensureIndexFresh.ts',
+      'mergeCorpusCoverage.ts',
       'publishCorpusBatches.ts',
       'storeRecords.ts',
     ]);

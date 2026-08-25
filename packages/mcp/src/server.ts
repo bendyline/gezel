@@ -4216,6 +4216,27 @@ server.tool(
         };
       }
     }
+    // Artifact writes are whole-file replacements. Reject malformed JSON
+    // before crossing the store boundary so a tool call cut off by a local
+    // model's output cap cannot replace the last complete ledger with a
+    // syntactically broken prefix. This is intentionally extension-scoped:
+    // scratch Markdown/source artifacts retain their existing validation and
+    // `force` semantics, while a `.json` artifact is never useful malformed.
+    if (clean.toLowerCase().endsWith('.json')) {
+      try {
+        JSON.parse(content);
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Refusing to replace ${clean}: the new content is not valid JSON (${err instanceof Error ? err.message : String(err)}). The previous artifact was left unchanged. Re-emit one complete valid JSON value; if it cannot fit in one tool call, split the deliverable or use a deterministic script to assemble it.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
     // normalizeMarkdown collapses single newlines inside non-fenced paragraphs into
     // spaces — correct for prose .md, catastrophic for source code. An end-of-line
     // `// comment` would eat the next statement when collapsed onto one line
