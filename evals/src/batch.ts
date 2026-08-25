@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DeviceHealthGate, createSystemDeviceHealthProbe } from '@bendyline/gezel/native';
 import { repoRoot } from './native-bin.ts';
-import { ensurePreflightAdmission, formatPreflightFailure } from './preflight.ts';
+import { PreflightExcludedError, ensurePreflightAdmission } from './preflight.ts';
 import { isLocalEngine } from './providers.ts';
 import { resolveEvalRunsDir } from './run-paths.ts';
 import { runTrial } from './runner.ts';
@@ -158,7 +158,7 @@ export async function runBatch(scenario: EvalScenario, opts: BatchOptions): Prom
       log: (line) => console.log(line),
     });
     if (!report.admitted) {
-      throw new Error(formatPreflightFailure(report));
+      throw new PreflightExcludedError(report);
     }
     preflight = { ran: true, admitted: report.admitted, genTokensPerSec: report.genTokensPerSec };
   }
