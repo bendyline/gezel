@@ -51,6 +51,22 @@ describe('referencePreviewRoutes', () => {
     await expect(response.json()).resolves.toEqual({ mode: 'text', content: 'plain notes' });
   });
 
+  it('returns not found when a historical reference outlives its artifact drawer', async () => {
+    await rm(artifacts, { recursive: true, force: true });
+
+    const response = await preview('artifact', 'drafts/gdd_high_level.md');
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: 'not found' });
+  });
+
+  it('continues to reject a path that escapes its reference drawer', async () => {
+    const response = await preview('artifact', '../outside.md');
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: 'path traversal' });
+  });
+
   it('resolves an artifact path that already carries the drawer prefix', async () => {
     const corpus = join(artifacts, 'data', 'github-pull-requests', 'pr-46', 'files');
     await mkdir(corpus, { recursive: true });
