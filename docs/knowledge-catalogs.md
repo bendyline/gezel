@@ -46,6 +46,37 @@ embedder — first run (bge-small-en-v1.5, 2026-08-20): paraphrased-query
 R@1 0.75 / R@5 1.00 / MRR 0.88, warm explicit search p50 8 ms / p95 22 ms
 against the 750 ms gate.
 
+Phases 5–6 (2026-08-25): the Qualla production pipeline is landed in
+`qualla-internal` — `build-knowledge` streams the enwiki dump directly
+(input adapter A), classifies against a 20-domain versioned taxonomy
+(P31 seeds → description rules → categories → title patterns →
+coordinates/general fallbacks, rules-hash stamped into the catalog
+version), converts wikitext with the knowledge pre-pass (simple tables →
+GFM, lead-infobox scalar fields → a "Key facts" block, entity decoding),
+compiles per-domain `.gezk` catalogs with the public
+`gezel-multilingual-e5-small@1` profile, and is restartable at
+article/spool/catalog boundaries (checkpointed spools + the append-only
+content-hash embed cache as the reproducibility authority — a kill -9
+mid-embed resumed to a byte-identical release, verified by archive
+sha256). `sign-knowledge-release` signs releases with the offline Ed25519
+key (generate/rotate via `--generate-key`; keyId-indexed trust anchors),
+re-hashes every archive, self-verifies against the public key, and stages
+the CDN tree: immutable `_knowledge/catalogs/<id>/<version>/*.gezk`
+plus the RFC 8785-signed `_knowledge/registry/index.json`, uploaded
+catalogs-first/registry-LAST by the `_knowledge` block in qualla's
+sync-to-azure scripts (which re-verify every archive against the signed
+contentDigest before publishing; procedure + withdrawal runbook in
+qualla's RUNBOOK §6.6). The signed chain is proven end-to-end in-repo
+style: registry verification (`verifyRegistryIndex`) accepts the release
+and rejects tampering, and a live daemon installs a signed catalog via
+URL + registry `contentDigest`, refusing a wrong digest. Routing-recall
+context from the pilot: at micro-shard scale every shard sits under the
+25k-chunk threshold where the frozen centroid formula assigns k=1, so the
+S=3 measurement (88.2% recall@5 vs scan-all over 56 queries on 7 shards,
+random-routing baseline 43%) validates the mechanism, not the production
+gate — the "within 2pp of scan-all" gate belongs to full 200k-chunk
+shards with 16 centroids each (Phase 7 scale).
+
 ## Executive decision
 
 A **knowledge catalog** is a versioned, read-only body of reference material that
@@ -599,6 +630,7 @@ Suggested first-party routes:
 | --- | --- |
 | `GET /api/knowledge/catalogs` | This user's catalog refs, storage scope, versions, health, size, enabled state |
 | `GET /api/knowledge/available` | Signed Qualla registry, cached/offline-safe |
+| `GET /api/knowledge/updates` | Installed catalogs with strictly newer versions in the signed registry (shipped; requires `config.knowledge.registryUrl` + a verifying trust anchor, honors `allowAppNetwork`) |
 | `POST /api/knowledge/install` | Add/install for this user; trusted registry ids prefer shared storage |
 | `GET /api/knowledge/jobs/:id` | Progress, phase, bytes, error, cancellation state |
 | `DELETE /api/knowledge/jobs/:id` | Cancel download/install |

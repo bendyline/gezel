@@ -12,6 +12,7 @@ import type {
   KnowledgeCatalogRef,
   KnowledgeInstallRequest,
   KnowledgeSearchRequest,
+  KnowledgeUpdatesResponse,
   ListActiveImagePullsResponse,
   ListActiveVideoPullsResponse,
   ListAudioCatalogResponse,
@@ -2771,6 +2772,11 @@ export class GezelClient {
   /** Installed catalogs: refs, enabled state, health, counts, sizes. */
   listKnowledgeCatalogs(): Promise<{ catalogs: KnowledgeCatalogStatus[] }> {
     return this.request('GET', '/api/knowledge/catalogs');
+  }
+
+  /** Newer versions available in the publisher's signed registry. */
+  knowledgeUpdates(): Promise<KnowledgeUpdatesResponse> {
+    return this.request('GET', '/api/knowledge/updates');
   }
 
   /** Kick off a catalog install (file path or URL); poll or stream the job. */

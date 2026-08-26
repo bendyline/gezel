@@ -181,6 +181,48 @@ describe('published package payloads', () => {
     expect(packed.get(name)!.size).toBeLessThanOrEqual(budget);
   });
 
+  it.each(packages.filter((p) => p.typed))(
+    '$name ships no dangling relative imports in its declarations',
+    ({ name, path }) => {
+      // A dts rollup that inlines another package's chunk-split declarations
+      // hoists that package's relative `./chunk-<hash>.js` imports into this
+      // package's dist, where nothing resolves them: the packed tarball then
+      // fails skipLibCheck=false typechecks and the editor type server loses
+      // the surface. The SDK hit exactly this when core's dts grew a shared
+      // chunk. Its public wire types now stay self-contained, and this pins
+      // the invariant for every typed package against what npm actually packs.
+      const files = packed.get(name)!.files.map((file) => file.path.replace(/\\/g, '/'));
+      const declarations = files.filter((file) => file.endsWith('.d.ts'));
+      const shipped = new Set(files);
+      const dangling: string[] = [];
+      for (const declaration of declarations) {
+        // Comments hold JSDoc example imports and {@link import(...)} tags
+        // that TypeScript never resolves as modules — scan only real code.
+        const source = readFileSync(resolve(path, declaration), 'utf8')
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .replace(/^[\t ]*\/\/.*$/gm, '');
+        const parent = declaration.split('/').slice(0, -1).join('/');
+        const specifiers = [
+          ...source.matchAll(/\b(?:from\s+|import\s*\()\s*['"](\.\.?\/[^'"]+\.js)['"]/g),
+          // Bare side-effect imports resolve too (TS2882 when missing).
+          ...source.matchAll(/^\s*import\s*['"](\.\.?\/[^'"]+\.js)['"]/gm),
+        ].map((match) => match[1] as string);
+        for (const specifier of specifiers) {
+          const segments = [...(parent ? parent.split('/') : []), ...specifier.split('/')];
+          const normalized: string[] = [];
+          for (const segment of segments) {
+            if (segment === '.' || segment === '') continue;
+            if (segment === '..') normalized.pop();
+            else normalized.push(segment);
+          }
+          const target = normalized.join('/').replace(/\.js$/, '.d.ts');
+          if (!shipped.has(target)) dangling.push(`${declaration} -> ${specifier}`);
+        }
+      }
+      expect(dangling).toEqual([]);
+    },
+  );
+
   it.each(packages)('$name ships a README for its npm page', ({ name }) => {
     const files = packed.get(name)!.files.map((f) => f.path.toLowerCase());
     expect(files).toContain('readme.md');
