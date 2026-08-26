@@ -20,27 +20,60 @@ build=10621
 commit=c1d0e7a004015f23bc0233470b747b596f29b264
 `);
 
-test('llama version identity accepts the expected build and short commit', () => {
-  assert.deepEqual(parseLlamaVersionOutput('version: 10621 (c1d0e7a00)\nbuilt with MSVC'), {
+test('llama version identity accepts the v0.3.0 output format', () => {
+  // Verbatim from a local build of the pinned tag.
+  const real =
+    'version: 0.3.0 (build 10621, commit c1d0e7a)\nbuilt with MSVC 19.51.36256.0 for x64';
+  assert.deepEqual(parseLlamaVersionOutput(real), {
     buildNumber: 10621,
-    commit: 'c1d0e7a00',
+    commit: 'c1d0e7a',
+    version: '0.3.0',
   });
-  assert.deepEqual(assertLlamaVersionIdentity('version: 10621 (c1d0e7a00)', pin), {
+  assert.deepEqual(assertLlamaVersionIdentity(real, pin), {
+    buildNumber: 10621,
+    commit: 'c1d0e7a',
+    version: '0.3.0',
+  });
+});
+
+test('llama version identity still accepts the legacy b#### output format', () => {
+  assert.deepEqual(parseLlamaVersionOutput('version: 10621 (c1d0e7a00)\nbuilt with MSVC'), {
     buildNumber: 10621,
     commit: 'c1d0e7a00',
   });
 });
 
+test('llama version identity rejects a -dev build against a semver pin', () => {
+  assert.throws(
+    () => assertLlamaVersionIdentity('version: 0.3.0-dev (build 10621, commit c1d0e7a)', pin),
+    /reports version 0\.3\.0-dev, expected 0\.3\.0 from v0\.3\.0 .* -DLLAMA_BUILD_IS_DEV=OFF/,
+  );
+});
+
+test('llama version identity rejects a semver that disagrees with the pinned tag', () => {
+  assert.throws(
+    () => assertLlamaVersionIdentity('version: 0.4.0 (build 10621, commit c1d0e7a)', pin),
+    /reports version 0\.4\.0, expected 0\.3\.0 from v0\.3\.0/,
+  );
+});
+
+test('llama version output with no recognizable identity is rejected', () => {
+  assert.throws(
+    () => parseLlamaVersionOutput('llama-server: unrecognized option'),
+    /no recognizable identity/,
+  );
+});
+
 test('llama version identity rejects a shallow build number', () => {
   assert.throws(
-    () => assertLlamaVersionIdentity('version: 1 (c1d0e7a00)', pin),
+    () => assertLlamaVersionIdentity('version: 0.3.0 (build 1, commit c1d0e7a)', pin),
     /reports build 1, expected 10621/,
   );
 });
 
 test('llama version identity rejects the wrong commit', () => {
   assert.throws(
-    () => assertLlamaVersionIdentity('version: 10621 (aaaaaaaaa)', pin),
+    () => assertLlamaVersionIdentity('version: 0.3.0 (build 10621, commit aaaaaaaaa)', pin),
     /reports commit aaaaaaaaa, expected a short prefix/,
   );
 });

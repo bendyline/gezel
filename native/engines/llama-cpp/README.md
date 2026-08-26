@@ -33,6 +33,22 @@ is the pin it claims to be. Both refuse a pin they cannot verify rather
 than skipping the check, so a bump must move `tag`, `build`, and `commit`
 together.
 
+v0.3.0 also changed what the **binary** prints, which is a separate break from
+the tag change and is only visible once you actually build:
+
+```
+b10353   version: 10353 (f8def7f)
+v0.3.0   version: 0.3.0 (build 10621, commit c1d0e7a)
+```
+
+`scripts/assert-llama-version.mjs` parses both. It additionally checks the
+reported semver against a `vX.Y.Z` pin, which catches the other half of the
+change: upstream defaults `LLAMA_BUILD_IS_DEV=ON`, stamping the binary
+`0.3.0-dev`, and its CMakeLists says to set it OFF "when making a release from
+a release tag (vX.Y.Z)". Both build scripts pass `-DLLAMA_BUILD_IS_DEV=OFF`, so
+gezel's engines identify as the release they were built from rather than as an
+upstream nightly.
+
 Bumping the pin also means updating `LLAMA_ENGINE_VERSION`
 (`packages/core/src/native/llama-engine-version.ts`), the
 `native/licenses/manifest.json` entry, and the NOTICE row — the last two
