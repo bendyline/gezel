@@ -98,11 +98,9 @@ export function signRegistryIndex(
   const key = createPrivateKey(privateKeyPem);
   const publicKeyPem = createPublicKey(key).export({ type: 'spki', format: 'pem' }).toString();
   const { signature: _omitted, ...unsigned } = index;
-  const value = cryptoSign(
-    null,
-    Buffer.from(canonicalizeJson(unsigned), 'utf8'),
-    key,
-  ).toString('base64');
+  const value = cryptoSign(null, Buffer.from(canonicalizeJson(unsigned), 'utf8'), key).toString(
+    'base64',
+  );
   return {
     ...index,
     signature: {

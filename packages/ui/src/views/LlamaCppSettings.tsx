@@ -252,17 +252,20 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
     [onConfigChanged, showSavedState, showSavingState],
   );
 
-  const saveContextSizing = useCallback(async (policy: LlamaCppContextSizing) => {
-    showSavingState('saving');
-    try {
-      const updated = await api.updateLlamaCppContextSizing(policy);
-      if (!mounted.current) return;
-      setContextSizing(updated.policy);
-      showSavedState();
-    } catch {
-      showSavingState('idle');
-    }
-  }, [showSavedState, showSavingState]);
+  const saveContextSizing = useCallback(
+    async (policy: LlamaCppContextSizing) => {
+      showSavingState('saving');
+      try {
+        const updated = await api.updateLlamaCppContextSizing(policy);
+        if (!mounted.current) return;
+        setContextSizing(updated.policy);
+        showSavedState();
+      } catch {
+        showSavingState('idle');
+      }
+    },
+    [showSavedState, showSavingState],
+  );
 
   const saveModelPath = useCallback(async () => {
     const trimmed = modelPathDraft.trim();

@@ -47,6 +47,7 @@ export function familyToToolGrammarHint(style: ModelStyle | undefined): ToolGram
     case 'qwen':
     case 'qwq': // Qwen 3.5/3.6 + QwQ emit the Hermes <function=NAME> nesting
     case 'nemotron': // Nemotron 3.5 Lightning uses the same qwen3_coder XML template
+    case 'granite': // Granite 4.2 declares the same nested qwen3_coder tool-call envelope
       return { format: 'hermes', mode: 'name-and-params' };
     case 'gemma':
       // Gemma 4 emits `<|tool_call>call:NAME{...}<tool_call|>`. Name-only

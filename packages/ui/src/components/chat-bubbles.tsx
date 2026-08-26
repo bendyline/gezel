@@ -1601,6 +1601,14 @@ export function StreamingStatusLine({
   const progressTitle =
     thinkingDetail && thinkingDetail.trim().length > 0 ? thinkingDetail : statusLabel;
   const totalTokens = showProgress ? extractTotalTokenCount(thinkingDetail) : null;
+  const statusPathSeparator = Math.max(statusLabel.lastIndexOf('/'), statusLabel.lastIndexOf('\\'));
+  const statusPathParts =
+    statusPathSeparator > 0 && statusPathSeparator < statusLabel.length - 1
+      ? {
+          prefix: statusLabel.slice(0, statusPathSeparator + 1),
+          suffix: statusLabel.slice(statusPathSeparator + 1),
+        }
+      : undefined;
   return (
     <span className="msg-live-status">
       {!failed && !queued && awaiting && (
@@ -1650,7 +1658,16 @@ export function StreamingStatusLine({
           progress bar, and token/tool counts on either side stay
           visible as the load-bearing signals. See `msg-live-status-label`
           rule in styles/chat.css. */}
-      <span className="msg-live-status-label">{statusLabel}</span>
+      <span className="msg-live-status-label" title={statusLabel}>
+        {statusPathParts ? (
+          <>
+            <span className="msg-live-status-label-prefix">{statusPathParts.prefix}</span>
+            <span className="msg-live-status-label-suffix">{statusPathParts.suffix}</span>
+          </>
+        ) : (
+          statusLabel
+        )}
+      </span>
       {showProgress && (
         // Radix tooltip surfaces `thinkingDetail` (e.g. "4,096 / 7,880
         // tokens · 298 tok/s") on hover. The native `title` attribute

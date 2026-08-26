@@ -505,15 +505,21 @@ function taskInterpolationContext(task: Task): Record<string, string> {
  * declaring an `advanceWhen` deliverable, and reading only `advanceWhen`
  * classified every one of those as 'workspace' — which is how a task-note
  * script gate came to demand `replace_in_file`.
+ *
+ * `failedChecks` is this attempt's failing-check labels when the caller
+ * has them — a step whose declarative deliverable passes while only a
+ * script rejects must not be told to rewrite that deliverable.
  */
 function stepDeliverableSurface(
   step: Pick<TaskCraftbookStep, 'advanceWhen' | 'gate'>,
+  failedChecks?: readonly string[],
 ): DeliverableSurface {
   const gate = step.gate ? normalizeStepGate(step.gate) : undefined;
   return deliverableSurface({
     advanceWhen: step.advanceWhen,
     checks: gate?.checks as ReadonlyArray<Record<string, unknown>> | undefined,
     scripts: gate?.scripts,
+    ...(failedChecks ? { failedChecks } : {}),
   });
 }
 
@@ -2878,8 +2884,22 @@ export class TaskManager {
     // verified gap). Model-driven frozen resubmits now climb
     // the escalation ladder instead: fresh stage directive, fresh
     // fingerprint, so the nudge actually delivers.
+    //
+    // The hash covers ONE input: the `advanceWhen` deliverable. A gate
+    // script reads whatever it likes — `checkTaskNoteContains` reads the
+    // task NOTES — so for a scripted gate "byte-identical deliverable"
+    // does not imply "same verdict", and damping on it caches a verdict
+    // the model has already earned its way out of. Pull Request Review's
+    // `scope` gate is the wild-caught case: its deliverable is the batch
+    // file the runtime publishes onEnter and the prompt forbids touching,
+    // so the hash was immutable by construction while the note the script
+    // actually judges was rewritten twice. Three of four recorded
+    // "failures" never ran the check, and the ladder paused the task with
+    // a verdict that was false when it was replayed. Scripted gates
+    // re-evaluate; the plateau ladder in the rejection path below still
+    // terminates the loop, on verdicts that came from a real run.
     let contentHash: string | undefined;
-    if (step.advanceWhen?.file) {
+    if (step.advanceWhen?.file && gate.scripts.length === 0) {
       const content = await (step.advanceWhen.artifact
         ? this.store.readProjectArtifact(projectId, step.advanceWhen.file)
         : this.store.readProjectWorkspaceFile(projectId, step.advanceWhen.file)
@@ -2911,7 +2931,11 @@ export class TaskManager {
       const signature = lastEntry?.signatureHash ?? step.lastGateReject.messageFingerprint;
       const score = plateauScore(trail, signature);
       let stage = stageForPlateau(score);
-      const deliverableFile = step.advanceWhen?.file;
+      const frozenSurface = stepDeliverableSurface(step, lastEntry?.failedChecks);
+      // A note-surface rejection has nothing on disk to replace whole,
+      // and its declarative deliverable is passing — naming that file in
+      // a stage directive sends the repair at the wrong artifact.
+      const deliverableFile = frozenSurface === 'note' ? undefined : step.advanceWhen?.file;
       if (stage === 2 && !deliverableFile) stage = 1;
       const frozenEntry: GateAttemptRecord = {
         at: nowIso(),
@@ -3030,7 +3054,6 @@ export class TaskManager {
         };
       }
 
-      const frozenSurface = stepDeliverableSurface(step);
       const nudge =
         stage === 2 && deliverableFile
           ? buildStageTwoNudge({
@@ -3354,15 +3377,25 @@ export class TaskManager {
     // the model gets a strategy CHANGE, not the same bullets again.
     const signature = gateFailureSignature(outcome.checkResults, outcome.runs);
     const score = plateauScore(step.gateAttemptHistory, signature);
-    let stage: EscalationStage = modelDriven ? stageForPlateau(score) : 0;
-    const deliverableFile = step.advanceWhen?.file;
-    if (stage === 2 && !deliverableFile) stage = 1;
-    const rejectSurface = stepDeliverableSurface(step);
     const failedLabels = (outcome.checkResults ?? [])
       .filter((c) => !c.ok)
       .map((c) => c.label)
       .slice(0, 8);
     const rejectingScript = outcome.runs.find((r) => r.decision === 'reject' || r.error);
+    // Surface classification needs the WHOLE failing set — declarative
+    // and scripted — because the trail entry below records only the
+    // declarative half when both exist.
+    const rejectSurface = stepDeliverableSurface(step, [
+      ...failedLabels,
+      ...outcome.runs
+        .filter((r) => r.decision === 'reject' || r.error)
+        .map((r) => `script:${r.scriptName}`),
+    ]);
+    let stage: EscalationStage = modelDriven ? stageForPlateau(score) : 0;
+    // See the frozen path: a passing deliverable is not the thing to
+    // rewrite, and a note surface has no file to name at all.
+    const deliverableFile = rejectSurface === 'note' ? undefined : step.advanceWhen?.file;
+    if (stage === 2 && !deliverableFile) stage = 1;
     // Converging-loop rejection: the same checks fail, but on fewer
     // outstanding items than last attempt. `signature` already carries the
     // count so the ladder is at stage 0 here; this only replaces the

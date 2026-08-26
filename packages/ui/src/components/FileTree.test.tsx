@@ -78,6 +78,22 @@ describe('FileTree folder expansion', () => {
   });
 });
 
+describe('FileTree file-type icons', () => {
+  it.each([
+    ['brief.docx', 'fa-file-word'],
+    ['deck.pptx', 'fa-file-powerpoint'],
+    ['budget.xlsx', 'fa-file-excel'],
+    ['report.pdf', 'fa-file-pdf'],
+    ['photo.png', 'fa-file-image'],
+    ['source.ts', 'fa-file-code'],
+    ['notes.md', 'fa-file-lines'],
+  ])('uses the Font Awesome %s glyph', (name, iconClass) => {
+    render(<FileTree entries={[{ path: name, name, isDirectory: false }]} onSelect={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name }).querySelector('i')).toHaveClass(iconClass);
+  });
+});
+
 describe('FileTree sortMode', () => {
   const UNORDERED = [
     { path: 'zeta.md', name: 'zeta.md', isDirectory: false, mtimeMs: 100 },

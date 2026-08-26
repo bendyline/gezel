@@ -6311,7 +6311,8 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       proj.id,
       {
         title: 'Fix the targeted finding',
-        description: 'Investigate one indexed finding, propose the smallest safe fix, and verify it.',
+        description:
+          'Investigate one indexed finding, propose the smallest safe fix, and verify it.',
         assignee: { kind: 'gezel', gezelId: 'dev' },
         steps: [{ id: 'fix', name: 'Fix and verify', terminal: true }],
       },

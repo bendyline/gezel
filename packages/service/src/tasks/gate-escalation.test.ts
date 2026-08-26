@@ -341,6 +341,33 @@ describe('note-surface escalation nudges', () => {
     expect(deliverableSurface({})).toBe('workspace');
   });
 
+  it('classifies a script-only failure as the note surface even with a deliverable', () => {
+    // Pull Request Review's `scope` gate: the batch file passes every
+    // time, the note script is the only thing rejecting. Reading
+    // `advanceWhen` alone aimed both stage directives at the one file the
+    // step forbids rewriting.
+    expect(
+      deliverableSurface({
+        advanceWhen: { file: 'tasks/32/pr-review/batches.json', artifact: true },
+        scripts: [{ name: 'checkTaskNoteContains' }],
+        failedChecks: ['script:checkTaskNoteContains'],
+      }),
+    ).toBe('note');
+    // A failing declarative check anywhere in the set keeps the file
+    // wording — that half is a real file the model has to repair.
+    expect(
+      deliverableSurface({
+        advanceWhen: { file: 'r.md', artifact: true },
+        scripts: [{ name: 'checkTaskNoteContains' }],
+        failedChecks: ['minBytes r.md', 'script:checkTaskNoteContains'],
+      }),
+    ).toBe('artifact');
+    // An empty failing set carries no signal; fall through to the old rules.
+    expect(deliverableSurface({ advanceWhen: { file: 'index.html' }, failedChecks: [] })).toBe(
+      'workspace',
+    );
+  });
+
   it('stage 1 claims no file, names write_task_note, and never names a patch tool', () => {
     const stage1 = buildStageOneNudge({ failingBullets: bullets, frozen: false, surface: 'note' });
     expect(stage1).toContain('GATE_TARGETED_EDIT:');

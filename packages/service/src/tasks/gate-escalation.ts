@@ -146,9 +146,21 @@ export type DeliverableSurface = 'workspace' | 'artifact' | 'note';
 
 /**
  * Classify a step's deliverable surface from what its gate actually
- * reads. An explicit `advanceWhen` deliverable wins; otherwise the gate's
- * own checks decide, and a gate that names no file anywhere while
- * carrying scripts is judging the task record.
+ * reads. What FAILED wins when the caller knows it; otherwise an
+ * explicit `advanceWhen` deliverable, then the gate's own checks, and a
+ * gate that names no file anywhere while carrying scripts is judging the
+ * task record.
+ *
+ * `failedChecks` matters because a step can carry a declarative
+ * deliverable AND a script that judges something else. Pull Request
+ * Review's `scope` gate does: its `advanceWhen` batch file passes every
+ * time (the runtime writes it onEnter, the prompt forbids touching it)
+ * while `checkTaskNoteContains` is the only thing rejecting. Classifying
+ * from `advanceWhen` there aimed both stage directives at the one file
+ * the step forbids rewriting. When every failing check is a script the
+ * declarative deliverable is passing, so it is not what needs repair —
+ * and since a script's inputs are opaque to us, the honest wording is
+ * the fileless one, which claims no file and names no file tool.
  *
  * The artifact verdict requires EVERY file-naming check to be drawer-
  * flagged: a mixed gate still needs workspace wording, because the
@@ -158,7 +170,10 @@ export function deliverableSurface(opts: {
   advanceWhen?: { file?: string; artifact?: boolean } | undefined;
   checks?: ReadonlyArray<Record<string, unknown>> | undefined;
   scripts?: ReadonlyArray<unknown> | undefined;
+  failedChecks?: readonly string[] | undefined;
 }): DeliverableSurface {
+  const failed = opts.failedChecks ?? [];
+  if (failed.length > 0 && failed.every((label) => label.startsWith('script:'))) return 'note';
   if (opts.advanceWhen?.file) return opts.advanceWhen.artifact ? 'artifact' : 'workspace';
   const fileChecks = (opts.checks ?? []).filter(
     (check) =>

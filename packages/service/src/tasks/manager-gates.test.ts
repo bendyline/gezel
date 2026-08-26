@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { GATE_MAX_PROGRESS_ATTEMPTS } from '@bendyline/gezel';
+import { GATE_MAX_PROGRESS_ATTEMPTS, type Task } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ChatEventBus } from '../chat/events.js';
@@ -1755,6 +1755,151 @@ describe('completion gates — unsatisfiable under writes-off', () => {
     expect(outcome.gate.unsatisfiable).toBe(true);
     expect(outcome.gate.attempt).toBe(0);
     expect(outcome.gate.message).toContain('pr-review.md');
+  });
+});
+
+/**
+ * A gate SCRIPT's inputs are opaque to the runtime: it can read the task
+ * notes, an artifact the step never declared, anything. Everything the
+ * gate machinery infers from the step's declarative shape alone is
+ * therefore a guess, and these are the two places that guess was wrong.
+ */
+describe('completion gates — scripted gates', () => {
+  /**
+   * Pull Request Review's `scope` gate, reproduced: the `advanceWhen`
+   * deliverable is a batch file the runtime publishes onEnter and the
+   * prompt forbids touching, and the only rejecting check is a script
+   * reading the TASK NOTE. The repeat-reject damper hashes the
+   * deliverable alone, so on the real run the hash never moved, the
+   * cached rejection was replayed three times without the script ever
+   * running again, and the ladder paused the task on a verdict that was
+   * false by the time it was shown.
+   */
+  function flippingScriptRunner(decisions: readonly ('approve' | 'reject')[]) {
+    const calls: number[] = [];
+    let i = 0;
+    const runner = {
+      run: async () => {
+        const decision = decisions[Math.min(i, decisions.length - 1)]!;
+        i += 1;
+        calls.push(i);
+        return {
+          id: `run-${i}`,
+          projectId: 'default',
+          scriptName: 'checkTaskNoteContains',
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+          status: 'ok' as const,
+          trigger: { kind: 'manual' as const },
+          inputs: {},
+          output:
+            decision === 'approve'
+              ? { decision: 'approve', message: 'task notes match' }
+              : { decision: 'reject', message: 'The task notes do not yet contain the header.' },
+          calls: [],
+          logs: '',
+        };
+      },
+    } as unknown as Parameters<TaskManager['setScriptRunner']>[0];
+    return { runner, runCount: () => calls.length };
+  }
+
+  async function scopeShapedTask(): Promise<{ task: Task; stepId: string }> {
+    await writeArtifactFile('pr-review/batches.json', '{"batches":[1,2,3]}');
+    const task = await tasks.create('default', {
+      title: 'Map the pull request corpus',
+      description: 'runtime-published deliverable, note-judging script gate.',
+      assignee: { kind: 'user' },
+      steps: [
+        {
+          name: 'Scope',
+          assignee: { kind: 'user' } as const,
+          advanceWhen: {
+            file: 'pr-review/batches.json',
+            minBytes: 2,
+            artifact: true,
+          } as never,
+          gate: {
+            at: 'completion',
+            scripts: [{ name: 'checkTaskNoteContains', scope: 'standard' }],
+            maxAttempts: 3,
+          } as never,
+        },
+        { name: 'Done', assignee: { kind: 'user' } as const },
+      ],
+    });
+    return { task, stepId: task.craftbook.steps[0]!.id };
+  }
+
+  it('re-runs a gate script when the unchanged deliverable is not what it judges', async () => {
+    const { task, stepId } = await scopeShapedTask();
+    const { runner, runCount } = flippingScriptRunner(['reject', 'approve']);
+    tasks.setScriptRunner(runner);
+
+    const first = await tasks.completeStepChecked('default', task.num, stepId, undefined, {
+      cause: 'model',
+    });
+    expect(first.status).toBe('held');
+    expect(runCount()).toBe(1);
+
+    // The deliverable is byte-identical — the model repaired the note the
+    // script reads, which the damper's hash cannot see. It must re-run.
+    const second = await tasks.completeStepChecked('default', task.num, stepId, undefined, {
+      cause: 'model',
+    });
+    expect(runCount()).toBe(2);
+    expect(second.status).toBe('advanced');
+  });
+
+  it('never damps a scripted gate into a cached verdict', async () => {
+    const { task, stepId } = await scopeShapedTask();
+    const { runner, runCount } = flippingScriptRunner(['reject']);
+    tasks.setScriptRunner(runner);
+
+    for (let i = 0; i < 2; i++) {
+      const outcome = await tasks.completeStepChecked('default', task.num, stepId, undefined, {
+        cause: 'model',
+      });
+      expect(outcome.status).toBe('held');
+      if (outcome.status !== 'held') return;
+      expect(outcome.gate.cached).toBe(false);
+      expect(outcome.gate.attempt).toBe(i + 1);
+    }
+    expect(runCount()).toBe(2);
+    const step = (await tasks.get('default', task.num))!.craftbook.steps.find(
+      (s) => s.id === stepId,
+    )!;
+    expect(step.gateAttemptHistory?.some((e) => e.frozen)).toBeFalsy();
+    expect(step.lastGateReject?.contentHash).toBeUndefined();
+  });
+
+  it('aims a script-only rejection at the task record, not the passing deliverable', async () => {
+    const { task, stepId } = await scopeShapedTask();
+    const { runner } = flippingScriptRunner(['reject']);
+    tasks.setScriptRunner(runner);
+
+    // Attempt 1 is stage 0 (the gate's own verdict); attempt 2 shares the
+    // failing signature and climbs to the stage-1 directive.
+    await tasks.completeStepChecked('default', task.num, stepId, undefined, { cause: 'model' });
+    const second = await tasks.completeStepChecked('default', task.num, stepId, undefined, {
+      cause: 'model',
+    });
+    expect(second.status).toBe('held');
+    if (second.status !== 'held') return;
+    expect(second.gate.escalationStage).toBe(1);
+    expect(second.gate.message).toContain('This gate reads the task record, not a file');
+    expect(second.gate.message).toContain('write_task_note');
+    // The batch file passes every check — never name it as the repair target.
+    expect(second.gate.message).not.toContain('batches.json');
+    expect(second.gate.message).not.toContain('write_artifact');
+
+    // Stage 2's whole-file rewrite has no meaning here; it must stay at 1.
+    const third = await tasks.completeStepChecked('default', task.num, stepId, undefined, {
+      cause: 'model',
+    });
+    expect(third.status).toBe('held');
+    if (third.status !== 'held') return;
+    expect(third.gate.message).not.toContain('GATE_FULL_REWRITE');
   });
 });
 

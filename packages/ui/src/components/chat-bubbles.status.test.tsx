@@ -10,6 +10,30 @@ vi.mock('../theme.js', () => ({ useEffectiveTheme: () => 'light' }));
 const { StreamingBubble } = await import('./chat-bubbles.js');
 
 describe('StreamingBubble status', () => {
+  it('splits an activity path so the filename remains visible through middle truncation', () => {
+    const { container } = render(
+      <StreamingBubble
+        authorLabel="Boekwachter"
+        authorIcon={null}
+        segments={[]}
+        startedAt={Date.now() - 2_000}
+        thinkingLabel="Indexing packages/knowledge/src/registry-client/fetch.ts · Generating"
+      />,
+    );
+
+    const label = container.querySelector('.msg-live-status-label');
+    expect(label).toHaveAttribute(
+      'title',
+      'Indexing packages/knowledge/src/registry-client/fetch.ts · Generating',
+    );
+    expect(label?.querySelector('.msg-live-status-label-prefix')).toHaveTextContent(
+      'Indexing packages/knowledge/src/registry-client/',
+    );
+    expect(label?.querySelector('.msg-live-status-label-suffix')).toHaveTextContent(
+      'fetch.ts · Generating',
+    );
+  });
+
   it('replaces the thinking dots with a specific model-queue status', () => {
     const { container } = render(
       <StreamingBubble

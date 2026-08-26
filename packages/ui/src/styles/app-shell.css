@@ -2430,6 +2430,14 @@ button.machine-memory-unload-button {
   min-width: 10rem;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
   z-index: 50;
+  /* Radix flips the panel to the other side when it doesn't fit below,
+     but a list taller than either side still runs past the window edge —
+     the chat rail's References menu grows with every file a gezel touches.
+     The popper's available-height is the only value that knows where that
+     edge is; keep a sliver of it so the panel never butts against it. */
+  max-height: calc(var(--radix-popper-available-height, 100vh) - 0.75rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .app-nav-menu-item {

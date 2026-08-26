@@ -332,6 +332,15 @@ halves on one straight seam and keep `--radius-md` only on the outside corners.
 Menu items should name the variant and may carry one short hint line. The Tasks
 screen's New task / scheduled / Night Shift control is the reference.
 
+**A menu never runs off the window.** Radix flips a panel to the other side
+when it doesn't fit, but a list taller than *either* side — the chat rail's
+References menu grows with every file a gezel touches — still spills past the
+edge, because Radix measures the room and leaves the clamping to CSS. The
+shared `.app-nav-menu` panel takes
+`max-height: calc(var(--radix-popper-available-height, 100vh) - 0.75rem)` and
+scrolls; a menu that opts out of that class owes itself the same pair. Vertical
+scrollers keep the native bar, so nothing else is needed.
+
 **Resizable splits.** A two-pane split that a user might want to rebalance
 gets a grip, not a fixed track: a full-height `role="separator"` element with
 `.chat-rail-grip` between the panes, whose twin rails only appear on hover or

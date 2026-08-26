@@ -1,5 +1,6 @@
 import { type ReactNode, useMemo, useState } from 'react';
 import { ContextMenu, DropdownMenu } from '../primitives/index.js';
+import { FileTypeIcon } from './FileTypeIcon.js';
 import { sortTreeNodes } from './file-view-modes.js';
 
 export interface FileEntry {
@@ -102,12 +103,7 @@ export function defaultIconFor(entry: FileEntry): ReactNode {
       <i className="tree-icon tree-icon-folder fa-regular fa-folder fa-fw" aria-hidden="true" />
     );
   }
-  if (/\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(entry.name)) {
-    // biome-ignore lint/a11y/noAriaHiddenOnFocusable: decorative icon, not focusable
-    return <i className="tree-icon fa-regular fa-file-image fa-fw" aria-hidden="true" />;
-  }
-  // biome-ignore lint/a11y/noAriaHiddenOnFocusable: decorative icon, not focusable
-  return <i className="tree-icon fa-regular fa-file-lines fa-fw" aria-hidden="true" />;
+  return <FileTypeIcon name={entry.name} className="tree-icon" />;
 }
 
 function defaultLabelFor(entry: FileEntry): string {

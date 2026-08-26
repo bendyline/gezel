@@ -20,6 +20,7 @@ import { api } from '../api.js';
 import { DropdownChevron, DropdownMenu, Tabs } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 import { CommandsPanel } from './CommandsPanel.js';
+import { FileTypeIcon } from './FileTypeIcon.js';
 import { GezelIcon } from './GezelIcon.js';
 import { HtmlPreviewFrame } from './HtmlPreviewFrame.js';
 import { StepTracker } from './StepTracker.js';
@@ -1340,6 +1341,7 @@ function ReferenceTabMenu({
                     </svg>
                   )}
                 </span>
+                <FileTypeIcon name={name} className="chat-rail-reference-menu-icon" />
                 <span className="chat-rail-reference-menu-name">{name}</span>
               </DropdownMenu.Item>
             );

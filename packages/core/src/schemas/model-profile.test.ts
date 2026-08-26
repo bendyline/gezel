@@ -16,4 +16,19 @@ describe('model profile schemas', () => {
       toolCallFormat: 'function-call',
     });
   });
+
+  it('accepts Granite as a distinct model family', () => {
+    expect(ModelFamilySchema.parse('granite')).toBe('granite');
+    expect(
+      ModelStyleSchema.parse({
+        family: 'granite',
+        reasoningFormat: 'think',
+        toolCallFormat: 'function-call',
+      }),
+    ).toEqual({
+      family: 'granite',
+      reasoningFormat: 'think',
+      toolCallFormat: 'function-call',
+    });
+  });
 });
