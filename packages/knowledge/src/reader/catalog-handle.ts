@@ -21,6 +21,7 @@ import {
   rerankK,
 } from '../format/constants.js';
 import { quantizeBinary, rerankScore } from '../format/quantize.js';
+import { documentFtsTopIds, sanitizeFtsQuery } from './fts-query.js';
 import { type CatalogDb, CatalogOpenError, openCatalogDatabase } from './open.js';
 
 export interface CatalogTopic {
@@ -250,16 +251,28 @@ export class CatalogHandle {
     const match = ftsQuery(query);
     if (!match) return [];
     try {
-      return (
-        this.router.db
-          .prepare(
-            'SELECT document_id FROM fts_documents WHERE fts_documents MATCH ? ORDER BY rank LIMIT ?',
-          )
-          .all(match, limit) as Array<{ document_id: string }>
-      ).map((r, i) => ({ documentId: r.document_id, rank: i }));
+      return documentFtsTopIds(this.router.db, match, limit).map((documentId, i) => ({
+        documentId,
+        rank: i,
+      }));
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Router-level shape stats: topic-tree size and total route centroids.
+   * Read-only counts for inspectors and recall/routing diagnostics — a
+   * single-topic catalog fills shards in documentId order, which is the
+   * first thing to check when centroid routing underperforms.
+   */
+  routerStats(): { topics: number; routeCentroids: number } {
+    const count = (table: string): number =>
+      Number(
+        (this.router.db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number | bigint })
+          .c,
+      );
+    return { topics: count('topics'), routeCentroids: count('route_centroids') };
   }
 
   /**
@@ -459,11 +472,6 @@ function parseHeadingPath(raw: string): string[] {
   }
 }
 
-/** Injection-safe FTS5 query: quoted OR'd tokens, capped. */
-function ftsQuery(query: string): string | null {
-  const tokens = [
-    ...new Set((query.normalize('NFKC').match(/[\p{L}\p{N}_]+/gu) ?? []).slice(0, 16)),
-  ];
-  if (tokens.length === 0) return null;
-  return tokens.map((t) => `"${t.replace(/"/g, '""')}"`).join(' OR ');
-}
+// Shared with the compiler's seal-time smoke verification — semantics must
+// never drift between "what the build proved" and "what the install checks".
+const ftsQuery = sanitizeFtsQuery;

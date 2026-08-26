@@ -423,8 +423,10 @@ function ImagePullProgress({
     statusLine = `${pull.retrying.reason} — retrying in ${delaySec}s (attempt ${pull.retrying.attempt}/${pull.retrying.maxAttempts})`;
   } else if (known) {
     statusLine = `Downloading… (${formatSize(pull.bytesWritten)} of ${formatSize(pull.totalBytes)}, ${pct}%)`;
-  } else {
+  } else if (pull.bytesWritten > 0) {
     statusLine = `Downloading… (${formatSize(pull.bytesWritten)})`;
+  } else {
+    statusLine = 'Preparing download…';
   }
   return (
     <div

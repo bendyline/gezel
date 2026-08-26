@@ -324,6 +324,24 @@ Ollama, engagement modes, tempo, a task's status), use **keys in a tray** — se
 [Controls: keys in trays](#controls-keys-in-trays). The Home + Settings
 provider switches are this pattern.
 
+**Connected tabs, for a switch that fronts the surface below it.** The
+default tab bar (`gz-tabs-trigger`) marks the current tab with an accent
+underline and is right for a row of peer destinations. When the choice
+instead swaps the *surface directly beneath the tab* — the project
+composer's `@ Chat` / `> Terminal` switch, which replaces the whole compose
+stack under it — use the connected treatment: top-rounded corners only, the
+tab hanging off the bottom edge of its host row onto a seam, and the
+selected tab erasing the pixel of seam it stands on so tab and panel read as
+one surface. Selection is carried by that break plus a 2px accent bar on the
+tab's top edge; a latched key fill defeats the whole effect, because the
+panel the tab merges into is not tinted. Unselected tabs stay recessed
+(`--tray-bg`) and keep all four edges. The seam is not optional — fill alone
+cannot join anything when the tab's own row and the band below share a
+background, which is how the first attempt read as a chip parked in the
+address line. Reach for this only when the tab genuinely sits on the seam of
+what it switches; a tab floating above unrelated content has nothing to
+connect to and should be an underline tab or keys instead.
+
 **Split buttons.** Use a split button when one creation action is the clear,
 frequent default and two or three closely-related variants should remain
 available without crowding the toolbar. The wide left key performs the default
@@ -564,6 +582,27 @@ task another hour of the user's patience. And it disappears the instant that
 task streams a turn: the live bubble is its representation, and a "waiting"
 card beside it contradicts what the reader can see. Batches collapse past a
 few cards into one counted line rather than burying the conversation.
+
+**A craftbook run gets a receipt card, not just a pill.** When a tool call
+starts a craftbook (`invoke_craftbook`) or moves a task a step
+(`advance_task_step`), the transcript renders an inline card under the tool
+row ([`ToolCraftbookCard`](../packages/ui/src/components/ToolCraftbookCard.tsx),
+`msg-tool-card-*` block in [styles/chat.css](../packages/ui/src/styles/chat.css)):
+the craftbook's workshop-mark artwork in a small `--radius-md` tile, an
+uppercase eyebrow (Craftbook started / Step complete), **one sentence**, the
+compact step tracker, and the task chip. The generic pill row stays — it is
+the factual record with duration and provenance — and on completed bubbles
+the card is promoted above the collapsed "N steps" disclosure exactly like
+generated media, while the plain row stays inside the collapse. Two rules
+keep the card honest. Everything on it is a **snapshot of the moment the
+tool returned** (the service stamps the step statuses into the event) — it
+never pretends to be live, and the task chip opens the live view: the chat
+rail's Task pane where the surface has one, the full task tab otherwise.
+And the one live element, the External-services nudge on start cards
+("works better with External services — it still runs without it"), reflects
+the *current* security policy: it hides the moment the capability is on,
+and its action **deep-links to Settings → Security & Compliance** — a
+security switch is never flipped from inside chat.
 
 **Machine syntax never reaches a summary line.** A message body is not
 prose. It is markdown; it may carry reasoning the bubble hides; and when the

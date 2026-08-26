@@ -227,6 +227,7 @@ const TOOL_OUTPUT_SCHEMAS = {
   assign_task: TaskToolOutputSchema,
   add_task_step: TaskToolOutputSchema,
   advance_task_step: TaskToolOutputSchema,
+  invoke_craftbook: TaskToolOutputSchema,
   read_task_notes: TaskToolOutputSchema,
   write_task_note: TaskToolOutputSchema,
   npm_install: ListToolOutputSchema,

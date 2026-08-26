@@ -903,7 +903,9 @@ function InstallProgress({
   } else if (inst.phase === 'downloading') {
     phaseLabel = known
       ? `Downloading ${formatBytes(inst.bytesWrittenAll)} of ${formatBytes(inst.totalBytesAll)} (${pct}%)`
-      : `Downloading ${formatBytes(inst.bytesWrittenAll)}…`;
+      : inst.bytesWrittenAll > 0
+        ? `Downloading ${formatBytes(inst.bytesWrittenAll)}…`
+        : 'Preparing download…';
   } else if (inst.phase === 'verifying') {
     phaseLabel = `Checking download${inst.file ? ` (${inst.file})` : '…'}`;
   } else {

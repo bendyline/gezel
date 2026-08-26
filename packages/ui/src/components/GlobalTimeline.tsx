@@ -32,7 +32,7 @@ export function GlobalTimeline({
   onWorkspaceReference?: (path: string, projectId?: string) => void;
   onWorkspaceSeen?: (path: string, projectId?: string) => void;
   onOpenReference?: (reference: OpenChatReference) => void;
-  onTaskReference?: (ref: string, opts?: { scoped?: boolean }) => void;
+  onTaskReference?: (ref: string, opts?: { scoped?: boolean; focus?: boolean }) => void;
   emptyPlaceholder?: string;
   /** Rich empty state; see ChatTimelineView. */
   emptyContent?: import('react').ReactNode;

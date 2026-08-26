@@ -1221,6 +1221,7 @@ export class McpBridge {
                 effectiveArgs,
                 combined,
                 this.wrapperCtx,
+                this.tools.find((t) => t.name === toolName)?.parameters,
               );
               if (translated !== combined) {
                 combined = translated;

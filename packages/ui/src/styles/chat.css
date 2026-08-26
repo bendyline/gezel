@@ -630,6 +630,165 @@
   margin-left: 0;
 }
 
+/* ── Inline tool cards (craftbook start / step advance) ──
+   The transcript's receipt that a craftbook run started or moved a step:
+   catalog artwork + eyebrow + one-sentence headline + the compact step
+   tracker + a task chip. Rendered beneath the tool row while streaming
+   and promoted above the collapsed "N steps" disclosure on completed
+   bubbles (same lane as generated media). Snapshot semantics — the card
+   records that moment; the task chip opens the live view. */
+.msg-tool-card-promoted {
+  margin: 0.2rem 0;
+}
+
+.msg-tool-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin: 0.35rem 0 0.2rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-lg);
+  background: var(--panel, rgba(255, 255, 255, 0.03));
+}
+
+/* Inside a tool row the card inherits the list context — reset it. */
+.thinking-tool .msg-tool-card {
+  margin-left: 1.4rem;
+}
+
+.msg-tool-card-art {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-md);
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+}
+
+.msg-tool-card-art-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.msg-tool-card-body {
+  /* Wraps under the artwork tile when the bubble runs narrow — no
+     container query needed for the degradation. */
+  flex: 1 1 16rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.msg-tool-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.msg-tool-card-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.msg-tool-card-headline {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.msg-tool-card-track {
+  min-width: 0;
+}
+
+.msg-tool-card-track .step-tracker {
+  flex-wrap: nowrap;
+  width: max-content;
+  min-width: 100%;
+  justify-content: flex-start;
+  padding: 0.3rem 0.1rem 0.2rem;
+  margin-bottom: 0;
+}
+
+.msg-tool-card-track .step-dot {
+  padding-inline: 0.4rem;
+}
+
+.msg-tool-card-track .step-dot-label {
+  max-width: 7rem;
+  font-size: 0.72rem;
+}
+
+.msg-tool-card-track .step-dot-connector {
+  flex-basis: 18px;
+}
+
+.msg-tool-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--text-xs);
+}
+
+/* The External-services nudge: quiet strip under the actions, present
+   only while the craftbook recommends the capability AND the resolved
+   policy has it off. Deep-links to Settings — never flips a security
+   switch from inside chat. */
+.msg-tool-card-nudge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+  margin-top: 0.1rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed var(--border, rgba(255, 255, 255, 0.12));
+}
+
+.msg-tool-card-nudge-text {
+  flex: 1 1 14rem;
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.msg-tool-card-nudge-cta {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  padding: 0.25rem 0.6rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  background: var(--surface, rgba(255, 255, 255, 0.04));
+  color: var(--text);
+  cursor: pointer;
+}
+
+.msg-tool-card-nudge-cta:hover {
+  border-color: var(--accent);
+}
+
+/* Step-advance variant: same anatomy, quieter presence — smaller art
+   tile, tighter padding. */
+.msg-tool-card-compact {
+  padding: 0.45rem 0.55rem;
+}
+
+.msg-tool-card-compact .msg-tool-card-art {
+  width: 28px;
+  height: 28px;
+}
+
 /* Per-thumbnail wrapper — positions the corner ⋯ actions menu over
    the image without affecting the underlying button's hit area. */
 .thinking-tool-image-cell {

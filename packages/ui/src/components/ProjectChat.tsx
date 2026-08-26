@@ -435,6 +435,50 @@ function ProjectChatBody({
 
   const selectedGezelPronouns = pronounFormsForGender(selectedGezel.gender);
 
+  // The compose-surface switch, rendered into the top row of whichever
+  // composer is mounted — the chat composer's "To:" line, the terminal
+  // composer's toolbar. Those two rows sit at the same height (the terminal
+  // has no recipient band), so the tabs land under the cursor that just
+  // clicked them instead of jumping a row down. Each tab hangs off the bottom
+  // of its host row and the selected one opens into the band beneath it, so
+  // the thread picker and draft area read as the panel that tab fronts. The
+  // glyphs mirror the escape syntax users can type (`@florian …` → chat,
+  // `> ls` → terminal).
+  const composeModeTabs = (
+    <div className="compose-mode-tabs" role="tablist" aria-label="Compose surface">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={composeMode === 'chat'}
+        // The project tab bar already owns a tab named "Chat", so this one
+        // carries a distinguishing accessible name. It still contains the
+        // visible label, which is what WCAG's label-in-name rule asks for.
+        aria-label="AI chat"
+        className="compose-mode-tab"
+        onClick={switchToChat}
+        title="AI chat (@-mention to talk to a gezel)"
+      >
+        <span className="compose-mode-tab-glyph" aria-hidden="true">
+          @
+        </span>
+        Chat
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={composeMode === 'terminal'}
+        className="compose-mode-tab"
+        onClick={() => setComposeMode('terminal')}
+        title="Terminal (run shell commands in this project's workspace)"
+      >
+        <span className="compose-mode-tab-glyph" aria-hidden="true">
+          &gt;
+        </span>
+        Terminal
+      </button>
+    </div>
+  );
+
   return (
     <ChatReferences
       projectId={project.id}
@@ -585,6 +629,7 @@ function ProjectChatBody({
                     setTerminalInitialInput(seed);
                     setComposeMode('terminal');
                   }}
+                  addressLineTrailing={composeModeTabs}
                   belowAddressLine={
                     <SessionSwitcher
                       gezelId={selectedGezel.id}
@@ -614,6 +659,7 @@ function ProjectChatBody({
                       onChangeWorkingDir={pickTerminalFolder}
                     />
                   }
+                  toolbarTrailing={composeModeTabs}
                   initialInput={terminalInitialInput}
                   onSent={(input, result) => {
                     setActiveTerminalThreadId(result.threadId);
@@ -627,32 +673,6 @@ function ProjectChatBody({
                   onChatEscape={switchToChat}
                 />
               )}
-            </div>
-            <div className="project-chat-compose-mode-bar">
-              <div className="project-chat-compose-toggle" role="tablist">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={composeMode === 'chat'}
-                  aria-label="AI chat"
-                  className={composeMode === 'chat' ? 'active' : ''}
-                  onClick={switchToChat}
-                  title="AI chat (@-mention to talk to a gezel)"
-                >
-                  @
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={composeMode === 'terminal'}
-                  aria-label="Terminal"
-                  className={composeMode === 'terminal' ? 'active' : ''}
-                  onClick={() => setComposeMode('terminal')}
-                  title="Terminal (run shell commands in this project's workspace)"
-                >
-                  &gt;
-                </button>
-              </div>
             </div>
           </div>
           {/* Portals, so its position in the tree is cosmetic. `projects` is

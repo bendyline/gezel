@@ -677,8 +677,18 @@
 
 .pending-question-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
+}
+
+/* Steering the task is a different decision from answering the question,
+   so the pair reads as its own group behind a hairline rather than as two
+   more answers. */
+.pending-question-task-steer {
+  margin-left: 0.25rem;
+  padding-left: 0.75rem;
+  border-left: 1px solid var(--border);
 }
 
 .pending-question-submit {

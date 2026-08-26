@@ -49,6 +49,9 @@ export function runtimeCraftbookFromTemplate(
     ...(m.paramSchema ? { paramSchema: m.paramSchema } : {}),
     ...(m.command ? { command: m.command } : {}),
     ...(m.requirements ? { requirements: m.requirements } : {}),
+    // Soft "works better with" hints ride into the task snapshot so the
+    // chat's craftbook start card can nudge without re-resolving the book.
+    ...(m.recommends ? { recommends: m.recommends } : {}),
     ...(m.runModes ? { runModes: m.runModes } : {}),
     ...(scripts ? { scripts } : {}),
     // Declarative per-item fanout config rides into the runtime book so the

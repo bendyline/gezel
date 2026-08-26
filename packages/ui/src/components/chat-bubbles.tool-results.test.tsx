@@ -158,6 +158,73 @@ describe('tool file links', () => {
   });
 });
 
+describe('inline tool cards', () => {
+  const START_CARD = {
+    kind: 'craftbook-start' as const,
+    craftbookId: 'powerpoint-deck',
+    craftbookName: 'PowerPoint from Content',
+    taskRef: 'default/12',
+    projectId: 'default',
+    status: 'active',
+    activeStepId: 'research',
+    steps: [{ id: 'research', name: 'Acquire and verify sources', status: 'active' as const }],
+  };
+
+  it('promotes a card-bearing tool call above the collapsed step list, once', () => {
+    const { container } = render(
+      <ToolHistoryExpando
+        tools={[
+          {
+            name: 'invoke_craftbook',
+            durationMs: 900,
+            success: true,
+            argsSummary: 'Started powerpoint-deck',
+            card: START_CARD,
+          },
+        ]}
+      />,
+    );
+
+    const promoted = container.querySelector('.msg-tool-card-promoted .msg-tool-card');
+    expect(promoted).not.toBeNull();
+    // Outside <details> = visible while collapsed (structural, like the
+    // failure notice above — jsdom renders closed expandos' children).
+    expect(promoted?.closest('.msg-tool-history')).toBeNull();
+    expect(promoted).toHaveTextContent('Craftbook started');
+    expect(promoted).toHaveTextContent('PowerPoint from Content is underway — 1 step.');
+    // The collapsed list keeps the plain row (provenance, step count) but
+    // suppresses its copy of the card.
+    fireEvent.click(screen.getByText('1 step'));
+    expect(container.querySelectorAll('.msg-tool-card')).toHaveLength(1);
+  });
+
+  it('renders the card under the row while streaming', () => {
+    const { container } = render(
+      <StreamingBubble
+        authorLabel="Ada"
+        authorIcon={null}
+        startedAt={null}
+        segments={[
+          {
+            kind: 'tool',
+            tool: {
+              name: 'invoke_craftbook',
+              durationMs: 900,
+              success: true,
+              projectId: 'default',
+              card: START_CARD,
+            },
+          },
+        ]}
+      />,
+    );
+
+    const card = container.querySelector('.thinking-tool .msg-tool-card');
+    expect(card).not.toBeNull();
+    expect(card).toHaveTextContent('Task default/12');
+  });
+});
+
 /**
  * A completion gate that rejects a step used to reach the user as a red ✗
  * and nothing else: the reason sat in `title` and the details drawer,

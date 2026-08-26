@@ -28,7 +28,7 @@ interface Props {
 }
 
 function poolLabel(kind: MachineMemoryUsage['kind']): string {
-  if (kind === 'vram') return 'VRAM';
+  if (kind === 'vram') return 'Video memory';
   if (kind === 'ram') return 'RAM';
   return 'Unified memory';
 }
@@ -64,6 +64,20 @@ function gpuOwnerLabel(
   if (owner === 'app-engine') return 'Gezel app engine';
   if (owner === 'gezel-engine') return 'Gezel engine';
   return 'Other app';
+}
+
+type GpuProcess = NonNullable<MachineMemoryUsage['gpuProcesses']>[number];
+
+function gpuProcessDisplayName(name: string | undefined): string | null {
+  const friendly = name?.trim().replace(/\.exe$/i, '');
+  if (!friendly) return null;
+  return friendly.toLowerCase() === 'dwm' ? 'Windows Desktop' : friendly;
+}
+
+function gpuProcessRowLabel(process: GpuProcess): string {
+  const name = gpuProcessDisplayName(process.name);
+  if (name === 'Windows Desktop') return name;
+  return name ? `${gpuOwnerLabel(process.owner)} · ${name}` : gpuOwnerLabel(process.owner);
 }
 
 /**
@@ -108,7 +122,7 @@ function describeCapacityPools(
       }
       return `Current reservations exceed the ~${formatBytes(spillover.coResidencyBytes)} on-card limit; the next model load will serialize them`;
     }
-    return `Capacity: ~${formatBytes(pools.vramBytes)} VRAM + ~${formatBytes(pools.ramShareBytes)} system RAM`;
+    return `Capacity: ~${formatBytes(pools.vramBytes)} video memory + ~${formatBytes(pools.ramShareBytes)} system RAM`;
   }
   if (pools.kind === 'unified') {
     return `Capacity: ~${formatBytes(pools.ramShareBytes)} unified memory`;
@@ -222,7 +236,7 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
   const hasMeasuredUsage = usage.usedBytes !== null;
   const measuredUsageLabel =
     usage.kind === 'vram'
-      ? 'Current VRAM use'
+      ? 'Current video memory use'
       : usage.kind === 'ram'
         ? 'Current RAM use'
         : 'Current memory use';
@@ -231,23 +245,27 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
       ? `${formatBytes(usage.totalBytes)} total`
       : `${formatBytes(usage.usedBytes)} of ${formatBytes(usage.totalBytes)} used`;
   const observed = typeof usage.gezelBytesObserved === 'number';
+  const processAttributionEstimated = usage.processAttributionKind === 'estimated';
+  const gezelApproximate = !observed || processAttributionEstimated;
   const gezelBytes = usage.gezelBytesObserved ?? usage.gezelBytesEstimated;
   const otherLabel = usage.kind === 'vram' && !observed ? 'Unattributed' : 'Other';
   const unattributedDescription =
-    'Per-process VRAM use is unavailable; this may include retained Gezel models';
+    'Per-process video memory use is unavailable; this may include retained Gezel models';
   const otherPercent = usage.otherBytes === null ? 0 : percent(usage.otherBytes, usage.totalBytes);
   const cachedBytes = typeof usage.cachedBytes === 'number' ? usage.cachedBytes : null;
   const cachedPercent = cachedBytes === null ? 0 : percent(cachedBytes, usage.totalBytes);
-  // Observed process accounting gives a trustworthy Gezel total, but not a
-  // trustworthy per-model weights/cache split. The broker can retain capacity
-  // for a cold provider whose process is not running, so applying that estimate
-  // to the observed footprint invents detail. Keep the measured total whole.
+  // Process accounting can give us a Gezel total, but not a trustworthy
+  // per-model weights/cache split. The broker can retain capacity for a cold
+  // provider whose process is not running, so applying that estimate to the
+  // attributed footprint invents detail. Keep that total whole.
   const gezelSegments = observed
     ? [
         {
           key: 'observed',
           label: 'Gezel',
-          detail: 'measured daemon and running local-engine footprint',
+          detail: processAttributionEstimated
+            ? 'estimated from current local-engine video memory residency'
+            : 'measured daemon and running local-engine footprint',
           bytes: gezelBytes,
         },
       ]
@@ -366,16 +384,33 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
         .filter(Boolean)
         .join(', ')
     : '';
-  const gpuProcesses = (usage.gpuProcesses ?? [])
-    .filter((process) => process.dedicatedBytes >= 16 * 1024 ** 2)
-    .slice(0, 8);
+  const processDetailThresholdBytes = 16 * 1024 ** 2;
+  const allGpuProcesses = usage.gpuProcesses ?? [];
+  const displayableGpuProcesses = allGpuProcesses.filter(
+    (process) => process.dedicatedBytes >= processDetailThresholdBytes,
+  );
+  const smallProcessBytes = allGpuProcesses
+    .filter((process) => process.dedicatedBytes < processDetailThresholdBytes)
+    .reduce((sum, process) => sum + process.dedicatedBytes, 0);
+  const needsProcessRemainder =
+    displayableGpuProcesses.length > 8 || smallProcessBytes >= processDetailThresholdBytes;
+  const gpuProcesses = displayableGpuProcesses.slice(0, needsProcessRemainder ? 7 : 8);
+  const visibleProcessBytes = gpuProcesses.reduce(
+    (sum, process) => sum + process.dedicatedBytes,
+    0,
+  );
+  const remainingProcessBytes = Math.max(
+    0,
+    allGpuProcesses.reduce((sum, process) => sum + process.dedicatedBytes, 0) - visibleProcessBytes,
+  );
+  const showProcessRemainder = remainingProcessBytes >= processDetailThresholdBytes;
   const engineLifecycles = usage.engineLifecycles ?? [];
   const ariaSummary = [
     `${hasMeasuredUsage ? measuredUsageLabel : label}: ${usedSummary}`,
     !attributed
       ? null
       : observed
-        ? `Gezel observed footprint ${formatBytes(gezelBytes)}`
+        ? `Gezel ${processAttributionEstimated ? 'estimated' : 'observed'} footprint ${formatBytes(gezelBytes)}`
         : `Gezel estimated ${formatBytes(gezelBytes)}`,
     ...gezelSegments.map((segment) =>
       segment.bytes > 0 ? `${segment.label} about ${formatBytes(segment.bytes)}` : null,
@@ -445,7 +480,7 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
           {attributed && (
             <span>
               <i className="machine-memory-swatch machine-memory-swatch-gezel" aria-hidden />
-              Gezel {observed ? '' : '~'}
+              Gezel {gezelApproximate ? '~' : ''}
               {formatBytes(gezelBytes)}
             </span>
           )}
@@ -469,18 +504,41 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
           )}
         </div>
       )}
-      {gpuProcesses.length > 0 && (
-        <div className="machine-memory-detail-list" aria-label="Dedicated VRAM owners">
-          <div className="machine-memory-detail-heading">Dedicated VRAM owners</div>
+      {(gpuProcesses.length > 0 || showProcessRemainder) && (
+        <div
+          className="machine-memory-detail-list"
+          aria-label={
+            processAttributionEstimated
+              ? 'Estimated video memory use'
+              : 'Dedicated video memory owners'
+          }
+        >
+          <div className="machine-memory-detail-heading">
+            {processAttributionEstimated
+              ? 'Estimated video memory use'
+              : 'Dedicated video memory owners'}
+          </div>
           {gpuProcesses.map((process) => (
-            <div className="machine-memory-detail-row" key={`${process.pid}:${process.owner}`}>
+            <div
+              className="machine-memory-detail-row"
+              key={`${process.pid}:${process.adapterLuid ?? 'all'}:${process.owner}`}
+            >
+              <span>{gpuProcessRowLabel(process)}</span>
               <span>
-                {gpuOwnerLabel(process.owner)}
-                {process.name ? ` · ${process.name}` : ''}
+                {processAttributionEstimated ? '~' : ''}
+                {formatBytes(process.dedicatedBytes)}
               </span>
-              <span>{formatBytes(process.dedicatedBytes)}</span>
             </div>
           ))}
+          {showProcessRemainder && (
+            <div className="machine-memory-detail-row">
+              <span>Other processes</span>
+              <span>
+                {processAttributionEstimated ? '~' : ''}
+                {formatBytes(remainingProcessBytes)}
+              </span>
+            </div>
+          )}
         </div>
       )}
       {engineLifecycles.length > 0 && (
@@ -500,7 +558,7 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
               : engine.active
                 ? 'In use'
                 : engine.unloadAt !== null
-                  ? `${engine.releaseReason === 'memory-pressure' ? 'VRAM pressure · ' : ''}${formatCountdown(engine.unloadAt)}`
+                  ? `${engine.releaseReason === 'memory-pressure' ? 'Video memory pressure · ' : ''}${formatCountdown(engine.unloadAt)}`
                   : 'Resident';
             return (
               <div className="machine-memory-detail-row" key={key}>

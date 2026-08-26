@@ -45,6 +45,7 @@ import {
 } from './ambient-display/runtime.js';
 import { autostart } from './autostart/index.js';
 import { resolveAutostartNodePath, resolveAutostartPnpmPath } from './autostart/runtime.js';
+import { buildEditableContextMenuTemplate } from './editable-context-menu.js';
 import {
   PREVIEW_FRAME_INDETERMINATE,
   daemonEntrypointArgument,
@@ -578,6 +579,26 @@ async function createWindow(): Promise<void> {
   // Make the E2E window visible-but-inactive so it composites for screenshots
   // without ever becoming key or jumping to the foreground.
   if (e2e) mainWindow.showInactive();
+
+  // Electron supplies spellcheck results to the main process but does not
+  // render a context menu for them. Install one at the window boundary so
+  // every editable surface (including Squisq's Tiptap editor) gets native
+  // replacements, a persistent dictionary action, and the standard edit
+  // commands without coupling browser-only editor code to Electron.
+  const contextMenuWindow = mainWindow;
+  const contextMenuWebContents = contextMenuWindow.webContents;
+  contextMenuWebContents.on('context-menu', (_event, params) => {
+    const template = buildEditableContextMenuTemplate(params, {
+      replaceMisspelling: (suggestion) => {
+        contextMenuWebContents.replaceMisspelling(suggestion);
+      },
+      addToDictionary: (word) => {
+        contextMenuWebContents.session.addWordToSpellCheckerDictionary(word);
+      },
+    });
+    if (template.length === 0) return;
+    Menu.buildFromTemplate(template).popup({ window: contextMenuWindow });
+  });
 
   // Only ever hand a vetted scheme to the OS. `openExternal` will launch
   // handlers for file://, smb://, custom app schemes, javascript:, etc. —

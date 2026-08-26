@@ -84,7 +84,7 @@ describe('TaskManager', () => {
     expect(Math.max(...nums)).toBe(N);
   });
 
-  it('snapshots a craftbook’s toolsets and basedOn credit onto the task', async () => {
+  it('snapshots a craftbook’s toolsets, recommends, and basedOn credit onto the task', async () => {
     await installProjectToolset('usb-camera');
     tasks.setCraftbookResolver({
       async resolve(id) {
@@ -96,6 +96,7 @@ describe('TaskManager', () => {
             entryStepId: 'capture',
             basedOn: { name: 'Camera recipe', url: 'https://example.com/camera-recipe' },
             toolsets: [{ toolsetId: 'usb-camera', autoAllow: true, reason: 'pull frames' }],
+            recommends: [{ kind: 'external-services', reason: 'streams from a cloud camera' }],
             createdAt: '2026-01-01T00:00:00Z',
             updatedAt: '2026-01-01T00:00:00Z',
           },
@@ -110,6 +111,10 @@ describe('TaskManager', () => {
     });
     expect(t.craftbook.toolsets).toEqual([
       { toolsetId: 'usb-camera', autoAllow: true, reason: 'pull frames' },
+    ]);
+    // The chat's craftbook start card reads this off the tool result's task.
+    expect(t.craftbook.recommends).toEqual([
+      { kind: 'external-services', reason: 'streams from a cloud camera' },
     ]);
     expect(t.craftbook.basedOn).toEqual({
       name: 'Camera recipe',

@@ -123,6 +123,7 @@ export function TerminalComposer({
   projectId,
   workingDir,
   contextRow,
+  toolbarTrailing,
   onSent,
   initialInput,
   onChatEscape,
@@ -131,6 +132,13 @@ export function TerminalComposer({
   workingDir: string;
   /** Optional terminal context control rendered between the toolbar and input. */
   contextRow?: ReactNode;
+  /**
+   * Optional trailing content for the toolbar, rendered after Fire. Project
+   * chat puts the chat/terminal mode tabs here: the toolbar is the row that
+   * lines up with the chat composer's "To:" line, so the switch keeps its
+   * position across a mode flip.
+   */
+  toolbarTrailing?: ReactNode;
   /** Optional hook the parent can use to flip a UX state on submit. */
   onSent?: (input: string, result: RunTerminalCommandResponse) => void;
   /**
@@ -288,6 +296,7 @@ export function TerminalComposer({
         >
           Fire
         </button>
+        {toolbarTrailing}
       </div>
       {contextRow}
       <div className="terminal-composer-input-wrap">

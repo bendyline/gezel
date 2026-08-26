@@ -947,9 +947,11 @@
   position: relative;
   z-index: 1;
   /* Equal widths when they fit; a firm min-width so the caption + dropdown
-     never crush into the neighbour — past that the bench scrolls. */
+     never crush into the neighbour — past that the bench scrolls. Keep this
+     wider than the dropdown's own bounds: the caption is out of flow, so a
+     select that outgrows its column lands on top of the next one. */
   flex: 1 1 0;
-  min-width: 10rem;
+  min-width: 11.5rem;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -963,7 +965,9 @@
   left: 50%;
   transform: translateX(-50%);
   width: max-content;
-  max-width: 100%;
+  /* Leave a gutter either side of the column so neighbouring captions read
+     as separate, never touching. */
+  max-width: calc(100% - 0.5rem);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1003,7 +1007,11 @@
   appearance: none;
   -webkit-appearance: none;
   pointer-events: auto;
-  max-width: 11rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-family: Georgia, "Times New Roman", serif;
   font-style: italic;
   font-size: 0.84rem;

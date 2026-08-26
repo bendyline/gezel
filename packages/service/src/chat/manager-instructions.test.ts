@@ -411,6 +411,78 @@ describe('buildInstructions structured step inputs', () => {
     expect(rendered).toContain('`read_artifact` is not wired this turn');
     expect(rendered).toContain('Do not claim it is missing');
   });
+
+  // The powerpoint-deck wild catch: step 0's conditional escape hatch
+  // ("If … are all empty, call `ask_user_question` and stop") was lifted
+  // into the anchor as an unconditional command even though the topic
+  // parameter was supplied.
+  it('skips conditional and negated tool mentions when picking the first action', () => {
+    const step = {
+      id: 'research',
+      name: 'Acquire and verify sources',
+      prompt:
+        'Topic: `startup ideas`. 0. If source path, topic, and inline content are all empty, call `ask_user_question` for the missing subject and stop. Do not call `read_task_notes` while the boundary is missing. 3. Call `write_task_note` with the sources used.',
+      createdAt: '2026-08-26T00:00:00.000Z',
+    };
+    const rendered = buildInstructions({
+      name: 'Agathe',
+      role: 'Researcher',
+      about: 'Research things.',
+      project: { id: 'default', name: 'Default' } as unknown as ProjectDetail,
+      localModelTier: 'small',
+      availableTools: ['ask_user_question', 'read_task_notes', 'write_task_note'].map((name) => ({
+        name,
+        description: `${name} tool`,
+      })),
+      task: {
+        task: {
+          ref: 'default/8',
+          title: 'PowerPoint from Content',
+          status: 'active',
+          assignee: { kind: 'gezel', gezelId: 'agathe' },
+          craftbook: { steps: [step], entryStepId: 'research' },
+        },
+        step,
+      },
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(rendered).toContain(
+      'First action (once only): call `write_task_note` exactly as the procedure specifies.',
+    );
+    expect(rendered).not.toContain(
+      'First action (once only): call `ask_user_question` exactly as the procedure specifies.',
+    );
+  });
+
+  it('omits the first-action anchor entirely on a gate retry attempt', () => {
+    const step = {
+      id: 'research',
+      name: 'Acquire and verify sources',
+      prompt: 'Call `write_task_note` with the sources used.',
+      attemptCount: 2,
+      createdAt: '2026-08-26T00:00:00.000Z',
+    };
+    const rendered = buildInstructions({
+      name: 'Agathe',
+      role: 'Researcher',
+      about: 'Research things.',
+      project: { id: 'default', name: 'Default' } as unknown as ProjectDetail,
+      localModelTier: 'small',
+      availableTools: [{ name: 'write_task_note', description: 'note tool' }],
+      task: {
+        task: {
+          ref: 'default/8',
+          title: 'PowerPoint from Content',
+          status: 'active',
+          assignee: { kind: 'gezel', gezelId: 'agathe' },
+          craftbook: { steps: [step], entryStepId: 'research' },
+        },
+        step,
+      },
+    } as unknown as BuildInstructionsOptions).full;
+
+    expect(rendered).not.toContain('First action (once only)');
+  });
 });
 
 describe('buildInstructions assigned pronouns', () => {

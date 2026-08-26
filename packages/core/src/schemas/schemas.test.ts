@@ -4,6 +4,7 @@ import {
   BoekwachterIssueSchema,
   ChatEventSchema,
   ChatMessageSchema,
+  ChatMessageToolCallSchema,
   CraftbookTemplateIdentitySchema,
   CreateProjectRequestSchema,
   CreateTaskRequestSchema,
@@ -403,6 +404,66 @@ describe('ChatEventSchema', () => {
       resultText: 'Matched presentations/powerpoint',
       resultTruncated: false,
     });
+  });
+
+  it('carries an inline tool card on tool events and rejects malformed ones', () => {
+    const card = {
+      kind: 'craftbook-start',
+      craftbookId: 'powerpoint-deck',
+      craftbookName: 'PowerPoint from Content',
+      taskRef: 'default/12',
+      projectId: 'default',
+      status: 'active',
+      activeStepId: 'research',
+      steps: [{ id: 'research', name: 'Acquire and verify sources', status: 'active' }],
+      recommendsExternalServices: { reason: 'verifies sources with live web search' },
+    };
+    const base = { type: 'tool', name: 'invoke_craftbook', durationMs: 42, success: true };
+    expect(ChatEventSchema.parse({ ...base, card })).toMatchObject({ card });
+    // Same payload round-trips on the persisted tool-call record.
+    expect(
+      ChatMessageToolCallSchema.parse({
+        name: 'invoke_craftbook',
+        durationMs: 42,
+        success: true,
+        card,
+      }),
+    ).toMatchObject({ card });
+    expect(() =>
+      ChatEventSchema.parse({ ...base, card: { ...card, kind: 'mystery-card' } }),
+    ).toThrow();
+    expect(() =>
+      ChatEventSchema.parse({
+        ...base,
+        card: { ...card, steps: [{ id: 'research', name: 'Research', status: 'started' }] },
+      }),
+    ).toThrow();
+  });
+
+  it('parses the step-advance card variant', () => {
+    expect(
+      ChatMessageToolCallSchema.parse({
+        name: 'advance_task_step',
+        durationMs: 42,
+        success: true,
+        card: {
+          kind: 'task-step-advance',
+          craftbookId: 'powerpoint-deck',
+          craftbookName: 'PowerPoint from Content',
+          taskRef: 'default/12',
+          projectId: 'default',
+          status: 'active',
+          completedStepId: 'research',
+          completedStepName: 'Acquire and verify sources',
+          activeStepId: 'outline',
+          activeStepName: 'Lock the slide outline',
+          steps: [
+            { id: 'research', name: 'Acquire and verify sources', status: 'done' },
+            { id: 'outline', name: 'Lock the slide outline', status: 'active' },
+          ],
+        },
+      }).card,
+    ).toMatchObject({ kind: 'task-step-advance', completedStepId: 'research' });
   });
 });
 

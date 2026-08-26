@@ -294,7 +294,9 @@ function AudioPullProgress({
     ? pull.error
     : known
       ? `Downloading… (${formatSize(pull.bytesWritten)} of ${formatSize(pull.totalBytes)}, ${pct}%)`
-      : `Downloading… (${formatSize(pull.bytesWritten)})`;
+      : pull.bytesWritten > 0
+        ? `Downloading… (${formatSize(pull.bytesWritten)})`
+        : 'Preparing download…';
   return (
     <div className={`ollama-pull${pull.error ? ' ollama-pull-error' : ''}`}>
       <div className="ollama-pull-head">

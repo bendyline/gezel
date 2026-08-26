@@ -537,8 +537,10 @@ function VideoPullProgress({
   } else if (known) {
     const file = pull.fileLabel ? ` · ${pull.fileLabel}` : '';
     statusLine = `Downloading… (${formatSize(pull.bytesWritten)} of ${formatSize(pull.totalBytes)}, ${pct}%)${file}`;
-  } else {
+  } else if (pull.bytesWritten > 0) {
     statusLine = `Downloading… (${formatSize(pull.bytesWritten)})`;
+  } else {
+    statusLine = 'Preparing download…';
   }
   return (
     <div

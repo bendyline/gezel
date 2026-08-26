@@ -510,9 +510,9 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     );
 
     const strip = await screen.findByRole('img', {
-      name: /Current VRAM use: 9\.0 GB of 24\.0 GB used, Gezel estimated 5\.0 GB/i,
+      name: /Current video memory use: 9\.0 GB of 24\.0 GB used, Gezel estimated 5\.0 GB/i,
     });
-    expect(screen.getByText('Current VRAM use')).toBeInTheDocument();
+    expect(screen.getByText('Current video memory use')).toBeInTheDocument();
     expect(strip).toBeInTheDocument();
     expect(screen.getByText('Gezel ~5.0 GB')).toBeInTheDocument();
     // Zero-byte pieces of the breakdown stay out of the announcement.
@@ -523,7 +523,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(unattributed).toBeInTheDocument();
     expect(unattributed).toHaveAttribute(
       'title',
-      'Per-process VRAM use is unavailable; this may include retained Gezel models',
+      'Per-process video memory use is unavailable; this may include retained Gezel models',
     );
     expect(strip).toHaveAccessibleName(
       /unattributed use 4\.0 GB; this may include retained Gezel models/i,
@@ -538,7 +538,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     );
   });
 
-  it('names Windows VRAM owners and can unload an idle model from its countdown', async () => {
+  it('shows a friendly estimated Windows video memory breakdown and can unload an idle model', async () => {
     const user = userEvent.setup();
     const GiB = 1024 ** 3;
     const memoryUsage: Awaited<ReturnType<typeof api.getMachineMemoryUsage>> = {
@@ -547,6 +547,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
       usedBytes: 31 * GiB,
       gezelBytesEstimated: 0,
       gezelBytesObserved: 26 * GiB,
+      processAttributionKind: 'estimated',
       gezelInfraBytes: 0,
       gezelModelWeightsBytes: 0,
       gezelModelCacheBytes: 26 * GiB,
@@ -580,6 +581,24 @@ describe('EngineStatusPill — simultaneous local engines', () => {
           dedicatedBytes: 13 * GiB,
           owner: 'development-engine',
         },
+        {
+          pid: 303,
+          name: 'dwm.exe',
+          dedicatedBytes: 1 * GiB,
+          owner: 'external',
+        },
+        {
+          pid: 304,
+          name: 'background-a.exe',
+          dedicatedBytes: 10 * 1024 ** 2,
+          owner: 'external',
+        },
+        {
+          pid: 305,
+          name: 'background-b.exe',
+          dedicatedBytes: 10 * 1024 ** 2,
+          owner: 'external',
+        },
       ],
       gezelEngineProcessCount: 2,
       orphanedGezelEngineProcessCount: 0,
@@ -598,10 +617,15 @@ describe('EngineStatusPill — simultaneous local engines', () => {
 
     await user.click(await screen.findByRole('button', { name: /Talkie 1930 13B/i }));
 
-    expect(
-      await screen.findByText(/Gezel machine engine · gezel-llama-server\.exe/i),
-    ).toBeVisible();
-    expect(screen.getByText(/Gezel development engine · gezel-llama-server\.exe/i)).toBeVisible();
+    expect(await screen.findByText(/Gezel machine engine · gezel-llama-server/i)).toBeVisible();
+    expect(screen.queryByText(/gezel-llama-server\.exe/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Gezel development engine · gezel-llama-server/i)).toBeVisible();
+    expect(screen.getByText('Windows Desktop')).toBeVisible();
+    expect(screen.queryByText(/dwm(?:\.exe)?/i)).not.toBeInTheDocument();
+    expect(screen.getByText('Estimated video memory use')).toBeVisible();
+    expect(screen.getAllByText('~13.0 GB')).toHaveLength(2);
+    expect(screen.getByText('~1.0 GB')).toBeVisible();
+    expect(screen.getByText('Other processes')).toBeVisible();
     expect(screen.getByText('Other 5.0 GB')).toBeVisible();
     expect(screen.getByText(/Unloads in 5:00|Unloads in 4:59/i)).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Unload Talkie 1930 13B now' }));
@@ -675,7 +699,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
 
     // The pool is unmeasured, so its unactionable meter is omitted — the old
     // behaviour clamped the reservation to the card and drew a full bar.
-    expect(screen.getByText('VRAM')).toBeInTheDocument();
+    expect(screen.getByText('Video memory')).toBeInTheDocument();
     expect(screen.getByText('31.9 GB total')).toBeInTheDocument();
     expect(document.querySelector('.machine-memory-bar')).toBeNull();
     expect(document.querySelector('.machine-memory-swatch-gezel')).toBeNull();
@@ -683,10 +707,12 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     const capacityMeter = screen.getByRole('img', {
       name: /Model capacity: about 50\.0 GB of 68\.4 GB reserved/i,
     });
-    expect(capacityMeter).toHaveAccessibleName(/30\.4 GB VRAM \+ ~38\.0 GB system RAM/i);
+    expect(capacityMeter).toHaveAccessibleName(/30\.4 GB video memory \+ ~38\.0 GB system RAM/i);
     expect(capacityMeter.querySelectorAll('.machine-memory-reservation-segment')).toHaveLength(2);
     expect(screen.getByText('Reserved model capacity')).toBeInTheDocument();
-    expect(screen.getByText('Capacity: ~30.4 GB VRAM + ~38.0 GB system RAM')).toBeInTheDocument();
+    expect(
+      screen.getByText('Capacity: ~30.4 GB video memory + ~38.0 GB system RAM'),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Capacity planning only/)).not.toBeInTheDocument();
     // Capacity holders are visible as well as accessible. Known ids take
     // their catalog name; the rest fall back to the id.

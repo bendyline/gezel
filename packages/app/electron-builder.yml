@@ -83,7 +83,8 @@ files:
   # macOS menu-bar (tray) template icon + its @2x HiDPI variant, read by
   # the main process via nativeImage.createFromPath (see src/tray.ts).
   # Windows uses the multi-resolution icon.ico above so the shell can select
-  # a pixel-aligned 16/20/24 px frame; Linux derives its tray icon from icon.png.
+  # native 16–48 px taskbar frames or vector-derived 64–256 px Explorer frames;
+  # Linux derives its tray icon from icon.png.
   - assets/trayTemplate.png
   - assets/trayTemplate@2x.png
   # Five indeterminate activity frames. The main process cycles these only

@@ -6,6 +6,7 @@ import {
   CraftbookBasedOnSchema,
   CraftbookCommandNeedSchema,
   CraftbookConnectorNeedSchema,
+  CraftbookRecommendationSchema,
   CraftbookRequirementSchema,
   CraftbookRunModesSchema,
   CraftbookScriptsSchema,
@@ -721,6 +722,8 @@ export const CraftbookTemplateVersionManifestSchema = z.object({
     .optional(),
   /** Prerequisites for the craftbook to be offered (see CraftbookSchema). */
   requirements: z.array(CraftbookRequirementSchema).optional(),
+  /** Soft "works better with" hints — never gate (see CraftbookRecommendationSchema). */
+  recommends: z.array(CraftbookRecommendationSchema).optional(),
   /** Unattended launch modes this recipe is suitable for. */
   runModes: CraftbookRunModesSchema.optional(),
   /**
@@ -799,6 +802,8 @@ export const CraftbookTemplateManifestSchema = z.object({
     .optional(),
   /** Applicability prerequisites (mirrored from the version manifest). */
   requirements: z.array(CraftbookRequirementSchema).optional(),
+  /** Soft "works better with" hints (mirrored from the version manifest). */
+  recommends: z.array(CraftbookRecommendationSchema).optional(),
   /** Unattended launch modes (mirrored from the version manifest). */
   runModes: CraftbookRunModesSchema.optional(),
   /** Toolset dependencies (mirrored from the version manifest). */

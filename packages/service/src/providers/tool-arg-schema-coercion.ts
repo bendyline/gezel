@@ -32,7 +32,7 @@
  */
 
 /** JSON Schema fragment. Untyped on purpose — this walks arbitrary MCP schemas. */
-type JsonSchema = Record<string, unknown>;
+export type JsonSchema = Record<string, unknown>;
 
 export interface ToolArgCoercionResult {
   args: Record<string, unknown>;
@@ -73,10 +73,17 @@ function resolveRef(root: JsonSchema, ref: string): JsonSchema | undefined {
   return isPlainObject(node) ? node : undefined;
 }
 
-function deref(
+/**
+ * Follow `$ref` chains to the concrete schema node. Exported because the
+ * error-message shape describer in `mcp-wrappers/schema-shape-hint.ts`
+ * walks the same schemas and must resolve refs identically — two
+ * resolvers over one schema dialect drift, and the drift shows up as a
+ * hint that contradicts the coercion.
+ */
+export function deref(
   schema: JsonSchema | undefined,
   root: JsonSchema,
-  seen: Set<string>,
+  seen: Set<string> = new Set(),
 ): JsonSchema | undefined {
   if (!schema) return undefined;
   const ref = schema.$ref;

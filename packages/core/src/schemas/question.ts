@@ -40,7 +40,12 @@ export const QuestionAnswerSchema = z.object({
    * proceed anyway with sensible defaults. Triggers a synthetic
    * follow-up turn with a `[The user wants you to proceed…]` seed
    * so the gezel knows to make decisions on the user's behalf.
-   * UI label: "Just do whatever".
+   *
+   * The plain question card no longer offers this — a "decide for me"
+   * button next to a question the gezel is blocked on invited the one
+   * answer that teaches it nothing. It stays on the approval cards that
+   * mean it literally (declining an image generation, an npm install,
+   * a schedule) and on the permission broker's dismissal path.
    */
   declined: z.boolean().optional(),
   /**

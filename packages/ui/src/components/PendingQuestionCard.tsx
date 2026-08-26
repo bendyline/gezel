@@ -1,4 +1,5 @@
 import type {
+  AnswerQuestionRequest,
   ClaudeUserQuestionIntent,
   NpmInstallApprovalDecision,
   NpmInstallApprovalPackage,
@@ -184,6 +185,105 @@ function OpenInChatButton({
     >
       Open in chat
     </button>
+  );
+}
+
+/**
+ * How a card resolves itself after the user steers the task instead of
+ * answering: the gezel's turn ended when it asked, and pausing is not a
+ * "proceed with defaults" signal — so nothing is seeded back.
+ */
+const SILENT_SKIP = { silentSkip: true } as const;
+
+/**
+ * "Pause task" / "Cancel task" for a question that hangs off one.
+ *
+ * A question is a hard stop for the gezel that asked it — the turn has
+ * already ended and nothing moves until the card is resolved. When the
+ * answer the user actually wants to give is "stop working on this",
+ * making them answer the question first and *then* hunt down the task
+ * to pause it is two surfaces for one decision. So steering the task is
+ * offered here, and the card resolves itself with `dismiss` afterwards
+ * so no orphan question is left waiting on a task nobody is running.
+ *
+ * The task steer goes first: if it fails the card stays open with the
+ * reason, rather than collapsing on a task that never changed.
+ *
+ * Errors are handed up (`onError`) instead of rendered here — the host
+ * card already owns an error line, and this component lives inside a
+ * flex row of buttons.
+ */
+function TaskLifecycleActions({
+  question,
+  onAnswered,
+  onError,
+  disabled,
+  dismiss,
+}: {
+  question: Question;
+  onAnswered?: (q: Question) => void;
+  onError?: (message: string | null) => void;
+  disabled?: boolean;
+  /** How the card resolves itself once the task has been steered. */
+  dismiss: AnswerQuestionRequest;
+}) {
+  const [busy, setBusy] = useState<'paused' | 'canceled' | null>(null);
+  const ref = useMemo(
+    () => (question.taskRef ? parseTaskRef(question.taskRef) : null),
+    [question.taskRef],
+  );
+
+  const steer = useCallback(
+    async (status: 'paused' | 'canceled') => {
+      if (!ref || busy) return;
+      setBusy(status);
+      onError?.(null);
+      try {
+        await api.setTaskStatus(ref.projectId, ref.num, status);
+      } catch (err) {
+        onError?.(
+          (err as Error).message ??
+            `Failed to ${status === 'paused' ? 'pause' : 'cancel'} the task.`,
+        );
+        setBusy(null);
+        return;
+      }
+      try {
+        const updated = await api.answerQuestion(question.id, dismiss);
+        onAnswered?.(updated);
+      } catch (err) {
+        // The task IS steered — say so, so the user doesn't hit it again.
+        onError?.(
+          `The task is ${status}, but the question couldn't be cleared: ${(err as Error).message}`,
+        );
+        setBusy(null);
+      }
+    },
+    [ref, busy, question.id, dismiss, onAnswered, onError],
+  );
+
+  if (!ref) return null;
+  return (
+    <>
+      <button
+        type="button"
+        className="pending-question-skip pending-question-task-steer subtle"
+        onClick={() => void steer('paused')}
+        disabled={disabled || busy !== null}
+        title="Stop the task here. It keeps its progress and can be resumed later."
+      >
+        {busy === 'paused' ? 'Pausing…' : 'Pause task'}
+      </button>
+      <button
+        type="button"
+        className="pending-question-skip subtle"
+        onClick={() => void steer('canceled')}
+        disabled={disabled || busy !== null}
+        title="End the task. It stops for good — its notes and artifacts stay."
+      >
+        {busy === 'canceled' ? 'Canceling…' : 'Cancel task'}
+      </button>
+    </>
   );
 }
 
@@ -661,6 +761,15 @@ function ToolPermissionForm({
         >
           {submitting === 'deny' ? 'Denying…' : 'Deny'}
         </button>
+        {/* The permission broker reads a silent skip as a denial, so the
+            waiting subprocess is released either way. */}
+        <TaskLifecycleActions
+          question={question}
+          onAnswered={onAnswered}
+          onError={setError}
+          disabled={submitting !== null}
+          dismiss={SILENT_SKIP}
+        />
         <OpenInChatButton question={question} onOpenInChat={onOpenInChat} />
       </div>
     </div>
@@ -851,7 +960,6 @@ function ClaudeUserQuestionForm({
       kicker={kicker || undefined}
       choiceDescriptions={intent.options.map((o) => o.description)}
       skipHint="Dismiss without answering. The gezel is still working and will carry on without this input."
-      justDoHint="Tell the gezel to decide on its own, using sensible defaults."
     />
   );
 }
@@ -863,7 +971,6 @@ function PendingForm({
   kicker,
   choiceDescriptions,
   skipHint,
-  justDoHint,
 }: {
   question: Question;
   onAnswered?: (q: Question) => void;
@@ -873,15 +980,14 @@ function PendingForm({
   /** Per-choice description lines, index-aligned with `question.choices`. */
   choiceDescriptions?: (string | undefined)[];
   skipHint?: string;
-  justDoHint?: string;
 }) {
   const allowWriteIn = question.allowWriteIn ?? true;
   const multi = question.multiSelect ?? false;
   const choices = question.choices ?? [];
   // Single-select with no write-in (e.g. Approve/Decline command-approval
-  // gates): clicking a choice IS the answer — no Submit/Skip/Just-do-whatever
-  // row needed. Multi-select still needs explicit confirmation, and
-  // write-in mode needs the row so the user can type without committing.
+  // gates): clicking a choice IS the answer — no Submit/Skip row needed.
+  // Multi-select still needs explicit confirmation, and write-in mode
+  // needs the row so the user can type without committing.
   const autoSubmit = !multi && !allowWriteIn && choices.length > 0;
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [writeIn, setWriteIn] = useState('');
@@ -909,10 +1015,10 @@ function PendingForm({
   );
 
   const submit = useCallback(
-    async (mode: 'submit' | 'just-do-whatever' | 'silent-skip') => {
+    async (mode: 'submit' | 'silent-skip') => {
       if (submitting) return;
       const selectedChoices = Array.from(selected).sort((a, b) => a - b);
-      // Block empty submits unless dismissing via Skip / Just do whatever.
+      // Block empty submits unless dismissing via Skip.
       if (mode === 'submit' && selectedChoices.length === 0 && !writeIn.trim()) {
         setError("Pick a choice or type something — or use Skip if you'd rather not answer.");
         return;
@@ -923,7 +1029,6 @@ function PendingForm({
         const updated = await api.answerQuestion(question.id, {
           ...(mode === 'submit' && selectedChoices.length > 0 ? { selectedChoices } : {}),
           ...(mode === 'submit' && writeIn.trim() ? { writeIn: writeIn.trim() } : {}),
-          ...(mode === 'just-do-whatever' ? { declined: true } : {}),
           ...(mode === 'silent-skip' ? { silentSkip: true } : {}),
         });
         onAnswered?.(updated);
@@ -1035,20 +1140,15 @@ function PendingForm({
             >
               Skip
             </button>
-            <button
-              type="button"
-              className="pending-question-skip subtle"
-              onClick={() => void submit('just-do-whatever')}
-              disabled={submitting}
-              title={
-                justDoHint ??
-                'Tell the gezel to proceed without your input, using sensible defaults.'
-              }
-            >
-              Just do whatever
-            </button>
           </>
         )}
+        <TaskLifecycleActions
+          question={question}
+          onAnswered={onAnswered}
+          onError={setError}
+          disabled={submitting || autoSubmittingIdx !== null}
+          dismiss={SILENT_SKIP}
+        />
         <OpenInChatButton
           question={question}
           onOpenInChat={onOpenInChat}

@@ -78,7 +78,12 @@ import {
   plateauScore,
   stageForPlateau,
 } from './gate-escalation.js';
-import { type GateCheckOutcome, type GateWorkspaceReader, gateCheckLabel } from './gate-eval.js';
+import {
+  type GateCheckOutcome,
+  type GateWorkspaceReader,
+  gateCheckLabel,
+  taskSuppliedCitationPaths,
+} from './gate-eval.js';
 import { execNodeRunsInSandbox } from './node-runs-exec.js';
 import { type StepGateOutcome, evaluateStepGate, gateMessageFingerprint } from './step-gate.js';
 
@@ -209,6 +214,9 @@ function snapshotCraftbookForTask(book: Craftbook, now: string): TaskCraftbook {
     // Snapshot toolsets so ChatManager can derive the auto-allow tool set
     // from `task.craftbook.toolsets` without re-resolving the catalog book.
     ...(book.toolsets ? { toolsets: book.toolsets } : {}),
+    // Snapshot recommendation hints so the chat's craftbook start card can
+    // read them off the tool result's task without a catalog lookup.
+    ...(book.recommends ? { recommends: book.recommends } : {}),
     // Snapshot connector needs so a running task records the corpus it was
     // launched against without re-resolving the catalog book.
     ...(book.connectors ? { connectors: book.connectors } : {}),
@@ -2141,6 +2149,7 @@ export class TaskManager {
       ...(book.triggers ? { triggers: book.triggers } : {}),
       ...(book.hooks ? { hooks: book.hooks } : {}),
       ...(book.toolsets ? { toolsets: book.toolsets } : {}),
+      ...(book.recommends ? { recommends: book.recommends } : {}),
       ...(book.connectors ? { connectors: book.connectors } : {}),
       ...(book.scripts ? { scripts: book.scripts } : {}),
       createdAt: task.craftbook.createdAt,
@@ -3096,6 +3105,15 @@ export class TaskManager {
       ws,
       runScript: (ref) => this.runGateScript(projectId, task, step, ref),
       deps: {
+        // Paths the task itself handed the assignee (invocation params,
+        // the step prompt's own path tokens). `citationsResolve` forgives
+        // these when unresolvable — a sources packet transcribing its own
+        // work folder or future output path is not fabricating a citation.
+        knownCitationPaths: taskSuppliedCitationPaths({
+          ...(step.prompt !== undefined ? { stepPrompt: step.prompt } : {}),
+          ...(task.craftbookParams !== undefined ? { params: task.craftbookParams } : {}),
+          artifactDir: task.artifactDir ?? `tasks/${task.num}`,
+        }),
         // The nodeRuns executor — same security fence as user scripts:
         // when the policy disables script execution, the check rejects
         // with the policy message (fail-closed) instead of running.

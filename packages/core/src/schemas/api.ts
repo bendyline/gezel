@@ -310,10 +310,13 @@ export const GpuProcessOwnerSchema = z.enum([
 ]);
 export type GpuProcessOwner = z.infer<typeof GpuProcessOwnerSchema>;
 
-/** Driver accounting for one process holding dedicated GPU memory. */
+/** Driver accounting for one process holding GPU-local memory. */
 export const GpuProcessMemorySchema = z.object({
   pid: z.number().int().positive(),
   name: z.string().optional(),
+  /** Windows adapter identity parsed from the process-counter instance. */
+  adapterLuid: z.string().optional(),
+  /** Historical wire name; Windows resident-local samples also use this field. */
   dedicatedBytes: z.number().nonnegative(),
   owner: GpuProcessOwnerSchema,
 });
@@ -356,6 +359,8 @@ export const MachineMemoryUsageSchema = z.object({
   gezelBytesEstimated: z.number().nonnegative(),
   /** Observed Gezel process footprint when the platform exposes it. */
   gezelBytesObserved: z.number().nonnegative().nullable(),
+  /** Windows process attribution is reconciled to the pool and remains approximate. */
+  processAttributionKind: z.enum(['measured', 'estimated']).optional(),
   /** Gezel daemon + local-engine runtime overhead within the attributed total. */
   gezelInfraBytes: z.number().nonnegative(),
   /** Loaded model parameters, estimated from the installed model payloads. */
@@ -404,7 +409,7 @@ export const MachineMemoryUsageSchema = z.object({
   residentModels: z.array(ResidentEngineModelSchema),
   /** Running supervised replicas and their next policy deadline. */
   engineLifecycles: z.array(LocalEngineLifecycleSchema).optional(),
-  /** Actual dedicated-VRAM owners, when the OS exposes them. */
+  /** GPU-local process attribution, when the OS exposes trustworthy counters. */
   gpuProcesses: z.array(GpuProcessMemorySchema).optional(),
   gezelEngineProcessCount: z.number().int().nonnegative(),
   orphanedGezelEngineProcessCount: z.number().int().nonnegative(),

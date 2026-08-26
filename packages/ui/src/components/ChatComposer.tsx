@@ -149,6 +149,12 @@ export interface ChatComposerProps {
    */
   belowAddressLine?: ReactNode;
   /**
+   * Optional trailing content for the "To:" line, rendered after the
+   * recipient picker. Project chat puts the chat/terminal mode tabs here
+   * so the compose-surface switch sits on the address line it fronts.
+   */
+  addressLineTrailing?: ReactNode;
+  /**
    * Project-chat pivot hook. Fires the first time a draft picks up
    * an `@<otherGezel>` mention (other than the current primary) so
    * the parent can switch the active gezel chip + the SessionSwitcher
@@ -236,6 +242,7 @@ export function ChatComposer({
   taskRef,
   stepId,
   belowAddressLine,
+  addressLineTrailing,
   onPivotToMention,
   passiveCcGezelIds,
   onPassiveCcConsumed,
@@ -808,6 +815,7 @@ export function ChatComposer({
                 ...(event.diff !== undefined ? { diff: event.diff } : {}),
                 ...(event.addedLines !== undefined ? { addedLines: event.addedLines } : {}),
                 ...(event.removedLines !== undefined ? { removedLines: event.removedLines } : {}),
+                ...(event.card ? { card: event.card } : {}),
                 projectId,
               };
               onToolActivity?.(tool);
@@ -1205,6 +1213,7 @@ export function ChatComposer({
             }
           />
         )}
+        {addressLineTrailing}
       </div>
       {belowAddressLine}
       <div className="chat-editor-wrap">

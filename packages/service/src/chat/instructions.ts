@@ -409,6 +409,16 @@ const MINIMAL_CONTEXT_CONDUCT =
  * produce `index.html` but require an acceptance note or a script check
  * before the write; steering from the file extension contradicted that
  * authored order and caused small models to skip the procedure.
+ *
+ * Mentions inside a conditional clause ("If … are all empty, call
+ * `ask_user_question` and stop") or a negated one ("Do not call
+ * `read_task_notes`") are skipped: the anchor commands the tool
+ * unconditionally, so lifting a guarded mention turns the procedure's
+ * escape hatch into a mandate. Wild-caught on the powerpoint-deck
+ * research step — the footer ordered `ask_user_question` even though the
+ * step's topic parameter was supplied and the condition false. Skipping a
+ * guarded mention at worst anchors a later unconditional tool or emits no
+ * anchor, both safe.
  */
 function firstAvailableProcedureTool(
   procedure: string,
@@ -417,9 +427,31 @@ function firstAvailableProcedureTool(
   const namedTool = /`([a-z][a-z0-9_-]+)(?:\([^`]*\))?`/g;
   for (const match of procedure.matchAll(namedTool)) {
     const name = match[1];
-    if (name && availableToolNames.has(name)) return name;
+    if (!name || !availableToolNames.has(name)) continue;
+    if (isGuardedToolMention(procedure, match.index)) continue;
+    return name;
   }
   return undefined;
+}
+
+/** True when the tool mention at `index` sits in a conditional or negated
+ *  clause (see {@link firstAvailableProcedureTool}). Clause = text since
+ *  the last sentence boundary; lexical on purpose — this only ever makes
+ *  the anchor MORE conservative. */
+function isGuardedToolMention(procedure: string, index: number): boolean {
+  const before = procedure.slice(0, index);
+  const boundary = Math.max(
+    before.lastIndexOf('. '),
+    before.lastIndexOf('.\n'),
+    before.lastIndexOf('! '),
+    before.lastIndexOf('? '),
+    before.lastIndexOf(': '),
+    before.lastIndexOf(';'),
+    before.lastIndexOf('\n'),
+  );
+  const clause = before.slice(boundary + 1).replace(/^[\s*>-]+/, '');
+  if (/^(?:if|when|unless|only if|in case|otherwise|should)\b/i.test(clause)) return true;
+  return /\b(?:do not|don't|never|avoid|instead of|rather than)\b[^.!?]*$/i.test(clause);
 }
 
 /** Sentence-aware cap of the about body for minimal-context mode. */
@@ -1247,8 +1279,14 @@ ${artifactsLine}
       // Name the authored first action, not one inferred from the
       // deliverable extension. For example, an HTML step may explicitly
       // require `write_task_note` before `write_file`.
+      //
+      // Suppressed on gate retries (attempt > 1): the attempt note already
+      // says "fix the specific gap named in the notes rather than starting
+      // over", and an anchor commanding the procedure's first action is a
+      // direct contradiction — it steers the model into re-running the
+      // step from the top instead of repairing the named gap.
       let firstActionAnchor = '';
-      if (smallOrLeaky && task.step) {
+      if (smallOrLeaky && task.step && activeStepAttempt <= 1) {
         const firstInput = task.step.consumes?.[0];
         const firstInputTool = firstInput?.artifact ? 'read_artifact' : 'read_file';
         const firstProcedureTool =

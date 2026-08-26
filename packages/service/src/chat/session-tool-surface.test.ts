@@ -1187,3 +1187,74 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
     expect(allowlist!.has('run_nodejs_script')).toBe(true);
   });
 });
+
+/**
+ * The count cap and the kit clamp are two different narrowings, and only
+ * the clamp consulted the step's own procedure — so whether a step could
+ * call the tool its text named depended on which one happened to bind.
+ * Both now read the same signal.
+ *
+ * The tool under test is the one powerpoint-deck `publish` step 5 names:
+ * DocBlocks can write only to the artifacts root, so
+ * `copy_artifact_to_workspace` is the sole route to the requested
+ * workspace path, and a roster without it leaves the step unable to
+ * comply (ADR 0001's failure reached from the opposite side).
+ */
+describe('the count cap keeps what the active step positively instructs', () => {
+  const WIDE_GROUPS = [
+    'memory',
+    'workspace-fs-read',
+    'workspace-fs-write',
+    'tasks',
+    'craftbooks',
+    'team-management',
+    'artifacts',
+    'documents',
+    'code-execution',
+    'web',
+    'archives',
+  ];
+
+  const surfaceWithStepPrompt = async (prompt: string): Promise<Set<string>> => {
+    const { allowlist } = await resolveSessionToolSurface({
+      surface: 'bridge',
+      session: {
+        id: 'publish-session',
+        gezelId: 'meester',
+        projectId: 'p1',
+        providerName: 'llama-cpp',
+        title: '',
+        messages: [],
+        createdAt: '2026-08-26T00:00:00.000Z',
+        lastActivityAt: '2026-08-26T00:00:00.000Z',
+      } as unknown as ChatSession,
+      role: 'Meester',
+      mode: 'always',
+      provider: 'llama-cpp',
+      modelId: 'gemma4:e4b',
+      toolsetsGroupOverride: WIDE_GROUPS,
+      githubLinked: false,
+      isGitRepo: false,
+      tier: 'small',
+      latestUserMessage: undefined,
+      activeStep: {
+        prompt,
+        advanceWhen: { file: 'powerpoint/task-8/deck.pptx', minBytes: 1 },
+      },
+    } as never);
+    expect(allowlist).not.toBeNull();
+    return allowlist!;
+  };
+
+  const MANDATES =
+    'Call `copy_artifact_to_workspace` with source `"tasks/8/deck.pptx"` and dest `"powerpoint/task-8/deck.pptx"` so the user receives the exact requested workspace file without a text/binary round-trip.';
+  const SILENT = 'Publish the reviewed deck and record the result in the task notes.';
+
+  it('keeps a step-mandated tool the cap would otherwise evict', async () => {
+    expect((await surfaceWithStepPrompt(MANDATES)).has('copy_artifact_to_workspace')).toBe(true);
+  });
+
+  it('control: the same tool is evicted when no step instructs it', async () => {
+    expect((await surfaceWithStepPrompt(SILENT)).has('copy_artifact_to_workspace')).toBe(false);
+  });
+});

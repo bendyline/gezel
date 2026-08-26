@@ -46,6 +46,9 @@ describe('humanizeToolCall — non-nerdy summaries', () => {
     expect(humanizeToolCall('ensure_gezel', { jobTitle: 'Developer' })).toBe(
       'Lined up a Developer',
     );
+    expect(humanizeToolCall('invoke_craftbook', { craftbookId: 'powerpoint-deck' })).toBe(
+      'Started powerpoint-deck',
+    );
   });
 
   it('returns undefined for unknown tools so the caller falls back to the key:value summary', () => {

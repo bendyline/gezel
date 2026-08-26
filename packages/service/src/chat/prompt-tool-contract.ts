@@ -93,6 +93,8 @@ interface ToolMention {
 
 interface ExplicitToolCandidate extends ToolMention {
   syntax: 'backtick' | 'call' | 'bare-directive' | 'named-tool';
+  /** Characters the spelling occupies, backticks and `(...)` included. */
+  length: number;
 }
 
 const AMBIGUOUS_TOMBSTONES = new Set(['Grep', 'Read', 'Edit', 'Agent', 'Bash']);
@@ -116,7 +118,12 @@ function explicitToolCandidates(line: string): ExplicitToolCandidate[] {
     'tool_use',
     'tools',
   ]);
-  const add = (tool: string, index: number, syntax: ExplicitToolCandidate['syntax']) => {
+  const add = (
+    tool: string,
+    index: number,
+    syntax: ExplicitToolCandidate['syntax'],
+    length: number = tool.length,
+  ) => {
     if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(tool)) return;
     if (reservedWords.has(tool.toLowerCase())) return;
     const knownName = BUILTIN_TOOL_NAME_SET.has(tool);
@@ -127,14 +134,16 @@ function explicitToolCandidates(line: string): ExplicitToolCandidate[] {
       (tool.includes('-') &&
         NORMALIZED_BUILTIN_TOOL_NAME_SET.has(tool.toLowerCase().replace(/[^a-z0-9]/g, '')));
     if (!toolShaped && !knownName) return;
-    candidates.push({ tool, index, syntax });
+    candidates.push({ tool, index, syntax, length });
   };
 
   for (const match of line.matchAll(/`([A-Za-z][A-Za-z0-9_-]*)(?:\s*\([^`]*\))?`/g)) {
-    if (match.index !== undefined && match[1]) add(match[1], match.index, 'backtick');
+    if (match.index !== undefined && match[1]) {
+      add(match[1], match.index, 'backtick', match[0].length);
+    }
   }
   for (const match of line.matchAll(/(?<![A-Za-z0-9_.`])([A-Za-z][A-Za-z0-9_]*)\(/g)) {
-    if (match.index !== undefined && match[1]) add(match[1], match.index, 'call');
+    if (match.index !== undefined && match[1]) add(match[1], match.index, 'call', match[0].length);
   }
 
   // Models are commonly instructed with plain prose rather than function
@@ -209,7 +218,7 @@ function explicitToolCandidates(line: string): ExplicitToolCandidate[] {
     });
 }
 
-function clauseAround(line: string, index: number): string {
+function clauseBounds(line: string, index: number): { start: number; end: number } {
   const before = line.slice(0, index);
   const starts = [before.lastIndexOf('. '), before.lastIndexOf('; '), before.lastIndexOf('! ')];
   const boundary = Math.max(...starts);
@@ -219,7 +228,46 @@ function clauseAround(line: string, index: number): string {
     (value) => value >= 0,
   );
   const end = ends.length > 0 ? index + Math.min(...ends) + 1 : line.length;
+  return { start, end };
+}
+
+function clauseAround(line: string, index: number): string {
+  const { start, end } = clauseBounds(line, index);
   return line.slice(start, end);
+}
+
+/**
+ * How far past a mention a negation may sit and still be read as negating
+ * *that* mention. Long enough for the predicate forms — "` is not
+ * available`", "` cannot be used`", "` isn't wired`" — and far short of a
+ * trailing benefit clause.
+ */
+const POST_MENTION_NEGATION_CHARS = 28;
+
+/**
+ * Whether a clause negates THIS mention, as opposed to merely containing a
+ * negative word somewhere.
+ *
+ * Scanning the whole clause conflates two different sentences. A negation
+ * aimed at a tool sits before it ("do not call `x`", "use `a`, never `b`")
+ * or immediately after it as a predicate ("`x` is not available"). A
+ * negative word trailing far behind the mention usually belongs to prose
+ * about the *result*: the powerpoint-deck publish step said "Call
+ * `copy_artifact_to_workspace` … so the user receives the exact requested
+ * workspace file **without** a text/binary round-trip", and that stray
+ * "without" — 145 characters downstream, describing a benefit — vetoed the
+ * only builtin the step mandated. The step-kit clamp then dropped the tool
+ * its own procedure told the gezel to call, leaving a turn that could not
+ * comply (ADR 0001's failure, arrived at from the opposite direction).
+ */
+function negatesMention(line: string, candidate: ExplicitToolCandidate): boolean {
+  const { start, end } = clauseBounds(line, candidate.index);
+  const before = line.slice(start, candidate.index);
+  if (NEGATIVE_CONTEXT.test(before)) return true;
+  const mentionEnd = Math.min(candidate.index + candidate.length, end);
+  return NEGATIVE_CONTEXT.test(
+    line.slice(mentionEnd, Math.min(mentionEnd + POST_MENTION_NEGATION_CHARS, end)),
+  );
 }
 
 function addFinding(
@@ -253,7 +301,10 @@ export function promptMandatedTools(prompt: string): Set<string> {
       if (!CANONICAL_TOOL_NAME_SET.has(tool)) continue;
       if (NON_MODEL_FACING_TOOL_NAMES.has(tool)) continue;
       const clause = clauseAround(line, candidate.index);
-      if (NEGATIVE_CONTEXT.test(clause) || CONDITIONAL_CONTEXT.test(clause)) continue;
+      // Positional for the negation, whole-clause for the conditional: an
+      // availability conditional ("if `x` is wired") governs the whole
+      // clause wherever it sits, while a negative word does not.
+      if (negatesMention(line, candidate) || CONDITIONAL_CONTEXT.test(clause)) continue;
       const prefix = line.slice(Math.max(0, candidate.index - 48), candidate.index);
       if (/\b(?:not|without|for|from|returned by)\s*`?\s*$/i.test(prefix)) continue;
       if (candidate.syntax === 'bare-directive' || candidate.syntax === 'named-tool') {

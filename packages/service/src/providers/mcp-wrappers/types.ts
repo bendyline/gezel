@@ -152,12 +152,19 @@ export interface McpToolWrapper {
    * `function_call_output`. Errors thrown are caught + ignored
    * (fall back to the original error). Returning the input
    * unchanged is a no-op.
+   *
+   * `inputSchema` is the tool's declared JSON Schema as the model was
+   * shown it (post-`decorateTools`), or undefined when the server
+   * published none. A validator says what is wrong; only the schema
+   * says what right looks like, and the translator needs both to turn
+   * `expected object` into the object's actual field names.
    */
   postProcessError?(
     toolName: string,
     args: Record<string, unknown>,
     errorText: string,
     ctx: McpToolWrapperContext,
+    inputSchema?: Record<string, unknown>,
   ): Promise<string>;
   /**
    * Always-fires terminal hook. Invoked exactly once per call —

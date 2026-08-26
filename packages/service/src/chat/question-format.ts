@@ -9,7 +9,7 @@ import type { Question } from '@bendyline/gezel';
  *   Selected: choice1, choice2
  *   Notes: write-in body
  *
- * For "Just do whatever" answers (`declined`):
+ * For "proceed with defaults" answers (`declined`):
  *
  *   [The user wants you to proceed without their input — use sensible
  *    defaults: "..."]

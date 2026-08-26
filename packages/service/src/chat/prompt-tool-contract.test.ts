@@ -29,6 +29,34 @@ describe('promptMandatedTools', () => {
   it('ignores prose that merely names a non-tool identifier', () => {
     expect(promptMandatedTools('Update the `max_tokens` value in the config.')).toEqual(new Set());
   });
+
+  // Wild-caught on powerpoint-deck `publish` (task default/8). The clause
+  // is a plain imperative; the only negative word sits 145 characters
+  // downstream describing what the user is spared. Vetoing on it dropped
+  // the sole builtin the step mandated, and the deliverable step then had
+  // no way to land its own output path.
+  it('keeps a directive whose clause ends in a benefit phrase', () => {
+    expect([
+      ...promptMandatedTools(
+        'Call `copy_artifact_to_workspace` with source `"tasks/8/deck.pptx"` and dest `"powerpoint/task-8/deck.pptx"` so the user receives the exact requested workspace file without a text/binary round-trip.',
+      ),
+    ]).toEqual(['copy_artifact_to_workspace']);
+  });
+
+  it('still drops a negation that governs the mention', () => {
+    // Before the mention.
+    expect(promptMandatedTools('Never call `write_file` during review.')).toEqual(new Set());
+    expect([...promptMandatedTools('Use `read_file`; do not use `read_artifact`.')]).toEqual([
+      'read_file',
+    ]);
+    // Immediately after it, as a predicate about the tool itself.
+    expect(promptMandatedTools('Use `run_nodejs_script` — it is not available here.')).toEqual(
+      new Set(),
+    );
+    expect(promptMandatedTools('Call `apply_patch`, which is unavailable on this roster.')).toEqual(
+      new Set(),
+    );
+  });
 });
 
 describe('lintPromptToolContract', () => {

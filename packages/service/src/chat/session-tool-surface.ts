@@ -367,6 +367,7 @@ export async function resolveSessionToolSurface(
     mode: opts.mode,
     ...(kit ? { deliverableKind: kit.kind } : {}),
     ...(researchIntent ? { researchIntent: true } : {}),
+    stepMandatedTools: stepMandatedTools(opts.activeStep),
     ...(opts.rolesAsTools ? { rolesAsTools: true } : {}),
     ...(opts.coordinatorToolDiet !== undefined
       ? { coordinatorToolDiet: opts.coordinatorToolDiet }
@@ -981,6 +982,22 @@ function capToolAllowlistForTier(opts: {
   deliverableKind?: import('@bendyline/gezel').DeliverableKind;
   /** Research/source-acquisition tools are load-bearing for this turn. */
   researchIntent?: boolean;
+  /**
+   * Tools the active step's own procedure positively instructs.
+   *
+   * The kit-intersection clamp has always honored these; the count cap
+   * did not, so whether a step could call the tool its own text named
+   * depended on which narrowing happened to bind — the clamp only runs
+   * when a deliverable kit resolves, while the cap binds on every capped
+   * role. Two narrowings answering the same question differently is the
+   * bug; the cap now reads the same signal.
+   *
+   * Bounded by construction: `promptMandatedTools` yields only canonical,
+   * model-facing names under a directive, and the set is applied to an
+   * allowlist the role, security, consent, and workspace-write filters
+   * already produced, so nothing those layers removed can return.
+   */
+  stepMandatedTools?: ReadonlySet<string>;
   /** Explicit matrix/test override for the env-gated coordinator diet. */
   coordinatorToolDiet?: boolean;
   /** Post-admission local context window; see ResolveSessionToolSurfaceOptions. */
@@ -1007,6 +1024,7 @@ function capToolAllowlistForTier(opts: {
   const alwaysKeep = (name: string): boolean =>
     SELF_CHECK_TOOL_CAP_ALWAYS_KEEP.has(name) ||
     LOAD_BEARING_TOOL_CAP_ALWAYS_KEEP.has(name) ||
+    opts.stepMandatedTools?.has(name) === true ||
     (opts.researchIntent === true && RESEARCH_STEP_TOOLS.includes(name)) ||
     (opts.rolesAsTools === true && isRoleDelegationTool(name));
   const nonExempt = [...opts.allowlist].filter((n) => !alwaysKeep(n)).length;

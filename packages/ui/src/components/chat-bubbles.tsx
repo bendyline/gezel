@@ -6,6 +6,7 @@ import type {
   ReferencedFile,
   SessionGpuTask,
   ToolCallAudio,
+  ToolCallCard,
   ToolCallImage,
   ToolCallVideo,
 } from '@bendyline/gezel';
@@ -52,6 +53,7 @@ import { ImagePreview } from './ImagePreview.js';
 import { PendingQuestionCard } from './PendingQuestionCard.js';
 import { ReportErrorLink } from './ReportErrorLink.js';
 import { ToolArgsSummary } from './ToolArgsSummary.js';
+import { ToolCraftbookCard } from './ToolCraftbookCard.js';
 import { ToolDiffBlock } from './ToolDiffBlock.js';
 import type { OpenChatReference } from './chat-open-command.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from './chat-theme.js';
@@ -141,6 +143,13 @@ export interface ToolActivity {
   diff?: string;
   addedLines?: number;
   removedLines?: number;
+  /**
+   * Rich inline card payload for tools with special renderings
+   * (craftbook start, step advance). When set, a `<ToolCraftbookCard>`
+   * renders beneath the tool row — and, on completed bubbles, promoted
+   * above the collapsed step list like generated media.
+   */
+  card?: ToolCallCard;
 }
 
 export type InlineWarning = Extract<ChatEvent, { type: 'warning' }>;
@@ -279,6 +288,13 @@ export interface MessageBubbleProps {
    * this to dispatch a `gezel:open-tab` event with `kind: 'task'`.
    */
   onTaskReference?: (ref: string) => void;
+  /**
+   * Opens a task BESIDE the chat (the rail's Task pane) — the inline
+   * craftbook cards' primary open verb, distinct from `onTaskReference`
+   * (which surfaces wire to the full task tab). Absent → the card falls
+   * back to the full-tab open itself.
+   */
+  onFocusTask?: (ref: string) => void;
   /**
    * MCP tool invocations from the turn that produced this reply. When
    * present + non-empty, a collapsible "N steps" expando renders at the
@@ -516,6 +532,7 @@ export function MessageBubble({
   onFileReference,
   onOpenReference,
   onTaskReference,
+  onFocusTask,
   toolCalls,
   reasoning,
   reasoningDurationMs,
@@ -822,6 +839,7 @@ export function MessageBubble({
           tools={toolCalls}
           projectId={projectId}
           onOpenReference={onOpenReference}
+          onFocusTask={onFocusTask}
         />
       )}
       {!isUser && reasoning && reasoning.trim().length > 0 && (
@@ -1317,6 +1335,8 @@ export interface StreamingBubbleProps {
   segments: StreamingSegment[];
   /** Opens a successful file-tool path in the conversation's References viewer. */
   onOpenReference?: (reference: OpenChatReference) => void;
+  /** See {@link MessageBubbleProps.onFocusTask} — the inline cards' rail-open verb. */
+  onFocusTask?: (ref: string) => void;
   startedAt: number | null;
   /** Extra classes applied to the wrapper (e.g. timeline grouping). */
   extraClass?: string;
@@ -1785,6 +1805,7 @@ export function StreamingBubble({
   localEngine,
   segments,
   onOpenReference,
+  onFocusTask,
   startedAt,
   extraClass,
   fontFamily,
@@ -2137,7 +2158,11 @@ export function StreamingBubble({
               return (
                 <div className="msg-stream-segment" key={key}>
                   {seg.kind === 'tools' ? (
-                    <ToolActivityList tools={seg.tools} onOpenReference={onOpenReference} />
+                    <ToolActivityList
+                      tools={seg.tools}
+                      onOpenReference={onOpenReference}
+                      onFocusTask={onFocusTask}
+                    />
                   ) : seg.kind === 'intent' ? (
                     <IntentDivider label={seg.label} />
                   ) : (
@@ -2850,13 +2875,19 @@ function ToolDetailsBlock({
 function ToolActivityList({
   tools,
   suppressMedia = false,
+  suppressCards = false,
   onOpenReference,
+  onFocusTask,
 }: {
   tools: ToolActivity[];
   /** Skip inline image/video rows — used when a parent renders them in a
    *  visible strip above the (collapsed) step list to avoid duplication. */
   suppressMedia?: boolean;
+  /** Same contract for rich inline cards — the expando promotes them above the collapse. */
+  suppressCards?: boolean;
   onOpenReference?: (reference: OpenChatReference) => void;
+  /** Opens a task beside the chat (rail Task pane) from an inline card. */
+  onFocusTask?: (ref: string) => void;
 }) {
   return (
     <ul className="thinking-tools">
@@ -2876,6 +2907,9 @@ function ToolActivityList({
           </span>
           {!t.success && t.errorMessage && (
             <div className="thinking-tool-error">{toolErrorSummary(t.errorMessage)}</div>
+          )}
+          {!suppressCards && t.card && (
+            <ToolCraftbookCard card={t.card} onFocusTask={onFocusTask} />
           )}
           {!suppressMedia &&
             (t.videos && t.videos.length > 0 && t.projectId ? (
@@ -3272,10 +3306,13 @@ export function ToolHistoryExpando({
   tools,
   projectId,
   onOpenReference,
+  onFocusTask,
 }: {
   tools: ChatMessageToolCall[];
   projectId?: string;
   onOpenReference?: (reference: OpenChatReference) => void;
+  /** Opens a task beside the chat (rail Task pane) from a promoted inline card. */
+  onFocusTask?: (ref: string) => void;
 }) {
   if (tools.length === 0) return null;
   const total = tools.reduce((acc, t) => acc + t.durationMs, 0);
@@ -3294,9 +3331,21 @@ export function ToolHistoryExpando({
   const mediaActivities = activities.filter(
     (t) => t.projectId && ((t.images && t.images.length > 0) || (t.videos && t.videos.length > 0)),
   );
+  // Rich inline cards (craftbook start / step advance) get the same
+  // promotion as generated media: visible above the collapsed step list,
+  // suppressed inside it so the plain row still counts in "N steps" and
+  // keeps the args/result provenance.
+  const cardActivities = activities.filter((t) => t.card);
   const failures = unresolvedToolFailures(tools).slice(-VISIBLE_TOOL_FAILURES);
   return (
     <>
+      {cardActivities.map((t, i) =>
+        t.card ? (
+          <div className="msg-tool-card-promoted" key={`card-${t.name}-${i}`}>
+            <ToolCraftbookCard card={t.card} onFocusTask={onFocusTask} />
+          </div>
+        ) : null,
+      )}
       {mediaActivities.map((t, i) => (
         <div className="msg-tool-media" key={`media-${t.name}-${i}`}>
           {t.videos && t.videos.length > 0 && t.projectId ? (
@@ -3325,7 +3374,12 @@ export function ToolHistoryExpando({
           <span className="msg-tool-history-total muted">· {formatDurationShort(total)} total</span>
           {failed > 0 && <span className="msg-tool-history-failed">· {failed} failed</span>}
         </summary>
-        <ToolActivityList tools={activities} suppressMedia onOpenReference={onOpenReference} />
+        <ToolActivityList
+          tools={activities}
+          suppressMedia
+          suppressCards
+          onOpenReference={onOpenReference}
+        />
       </details>
     </>
   );

@@ -350,6 +350,29 @@ export const CraftbookRequirementSchema = z.discriminatedUnion('kind', [
 export type CraftbookRequirement = z.infer<typeof CraftbookRequirementSchema>;
 
 /**
+ * A soft author hint that the craftbook works BETTER with an install
+ * capability enabled, while remaining fully runnable without it. Never
+ * gates: unlike {@link CraftbookRequirementSchema} (hard — hides the book
+ * when unmet) and {@link CraftbookToolsetNeedSchema} (surfaces an install
+ * affordance), a recommendation only informs UI copy — e.g. the craftbook
+ * start card nudging that "PowerPoint from Content" researches better with
+ * External services on. Carried into the runtime craftbook and the task
+ * snapshot so the chat card can read it off the task at event time.
+ */
+export const CraftbookRecommendationSchema = z.discriminatedUnion('kind', [
+  /**
+   * Works better with the install-wide External services capability
+   * (`securityPolicy.allowExternalServices`) — web search, URL fetch.
+   */
+  z.object({
+    kind: z.literal('external-services'),
+    /** Human-readable rationale shown in the nudge ("verifies sources with live web search"). */
+    reason: z.string().optional(),
+  }),
+]);
+export type CraftbookRecommendation = z.infer<typeof CraftbookRecommendationSchema>;
+
+/**
  * Author guidance for the task launchers. Every craftbook remains usable as
  * a one-time task; these optional flags identify recipes that are also safe
  * to run unattended on a cadence or during Night Shift. `recommended` sorts
@@ -657,6 +680,13 @@ export const CraftbookSchema = z
      * and not recognized as a terminal command. Absent = always offered.
      */
     requirements: z.array(CraftbookRequirementSchema).optional(),
+    /**
+     * Soft "works better with" hints — never gate, only inform UI copy
+     * (the craftbook start card's permission nudge). See
+     * {@link CraftbookRecommendationSchema}. Carried into the runtime
+     * craftbook and the task snapshot, unlike `requirements`.
+     */
+    recommends: z.array(CraftbookRecommendationSchema).optional(),
     /** Unattended launch modes this recipe is suitable for. */
     runModes: CraftbookRunModesSchema.optional(),
     /**
@@ -849,6 +879,7 @@ export const CreateCraftbookRequestSchema = z.object({
     .regex(/^[a-z][a-z0-9-]*$/)
     .optional(),
   requirements: z.array(CraftbookRequirementSchema).optional(),
+  recommends: z.array(CraftbookRecommendationSchema).optional(),
   runModes: CraftbookRunModesSchema.optional(),
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
   scripts: CraftbookScriptsSchema.optional(),
@@ -870,6 +901,7 @@ export const UpdateCraftbookRequestSchema = z.object({
     .nullable()
     .optional(),
   requirements: z.array(CraftbookRequirementSchema).nullable().optional(),
+  recommends: z.array(CraftbookRecommendationSchema).nullable().optional(),
   runModes: CraftbookRunModesSchema.nullable().optional(),
   toolsets: z.array(CraftbookToolsetNeedSchema).nullable().optional(),
   /** Full-replace semantics: the map is the truth. `null` clears all scripts. */

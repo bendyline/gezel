@@ -460,7 +460,7 @@ export interface ChatTimelineViewProps {
    * pinned) and any `referencedTasks` the parser recognized in a reply
    * body (`scoped: false`). Dedupe + ordering live in the rail.
    */
-  onTaskReference?: (ref: string, opts?: { scoped?: boolean }) => void;
+  onTaskReference?: (ref: string, opts?: { scoped?: boolean; focus?: boolean }) => void;
   /**
    * Tasks the TaskRunner is holding, paired with the queue state that
    * explains the hold. Rendered as receipt cards in the final lane —
@@ -2000,6 +2000,7 @@ export function ChatTimelineView({
           ...(event.diff !== undefined ? { diff: event.diff } : {}),
           ...(event.addedLines !== undefined ? { addedLines: event.addedLines } : {}),
           ...(event.removedLines !== undefined ? { removedLines: event.removedLines } : {}),
+          ...(event.card ? { card: event.card } : {}),
           // Tag with the envelope's project so the References pane can
           // resolve the path against the right project on cross-project
           // surfaces (Meester global timeline).
@@ -3328,6 +3329,16 @@ export function ChatTimelineView({
     );
   };
   /**
+   * The inline craftbook cards' "open this task" verb: the chat rail's
+   * Task pane where this surface has one (ChatReferences forwards
+   * `onTaskReference`, whose `focus: true` switches the rail there), the
+   * full task tab otherwise.
+   */
+  const focusTask = (ref: string): void => {
+    if (onTaskReference) onTaskReference(ref, { focus: true });
+    else window.dispatchEvent(new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }));
+  };
+  /**
    * Render one persisted chat message as a bubble. Shared by thread
    * roots and replies — `opts` carries the thread-position concerns
    * (suppressed repeat-author header, late-reply timestamp, recovered
@@ -3445,6 +3456,7 @@ export function ChatTimelineView({
         onTaskReference={(ref) =>
           window.dispatchEvent(new CustomEvent('gezel:open-tab', { detail: { kind: 'task', ref } }))
         }
+        onFocusTask={focusTask}
       />
     );
   };
@@ -3483,6 +3495,7 @@ export function ChatTimelineView({
         {...(!roleBasedNameOnlyMode && gezel?.role ? { authorRole: gezel.role } : {})}
         segments={slot.segments}
         {...(onOpenReference ? { onOpenReference } : {})}
+        onFocusTask={focusTask}
         startedAt={slot.startedAt}
         lastActivityAt={slot.lastActivityAt}
         hasProgress={slot.hasProgress}

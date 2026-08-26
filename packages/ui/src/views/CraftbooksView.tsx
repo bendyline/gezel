@@ -257,6 +257,7 @@ function NewCraftbookDialog({
           ...(src.defaultAssignee ? { defaultAssignee: src.defaultAssignee } : {}),
           ...(src.paramSchema ? { paramSchema: src.paramSchema } : {}),
           ...(src.requirements ? { requirements: src.requirements } : {}),
+          ...(src.recommends ? { recommends: src.recommends } : {}),
           ...(src.toolsets ? { toolsets: src.toolsets } : {}),
           // Intentionally omit `command` — a clone must not claim the source's
           // command token; the user can set one after.

@@ -19,6 +19,7 @@ import {
 } from '../format/constants.js';
 import { hashFileStreaming } from '../format/file-hash.js';
 import { CatalogHandle } from './catalog-handle.js';
+import { SMOKE_QUERY_TOP_N } from './fts-query.js';
 import { openCatalogDatabase } from './open.js';
 
 export interface CatalogCheck {
@@ -193,12 +194,16 @@ export async function validateExtractedCatalog(
       }
 
       for (const smoke of manifest.smokeQueries ?? []) {
-        const hits = handle.searchDocumentsFts(smoke.query, 10).map((h) => h.documentId);
+        const hits = handle
+          .searchDocumentsFts(smoke.query, SMOKE_QUERY_TOP_N)
+          .map((h) => h.documentId);
         const missing = smoke.expectedDocumentIds.filter((id) => !hits.includes(id));
         check(
           `smoke:${smoke.query}`,
           missing.length === 0,
-          missing.length > 0 ? `missing ${missing.join(', ')}` : undefined,
+          missing.length > 0
+            ? `the catalog's built-in sanity query "${smoke.query}" did not return its expected document${missing.length > 1 ? 's' : ''} (${missing.join(', ')}) in the top ${SMOKE_QUERY_TOP_N} results — the search index cannot answer queries the publisher recorded as guaranteed, so the archive is corrupt or was built by a broken toolchain; re-download it or report it to the publisher`
+            : undefined,
         );
       }
     }

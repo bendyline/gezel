@@ -821,8 +821,8 @@
    a warm header band grouping recipient + thread picker + toolbar above the
    lighter draft, inside one rounded frame. The horizontal inset matches the
    timeline's content gutter so the frame lines up with the bubbles above it.
-   Unlike project chat there are no attached @/> mode tabs here, so all four
-   corners stay rounded. */
+   Per-gezel chat has no terminal surface, so its "To:" line carries no mode
+   tabs — the compose-surface switch is project chat only. */
 .gezel-chat-tab .chat-composer {
   --compose-frame-bg: var(--chat-compose-header-bg);
   --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));

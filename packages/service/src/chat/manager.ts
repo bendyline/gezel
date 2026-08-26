@@ -336,6 +336,7 @@ import {
   type TaskBudgetSnapshot,
   TaskBudgetTracker,
 } from './task-budget.js';
+import { extractToolCard } from './tool-cards.js';
 import type { AvailableToolInfo } from './tools-block.js';
 import { describeTurnError } from './turn-error.js';
 import { UsageTracker } from './usage.js';
@@ -15279,6 +15280,11 @@ export class ChatManager {
               },
             ]
           : undefined;
+      // Rich inline cards (craftbook start, step advance) — same
+      // structuredContent allow-list pattern as `diff`/`gezelVideo` above:
+      // the extractor is tool-name-keyed and shape-guarded, so foreign
+      // structuredContent yields no card rather than a malformed one.
+      const card = extractToolCard(info);
       const call: ChatMessageToolCall = {
         name: info.name,
         durationMs: info.durationMs,
@@ -15296,6 +15302,7 @@ export class ChatManager {
         ...(diff !== undefined ? { diff } : {}),
         ...(addedLines !== undefined ? { addedLines } : {}),
         ...(removedLines !== undefined ? { removedLines } : {}),
+        ...(card ? { card } : {}),
       };
       // Accumulate for persistence on the final assistant message. `send()`
       // clears this array at turn start and drains it at turn end.
@@ -15322,6 +15329,7 @@ export class ChatManager {
           ...(diff !== undefined ? { diff } : {}),
           ...(addedLines !== undefined ? { addedLines } : {}),
           ...(removedLines !== undefined ? { removedLines } : {}),
+          ...(card ? { card } : {}),
         },
       );
       if (historyManager) {

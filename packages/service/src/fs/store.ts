@@ -6512,6 +6512,7 @@ export class Store {
       plan?: unknown;
       defaultAssignee?: unknown;
       basedOn?: unknown;
+      recommends?: unknown;
       runModes?: unknown;
       releasedAt?: unknown;
     };
@@ -6540,6 +6541,9 @@ export class Store {
         : {}),
       ...(v.runModes && typeof v.runModes === 'object'
         ? { runModes: v.runModes as Craftbook['runModes'] }
+        : {}),
+      ...(Array.isArray(v.recommends)
+        ? { recommends: v.recommends as Craftbook['recommends'] }
         : {}),
       steps,
       entryStepId: v.entryStepId,
@@ -6817,6 +6821,7 @@ export class Store {
       ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
       ...(book.command ? { command: book.command } : {}),
       ...(book.requirements ? { requirements: book.requirements } : {}),
+      ...(book.recommends ? { recommends: book.recommends } : {}),
       ...(book.runModes ? { runModes: book.runModes } : {}),
       ...(book.scripts ? { bundledScripts: Object.keys(book.scripts).map((n) => `${n}.ts`) } : {}),
     };

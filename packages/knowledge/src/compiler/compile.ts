@@ -49,6 +49,7 @@ import { ROUTER_DDL, SHARD_DDL, vecChunksDdl } from '../format/ddl.js';
 import { hashFileStreaming } from '../format/file-hash.js';
 import { chunkContentHash, chunkUid, documentSlug } from '../format/ids.js';
 import { DatabaseSync } from '../format/node-sqlite.js';
+import { SMOKE_QUERY_TOP_N, documentSmokeQueryMisses } from '../reader/fts-query.js';
 import { l2Normalize, quantizeBinary, quantizeInt8 } from '../format/quantize.js';
 import { loadVecExtension } from './vec-load.js';
 
@@ -91,6 +92,21 @@ export interface CompileKnowledgeCatalogOptions {
   /** Scratch directory for the staged databases (removed on success). */
   workDir: string;
   smokeQueries?: Array<{ query: string; expectedDocumentIds: string[] }>;
+  /**
+   * How to treat `smokeQueries` at seal time. Every recorded query is
+   * verified against the BUILT index with the validator's exact semantics
+   * (sanitize → fts_documents → top-N) before the manifest is written — a
+   * catalog must never ship sanity queries it cannot answer (the arts-pilot
+   * "smoke:Abbey (missing 1315)" install failure).
+   *
+   * - 'require' (default): every query must pass; a miss fails the build
+   *   with the query, the missing ids, and guidance.
+   * - 'select': the list is CANDIDATES — verify in order, record the first
+   *   three that pass, and fail only when none do. For producers that
+   *   derive queries mechanically (Qualla uses article titles) and cannot
+   *   know in advance which titles win the BM25 rank race.
+   */
+  smokeQueryPolicy?: 'require' | 'select';
   toolchain?: KnowledgeCatalogManifest['toolchain'];
   /** Extra archive files (README.md, LICENSES/…): path → utf8 content. */
   extraFiles?: Record<string, string>;
@@ -501,6 +517,42 @@ export async function compileKnowledgeCatalog(
     router.close();
     for (const db of shardDbs.values()) db.close();
 
+    // ── smoke-query verification (seal gate) ──────────────────────────────────
+    // Run against the FINAL vacuumed router with the validator's own
+    // semantics, so what the build proves is exactly what installs check.
+    let smokeQueries = opts.smokeQueries;
+    if (smokeQueries && smokeQueries.length > 0) {
+      const routerFinal = new DatabaseSync(join(finalDir, ROUTER_DB_PATH), { readOnly: true });
+      try {
+        const verdicts = smokeQueries.map((smoke) => ({
+          smoke,
+          missing: documentSmokeQueryMisses(routerFinal, smoke),
+        }));
+        if ((opts.smokeQueryPolicy ?? 'require') === 'select') {
+          smokeQueries = verdicts
+            .filter((v) => v.missing.length === 0)
+            .slice(0, 3)
+            .map((v) => v.smoke);
+          if (smokeQueries.length === 0) {
+            throw new Error(
+              `no smoke-query candidate passes against the built index (tried ${verdicts.length}: ${verdicts.map((v) => `"${v.smoke.query}"`).join(', ')}) — the fts_documents index cannot surface any candidate's expected document in the top ${SMOKE_QUERY_TOP_N}`,
+            );
+          }
+        } else {
+          const failed = verdicts.filter((v) => v.missing.length > 0);
+          if (failed.length > 0) {
+            throw new Error(
+              `smoke queries failed against the built index: ${failed
+                .map((v) => `"${v.smoke.query}" (missing ${v.missing.join(', ')})`)
+                .join('; ')} — every recorded sanity query must return its expected documents in the top ${SMOKE_QUERY_TOP_N} fts_documents results; pick more specific queries (distinctive titles beat common words in the rank race) or pass smokeQueryPolicy: 'select' with candidates`,
+            );
+          }
+        }
+      } finally {
+        routerFinal.close();
+      }
+    }
+
     // Patch shard byte sizes into the (already vacuumed) router? No — the
     // shards row records the PRE-vacuum estimate being wrong would drift the
     // manifest. Instead: sizes are measured from the vacuumed files and only
@@ -566,7 +618,7 @@ export async function compileKnowledgeCatalog(
       counts: { documents: prepared.length, chunks: totalChunks, shards: shardCount },
       files: [...files].sort((a, b) => (a.path < b.path ? -1 : 1)),
       compatibility: { maximumIndexSchemaVersion: GEZK_INDEX_SCHEMA_VERSION },
-      ...(opts.smokeQueries ? { smokeQueries: opts.smokeQueries } : {}),
+      ...(smokeQueries && smokeQueries.length > 0 ? { smokeQueries } : {}),
       ...(opts.toolchain ? { toolchain: opts.toolchain } : {}),
     });
     const manifest = opts.finalizeManifest

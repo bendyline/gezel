@@ -692,6 +692,7 @@ describe('BundledSource — craftbook template layouts', () => {
         description: 'THE INLINE PROSE',
         basedOn: { name: 'Fixture upstream', url: 'https://example.com/fixture' },
         runModes: { scheduled: 'recommended', nightShift: 'supported' },
+        recommends: [{ kind: 'external-services', reason: 'fetches live pages' }],
         connectors: [
           {
             typeId: 'github-pulls',
@@ -721,6 +722,9 @@ describe('BundledSource — craftbook template layouts', () => {
       scheduled: 'recommended',
       nightShift: 'supported',
     });
+    expect(detail.manifest.recommends).toEqual([
+      { kind: 'external-services', reason: 'fetches live pages' },
+    ]);
     expect(detail.manifest.connectors).toEqual([
       {
         typeId: 'github-pulls',

@@ -69,13 +69,29 @@ contentDigest before publishing; procedure + withdrawal runbook in
 qualla's RUNBOOK §6.6). The signed chain is proven end-to-end in-repo
 style: registry verification (`verifyRegistryIndex`) accepts the release
 and rejects tampering, and a live daemon installs a signed catalog via
-URL + registry `contentDigest`, refusing a wrong digest. Routing-recall
-context from the pilot: at micro-shard scale every shard sits under the
-25k-chunk threshold where the frozen centroid formula assigns k=1, so the
-S=3 measurement (88.2% recall@5 vs scan-all over 56 queries on 7 shards,
-random-routing baseline 43%) validates the mechanism, not the production
-gate — the "within 2pp of scan-all" gate belongs to full 200k-chunk
-shards with 16 centroids each (Phase 7 scale).
+URL + registry `contentDigest`, refusing a wrong digest.
+
+100k-pilot results (2026-08-26): 100,000 articles → 20 catalogs,
+1,064,599 chunks, 1.67 GB of archives (geography 452 MB, general 360 MB,
+people 303 MB — the sizes that fixed archive hosting on qualla.com, never
+the Pages-backed gezelgilde.com), compiled in 17.7 h at an effective
+16.7 chunks/s on a single CPU embed pipeline — which makes the Phase-7
+worker-pool parallelization a prerequisite, not an optimization (~7M
+chunks ≈ 5 days single-pipeline). Classifier: 65% high / 13% medium /
+22% low confidence, the low tier being exactly the general+coordinates
+fallbacks; the 19% general bucket is the pre-production taxonomy review
+target. Routing recall, measured on a 9-shard rebuild of geography
+(36k-chunk shards, 3 centroids each): S=3 59.7% / S=6 84.7% recall@5 vs
+scan-all (random baselines 33%/67%), with the home shard ranked first by
+centroids for only 26% of queries. Root cause is content, not format:
+the pilot emits a FLAT topic tree per domain, so the topic-affinity
+shard fill degenerates to documentId order and shards are page-age
+slices rather than topical clusters — centroids have nothing to
+separate. The "within 2pp of scan-all" gate is therefore conditional on
+sub-topicking the large domains (geography by country/region, people by
+era/occupation) before the Phase-7 full build; until then the doc-FTS
+arm and the S knob carry exact-name and explicit-search recall, and
+single-catalog scan-all stays affordable at ≤10 shards.
 
 ## Executive decision
 

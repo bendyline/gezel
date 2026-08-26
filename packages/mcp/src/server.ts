@@ -5383,14 +5383,28 @@ server.tool(
       const idempotentText = launched.reused
         ? ' This identical craftbook invocation already succeeded in the current root turn; reused its task instead of creating a duplicate.'
         : '';
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step ${created.activeStepId ?? '(none)'} was dispatched to the recipe-selected specialist.${installedText}${idempotentText}`,
+      // Structured contract: the full task rides in structuredContent so the
+      // chat runtime can derive the inline craftbook start card. The text is
+      // kept byte-identical to the pre-migration template — it is what the
+      // model reads, and manager-mcp assertions pin it.
+      return okResult(
+        TaskToolOutputSchema,
+        {
+          summary: `Invoked craftbook "${craftbookId}" — task ${created.ref}.`,
+          operation: 'invoke_craftbook',
+          ref: created.ref,
+          status: created.status,
+          ...(created.activeStepId ? { stepId: created.activeStepId } : {}),
+          task: created,
+          details: {
+            reused: launched.reused,
+            ...(launch.installed.length > 0 ? { installed: launch.installed } : {}),
           },
-        ],
-      };
+        },
+        {
+          text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step ${created.activeStepId ?? '(none)'} was dispatched to the recipe-selected specialist.${installedText}${idempotentText}`,
+        },
+      );
     } catch (err) {
       return {
         content: [

@@ -457,6 +457,81 @@ export const ToolCallVideoSchema = z.object({
 });
 export type ToolCallVideo = z.infer<typeof ToolCallVideoSchema>;
 
+/**
+ * One step in a tool card's roadmap snapshot. Status is resolved
+ * server-side at event time from the task's step lifecycle
+ * (`completedAt` / `activeStepId`) — never from step order, which lies
+ * for craftbooks whose review steps loop back.
+ */
+export const ToolCardStepSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: z.enum(['done', 'active', 'pending']),
+});
+export type ToolCardStep = z.infer<typeof ToolCardStepSchema>;
+
+/**
+ * Rich inline card for an `invoke_craftbook` tool call: the chat
+ * transcript's "a craftbook just started" receipt — craftbook identity,
+ * the created task, and the step roadmap at that moment.
+ */
+export const CraftbookStartCardSchema = z.object({
+  kind: z.literal('craftbook-start'),
+  craftbookId: z.string(),
+  craftbookName: z.string(),
+  /** Task ref `projectId/num`. */
+  taskRef: z.string(),
+  /** The TASK's project — may differ from the session's when invoked cross-project. */
+  projectId: z.string(),
+  /** Task status at event time. */
+  status: z.string(),
+  activeStepId: z.string().optional(),
+  steps: z.array(ToolCardStepSchema),
+  /** True when the call idempotently returned an already-running task. */
+  reused: z.boolean().optional(),
+  /**
+   * The craftbook declares it works better with the External services
+   * capability. The UI nudges (with the optional author rationale) only
+   * while the resolved security policy has it disabled.
+   */
+  recommendsExternalServices: z.object({ reason: z.string().optional() }).optional(),
+});
+export type CraftbookStartCard = z.infer<typeof CraftbookStartCardSchema>;
+
+/**
+ * Slimmer inline card for an `advance_task_step` tool call: which step
+ * completed, which is now active, and the roadmap moved forward.
+ */
+export const TaskStepAdvanceCardSchema = z.object({
+  kind: z.literal('task-step-advance'),
+  craftbookId: z.string(),
+  craftbookName: z.string(),
+  taskRef: z.string(),
+  projectId: z.string(),
+  status: z.string(),
+  completedStepId: z.string(),
+  completedStepName: z.string().optional(),
+  /** Absent when the advance took the task terminal (complete/canceled). */
+  activeStepId: z.string().optional(),
+  activeStepName: z.string().optional(),
+  steps: z.array(ToolCardStepSchema),
+});
+export type TaskStepAdvanceCard = z.infer<typeof TaskStepAdvanceCardSchema>;
+
+/**
+ * Typed payload behind the rich inline cards the chat transcript renders
+ * for specific tools, extracted server-side from MCP `structuredContent`
+ * (chat/tool-cards.ts). A card is a SNAPSHOT-AT-EVENT-TIME receipt: it
+ * records what was true when the tool completed and never claims to be
+ * live — the task rail/tab is the live view, one click away. Add new
+ * card kinds here as more tools earn rich renderings.
+ */
+export const ToolCallCardSchema = z.discriminatedUnion('kind', [
+  CraftbookStartCardSchema,
+  TaskStepAdvanceCardSchema,
+]);
+export type ToolCallCard = z.infer<typeof ToolCallCardSchema>;
+
 export const ChatMessageToolCallSchema = z.object({
   name: z.string(),
   durationMs: z.number(),
@@ -498,6 +573,8 @@ export const ChatMessageToolCallSchema = z.object({
   diff: z.string().optional(),
   addedLines: z.number().int().nonnegative().optional(),
   removedLines: z.number().int().nonnegative().optional(),
+  /** Rich inline card payload for tools with special renderings — see ToolCallCardSchema. */
+  card: ToolCallCardSchema.optional(),
 });
 export type ChatMessageToolCall = z.infer<typeof ChatMessageToolCallSchema>;
 
@@ -923,6 +1000,8 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     diff: z.string().optional(),
     addedLines: z.number().int().nonnegative().optional(),
     removedLines: z.number().int().nonnegative().optional(),
+    /** Rich inline card payload for tools with special renderings — see ToolCallCardSchema. */
+    card: ToolCallCardSchema.optional(),
   }),
   z.object({
     type: z.literal('error'),
