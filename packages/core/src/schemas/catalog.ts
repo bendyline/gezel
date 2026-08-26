@@ -1475,6 +1475,31 @@ export const ChatModelDs4SourceSchema = z
      * default. An explicit `config.ds4NumCtx` always wins over this.
      */
     maxLaunchCtx: z.number().int().positive().optional(),
+    /**
+     * Optional DSpark speculative-decoding companion GGUF, the ds4 analogue of
+     * {@link ChatModelLlamaCppSourceSchema}'s `draftModel`. ds4 loads it with
+     * `--mtp <path>` and drafts with `--dspark`; the draft width comes from the
+     * support model's own `block_size`, not from `--mtp-draft` (that flag is
+     * legacy-MTP only). Family-scoped: DeepSeek V4 Flash publishes one, GLM 5.2
+     * does not support the external `--mtp` file at all.
+     *
+     * Declaring this makes it a MANDATORY download for every install of the
+     * entry — `buildDownloadPlan` fetches a declared draft companion
+     * unconditionally, unlike the opt-in `mmproj`. The DeepSeek support GGUF is
+     * ~5.6 GiB, and DSpark is off under `--ssd-streaming` and unhelpful on
+     * Metal, so weigh that cost against who can actually use it before adding
+     * this to an entry.
+     */
+    draftModel: z
+      .object({
+        /** Filename within the same HF repo. May include a subdirectory. */
+        filename: z.string(),
+        /** SHA-256 of the support GGUF, lifted from HF LFS metadata. */
+        sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        /** Size on disk after download. */
+        sizeBytes: z.number().int().positive(),
+      })
+      .optional(),
   })
   .refine(
     (v) => {

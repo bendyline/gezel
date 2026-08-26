@@ -10,6 +10,7 @@ import { LlamaCppProvider, createLlamaCppPatientFetch } from '../llama-cpp/index
 import { minViableLocalContextTokens } from '../native/capacity-broker.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
+import { type Ds4Backend, ds4DsparkArgs, resolveDs4Dspark } from './dspark.js';
 import { Ds4Provider } from './provider.js';
 
 const log = createLogger('chat');
@@ -251,6 +252,18 @@ export async function buildDs4Provider(opts: {
     );
   }
 
+  // DSpark speculative decoding. Resolved here, beside the residency decision
+  // it depends on: ds4 aborts at startup if `--mtp` is combined with
+  // `--ssd-streaming`, so this can only ever draft on a fully resident launch.
+  const dsparkSupportPath = config.ds4DsparkModelPath ?? installedModel?.draftModelPath;
+  const dspark = resolveDs4Dspark({
+    mode: config.ds4Dspark,
+    backend: backendFlag.slice(2) as Ds4Backend,
+    ssdStreaming,
+    ...(dsparkSupportPath ? { supportModelPath: dsparkSupportPath } : {}),
+  });
+  if (dspark.unmetRequest) log.warn(`[ds4] ${dspark.unmetRequest}`);
+
   const cachePlan = planDs4ExpertCache({
     configuredGb: config.ds4CacheExpertsGb,
     catalogCacheBytes: ds4Source?.cacheExpertsBytes,
@@ -365,6 +378,7 @@ export async function buildDs4Provider(opts: {
           args.push('--ssd-streaming-cache-experts', `${cacheExpertsGb}GB`);
         }
       }
+      args.push(...ds4DsparkArgs(dspark));
       // Record the effective safety policy before spawn. ds4-server's own
       // stdout does not reliably echo its argv, and a hard lockup/force-quit
       // otherwise leaves no way to tell whether streaming was actually on.
@@ -372,7 +386,8 @@ export async function buildDs4Provider(opts: {
         `[ds4-server] launch model=${effectiveModelId ?? basename(modelPath)} ` +
           `sizeGiB=${modelSizeBytes ? (modelSizeBytes / 1024 ** 3).toFixed(1) : 'unknown'} ` +
           `backend=${backendFlag.slice(2)} ctx=${numCtx} ` +
-          `ssdStreaming=${ssdStreaming} cacheExpertsGiB=${ssdStreaming ? cacheExpertsGb : 0}`,
+          `ssdStreaming=${ssdStreaming} cacheExpertsGiB=${ssdStreaming ? cacheExpertsGb : 0} ` +
+          `dspark=${dspark.enabled} (${dspark.reason})`,
       );
       return { command: binary, args, baseUrl: `http://127.0.0.1:${port}`, cwd: ds4BundleDir };
     },

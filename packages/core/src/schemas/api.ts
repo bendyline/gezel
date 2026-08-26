@@ -1376,6 +1376,31 @@ export const GezelConfigSchema = z.object({
    */
   ds4CacheExpertsGb: z.number().positive().optional(),
   /**
+   * ds4-only: DSpark speculative decoding (`--dspark --mtp <support.gguf>`).
+   *
+   * - `off`  — never draft.
+   * - `on`   — draft whenever a support model resolves and the engine allows it.
+   * - `auto` — draft only where it has been shown to pay: a CUDA host running
+   *            a fully resident model. Default.
+   *
+   * `auto` deliberately excludes Metal. Measured 2026-08-26 on an M5 Max
+   * (DeepSeek V4 Flash IQ2_XXS, full residency, seed-pinned A/B/C/A): baseline
+   * 38.4 tok/s, opportunistic 38.5, exact 36.7, and ds4's own
+   * `DS4_DSPARK_STATS` accounting reported net_saved of -1301 ms and -1038 ms
+   * respectively. Verification of a 5-token block through a 284B MoE costs more
+   * than the single-token decodes it skips. Apple Silicon reports
+   * `gpuMemoryKind: 'unified'` exactly like GB10 does, so residency/unified
+   * memory is NOT a sufficient predicate — the backend is.
+   */
+  ds4Dspark: z.enum(['off', 'on', 'auto']).optional(),
+  /**
+   * ds4-only: absolute path to a DSpark support GGUF, overriding whatever the
+   * installed model carries. The escape hatch for evaluating DSpark on hardware
+   * before any catalog entry declares a `draftModel` (which would make it a
+   * mandatory download for every install of that entry).
+   */
+  ds4DsparkModelPath: z.string().optional(),
+  /**
    * llama-cpp-only: mid-stream idle cap (seconds). After this many
    * seconds with no SSE chunk arriving, the in-flight chat completion
    * is aborted with an idle-stall error so the runtime publishes
