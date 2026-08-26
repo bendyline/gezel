@@ -49,8 +49,8 @@ import { ROUTER_DDL, SHARD_DDL, vecChunksDdl } from '../format/ddl.js';
 import { hashFileStreaming } from '../format/file-hash.js';
 import { chunkContentHash, chunkUid, documentSlug } from '../format/ids.js';
 import { DatabaseSync } from '../format/node-sqlite.js';
-import { SMOKE_QUERY_TOP_N, documentSmokeQueryMisses } from '../reader/fts-query.js';
 import { l2Normalize, quantizeBinary, quantizeInt8 } from '../format/quantize.js';
+import { SMOKE_QUERY_TOP_N, documentSmokeQueryMisses } from '../reader/fts-query.js';
 import { loadVecExtension } from './vec-load.js';
 
 export interface CompileTopic {
@@ -544,7 +544,9 @@ export async function compileKnowledgeCatalog(
             throw new Error(
               `smoke queries failed against the built index: ${failed
                 .map((v) => `"${v.smoke.query}" (missing ${v.missing.join(', ')})`)
-                .join('; ')} — every recorded sanity query must return its expected documents in the top ${SMOKE_QUERY_TOP_N} fts_documents results; pick more specific queries (distinctive titles beat common words in the rank race) or pass smokeQueryPolicy: 'select' with candidates`,
+                .join(
+                  '; ',
+                )} — every recorded sanity query must return its expected documents in the top ${SMOKE_QUERY_TOP_N} fts_documents results; pick more specific queries (distinctive titles beat common words in the rank race) or pass smokeQueryPolicy: 'select' with candidates`,
             );
           }
         }

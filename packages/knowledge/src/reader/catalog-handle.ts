@@ -269,8 +269,11 @@ export class CatalogHandle {
   routerStats(): { topics: number; routeCentroids: number } {
     const count = (table: string): number =>
       Number(
-        (this.router.db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number | bigint })
-          .c,
+        (
+          this.router.db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as {
+            c: number | bigint;
+          }
+        ).c,
       );
     return { topics: count('topics'), routeCentroids: count('route_centroids') };
   }

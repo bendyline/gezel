@@ -108,9 +108,7 @@ describe('seal-time smoke-query gate', () => {
         outputPath: join(dir, 'none.gezk'),
         workDir: join(dir, 'work-none'),
         smokeQueryPolicy: 'select',
-        smokeQueries: [
-          { query: 'zzz-nonexistent-term', expectedDocumentIds: [DOCS[3]!.id] },
-        ],
+        smokeQueries: [{ query: 'zzz-nonexistent-term', expectedDocumentIds: [DOCS[3]!.id] }],
       }),
     ).rejects.toThrow(/no smoke-query candidate passes/);
   });

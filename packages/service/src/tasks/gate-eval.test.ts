@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  type GateWorkspaceReader,
-  evaluateGate,
-  taskSuppliedCitationPaths,
-} from './gate-eval.js';
+import { type GateWorkspaceReader, evaluateGate, taskSuppliedCitationPaths } from './gate-eval.js';
 
 const reader = (files: Record<string, string>): GateWorkspaceReader => ({
   read: async (f) => (f in files ? files[f]! : null),

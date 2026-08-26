@@ -215,9 +215,7 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   // own content (a two-line recipient block vs a fixed-height toolbar), so they
   // are near-aligned rather than pixel-identical — the binding requirement is
   // that the drift stays inside the key.
-  const tabsVerticalDrift = Math.abs(
-    terminalModeAlignment!.tabsTop - chatModeAlignment!.tabsTop,
-  );
+  const tabsVerticalDrift = Math.abs(terminalModeAlignment!.tabsTop - chatModeAlignment!.tabsTop);
   const tabsHeight = chatModeAlignment!.tabsBottom - chatModeAlignment!.tabsTop;
   expect(tabsVerticalDrift).toBeLessThan(tabsHeight / 2);
   expect(terminalModeAlignment!.tabsRight).toBeCloseTo(chatModeAlignment!.tabsRight, 0);
