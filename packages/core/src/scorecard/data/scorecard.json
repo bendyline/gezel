@@ -16,7 +16,7 @@
         "harnessCommit": "b3be0a7f",
         "gildeVersion": "0.1.39",
         "count": 3,
-        "judgeModelId": null
+        "judgeModelId": "claude-sonnet-4-6"
       },
       "suites": ["core", "productivity"],
       "scenariosBySuite": {
@@ -365,6 +365,11 @@
         "peakMemoryMb": 14973,
         "kvCacheType": "q8_0"
       },
+      "judge": {
+        "meanScore": 7.1,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "tictactoe",
@@ -448,7 +453,7 @@
     {
       "modelId": "gemma4-12b-q4",
       "label": "gemma4-12b-q4",
-      "engine": "llama-cpp",
+      "engine": "mlx",
       "tier": "medium",
       "parameterSize": "12B",
       "runId": "2026-08-22-mac-apple-m4-max",
@@ -462,6 +467,11 @@
         "contextTokens": 101376,
         "peakMemoryMb": 43242,
         "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 6.9,
+        "artifacts": 6,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -546,7 +556,7 @@
     {
       "modelId": "gemma4-12b-q8",
       "label": "gemma4-12b-q8",
-      "engine": "llama-cpp",
+      "engine": "mlx",
       "tier": "medium",
       "parameterSize": "12B",
       "runId": "2026-08-22-mac-apple-m4-max",
@@ -560,6 +570,11 @@
         "contextTokens": 84992,
         "peakMemoryMb": 43039,
         "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 8.1,
+        "artifacts": 3,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -644,7 +659,7 @@
     {
       "modelId": "gemma4-e2b-q4",
       "label": "gemma4-e2b-q4",
-      "engine": "llama-cpp",
+      "engine": "mlx",
       "tier": "tiny",
       "parameterSize": "2.3B",
       "runId": "2026-08-22-mac-apple-m4-max",
@@ -658,6 +673,11 @@
         "contextTokens": 131072,
         "peakMemoryMb": 7035,
         "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 4.3,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -742,7 +762,7 @@
     {
       "modelId": "gemma4-e4b-q4",
       "label": "gemma4-e4b-q4",
-      "engine": "llama-cpp",
+      "engine": "mlx",
       "tier": "small",
       "parameterSize": "8B",
       "runId": "2026-08-22-mac-apple-m4-max",
@@ -756,6 +776,11 @@
         "contextTokens": 131072,
         "peakMemoryMb": 13994,
         "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 5.4,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -854,6 +879,11 @@
         "contextTokens": 128000,
         "peakMemoryMb": 5016,
         "kvCacheType": "q8_0"
+      },
+      "judge": {
+        "meanScore": 3.6,
+        "artifacts": 8,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -1051,6 +1081,11 @@
         "peakMemoryMb": 16242,
         "kvCacheType": "q8_0"
       },
+      "judge": {
+        "meanScore": 4.4,
+        "artifacts": 5,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "tictactoe",
@@ -1134,7 +1169,7 @@
     {
       "modelId": "qwen3.5-2b-q4",
       "label": "qwen3.5-2b-q4",
-      "engine": "llama-cpp",
+      "engine": "mlx",
       "tier": "tiny",
       "parameterSize": "2B",
       "runId": "2026-08-22-mac-apple-m4-max",
@@ -1148,6 +1183,11 @@
         "contextTokens": 262144,
         "peakMemoryMb": 5279,
         "kvCacheType": "q8_0"
+      },
+      "judge": {
+        "meanScore": 3.2,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -1232,7 +1272,7 @@
     {
       "modelId": "qwen3.5-4b-q4",
       "label": "qwen3.5-4b-q4",
-      "engine": "llama-cpp",
+      "engine": "mlx",
       "tier": "tiny",
       "parameterSize": "4B",
       "runId": "2026-08-22-mac-apple-m4-max",
@@ -1246,6 +1286,11 @@
         "contextTokens": 262144,
         "peakMemoryMb": 11825,
         "kvCacheType": "q8_0"
+      },
+      "judge": {
+        "meanScore": 6.6,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -1330,7 +1375,7 @@
     {
       "modelId": "qwen3.5-9b-q4",
       "label": "qwen3.5-9b-q4",
-      "engine": "llama-cpp",
+      "engine": "mlx",
       "tier": "small",
       "parameterSize": "9B",
       "runId": "2026-08-22-mac-apple-m4-max",
@@ -1344,6 +1389,11 @@
         "contextTokens": 262144,
         "peakMemoryMb": 13431,
         "kvCacheType": "q8_0"
+      },
+      "judge": {
+        "meanScore": 5.3,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -1443,6 +1493,11 @@
         "peakMemoryMb": 14460,
         "kvCacheType": "q8_0"
       },
+      "judge": {
+        "meanScore": 6.2,
+        "artifacts": 25,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "constrained-comms",
@@ -1540,7 +1595,7 @@
     {
       "modelId": "gemma4-12b-q4",
       "label": "gemma4-12b-q4",
-      "engine": "llama-cpp",
+      "engine": "mlx",
       "tier": "medium",
       "parameterSize": "12B",
       "runId": "2026-08-22-mac-apple-m4-max",
@@ -1554,6 +1609,11 @@
         "contextTokens": 101376,
         "peakMemoryMb": 42512,
         "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 5.8,
+        "artifacts": 24,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -1652,7 +1712,7 @@
     {
       "modelId": "gemma4-12b-q8",
       "label": "gemma4-12b-q8",
-      "engine": "llama-cpp",
+      "engine": "mlx",
       "tier": "medium",
       "parameterSize": "12B",
       "runId": "2026-08-22-mac-apple-m4-max",
@@ -1666,6 +1726,11 @@
         "contextTokens": 84992,
         "peakMemoryMb": 42795,
         "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 5.8,
+        "artifacts": 24,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -1764,7 +1829,7 @@
     {
       "modelId": "gemma4-e2b-q4",
       "label": "gemma4-e2b-q4",
-      "engine": "llama-cpp",
+      "engine": "mlx",
       "tier": "tiny",
       "parameterSize": "2.3B",
       "runId": "2026-08-22-mac-apple-m4-max",
@@ -1778,6 +1843,11 @@
         "contextTokens": 131072,
         "peakMemoryMb": 6326,
         "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 4.5,
+        "artifacts": 20,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -1876,7 +1946,7 @@
     {
       "modelId": "gemma4-e4b-q4",
       "label": "gemma4-e4b-q4",
-      "engine": "llama-cpp",
+      "engine": "mlx",
       "tier": "small",
       "parameterSize": "8B",
       "runId": "2026-08-22-mac-apple-m4-max",
@@ -1890,6 +1960,11 @@
         "contextTokens": 131072,
         "peakMemoryMb": 12817,
         "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 5.5,
+        "artifacts": 22,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -2003,6 +2078,11 @@
         "peakMemoryMb": 4949,
         "kvCacheType": "q8_0"
       },
+      "judge": {
+        "meanScore": 4.4,
+        "artifacts": 27,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "constrained-comms",
@@ -2114,6 +2194,11 @@
         "contextTokens": 32768,
         "peakMemoryMb": 9881,
         "kvCacheType": "q8_0"
+      },
+      "judge": {
+        "meanScore": 1.6,
+        "artifacts": 30,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -2227,6 +2312,11 @@
         "peakMemoryMb": 15266,
         "kvCacheType": "q8_0"
       },
+      "judge": {
+        "meanScore": 6.5,
+        "artifacts": 27,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "constrained-comms",
@@ -2324,7 +2414,7 @@
     {
       "modelId": "qwen3.5-2b-q4",
       "label": "qwen3.5-2b-q4",
-      "engine": "llama-cpp",
+      "engine": "mlx",
       "tier": "tiny",
       "parameterSize": "2B",
       "runId": "2026-08-22-mac-apple-m4-max",
@@ -2338,6 +2428,11 @@
         "contextTokens": 262144,
         "peakMemoryMb": 4747,
         "kvCacheType": "q8_0"
+      },
+      "judge": {
+        "meanScore": 4.1,
+        "artifacts": 26,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -2436,7 +2531,7 @@
     {
       "modelId": "qwen3.5-4b-q4",
       "label": "qwen3.5-4b-q4",
-      "engine": "llama-cpp",
+      "engine": "mlx",
       "tier": "tiny",
       "parameterSize": "4B",
       "runId": "2026-08-22-mac-apple-m4-max",
@@ -2450,6 +2545,11 @@
         "contextTokens": 262144,
         "peakMemoryMb": 10181,
         "kvCacheType": "q8_0"
+      },
+      "judge": {
+        "meanScore": 6.2,
+        "artifacts": 24,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -2548,7 +2648,7 @@
     {
       "modelId": "qwen3.5-9b-q4",
       "label": "qwen3.5-9b-q4",
-      "engine": "llama-cpp",
+      "engine": "mlx",
       "tier": "small",
       "parameterSize": "9B",
       "runId": "2026-08-22-mac-apple-m4-max",
@@ -2562,6 +2662,11 @@
         "contextTokens": 262144,
         "peakMemoryMb": 11617,
         "kvCacheType": "q8_0"
+      },
+      "judge": {
+        "meanScore": 6.2,
+        "artifacts": 25,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
