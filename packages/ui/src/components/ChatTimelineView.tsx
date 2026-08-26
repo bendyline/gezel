@@ -22,7 +22,15 @@ import {
   resolveGezelFontScale,
 } from '@bendyline/gezel';
 import type { SseStreamOptions } from '@bendyline/gezel-client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { api } from '../api.js';
 import { isUserCancelledTurnError } from '../error-report.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
@@ -48,6 +56,7 @@ import {
   type OptimisticUserMessage,
   subscribeOptimisticUserMessages,
 } from './chat-optimistic-events.js';
+import { FrameCoalescedStore } from './frame-coalesced-store.js';
 import { consumeFocusSessionError } from './pending-focus-session-error.js';
 import type { QueuedTaskEntry } from './queued-task-entries.js';
 import { compareTimelineRows, nextTerminalBottomGraceExpiry } from './timeline-row-order.js';
@@ -217,8 +226,8 @@ type OptimisticTimelineMessage = TimelineMessage & { optimistic?: true };
 
 /**
  * Live "growing" terminal output bubble. Mirrors `LiveSlot`'s
- * shape (kept-in-ref state, `*Bump` counter triggers redraw) but
- * scoped to a terminal `runId` instead of a chat sessionId. One
+ * mutable-store shape but is scoped to a terminal `runId` instead
+ * of a chat sessionId. One
  * slot per in-flight `runId`; created by `runStarted` SSE events,
  * grown by `outputChunk` events, dropped when the final `message`
  * event arrives carrying the matching `runId`.
@@ -395,6 +404,63 @@ interface LiveSlot {
    * dragging or why the provider dropped into degraded mode.
    */
   warnings?: InlineWarning[];
+}
+
+/**
+ * A single narrow React subscription into a mutable streaming store. The
+ * parent timeline supplies the stable structural position; only this child
+ * redraws when fragments mutate the item at that position.
+ */
+function FrameCoalescedItem<T>({
+  store,
+  itemKey,
+  render,
+  onRendered,
+}: {
+  store: FrameCoalescedStore<T>;
+  itemKey: string;
+  render: (item: T) => React.ReactNode;
+  onRendered?: () => void;
+}): React.ReactNode {
+  const subscribe = useCallback(
+    (listener: () => void) => store.subscribeItem(itemKey, listener),
+    [store, itemKey],
+  );
+  const getSnapshot = useCallback(() => store.getItemSnapshot(itemKey), [store, itemKey]);
+  const version = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const item = store.items.get(itemKey);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: version is the external-store render signal; item intentionally keeps mutable identity.
+  useLayoutEffect(() => {
+    if (item) onRendered?.();
+  }, [item, onRendered, version]);
+
+  return item ? <>{render(item)}</> : null;
+}
+
+function FrameCoalescedLiveStickyHeader({
+  store,
+  sessionId,
+  userMsg,
+  gezels,
+}: {
+  store: FrameCoalescedStore<LiveSlot>;
+  sessionId: string;
+  userMsg: TimelineMessage;
+  gezels: Map<string, GezelSummary>;
+}): React.ReactNode {
+  return (
+    <FrameCoalescedItem
+      store={store}
+      itemKey={sessionId}
+      render={(slot) => (
+        <ChatStickyHeader
+          payload={{ userMsg, assistantInfo: { kind: 'live', sessionId, slot } }}
+          gezels={gezels}
+        />
+      )}
+    />
+  );
 }
 
 function liveStatusLabel(slot: Pick<LiveSlot, 'activity' | 'thinkingLabel'>): string | undefined {
@@ -599,9 +665,9 @@ export interface ChatTimelineViewProps {
  * last 24h, OR (c) it's a live streaming row. Older sessions get the
  * `timeline-msg-faded` class for ~0.55 opacity (hover restores 0.9).
  *
- * Live messages are kept in `liveRef` (a mutable ref, not state) so
- * delta-per-token updates don't trigger O(N) message re-renders. A single
- * `liveBump` counter forces a redraw of just the streaming rows.
+ * Live messages are kept in a mutable frame-coalesced store. Each live
+ * session subscribes independently, so token deltas redraw only that
+ * session's streaming bubble while the persisted thread tree stays stable.
  */
 export function ChatTimelineView({
   scopeKey,
@@ -801,6 +867,8 @@ export function ChatTimelineView({
     Map<string, { busy?: 'acknowledge' | 'retry'; error?: string }>
   >(new Map());
   const [gezels, setGezels] = useState<Map<string, GezelSummary>>(new Map());
+  const gezelsRef = useRef(gezels);
+  gezelsRef.current = gezels;
   const [projects, setProjects] = useState<Map<string, Project>>(new Map());
   /**
    * Pending-question lookup keyed by question id. Built by fetching every
@@ -809,16 +877,31 @@ export function ChatTimelineView({
    * across all messages so a single fetch covers cross-project surfaces.
    */
   const [questionsById, setQuestionsById] = useState<Map<string, Question>>(new Map());
-  const [liveBump, setLiveBump] = useState(0);
-  const liveRef = useRef<Map<string, LiveSlot>>(new Map());
+  const liveStoreRef = useRef<FrameCoalescedStore<LiveSlot> | null>(null);
+  if (!liveStoreRef.current) liveStoreRef.current = new FrameCoalescedStore<LiveSlot>();
+  const liveStore = liveStoreRef.current;
+  const liveRef = useRef(liveStore.items);
+  const liveStructureVersion = useSyncExternalStore(
+    liveStore.subscribeStructure,
+    liveStore.getStructureSnapshot,
+    liveStore.getStructureSnapshot,
+  );
   /**
    * In-flight terminal runs. Same shape rationale as `liveRef`:
-   * mutated in place by SSE event handlers, redraws driven by
-   * `terminalLiveBump`. Separate from `liveRef` so chat streaming
-   * frame cost doesn't pull terminal redraws (and vice versa).
+   * mutated in place by SSE event handlers. Its store is separate from
+   * chat so terminal output and model tokens notify different subscribers.
    */
-  const [terminalLiveBump, setTerminalLiveBump] = useState(0);
-  const terminalLiveRef = useRef<Map<string, TerminalLiveSlot>>(new Map());
+  const terminalLiveStoreRef = useRef<FrameCoalescedStore<TerminalLiveSlot> | null>(null);
+  if (!terminalLiveStoreRef.current) {
+    terminalLiveStoreRef.current = new FrameCoalescedStore<TerminalLiveSlot>();
+  }
+  const terminalLiveStore = terminalLiveStoreRef.current;
+  const terminalLiveRef = useRef(terminalLiveStore.items);
+  const terminalLiveStructureVersion = useSyncExternalStore(
+    terminalLiveStore.subscribeStructure,
+    terminalLiveStore.getStructureSnapshot,
+    terminalLiveStore.getStructureSnapshot,
+  );
   /**
    * Per-session ordered list of queued messages — the ghost bubbles
    * we render under each session's streaming bubble. Keyed by
@@ -868,6 +951,8 @@ export function ChatTimelineView({
    * Kept in state (not a ref) so the button can render the live state.
    */
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
+  const pinnedToBottomRef = useRef(true);
+  pinnedToBottomRef.current = pinnedToBottom;
   /**
    * A prompt submitted from the composer attached to this timeline. It is
    * deliberately separate from ordinary row growth: background messages
@@ -934,6 +1019,8 @@ export function ChatTimelineView({
    * response gets taller than the viewport.
    */
   const lastScrollHeightRef = useRef(0);
+  /** Coalesces growth from multiple independently streaming bubbles. */
+  const liveFollowRafRef = useRef<number | null>(null);
 
   // Reload from scratch whenever the scope changes (project switch, Meester
   // chat, etc.). Clears live state too — no point carrying over a streaming
@@ -959,6 +1046,9 @@ export function ChatTimelineView({
     setOldestAt(undefined);
     registeredFileSightingsRef.current.clear();
     liveRef.current.clear();
+    liveStore.markStructureChanged();
+    terminalLiveRef.current.clear();
+    terminalLiveStore.markStructureChanged();
     queuedRef.current.clear();
     contextStatusRef.current.clear();
     // Reset the stick-to-bottom state too. Otherwise, if the user
@@ -968,6 +1058,7 @@ export function ChatTimelineView({
     // instead of the newest messages. Same reset for the row-count
     // ref so the first post-reload render counts as "grew" and
     // triggers the anchor-to-bottom.
+    pinnedToBottomRef.current = true;
     setPinnedToBottom(true);
     setSubmissionAnchor(null);
     setAlignedSubmissionKey(null);
@@ -1037,7 +1128,7 @@ export function ChatTimelineView({
                 : {}),
             });
           }
-          if (inflight.inflight.length > 0) setLiveBump((n) => n + 1);
+          if (inflight.inflight.length > 0) liveStore.markStructureChanged();
         } catch {
           /* non-fatal — the thinking bubble just won't reappear, actual
              stream events still arrive via SSE */
@@ -1064,7 +1155,7 @@ export function ChatTimelineView({
               })),
             );
           }
-          if (q.sessions.length > 0) setLiveBump((n) => n + 1);
+          if (q.sessions.length > 0) liveStore.markStructureChanged();
         } catch {
           /* non-fatal */
         }
@@ -1295,7 +1386,8 @@ export function ChatTimelineView({
   }, [scopeKey, refreshQuestions]);
 
   // Live SSE — open one connection per scope, abort on scope change /
-  // unmount. Updates `liveRef` directly, then bumps a counter to redraw.
+  // unmount. Updates the mutable live store; each affected session publishes
+  // at most one narrow subscriber notification per animation frame.
   // biome-ignore lint/correctness/useExhaustiveDependencies: scopeKey is the reset/reload trigger; handleEnvelope is deliberately excluded (captured via refs).
   useEffect(() => {
     const ctrl = new AbortController();
@@ -1399,7 +1491,7 @@ export function ChatTimelineView({
                 cwd: env.cwd,
                 content: '',
               });
-              setTerminalLiveBump((n) => n + 1);
+              terminalLiveStore.markStructureChanged();
               backoffMs = 250;
               continue;
             }
@@ -1411,7 +1503,7 @@ export function ChatTimelineView({
                 // answered — drop the reply UI so it doesn't sit
                 // stale.
                 if (slot.awaitingInput) delete slot.awaitingInput;
-                setTerminalLiveBump((n) => n + 1);
+                terminalLiveStore.markItemChanged(env.runId);
               }
               backoffMs = 250;
               continue;
@@ -1420,7 +1512,7 @@ export function ChatTimelineView({
               const slot = terminalLiveRef.current.get(env.runId);
               if (slot) {
                 slot.awaitingInput = { promptLine: env.promptLine, mode: env.mode };
-                setTerminalLiveBump((n) => n + 1);
+                terminalLiveStore.markItemChanged(env.runId);
               }
               backoffMs = 250;
               continue;
@@ -1429,7 +1521,7 @@ export function ChatTimelineView({
             // live slot if this message terminates a run.
             if (env.runId) {
               terminalLiveRef.current.delete(env.runId);
-              setTerminalLiveBump((n) => n + 1);
+              terminalLiveStore.markStructureChanged();
             }
             setTerminalEntries((prev) => {
               // Dedupe by messageId so SSE replay after a reconnect
@@ -1554,7 +1646,7 @@ export function ChatTimelineView({
           liveRef.current.delete(sessionId);
           pendingNarrationRef.current.delete(sessionId);
         }
-        setLiveBump((n) => n + 1);
+        liveStore.markStructureChanged();
         void refreshLatest();
       } catch {
         // Non-fatal. A later poll or the normal `done` event will converge.
@@ -1569,7 +1661,7 @@ export function ChatTimelineView({
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [inflightProjectId, inflightGezelId, refreshLatest]);
+  }, [inflightProjectId, inflightGezelId, refreshLatest, liveStore.markStructureChanged]);
 
   useEffect(() => {
     return subscribeOptimisticUserMessages((message) => {
@@ -1622,7 +1714,7 @@ export function ChatTimelineView({
           ...(lastForSession?.taskRef ? { taskRef: lastForSession.taskRef } : {}),
           ...(lastForSession?.stepId ? { stepId: lastForSession.stepId } : {}),
         });
-        setLiveBump((n) => n + 1);
+        liveStore.markStructureChanged();
       }
       // This event is published only by the local composer after the send
       // was accepted. Bring that prompt into view even if the reader had
@@ -1636,7 +1728,12 @@ export function ChatTimelineView({
       });
       setAlignedSubmissionKey(null);
     });
-  }, [inflightProjectId, inflightGezelId, synthesizeUserTimelineMessage]);
+  }, [
+    inflightProjectId,
+    inflightGezelId,
+    synthesizeUserTimelineMessage,
+    liveStore.markStructureChanged,
+  ]);
 
   const handleEnvelope = useCallback(
     (env: ChatEventEnvelope) => {
@@ -1666,7 +1763,7 @@ export function ChatTimelineView({
       // mid-session by the Meester, etc.), refetch the roster so the
       // bubble author label and session divider resolve to a real name
       // instead of the generic "Gezel" fallback.
-      if (!gezels.has(gezelId)) void refetchGezels();
+      if (!gezelsRef.current.has(gezelId)) void refetchGezels();
       if (event.type === 'user_message') {
         // Stop in-flight narration only when this is a real human send
         // (no `from` field). Inter-gezel handoffs (Meester delegating
@@ -1798,7 +1895,7 @@ export function ChatTimelineView({
                 : {}),
             ...(lastForSession?.taskRef ? { taskRef: lastForSession.taskRef } : {}),
           });
-          setLiveBump((n) => n + 1);
+          liveStore.markStructureChanged();
         }
       } else if (event.type === 'delta') {
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
@@ -1837,7 +1934,7 @@ export function ChatTimelineView({
         // is over (or was abandoned); drop the live tool-args block.
         delete slot.liveToolArgs;
         liveRef.current.set(sessionId, slot);
-        setLiveBump((n) => n + 1);
+        liveStore.markItemChanged(sessionId);
       } else if (event.type === 'reasoning_delta') {
         // Live think-phase tokens (ds4's `reasoning_content` channel).
         // Accumulate into a dimmed "thinking" block rendered above the
@@ -1857,7 +1954,7 @@ export function ChatTimelineView({
         delete slot.thinkingProgress;
         delete slot.thinkingDetail;
         liveRef.current.set(sessionId, slot);
-        setLiveBump((n) => n + 1);
+        liveStore.markItemChanged(sessionId);
       } else if (event.type === 'tool_args_delta') {
         // Live tool-argument fragments — the model is generating a
         // structured tool call (typically write_file content). Counts as
@@ -1887,7 +1984,7 @@ export function ChatTimelineView({
         slot.hasProgress = true;
         delete slot.queueAhead;
         liveRef.current.set(sessionId, slot);
-        setLiveBump((n) => n + 1);
+        liveStore.markItemChanged(sessionId);
       } else if (event.type === 'wire_pulse') {
         // Bare framing chunk arrived from the provider — Ollama is
         // alive on the wire but the model isn't producing visible
@@ -1903,7 +2000,7 @@ export function ChatTimelineView({
         slot.hasProgress = true;
         delete slot.queueAhead;
         liveRef.current.set(sessionId, slot);
-        setLiveBump((n) => n + 1);
+        liveStore.markItemChanged(sessionId);
       } else if (event.type === 'intent') {
         // Copilot announced a phase transition via `report_intent`.
         // Push it as its own segment so the streaming bubble renders
@@ -1919,7 +2016,7 @@ export function ChatTimelineView({
         slot.wirePulseCount = 0;
         delete slot.queueAhead;
         liveRef.current.set(sessionId, slot);
-        setLiveBump((n) => n + 1);
+        liveStore.markItemChanged(sessionId);
       } else if (event.type === 'heartbeat') {
         // Provider told us it's still working — bump the activity
         // clock so the "silent for Xs" banner doesn't climb during
@@ -1936,7 +2033,7 @@ export function ChatTimelineView({
         slot.thinkingLabel = event.label;
         delete slot.queueAhead;
         liveRef.current.set(sessionId, slot);
-        setLiveBump((n) => n + 1);
+        liveStore.markItemChanged(sessionId);
       } else if (event.type === 'warning') {
         // Provider-side warning (rate-limit, degraded mode, etc.) —
         // append to the slot's warnings list so the streaming bubble
@@ -1946,7 +2043,7 @@ export function ChatTimelineView({
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.warnings = [...(slot.warnings ?? []), event];
         liveRef.current.set(sessionId, slot);
-        setLiveBump((n) => n + 1);
+        liveStore.markItemChanged(sessionId);
       } else if (event.type === 'queued') {
         // The service only fires `queued` after a >200ms wait, so we
         // can flip the bubble to the queued state immediately without
@@ -1954,7 +2051,7 @@ export function ChatTimelineView({
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.queueAhead = event.aheadOf;
         liveRef.current.set(sessionId, slot);
-        setLiveBump((n) => n + 1);
+        liveStore.markItemChanged(sessionId);
       } else if (event.type === 'queue_enqueued') {
         // Upsert by queueId: a fresh enqueue appends, but a
         // coalesced send re-publishes with the SAME queueId and an
@@ -1974,14 +2071,14 @@ export function ChatTimelineView({
           list.push(entry);
         }
         queuedRef.current.set(sessionId, list);
-        setLiveBump((n) => n + 1);
+        liveStore.markStructureChanged();
       } else if (event.type === 'queue_removed') {
         const list = queuedRef.current.get(sessionId);
         if (list) {
           const next = list.filter((e) => e.id !== event.queueId);
           if (next.length === 0) queuedRef.current.delete(sessionId);
           else queuedRef.current.set(sessionId, next);
-          setLiveBump((n) => n + 1);
+          liveStore.markStructureChanged();
         }
       } else if (event.type === 'tool') {
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
@@ -2023,7 +2120,7 @@ export function ChatTimelineView({
         // normal for agentic models.)
         delete slot.queueAhead;
         liveRef.current.set(sessionId, slot);
-        setLiveBump((n) => n + 1);
+        liveStore.markItemChanged(sessionId);
         onToolActivity?.(tool);
       } else if (event.type === 'complete') {
         // A committed assistant message means the retry (or an ordinary
@@ -2089,7 +2186,7 @@ export function ChatTimelineView({
           delete existing.error;
           liveRef.current.set(sessionId, existing);
         }
-        setLiveBump((n) => n + 1);
+        liveStore.markItemChanged(sessionId);
         // Refetch the most-recent slice so the completed message
         // lands as a real timeline row. Synthesizing here would
         // miss session metadata (title / createdAt) for brand-new
@@ -2147,7 +2244,7 @@ export function ChatTimelineView({
           slot.error = event.error;
           slot.errorDetail = event.errorDetail;
           liveRef.current.set(sessionId, slot);
-          setLiveBump((n) => n + 1);
+          liveStore.markItemChanged(sessionId);
         }
       } else if (event.type === 'cancelled') {
         // A requested stop is ordinary control flow, not a failed turn.
@@ -2155,7 +2252,7 @@ export function ChatTimelineView({
         // emits this event again after it persists any salvaged partial
         // response, so the refresh below converges on the durable row.
         if (liveRef.current.delete(sessionId)) {
-          setLiveBump((n) => n + 1);
+          liveStore.markStructureChanged();
         }
         void refreshLatest();
       } else if (event.type === 'done') {
@@ -2164,7 +2261,7 @@ export function ChatTimelineView({
         const slot = liveRef.current.get(sessionId);
         if (slot && !slot.error) {
           liveRef.current.delete(sessionId);
-          setLiveBump((n) => n + 1);
+          liveStore.markStructureChanged();
         }
         // Drain any buffered narration for this session. We waited for
         // `done` so all continuation iterations (tool-only stall
@@ -2229,7 +2326,7 @@ export function ChatTimelineView({
           }
         }
         liveRef.current.set(sessionId, slot);
-        setLiveBump((n) => n + 1);
+        liveStore.markItemChanged(sessionId);
       } else if (event.type === 'gpu_swap') {
         // VRAM-tenancy change: a non-LLM workload (today: local
         // image generation) has taken or released the GPU. While
@@ -2262,7 +2359,7 @@ export function ChatTimelineView({
             slot.gpuSwapSecondsPerStep = event.secondsPerStep;
         }
         liveRef.current.set(sessionId, slot);
-        setLiveBump((n) => n + 1);
+        liveStore.markItemChanged(sessionId);
       } else if (event.type === 'awaiting_gezel') {
         // This turn is parked inside a synchronous ask_gezel /
         // ask_specialist consultation — the asker's model is idle,
@@ -2280,7 +2377,7 @@ export function ChatTimelineView({
           slot.awaitingGezelName = event.targetGezelName;
         }
         liveRef.current.set(sessionId, slot);
-        setLiveBump((n) => n + 1);
+        liveStore.markItemChanged(sessionId);
       } else if (event.type === 'context_warning') {
         // Don't downgrade an existing 'compacted' status to a 'warning'
         // — once the system has had to compact, that's the user-facing
@@ -2295,7 +2392,7 @@ export function ChatTimelineView({
             model: event.model,
             at: Date.now(),
           });
-          setLiveBump((n) => n + 1);
+          liveStore.markStructureChanged();
         }
       } else if (event.type === 'context_compacted') {
         contextStatusRef.current.set(sessionId, {
@@ -2307,7 +2404,7 @@ export function ChatTimelineView({
         // Refetch the timeline — older messages were dropped from disk
         // by the compaction, so the rendered list needs to match.
         void refreshLatest();
-        setLiveBump((n) => n + 1);
+        liveStore.markStructureChanged();
       } else if (event.type === 'question_asked' || event.type === 'question_answered') {
         // Update the lookup directly (cheaper than re-fetching) and
         // refresh the timeline so the new `pendingQuestionId` stamp on
@@ -2329,6 +2426,7 @@ export function ChatTimelineView({
         // thread builder attaches it after this session's persisted replies.
         // Keep the latest message only to inherit divider/session metadata.
         const lastForSession = findLastForSession(messages, sid);
+        liveStore.markStructureChanged();
         const now = Date.now();
         return {
           gezelId: gid,
@@ -2352,18 +2450,20 @@ export function ChatTimelineView({
       messages,
       onToolActivity,
       refreshLatest,
-      gezels,
       refetchGezels,
       defaultProvider,
       inflightProjectId,
       inflightGezelId,
+      liveStore.markItemChanged,
+      liveStore.markStructureChanged,
     ],
   );
 
-  // Build the rendered row sequence by interleaving streaming rows with
-  // completed messages by their effective `at`. Re-derived whenever
-  // messages change OR liveBump bumps.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: liveBump + terminalLiveBump are counters that force re-derivation from the mutable refs.
+  // Build the rendered row sequence by interleaving streaming positions with
+  // completed messages. Token/terminal chunks do not invalidate this tree;
+  // only item insertion/removal and persisted row changes do. The live child
+  // at each position owns its high-frequency item subscription.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: structure versions and terminalOrderTick deliberately invalidate reads from mutable stores and Date.now ordering.
   const rows = useMemo(() => {
     const liveRows: Array<{ kind: 'streaming'; sessionId: string; slot: LiveSlot }> = [];
     for (const [sid, slot] of liveRef.current.entries()) {
@@ -2374,11 +2474,9 @@ export function ChatTimelineView({
       kind: 'streaming' as const,
       sessionId: r.sessionId,
       slot: r.slot,
-      // Active thread groups are re-queued at their streaming row's
-      // position by `buildTimelineThreads`. Use observable progress here,
-      // not the original trigger time, so whichever turn most recently
-      // emitted a token/tool/phase moves nearest the bottom of the chat.
-      // Fresh terminal work still owns the final lane below live chat.
+      // Capture observable progress when the slot enters or leaves the
+      // structural graph. Token fragments deliberately do not keep re-sorting
+      // every thread; stable placement is what lets persisted rows stay cold.
       at: new Date(r.slot.lastActivityAt).toISOString(),
       // Rootless live work (notably one-shot background activity) needs a
       // stable React key even as the activity timestamp changes per event.
@@ -2416,7 +2514,13 @@ export function ChatTimelineView({
     const now = Date.now();
     all.sort((a, b) => compareTimelineRows(a, b, now));
     return all;
-  }, [messages, terminalEntries, liveBump, terminalLiveBump, terminalOrderTick]);
+  }, [
+    messages,
+    terminalEntries,
+    liveStructureVersion,
+    terminalLiveStructureVersion,
+    terminalOrderTick,
+  ]);
 
   // Slack-style threading: fold the flat rows into turn-rooted thread
   // groups. Every user message (a human turn or a gezel→gezel handoff)
@@ -2425,9 +2529,9 @@ export function ChatTimelineView({
   // landed in between chronologically — so the continuation loop's
   // trailing status bubbles render under their real trigger instead of
   // floating above whatever message arrived next. Each group moves as one
-  // unit to its newest reply's position; live rows use latest observable
-  // progress, so active exchanges continually settle near the bottom and
-  // stay there when an iteration commits. Fan-out duplicate user rows
+  // unit to its newest reply's position. Live rows enter the active lane when
+  // their slot is created and stay structurally stable while bytes stream.
+  // Fan-out duplicate user rows
   // (@-mention fan-out persists the same prompt into several sessions)
   // don't render their own root; their sessions' replies merge into the
   // kept root's thread. See `timeline-threads.ts`.
@@ -2449,7 +2553,7 @@ export function ChatTimelineView({
    * with the canonical one from disk, and until then the card sat
    * beside a visibly streaming bubble for the whole turn.
    */
-  // biome-ignore lint/correctness/useExhaustiveDependencies: liveBump is a counter that forces re-derivation from the mutable liveRef.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: liveStructureVersion deliberately invalidates reads from the mutable live store.
   const queuedTaskCards = useMemo(() => {
     if (!queuedTasks?.length) return [];
     const streaming = new Set<string>();
@@ -2469,7 +2573,7 @@ export function ChatTimelineView({
       if (liveRef.current.has(sid)) return false;
       return !messages.some((m) => m.sessionId === sid);
     });
-  }, [queuedTasks, messages, liveBump]);
+  }, [queuedTasks, messages, liveStructureVersion]);
 
   // Auto-scroll: snapshot whether the user is near the bottom *before*
   // every render, then if so, snap to the bottom *after*. If they were
@@ -2502,6 +2606,25 @@ export function ChatTimelineView({
     if (!pinnedToBottom) return;
     el.scrollTo({ top: el.scrollHeight, behavior: 'instant' as ScrollBehavior });
   }, [rows, pinnedToBottom]);
+
+  /**
+   * Live item subscribers render independently of this component. Follow
+   * their DOM growth without turning it into parent state, and combine
+   * multiple session/terminal commits into one layout read per frame.
+   */
+  const scheduleLiveGrowthFollow = useCallback(() => {
+    if (liveFollowRafRef.current !== null) return;
+    liveFollowRafRef.current = requestAnimationFrame(() => {
+      liveFollowRafRef.current = null;
+      const el = scrollRef.current;
+      if (!el) return;
+      const nextHeight = el.scrollHeight;
+      const heightGrew = nextHeight > lastScrollHeightRef.current;
+      lastScrollHeightRef.current = nextHeight;
+      if (!heightGrew || !pinnedToBottomRef.current) return;
+      el.scrollTo({ top: nextHeight, behavior: 'instant' as ScrollBehavior });
+    });
+  }, []);
 
   /**
    * Align a locally-submitted prompt after its row has rendered. The target
@@ -2558,6 +2681,7 @@ export function ChatTimelineView({
     const timelineRect = el.getBoundingClientRect();
     const targetRect = target.getBoundingClientRect();
     const top = Math.max(0, el.scrollTop + targetRect.top - timelineRect.top - 12);
+    pinnedToBottomRef.current = true;
     setPinnedToBottom(true);
     el.scrollTo({ top });
     setAlignedSubmissionKey(submissionAnchor.key);
@@ -2581,6 +2705,7 @@ export function ChatTimelineView({
     const target = rows[rows.length - 1];
     if (!target) return;
     consumedTerminalFocusKeyRef.current = terminalFocusRequest.requestKey;
+    pinnedToBottomRef.current = false;
     setPinnedToBottom(false);
     if (typeof target.scrollIntoView === 'function') target.scrollIntoView({ block: 'center' });
     target.classList.add('timeline-focus-flash');
@@ -2625,6 +2750,7 @@ export function ChatTimelineView({
       }
       const target = messageTarget ?? banner ?? bubbles[bubbles.length - 1] ?? null;
       if (!target) return false;
+      pinnedToBottomRef.current = false;
       setPinnedToBottom(false);
       // jsdom (and some webviews) don't implement scrollIntoView — the
       // flash + composer focus below still carry the interaction there.
@@ -2929,6 +3055,10 @@ export function ChatTimelineView({
         cancelAnimationFrame(stickyRecomputeRafRef.current);
         stickyRecomputeRafRef.current = null;
       }
+      if (liveFollowRafRef.current !== null) {
+        cancelAnimationFrame(liveFollowRafRef.current);
+        liveFollowRafRef.current = null;
+      }
       if (scrollbarIdleTimerRef.current !== null) {
         window.clearTimeout(scrollbarIdleTimerRef.current);
         scrollbarIdleTimerRef.current = null;
@@ -2950,6 +3080,7 @@ export function ChatTimelineView({
     }, SCROLLBAR_IDLE_MS);
     const distFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
     const nearBottom = distFromBottom <= SCROLL_NEAR_BOTTOM_PX;
+    pinnedToBottomRef.current = nearBottom;
     // Only flip state when it actually changes — otherwise every
     // scroll event while sitting at the bottom would schedule a
     // no-op re-render, adding noise to the React profiler and
@@ -3006,6 +3137,7 @@ export function ChatTimelineView({
   const togglePinned = useCallback(() => {
     setPinnedToBottom((prev) => {
       const next = !prev;
+      pinnedToBottomRef.current = next;
       if (next) {
         const el = scrollRef.current;
         if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'instant' as ScrollBehavior });
@@ -3017,11 +3149,10 @@ export function ChatTimelineView({
   // Resolve the sticky-header payload BEFORE the early returns
   // below — React requires hook calls to fire in the same order on
   // every render. `stickyHeader` carries just the ids; we look up
-  // the actual user message + assistant slot / message here so the
-  // sticky element re-renders with fresh live status (the streaming
-  // bubble's elapsed counter, tool count, wire pulses) on every
-  // `liveBump`. Returns null when nothing is occluded.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: liveBump is a counter that forces re-derivation from liveRef.current (a mutable map React doesn't track).
+  // the actual user message + assistant identity here. A live sticky header
+  // subscribes to its own session below, so token fragments never invalidate
+  // this parent or trigger another all-node sticky measurement.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: liveStructureVersion deliberately retires sticky identities when a live slot is removed.
   const stickyPayload = useMemo(() => {
     if (!stickyHeader) return null;
     const userMsg = messages.find(
@@ -3029,13 +3160,12 @@ export function ChatTimelineView({
     );
     if (!userMsg) return null;
     let assistantInfo:
-      | { kind: 'live'; sessionId: string; slot: LiveSlot }
+      | { kind: 'live'; sessionId: string }
       | { kind: 'message'; msg: TimelineMessage }
       | null = null;
     if (stickyHeader.assistantMessageId.startsWith('live:')) {
       const sid = stickyHeader.assistantMessageId.slice('live:'.length);
-      const slot = liveRef.current.get(sid);
-      if (slot) assistantInfo = { kind: 'live', sessionId: sid, slot };
+      if (liveRef.current.has(sid)) assistantInfo = { kind: 'live', sessionId: sid };
     } else {
       const msg = messages.find(
         (m) => `msg:${m.sessionId}:${m.at}:${m.role}` === stickyHeader.assistantMessageId,
@@ -3044,7 +3174,7 @@ export function ChatTimelineView({
     }
     if (!assistantInfo) return null;
     return { userMsg, assistantInfo };
-  }, [stickyHeader, messages, liveBump]);
+  }, [stickyHeader, messages, liveStructureVersion]);
 
   // Built once and rendered from both the empty branch and the main
   // one: a project whose only activity is a queued task has no rows at
@@ -3113,7 +3243,7 @@ export function ChatTimelineView({
         retiredLiveError = true;
       }
       if (retiredLiveError) {
-        setLiveBump((n) => n + 1);
+        liveStore.markStructureChanged();
         void refreshLatest();
       }
       setSessionErrorActions((prev) => {
@@ -3690,38 +3820,45 @@ export function ChatTimelineView({
       const projectId = item.slot.projectId;
       const runId = item.runId;
       els.push(
-        <TerminalStreamingBubble
+        <FrameCoalescedItem
           key={`terminal-streaming:${runId}`}
-          content={item.slot.content}
-          cwd={item.slot.cwd}
-          startedAt={item.slot.startedAt}
-          {...(item.slot.awaitingInput ? { awaitingInput: item.slot.awaitingInput } : {})}
-          onCancel={() => {
-            // Best-effort cancel: server idempotently returns 404
-            // if the run already finished, which the client
-            // swallows. We don't optimistically drop the live
-            // slot — that happens when the final message arrives
-            // via SSE carrying the matching runId.
-            void api.cancelTerminalRun(projectId, runId).catch(() => {
-              /* surfaced via the final message's exit code */
-            });
-          }}
-          onSendInput={(text) => {
-            // Optimistically drop the awaitingInput flag — the
-            // server's next chunk would do it anyway, but this
-            // hides the reply UI immediately so the user knows
-            // the click registered. If the shell asks AGAIN
-            // (wrong password), a fresh inputRequested event
-            // re-sets the flag.
-            const slot = terminalLiveRef.current.get(runId);
-            if (slot) {
-              delete slot.awaitingInput;
-              setTerminalLiveBump((n) => n + 1);
-            }
-            void api.sendTerminalInput(projectId, runId, text).catch((err) => {
-              console.warn('[ChatTimelineView] sendTerminalInput failed', err);
-            });
-          }}
+          store={terminalLiveStore}
+          itemKey={runId}
+          onRendered={scheduleLiveGrowthFollow}
+          render={(slot) => (
+            <TerminalStreamingBubble
+              content={slot.content}
+              cwd={slot.cwd}
+              startedAt={slot.startedAt}
+              {...(slot.awaitingInput ? { awaitingInput: slot.awaitingInput } : {})}
+              onCancel={() => {
+                // Best-effort cancel: server idempotently returns 404
+                // if the run already finished, which the client
+                // swallows. We don't optimistically drop the live
+                // slot — that happens when the final message arrives
+                // via SSE carrying the matching runId.
+                void api.cancelTerminalRun(projectId, runId).catch(() => {
+                  /* surfaced via the final message's exit code */
+                });
+              }}
+              onSendInput={(text) => {
+                // Optimistically drop the awaitingInput flag — the
+                // server's next chunk would do it anyway, but this
+                // hides the reply UI immediately so the user knows
+                // the click registered. If the shell asks AGAIN
+                // (wrong password), a fresh inputRequested event
+                // re-sets the flag.
+                const current = terminalLiveRef.current.get(runId);
+                if (current) {
+                  delete current.awaitingInput;
+                  terminalLiveStore.markItemChanged(runId);
+                }
+                void api.sendTerminalInput(projectId, runId, text).catch((err) => {
+                  console.warn('[ChatTimelineView] sendTerminalInput failed', err);
+                });
+              }}
+            />
+          )}
         />,
       );
       continue;
@@ -3786,7 +3923,15 @@ export function ChatTimelineView({
       for (let j = 0; j < item.replies.length; j++) {
         const reply = item.replies[j]!;
         if (reply.kind === 'streaming') {
-          replyEls.push(...renderStreamingRows(reply.sessionId, reply.slot));
+          replyEls.push(
+            <FrameCoalescedItem
+              key={`live-slot:${reply.sessionId}`}
+              store={liveStore}
+              itemKey={reply.sessionId}
+              onRendered={scheduleLiveGrowthFollow}
+              render={(slot) => renderStreamingRows(reply.sessionId, slot)}
+            />,
+          );
           continue;
         }
         const m = reply.msg;
@@ -3919,7 +4064,23 @@ export function ChatTimelineView({
           )}
         </output>
       )}
-      {stickyPayload && <ChatStickyHeader payload={stickyPayload} gezels={gezels} />}
+      {stickyPayload &&
+        (stickyPayload.assistantInfo.kind === 'live' ? (
+          <FrameCoalescedLiveStickyHeader
+            store={liveStore}
+            sessionId={stickyPayload.assistantInfo.sessionId}
+            userMsg={stickyPayload.userMsg}
+            gezels={gezels}
+          />
+        ) : (
+          <ChatStickyHeader
+            payload={{
+              userMsg: stickyPayload.userMsg,
+              assistantInfo: { kind: 'message', msg: stickyPayload.assistantInfo.msg },
+            }}
+            gezels={gezels}
+          />
+        ))}
       <div
         className="chat-timeline"
         ref={scrollRef}

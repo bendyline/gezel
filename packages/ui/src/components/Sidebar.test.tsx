@@ -72,6 +72,25 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('sidebar-area-settings')).toBeInTheDocument();
   });
 
+  it('warms destinations on pointer and keyboard intent before selection', async () => {
+    const onPreload = vi.fn();
+    render(
+      <Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} onPreload={onPreload} />,
+    );
+
+    fireEvent.pointerEnter(screen.getByTestId('sidebar-area-tasks'));
+    fireEvent.focus(screen.getByTestId('sidebar-area-settings'));
+    fireEvent.pointerDown(await screen.findByRole('button', { name: 'Alpha' }));
+
+    expect(onPreload).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'area', area: 'tasks' }),
+    );
+    expect(onPreload).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'area', area: 'settings' }),
+    );
+    expect(onPreload).toHaveBeenCalledWith(expect.objectContaining({ kind: 'project', id: 'p1' }));
+  });
+
   it('omits document folders that contain no visible files', async () => {
     window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ documents: true }));
     vi.mocked(api.listDocuments).mockResolvedValue({

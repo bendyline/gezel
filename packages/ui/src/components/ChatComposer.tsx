@@ -17,6 +17,7 @@ import {
   resolveOpenChatTarget,
 } from './chat-open-command.js';
 import { publishOptimisticUserMessage } from './chat-optimistic-events.js';
+import { COMPOSER_PREFILL_EVENT, takeComposerPrefill } from './composer-prefill.js';
 import { type MentionToken, extractMentionTokens, extractMentions } from './mention-parse.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
@@ -36,44 +37,11 @@ interface ComposerDraftSnapshot {
   editVersion: number;
 }
 
-/**
- * Module-level queue for prefill payloads. A view elsewhere in the
- * app (e.g. the "Complain about this" preview-error button) calls
- * `queueComposerPrefill(projectId, markdown)` BEFORE navigating to
- * the chat tab; the next ChatComposer that mounts for the matching
- * project consumes the entry, drops the markdown into its editor,
- * and leaves the user to review + hit Send themselves. Keyed by
- * projectId so prefills for a different project than the one the
- * user ends up on don't accidentally clobber an unrelated draft.
- *
- * The alternative — a custom `window` event — lost the payload when
- * dispatched before the listener mounted.
- */
-const pendingPrefills = new Map<string, string>();
-
-/**
- * Fired right after a prefill is queued so a composer that's ALREADY
- * mounted for the matching project drains it immediately. Without this,
- * delivery relied solely on a remount: the consume effect is keyed on
- * `projectId`, so when the queue is filled while a same-project composer
- * is already on screen (e.g. the Output pane's camera "debug frame"
- * button while the Chat tab is already active beside it), nothing ever
- * picked the entry up and the screenshot silently vanished.
- */
-const PREFILL_EVENT = 'gezel:composer-prefill';
-
 function newlineShortcutLabel(): string {
   const platform =
     window.__GEZEL__?.platform ??
     (typeof navigator === 'undefined' ? '' : navigator.platform || navigator.userAgent);
   return platform === 'darwin' || /Mac/i.test(platform) ? '⌘⏎' : 'Ctrl+Enter';
-}
-
-export function queueComposerPrefill(projectId: string, markdown: string): void {
-  pendingPrefills.set(projectId, markdown);
-  // Harmless when no composer is mounted yet — the mount-time drain in
-  // ChatComposer covers the navigate-then-mount case.
-  window.dispatchEvent(new CustomEvent(PREFILL_EVENT, { detail: { projectId } }));
 }
 
 export interface ChatComposerProps {
@@ -317,14 +285,13 @@ export function ChatComposer({
   // clear the editor; draftRef supplies the content for the fresh mount.
   const [editorRevision, setEditorRevision] = useState(0);
   // Drain a queued prefill into the editor. Runs on mount (covers the
-  // navigate-to-chat-then-mount case) AND on `PREFILL_EVENT` (covers an
+  // navigate-to-chat-then-mount case) AND on `COMPOSER_PREFILL_EVENT` (covers an
   // already-mounted composer — the Output pane camera button while the
   // Chat tab is already active beside it). The key bump forces an
   // EditorShell remount so the new initial content shows.
   const consumePrefill = useCallback(() => {
-    const queued = pendingPrefills.get(projectId);
+    const queued = takeComposerPrefill(projectId);
     if (!queued) return;
-    pendingPrefills.delete(projectId);
     // Don't clobber an in-progress draft. The editor is a published
     // black-box (`@bendyline/squisq-editor-react`) with no host-facing
     // "insert at caret" handle, so we can't drop the payload at the
@@ -347,8 +314,8 @@ export function ChatComposer({
       const detail = (e as CustomEvent).detail as { projectId?: string } | undefined;
       if (detail?.projectId === projectId) consumePrefill();
     };
-    window.addEventListener(PREFILL_EVENT, onPrefill);
-    return () => window.removeEventListener(PREFILL_EVENT, onPrefill);
+    window.addEventListener(COMPOSER_PREFILL_EVENT, onPrefill);
+    return () => window.removeEventListener(COMPOSER_PREFILL_EVENT, onPrefill);
   }, [consumePrefill, projectId]);
   // Gezels @-mentioned in the current draft. Rendered as extra chips in
   // the "To:" row so the user sees who the fan-out will reach before they

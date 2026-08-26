@@ -30,10 +30,9 @@ import type {
   MouseEvent as ReactMouseEvent,
   ReactNode,
 } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
-import { queueComposerPrefill } from '../components/ChatComposer.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { FileFlatList } from '../components/FileFlatList.js';
@@ -45,13 +44,10 @@ import { HtmlPreviewFrame, type HtmlPreviewLogEntry } from '../components/HtmlPr
 import { ProjectMemoriesEditor } from '../components/MemoriesTree.js';
 import { ProjectActionsMenu, ProjectContextMenu } from '../components/ProjectActionsMenu.js';
 import type { ProjectTemplateGezelOptions } from '../components/ProjectAddGezelDialog.js';
-import { ProjectChat } from '../components/ProjectChat.js';
-import { ProjectConnectionsTab } from '../components/ProjectConnectionsTab.js';
 import { ProjectCrewRoster } from '../components/ProjectCrewRoster.js';
 import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
 import { ProjectIcon } from '../components/ProjectIcon.js';
 import { ProjectKnowledgeRow } from '../components/ProjectKnowledgeRow.js';
-import { ProjectMailTab } from '../components/ProjectMailTab.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
 import {
@@ -78,7 +74,7 @@ import {
   workspaceIndexLabel,
 } from '../components/WorkspaceIndexPane.js';
 import { WorkspaceIssueFixDialog } from '../components/WorkspaceIssueFixDialog.js';
-import { DiffpackReviewView } from '../components/diffpacks/DiffpackReviewView.js';
+import { queueComposerPrefill } from '../components/composer-prefill.js';
 import { useDiffpackCount } from '../components/diffpacks/useDiffpacks.js';
 import {
   BINARY_FILE,
@@ -126,12 +122,45 @@ import { crewLeadLabel, crewLeadLabelLower } from '../labels.js';
 import { Select, Tabs } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { useEffectiveTheme } from '../theme.js';
-import { FileMapView } from './FileMapView.js';
-import { HistoryView } from './HistoryView.js';
-import { ProjectGitHubView } from './ProjectGithubView.js';
-import { ProjectOverviewView } from './ProjectOverviewView.js';
-import { TasksView } from './TasksView.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
+
+const loadProjectChatModule = () => import('../components/ProjectChat.js');
+const loadProjectConnectionsModule = () => import('../components/ProjectConnectionsTab.js');
+const loadProjectMailModule = () => import('../components/ProjectMailTab.js');
+const loadDiffpackReviewModule = () => import('../components/diffpacks/DiffpackReviewView.js');
+const loadFileMapModule = () => import('./FileMapView.js');
+const loadHistoryModule = () => import('./HistoryView.js');
+const loadProjectGitHubModule = () => import('./ProjectGithubView.js');
+const loadProjectOverviewModule = () => import('./ProjectOverviewView.js');
+const loadTasksModule = () => import('./TasksView.js');
+
+const ProjectChat = lazy(() =>
+  loadProjectChatModule().then(({ ProjectChat }) => ({ default: ProjectChat })),
+);
+const ProjectConnectionsTab = lazy(() =>
+  loadProjectConnectionsModule().then(({ ProjectConnectionsTab }) => ({
+    default: ProjectConnectionsTab,
+  })),
+);
+const ProjectMailTab = lazy(() =>
+  loadProjectMailModule().then(({ ProjectMailTab }) => ({ default: ProjectMailTab })),
+);
+const DiffpackReviewView = lazy(() =>
+  loadDiffpackReviewModule().then(({ DiffpackReviewView }) => ({ default: DiffpackReviewView })),
+);
+const FileMapView = lazy(() =>
+  loadFileMapModule().then(({ FileMapView }) => ({ default: FileMapView })),
+);
+const HistoryView = lazy(() =>
+  loadHistoryModule().then(({ HistoryView }) => ({ default: HistoryView })),
+);
+const ProjectGitHubView = lazy(() =>
+  loadProjectGitHubModule().then(({ ProjectGitHubView }) => ({ default: ProjectGitHubView })),
+);
+const ProjectOverviewView = lazy(() =>
+  loadProjectOverviewModule().then(({ ProjectOverviewView }) => ({ default: ProjectOverviewView })),
+);
+const TasksView = lazy(() => loadTasksModule().then(({ TasksView }) => ({ default: TasksView })));
 
 const SELECTED_PROJECT_STORAGE_KEY = 'gezel:projects:selectedId';
 
@@ -198,6 +227,47 @@ type ProjectTab =
   // Compact-only: when the project area is too narrow for the output
   // pane to sit beside the content, it becomes its own tab instead.
   | 'output';
+
+function preloadProjectTab(tab: ProjectTab): void {
+  let loading: Promise<unknown> | undefined;
+  switch (tab) {
+    case 'chat':
+      loading = loadProjectChatModule();
+      break;
+    case 'tasks':
+      loading = loadTasksModule();
+      break;
+    case 'proposals':
+      loading = loadDiffpackReviewModule();
+      break;
+    case 'github':
+      loading = loadProjectGitHubModule();
+      break;
+    case 'mail':
+      loading = loadProjectMailModule();
+      break;
+    case 'map':
+      loading = loadFileMapModule();
+      break;
+    case 'overview':
+      loading = loadProjectOverviewModule();
+      break;
+    case 'about':
+      loading = Promise.all([loadProjectConnectionsModule(), loadHistoryModule()]);
+      break;
+    default:
+      break;
+  }
+  void loading?.catch(() => {});
+}
+
+function ProjectPaneBoundary({ children }: { children: ReactNode }) {
+  return (
+    <Suspense fallback={<p className="placeholder project-pane-loading">Loading view…</p>}>
+      {children}
+    </Suspense>
+  );
+}
 
 type ConfigurableProjectTab = keyof ProjectTabVisibility;
 
@@ -2433,6 +2503,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           className="gz-tab-icon"
                           aria-label={t.label}
                           title={t.label}
+                          onPointerEnter={() => preloadProjectTab(t.value)}
+                          onFocus={() => preloadProjectTab(t.value)}
+                          onPointerDown={() => preloadProjectTab(t.value)}
                         >
                           <ProjectTabIcon tab={t.value} />
                         </Tabs.Trigger>
@@ -2441,6 +2514,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           key={t.value}
                           value={t.value}
                           data-testid={`project-tab-${t.value}`}
+                          onPointerEnter={() => preloadProjectTab(t.value)}
+                          onFocus={() => preloadProjectTab(t.value)}
+                          onPointerDown={() => preloadProjectTab(t.value)}
                         >
                           {t.label}
                         </Tabs.Trigger>
@@ -2552,7 +2628,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           id="project-about-connections"
                           className="project-about-section project-about-anchor"
                         >
-                          <ProjectConnectionsTab project={selected} onProjectChange={setSelected} />
+                          <ProjectPaneBoundary>
+                            <ProjectConnectionsTab
+                              project={selected}
+                              onProjectChange={setSelected}
+                            />
+                          </ProjectPaneBoundary>
                         </section>
                       )}
 
@@ -2998,7 +3079,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                       >
                         <h3 className="project-about-section-title">History</h3>
                         <div className="project-about-history">
-                          <HistoryView projectId={selected.id} />
+                          <ProjectPaneBoundary>
+                            <HistoryView projectId={selected.id} />
+                          </ProjectPaneBoundary>
                         </div>
                       </section>
 
@@ -3415,24 +3498,48 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   )}
 
                   {tab === 'chat' && (
-                    <ProjectChat key={selected.id} project={selected} compact={effectiveCompact} />
+                    <ProjectPaneBoundary>
+                      <ProjectChat
+                        key={selected.id}
+                        project={selected}
+                        compact={effectiveCompact}
+                      />
+                    </ProjectPaneBoundary>
                   )}
 
-                  {tab === 'tasks' && <TasksView projectId={selected.id} />}
+                  {tab === 'tasks' && (
+                    <ProjectPaneBoundary>
+                      <TasksView projectId={selected.id} />
+                    </ProjectPaneBoundary>
+                  )}
 
-                  {tab === 'proposals' && <DiffpackReviewView projectId={selected.id} />}
+                  {tab === 'proposals' && (
+                    <ProjectPaneBoundary>
+                      <DiffpackReviewView projectId={selected.id} />
+                    </ProjectPaneBoundary>
+                  )}
 
                   {tab === 'github' && selected.github?.url && (
-                    <ProjectGitHubView project={selected} onProjectChange={setSelected} />
+                    <ProjectPaneBoundary>
+                      <ProjectGitHubView project={selected} onProjectChange={setSelected} />
+                    </ProjectPaneBoundary>
                   )}
 
                   {showWorkInProgressFeatures && tab === 'mail' && (
-                    <ProjectMailTab project={selected} onProjectChange={setSelected} />
+                    <ProjectPaneBoundary>
+                      <ProjectMailTab project={selected} onProjectChange={setSelected} />
+                    </ProjectPaneBoundary>
                   )}
 
-                  {tab === 'map' && <FileMapView projectId={selected.id} />}
+                  {tab === 'map' && (
+                    <ProjectPaneBoundary>
+                      <FileMapView projectId={selected.id} />
+                    </ProjectPaneBoundary>
+                  )}
                   {tab === 'overview' && (
-                    <ProjectOverviewView projectId={selected.id} project={selected} />
+                    <ProjectPaneBoundary>
+                      <ProjectOverviewView projectId={selected.id} project={selected} />
+                    </ProjectPaneBoundary>
                   )}
                 </div>
               )}

@@ -11,8 +11,8 @@
       ]
     },
     "llama-cpp": {
-      "tag": "b10353",
-      "commit": "f8def7fe168bab245fbf15d3f18b26dbb1ef73c8",
+      "tag": "v0.3.0",
+      "commit": "c1d0e7a004015f23bc0233470b747b596f29b264",
       "files": ["LICENSE-ggml-MIT.txt"]
     },
     "sd-cpp": {

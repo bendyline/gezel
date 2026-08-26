@@ -1,18 +1,30 @@
 # llama.cpp upstream pin.
 #
-# Format: two lines. First is a git tag (human-readable, used in
-# release notes). Second is the full 40-char commit sha (what build
-# scripts actually check out — tags move, shas don't).
+# Format: four lines. `tag` is the human-readable upstream release (used
+# in release notes and the NOTICE row), `commit` is the full 40-char sha
+# that build scripts actually check out (tags move, shas don't), and
+# `build` is the build number the compiled binary reports.
 #
-# llama.cpp cuts a new release tag several times a day under the
-# `b####` scheme (incrementing build number). Pin to a specific `b####`
-# for reproducibility; bump by editing both lines together.
+# Upstream runs TWO tag lines off the same history:
+#   * `vX.Y.Z`  — semver *stable* releases (GitHub "latest"), introduced
+#                 with v0.3.0. This is what we pin.
+#   * `b####`   — rolling build tags, cut several times a day and now
+#                 published as GitHub *prereleases*. Every stable release
+#                 also carries a `b####` tag on the identical commit
+#                 (v0.3.0 == b10621).
+#
+# `build` exists because llama.cpp derives its reported version from
+# `git rev-list --count HEAD` (cmake/build-info.cmake), which used to be
+# readable straight off a `b####` tag and no longer is. Both
+# native/scripts/fetch-upstream.sh and scripts/assert-llama-version.mjs
+# verify the built binary against it, so it must be stated explicitly
+# rather than inferred. Keep all four lines in step on a bump.
 #
 # Verify the commit is reachable from the tag:
-#   git -C native/engines/llama-cpp/.upstream fetch --tags
-#   git -C native/engines/llama-cpp/.upstream rev-parse <tag>^{commit}
+#   git ls-remote https://github.com/ggml-org/llama.cpp.git refs/tags/<tag>^{}
 #
 # License: MIT (https://github.com/ggml-org/llama.cpp)
 upstream=https://github.com/ggml-org/llama.cpp.git
-tag=b10353
-commit=f8def7fe168bab245fbf15d3f18b26dbb1ef73c8
+tag=v0.3.0
+build=10621
+commit=c1d0e7a004015f23bc0233470b747b596f29b264

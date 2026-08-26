@@ -1,5 +1,5 @@
-import { queueComposerPrefill } from '../../components/ChatComposer.js';
 import { GezelIcon } from '../../components/GezelIcon.js';
+import { queueComposerPrefill } from '../../components/composer-prefill.js';
 
 /**
  * What the workshop shows before the first message.

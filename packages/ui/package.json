@@ -6,9 +6,9 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && node ../../scripts/check-ui-startup-budget.mjs dist/index.html",
     "build:embedded": "vite build --config vite.embedded.config.ts",
-    "build:all": "vite build && vite build --config vite.embedded.config.ts",
+    "build:all": "vite build && node ../../scripts/check-ui-startup-budget.mjs dist/index.html && vite build --config vite.embedded.config.ts",
     "dev": "vite",
     "poppetje:gallery": "tsx scripts/poppetje-gallery.tsx",
     "poppetje:eval": "tsx scripts/poppetje-eval.ts",

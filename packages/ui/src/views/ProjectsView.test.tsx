@@ -9,7 +9,7 @@ vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
 
 const chatComposerMocks = vi.hoisted(() => ({ queueComposerPrefill: vi.fn() }));
-vi.mock('../components/ChatComposer.js', () => ({
+vi.mock('../components/composer-prefill.js', () => ({
   queueComposerPrefill: chatComposerMocks.queueComposerPrefill,
 }));
 

@@ -9,13 +9,6 @@
  * `as.pdf`; `"notes/diary.md"` exports as `diary.pdf`.
  */
 
-import { containerToZip } from '@bendyline/squisq-formats/container';
-import { markdownDocToDocx } from '@bendyline/squisq-formats/docx';
-import { collectImagePaths, docToHtml, docToHtmlZip } from '@bendyline/squisq-formats/html';
-import { markdownDocToPdf } from '@bendyline/squisq-formats/pdf';
-import { docToPptx } from '@bendyline/squisq-formats/pptx';
-import { PLAYER_BUNDLE } from '@bendyline/squisq-react/standalone-source';
-import { markdownToDoc } from '@bendyline/squisq/doc';
 import type {
   MarkdownBlockNode,
   MarkdownDocument,
@@ -23,9 +16,8 @@ import type {
 } from '@bendyline/squisq/markdown';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import type { Doc } from '@bendyline/squisq/schemas';
-import { MemoryContentContainer } from '@bendyline/squisq/storage';
 import type { ContentContainer } from '@bendyline/squisq/storage';
-import { applyTransform } from '@bendyline/squisq/transform';
+import { downloadBlob } from './download-blob.js';
 import type { ExportFormat, ExportOptions } from './export-options.js';
 import { FORMAT_EXTENSIONS } from './export-options.js';
 
@@ -36,15 +28,6 @@ const MIME_TYPES: Record<ExportFormat, string> = {
   md: 'text/markdown',
   html: 'text/html',
 };
-
-export function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 /**
  * Derive `<basename>.<ext>` from a path. Strips directories and the
@@ -80,6 +63,7 @@ export async function runExport(
   const doc = parseMarkdown(markdown);
 
   if (options.format === 'docx') {
+    const { markdownDocToDocx } = await import('@bendyline/squisq-formats/docx');
     const images = mediaContainer ? await resolveImages(doc, mediaContainer) : undefined;
     const buf = await markdownDocToDocx(doc, { themeId, images });
     downloadBlob(new Blob([buf], { type: MIME_TYPES.docx }), filename);
@@ -87,12 +71,18 @@ export async function runExport(
   }
 
   if (options.format === 'pdf') {
+    const { markdownDocToPdf } = await import('@bendyline/squisq-formats/pdf');
     const buf = await markdownDocToPdf(doc, { themeId, pageSize: options.pageSize });
     downloadBlob(new Blob([buf], { type: MIME_TYPES.pdf }), filename);
     return;
   }
 
   if (options.format === 'pptx') {
+    const [{ docToPptx }, { markdownToDoc }, { applyTransform }] = await Promise.all([
+      import('@bendyline/squisq-formats/pptx'),
+      import('@bendyline/squisq/doc'),
+      import('@bendyline/squisq/transform'),
+    ]);
     const baseDoc = markdownToDoc(doc);
     const transformed = applyTransform(baseDoc, options.transformStyle);
     const enrichedDoc = transformed.doc;
@@ -114,10 +104,18 @@ async function runHtmlExport(
   const themeId = options.themeId !== 'standard' ? options.themeId : undefined;
 
   if (options.htmlStyle === 'rendered') {
+    const [htmlModule, { PLAYER_BUNDLE }, { markdownToDoc }] = await Promise.all([
+      import('@bendyline/squisq-formats/html'),
+      import('@bendyline/squisq-react/standalone-source'),
+      import('@bendyline/squisq/doc'),
+    ]);
+    const { collectImagePaths, docToHtml, docToHtmlZip } = htmlModule;
     const mdDoc = parseMarkdown(markdown);
     const baseDoc = markdownToDoc(mdDoc);
     if (themeId) baseDoc.themeId = themeId;
-    const images = mediaContainer ? await resolveDocImages(baseDoc, mediaContainer) : undefined;
+    const images = mediaContainer
+      ? await resolveDocImages(baseDoc, mediaContainer, collectImagePaths)
+      : undefined;
     if (options.htmlBundle === 'zip') {
       const blob = await docToHtmlZip(baseDoc, {
         playerScript: PLAYER_BUNDLE,
@@ -144,6 +142,10 @@ async function runHtmlExport(
   const localImages = referencedImages.filter((u) => !isExternalUrl(u));
 
   if (options.htmlBundle === 'zip' && mediaContainer && localImages.length > 0) {
+    const [{ containerToZip }, { MemoryContentContainer }] = await Promise.all([
+      import('@bendyline/squisq-formats/container'),
+      import('@bendyline/squisq/storage'),
+    ]);
     const html = renderPlainHtml(mdDoc, baseName, null);
     const container = new MemoryContentContainer();
     await container.writeFile('index.html', new TextEncoder().encode(html));
@@ -330,6 +332,7 @@ async function resolveImages(
 async function resolveDocImages(
   doc: Doc,
   container: ContentContainer,
+  collectImagePaths: (doc: Doc) => Iterable<string>,
 ): Promise<Map<string, ArrayBuffer>> {
   const paths = collectImagePaths(doc);
   const map = new Map<string, ArrayBuffer>();

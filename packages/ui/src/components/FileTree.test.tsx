@@ -6,6 +6,18 @@ import { FileTree } from './FileTree.js';
 const NOTE = { path: 'notes.md', name: 'notes.md', isDirectory: false };
 
 describe('FileTree row actions', () => {
+  it('reports pointer and keyboard intent before selection', () => {
+    const onIntent = vi.fn();
+    render(<FileTree entries={[NOTE]} onSelect={vi.fn()} onIntent={onIntent} />);
+
+    const row = screen.getByRole('button', { name: 'notes.md' }).closest('.tree-row');
+    expect(row).not.toBeNull();
+    fireEvent.pointerEnter(row!);
+    fireEvent.focus(screen.getByRole('button', { name: 'notes.md' }));
+
+    expect(onIntent).toHaveBeenCalledWith(NOTE);
+  });
+
   it('offers Rename and Delete from the three-dots menu', async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();

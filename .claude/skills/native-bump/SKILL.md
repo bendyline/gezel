@@ -19,7 +19,7 @@ The 5 engines:
 
 | Engine | Upstream repo | `tag=` format | How to check latest |
 |---|---|---|---|
-| **llama-cpp** | ggml-org/llama.cpp | `b####` (cut several times/day) | `gh api repos/ggml-org/llama.cpp/releases/latest --jq .tag_name` |
+| **llama-cpp** | ggml-org/llama.cpp | `vX.Y.Z` semver stable + `build=` (the rolling `b####` tags are now *prereleases*) | `gh api repos/ggml-org/llama.cpp/releases/latest --jq .tag_name` |
 | **sd-cpp** | leejet/stable-diffusion.cpp | `master-<N>-<shortsha>` | `gh api repos/leejet/stable-diffusion.cpp/tags --jq '.[0].name'` |
 | **whisper-cpp** | ggml-org/whisper.cpp | `v1.x.y` (semver) | `gh api repos/ggml-org/whisper.cpp/releases/latest --jq .tag_name` |
 | **uv** | astral-sh/uv | `X.Y.Z` (semver) + 5 sha256 | `gh api repos/astral-sh/uv/releases/latest --jq .tag_name` |
@@ -45,7 +45,19 @@ For each engine the user named (or all, if they said "update the native binaries
    git ls-remote https://github.com/<owner>/<repo>.git refs/tags/<tag>   # sha must equal the commit you pinned
    ```
 
-3. **llama-cpp ONLY — sync the cache-bust constant.** `packages/core/src/native/llama-engine-version.ts` has `LLAMA_ENGINE_VERSION`, which **must equal the new `b####`**. Its doc says "Bumped alongside `native/engines/llama-cpp/VERSION`"; a stale value causes backend-probe cache thrash. *(This is the #1 missed step — it was already stale `b8892` vs VERSION's `b9843` when this skill was written.)*
+3. **llama-cpp ONLY — three extra moves.**
+   - **Sync the cache-bust constant.** `packages/core/src/native/llama-engine-version.ts` has `LLAMA_ENGINE_VERSION`, which **must equal the new `tag=`**. Its doc says "Bumped alongside `native/engines/llama-cpp/VERSION`"; a stale value causes backend-probe cache thrash. *(This is the #1 missed step — it was already stale `b8892` vs VERSION's `b9843` when this skill was written.)*
+   - **Set `build=`.** Upstream pins are semver now (`v0.3.0`), and the build number the binary reports (`git rev-list --count HEAD`) is no longer readable off the tag. Every stable release carries an equivalent `b####` tag on the same commit — that number IS the build. Find it with:
+     ```bash
+     REPO=https://github.com/ggml-org/llama.cpp.git; TAG=v0.3.0
+     SHA=$(git ls-remote "$REPO" "refs/tags/$TAG^{}" | cut -f1)
+     git ls-remote --tags "$REPO" | grep -i "^$SHA" | sed 's#.*refs/tags/##'   # -> b10621, v0.3.0^{}
+     ```
+     Use `git ls-remote`, not `gh api .../tags` — that endpoint paginates and the
+     matching `b####` is usually not on the first page, so it returns only the
+     semver tag and looks like no build number exists.
+     `fetch-upstream.sh` and `assert-llama-version.mjs` both **hard-fail** on a pin they can't verify, so a wrong or missing `build=` fails the build rather than sliding through.
+   - **Reconcile the legal surface.** `native/licenses/manifest.json` and the NOTICE.md row both carry the tag+commit and are checked by `scripts/check-notice.mjs`. (`packages/service/dist/NOTICE.md` also goes stale until the next `pnpm build` — that's a build artifact, not a pin error.)
 
 4. **uv ONLY — refresh all 5 sha256 digests.** `build.sh`/`build.ps1` verify the downloaded archive against the pin. Target→key mapping:
    | VERSION key | uv release asset |
@@ -139,7 +151,7 @@ gh run view <id> --json jobs --jq '.jobs[] | select(.conclusion!="success") | {n
 
 ## Gotchas checklist
 - [ ] Pinned the **40-char** commit, and `git ls-remote` confirms it's reachable from the tag.
-- [ ] **`LLAMA_ENGINE_VERSION` synced** to the new `b####` (llama bumps only).
+- [ ] **`LLAMA_ENGINE_VERSION` synced** to the new `tag=`, **`build=` set** to the equivalent `b####` number, and manifest.json + NOTICE.md row updated (llama bumps only).
 - [ ] uv: all **5** sha256 digests refreshed.
 - [ ] Left git to the user (commit / push / `cut-native-release.mjs`).
 - [ ] Verified the workflow ran against the **intended commit** (dispatch race).

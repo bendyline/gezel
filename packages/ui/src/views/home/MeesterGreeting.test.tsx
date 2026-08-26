@@ -3,12 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // vi.mock is hoisted, so the spy has to be created inside the factory and
 // read back through the mocked module rather than closed over here.
-vi.mock('../../components/ChatComposer.js', () => ({ queueComposerPrefill: vi.fn() }));
+vi.mock('../../components/composer-prefill.js', () => ({ queueComposerPrefill: vi.fn() }));
 vi.mock('../../components/GezelIcon.js', () => ({
   GezelIcon: ({ name }: { name: string }) => <span data-testid="icon" data-name={name} />,
 }));
 
-import { queueComposerPrefill } from '../../components/ChatComposer.js';
+import { queueComposerPrefill } from '../../components/composer-prefill.js';
 import { MeesterGreeting } from './MeesterGreeting.js';
 
 const prefill = vi.mocked(queueComposerPrefill);

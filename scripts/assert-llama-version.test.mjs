@@ -15,32 +15,75 @@ const workflow = readFileSync(
 
 const pin = parseLlamaPin(`
 upstream=https://github.com/ggml-org/llama.cpp.git
-tag=b10353
-commit=f8def7fe168bab245fbf15d3f18b26dbb1ef73c8
+tag=v0.3.0
+build=10621
+commit=c1d0e7a004015f23bc0233470b747b596f29b264
 `);
 
 test('llama version identity accepts the expected build and short commit', () => {
-  assert.deepEqual(parseLlamaVersionOutput('version: 10353 (f8def7fe1)\nbuilt with MSVC'), {
-    buildNumber: 10353,
-    commit: 'f8def7fe1',
+  assert.deepEqual(parseLlamaVersionOutput('version: 10621 (c1d0e7a00)\nbuilt with MSVC'), {
+    buildNumber: 10621,
+    commit: 'c1d0e7a00',
   });
-  assert.deepEqual(assertLlamaVersionIdentity('version: 10353 (f8def7fe1)', pin), {
-    buildNumber: 10353,
-    commit: 'f8def7fe1',
+  assert.deepEqual(assertLlamaVersionIdentity('version: 10621 (c1d0e7a00)', pin), {
+    buildNumber: 10621,
+    commit: 'c1d0e7a00',
   });
 });
 
 test('llama version identity rejects a shallow build number', () => {
   assert.throws(
-    () => assertLlamaVersionIdentity('version: 1 (f8def7fe1)', pin),
-    /reports build 1, expected 10353/,
+    () => assertLlamaVersionIdentity('version: 1 (c1d0e7a00)', pin),
+    /reports build 1, expected 10621/,
   );
 });
 
 test('llama version identity rejects the wrong commit', () => {
   assert.throws(
-    () => assertLlamaVersionIdentity('version: 10353 (aaaaaaaaa)', pin),
+    () => assertLlamaVersionIdentity('version: 10621 (aaaaaaaaa)', pin),
     /reports commit aaaaaaaaa, expected a short prefix/,
+  );
+});
+
+test('llama pin derives the build number from a b#### tag', () => {
+  const derived = parseLlamaPin(`
+tag=b10621
+commit=c1d0e7a004015f23bc0233470b747b596f29b264
+`);
+  assert.equal(derived.buildNumber, 10621);
+  assert.equal(derived.tag, 'b10621');
+});
+
+test('llama pin accepts a semver tag that declares its build number', () => {
+  const semver = parseLlamaPin(`
+tag=v0.3.0
+build=10621
+commit=c1d0e7a004015f23bc0233470b747b596f29b264
+`);
+  assert.equal(semver.buildNumber, 10621);
+  assert.equal(semver.tag, 'v0.3.0');
+});
+
+test('llama pin rejects a semver tag with no declared build number', () => {
+  assert.throws(
+    () =>
+      parseLlamaPin(`
+tag=v0.3.0
+commit=c1d0e7a004015f23bc0233470b747b596f29b264
+`),
+    /tag v0\.3\.0 is not a b<number> tag, so it must declare build=<number>/,
+  );
+});
+
+test('llama pin rejects a declared build number that contradicts a b#### tag', () => {
+  assert.throws(
+    () =>
+      parseLlamaPin(`
+tag=b10621
+build=10622
+commit=c1d0e7a004015f23bc0233470b747b596f29b264
+`),
+    /declares build=10622 but tag b10621 implies 10621/,
   );
 });
 
