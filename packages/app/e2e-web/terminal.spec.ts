@@ -14,6 +14,66 @@ import { shot } from './helpers/shot.js';
  *  address lines end with a small gutter, so this is a ceiling, not a target. */
 const MODE_TAB_RIGHT_INSET_CEILING_PX = 24;
 
+/** Gap kept between the top of a tab and the compose frame's own top border,
+ *  so the two edges read as two lines rather than one thick one. */
+const MODE_TAB_TOP_INSET_PX = 2;
+
+/**
+ * Measures the compose frame's bands relative to the frame itself, so chat and
+ * terminal come back in the same coordinate space and can be compared directly.
+ * Runs in the page; `selectors` names each mode's equivalent of the shared
+ * bands. Rounded to 2dp because sub-pixel text metrics differ between the two
+ * modes' contents and are not what this is guarding.
+ */
+const MEASURE_BANDS = (
+  shell: HTMLElement,
+  selectors: { top: string; picker: string },
+): {
+  shellHeight: number;
+  frameBackground: string;
+  frameBorder: string;
+  top: Record<string, number>;
+  picker: Record<string, number>;
+  tabs: Record<string, number>;
+} | null => {
+  const frame = shell.querySelector<HTMLElement>('.project-chat-compose-main');
+  if (!frame) return null;
+  const frameRect = frame.getBoundingClientRect();
+  const frameStyle = getComputedStyle(frame);
+  const round = (value: number) => Math.round(value * 100) / 100;
+  const band = (selector: string) => {
+    const element = shell.querySelector<HTMLElement>(selector);
+    if (!element) return null;
+    const rect = element.getBoundingClientRect();
+    return {
+      top: round(rect.top - frameRect.top),
+      bottom: round(rect.bottom - frameRect.top),
+      height: round(rect.height),
+      left: round(rect.left - frameRect.left),
+      rightInset: round(frameRect.right - rect.right),
+    };
+  };
+  const top = band(selectors.top);
+  const picker = band(selectors.picker);
+  const tabs = band('.compose-mode-tabs');
+  if (!top || !picker || !tabs) return null;
+  return {
+    shellHeight: round(shell.getBoundingClientRect().height),
+    frameBackground: frameStyle.backgroundColor,
+    frameBorder: `${frameStyle.borderWidth} ${frameStyle.borderColor}`,
+    top,
+    picker,
+    // Sub-pixel label widths differ between the two modes, so the strip's
+    // `left` is not comparable; its right edge, which is what anchors it, is.
+    tabs: {
+      top: tabs.top,
+      bottom: tabs.bottom,
+      height: tabs.height,
+      rightInset: tabs.rightInset,
+    },
+  };
+};
+
 async function gotoProject(page: import('@playwright/test').Page, projectId: string) {
   await gotoHome(page);
   await openProject(page, projectId);
@@ -67,8 +127,13 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
     composeHeaderProbe.style.background = 'var(--chat-compose-header-bg)';
     element.append(composeHeaderProbe);
     const toolbarRect = toolbarHeader?.getBoundingClientRect();
-    const borderLeftWidth = Number.parseFloat(style.borderLeftWidth);
-    const borderRightWidth = Number.parseFloat(style.borderRightWidth);
+    // Measured from the frame's CONTENT box, not its border box: the frame
+    // carries the shared left inset that both compose modes lay their bands
+    // against, so the border alone is no longer the reference edge.
+    const borderLeftWidth =
+      Number.parseFloat(style.borderLeftWidth) + Number.parseFloat(style.paddingLeft);
+    const borderRightWidth =
+      Number.parseFloat(style.borderRightWidth) + Number.parseFloat(style.paddingRight);
     const result = {
       borderWidth: style.borderRightWidth,
       borderColor: style.borderRightColor,
@@ -93,132 +158,45 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   expect(frameTreatment.toolbarBackground).toBe(frameTreatment.composeHeaderBackground);
   expect(frameTreatment.editorBackground).not.toBe(frameTreatment.composeHeaderBackground);
 
-  const chatHeight = await shell.evaluate((element) => element.getBoundingClientRect().height);
-  // The mode tabs ride in the composer's top row — the "To:" line in chat, the
-  // toolbar in terminal. Those rows are the same height, so the tabs must not
-  // move when the flip they triggered swaps the surface underneath them. Each
-  // tab also has to reach the seam below its row: a tab floating clear of the
-  // panel it fronts is a chip, and the connection is the whole affordance.
-  const chatModeAlignment = await shell.evaluate((element) => {
-    const tabs = element.querySelector<HTMLElement>('.compose-mode-tabs');
-    const addressLine = element.querySelector<HTMLElement>('.chat-composer-to');
-    const sessionRow = element.querySelector<HTMLElement>('.gezel-chat-session-header');
-    const input = element.querySelector<HTMLElement>('.squisq-wysiwyg-container');
-    if (!tabs || !addressLine || !sessionRow || !input) return null;
-    const tabsRect = tabs.getBoundingClientRect();
-    const addressRect = addressLine.getBoundingClientRect();
-    const sessionRect = sessionRow.getBoundingClientRect();
-    const inputRect = input.getBoundingClientRect();
-    const frameRect = element
-      .querySelector<HTMLElement>('.project-chat-compose-main')
-      ?.getBoundingClientRect();
-    return {
-      tabsTop: tabsRect.top,
-      tabsBottom: tabsRect.bottom,
-      tabsRight: tabsRect.right,
-      addressTop: addressRect.top,
-      sessionTop: sessionRect.top,
-      inputTop: inputRect.top,
-      frameRight: frameRect?.right ?? Number.NaN,
-    };
+  // The two compose modes are one surface with its middle swapped, so their
+  // chrome is measured against each other rather than against fixed numbers.
+  // Both stack the same three bands inside the same frame — a top line (chat's
+  // recipients, terminal's tool rail) that hosts the mode tabs, a picker row
+  // (thread / folder), and the typing area — and every one of those has to
+  // land on the same pixel, or flipping modes visibly reflows the composer
+  // under the cursor that flipped it.
+  const chatBands = await shell.evaluate(MEASURE_BANDS, {
+    top: '.chat-composer-to',
+    picker: '.gezel-chat-session-header',
   });
-  const sessionRow = page.locator('.gezel-chat-session-header');
-  // Net of the tab seam on its top edge, which is chat's alone: terminal's
-  // equivalent rule is drawn by the toolbar above its folder row, so counting
-  // the border here would compare a band against a band-plus-line.
-  const sessionRowHeight = await sessionRow.evaluate(
-    (element) =>
-      element.getBoundingClientRect().height -
-      Number.parseFloat(getComputedStyle(element).borderTopWidth),
-  );
-  const sessionRowPadding = await sessionRow.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return {
-      blockStart: Number.parseFloat(style.paddingBlockStart),
-      inlineStart: Number.parseFloat(style.paddingInlineStart),
-    };
-  });
-  expect(chatModeAlignment).not.toBeNull();
-  expect(chatModeAlignment!.tabsTop).toBeGreaterThanOrEqual(chatModeAlignment!.addressTop - 1);
-  expect(chatModeAlignment!.tabsBottom).toBeLessThanOrEqual(chatModeAlignment!.inputTop);
-  // Flush on the session row's top edge — and 1px past it, so the selected tab
-  // erases the seam it stands on instead of resting against it.
-  expect(chatModeAlignment!.tabsBottom).toBeCloseTo(chatModeAlignment!.sessionTop + 1, 0);
-  expect(chatModeAlignment!.frameRight - chatModeAlignment!.tabsRight).toBeLessThanOrEqual(
-    MODE_TAB_RIGHT_INSET_CEILING_PX,
-  );
-  expect(chatModeAlignment!.frameRight - chatModeAlignment!.tabsRight).toBeGreaterThanOrEqual(0);
-
   await switchToTerminal(page);
+  const terminalBands = await shell.evaluate(MEASURE_BANDS, {
+    top: '.terminal-composer-toolbar',
+    picker: '.folder-tree-switcher',
+  });
 
-  const terminalHeight = await shell.evaluate((element) => element.getBoundingClientRect().height);
-  const terminalModeAlignment = await shell.evaluate((element) => {
-    const tabs = element.querySelector<HTMLElement>('.compose-mode-tabs');
-    const toolbar = element.querySelector<HTMLElement>('.terminal-composer-toolbar');
-    const folder = element.querySelector<HTMLElement>('.folder-tree-switcher');
-    const input = element.querySelector<HTMLElement>('.terminal-composer-input-wrap');
-    if (!tabs || !toolbar || !folder || !input) return null;
-    const tabsRect = tabs.getBoundingClientRect();
-    const toolbarRect = toolbar.getBoundingClientRect();
-    const folderRect = folder.getBoundingClientRect();
-    const inputRect = input.getBoundingClientRect();
-    const frameRect = element
-      .querySelector<HTMLElement>('.project-chat-compose-main')
-      ?.getBoundingClientRect();
-    return {
-      tabsTop: tabsRect.top,
-      tabsBottom: tabsRect.bottom,
-      tabsRight: tabsRect.right,
-      toolbarTop: toolbarRect.top,
-      toolbarBottom: toolbarRect.bottom,
-      folderTop: folderRect.top,
-      folderBottom: folderRect.bottom,
-      inputTop: inputRect.top,
-      inputBottom: inputRect.bottom,
-      inputHeight: inputRect.height,
-      frameRight: frameRect?.right ?? Number.NaN,
-    };
-  });
-  const folderRow = page.locator('.project-chat-compose-main .folder-tree-switcher');
-  const folderRowHeight = await folderRow.evaluate(
-    (element) => element.getBoundingClientRect().height,
-  );
-  const folderRowPadding = await folderRow.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return {
-      blockStart: Number.parseFloat(style.paddingBlockStart),
-      inlineStart: Number.parseFloat(style.paddingInlineStart),
-    };
-  });
-  expect.soft(terminalHeight).toBeCloseTo(chatHeight, 0);
-  expect.soft(folderRowHeight).toBeCloseTo(sessionRowHeight, 0);
-  expect.soft(folderRowPadding).toEqual(sessionRowPadding);
-  expect(terminalModeAlignment).not.toBeNull();
-  expect(terminalModeAlignment!.toolbarBottom).toBeCloseTo(terminalModeAlignment!.folderTop, 0);
-  expect(terminalModeAlignment!.folderBottom).toBeCloseTo(terminalModeAlignment!.inputTop, 0);
-  expect(terminalModeAlignment!.inputHeight).toBeGreaterThan(120);
-  // The tabs stay inside the toolbar band — a taller tab would push the whole
-  // terminal composer past chat's height — and reach its bottom rule, which is
-  // the seam the selected tab breaks.
-  expect(terminalModeAlignment!.tabsTop).toBeGreaterThanOrEqual(
-    terminalModeAlignment!.toolbarTop - 1,
-  );
-  expect(terminalModeAlignment!.tabsBottom).toBeCloseTo(terminalModeAlignment!.folderTop, 0);
-  expect(terminalModeAlignment!.frameRight - terminalModeAlignment!.tabsRight).toBeLessThanOrEqual(
-    MODE_TAB_RIGHT_INSET_CEILING_PX,
-  );
-  expect(
-    terminalModeAlignment!.frameRight - terminalModeAlignment!.tabsRight,
-  ).toBeGreaterThanOrEqual(0);
-  // The whole point of the toolbar placement: the tab a user just clicked must
-  // still be under the pointer afterwards. The two host rows are sized by their
-  // own content (a two-line recipient block vs a fixed-height toolbar), so they
-  // are near-aligned rather than pixel-identical — the binding requirement is
-  // that the drift stays inside the key.
-  const tabsVerticalDrift = Math.abs(terminalModeAlignment!.tabsTop - chatModeAlignment!.tabsTop);
-  const tabsHeight = chatModeAlignment!.tabsBottom - chatModeAlignment!.tabsTop;
-  expect(tabsVerticalDrift).toBeLessThan(tabsHeight / 2);
-  expect(terminalModeAlignment!.tabsRight).toBeCloseTo(chatModeAlignment!.tabsRight, 0);
+  expect(chatBands).not.toBeNull();
+  expect(terminalBands).not.toBeNull();
+  expect(terminalBands!.shellHeight).toBeCloseTo(chatBands!.shellHeight, 0);
+  expect(terminalBands!.frameBackground).toBe(chatBands!.frameBackground);
+  expect(terminalBands!.frameBorder).toBe(chatBands!.frameBorder);
+  for (const band of ['top', 'picker', 'tabs'] as const) {
+    expect
+      .soft(terminalBands![band], `${band} band should be identical across compose modes`)
+      .toEqual(chatBands![band]);
+  }
+
+  // The tabs ARE the top line, not a control parked inside it: they fill the
+  // band bar the couple of pixels that keep them off the frame's own border,
+  // and they overhang its 1px rule, which is the seam the selected tab erases
+  // to join the panel below.
+  for (const bands of [chatBands!, terminalBands!]) {
+    expect(bands.tabs.top).toBeCloseTo(bands.top.top + MODE_TAB_TOP_INSET_PX, 0);
+    expect(bands.tabs.bottom).toBeCloseTo(bands.top.bottom, 0);
+    expect(bands.top.bottom).toBeCloseTo(bands.picker.top, 0);
+  }
+  expect(chatBands!.tabs.rightInset).toBeLessThanOrEqual(MODE_TAB_RIGHT_INSET_CEILING_PX);
+  expect(chatBands!.tabs.rightInset).toBeGreaterThanOrEqual(0);
 });
 
 test('aligns the output and reference split grips', async ({ page, world }) => {
