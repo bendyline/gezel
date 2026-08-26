@@ -72,6 +72,19 @@ describe('ProjectGitStatusBar', () => {
     });
   });
 
+  it('re-arms Sync when git activity invalidates the last completed sync', async () => {
+    vi.mocked(api.getProjectGitStatus).mockResolvedValue({
+      ...BASE_STATUS,
+      syncStale: true,
+      syncStaleReason: 'branch-changed',
+    } as never);
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+
+    expect(await screen.findByText('Sync to update')).toBeInTheDocument();
+    expect(screen.queryByText(/synced /)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sync' })).toHaveClass('primary');
+  });
+
   it('shows detailed AI indexing progress in a click-open status panel', async () => {
     vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
       state: 'fresh',

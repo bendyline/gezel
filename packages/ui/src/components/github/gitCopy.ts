@@ -143,13 +143,14 @@ export function statusChipPhrase(args: {
   changesCount?: number;
   ahead?: number;
   behind?: number;
+  syncStale?: boolean;
 }): string {
   if (args.mergeInProgress) return 'Sync needs your help';
   const bits: string[] = [];
   if ((args.changesCount ?? 0) > 0) bits.push(plural(args.changesCount!, 'unsaved change'));
   if ((args.ahead ?? 0) > 0) bits.push(`${args.ahead} to send`);
   if ((args.behind ?? 0) > 0) bits.push(`${args.behind} to get`);
-  if (bits.length === 0) return 'Up to date';
+  if (bits.length === 0) return args.syncStale ? 'Sync to update' : 'Up to date';
   return bits.join(' · ');
 }
 
