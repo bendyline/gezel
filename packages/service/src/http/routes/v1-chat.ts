@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { ZodError } from 'zod';
 import type { ExternalConversationTurn } from '../../chat/external-conversation-recorder.js';
+import { OLLAMA_TURN_TIMEOUT_MS } from '../../chat/manager.js';
 import {
   type ExternalToolSpec,
   ExternalToolsUnsupportedError,
@@ -46,7 +47,9 @@ const log = createLogger('v1-chat');
 // provider idle watchdogs and the HTTP abort signal remain the real stall and
 // cancellation controls inside these generous hard backstops.
 const CALLER_OWNED_CLOUD_TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000;
-const CALLER_OWNED_LOCAL_TURN_TIMEOUT_MS = 8 * 60 * 60 * 1000;
+// Imported, not re-declared: this literal drifted from ChatManager the moment
+// that ceiling moved, and "match ChatManager" is only true if it cannot drift.
+const CALLER_OWNED_LOCAL_TURN_TIMEOUT_MS = OLLAMA_TURN_TIMEOUT_MS;
 
 function callerOwnedTurnTimeoutMs(provider: ProviderName): number {
   return isLocalProvider(provider) || provider === 'remote'

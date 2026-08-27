@@ -16792,7 +16792,19 @@ const CHAT_TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000;
  * `config.ollamaTurnTimeoutMin` still works for users who want a
  * tighter local ceiling.
  */
-const OLLAMA_TURN_TIMEOUT_MS = 8 * 60 * 60 * 1000;
+/**
+ * Lowered from 8h. Wild-caught (koray PR-review fanout): four turns were
+ * 1.5–5.3 hours deep when the user stopped them, and a turn persists
+ * nothing until it ends — so seven hours of work committed nothing at all.
+ * The 5.3h turn made 21 engine requests and spent only ~19 minutes of that
+ * in prefill; the rest was ~60,000 output tokens at the ~3.4 tok/s this
+ * box sustains under fanout. Four hours still covers any legitimate
+ * tool-heavy local turn while halving how long a non-converging one can
+ * hide. This is a damage bound, not a fix — the cure is a cap on how much
+ * a single turn may GENERATE, which `MAX_TOOL_LOOP_TURNS = 96` does not
+ * provide at ~6 min/iteration.
+ */
+export const OLLAMA_TURN_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 
 const CONTINUATION_NUDGE =
   'Continue. Your previous response described what you would do or what you read, ' +

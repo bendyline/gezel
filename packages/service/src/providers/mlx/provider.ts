@@ -1017,6 +1017,30 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // startup; warming only accelerates an already-resident server.
     const baseUrl = this.deps.provider.currentBaseUrl();
     if (!baseUrl) return;
+    // A warm whose roster differs from the real turn's is worse than no warm
+    // at all. Qwen-family templates render the tool block at the TOP of the
+    // system message, so a no-tools render shares 3 tokens with a 44-tool
+    // turn — the shared prefix it saves then forces a full re-prefill on
+    // every session that seeds from it, and the next warm overwrites the
+    // corrected prefix right back.
+    //
+    // Wild-caught (koray PR-review fanout): `prefix-0b60345fcefa9ffd`
+    // oscillated between a 15,563-token no-tools render and a 24,796-token
+    // real one, ~9.2k tokens apart, producing `lcp=3 lcp_frac=0.00` and
+    // `mode=fresh reused=0` on turn after turn — 40 full re-prefills and
+    // 1.58M tokens re-prefilled against 238k of new work.
+    //
+    // The bridges spawn lazily, so an early warm sees an empty roster. A
+    // cold prefix costs one slow turn; a WRONG one costs every turn. An
+    // genuinely tool-less session also reads as empty here and is skipped
+    // too — its prompt is small, so the warm it loses is worth little,
+    // and that is the safe direction to be wrong in.
+    if (this.deps.bridges.isEmpty() && (this.deps.externalTools ?? []).length === 0) {
+      log.debug(
+        'turn#warm skipped — no tool roster registered yet; warming now would save a no-tools prefix that cannot match a real turn',
+      );
+      return;
+    }
     const bridgeTools = this.deps.bridges.isEmpty()
       ? []
       : toChatCompletionsTools(this.deps.bridges);
@@ -1060,6 +1084,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           opts.sessionId,
           this.deps.systemMessage,
           this.deps.systemPromptLayers,
+          // Same roster the body above will actually send. Omitting it made
+          // this warm register a prefix identity that could not distinguish
+          // a no-tools render from the real turn's — the send path at the
+          // bottom of `send()` has always passed it; this one did not.
+          body.tools as readonly unknown[] | undefined,
         );
         Object.assign(body, adapter.buildRequestExtras(opts.sessionId));
       }
