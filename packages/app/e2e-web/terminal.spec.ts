@@ -177,7 +177,9 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   const chatBands = await shell.evaluate(MEASURE_BANDS, {
     top: '.chat-composer-to',
     picker: '.gezel-chat-session-header',
-    action: '.squisq-toolbar',
+    // The band, not the bar inside it: squisq's header is the toolbar plus the
+    // 1px seam under it, which is what the terminal's Fire row has to match.
+    action: '.squisq-editor-header',
     key: '.chat-send-btn',
   });
   await switchToTerminal(page);
@@ -210,6 +212,28 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   }
   expect(chatBands!.tabs.rightInset).toBeLessThanOrEqual(MODE_TAB_RIGHT_INSET_CEILING_PX);
   expect(chatBands!.tabs.rightInset).toBeGreaterThanOrEqual(0);
+
+  // A selected thread with no matching item — archived, or belonging to another
+  // project — leaves Radix rendering an empty trigger (it shows no placeholder
+  // for a value that is set). With no text there is no line box, and the
+  // control used to lose 3.3px and take the picker band down with it: a whole
+  // band of the frame changing height on a state nothing on screen explains,
+  // which is what made chat sit shorter than terminal. Simulated by blanking
+  // the value, because the state is a disagreement between two server-side
+  // lists rather than something the UI can be clicked into.
+  await page.getByRole('tab', { name: 'AI chat' }).click();
+  const picker = shell.locator('.gezel-chat-session-header');
+  await expect(picker).toBeVisible();
+  const pickerHeight = () =>
+    picker.evaluate((el) => Math.round(el.getBoundingClientRect().height * 100) / 100);
+  const filled = await pickerHeight();
+  await shell
+    .locator('.gezel-chat-session-select span')
+    .first()
+    .evaluate((el) => {
+      el.textContent = '';
+    });
+  expect(await pickerHeight()).toBe(filled);
 });
 
 test('aligns the output and reference split grips', async ({ page, world }) => {

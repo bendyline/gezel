@@ -254,6 +254,15 @@
   font-size: 0.8rem;
   white-space: nowrap;
   overflow: hidden;
+  /* Radix renders nothing in the trigger when the selected value has no
+     matching item — a thread that was archived, or one belonging to another
+     project — and with no text there is no line box, so the control loses
+     3.3px and takes the picker row down with it. That is a whole band of the
+     compose frame changing height on a state the user cannot see, which in
+     project chat reads as the terminal composer being taller than the chat
+     one. The floor is this control's own metrics: line-height + block padding
+     + borders, spelled in `em` so it tracks them. */
+  min-height: calc(1.3em + 0.6rem + 2px);
 }
 
 .gz-select-trigger.gezel-chat-session-select {

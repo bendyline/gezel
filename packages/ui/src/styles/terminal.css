@@ -679,7 +679,13 @@
  * a margin rather than padding, so the two rows and the two keys inside them
  * land on the same pixels. */
 .project-chat-compose-main .terminal-composer-fire-row {
-  height: var(--compose-top-row-height);
+  /* A top row plus the seam under it. Chat's equivalent band is squisq's
+   * `.squisq-editor-header`: a 35px toolbar with a 1px rule below it, which is
+   * why chat's typing surface is 84px where an unseamed terminal's was 85 —
+   * the one place the two modes still disagreed by a pixel, and the last
+   * "the terminal box is taller" to survive measurement. */
+  height: calc(var(--compose-top-row-height) + 1px);
+  border-bottom: 1px solid var(--compose-band-rule);
   margin: 0 1px;
 }
 
@@ -705,9 +711,9 @@
 .project-chat-compose-main .terminal-composer-input-wrap {
   /* Border-box, so this lands the frame bottom exactly where chat's does.
    * The Fire row above takes its cut of the budget the way squisq's toolbar
-   * takes chat's, which is why this is the whole band minus one top row. */
-  height: calc(var(--compose-entry-height) - var(--compose-top-row-height));
-  flex: 1 1 calc(var(--compose-entry-height) - var(--compose-top-row-height));
+   * takes chat's — one top row, plus the 1px seam under it. */
+  height: calc(var(--compose-entry-height) - var(--compose-top-row-height) - 1px);
+  flex: 1 1 calc(var(--compose-entry-height) - var(--compose-top-row-height) - 1px);
   min-height: 72px;
   align-items: stretch;
   border: 0;
@@ -717,14 +723,19 @@
 }
 
 /* Specificity, not source order: the standalone light-theme rule for this
- * element sits further down the file and would otherwise win. */
+ * element sits further down the file and would otherwise win. It also paints a
+ * terracotta rule along the bottom of the slab — right on top of the frame's
+ * own border here, so the terminal's bottom edge read as a thicker line than
+ * chat's, which carries none. Same size, more weight. */
 [data-theme="light"] .project-chat-compose-main .terminal-composer-input-wrap {
   background: #f6f1e7;
+  border-bottom: 0;
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) .project-chat-compose-main .terminal-composer-input-wrap {
     background: #f6f1e7;
+    border-bottom: 0;
   }
 }
 
@@ -1106,6 +1117,9 @@
 .folder-tree-trigger {
   display: inline-flex;
   align-items: center;
+  /* Same floor, same reason, as `.gezel-chat-session-select` — an empty path
+     must not shrink the band it sits in. */
+  min-height: calc(1.3em + 0.6rem + 2px);
   gap: 0.4rem;
   padding: 0.2rem 0.5rem;
   border: 1px solid var(--color-border, #333);
@@ -1251,12 +1265,6 @@
 [data-theme="light"] .folder-tree-node:hover {
   background: #ece3cf;
 }
-/* `border-top-color` here was aimed at an edge this row has never had; the
- * seam is its bottom border, and it is themed for both schemes by
- * `--compose-band-rule` above. */
-[data-theme="light"] .project-chat-compose-main .folder-tree-switcher {
-  background: transparent;
-}
 /* Sigil + muted helper text in light mode — the dark-bg cyan accent
  * (`#6cf`) and pale `#999` muted both clash with the warm cream
  * palette. Warm sigil + slightly darker muted reads naturally. */
@@ -1302,9 +1310,6 @@
   :root:not([data-theme="dark"]) .folder-tree-node:hover {
     background: #ece3cf;
   }
-  :root:not([data-theme="dark"]) .project-chat-compose-main .folder-tree-switcher {
-    background: transparent;
-  }
   :root:not([data-theme="dark"]) .terminal-prompt-sigil {
     color: var(--accent, #b0724c);
   }
@@ -1316,4 +1321,22 @@
   :root:not([data-theme="dark"]) .folder-tree-trigger-caret {
     color: var(--text-muted, #666);
   }
+}
+
+/* Same control in both modes, so the same chrome. The light-theme terminal
+ * rules above dress the STANDALONE terminal surface — a terracotta-outlined
+ * box on a brighter fill, from when that surface was a dark slab — and inside
+ * the compose frame they made a dropdown of exactly chat's size (30.3px, both
+ * measured) read as the heavier, and therefore taller, of the two. A visible
+ * outline adds apparent height at both edges; that difference in weight is
+ * what several "the terminal is a couple of pixels bigger" readings were,
+ * because the geometry has been identical throughout.
+ *
+ * This has to come last in the file AND out-specify `[data-theme="light"]
+ * .folder-tree-trigger` and its `prefers-color-scheme` twin, hence the extra
+ * class in the selector. */
+.project-chat-compose-main .folder-tree-switcher .folder-tree-trigger {
+  background: var(--chat-thread-bg, var(--bg));
+  border-color: var(--border);
+  color: var(--text);
 }
