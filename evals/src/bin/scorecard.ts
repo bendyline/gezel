@@ -295,11 +295,18 @@ function main(): void {
       const matrixRoot = join(sweepRoot, model.id, suiteId);
       if (!ingestOnly) {
         console.log(`\n[scorecard] ${model.id} × ${suiteId} (${count} trials/scenario)`);
+        // Spawn the cell through node + the lease runner, not the `pnpm`
+        // shim: on Windows `spawnSync('pnpm', …)` cannot launch `pnpm.cmd`
+        // without a shell, fails with a swallowed ENOENT, and every cell
+        // books as "no summary.json was written" (wild-caught: the
+        // 2026-08-27 win32 sweep lost all 8 cells this way).
         const runCell = (): ReturnType<typeof spawnSync> =>
           spawnSync(
-            'pnpm',
+            process.execPath,
             [
-              'eval:all',
+              join(repoRoot, 'scripts/run-with-dependency-lease.mjs'),
+              '--direct-node',
+              join(repoRoot, 'evals/src/bin/all.ts'),
               '--suite',
               suiteId,
               ...(verify ? ['--scenarios', VERIFY_SCENARIOS.join(',')] : []),
