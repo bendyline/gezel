@@ -27,13 +27,15 @@ const MODE_TAB_TOP_INSET_PX = 2;
  */
 const MEASURE_BANDS = (
   shell: HTMLElement,
-  selectors: { top: string; picker: string },
+  selectors: { top: string; picker: string; action: string; key: string },
 ): {
   shellHeight: number;
   frameBackground: string;
   frameBorder: string;
   top: Record<string, number>;
   picker: Record<string, number>;
+  action: Record<string, number>;
+  key: Record<string, number>;
   tabs: Record<string, number>;
 } | null => {
   const frame = shell.querySelector<HTMLElement>('.project-chat-compose-main');
@@ -55,14 +57,18 @@ const MEASURE_BANDS = (
   };
   const top = band(selectors.top);
   const picker = band(selectors.picker);
+  const action = band(selectors.action);
+  const key = band(selectors.key);
   const tabs = band('.compose-mode-tabs');
-  if (!top || !picker || !tabs) return null;
+  if (!top || !picker || !action || !key || !tabs) return null;
   return {
     shellHeight: round(shell.getBoundingClientRect().height),
     frameBackground: frameStyle.backgroundColor,
     frameBorder: `${frameStyle.borderWidth} ${frameStyle.borderColor}`,
     top,
     picker,
+    action,
+    key,
     // Sub-pixel label widths differ between the two modes, so the strip's
     // `left` is not comparable; its right edge, which is what anchors it, is.
     tabs: {
@@ -160,19 +166,26 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
 
   // The two compose modes are one surface with its middle swapped, so their
   // chrome is measured against each other rather than against fixed numbers.
-  // Both stack the same three bands inside the same frame — a top line (chat's
+  // Both stack the same four bands inside the same frame — a top line (chat's
   // recipients, terminal's tool rail) that hosts the mode tabs, a picker row
-  // (thread / folder), and the typing area — and every one of those has to
-  // land on the same pixel, or flipping modes visibly reflows the composer
-  // under the cursor that flipped it.
+  // (thread / folder), an action row carrying the one primary key (Send /
+  // Fire), and the typing area — and every one of those has to land on the
+  // same pixel, or flipping modes visibly reflows the composer under the
+  // cursor that flipped it. The action row is the one that drifted: chat's is
+  // squisq's toolbar, which sizes to its content, so it tracked the height of
+  // whatever key we last put in it while terminal's is a fixed band.
   const chatBands = await shell.evaluate(MEASURE_BANDS, {
     top: '.chat-composer-to',
     picker: '.gezel-chat-session-header',
+    action: '.squisq-toolbar',
+    key: '.chat-send-btn',
   });
   await switchToTerminal(page);
   const terminalBands = await shell.evaluate(MEASURE_BANDS, {
     top: '.terminal-composer-toolbar',
     picker: '.folder-tree-switcher',
+    action: '.terminal-composer-fire-row',
+    key: '.terminal-fire-btn',
   });
 
   expect(chatBands).not.toBeNull();
@@ -180,7 +193,7 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   expect(terminalBands!.shellHeight).toBeCloseTo(chatBands!.shellHeight, 0);
   expect(terminalBands!.frameBackground).toBe(chatBands!.frameBackground);
   expect(terminalBands!.frameBorder).toBe(chatBands!.frameBorder);
-  for (const band of ['top', 'picker', 'tabs'] as const) {
+  for (const band of ['top', 'picker', 'action', 'key', 'tabs'] as const) {
     expect
       .soft(terminalBands![band], `${band} band should be identical across compose modes`)
       .toEqual(chatBands![band]);

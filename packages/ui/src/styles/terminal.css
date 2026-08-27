@@ -673,11 +673,25 @@
 }
 
 /* In the compose frame the row is a band like the ones above it: full height
- * of a top row so the Fire key lands where chat's Send does, inset to the
- * frame's own gutter. */
+ * of a top row so the Fire key lands where chat's Send does. The 1px inset is
+ * measured, not chosen — it mirrors the `margin-inline` squisq's
+ * `.squisq-editor-header` spends on the band that carries Send, down to being
+ * a margin rather than padding, so the two rows and the two keys inside them
+ * land on the same pixels. */
 .project-chat-compose-main .terminal-composer-fire-row {
   height: var(--compose-top-row-height);
-  padding: 0 0.15rem;
+  margin: 0 1px;
+}
+
+/* Chat's toolbar is content-sized, so it used to be exactly as tall as the
+ * Send key inside it (28px + 1px of margin each side) — 5px shorter than the
+ * terminal's Fire row, which left the key looking wedged against the draft
+ * below it and put every row after it at a different y across a mode flip.
+ * The two modes' totals always matched (the editor body simply absorbed the
+ * 5px); what did not match was where the rows sat. Floor it at a top row and
+ * both bands, both keys, and both typing surfaces line up. */
+.project-chat-compose-main .squisq-toolbar {
+  min-height: var(--compose-top-row-height);
 }
 
 /* The typing surface, matched to the squisq editor chat types into: one

@@ -477,6 +477,27 @@ skeleton the same way — extend it rather than fork it. Lead the gallery
 with the curated, context-relevant subset (e.g. craftbooks recommended
 for the project's type) and keep the full catalog one rail-click away.
 
+**A gallery dialog splits in two when the choice is worth reading.** The
+right-hand pane is fine for a starting point you pick by name (project
+types), but a craftbook is a page: a paragraph of description, four to a
+dozen named steps with their own one-liners, and a parameter form. Clamped
+into a 19rem column, the description lost its tail to a five-line clamp and
+the params stacked below the fold — so New Task is now a **two-step wizard**
+(`gz-ntd-step-pick` / `gz-ntd-step-configure` in
+[styles/project-surfaces.css](../packages/ui/src/styles/project-surfaces.css)).
+Step 1 is the catalog alone: rail + gallery across the full dialog, with the
+*project* picker in the header, because that choice decides which craftbooks
+are applicable and recommended. Choosing a card — the blank card included —
+advances to step 2: the recipe in full on the left, the properties form on
+the right, and one back key returning to the gallery with the choice still
+lit. Three rules keep it from reading as two different dialogs: the dialog
+keeps its size and its footer bar across both steps so the frame never
+jumps, the selection survives going back, and nothing is created until the
+second screen (the picker's footnote says so, and Enter in the search field
+must not submit the form). Reach for the split when the selection carries
+substantial detail or configuration; a catalog of one-line choices should
+stay a single screen with the pane.
+
 **Shelve a big catalog by subject, not by lifecycle.** A rail whose shelves
 answer "where in a project's life does this fit?" collapses on a large
 catalog — New Task's 255 craftbooks landed in two piles, the larger one
