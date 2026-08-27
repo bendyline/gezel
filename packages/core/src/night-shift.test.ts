@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   type NightShiftWindow,
+  formatNightShiftSummary,
   isInNightShiftWindow,
   lastNightShiftWindow,
   nextNightShiftStart,
@@ -179,5 +180,34 @@ describe('isPendingNightShiftTask', () => {
       },
     };
     expect(isPendingNightShiftTask(host, '2026-06-20')).toBe(false);
+  });
+});
+
+describe('formatNightShiftSummary', () => {
+  it('reads as a sentence rather than a tally', () => {
+    expect(formatNightShiftSummary({ tasks: 1, reports: 1 })).toBe(
+      'The night shift finished 1 task and left 1 report for you.',
+    );
+    expect(formatNightShiftSummary({ tasks: 2, reports: 0 })).toBe(
+      'The night shift finished 2 tasks.',
+    );
+    expect(formatNightShiftSummary({ tasks: 0, reports: 3 })).toBe(
+      'The night shift left 3 reports for you.',
+    );
+  });
+
+  it('names proposals and the actions still awaiting a look', () => {
+    expect(formatNightShiftSummary({ tasks: 2, reports: 1, proposals: 2, actions: 3 })).toBe(
+      'The night shift finished 2 tasks and left 1 report and 2 change proposals for you. There are 3 suggested actions to review.',
+    );
+    expect(formatNightShiftSummary({ tasks: 1, reports: 1, actions: 1 })).toBe(
+      'The night shift finished 1 task and left 1 report for you. There is 1 suggested action to review.',
+    );
+  });
+
+  it('says so plainly when the shift produced nothing', () => {
+    expect(formatNightShiftSummary({ tasks: 0, reports: 0 })).toBe(
+      'The night shift ran, but nothing came of it.',
+    );
   });
 });

@@ -26,6 +26,7 @@ import {
 import { makeEngineKey } from '../native/engine-key.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
+import { patientFetch } from '../patient-fetch.js';
 import { lastArgValue, readLlamaCppBuildMetadata } from './build-metadata.js';
 import {
   matchNvidiaRuntimeDevice,
@@ -51,7 +52,7 @@ import {
   fitsSwaFullInFastMemory,
   planMoeOffload,
 } from './offload-planner.js';
-import { LlamaCppProvider, createLlamaCppPatientFetch } from './provider.js';
+import { LlamaCppProvider } from './provider.js';
 import { reasoningLaunchOverridesFromEnv } from './reasoning-launch.js';
 import { resolveSpecDraft } from './spec-draft.js';
 
@@ -188,7 +189,7 @@ export async function buildLlamaCppProvider(opts: {
     ? config.modelContextOverrides?.[`llama-cpp:${defaultModelId}`]
     : undefined;
   const baseProviderOpts = {
-    fetchImpl: createLlamaCppPatientFetch(),
+    fetchImpl: patientFetch(),
     ...(defaultModelId ? { defaultModel: defaultModelId } : {}),
     // llama-server only sends its final `usage` chunk (and the `timings`
     // block that rides with it, carrying decode/prefill rate + cache_n) when

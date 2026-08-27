@@ -14,6 +14,8 @@
  * `ensureLoaded()`.
  */
 
+// patient-fetch-exempt: KokoroProvider runs the model in-process (ONNX), not over HTTP —
+// there is no request for a fetch timeout to cut.
 import { join } from 'node:path';
 import { HF_CACHE_DIR_ENV, transformersCacheDir } from '../../transformers-cache.js';
 import { KokoroProvider } from './kokoro.js';

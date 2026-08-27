@@ -18,7 +18,6 @@
 
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Agent, fetch as undiciFetch } from 'undici';
 import {
   type ModelStorageRoots,
   findModelRoot,
@@ -28,25 +27,10 @@ import {
 } from '../../models/storage-roots.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
+import { patientFetch } from '../patient-fetch.js';
 import { MockSpeechToTextProvider } from './mock-stt.js';
 import type { SpeechToTextProvider } from './types.js';
 import { WhisperCppProvider } from './whisper-cpp.js';
-
-let cachedPatientFetch: typeof fetch | undefined;
-function patientFetch(): typeof fetch {
-  if (!cachedPatientFetch) {
-    // Long-running transcriptions on a slow machine can hold the HTTP
-    // request open well past Node's default 5-minute fetch timeout.
-    // Disable both undici timeouts and let our own
-    // `WhisperCppProviderOptions.timeoutMs` enforce the limit.
-    const dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
-    cachedPatientFetch = ((
-      url: Parameters<typeof undiciFetch>[0],
-      init?: Parameters<typeof undiciFetch>[1],
-    ) => undiciFetch(url, { ...init, dispatcher })) as unknown as typeof fetch;
-  }
-  return cachedPatientFetch;
-}
 
 export interface SpeechToTextFactoryOptions {
   home: string;

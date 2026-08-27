@@ -151,3 +151,50 @@ export function nextNightShiftStart(now: Date, window: NightShiftWindow): Date {
   }
   return candidate;
 }
+
+function countOf(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** "a", "a and b", "a, b and c". */
+function joinList(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? '';
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+/**
+ * How a settled night window is described to the user, in one or two
+ * plain sentences. Shared by the morning needs-input card, Home's "Last
+ * night" panel, and the question prompt the service synthesizes, so the
+ * three surfaces can never disagree about what the shift did — and so
+ * nobody has to read `1 task(s) completed`.
+ */
+export function formatNightShiftSummary(counts: {
+  tasks: number;
+  reports: number;
+  /** Change proposals still awaiting a decision. */
+  proposals?: number;
+  /** Report-embedded actions still in the `suggested` state. */
+  actions?: number;
+}): string {
+  const leftBehind: string[] = [];
+  if (counts.reports > 0) leftBehind.push(countOf(counts.reports, 'report'));
+  if ((counts.proposals ?? 0) > 0) {
+    leftBehind.push(countOf(counts.proposals ?? 0, 'change proposal'));
+  }
+
+  let summary: string;
+  if (counts.tasks > 0 && leftBehind.length > 0) {
+    summary = `The night shift finished ${countOf(counts.tasks, 'task')} and left ${joinList(leftBehind)} for you.`;
+  } else if (counts.tasks > 0) {
+    summary = `The night shift finished ${countOf(counts.tasks, 'task')}.`;
+  } else if (leftBehind.length > 0) {
+    summary = `The night shift left ${joinList(leftBehind)} for you.`;
+  } else {
+    summary = 'The night shift ran, but nothing came of it.';
+  }
+
+  const actions = counts.actions ?? 0;
+  if (actions === 0) return summary;
+  return `${summary} ${actions === 1 ? 'There is' : 'There are'} ${countOf(actions, 'suggested action')} to review.`;
+}

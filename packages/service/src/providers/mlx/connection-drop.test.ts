@@ -50,6 +50,37 @@ describe('buildMidStreamDropMessage', () => {
     expect(msg).not.toMatch(/settings change/i);
   });
 
+  it('never blames a crash or an OOM while the engine is still running', () => {
+    // Wild-caught: six turns died at ~300s to undici's default fetch
+    // timeout while the engine was healthy and serving another session at
+    // 6.8 tok/s. The old wording asserted a crash/OOM and told the user to
+    // restart the engine — advice that could not help and sent a real
+    // investigation looking for an OOM that never happened.
+    const msg = buildMidStreamDropMessage(0, false, true);
+    expect(msg).not.toMatch(/crashed|ran out of memory/i);
+    expect(msg).not.toMatch(/restart the engine/i);
+    expect(msg).toMatch(/still running/i);
+    expect(msg).toMatch(/did not crash or run out of memory/i);
+    // Points at the thing that actually distinguishes a timeout.
+    expect(msg).toMatch(/same elapsed time/i);
+  });
+
+  it('keeps the crash wording when the engine really did go away', () => {
+    const msg = buildMidStreamDropMessage(0, false, false);
+    expect(msg).toMatch(/crashed, ran out of memory/i);
+  });
+
+  it('falls back to the crash wording when liveness is unknown', () => {
+    const msg = buildMidStreamDropMessage(0, false, undefined);
+    expect(msg).toMatch(/crashed, ran out of memory/i);
+  });
+
+  it('a planned stop still wins over engine liveness', () => {
+    const msg = buildMidStreamDropMessage(10, true, true);
+    expect(msg).toMatch(/settings/i);
+    expect(msg).not.toMatch(/still running/i);
+  });
+
   it('says "before any output" when nothing streamed', () => {
     expect(buildMidStreamDropMessage(0, true)).toContain('before any output');
     expect(buildMidStreamDropMessage(0, false)).toContain('before any output');

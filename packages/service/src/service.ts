@@ -8,6 +8,7 @@ import {
   type GezelConfig,
   type ServiceRole,
   createLogger,
+  formatNightShiftSummary,
   formatSuspension,
   isEngagementAllowed,
   normalizeStepGate,
@@ -1866,14 +1867,22 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     if (review.windowKey !== windowKey) return;
     if (review.tasksCompleted.length === 0 && review.reports.length === 0) return;
     const config = await store.readConfig().catch(() => ({}) as GezelConfig);
-    const actionTotal = review.reports.reduce((n, r) => n + r.actionCounts.total, 0);
+    // `suggested`, not `total`: the tally is a call to action, and an
+    // action already fired or dismissed is not one the user still owes
+    // a look. Same count Home's "Last night" panel names.
+    const actionTotal = review.reports.reduce((n, r) => n + r.actionCounts.suggested, 0);
     await store.writeQuestion({
       id: randomUUID(),
       projectId: 'default',
       gezelId: config.meesterGezelId ?? '',
       // No live session — the answer route early-returns for this intent.
       sessionId: '',
-      prompt: `The night shift finished: ${review.tasksCompleted.length} task(s) completed, ${review.reports.length} report(s) written${actionTotal > 0 ? `, ${actionTotal} suggested action(s) to review` : ''}.`,
+      prompt: formatNightShiftSummary({
+        tasks: review.tasksCompleted.length,
+        reports: review.reports.length,
+        proposals: review.diffpacks.length,
+        actions: actionTotal,
+      }),
       choices: ['Dismiss'],
       allowWriteIn: false,
       multiSelect: false,

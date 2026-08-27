@@ -27,7 +27,6 @@
 
 import { join } from 'node:path';
 import type { GezelConfig } from '@bendyline/gezel';
-import { Agent, fetch as undiciFetch } from 'undici';
 import {
   type ModelStorageRoots,
   findModelRoot,
@@ -39,6 +38,7 @@ import type { SecretStore } from '../../secrets/types.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
+import { patientFetch } from '../patient-fetch.js';
 import { GoogleAiImageProvider } from './google-ai.js';
 import { MockImageProvider } from './mock.js';
 import { OpenAIImageProvider } from './openai-image.js';
@@ -59,17 +59,6 @@ import type { ImageProvider, InstalledImageModelInfo } from './types.js';
  * working. Lazily built on first generate so the dispatcher only
  * spins up when an sd-cpp branch is selected.
  */
-let cachedPatientFetch: typeof fetch | undefined;
-function patientFetch(): typeof fetch {
-  if (!cachedPatientFetch) {
-    const dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
-    cachedPatientFetch = ((
-      url: Parameters<typeof undiciFetch>[0],
-      init?: Parameters<typeof undiciFetch>[1],
-    ) => undiciFetch(url, { ...init, dispatcher })) as unknown as typeof fetch;
-  }
-  return cachedPatientFetch;
-}
 
 export interface ImageProviderFactoryOptions {
   home: string;

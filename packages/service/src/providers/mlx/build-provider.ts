@@ -18,6 +18,7 @@ import {
 } from '../native/capacity-broker.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
+import { patientFetch } from '../patient-fetch.js';
 import { readMlxModelGeometry } from './model-geometry.js';
 import { MlxProvider } from './provider.js';
 import { templateOpensReasoning } from './reasoning-stream.js';
@@ -112,6 +113,13 @@ export async function buildMlxProvider(opts: {
     : undefined;
   const numCtx = perModelCtxOverride ?? config.mlxNumCtx;
   const baseProviderOpts = {
+    // Both the supervised subprocess and the external-baseUrl branch talk
+    // to an MLX server that can spend many minutes in prefill before its
+    // first byte. Node's global fetch cuts that at 5 minutes via undici's
+    // defaults — well inside the 595–900s pre-first-byte budgets this
+    // provider computes for large prompts, and surfaced as if the engine
+    // had died. See patient-fetch.ts.
+    fetchImpl: patientFetch(),
     ...(defaultModelId ? { defaultModel: defaultModelId } : {}),
     ...(concurrency ? { concurrency } : {}),
     ...(affinity !== undefined ? { affinity } : {}),

@@ -16,6 +16,8 @@
  * call, dominated by the actual HTTP search.
  */
 
+// patient-fetch-exempt: web search providers call remote APIs, where undici's 300s cap is
+// correct — a dead host must time out rather than hang the turn forever.
 import { resolveSecurityPolicy } from '@bendyline/gezel';
 import type { Store } from '../../fs/store.js';
 import type { SecretStore } from '../../secrets/types.js';

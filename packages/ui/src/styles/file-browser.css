@@ -974,18 +974,30 @@ button.danger {
   font-weight: 600;
 }
 
-.pending-question-night-reports {
+/* Morning night-shift card: three labelled bands (proposals to decide,
+   reports to read, tasks that finished), each a stack of rows. */
+.pending-question-night-band {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  margin: 0.4rem 0;
+  margin: 0.6rem 0;
 }
 
-.pending-question-night-report {
+/* Uppercase eyebrow per docs/ux.md — same recipe as `.gz-npd-rail-group`. */
+.pending-question-night-band-label {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pending-question-night-row {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0.3rem 0.5rem;
+  padding: 0.35rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
@@ -993,6 +1005,19 @@ button.danger {
   font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
+  transition: background 140ms ease-out;
+}
+
+.pending-question-night-row:hover {
+  background: var(--panel);
+}
+
+.pending-question-night-row-title {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gz-dialog.project-add-gezel-dialog {

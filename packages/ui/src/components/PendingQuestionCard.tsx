@@ -1,12 +1,13 @@
 import type {
   AnswerQuestionRequest,
   ClaudeUserQuestionIntent,
+  NightShiftReviewResponse,
   NpmInstallApprovalDecision,
   NpmInstallApprovalPackage,
   Question,
   Task,
 } from '@bendyline/gezel';
-import { parseTaskRef } from '@bendyline/gezel';
+import { formatNightShiftSummary, parseTaskRef } from '@bendyline/gezel';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { RenderedMarkdown } from './chat-bubbles.js';
@@ -72,7 +73,13 @@ export function PendingQuestionCard(props: {
 }) {
   const { question } = props;
   const body = <QuestionBody {...props} />;
-  if (question.answer || !question.documentPath) return body;
+  // Only prose earns the tall portrait column. A data attachment (a
+  // coverage JSON, a manifest) is context, not reading — it stays in the
+  // card's context strip as a code block rather than filling half the
+  // width with a literal.
+  if (question.answer || !question.documentPath || !isProseDocument(question.documentPath)) {
+    return body;
+  }
   return (
     <div className="pending-question-splitwrap">
       <div className="pending-question-split">
@@ -289,10 +296,18 @@ function TaskLifecycleActions({
 
 // ── Night-shift review (the morning summary) ───────────────────────
 //
-// Synthesized once per settled night window: what the shift finished
-// and which reports carry suggested actions. Report rows open the
-// owning project; Dismiss collapses the card (the answer route
-// early-returns — nothing to arm or seed).
+// Synthesized once per settled night window. The card is the first thing
+// the user sees in the morning, so it reads as a hand-off note, not a
+// tally: one plain sentence, then the work itself in three bands —
+// proposals to decide on, reports to read, tasks that finished.
+//
+// The counts baked into the intent are enough for the sentence but not
+// for the bands (no titles, no proposals), so the card re-derives the
+// review from the service. That call answers for the LATEST window; an
+// older card — one left unanswered past the next night — keeps the
+// intent's own report list rather than describing someone else's night.
+// Dismiss collapses the card (the answer route early-returns — nothing
+// to arm or seed).
 
 function NightShiftReviewCard({
   question,
@@ -309,6 +324,22 @@ function NightShiftReviewCard({
   };
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [review, setReview] = useState<NightShiftReviewResponse | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getNightShiftReview()
+      .then((res) => {
+        if (!cancelled && res.windowKey === intent.windowKey) setReview(res);
+      })
+      .catch(() => {
+        /* the intent alone still renders a correct, thinner card */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [intent.windowKey]);
 
   const dismiss = useCallback(async () => {
     if (submitting) return;
@@ -323,31 +354,114 @@ function NightShiftReviewCard({
     }
   }, [question.id, submitting, onAnswered]);
 
+  const tasks = review?.tasksCompleted ?? [];
+  const proposals = review?.diffpacks ?? [];
+  const reports =
+    review?.reports.map((r) => ({
+      projectId: r.projectId,
+      projectName: r.projectName,
+      path: r.path,
+      title: r.title,
+      actionCount: r.actionCounts.suggested,
+    })) ??
+    intent.reports.map((r) => ({
+      projectId: r.projectId,
+      projectName: undefined as string | undefined,
+      path: r.path,
+      title: r.title,
+      actionCount: r.actionCount,
+    }));
+
+  const summary = formatNightShiftSummary({
+    tasks: review ? tasks.length : intent.tasksCompleted,
+    reports: reports.length,
+    proposals: proposals.length,
+    actions: reports.reduce((n, r) => n + r.actionCount, 0),
+  });
+
+  // The lead report is already open in the column beside the card — a row
+  // linking to what the reader is looking at is noise.
+  const hoisted = useContext(DocumentHoisted);
+  const reportRows = reports.filter(
+    (r) => !hoisted || `projects/${r.projectId}/artifacts/${r.path}` !== question.documentPath,
+  );
+
   return (
     <div className="pending-question pending-question-pending pending-question-night-review">
       <ContextStrip question={question} />
-      <div className="pending-question-prompt">{question.prompt}</div>
-      {intent.reports.length > 0 && (
-        <div className="pending-question-night-reports">
-          {intent.reports.map((r) => (
+      <div className="pending-question-prompt">{summary}</div>
+      {/* Proposals lead: they are the part of the night waiting on a
+          decision rather than on being read. */}
+      {proposals.length > 0 && (
+        <div className="pending-question-night-band">
+          <span className="pending-question-night-band-label">Waiting on you</span>
+          {proposals.map((pack) => (
+            <button
+              key={`${pack.projectId}:${pack.packId}`}
+              type="button"
+              className="pending-question-night-row"
+              onClick={() => navigateToTab({ kind: 'project', id: pack.projectId })}
+            >
+              <span className="pending-question-night-row-title">{pack.title}</span>
+              <span className="muted small">
+                {pack.fileCount} file{pack.fileCount === 1 ? '' : 's'} · +{pack.additions} −
+                {pack.deletions}
+                {pack.drifted ? ' · out of date' : ''}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      {reportRows.length > 0 && (
+        <div className="pending-question-night-band">
+          <span className="pending-question-night-band-label">
+            {reportRows.length === 1 ? 'Report' : 'Reports'}
+          </span>
+          {reportRows.map((r) => (
             <button
               key={`${r.projectId}:${r.path}`}
               type="button"
-              className="pending-question-night-report"
+              className="pending-question-night-row"
+              // Open the report itself. Landing on the owning project and
+              // hunting the artifacts drawer for the file we just named is
+              // a step the user shouldn't have to take.
               onClick={() =>
-                window.dispatchEvent(
-                  new CustomEvent('gezel:open-tab', {
-                    detail: { kind: 'project', id: r.projectId, activate: true },
-                  }),
-                )
+                navigateToTab({
+                  kind: 'document',
+                  path: `projects/${r.projectId}/artifacts/${r.path}`,
+                })
               }
             >
-              <span>{r.title ?? r.path}</span>
-              {r.actionCount > 0 && (
-                <span className="muted small">
-                  {r.actionCount} action{r.actionCount === 1 ? '' : 's'}
-                </span>
-              )}
+              <span className="pending-question-night-row-title">{r.title ?? r.path}</span>
+              <span className="muted small">
+                {[
+                  r.projectName,
+                  r.actionCount > 0
+                    ? `${r.actionCount} action${r.actionCount === 1 ? '' : 's'} to review`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      {tasks.length > 0 && (
+        <div className="pending-question-night-band">
+          <span className="pending-question-night-band-label">Finished</span>
+          {tasks.map((t) => (
+            <button
+              key={t.ref}
+              type="button"
+              className="pending-question-night-row"
+              onClick={() => navigateToTab({ kind: 'task', ref: t.ref })}
+            >
+              <span className="pending-question-night-row-title">{t.title}</span>
+              <span className="muted small">
+                {t.ref}
+                {t.projectName ? ` · ${t.projectName}` : ''}
+              </span>
             </button>
           ))}
         </div>
@@ -1404,6 +1518,18 @@ function TaskContext({ taskRef }: { taskRef: string }) {
   );
 }
 
+/** Markdown/plain text — the shapes worth rendering as a document. */
+function isProseDocument(path: string): boolean {
+  return /\.(md|markdown|txt)$/i.test(path);
+}
+
+/** Fence language for a data attachment, from its extension. */
+function fenceLanguage(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() ?? '';
+  if (ext === 'yml') return 'yaml';
+  return /^[a-z0-9]+$/.test(ext) ? ext : '';
+}
+
 function DocumentContext({
   projectId,
   documentPath,
@@ -1466,10 +1592,14 @@ function DocumentContext({
 
   const previewLines = useMemo(() => {
     if (!content) return '';
-    if (panel) return content;
-    const lines = content.split('\n');
-    return expanded ? content : lines.slice(0, 10).join('\n');
-  }, [content, expanded, panel]);
+    const body = panel || expanded ? content : content.split('\n').slice(0, 10).join('\n');
+    // Anything that isn't prose goes through the markdown renderer as a
+    // fenced block: a raw JSON literal rendered AS markdown is neither
+    // readable nor honest about what it is.
+    return isProseDocument(documentPath)
+      ? body
+      : `\`\`\`${fenceLanguage(documentPath)}\n${body}\n\`\`\``;
+  }, [content, expanded, panel, documentPath]);
 
   const kindLabel =
     resolvedKind === 'artifact'

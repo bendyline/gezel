@@ -2301,7 +2301,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           // the original text still rides along in the persisted warning.
           if (!recoveredFromRamble && isMidStreamConnectionDrop(err)) {
             throw new Error(
-              buildMidStreamDropMessage(turnContent.length, this.deps.provider.isDisposed),
+              buildMidStreamDropMessage(
+                turnContent.length,
+                this.deps.provider.isDisposed,
+                this.deps.provider.engineLifecycleSnapshot()?.running,
+              ),
             );
           }
           if (!recoveredFromRamble) throw err;
@@ -3824,10 +3828,22 @@ function buildPreFirstByteAbortMessage(
  * for an out-of-memory event that never happened, when what actually
  * occurred is that their own settings change restarted the session.
  */
-export function buildMidStreamDropMessage(charsReceived: number, plannedStop: boolean): string {
+export function buildMidStreamDropMessage(
+  charsReceived: number,
+  plannedStop: boolean,
+  engineStillRunning?: boolean,
+): string {
   const got = charsReceived > 0 ? `after ${charsReceived} chars` : 'before any output';
   if (plannedStop) {
     return `[Mac AI] this turn stopped ${got} because Gezel unloaded the on-device engine while it was answering. Changing your settings restarts chat sessions so the new settings apply, and unloading a model in Settings → On-device or quitting the app does the same. The model didn't crash — send the message again to redo this turn.`;
+  }
+  // Only claim a crash when the engine actually went away. A live engine
+  // plus a dead socket is a transport fault on our side, and "restart the
+  // engine" is then advice that cannot help — it sent a real investigation
+  // hunting for an OOM that never happened while undici was quietly
+  // cutting the request at its 300s default. See patient-fetch.ts.
+  if (engineStillRunning) {
+    return `[Mac AI] the connection to the on-device engine dropped ${got}, but the engine is still running — so it did not crash or run out of memory. Something closed the HTTP request underneath the turn. Send the message again; if it keeps happening at roughly the same elapsed time each turn, that points at a timeout rather than the model, so capture the service log for that window.`;
   }
   return `[Mac AI] the on-device engine dropped the connection mid-turn (${got}). This usually means the mlx server crashed, ran out of memory, or was restarted while the turn was streaming — this turn's work was lost. Retry the turn; if it keeps happening, restart the engine in Settings → On-device.`;
 }

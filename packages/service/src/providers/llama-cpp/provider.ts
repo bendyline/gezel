@@ -30,7 +30,6 @@ import {
   createLogger,
   leaksUntaggedReasoning,
 } from '@bendyline/gezel';
-import { Agent, fetch as undiciFetch } from 'undici';
 import type { TurnRambleDetectionConfig } from '../../model-profile/behaviors/turn-ramble-detection.js';
 import {
   extractReasoningWithProfile,
@@ -413,24 +412,6 @@ const DIRECT_FILE_WORK_MUTATION_TOOL_NAMES: ReadonlySet<string> = new Set([
 const SCRIPTED_DIRECT_FILE_WORK_PROMPT_RE =
   /\b(?:write|create|generate|use|run)\s+(?:a\s+)?(?:node(?:\.js)?\s+)?script\b|\bnode\s+script\b|\bscript\s+and\s+run\b/i;
 const SCENARIO_FILE_REPAIR_NO_MUTATION_LIMIT = 2;
-
-/**
- * Fetch for local llama-server calls with undici's built-in 5-minute
- * headers/body timeouts disabled. llama-server can spend longer than
- * that in cold prefill before sending the first SSE byte; the provider
- * already owns the real turn deadlines via AbortController.
- */
-let cachedPatientFetch: typeof fetch | undefined;
-export function createLlamaCppPatientFetch(): typeof fetch {
-  if (!cachedPatientFetch) {
-    const dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
-    cachedPatientFetch = ((
-      url: Parameters<typeof undiciFetch>[0],
-      init?: Parameters<typeof undiciFetch>[1],
-    ) => undiciFetch(url, { ...init, dispatcher })) as unknown as typeof fetch;
-  }
-  return cachedPatientFetch;
-}
 
 /**
  * Default context window (tokens) for sessions handed out by this

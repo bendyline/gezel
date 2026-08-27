@@ -17,7 +17,6 @@
 
 import { createLogger } from '@bendyline/gezel';
 import type { VideoAccelerator } from '@bendyline/gezel';
-import { Agent, fetch as undiciFetch } from 'undici';
 import type { GpuArbiter } from '../gpu-arbiter.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
 import type { VideoModelManager, VideoModelSelector } from './models.js';
@@ -37,24 +36,6 @@ const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000; // 1h — video + cold-start model lo
 const DEFAULT_NUM_FRAMES = 97;
 const DEFAULT_FPS = 24;
 const DEFAULT_STEPS = 40;
-
-/**
- * fetch with undici's 5-minute header/body timeouts disabled — a single
- * generation holds the request open for the whole sample run, which
- * routinely crosses 5 minutes on consumer GPUs (and far longer on CPU).
- * Node's global fetch would abort with a generic `fetch failed`.
- */
-let cachedPatientFetch: typeof fetch | undefined;
-export function patientVideoFetch(): typeof fetch {
-  if (!cachedPatientFetch) {
-    const dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
-    cachedPatientFetch = ((
-      url: Parameters<typeof undiciFetch>[0],
-      init?: Parameters<typeof undiciFetch>[1],
-    ) => undiciFetch(url, { ...init, dispatcher })) as unknown as typeof fetch;
-  }
-  return cachedPatientFetch;
-}
 
 export interface DiffusersVideoProviderOptions {
   /** Fallback base URL before the supervisor resolves a port. */

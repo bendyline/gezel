@@ -1,8 +1,8 @@
 import { join } from 'node:path';
-import { Agent, fetch as undiciFetch } from 'undici';
 import { modelStorageRoots } from '../../models/storage-roots.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
+import { patientFetch } from '../patient-fetch.js';
 import { DEFAULT_RECOGNITION_MODEL_ID } from './catalog.js';
 import { LlamaVisionProvider } from './llama-vision.js';
 import { MockRecognitionProvider } from './mock.js';
@@ -28,17 +28,6 @@ export interface RecognitionFactoryOptions {
  * model load on a weak box legitimately exceeds that, and the failure looks
  * like a hang rather than a timeout. Same dispatcher the STT factory uses.
  */
-let cachedPatientFetch: typeof fetch | undefined;
-function patientFetch(): typeof fetch {
-  if (!cachedPatientFetch) {
-    const dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
-    cachedPatientFetch = ((
-      url: Parameters<typeof undiciFetch>[0],
-      init?: Parameters<typeof undiciFetch>[1],
-    ) => undiciFetch(url, { ...init, dispatcher })) as unknown as typeof fetch;
-  }
-  return cachedPatientFetch;
-}
 
 export function recognitionModelsRoot(home: string): string {
   return join(home, 'engines', 'recognition', 'models');

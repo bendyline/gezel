@@ -6,10 +6,11 @@ import {
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { gezelPaths } from '@bendyline/gezel/paths';
-import { LlamaCppProvider, createLlamaCppPatientFetch } from '../llama-cpp/index.js';
+import { LlamaCppProvider } from '../llama-cpp/index.js';
 import { minViableLocalContextTokens } from '../native/capacity-broker.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
+import { patientFetch } from '../patient-fetch.js';
 import { type Ds4Backend, ds4DsparkArgs, resolveDs4Dspark } from './dspark.js';
 import { Ds4Provider } from './provider.js';
 
@@ -104,7 +105,7 @@ export async function buildDs4Provider(opts: {
     return 600_000;
   })();
   const baseProviderOpts = {
-    fetchImpl: createLlamaCppPatientFetch(),
+    fetchImpl: patientFetch(),
     ...(defaultModelId ? { defaultModel: defaultModelId } : {}),
     ...(affinity !== undefined ? { affinity } : {}),
     // ds4-server emits per-turn token usage only when the request asks via

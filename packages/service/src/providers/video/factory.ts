@@ -23,7 +23,8 @@ import type { UvRuntime } from '../../python/uv-runtime.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
-import { DiffusersVideoProvider, patientVideoFetch } from './diffusers-video.js';
+import { patientFetch } from '../patient-fetch.js';
+import { DiffusersVideoProvider } from './diffusers-video.js';
 import { MockVideoProvider } from './mock.js';
 import { VideoModelManager, VideoModelSelector } from './models.js';
 import type { VideoProvider } from './types.js';
@@ -59,7 +60,7 @@ export async function createVideoProvider(
       baseUrl: env.GEZEL_VIDEO_SERVER_URL,
       models,
       accelerator,
-      fetchImpl: patientVideoFetch(),
+      fetchImpl: patientFetch(),
     });
   }
 
@@ -158,7 +159,7 @@ export async function createVideoProvider(
     accelerator,
     supervisor,
     selector,
-    fetchImpl: patientVideoFetch(),
+    fetchImpl: patientFetch(),
     ...(opts.arbiter ? { arbiter: opts.arbiter } : {}),
   });
 }
