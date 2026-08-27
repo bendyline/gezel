@@ -515,6 +515,18 @@ pushes Submit under the bottom edge reads as a broken dialog, not as a
 scrollable one, because nothing on screen says there is more below. The
 drawer's own scrollbar remains as the fallback for a very short window.
 
+**One submit key per composer, and it is a glyph.** Chat's Send and the
+terminal's Fire are the same act — *this draft goes now* — so they share one
+recipe (`.chat-send-btn` / `.terminal-fire-btn` in
+[styles/shared-content.css](../packages/ui/src/styles/shared-content.css)): the
+terracotta bevel, near-square, carrying the up-arrow `SubmitArrow` primitive
+instead of a word. Two words that mean the same thing drift apart; one mark
+does not. They also sit in the same place — their own row between the context
+strip and the typing surface — so flipping compose mode never moves the primary
+key out from under the cursor. Being glyph-only, each carries `title` and
+`aria-label`, and Send's label (not a hidden `aria-busy` alone) is what
+announces the pending turn now that "Sending…" is no longer on its face.
+
 **Mid-turn composer actions.** While a gezel is working, the composer keeps
 accepting text. With an empty draft the toolbar shows only the quiet
 secondary `■ Stop`. The moment there's a draft, two actions join it:

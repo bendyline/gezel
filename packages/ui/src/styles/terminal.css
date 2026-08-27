@@ -569,13 +569,11 @@
    * both. They are the same row to the eye, so they are the same row in the
    * geometry, and the mode tabs that sit in them fill it exactly. */
   --compose-top-row-height: 2.1875rem;
-  /* Terminal's command-entry band, sized to whatever chat spends below its
-   * own second row: squisq's editor toolbar (~35px, where chat's Send lives)
-   * plus the editor itself (~85px). Terminal has no separate action toolbar —
-   * Fire rides in the top band — so it spends the whole budget on typing room
-   * and the two modes settle at the same overall height. Measured rather than
-   * derived, because squisq owns both numbers; the mode-parity assertion in
-   * e2e-web/terminal.spec.ts is what catches it drifting. */
+  /* What chat spends below its own second row: squisq's editor toolbar
+   * (~35px, where Send lives) plus the editor itself (~85px). Terminal now
+   * spends it the same way — a Fire row of `--compose-top-row-height` over
+   * the command entry — so the two modes settle at the same overall height.
+   * Measured rather than derived, because squisq owns both numbers. */
   --compose-entry-height: 120px;
 }
 
@@ -645,6 +643,15 @@
   background: var(--compose-toolbar-bg) !important;
 }
 
+/* The address line's own content reads one pixel high against the mode tabs.
+ * The tabs hang from the top of the band (their 2px offset is measured off the
+ * frame border), so nudging the band's padding would drag them along with it —
+ * shift only the addressees and the recipient picker, and leave layout alone. */
+.project-chat-compose-main .chat-composer-to > *:not(.compose-mode-tabs) {
+  position: relative;
+  top: 1px;
+}
+
 /* `.chat-composer` pads itself for the standalone surfaces (Home, per-gezel
  * chat). Here the frame owns the inset and the bands run edge to edge, so its
  * padding is what put chat's top band 8px below terminal's and left a 4px
@@ -665,6 +672,14 @@
   gap: 0;
 }
 
+/* In the compose frame the row is a band like the ones above it: full height
+ * of a top row so the Fire key lands where chat's Send does, inset to the
+ * frame's own gutter. */
+.project-chat-compose-main .terminal-composer-fire-row {
+  height: var(--compose-top-row-height);
+  padding: 0 0.15rem;
+}
+
 /* The typing surface, matched to the squisq editor chat types into: one
  * full-bleed slab under the seam, no card of its own. The standalone terminal
  * wraps its input in a bordered, rounded, generously padded box; the light
@@ -674,10 +689,12 @@
  * The fills are squisq's own editor colours, kept in step with the matching
  * `editor.background` in terminal-monaco-setup.ts. */
 .project-chat-compose-main .terminal-composer-input-wrap {
-  /* Border-box, so this lands the frame bottom exactly where chat's does. */
-  height: var(--compose-entry-height);
-  flex: 1 1 var(--compose-entry-height);
-  min-height: 90px;
+  /* Border-box, so this lands the frame bottom exactly where chat's does.
+   * The Fire row above takes its cut of the budget the way squisq's toolbar
+   * takes chat's, which is why this is the whole band minus one top row. */
+  height: calc(var(--compose-entry-height) - var(--compose-top-row-height));
+  flex: 1 1 calc(var(--compose-entry-height) - var(--compose-top-row-height));
+  min-height: 72px;
   align-items: stretch;
   border: 0;
   border-radius: 0;
@@ -834,6 +851,13 @@
   margin-bottom: -1px;
 }
 
+/* Fire used to be the toolbar's `margin-left: auto` element and the tabs rode
+ * the space it opened. With Fire moved to its own row the tabs have to claim
+ * that space themselves, or they sit against the gallery keys. */
+.terminal-composer-toolbar .compose-mode-tabs {
+  margin-left: auto;
+}
+
 /* Terminal composer + folder tree (per-project terminal mode) */
 .terminal-composer {
   display: flex;
@@ -889,18 +913,18 @@
 .terminal-toolbar-btn svg {
   flex: 0 0 auto;
 }
-.terminal-toolbar-fire-btn {
-  margin-left: auto;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
-  color: var(--text);
-  font-weight: 600;
+
+/* Fire's own row — the terminal's twin of the squisq toolbar that carries
+ * chat's Send, so the primary key keeps its place across a mode flip. The key
+ * itself takes the shared `.terminal-fire-btn` / `.chat-send-btn` recipe in
+ * shared-content.css; this only places it. */
+.terminal-composer-fire-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-shrink: 0;
 }
-.terminal-toolbar-fire-btn:hover {
-  background: color-mix(in srgb, var(--accent) 24%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 54%, transparent);
-  color: var(--text);
-}
+
 [data-theme="light"] .terminal-toolbar-btn:hover,
 [data-theme="light"] .terminal-toolbar-btn[data-state="open"] {
   background: rgba(88, 138, 63, 0.24);
@@ -1099,7 +1123,11 @@
    * the same breathing room as the thread dropdown, and the equal block
    * padding keeps both context rows the same height across a mode switch. */
   padding: 0.4rem 0.6rem 0.4rem 0.25rem;
-  border-bottom: 1px solid var(--color-border, #333);
+  /* The same quiet seam every other band in the frame carries, including
+   * chat's thread-picker row. It used to be `var(--color-border, #333)` — a
+   * variable this app never defines, so the fallback painted a hard near-black
+   * rule across the parchment where chat has a soft one. */
+  border-bottom: 1px solid var(--compose-band-rule);
   background: rgba(255, 255, 255, 0.02);
   font-size: 0.8rem;
 }
@@ -1209,8 +1237,10 @@
 [data-theme="light"] .folder-tree-node:hover {
   background: #ece3cf;
 }
+/* `border-top-color` here was aimed at an edge this row has never had; the
+ * seam is its bottom border, and it is themed for both schemes by
+ * `--compose-band-rule` above. */
 [data-theme="light"] .project-chat-compose-main .folder-tree-switcher {
-  border-top-color: rgba(176, 114, 76, 0.2);
   background: transparent;
 }
 /* Sigil + muted helper text in light mode — the dark-bg cyan accent
@@ -1259,7 +1289,6 @@
     background: #ece3cf;
   }
   :root:not([data-theme="dark"]) .project-chat-compose-main .folder-tree-switcher {
-    border-top-color: rgba(176, 114, 76, 0.2);
     background: transparent;
   }
   :root:not([data-theme="dark"]) .terminal-prompt-sigil {

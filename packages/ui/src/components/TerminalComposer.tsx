@@ -1,7 +1,7 @@
 import type { RunTerminalCommandResponse } from '@bendyline/gezel';
 import { type ReactNode, Suspense, lazy, useCallback, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { Popover } from '../primitives/index.js';
+import { Popover, SubmitArrow } from '../primitives/index.js';
 import { CommandsPanel, type CommandsPanelSection } from './CommandsPanel.js';
 import type { TerminalCodeEditorHandle } from './terminal-editor/TerminalCodeEditor.js';
 import { useTerminalCompletionSources } from './terminal-editor/use-terminal-completion-sources.js';
@@ -133,10 +133,10 @@ export function TerminalComposer({
   /** Optional terminal context control rendered between the toolbar and input. */
   contextRow?: ReactNode;
   /**
-   * Optional trailing content for the toolbar, rendered after Fire. Project
-   * chat puts the chat/terminal mode tabs here: the toolbar is the row that
-   * lines up with the chat composer's "To:" line, so the switch keeps its
-   * position across a mode flip.
+   * Optional trailing content for the toolbar, rendered after the galleries.
+   * Project chat puts the chat/terminal mode tabs here: the toolbar is the
+   * row that lines up with the chat composer's "To:" line, so the switch
+   * keeps its position across a mode flip.
    */
   toolbarTrailing?: ReactNode;
   /** Optional hook the parent can use to flip a UX state on submit. */
@@ -210,7 +210,7 @@ export function TerminalComposer({
     [projectId, workingDir, onSent],
   );
 
-  // The toolbar action is the pointer-friendly twin of Enter. Read directly
+  // The Fire key is the pointer-friendly twin of Enter. Read directly
   // from Monaco so it always submits the current buffer, then return focus to
   // the editor for the next command.
   const fire = useCallback(() => {
@@ -241,7 +241,8 @@ export function TerminalComposer({
       {/* Toolbar — mirrors the squisq editor's top toolbar so the terminal
        * reads as a symmetric sibling of the chat editor. Holds the three
        * galleries (commands / scripts / tasks); picking from any of them
-       * stages the line into the input for review, while Fire runs it. */}
+       * stages the line into the input for review, while the Fire row
+       * below runs it. */}
       <div className="terminal-composer-toolbar">
         {GALLERIES.map((gallery) => (
           <Popover.Root
@@ -288,17 +289,25 @@ export function TerminalComposer({
             </Popover.Content>
           </Popover.Root>
         ))}
-        <button
-          type="button"
-          className="terminal-toolbar-btn terminal-toolbar-fire-btn"
-          title="Run command (Enter)"
-          onClick={fire}
-        >
-          Fire
-        </button>
         {toolbarTrailing}
       </div>
       {contextRow}
+      {/* Fire sits where chat's Send sits — its own row between the context
+       * strip and the typing surface, on the same accent recipe and the same
+       * submit glyph — so the primary action doesn't move when the user flips
+       * compose mode. It used to ride at the right of the toolbar, where it
+       * read as a fourth gallery key. */}
+      <div className="terminal-composer-fire-row">
+        <button
+          type="button"
+          className="terminal-fire-btn"
+          aria-label="Fire"
+          title="Fire — run this command (Enter)"
+          onClick={fire}
+        >
+          <SubmitArrow />
+        </button>
+      </div>
       <div className="terminal-composer-input-wrap">
         <span className="terminal-prompt-sigil">&gt;</span>
         <Suspense fallback={<div className="terminal-composer-input" aria-busy="true" />}>

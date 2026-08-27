@@ -1558,7 +1558,11 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   }
 }
 
-.chat-send-btn {
+/* The composer's one primary key: chat's Send and the terminal's Fire share
+   the recipe so the accent stays on a single action per surface and the key
+   doesn't change shape when the user flips compose mode. */
+.chat-send-btn,
+.terminal-fire-btn {
   margin: 1px;
   border: 1px solid color-mix(in srgb, var(--accent) 82%, var(--text));
   border-radius: var(--radius-md);
@@ -1573,7 +1577,8 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
     transform 120ms ease-out;
 }
 
-.chat-send-btn:hover:not(:disabled) {
+.chat-send-btn:hover:not(:disabled),
+.terminal-fire-btn:hover:not(:disabled) {
   background: linear-gradient(
     to bottom,
     color-mix(in srgb, var(--accent) 80%, var(--surface)),
@@ -1583,9 +1588,26 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
     color-mix(in srgb, var(--text) 28%, transparent);
 }
 
-.chat-send-btn:active:not(:disabled) {
+.chat-send-btn:active:not(:disabled),
+.terminal-fire-btn:active:not(:disabled) {
   transform: translateY(1px);
   box-shadow: inset 0 1px 2px color-mix(in srgb, var(--text) 30%, transparent);
+}
+
+/* Glyph-only variant. The arrow says "this draft goes now" in both modes, so
+   the key is sized near-square (keys in trays, docs/ux.md) and carries its
+   name in `aria-label` + `title` rather than on its face. */
+.chat-send-btn-icon,
+.terminal-fire-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 1.75rem;
+  padding: 0;
+}
+
+.chat-send-btn-icon[aria-busy="true"] {
+  opacity: 0.7;
 }
 
 /* Mid-turn composer controls. Nudge reuses .chat-send-btn so terracotta

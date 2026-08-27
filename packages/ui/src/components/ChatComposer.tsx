@@ -4,6 +4,7 @@ import { type GezelSummary, displayName, parseTaskRef } from '@bendyline/gezel';
 import { streamChatEvents } from '@bendyline/gezel-client';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { SubmitArrow } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
 import { ChatRecipientPicker } from './ChatRecipientPicker.js';
 import { GezelIcon } from './GezelIcon.js';
@@ -1299,17 +1300,22 @@ export function ChatComposer({
             ) : (
               <button
                 type="button"
-                className="chat-send-btn"
+                className="chat-send-btn chat-send-btn-icon"
                 data-testid="chat-send"
                 onClick={send}
                 disabled={!gezelId || engagementOff || draftSubmissionPending}
+                // The glyph replaced the label, so the button's whole
+                // accessible name lives here — including the pending state,
+                // which used to be readable on its face as "Sending…".
+                aria-label={draftSubmissionPending ? 'Sending…' : 'Send'}
+                aria-busy={draftSubmissionPending}
                 title={
                   engagementOff
                     ? 'AI is disabled in Settings → General'
                     : `Enter to send, ${newlineShortcutLabel()} for newline`
                 }
               >
-                {draftSubmissionPending ? 'Sending…' : 'Send'}
+                <SubmitArrow />
               </button>
             )
           }
