@@ -81,9 +81,11 @@ for (const file of await walk(resolve(root, 'packages/service/src'))) {
   const source = await readFile(file, 'utf8');
   if (/new Agent\(\s*\{[^}]*(?:headersTimeout|bodyTimeout)\s*:\s*0/s.test(source)) {
     failures.push(
-      `${path}: builds its own zero-timeout undici Agent.\n` +
-        `    Import \`patientFetch\` from ${CANONICAL} instead — one owner, so the next\n` +
-        `    engine cannot be given a copy that drifts.`,
+      [
+        `${path}: builds its own zero-timeout undici Agent.`,
+        `    Import 'patientFetch' from ${CANONICAL} instead — one owner, so the next`,
+        '    engine cannot be given a copy that drifts.',
+      ].join('\n'),
     );
   }
 }
@@ -96,11 +98,13 @@ for (const file of await walk(resolve(root, PROVIDERS_ROOT))) {
   if (source.includes('patientFetch(')) continue;
   if (/\/\/\s*patient-fetch-exempt:\s*\S/.test(source)) continue;
   failures.push(
-    `${path}: builds a provider without passing \`fetchImpl: patientFetch()\`, so it\n` +
-      `    inherits Node's global fetch and undici's 300s cap.\n` +
-      `    If it drives a local engine, pass \`fetchImpl: patientFetch()\`.\n` +
-      `    If the 300s cap is correct (a remote API, a download), say so at the top\n` +
-      `    of the file: // patient-fetch-exempt: <reason>`,
+    [
+      `${path}: builds a provider without passing 'fetchImpl: patientFetch()', so it`,
+      "    inherits Node's global fetch and undici's 300s cap.",
+      "    If it drives a local engine, pass 'fetchImpl: patientFetch()'.",
+      '    If the 300s cap is correct (a remote API, a download), say so at the top',
+      '    of the file: // patient-fetch-exempt: <reason>',
+    ].join('\n'),
   );
 }
 
