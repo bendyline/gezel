@@ -6145,12 +6145,13 @@ export class Store {
    */
   async listAllPendingQuestions(): Promise<Question[]> {
     const p = gezelPaths(this.home);
-    let projectIds: string[] = [];
-    try {
-      projectIds = await readdir(p.projects);
-    } catch {
-      return [];
-    }
+    // Same guard `listProjects` applies: the projects root holds OS
+    // detritus (`.DS_Store`) alongside real project dirs, and an id that
+    // fails `assertSafeEntityId` throws out of `projectQuestionsFile`.
+    // Unguarded, one stray dotfile 500s the whole endpoint for every
+    // project, so no pending question reaches the UI and any task parked
+    // on `ask_user_question` waits on an answer the user cannot give.
+    const projectIds = (await safeReaddir(p.projects)).filter(isSafeEntityId);
     const all: Question[] = [];
     for (const id of projectIds) {
       const qs = await this.listProjectQuestions(id);

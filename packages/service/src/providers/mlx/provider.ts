@@ -96,7 +96,9 @@ import {
   PROJECT_MACRO_INTERCEPT_CAP,
   deriveProjectMacroClosing,
 } from '../project-macro-loop-bail.js';
+import { prepareSalvagedProseDocument } from '../prose-document-salvage.js';
 import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs, runInQueue } from '../queue.js';
+import { buildRambleAbortMessage } from '../ramble-abort-message.js';
 import { RambleDetector } from '../ramble-detector.js';
 import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
 import {
@@ -1949,11 +1951,24 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               leakyReasoning:
                 profileHasBehavior(this.deps.profile, 'turn.preamble-folding') ||
                 leaksUntaggedReasoning(this.deps.model),
+              // MLX inlines chain-of-thought in the content deltas, and
+              // a template that opens `<think>` itself never shows the
+              // detector an open marker — so without this the whole
+              // reasoning block is scored as cold prose. Same flag the
+              // StreamingReasoningSplit below is seeded with.
+              opensInReasoning: this.deps.templateOpensReasoning === true,
             })
           : // Repetition guard is safe on any local model (fires only on
             // degenerate low-novelty loops); arm it even without the
-            // length-cap opt-in. See RambleDetector.
-            new RambleDetector({ threshold: 6000, enabled: false, repetitionGuardEnabled: true });
+            // length-cap opt-in. See RambleDetector. Still needs the
+            // reasoning-open seed: the guard exempts reasoning spans, and
+            // a template-opened `<think>` is one.
+            new RambleDetector({
+              threshold: 6000,
+              enabled: false,
+              repetitionGuardEnabled: true,
+              opensInReasoning: this.deps.templateOpensReasoning === true,
+            });
         let rambleAborted = false;
         // Tool name for the live tool-args channel — only the first
         // fragment of a streamed tool call carries `function.name`.
@@ -2239,7 +2254,17 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                     `turn#${seq}.${turn} ramble-no-salvage preview head=${JSON.stringify(head)} tail=${JSON.stringify(tail)}`,
                   );
                   throw new Error(
-                    `[Mac AI] aborting — the gezel emitted ${turnContent.length} characters of prose this turn without calling any action tool. Stop planning. Your next message must START with a single tool call — or, if the work is genuinely finished and nothing is left to do, be ONE short sentence saying so and nothing else. If shipping source or project files and \`write_file\` is in your tool list, call it NOW with the full file contents — no preamble, no plan. If you lack workspace write access, start with a handoff tool or \`ask_user_question\` instead. Do not save source files with \`write_artifact\`; artifacts are for plans/scratch.`,
+                    buildRambleAbortMessage({
+                      providerLabel: '[Mac AI]',
+                      charCount: turnContent.length,
+                      knownToolNames,
+                      ...(this.deps.activeCraftbookStep?.deliverableFile
+                        ? { deliverableFile: this.deps.activeCraftbookStep.deliverableFile }
+                        : {}),
+                      ...(this.deps.activeCraftbookStep?.deliverableIsArtifact
+                        ? { deliverableIsArtifact: true }
+                        : {}),
+                    }),
                   );
                 }
               }
@@ -2840,7 +2865,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             `turn#${seq}.${turn} repaired flattened arg(s) on ${r.name}: ${r.paths.join(', ')}`,
           );
         }
-        const toolCalls = coerced.calls as typeof mergedCalls;
+        let toolCalls = coerced.calls as typeof mergedCalls;
         if (rambleAborted && toolCalls.length === 0) {
           // If ctrl.abort() races with mlx-vlm closing the SSE stream,
           // the for-await loop can exit cleanly instead of throwing an
@@ -2857,8 +2882,62 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             `turn#${seq}.${turn} ramble-clean-exit-no-salvage preview head=${JSON.stringify(head)} tail=${JSON.stringify(tail)}`,
           );
           throw new Error(
-            `[Mac AI] aborting — the gezel emitted ${rawTurnContentBeforeReasoning.length} characters of prose this turn without calling any action tool. Stop planning. Your next message must START with a single tool call — or, if the work is genuinely finished and nothing is left to do, be ONE short sentence saying so and nothing else. If shipping source or project files and \`write_file\` is in your tool list, call it NOW with the full file contents — no preamble, no plan. If you lack workspace write access, start with a handoff tool or \`ask_user_question\` instead. Do not save source files with \`write_artifact\`; artifacts are for plans/scratch.`,
+            buildRambleAbortMessage({
+              providerLabel: '[Mac AI]',
+              charCount: rawTurnContentBeforeReasoning.length,
+              knownToolNames,
+              ...(this.deps.activeCraftbookStep?.deliverableFile
+                ? { deliverableFile: this.deps.activeCraftbookStep.deliverableFile }
+                : {}),
+              ...(this.deps.activeCraftbookStep?.deliverableIsArtifact
+                ? { deliverableIsArtifact: true }
+                : {}),
+            }),
           );
+        }
+        // Prose-document salvage. Past the guard above, zero tool calls
+        // means the model ENDED ITS OWN TURN — the one condition under
+        // which the buffer is a finished document rather than a cut-off
+        // one. A craftbook step whose deliverable is markdown gets it
+        // promoted to the write tool instead of leaving the text in chat
+        // where the gate will never see it. `turnContent` is already
+        // reasoning-stripped here; `finishReason === 'length'` means the
+        // token cap cut it, which is a truncation like any other.
+        if (toolCalls.length === 0 && finishReason !== 'length') {
+          const deliverable = this.deps.activeCraftbookStep?.deliverableFile;
+          const salvageToolName = this.deps.activeCraftbookStep?.deliverableIsArtifact
+            ? knownToolNames.has('write_artifact')
+              ? 'write_artifact'
+              : null
+            : knownToolNames.has('write_file')
+              ? 'write_file'
+              : null;
+          const document = salvageToolName
+            ? prepareSalvagedProseDocument({
+                text: turnContent,
+                deliverableFile: deliverable,
+                streamComplete: true,
+              })
+            : null;
+          if (document && salvageToolName && deliverable) {
+            toolCalls = [
+              {
+                id: `prose-doc-salvage-${seq}-${turn}`,
+                type: 'function' as const,
+                function: {
+                  name: salvageToolName,
+                  arguments: JSON.stringify({ path: deliverable, content: document }),
+                },
+              },
+            ] as typeof toolCalls;
+            log.info(
+              `turn#${seq}.${turn} prose-document-salvage: promoted ${document.length}-char ` +
+                `markdown buffer to ${salvageToolName} path=${deliverable}`,
+            );
+            this.emitWarning(
+              `The model wrote ${deliverable} in chat instead of calling ${salvageToolName} — promoting it to a real write. Ask the model to use the tool directly next time.`,
+            );
+          }
         }
         // Auto-fold pre-tool preamble for verbose-family models. When
         // a tool call fired this turn, untagged visible text is

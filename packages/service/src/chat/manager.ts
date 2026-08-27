@@ -337,6 +337,7 @@ import {
   TaskBudgetTracker,
 } from './task-budget.js';
 import { extractToolCard } from './tool-cards.js';
+import { buildToolEvidenceReplay } from './tool-evidence-replay.js';
 import type { AvailableToolInfo } from './tools-block.js';
 import { describeTurnError } from './turn-error.js';
 import { UsageTracker } from './usage.js';
@@ -3927,7 +3928,7 @@ export class ChatManager {
       args.kind === 'retry'
         ? `You paused on step \`${dispatchStepId}\` of task ${args.taskRef}, and the user has asked you to try again. Call \`read_task_notes\` first — the newest note says why it stopped. Then take a DIFFERENT approach to the same deliverable instead of repeating the attempt that failed, and call \`advance_task_step\` when it is done. If it still cannot work, say exactly what you need with \`ask_user_question\` rather than going quiet.`
         : resumedExisting
-          ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Continue this existing task thread from the progress and tool evidence above. Re-read only what you still need, keep appending focused notes with \`write_task_note\`, and call \`advance_task_step\` when the step is done.`
+          ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Your earlier tool results are restored above, each marked \`[recovered from an earlier turn]\` — treat those as already read and do NOT read them again. Re-read only the ones whose marker says the result was TRUNCATED or was not replayed. Keep appending focused notes with \`write_task_note\`, and call \`advance_task_step\` when the step is done.`
           : args.kind === 'entry'
             ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
             : selfHandoff
@@ -14991,6 +14992,7 @@ export class ChatManager {
         name: step.name,
         ...(lastExit?.name ? { onExitScriptName: lastExit.name } : {}),
         ...(step.advanceWhen?.file ? { deliverableFile: step.advanceWhen.file } : {}),
+        ...(step.advanceWhen?.artifact ? { deliverableIsArtifact: true } : {}),
       };
     }
     // Craftbook hooks: when this session's active task carries a
@@ -15147,8 +15149,10 @@ export class ChatManager {
     // seed the new session with the full persisted transcript. Without
     // this, a session reopened after an app restart lands with an empty
     // context and the model asks "what were we talking about?" on the
-    // very next turn. Filter out tool/system roles: the model only needs
-    // user+assistant turns to recover conversational context. Both local
+    // very next turn. The persisted tool calls and their results ride
+    // along (see `buildToolEvidenceReplay`): dropping them was fine for
+    // conversation and ruinous for work — a read-heavy craftbook step
+    // recovered none of its reads and started the batch over. Both local
     // engines (Ollama / llama-cpp / mlx), RemoteGezelProvider (B is
     // deliberately stateless), and Anthropic's Messages API qualify —
     // Anthropic is cloud but the API requires the client to replay history
@@ -15163,10 +15167,13 @@ export class ChatManager {
       const replayMessages = runtime?.omitLastUserFromPriorMessages
         ? record.messages.slice(0, -1)
         : record.messages;
-      opts.priorMessages = replayMessages
+      const replaySources = replayMessages
         .filter((m) => m.role === 'user' || m.role === 'assistant')
         .map((m) => ({
           role: m.role as 'user' | 'assistant',
+          ...(m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0
+            ? { toolCalls: m.toolCalls }
+            : {}),
           // Strip leftover `<think>` / `<|channel>` markup from
           // assistant turns before feeding history back to the model.
           // Two reasons this matters:
@@ -15192,6 +15199,14 @@ export class ChatManager {
               ? stripReasoningTags(m.content)
               : spliceIntoText(m.content, m.recognizedImages),
         }));
+      const replay = buildToolEvidenceReplay(replaySources);
+      opts.priorMessages = replay.entries;
+      if (replay.replayed > 0 || replay.superseded > 0) {
+        log.info(
+          `session ${record.id}: replayed ${replay.replayed} tool result(s) (${replay.chars} chars) ` +
+            `into the rebuilt context; ${replay.superseded} superseded, ${replay.budgetDropped} over budget`,
+        );
+      }
     }
     const historyManager = this.historyManager;
     const events = this.events;
@@ -16042,7 +16057,10 @@ export class ChatManager {
         const transcript = renderTranscript(
           priorMessages.map((m) => ({
             role: m.role === 'user' ? 'user' : 'assistant',
-            content: m.content,
+            // A tool result has no role of its own once the transcript is
+            // flattened; label it rather than let the condenser attribute
+            // tool output to the model as something it said.
+            content: m.role === 'tool' ? `[tool result] ${m.content}` : m.content,
             at: '',
           })) as ChatMessage[],
         );

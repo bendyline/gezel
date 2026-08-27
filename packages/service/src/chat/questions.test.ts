@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Question } from '@bendyline/gezel';
@@ -301,5 +301,21 @@ describe('ChatManager.deliverQuestionAnswer', () => {
         seed: '[Answer to: "x"]\nfoo',
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('listAllPendingQuestions — enumeration safety', () => {
+  // Wild-caught: `~/.gezel-dev/projects/` picks up a `.DS_Store`, whose
+  // leading dot fails `assertSafeEntityId`. The unguarded readdir fed it
+  // straight to `projectQuestionsFile`, which threw, so GET
+  // /api/questions 500'd for EVERY project — no pending question ever
+  // reached the UI and a task parked on `ask_user_question` waited on an
+  // answer the user could not give. Fired once per daemon boot.
+  it('skips OS detritus in the projects root instead of throwing', async () => {
+    await store.writeQuestion(makeQuestion({ id: 'pending-1' }));
+    await writeFile(join(home, 'projects', '.DS_Store'), 'binary junk');
+
+    const all = await store.listAllPendingQuestions();
+    expect(all.map((entry) => entry.id)).toContain('pending-1');
   });
 });

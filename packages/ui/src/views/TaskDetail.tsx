@@ -495,8 +495,13 @@ export function TaskDetail({
   const planGuards =
     task.status === 'draft' && !curatedBook ? planGuardrails(summarizePlanDocument(task)) : [];
 
+  const chatTabActive = selectedStepId === null && tab === 'chat';
+
   return (
-    <div className="task-detail" data-testid="task-detail">
+    <div
+      className={`task-detail${chatTabActive ? ' task-detail-chat-mode' : ''}`}
+      data-testid="task-detail"
+    >
       <header className="task-detail-header">
         <div>
           <span className="task-detail-ref">{task.ref}</span>
@@ -645,7 +650,7 @@ export function TaskDetail({
         />
       )}
 
-      {selectedStepId === null && tab === 'chat' && <TaskChatPane task={task} gezels={gezels} />}
+      {chatTabActive && <TaskChatPane task={task} gezels={gezels} />}
 
       {selectedStepId === null && tab === 'task' && (
         <div className="task-view-panel">

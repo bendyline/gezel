@@ -398,6 +398,14 @@ export interface SessionOpts {
     onExitScriptName?: string;
     /** Exact deliverable path, used to constrain code-block salvage. */
     deliverableFile?: string;
+    /**
+     * True when {@link deliverableFile} lives in the artifacts drawer
+     * rather than the workspace (`advanceWhen.artifact`). The ramble
+     * corrective needs it to name the right writer — a review step on a
+     * writes-off project must be pointed at `write_artifact`, not
+     * warned off it.
+     */
+    deliverableIsArtifact?: boolean;
   };
   /**
    * Capability tier of the model running this session, derived from

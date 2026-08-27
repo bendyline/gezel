@@ -110,6 +110,28 @@ export interface RambleDetectorOpts {
    */
   leakyReasoning?: boolean;
   /**
+   * The chat template emits the opening `<think>` itself, so generation
+   * starts INSIDE a reasoning span and the open marker never appears in
+   * the content stream. Without this the span-tracking below never arms
+   * — `insideReasoning` stays false for the whole chain-of-thought and
+   * the model's thinking is scored against the cold cap.
+   *
+   * Wild-caught (qwen3.8-27b-q4 MLX, PR-review batch step): the engine
+   * armed a 4096-token think budget (`opens_in_think=True`) while the
+   * detector guillotined at 12003 chars — the two budgets disagreed, so
+   * the turn died mid-thought, ~2 KB before the model would have closed
+   * `</think>` and emitted its `write_artifact` call. Reproduced on two
+   * unrelated tasks within an hour.
+   *
+   * Equivalent to having observed a `<think>` at offset 0: the span gets
+   * the loose {@link RambleDetectorOpts.insideCallThreshold} budget, and
+   * the model's own `</think>` then anchors the prose counter so the
+   * visible answer is measured fresh. Only meaningful on providers that
+   * inline chain-of-thought into the content stream (MLX); engines with
+   * a dedicated reasoning channel never show the detector this text.
+   */
+  opensInReasoning?: boolean;
+  /**
    * Trailing-prose window (chars) the repetition guard measures novelty
    * over. The guard stays dormant until prose-since-the-last-action
    * reaches this length — below it there isn't enough sample to tell
@@ -322,6 +344,15 @@ export class RambleDetector {
     this.repetitionGuardEnabled = opts.repetitionGuardEnabled ?? opts.enabled;
     this.repetitionWindow = opts.repetitionWindow ?? DEFAULT_REPETITION_WINDOW;
     this.repetitionMinNovelty = opts.repetitionMinNovelty ?? DEFAULT_REPETITION_MIN_NOVELTY;
+    // Seed the reasoning span as already open at offset 0 — exactly the
+    // state an observed `<think>` at the head of the stream would leave
+    // us in. `observeContent` recomputes `insideReasoning` from these
+    // offsets on its first scan; the field is set here too so the
+    // getters read true before any content arrives.
+    if (opts.opensInReasoning) {
+      this.lastReasoningOpenEndAtChars = 0;
+      this.insideReasoning = true;
+    }
   }
 
   /**

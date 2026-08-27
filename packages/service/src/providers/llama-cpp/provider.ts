@@ -96,7 +96,9 @@ import type {
   NativeEngineSupervisor,
 } from '../native/supervisor.js';
 import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
+import { prepareSalvagedProseDocument } from '../prose-document-salvage.js';
 import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs, runInQueue } from '../queue.js';
+import { buildRambleAbortMessage } from '../ramble-abort-message.js';
 import { RambleDetector } from '../ramble-detector.js';
 
 // Re-exported: these moved to ../immediate-write-salvage.ts when MLX needed
@@ -5271,7 +5273,17 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 }
                 if (!recoveredFromRamble) {
                   throw new Error(
-                    `[llama-cpp] aborting — the gezel emitted ${turnContent.length} characters of prose this turn without calling any action tool. Stop planning. Your next message must START with a single tool call — or, if the work is genuinely finished and nothing is left to do, be ONE short sentence saying so and nothing else. If shipping source or project files and \`write_file\` is in your tool list, call it NOW with the full file contents — no preamble, no plan. If you lack workspace write access, start with a handoff tool or \`ask_user_question\` instead. Do not save source files with \`write_artifact\`; artifacts are for plans/scratch.`,
+                    buildRambleAbortMessage({
+                      providerLabel: '[llama-cpp]',
+                      charCount: turnContent.length,
+                      knownToolNames,
+                      ...(this.deps.activeCraftbookStep?.deliverableFile
+                        ? { deliverableFile: this.deps.activeCraftbookStep.deliverableFile }
+                        : {}),
+                      ...(this.deps.activeCraftbookStep?.deliverableIsArtifact
+                        ? { deliverableIsArtifact: true }
+                        : {}),
+                    }),
                   );
                 }
               }
@@ -5405,6 +5417,49 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 `The model wrote ${blocks.length === 1 ? 'a code block' : `${blocks.length} code blocks`} in chat instead of calling ${salvageToolName} — promoting them to actual file writes.`,
               );
             }
+          }
+        }
+        // Prose-document salvage — the unfenced sibling of the block
+        // above. A review/report deliverable is markdown all the way
+        // down, so the model never fences it and the whole buffer would
+        // otherwise stay in chat where the step's gate cannot see it.
+        // Only runs on a turn the model ended itself with a complete
+        // document; `finishReason === 'length'` is a truncation.
+        if (toolCalls.length === 0 && !rambleAborted && finishReason !== 'length') {
+          const knownToolNames = collectKnownToolNames();
+          const deliverable = this.deps.activeCraftbookStep?.deliverableFile;
+          const salvageToolName = this.deps.activeCraftbookStep?.deliverableIsArtifact
+            ? knownToolNames.has('write_artifact')
+              ? 'write_artifact'
+              : null
+            : knownToolNames.has('write_file')
+              ? 'write_file'
+              : null;
+          const document = salvageToolName
+            ? prepareSalvagedProseDocument({
+                text: turnContent,
+                deliverableFile: deliverable,
+                streamComplete: true,
+              })
+            : null;
+          if (document && salvageToolName && deliverable) {
+            toolCalls = [
+              {
+                id: `prose-doc-salvage-${turn}`,
+                type: 'function' as const,
+                function: {
+                  name: salvageToolName,
+                  arguments: JSON.stringify({ path: deliverable, content: document }),
+                },
+              },
+            ];
+            log.info(
+              `[llama-cpp] prose-document-salvage: promoted ${document.length}-char markdown ` +
+                `buffer to ${salvageToolName} path=${deliverable}`,
+            );
+            this.emitWarning(
+              `The model wrote ${deliverable} in chat instead of calling ${salvageToolName} — promoting it to a real write.`,
+            );
           }
         }
         let malformedStructuredCallIds = new Set<string>();

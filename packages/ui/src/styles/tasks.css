@@ -555,6 +555,22 @@
   flex: 1;
 }
 
+/* Chat tab: the transcript is the only thing that moves. The detail pane is
+   normally the scroller (`.task-detail-panel`), which would carry the identity
+   header, the workflow bench and the composer up out of view as the
+   conversation grows. Hand the height budget to the pane instead and let
+   `.chat-timeline` inside do the scrolling. */
+.task-detail-panel:has(.task-detail-chat-mode) {
+  display: flex;
+  flex-direction: column;
+  overflow-y: hidden;
+}
+
+.task-detail-chat-mode > .task-detail-header,
+.task-detail-chat-mode > .task-bench-row {
+  flex: none;
+}
+
 .task-detail-chat-empty {
   padding: 1rem;
   font-size: 0.9rem;

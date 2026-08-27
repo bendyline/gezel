@@ -51,6 +51,7 @@ import {
 import { McpBridgePool } from './mcp-bridge-pool.js';
 import { computeToolBudgetChars } from './mcp-bridge.js';
 import { ProviderQueue, defaultAmbientQuietMs, runInQueue } from './queue.js';
+import { buildRambleAbortMessage } from './ramble-abort-message.js';
 import { RambleDetector } from './ramble-detector.js';
 import { StreamingSessionBase } from './streaming-session.js';
 import { terminalToolClosingText } from './terminal-tool-policy.js';
@@ -878,7 +879,21 @@ class OllamaSession extends StreamingSessionBase implements LLMSession {
       const abortErrorMessage = async (): Promise<string> => {
         if (abortKind === 'external') return '[ollama] turn cancelled by caller';
         if (abortKind === 'ramble') {
-          return `[ollama] aborting — the gezel emitted ${turnText.length} characters of prose this turn without calling any action tool. Stop planning. Your next message must START with a single tool call — or, if the work is genuinely finished and nothing is left to do, be ONE short sentence saying so and nothing else. If shipping source or project files and \`write_file\` is in your tool list, call it NOW with the full file contents — no preamble, no plan. If you lack workspace write access, start with a handoff tool or \`ask_user_question\` instead. Do not save source files with \`write_artifact\`; artifacts are for plans/scratch.`;
+          return buildRambleAbortMessage({
+            providerLabel: '[ollama]',
+            charCount: turnText.length,
+            knownToolNames: new Set(
+              this.deps.bridges.isEmpty()
+                ? []
+                : this.deps.bridges.getOpenAITools().map((t) => t.name),
+            ),
+            ...(this.deps.activeCraftbookStep?.deliverableFile
+              ? { deliverableFile: this.deps.activeCraftbookStep.deliverableFile }
+              : {}),
+            ...(this.deps.activeCraftbookStep?.deliverableIsArtifact
+              ? { deliverableIsArtifact: true }
+              : {}),
+          });
         }
         if (abortKind === 'idle') {
           if (idlePhase === 'pre-first-byte') {
