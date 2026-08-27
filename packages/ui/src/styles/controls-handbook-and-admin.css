@@ -89,6 +89,27 @@
   text-align: left;
 }
 
+/* The two lines inside a stacked key. Generic so a settings tray does not have
+   to invent its own pair the way the night-shift menu did — the hint must
+   never compete with the label (docs/ux.md → "Controls: keys in trays"). */
+.gz-key-label {
+  font-size: var(--text-sm);
+}
+
+.gz-key-hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-weight: 400;
+  white-space: normal;
+}
+
+/* A latched key takes the accent fill, so a muted hint on top of it loses
+   contrast. Inherit the pressed ink and lean on opacity for the hierarchy. */
+.gz-key-active .gz-key-hint {
+  color: inherit;
+  opacity: 0.75;
+}
+
 /* Icon-only keys for tight panel headers and toolbars: near-square padding,
    no label gap. No visible text, so every key MUST carry both `title` and
    `aria-label` (docs/ux.md → "Controls: keys in trays"). */

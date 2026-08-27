@@ -1880,6 +1880,16 @@ export interface Ds4ContextPlan {
   kvBytesPerToken?: number;
   /** Footprint at a zero-token window: everything the context doesn't move. */
   contextFreeResidentBytes?: number;
+  /**
+   * Whether this device would hold the model fully in memory rather than
+   * streaming its routed experts from SSD. Streaming costs roughly an order of
+   * magnitude (measured 1.85 vs 18.1 tok/s on the same IQ2_XXS build), so this
+   * is the single most decision-relevant fact when picking between quants.
+   *
+   * Computed by the daemon with the launcher's own residency function, not
+   * re-derived client-side.
+   */
+  fullyResident?: boolean;
 }
 
 /**

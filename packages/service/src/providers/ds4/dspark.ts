@@ -38,6 +38,13 @@ export interface Ds4DsparkOptions {
   ssdStreaming: boolean;
   /** Absolute path to a DSpark support GGUF, if one resolved. */
   supportModelPath?: string;
+  /**
+   * Whether the companion still fits once the resident weights are accounted
+   * for. Defaults to true so callers that cannot weigh it keep the old
+   * behavior. When false the launch keeps its residency and drops drafting —
+   * residency is worth ~9.5x and drafting ~1.05x, so the flag is what yields.
+   */
+  companionFitsMemory?: boolean;
 }
 
 export interface Ds4DsparkDecision {
@@ -94,6 +101,19 @@ export function resolveDs4Dspark(opts: Ds4DsparkOptions): Ds4DsparkDecision {
         ? {
             unmetRequest:
               'ds4Dspark=on cannot be honored while SSD streaming is active — ds4 refuses --mtp with --ssd-streaming. Full residency requires a model that fits this machine with headroom to spare (ds4SsdStreaming=false).',
+          }
+        : {}),
+    };
+  }
+
+  if (opts.companionFitsMemory === false) {
+    return {
+      enabled: false,
+      reason: 'support model does not fit alongside the resident weights',
+      ...(mode === 'on'
+        ? {
+            unmetRequest:
+              'ds4Dspark=on cannot be honored: the DSpark support model does not fit in memory alongside the fully resident weights. Drafting was dropped rather than giving up full residency, which is worth far more than drafting.',
           }
         : {}),
     };

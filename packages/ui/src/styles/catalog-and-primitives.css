@@ -48,6 +48,18 @@
   background: var(--warning-bg);
 }
 
+/* Neutral chip for a state that works but carries a real cost the user should
+   weigh -- today, a ds4 model that runs by streaming experts from SSD (roughly
+   ten times slower than one held in memory). Deliberately NOT `--ok`: that
+   sage chip is the resting "this is fine" signal, and wearing it made the slow
+   path look like the good outcome when it is the fallback. Also not `--warn`:
+   nothing is wrong, and an amber chip on every large model reads as noise. */
+.gz-status-pill--info {
+  color: var(--text-muted);
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+}
+
 /* Amber-tinted pill that tells the user verbose diagnostics are being
    written. Identity-distinct from the ok/warn variants so it's hard to
    forget debug mode is on. */

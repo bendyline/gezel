@@ -122,8 +122,14 @@ describe('Ds4ModelManager', () => {
 
     expect(await screen.findByText('DeepSeek V4 Flash (FP4)')).toBeInTheDocument();
     expect(screen.getByText('DeepSeek V4 Flash (IQ2_XXS)')).toBeInTheDocument();
-    expect(screen.getByText('fits with SSD streaming')).toBeInTheDocument();
-    expect(screen.getByText('recommended on this device')).toBeInTheDocument();
+    // No context plan in this fixture, so no `fullyResident` verdict — these
+    // rows are the streaming rungs. The label leads with the cost rather than
+    // reading as an endorsement: "fits with SSD streaming" wore the ok/green
+    // chip while describing the ~10x-slower path.
+    expect(screen.getByText('streams from SSD · lightest option')).toBeInTheDocument();
+    expect(screen.getByText('streams from SSD · slower')).toBeInTheDocument();
+    expect(screen.queryByText('fits with SSD streaming')).not.toBeInTheDocument();
+    expect(screen.queryByText('recommended on this device')).not.toBeInTheDocument();
     expect(screen.queryByText('runs on this device')).not.toBeInTheDocument();
     // Download size and memory working set share one cell, as they do on the
     // llama.cpp and MLX pages — for a streaming model the two numbers are
@@ -584,6 +590,38 @@ describe('Ds4ModelManager memory projection', () => {
       source: 'darwin-unified',
       usableBytes: Math.floor(128 * GiB * 0.6),
     });
+  });
+
+  it('badges a fully resident model above the streaming rungs and prices it by weights', async () => {
+    vi.mocked(api.getMemoryProfile).mockResolvedValue({
+      platform: 'darwin',
+      totalRamBytes: 128 * GiB,
+      gpuVramBytes: null,
+      source: 'darwin-unified',
+      usableBytes: Math.floor(128 * GiB * 0.6),
+    });
+    vi.mocked(api.listDs4ContextPlans).mockResolvedValue({
+      plans: {
+        'deepseek-v4-flash-284b-q2': {
+          effectiveContextWindow: 131_072,
+          projectedResidentBytes: 36 * GiB,
+          kvBytesPerToken: 8192,
+          contextFreeResidentBytes: 35 * GiB,
+          // The daemon's verdict, computed with the launcher's own residency
+          // function — the UI must not re-derive it.
+          fullyResident: true,
+        },
+      },
+    } as never);
+
+    render(<Ds4ModelManager />);
+
+    expect(await screen.findByText('runs fully in memory · fastest')).toBeInTheDocument();
+    // The catalog's `residentBytes` (36 GB) is a STREAMING expert-cache budget.
+    // Quoting it for a resident launch understates the real cost by ~45 GB, so
+    // the headline switches to the weights (81 GB in this fixture).
+    expect(screen.getByText('81.0 GB in memory')).toBeInTheDocument();
+    expect(screen.queryByText('36.0 GB in memory')).not.toBeInTheDocument();
   });
 
   it('quotes a smaller working set at a smaller context window', async () => {

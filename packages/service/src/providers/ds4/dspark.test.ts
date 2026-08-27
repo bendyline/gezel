@@ -91,4 +91,43 @@ describe('DS4 DSpark policy', () => {
   it('emits no --mtp-draft', () => {
     expect(ds4DsparkArgs(resolveDs4Dspark(eligible()))).not.toContain('--mtp-draft');
   });
+
+  it('drops drafting rather than residency when the companion will not fit', () => {
+    const d = resolveDs4Dspark({
+      mode: 'auto',
+      backend: 'cuda',
+      ssdStreaming: false,
+      companionFitsMemory: false,
+      supportModelPath: '/models/dspark-support.gguf',
+    });
+    expect(d.enabled).toBe(false);
+    expect(d.supportModelPath).toBeUndefined();
+    expect(d.reason).toMatch(/does not fit alongside the resident weights/);
+  });
+
+  it('reports an unmet ds4Dspark=on when the companion will not fit', () => {
+    const d = resolveDs4Dspark({
+      mode: 'on',
+      backend: 'cuda',
+      ssdStreaming: false,
+      companionFitsMemory: false,
+      supportModelPath: '/models/dspark-support.gguf',
+    });
+    expect(d.enabled).toBe(false);
+    // The user asked for drafting and is not getting it; silence here would
+    // leave them believing they were.
+    expect(d.unmetRequest).toMatch(/does not fit in memory/);
+  });
+
+  it('still drafts when the companion fits', () => {
+    const d = resolveDs4Dspark({
+      mode: 'auto',
+      backend: 'cuda',
+      ssdStreaming: false,
+      companionFitsMemory: true,
+      supportModelPath: '/models/dspark-support.gguf',
+    });
+    expect(d.enabled).toBe(true);
+    expect(d.supportModelPath).toBe('/models/dspark-support.gguf');
+  });
 });

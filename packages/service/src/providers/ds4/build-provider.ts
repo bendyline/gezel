@@ -236,15 +236,17 @@ export async function buildDs4Provider(opts: {
     );
   }
 
-  // Streaming is the safe default. A stale/manual `false` is honored only
-  // when this exact model plus runtime/OS headroom fits the unified-memory
-  // machine. The old device-only 120 GiB threshold made a 153 GiB Q4 GGUF try
-  // full residency on a 128 GiB Mac and could lock up the whole system.
+  // Residency is the default wherever the model fits — streaming costs roughly
+  // an order of magnitude (1.85 vs 18.1 tok/s measured on the same IQ2_XXS
+  // build). `shouldUseDs4SsdStreaming` still refuses a model that cannot fit,
+  // which is what keeps the flip safe: overriding that on a 90.89 GiB build
+  // OOM-killed the engine mid-load on a 121.63 GiB host.
   const { planDs4ExpertCache, shouldUseDs4SsdStreaming } = await import('./residency.js');
+  const totalRamBytes = totalRamGb * 1024 ** 3;
   const ssdStreaming = shouldUseDs4SsdStreaming({
     configured: config.ds4SsdStreaming,
     modelSizeBytes,
-    totalRamBytes: totalRamGb * 1024 ** 3,
+    totalRamBytes,
   });
   if (config.ds4SsdStreaming === false && ssdStreaming) {
     log.warn(
@@ -257,10 +259,29 @@ export async function buildDs4Provider(opts: {
   // it depends on: ds4 aborts at startup if `--mtp` is combined with
   // `--ssd-streaming`, so this can only ever draft on a fully resident launch.
   const dsparkSupportPath = config.ds4DsparkModelPath ?? installedModel?.draftModelPath;
+  // Residency is decided on the weights alone, then the companion is priced
+  // against what is left. That precedence is deliberate and not symmetric:
+  // residency is worth ~9.5x and drafting ~1.05x, so a companion that would
+  // push the model out of memory loses its own flag rather than costing the
+  // launch its residency.
+  let companionFitsMemory = true;
+  if (dsparkSupportPath && !ssdStreaming) {
+    const { canUseDs4FullResidency } = await import('./residency.js');
+    const { stat: statCompanion } = await import('node:fs/promises');
+    const companionBytes = await statCompanion(dsparkSupportPath)
+      .then((st) => st.size)
+      .catch(() => undefined);
+    companionFitsMemory = canUseDs4FullResidency({
+      modelSizeBytes,
+      totalRamBytes,
+      ...(companionBytes !== undefined ? { companionBytes } : {}),
+    });
+  }
   const dspark = resolveDs4Dspark({
     mode: config.ds4Dspark,
     backend: backendFlag.slice(2) as Ds4Backend,
     ssdStreaming,
+    companionFitsMemory,
     ...(dsparkSupportPath ? { supportModelPath: dsparkSupportPath } : {}),
   });
   if (dspark.unmetRequest) log.warn(`[ds4] ${dspark.unmetRequest}`);

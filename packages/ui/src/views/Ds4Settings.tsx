@@ -24,10 +24,14 @@ interface Props {
  * Settings tab for DwarfStar (ds4). DwarfStar is a specialized, GPU-only
  * on-device engine that streams very large mixture-of-experts models from SSD
  * — so the panel leads with an availability banner (it can't run on Windows /
- * Intel macOS), then explains the model-specific disk and memory costs. Low-
- * level residency controls deliberately stay out of the desktop UI: the
- * service keeps SSD streaming on by default and rejects overrides that cannot
- * safely fit.
+ * Intel macOS), then explains the model-specific disk and memory costs.
+ *
+ * Memory use is the one setting worth surfacing here. Streaming costs roughly
+ * an order of magnitude (measured 1.85 vs 18.1 tok/s on the same IQ2_XXS
+ * build), so the service now holds a model in memory whenever it fits and this
+ * panel exposes the opt-out rather than leaving it a config-file-only key. The
+ * service still refuses a residency request that cannot safely fit, so the
+ * control cannot be used to page the machine to death.
  */
 export function Ds4Settings({ config, onConfigChanged, health, title }: Props) {
   const totalRamBytes = useTotalRamBytes();
@@ -66,6 +70,27 @@ export function Ds4Settings({ config, onConfigChanged, health, title }: Props) {
     },
     [config?.defaultModel, onConfigChanged],
   );
+
+  const saveSsdStreaming = useCallback(
+    async (alwaysStream: boolean) => {
+      setSaving('saving');
+      try {
+        // `undefined` is the automatic policy (hold it in memory when it fits).
+        // `true` is an explicit, always-honored opt-in to streaming.
+        const next = await api.updateConfig({
+          ds4SsdStreaming: alwaysStream ? true : undefined,
+        });
+        onConfigChanged(next);
+        setSaving('saved');
+        setTimeout(() => setSaving('idle'), 1200);
+      } catch {
+        setSaving('idle');
+      }
+    },
+    [onConfigChanged],
+  );
+
+  const alwaysStream = config?.ds4SsdStreaming === true;
 
   const availability = detectDs4Availability({
     externalBaseUrl: config?.ds4BaseUrl,
@@ -162,12 +187,55 @@ export function Ds4Settings({ config, onConfigChanged, health, title }: Props) {
             hundreds of gigabytes.
           </p>
           <Ds4ModelManager onModelsChanged={refreshInstalled} />
-          <p className="muted small" style={{ marginTop: '1rem' }}>
-            SSD streaming stays on automatically. Gezel uses the selected model's recommended expert
-            cache and reduces it when necessary to preserve memory for the system and your other
-            apps.
-          </p>
           <Ds4EngineLogViewer />
+        </section>
+      )}
+
+      {/* ── Memory use ── */}
+      {availability.status !== 'unavailable' && availability.status !== 'external' && (
+        <section style={{ marginBottom: '2rem' }}>
+          <h4>Memory use</h4>
+          <p className="muted small" style={{ marginTop: 0 }}>
+            A model held entirely in memory generates roughly ten times faster than one whose
+            experts are read from SSD as they're needed. Gezel keeps a model in memory whenever this
+            machine has room for it, and falls back to streaming when it doesn't — the model list
+            shows which each one will do.
+          </p>
+          <div
+            className="gz-tray"
+            role="radiogroup"
+            aria-label="Memory use"
+            style={{ marginTop: '0.6rem' }}
+          >
+            <button
+              type="button"
+              // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
+              role="radio"
+              aria-checked={!alwaysStream}
+              className={`gz-key gz-key--stacked${!alwaysStream ? ' gz-key-active' : ''}`}
+              onClick={() => void saveSsdStreaming(false)}
+            >
+              <span className="gz-key-label">Keep in memory when it fits</span>
+              <span className="gz-key-hint">Fastest. Falls back to streaming automatically.</span>
+            </button>
+            <button
+              type="button"
+              // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
+              role="radio"
+              aria-checked={alwaysStream}
+              className={`gz-key gz-key--stacked${alwaysStream ? ' gz-key-active' : ''}`}
+              onClick={() => void saveSsdStreaming(true)}
+            >
+              <span className="gz-key-label">Always stream from SSD</span>
+              <span className="gz-key-hint">
+                Much slower, but leaves memory free for other apps.
+              </span>
+            </button>
+          </div>
+          <p className="muted small" style={{ marginTop: '0.6rem' }}>
+            Gezel never holds a model in memory that wouldn't leave enough for the system and your
+            other apps — a model too large for this machine streams regardless of this setting.
+          </p>
         </section>
       )}
 

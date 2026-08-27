@@ -13,9 +13,34 @@ import {
 const GB = 1024 ** 3;
 
 describe('DS4 residency policy', () => {
-  it('keeps streaming on by default, including 128 GB unified-memory targets', () => {
+  it('resides by default when the model fits, and streams when it does not', () => {
+    // The whole point of the inversion: an 81 GB model on a 128 GB unified
+    // machine used to stream (≈10x slower) unless a UI-less config key said
+    // otherwise. Nothing is configured here.
     expect(
       shouldUseDs4SsdStreaming({
+        modelSizeBytes: 81 * GB,
+        totalRamBytes: 128 * GB,
+        platform: 'darwin',
+        arch: 'arm64',
+      }),
+    ).toBe(false);
+    // Same machine, the mixed-precision build that OOM-killed the engine on a
+    // 121.63 GiB Spark: still streams, unconfigured.
+    expect(
+      shouldUseDs4SsdStreaming({
+        modelSizeBytes: 153 * GB,
+        totalRamBytes: 128 * GB,
+        platform: 'darwin',
+        arch: 'arm64',
+      }),
+    ).toBe(true);
+  });
+
+  it('honors an explicit opt-in to streaming even where residency would fit', () => {
+    expect(
+      shouldUseDs4SsdStreaming({
+        configured: true,
         modelSizeBytes: 81 * GB,
         totalRamBytes: 128 * GB,
         platform: 'darwin',
@@ -24,34 +49,27 @@ describe('DS4 residency policy', () => {
     ).toBe(true);
   });
 
-  it('allows an explicit full-residency request only when this model fits', () => {
+  it('prices a DSpark companion into the residency sum', () => {
+    const model = Math.round(80.76 * GB);
+    const companion = Math.round(5.58 * GB);
+    const linuxArm = { platform: 'linux' as const, arch: 'arm64' };
+    // On the measured Spark the companion does NOT tip the verdict — 80.76 +
+    // 5.58 + 32 = 118.34 against 121.63 — and the observed peak (116.5 GiB)
+    // stayed under that. Kept as a regression pin so the accounting change
+    // cannot silently start refusing the configuration it was validated on.
     expect(
-      shouldUseDs4SsdStreaming({
-        configured: false,
-        modelSizeBytes: 81 * GB,
-        totalRamBytes: 128 * GB,
-        platform: 'darwin',
-        arch: 'arm64',
-      }),
-    ).toBe(false);
-    expect(
-      shouldUseDs4SsdStreaming({
-        configured: false,
-        modelSizeBytes: 153 * GB,
-        totalRamBytes: 128 * GB,
-        platform: 'darwin',
-        arch: 'arm64',
+      canUseDs4FullResidency({
+        modelSizeBytes: model,
+        totalRamBytes: Math.round(121.63 * GB),
+        companionBytes: companion,
+        ...linuxArm,
       }),
     ).toBe(true);
-    expect(
-      shouldUseDs4SsdStreaming({
-        configured: false,
-        modelSizeBytes: 153 * GB,
-        totalRamBytes: 256 * GB,
-        platform: 'darwin',
-        arch: 'arm64',
-      }),
-    ).toBe(false);
+    // A slightly smaller host is where ignoring it would have been an OOM:
+    // weights alone clear 118 GiB, weights plus companion do not.
+    const tight = { modelSizeBytes: model, totalRamBytes: 118 * GB, ...linuxArm };
+    expect(canUseDs4FullResidency(tight)).toBe(true);
+    expect(canUseDs4FullResidency({ ...tight, companionBytes: companion })).toBe(false);
   });
 
   it('does not trust system RAM as discrete GPU capacity', () => {

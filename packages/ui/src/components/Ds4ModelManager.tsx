@@ -1,5 +1,9 @@
 import type { CatalogItemSummary, ChatModelManifest } from '@bendyline/gezel';
-import { RETIRED_MODEL_TOOLTIP, isRetiredModel } from '@bendyline/gezel';
+import {
+  DS4_FULL_RESIDENCY_HEADROOM_BYTES,
+  RETIRED_MODEL_TOOLTIP,
+  isRetiredModel,
+} from '@bendyline/gezel';
 import type {
   Ds4ContextPlan,
   IncompleteModelDownload,
@@ -462,8 +466,9 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                 // target exceeds the ceiling, the service reduces only the routed-
                 // expert cache. The fixed portion must still fit or installation is
                 // not offered on this machine.
-                const DS4_SYSTEM_HEADROOM = 32 * 1024 ** 3;
-                const ds4Ceiling = mem ? Math.max(0, mem.totalRamBytes - DS4_SYSTEM_HEADROOM) : 0;
+                const ds4Ceiling = mem
+                  ? Math.max(0, mem.totalRamBytes - DS4_FULL_RESIDENCY_HEADROOM_BYTES)
+                  : 0;
                 const fitsRecommendedCache = mem && resident ? resident <= ds4Ceiling : true;
                 const fixedResident = resident ? Math.max(0, resident - cache) : 0;
                 const canRunSafely = mem ? fixedResident + 1024 ** 3 <= ds4Ceiling : true;
@@ -475,22 +480,47 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                   job && job.totalBytes > 0
                     ? Math.floor((job.bytesWritten / job.totalBytes) * 100)
                     : 0;
-                const fitPill = resident ? (
+                // The daemon's own residency verdict for this entry. Kept
+                // ahead of the streaming rungs because it is a different
+                // ORDER of performance, not a better grade of the same thing:
+                // 18.1 tok/s resident against 1.85 streaming on the same
+                // IQ2_XXS build. Before this rung existed the streaming path
+                // was the best outcome the list could express, and it wore the
+                // ok/green pill.
+                const runsResident = plan?.fullyResident === true;
+                const fitPill = runsResident ? (
+                  <span
+                    className="gz-status-pill gz-status-pill--ok ds4-model-fit"
+                    title={`This device holds the whole model in memory — no expert streaming from SSD. That is roughly ten times faster to generate than the streaming fallback${
+                      resident
+                        ? `, and costs about ${formatBytes(m.ds4.approxSizeBytes)} of memory while loaded`
+                        : ''
+                    }.`}
+                  >
+                    runs fully in memory · fastest
+                  </span>
+                ) : resident ? (
                   fitsRecommendedCache ? (
                     <span
-                      className="gz-status-pill gz-status-pill--ok ds4-model-fit"
-                      title={`Uses SSD streaming with a target memory working set of about ${formatBytes(resident)}.`}
+                      className="gz-status-pill gz-status-pill--info ds4-model-fit"
+                      title={`Too large to hold in memory on this device, so DwarfStar keeps about ${formatBytes(
+                        resident,
+                      )} resident and reads the remaining experts from SSD as it goes. That works, but generates roughly ten times slower than a model that fits in memory. A smaller quant that fits will be much faster.`}
                     >
-                      {isLightest ? 'recommended on this device' : 'fits with SSD streaming'}
+                      {isLightest
+                        ? 'streams from SSD · lightest option'
+                        : 'streams from SSD · slower'}
                     </span>
                   ) : canRunSafely ? (
                     <span
                       className="gz-status-pill gz-status-pill--warn ds4-model-fit"
                       title={`Gezel will reduce this model's expert cache below its ${formatBytes(
                         resident,
-                      )} target to preserve 32 GB for the system and other apps. It should run, but will read from SSD more often.`}
+                      )} target to preserve ${formatBytes(
+                        DS4_FULL_RESIDENCY_HEADROOM_BYTES,
+                      )} for the system and other apps. It should run, but will read from SSD even more often than a normal streaming launch.`}
                     >
-                      reduced cache · slower
+                      reduced cache · much slower
                     </span>
                   ) : (
                     <span
@@ -548,6 +578,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                     ? { contextFreeBytes: plan.contextFreeResidentBytes }
                     : {}),
                   ...(launchCtx !== undefined ? { effectiveContextWindow: launchCtx } : {}),
+                  ...(runsResident ? { fullyResident: true } : {}),
                 };
                 const memoryHeadline = ds4MemoryHeadline(memoryCopy);
                 const updateAvailable = installedRow?.updateAvailable === true;

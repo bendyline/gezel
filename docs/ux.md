@@ -180,10 +180,16 @@ Rules:
   those surfaces, move it to the `gz-*` classes and delete its alias.
 - **Keys with a description line** follow the `.gz-key--stacked` shape:
   label on top, a smaller muted hint beneath, left-aligned, wrapping
-  allowed. `.pending-question-choice-described` (Claude CLI AskUserQuestion
-  options, where each choice carries an explanation) is the current
-  example. The hint is `--text-xs` in `--text-muted` — it must never
-  compete with the label.
+  allowed. Put the two lines in `.gz-key-label` and `.gz-key-hint` — the
+  recipe styles both, so a new surface never needs its own pair (the
+  night-shift menu's `app-engagement-menu-label`/`-hint` predates them and
+  is the case that motivated generalizing). The hint is `--text-xs` in
+  `--text-muted` and must never compete with the label; on a latched key it
+  inherits the pressed ink and separates by opacity instead, because muted
+  grey on the accent fill loses contrast. `.pending-question-choice-described`
+  (Claude CLI AskUserQuestion options) is the other example.
+  The ds4 Settings "Memory use" tray is the reference for a stacked
+  two-option preference.
 - **No new fully-rounded controls.** If you're reaching for
   `border-radius: 999px` on anything with a text label, it should almost
   certainly be a key or a small-radius chip instead.
