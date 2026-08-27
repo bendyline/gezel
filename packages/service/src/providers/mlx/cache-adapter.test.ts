@@ -218,10 +218,19 @@ describe('MlxCacheAdapter — tool roster in the prefix identity', () => {
     expect(gezelPrefixId(sys, [])).toBe(gezelPrefixId(sys));
   });
 
-  it('sends tools on the warm request only when the prefix-stability flag is on', async () => {
-    // Both states are pinned: the flag defaults OFF because the paired arms
-    // measured this line of work as a reuse regression (34% -> 14%), and a
-    // silent default flip would re-introduce ~5-6K tokens of warm prefill.
+  it('warms with tools when the flag is on, and NOT AT ALL when it is off', async () => {
+    // Both states are pinned. Flag ON warms with the roster — the warmed
+    // tokens are a real prefix of later turns. Flag OFF must not warm a
+    // tool-bearing session AT ALL: the old behavior warmed system-only,
+    // which renders Qwen's no-tools template branch (~3 shared tokens with
+    // the real turn) and persists it, overwriting the good entry the last
+    // real session saved back. Wild-caught (koray PR-review fanout):
+    // `prefix-0b60345fcefa9ffd` oscillated between the two shapes on every
+    // daemon boot — 40 full re-prefills, 1.58M tokens re-prefilled against
+    // 238K of new work. The flag still defaults OFF because the paired
+    // arms measured warm-with-tools as a reuse regression without the
+    // snapshot boundary (34% -> 14%); "no warm" keeps that result while
+    // never writing a shape that cannot match.
     const run = async (flag: string | undefined) => {
       const prev = process.env.GEZEL_MLX_STABLE_PREFIX;
       if (flag === undefined) delete process.env.GEZEL_MLX_STABLE_PREFIX;
@@ -248,7 +257,58 @@ describe('MlxCacheAdapter — tool roster in the prefix identity', () => {
     expect(on?.body.tools).toBeTruthy();
 
     const off = await run(undefined);
-    expect(off, 'a warm request should still be issued').toBeTruthy();
-    expect(off?.body.tools).toBeUndefined();
+    expect(off, 'flag off must not warm a tool-bearing prefix at all').toBeUndefined();
+  });
+
+  it('still warms a genuinely tool-less session system-only', async () => {
+    // A no-tools render IS the token prefix of a no-tools turn — skipping
+    // the warm here would throw away the one case where the system-only
+    // warm has always been correct.
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const a = new MlxCacheAdapter({
+      resolveBaseUrl: async () => 'http://127.0.0.1:1',
+      fetchImpl: (async (url: string, init: { body: string }) => {
+        calls.push({ url: String(url), body: JSON.parse(init.body) });
+        return { ok: true, json: async () => ({}) };
+      }) as unknown as typeof fetch,
+    });
+    await a.prepareForSend('sess-no-tools', 'system prompt', undefined, []);
+    const warm = calls.find((c) => c.url.includes('/v1/cache/warm'));
+    expect(warm, 'the tool-less warm should have been issued').toBeTruthy();
+    expect(warm?.body.tools).toBeUndefined();
+    expect(warm?.body.persist).toBe(true);
+  });
+
+  it('routes save-backs by roster: registration alone still separates rosters', async () => {
+    // Flag off, tools present: no warm fires, but the session must still
+    // be registered under a roster-aware id so its save-back cannot land
+    // in (or later seed from) another roster's entry.
+    const a = new MlxCacheAdapter({ resolveBaseUrl: async () => null });
+    const rosterA = [
+      { function: { name: 'write_file', parameters: { properties: { path: {} } } } },
+    ];
+    const rosterB = [{ function: { name: 'read_file', parameters: { properties: { path: {} } } } }];
+    await a.prepareForSend('sess-a', 'IDENTICAL SYSTEM PROMPT', undefined, rosterA);
+    await a.prepareForSend('sess-b', 'IDENTICAL SYSTEM PROMPT', undefined, rosterB);
+    const idA = a.buildRequestExtras('sess-a').prefix_cache_id;
+    const idB = a.buildRequestExtras('sess-b').prefix_cache_id;
+    expect(idA).toBeTruthy();
+    expect(idB).toBeTruthy();
+    expect(idA).not.toBe(idB);
+  });
+
+  it('folds the roster into the layered gp/gezel ids', () => {
+    const layers = { gezel: 'GEZEL LAYER', project: 'PROJECT LAYER' };
+    const rosterA = [
+      { function: { name: 'write_file', parameters: { properties: { path: {} } } } },
+    ];
+    const rosterB = [{ function: { name: 'read_file', parameters: { properties: { path: {} } } } }];
+    // Same layer text, different rosters: the server seeds session caches
+    // from these entries before any LCP check, so an id collision is a
+    // wrong-shape seed, not a miss.
+    expect(gezelLayerPrefixIds(layers, rosterA)).not.toEqual(gezelLayerPrefixIds(layers, rosterB));
+    // No-roster ids stay byte-identical to the pre-roster scheme so
+    // existing tool-less prefix files stay warm across the upgrade.
+    expect(gezelLayerPrefixIds(layers, [])).toEqual(gezelLayerPrefixIds(layers));
   });
 });

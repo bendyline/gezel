@@ -429,6 +429,58 @@ adapter keys on the now-volatile-free system message.
 > Subsequent runs (venv cached) start in seconds. Set `GEZEL_MLX_STARTUP_TIMEOUT_MS` (mirrors
 > `GEZEL_LLAMA_STARTUP_TIMEOUT_MS`; default 300 s) to let a cold first MLX turn wait out the build.
 
+### 3.7 The tool roster is part of the prefix SHAPE, not decoration
+
+Qwen-family chat templates render the tool block at the **top** of the system message. Two renders
+of the same prompt text — one with a roster, one without — therefore share **~3 tokens**. This is
+not a degradation; it is a different prefix. Three rules follow, all enforced in
+[mlx/cache-adapter.ts](../packages/service/src/providers/mlx/cache-adapter.ts) and pinned by its
+tests:
+
+1. **The roster feeds every prefix id** (flat `gezelPrefixId` and layered `gezelLayerPrefixIds`,
+   via the shared names+arity `toolRosterSignature`). MLX's batched KV is untrimmable and the
+   server seeds a session cache from a prefix entry *before* any LCP check, so a same-id collision
+   across rosters is not a miss — it seeds a wrong-shape cache that forces a full re-prefill.
+   Roles carry different rosters (tier tool-caps, per-turn task tools), so mixed rosters over one
+   prompt text are the common case.
+2. **Never warm a shape that cannot match.** A system-only warm for a tool-bearing session renders
+   the no-tools template branch and `persist: true` writes it to disk, where it **overwrites the
+   good entry the last real session saved back**. The two shapes then oscillate on every daemon
+   boot. Wild-caught (2026-08-27, PR-review fanout): `prefix-0b60345fcefa9ffd` flipped between a
+   15,563-token no-tools render and the 24,796-token real one — `lcp=3`, `mode=fresh reused=0`,
+   **40 full re-prefills, 1.58M tokens re-prefilled against 238K tokens of new work (6.6:1)**.
+   With `GEZEL_MLX_STABLE_PREFIX` off (the measured default — warm-with-tools alone was a 34%→14%
+   reuse regression), a tool-bearing session is now *registered but not warmed*: the first turn
+   pays cold prefill once, and the save-back it writes is the durable, correctly-shaped prefix.
+3. **`prefillOnly` refuses to warm before the roster exists.** MCP bridges spawn lazily; a warm
+   that fires first sees an empty roster and renders the wrong branch. A cold prefix costs one
+   slow turn; a wrong one costs every turn.
+
+llama-cpp is structurally immune to the catastrophic variant: its adapter never issues a warm,
+`llama-server` does true token-LCP matching before reuse, and its KV is trimmable — a stale id
+there costs one wasted disk restore, not a poisoned seed. Its layered ids stay roster-blind on
+purpose (the scheme is A/B-validated; changing it orphans every existing disk prefix on the
+default path). If llama-side roster churn ever shows up in `[slot-restore]` waste, fold
+`toolRosterSignature` in there too — deliberately, with the A/B rerun.
+
+**Validated live (2026-08-27, qwen3.8-27b-q4, scratch engine + persist dir, ~6.2K-token prompt,
+12-tool roster, A/B/A):**
+
+| arm | first turn | subsequent sessions |
+|---|---|---|
+| flag OFF (register-only) | cold, 6,217 prefilled | `reused=6201 prefill=17` — **99.7% reuse** |
+| flag ON (warm WITH tools) | **`reused=6186 prefill=29` — 99.5%** | `reused=6199 prefill=16` |
+| poison replay (system-only warm) | overwrote the good entry (`tokens=4838, prior=6186`) → `lcp=3`, full 6,216 re-prefill | — |
+| flag OFF again (A/B/A) | cold 6,217 | `reused=6201 prefill=16` |
+
+The old 34%→14% regression does not reproduce under roster-aware ids: a with-tools warm is a
+token-for-token prefix of the real turn. ON's win is moving the one cold prefill off the
+interactive path; OFF and ON are identical afterwards. **Caveat before promoting the flag:** the
+tools-branch render begins with a template-injected `Reasoning effort is set to …` system line, so
+reasoning-effort (and any other kwarg that reaches the template) is part of the prefix shape — the
+production warm body must carry the session's tuning-affecting fields, not just messages+tools,
+or a warm at one effort poisons a session at another.
+
 ---
 
 ## 4. The turn lifecycle — where the cache hooks fire

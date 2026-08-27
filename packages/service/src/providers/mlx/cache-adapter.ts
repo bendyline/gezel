@@ -67,25 +67,33 @@ export interface MlxCacheAdapterOptions {
  * lifetime of installs is negligible at this scale and the shorter id
  * is friendlier in logs.
  */
+/**
+ * Order-independent signature of the tool roster: names + argument keys,
+ * sorted. Stable against harmless description churn while separating real
+ * rosters. Shared by the flat and layered prefix ids — both must treat the
+ * roster as identity, because Qwen-family templates render the tool block
+ * at the TOP of the system message: two renders whose rosters differ share
+ * ~3 tokens no matter how identical the prompt text is.
+ */
+function toolRosterSignature(tools: readonly unknown[]): string {
+  return tools
+    .map((t) => {
+      const fn = (t as { function?: { name?: string; parameters?: { properties?: object } } })
+        ?.function;
+      const props = fn?.parameters?.properties ?? {};
+      return `${fn?.name ?? '?'}:${Object.keys(props).sort().join(',')}`;
+    })
+    .sort()
+    .join('|');
+}
+
 export function gezelPrefixId(systemPrompt: string, tools?: readonly unknown[]): string {
   const h = createHash('sha256').update(systemPrompt, 'utf8');
-  // The tool ROSTER is part of the prefix identity. Qwen-family templates
-  // render the tool block at the top of the system message, so two sessions
-  // whose rosters differ do not share a token prefix even with identical
-  // prompt text — and roles carry different rosters, so that is the common
-  // case, not an edge case. Hashing only names+arity keeps the id stable
-  // against harmless description churn while still separating real rosters.
+  // The tool ROSTER is part of the prefix identity — see
+  // {@link toolRosterSignature}. Roles carry different rosters, so mixed
+  // rosters over one prompt text are the common case, not an edge case.
   if (tools && tools.length > 0) {
-    const sig = tools
-      .map((t) => {
-        const fn = (t as { function?: { name?: string; parameters?: { properties?: object } } })
-          ?.function;
-        const props = fn?.parameters?.properties ?? {};
-        return `${fn?.name ?? '?'}:${Object.keys(props).sort().join(',')}`;
-      })
-      .sort()
-      .join('|');
-    h.update('\u0000tools\u0000', 'utf8').update(sig, 'utf8');
+    h.update('\u0000tools\u0000', 'utf8').update(toolRosterSignature(tools), 'utf8');
   }
   return `prefix-${h.digest('hex').slice(0, 16)}`;
 }
@@ -98,8 +106,21 @@ export function gezelPrefixId(systemPrompt: string, tools?: readonly unknown[]):
  * The server tries them longest-first and seeds `gp` from the first real
  * session save, so the shared prefix carries the engine-templated tools.
  */
-export function gezelLayerPrefixIds(layers: SystemPromptLayers): { gp: string; gezel: string } {
-  const h = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex').slice(0, 16);
+export function gezelLayerPrefixIds(
+  layers: SystemPromptLayers,
+  tools?: readonly unknown[],
+): { gp: string; gezel: string } {
+  // The roster folds into BOTH layered ids for the same reason it feeds
+  // {@link gezelPrefixId}: the tool block heads the rendered prompt, so a
+  // gp/gezel prefix saved under roster A is ~3 shared tokens for roster B.
+  // MLX's batched KV is untrimmable and the server seeds session caches
+  // from these entries before any LCP check, so a same-id/different-roster
+  // collision does not degrade to a miss — it seeds a wrong-shape cache
+  // that forces a full re-prefill. Distinct ids per roster line let each
+  // shape keep its own entry instead of fighting over one.
+  const sig = tools && tools.length > 0 ? `\u0000tools\u0000${toolRosterSignature(tools)}` : '';
+  const h = (s: string) =>
+    createHash('sha256').update(s, 'utf8').update(sig, 'utf8').digest('hex').slice(0, 16);
   return { gp: `prefix-gp-${h(layers.project)}`, gezel: `prefix-gezel-${h(layers.gezel)}` };
 }
 
@@ -171,29 +192,43 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
       // server seeds the shared `gp` prefix from the first real session
       // save, so the inherited prefix carries the engine-templated tools
       // (a system-only warm would strand them). Mirrors the llama-cpp
-      // disk-prefix path that the A/B proved out.
-      const { gp, gezel } = gezelLayerPrefixIds(layers);
+      // disk-prefix path that the A/B proved out. The roster feeds the
+      // ids so save-backs from different rosters land in different
+      // entries instead of overwriting each other.
+      const { gp, gezel } = gezelLayerPrefixIds(layers, tools);
       this.sessionLayerPrefixIds.set(sessionId, [gp, gezel]);
       this.sessionPrefix.set(sessionId, gp);
       return;
     }
     if (!systemPrompt) return;
-    // Tools are part of the prefix identity, not decoration: Qwen renders
-    // the tool block at the TOP of the system message, so a prefix warmed
-    // without them is not a token-prefix of any real turn. They also feed
-    // the prefix id, because a prefix warmed for roster A would otherwise
-    // be a false hit for a session carrying roster B.
-    // Rendering the warm prompt WITH tools is what makes the warmed entry a
-    // real token-prefix of later turns (Qwen puts the tool block at the top
-    // of the system message, so without them the two share 3 tokens). It is
-    // gated with the rest of the prefix-stability work because on its own it
-    // adds ~5-6K tokens of warm prefill and the payoff needs the snapshot
-    // boundary too — measured as a net reuse regression without it.
+    // Tools are part of the prefix IDENTITY unconditionally — a prefix
+    // saved for roster A must never be offered to roster B, whatever we
+    // decide about warming. The server seeds session caches from prefix
+    // entries before any LCP check, and MLX batched KV is untrimmable, so
+    // an id collision across rosters is not a miss — it is a wrong-shape
+    // seed that forces a full re-prefill.
+    const prefixId = this.setSessionPrefix(sessionId, systemPrompt, tools);
+    const hasTools = !!tools && tools.length > 0;
+    // Whether to WARM is a separate question from identity:
+    //   - No tools: a system-only warm renders the same template branch a
+    //     real tool-less turn will, so it is a genuine token-prefix. Warm.
+    //   - Tools + GEZEL_MLX_STABLE_PREFIX: warm WITH the roster. Costs
+    //     ~5-6K tokens of warm prefill; gated because the payoff needs the
+    //     snapshot boundary too (measured as a net regression alone).
+    //   - Tools, flag off: DO NOT WARM. A system-only warm renders Qwen's
+    //     no-tools branch, which shares ~3 tokens with the real turn, and
+    //     `persist: true` writes that shape to disk where it overwrites
+    //     the good entry the last real session saved back. Wild-caught
+    //     (koray PR-review fanout): `prefix-0b60345fcefa9ffd` oscillated
+    //     between a 15,563-token no-tools render and the 24,796-token
+    //     real one on every daemon boot — lcp=3, mode=fresh reused=0, 40
+    //     full re-prefills, 1.58M tokens re-prefilled vs 238K of new
+    //     work. Registration alone still routes save-backs correctly;
+    //     the first turn just pays cold prefill once.
     const stablePrefix =
       process.env.GEZEL_MLX_STABLE_PREFIX === '1' || process.env.GEZEL_MLX_STABLE_PREFIX === 'true';
-    const warmTools = stablePrefix ? tools : undefined;
-    const prefixId = this.setSessionPrefix(sessionId, systemPrompt, warmTools);
-    await this.warmPrefix(prefixId, systemPrompt, warmTools);
+    if (hasTools && !stablePrefix) return;
+    await this.warmPrefix(prefixId, systemPrompt, hasTools ? tools : undefined);
   }
 
   buildRequestExtras(sessionId: string): Record<string, unknown> {
