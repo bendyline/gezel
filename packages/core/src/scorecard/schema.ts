@@ -243,7 +243,12 @@ export const ScorecardDatasetSchema = z
     }
     const seen = new Set<string>();
     for (const result of dataset.results) {
-      const key = `${result.runId}::${result.suiteId}::${result.modelId}`;
+      // Engine is part of a row's identity: the same catalog model measured
+      // on two engines is two comparable measurements, not a duplicate.
+      // Without it a llama-cpp + mlx sweep of one model could only ever
+      // keep one engine's row (wild-caught: the 2026-08-25 qwen3.8 quant
+      // ladder, where the mlx q4 ingest displaced the llama q4 row).
+      const key = `${result.runId}::${result.suiteId}::${result.modelId}::${result.engine}`;
       if (seen.has(key)) {
         ctx.addIssue({ code: 'custom', message: `duplicate result for ${key}` });
       }

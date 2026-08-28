@@ -347,7 +347,12 @@ export function mergeScorecard(
   const runs = [preserved, ...existing.runs.filter((entry) => entry.id !== run.id)].sort((a, b) =>
     b.provenance.startedAt.localeCompare(a.provenance.startedAt),
   );
-  const key = (r: ScorecardModelResult) => `${r.runId}::${r.suiteId}::${r.modelId}`;
+  // Engine is part of the identity: the same catalog model measured on two
+  // engines is two measurements, not one. Without it, a llama-cpp + mlx
+  // sweep of one model silently REPLACED the first engine's rows with the
+  // second's (wild-caught: qwen3.8-27b-q4 in the 2026-08-25 quant-ladder
+  // sweep — the mlx leg's ingest erased the llama leg's dataset rows).
+  const key = (r: ScorecardModelResult) => `${r.runId}::${r.suiteId}::${r.modelId}::${r.engine}`;
   const incoming = new Set(results.map(key));
   const merged = [...existing.results.filter((r) => !incoming.has(key(r))), ...results];
   return ScorecardDatasetSchema.parse({
