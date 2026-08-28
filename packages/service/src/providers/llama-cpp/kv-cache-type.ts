@@ -99,6 +99,20 @@ export function planLlamaCppKv(args: {
   ctxConfigured: boolean;
   /** Memory-ceiling slots for a KV type at a context (caller's budget math). */
   ceilingFor: (kv: LlamaCppKvCacheType, ctxTokens: number) => number;
+  /**
+   * Does this exact plan clear the admission the launch will really run —
+   * weights + KV against the co-residency budget, at the full window?
+   *
+   * `ceilingFor` cannot answer this and must not be used as if it could. It
+   * is a slot COUNT floored at 1 (`localEngineSlotCeiling`), so it reports
+   * "1 slot" for a plan that does not fit at all, and it is priced against
+   * the FAST pool while admission is priced against the whole budget — for a
+   * RAM-spillover model those are different questions by construction.
+   * Conflating them made every f16 rung below pass on any single-slot
+   * machine, leaving the q8_0 rung unreachable and denying models that fit
+   * comfortably at q8_0.
+   */
+  fitsAt: (kv: LlamaCppKvCacheType, ctxTokens: number, slots: number) => boolean;
   /** Upper bound on slots regardless of memory (policy default). */
   maxSlots: number;
 }): {
@@ -135,13 +149,20 @@ export function planLlamaCppKv(args: {
     return { kvCacheType: fallback, upgraded: false, reason: 'gemma f16 (trade buys nothing)' };
   }
 
-  // Non-Gemma: f16-first ladder.
+  // Non-Gemma: f16-first ladder. Every rung clears BOTH gates — the fast-pool
+  // slot ceiling (KV lives on the card) and the admission the launch will
+  // really run. Gating on the ceiling alone is what made this ladder always
+  // answer f16: see the `fitsAt` contract above.
   const desiredSlots = args.slotsConfigured ? (args.configuredSlots ?? 1) : args.maxSlots;
   const f16AtRequested = args.ceilingFor('f16', args.requestedCtxTokens);
-  if (f16AtRequested >= desiredSlots) {
+  if (f16AtRequested >= desiredSlots && args.fitsAt('f16', args.requestedCtxTokens, desiredSlots)) {
     return { kvCacheType: 'f16', upgraded: false, reason: 'f16 fits the full plan' };
   }
-  if (!args.slotsConfigured && f16AtRequested >= 1) {
+  if (
+    !args.slotsConfigured &&
+    f16AtRequested >= 1 &&
+    args.fitsAt('f16', args.requestedCtxTokens, 1)
+  ) {
     return {
       kvCacheType: 'f16',
       upgraded: false,
@@ -154,7 +175,10 @@ export function planLlamaCppKv(args: {
     F16_PREFERRED_CTX_CAP_TOKENS >= args.minimumCtxTokens;
   if (canCapCtx) {
     const neededSlots = args.slotsConfigured ? desiredSlots : 1;
-    if (args.ceilingFor('f16', F16_PREFERRED_CTX_CAP_TOKENS) >= neededSlots) {
+    if (
+      args.ceilingFor('f16', F16_PREFERRED_CTX_CAP_TOKENS) >= neededSlots &&
+      args.fitsAt('f16', F16_PREFERRED_CTX_CAP_TOKENS, neededSlots)
+    ) {
       return {
         kvCacheType: 'f16',
         upgraded: false,
@@ -166,6 +190,6 @@ export function planLlamaCppKv(args: {
   return {
     kvCacheType: fallback,
     upgraded: false,
-    reason: 'f16 does not fit even one 64k slot — q8_0 for the memory saving',
+    reason: 'f16 does not fit the memory plan — q8_0 for the memory saving',
   };
 }

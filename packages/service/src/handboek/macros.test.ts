@@ -234,7 +234,12 @@ describe('data macros', () => {
     const { markdown } = await expandMacros('::handboek-role-tools{role=voorman scope=tiers}', {
       ...ctx('site'),
     });
-    expect(markdown).toContain('| medium | 12–45B | full kit (82 tools) |');
+    // The tool count moves whenever one joins or leaves the voorman kit — the
+    // two AI-app tools left it for a group in no role default, taking it from
+    // 82 to 80. Pinning the number only re-breaks this test; what must not
+    // regress is medium being *trimmed*, which it once was at "57 of N".
+    const medium = markdown.split('\n').find((line) => line.startsWith('| medium |'));
+    expect(medium).toMatch(/^\| medium \| 12–45B \| full kit \(\d+ tools\) \|$/);
     expect(markdown).not.toContain('| medium | 12–45B | 57 of');
   });
 

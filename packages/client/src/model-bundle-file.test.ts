@@ -9,9 +9,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as yazl from 'yazl';
 import {
   modelBytesFromResponse,
+  portableGezmodelFilename,
   verifyModelBundleArchive,
   writeModelBundleResponse,
-} from './model-bundle-export.js';
+} from './model-bundle-file.js';
 
 let scratch: string | undefined;
 
@@ -149,5 +150,12 @@ describe('desktop .gezmodel export integrity', () => {
         name: 'AbortError',
       },
     );
+  });
+});
+
+describe('portable export names', () => {
+  it('reduces a catalog id to a filesystem-safe .gezmodel name', () => {
+    expect(portableGezmodelFilename('qwen:7b/q4')).toBe('qwen-7b-q4.gezmodel');
+    expect(portableGezmodelFilename('...')).toBe('model.gezmodel');
   });
 });

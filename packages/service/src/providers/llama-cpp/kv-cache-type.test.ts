@@ -36,7 +36,14 @@ describe('planLlamaCppKv — trade f16 KV for a second slot', () => {
   // dimension only.
   const ceil = (f16: number, q8: number) => (kv: string) => (kv === 'f16' ? f16 : q8);
   // Neutral context inputs for cases that are not about the context cap.
-  const ctx = { requestedCtxTokens: 32_768, minimumCtxTokens: 32_768, ctxConfigured: false };
+  // These legacy cases exercise the slot dimension only, so memory always
+  // admits; the fit gate has its own describe below.
+  const ctx = {
+    requestedCtxTokens: 32_768,
+    minimumCtxTokens: 32_768,
+    ctxConfigured: false,
+    fitsAt: () => true,
+  };
 
   it('upgrades gemma to q8_0 when f16 forces one slot and q8_0 buys two', () => {
     const plan = planLlamaCppKv({
@@ -124,7 +131,7 @@ describe('planLlamaCppKv — f16-first ladder (non-Gemma, 2026-08-28 policy)', (
   // context grows 8k→90k (reports/llama-kv-q8-longctx-20260828.md). Favor
   // f16 when memory allows, sacrificing slots first, then context > 64k.
   const qwen = { architecture: 'qwen3', modelId: 'qwen3.8-27b-q4' };
-  const base = { ...qwen, slotsConfigured: false as const, maxSlots: 4 };
+  const base = { ...qwen, slotsConfigured: false as const, maxSlots: 4, fitsAt: () => true };
 
   it('takes f16 outright when it fits the full plan', () => {
     const plan = planLlamaCppKv({
@@ -169,6 +176,10 @@ describe('planLlamaCppKv — f16-first ladder (non-Gemma, 2026-08-28 policy)', (
       requestedCtxTokens: 131_072,
       minimumCtxTokens: 32_768,
       ctxConfigured: false,
+      // NOTE this stub returns 0, which the real `localEngineSlotCeiling`
+      // never can — it is floored at 1. Reaching the q8_0 rung through
+      // `ceilingFor` alone is therefore a shape only a test can produce;
+      // the `fitsAt` cases below are what covers the production path.
       ceilingFor: (kv) => (kv === 'f16' ? 0 : 2),
     });
     expect(plan).toMatchObject({ kvCacheType: 'q8_0' });
@@ -211,6 +222,7 @@ describe('planLlamaCppKv — f16-first ladder (non-Gemma, 2026-08-28 policy)', (
       minimumCtxTokens: 32_768,
       ctxConfigured: false,
       ceilingFor: (kv) => (kv === 'f16' ? 2 : 4),
+      fitsAt: () => true,
     });
     expect(fits).toMatchObject({ kvCacheType: 'f16' });
     const doesNot = planLlamaCppKv({
@@ -222,8 +234,85 @@ describe('planLlamaCppKv — f16-first ladder (non-Gemma, 2026-08-28 policy)', (
       minimumCtxTokens: 32_768,
       ctxConfigured: false,
       ceilingFor: (kv) => (kv === 'f16' ? 1 : 4),
+      fitsAt: () => true,
     });
     expect(doesNot).toMatchObject({ kvCacheType: 'q8_0' });
+  });
+
+  // The ladder used to gate only on `ceilingFor`, a slot COUNT floored at 1.
+  // On a single-slot machine that floor made every f16 rung pass, so a model
+  // that did not fit at all was launched at f16 and then denied by admission
+  // — the q8_0 rung was unreachable. Wild-caught as a 21 GB MoE against a
+  // 30 GB budget reporting "Won't fit" while q8_0 fits it at the full 64k.
+  it('drops to q8_0 when the ceiling says one slot but the plan does not fit', () => {
+    const plan = planLlamaCppKv({
+      ...base,
+      maxSlots: 1,
+      requestedCtxTokens: 65_536,
+      minimumCtxTokens: 65_536,
+      ctxConfigured: false,
+      // What the real ceiling reports on a single-slot host: 1 for both.
+      ceilingFor: () => 1,
+      fitsAt: (kv) => kv !== 'f16',
+    });
+    expect(plan).toMatchObject({ kvCacheType: 'q8_0' });
+    expect(plan.ctxCapTokens).toBeUndefined();
+  });
+
+  it('keeps f16 when the plan genuinely fits at one slot', () => {
+    // The mirror of the case above: same floored ceiling, but memory admits
+    // f16 — the fit gate must not cost f16 where it was affordable.
+    const plan = planLlamaCppKv({
+      ...base,
+      maxSlots: 1,
+      requestedCtxTokens: 65_536,
+      minimumCtxTokens: 65_536,
+      ctxConfigured: false,
+      ceilingFor: () => 1,
+      fitsAt: () => true,
+    });
+    expect(plan).toMatchObject({ kvCacheType: 'f16' });
+  });
+
+  it('drops to q8_0 rather than capping context the fit gate still rejects', () => {
+    // The ceiling is happy to cap 131k → 64k, but f16 does not fit even
+    // there; capping context AND keeping f16 would deny at admission.
+    const plan = planLlamaCppKv({
+      ...base,
+      requestedCtxTokens: 131_072,
+      minimumCtxTokens: 32_768,
+      ctxConfigured: false,
+      ceilingFor: () => 1,
+      fitsAt: (kv) => kv !== 'f16',
+    });
+    expect(plan).toMatchObject({ kvCacheType: 'q8_0' });
+    expect(plan.ctxCapTokens).toBeUndefined();
+  });
+
+  it('still caps context for f16 when the capped plan does fit', () => {
+    const plan = planLlamaCppKv({
+      ...base,
+      requestedCtxTokens: 131_072,
+      minimumCtxTokens: 32_768,
+      ctxConfigured: false,
+      ceilingFor: () => 1,
+      fitsAt: (kv, ctxTokens) => kv !== 'f16' || ctxTokens <= F16_PREFERRED_CTX_CAP_TOKENS,
+    });
+    expect(plan).toMatchObject({ kvCacheType: 'f16', ctxCapTokens: F16_PREFERRED_CTX_CAP_TOKENS });
+  });
+
+  it('an explicit kvCacheType override still bypasses the fit gate', () => {
+    // Operator intent is never second-guessed by the memory plan.
+    const plan = planLlamaCppKv({
+      ...base,
+      override: 'f16',
+      requestedCtxTokens: 65_536,
+      minimumCtxTokens: 65_536,
+      ctxConfigured: false,
+      ceilingFor: () => 1,
+      fitsAt: () => false,
+    });
+    expect(plan).toMatchObject({ kvCacheType: 'f16' });
   });
 
   it('gemma keeps its own shape — the slot-sacrifice ladder does not apply', () => {
@@ -239,6 +328,7 @@ describe('planLlamaCppKv — f16-first ladder (non-Gemma, 2026-08-28 policy)', (
       minimumCtxTokens: 32_768,
       ctxConfigured: false,
       ceilingFor: (kv) => (kv === 'f16' ? 1 : 2),
+      fitsAt: () => true,
     });
     expect(plan).toMatchObject({ kvCacheType: 'q8_0', upgraded: true });
   });

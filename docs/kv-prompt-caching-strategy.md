@@ -162,7 +162,7 @@ full caching-relevant argv:
   overridable via `config.llamaCppNumCtx` / env `GEZEL_LLAMA_NUM_CTX`.
 - **KV precision is memory-aware, f16-first (2026-08-28)** — the old flat `q8_0` default was
   priced on a 2B model; at 30B the q8_0 tax is ~6% decode flat and **−6% → −17% prefill as
-  context grows 8k → 90k** ([reports/llama-kv-q8-longctx-20260828.md](../reports/llama-kv-q8-longctx-20260828.md)).
+  context grows 8k → 90k** (`reports/llama-kv-q8-longctx-20260828.md`).
   `planLlamaCppKv` ([llama-cpp/kv-cache-type.ts](../packages/service/src/providers/llama-cpp/kv-cache-type.ts))
   now prefers **f16 whenever the memory plan fits it, sacrificing engine slots first and then
   context above `F16_PREFERRED_CTX_CAP_TOKENS = 65_536`**, and falls back to `q8_0` only when

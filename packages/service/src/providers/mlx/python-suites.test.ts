@@ -70,6 +70,12 @@ describe('MLX sidecar python suites', () => {
           cwd: PYTHON_DIR,
           encoding: 'utf8',
           timeout: 120_000,
+          // The suites print non-ASCII case names (cache_seed_test.py uses
+          // "→"), and CPython picks its stdout encoding from the console
+          // codepage when it is not a tty — cp1252 on a Windows workstation,
+          // which raises UnicodeEncodeError *inside the suite* and reports a
+          // passing suite as a failure. We decode as utf8 above, so say so.
+          env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
         });
       } catch (err) {
         const e = err as { stdout?: string; stderr?: string };

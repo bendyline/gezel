@@ -31,7 +31,11 @@ import {
 import {
   GezelClient,
   createTrustingFetch,
+  modelBytesFromResponse,
+  portableGezmodelFilename,
   streamAllChatEvents,
+  verifyModelBundleArchive,
+  writeModelBundleResponse,
 } from '@bendyline/gezel-client/node';
 import { ambientDir } from '@bendyline/gezel/paths';
 import { ambientDashboardDisplayTarget } from './ambient-display/display-target.js';
@@ -59,12 +63,7 @@ import {
   previewExternalServicesForFrame,
 } from './electron-boundaries.js';
 import { mainProcessIssueUrl } from './main-process-errors.js';
-import {
-  modelBytesFromResponse,
-  verifyModelBundleArchive,
-  writeModelBundleResponse,
-} from './model-bundle-export.js';
-import { findGezmodelArguments, portableGezmodelFilename } from './model-bundle-files.js';
+import { findGezmodelArguments } from './model-bundle-files.js';
 import { QuitCoordinator } from './quit-coordinator.js';
 import { rendererConnectionSnapshot } from './renderer-connection.js';
 import { resolveRendererNetworkPermission } from './renderer-network-policy.js';

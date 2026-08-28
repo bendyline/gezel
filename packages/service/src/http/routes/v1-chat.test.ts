@@ -35,6 +35,17 @@ afterAll(async () => {
   else process.env.GEZEL_MOCK_PROVIDER = priorMockFlag;
 }, 30_000);
 
+/**
+ * The `send` carrying `prompt` — not merely the first one recorded since the
+ * request began. A completed turn kicks off background memory extraction on
+ * the same provider, and that one-shot lands its own `send` (lane
+ * `background`, job `memory · external`) whenever it gets there, which is
+ * routinely inside the *next* test's window.
+ */
+function sendFor(calls: MockProvider['calls'], prompt: string) {
+  return calls.find((call) => call.kind === 'send' && (call.prompt ?? '').includes(prompt));
+}
+
 interface ApiOpts {
   body?: unknown;
   token?: string;
@@ -198,7 +209,7 @@ describe('POST /v1/chat/completions — non-streaming', () => {
 
     const calls = mockCopilot.calls.slice(callStart);
     const create = calls.find((call) => call.kind === 'create');
-    const send = calls.find((call) => call.kind === 'send');
+    const send = sendFor(calls, 'ping');
     expect(create?.opts?.systemPromptLayers).toEqual({
       gezel: 'be concise',
       project: 'be concise',
@@ -251,7 +262,7 @@ describe('POST /v1/chat/completions — streaming', () => {
     const reassembled = contentChunks.map((c) => c.choices[0]?.delta?.content ?? '').join('');
     expect(reassembled).toContain('tell me a tale');
 
-    const send = mockCopilot!.calls.slice(callStart).find((call) => call.kind === 'send');
+    const send = sendFor(mockCopilot!.calls.slice(callStart), 'tell me a tale');
     expect(send?.sendOpts?.queue).toMatchObject({
       lane: 'interactive',
       actorLabel: 'Gezel (root)',

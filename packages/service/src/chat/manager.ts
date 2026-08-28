@@ -12546,6 +12546,61 @@ export class ChatManager {
             ? { exactPerSlotKvBytesF16: (exactAtRequested * ctxTokens) / passPlanCtx }
             : {}),
         });
+      // One pricing for a candidate KV dtype, shared by the plan's fit gate
+      // and by the admission below — a second copy is how a preview starts
+      // promising a window the launch then denies.
+      const referenceCtx = 4096;
+      const exactKvAtReferenceFor = (kvType: LlamaCppKvCacheType) =>
+        summary
+          ? estimateKvReserveBytes({
+              blockCount: summary.blockCount,
+              embeddingLength: summary.embeddingLength,
+              headCount: summary.headCount,
+              headCountKv: summary.headCountKv,
+              headCountKvPerLayer: summary.headCountKvPerLayer,
+              slidingWindowPattern: summary.slidingWindowPattern,
+              sharedKvLayers: summary.sharedKvLayers,
+              keyLength: summary.keyLength,
+              valueLength: summary.valueLength,
+              keyLengthSwa: summary.keyLengthSwa,
+              valueLengthSwa: summary.valueLengthSwa,
+              fullAttentionInterval: summary.fullAttentionInterval,
+              ssmInnerSize: summary.ssmInnerSize,
+              ssmStateSize: summary.ssmStateSize,
+              ssmConvKernel: summary.ssmConvKernel,
+              ctxTokens: referenceCtx,
+              kvCacheType: kvType,
+            })
+          : undefined;
+      const kvBytesPerTokenFor = (kvType: LlamaCppKvCacheType) => {
+        const exact = exactKvAtReferenceFor(kvType);
+        return exact !== undefined
+          ? exact / referenceCtx
+          : estimatePerSlotKvBytes({
+              perTurnCtxTokens: referenceCtx,
+              weightsBytes: installed.approxSizeBytes,
+              kvCacheType: kvType,
+            }) / referenceCtx;
+      };
+      const weightsResidentBytes = estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
+        mmprojBytes: installed.mmprojSizeBytes,
+      });
+      const planFitsAt = (kvType: LlamaCppKvCacheType, ctxTokens: number, slotCount: number) => {
+        // `minimumPerTurnCtxTokens: ctxTokens` makes this ask for the WHOLE
+        // window — a plan admission would only accept by clamping does not
+        // count as a fit, which is exactly the case q8_0 has to rescue.
+        const probe = planCtxTokensForMemory({
+          requestedPerTurnCtxTokens: ctxTokens,
+          slots: slotCount,
+          minimumPerTurnCtxTokens: ctxTokens,
+          kvBytesPerToken: kvBytesPerTokenFor(kvType),
+          weightsResidentBytes,
+          budgetBytes: admissionBudgetBytes,
+          committedOtherBytes,
+          vramBytes: capacity.vramBytes,
+        });
+        return probe.minimumSatisfied && probe.slots >= slotCount;
+      };
       const kvPlan = planLlamaCppKv({
         architecture: installed.architecture,
         modelId,
@@ -12557,6 +12612,7 @@ export class ChatManager {
         ctxConfigured:
           explicitArg !== undefined || (config.llamaCppContextSizing ?? 'adaptive') === 'model-max',
         ceilingFor: passCeiling,
+        fitsAt: planFitsAt,
         maxSlots: defaultLocalEngineSlots(fastBudgetBytes),
       });
       kv = kvPlan.kvCacheType;
@@ -12574,34 +12630,8 @@ export class ChatManager {
 
       try {
         if (!summary) throw new Error('GGUF header unreadable');
-        const referenceCtx = 4096;
-        const exactKvAtReference = estimateKvReserveBytes({
-          blockCount: summary.blockCount,
-          embeddingLength: summary.embeddingLength,
-          headCount: summary.headCount,
-          headCountKv: summary.headCountKv,
-          headCountKvPerLayer: summary.headCountKvPerLayer,
-          slidingWindowPattern: summary.slidingWindowPattern,
-          sharedKvLayers: summary.sharedKvLayers,
-          keyLength: summary.keyLength,
-          valueLength: summary.valueLength,
-          keyLengthSwa: summary.keyLengthSwa,
-          valueLengthSwa: summary.valueLengthSwa,
-          fullAttentionInterval: summary.fullAttentionInterval,
-          ssmInnerSize: summary.ssmInnerSize,
-          ssmStateSize: summary.ssmStateSize,
-          ssmConvKernel: summary.ssmConvKernel,
-          ctxTokens: referenceCtx,
-          kvCacheType: kv,
-        });
-        const kvBytesPerToken =
-          exactKvAtReference !== undefined
-            ? exactKvAtReference / referenceCtx
-            : estimatePerSlotKvBytes({
-                perTurnCtxTokens: referenceCtx,
-                weightsBytes: installed.approxSizeBytes,
-                kvCacheType: kv,
-              }) / referenceCtx;
+        const exactKvAtReference = exactKvAtReferenceFor(kv);
+        const kvBytesPerToken = kvBytesPerTokenFor(kv);
         // The linearization the accepted plan priced with, so the growth
         // pass cannot disagree with admission about the same launch.
         let ladderKvLinearization: {

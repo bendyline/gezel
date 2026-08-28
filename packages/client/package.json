@@ -49,11 +49,15 @@
   "dependencies": {
     "@bendyline/gezel": "workspace:*",
     "undici": "8.9.0",
+    "yauzl": "^3.4.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/yauzl": "^3.4.0",
+    "@types/yazl": "^3.3.1",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "yazl": "^3.3.1"
   }
 }

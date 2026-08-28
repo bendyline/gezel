@@ -500,6 +500,65 @@ export async function buildLlamaCppProvider(opts: {
         ? { exactPerSlotKvBytesF16: (exactPerSlotKvF16 * ctxTokens) / planTimeCtx }
         : {}),
     });
+  // The admission this launch is held to further down, asked here at plan
+  // time so the ladder can tell "does not fit at all" from "fits in exactly
+  // one slot" — `ceilingFor` is floored at 1 and cannot. See the `fitsAt`
+  // contract in planLlamaCppKv. Priced from the header read above; the
+  // fuller GGUF walk has not happened yet, so this uses the same catalog
+  // weights figure `ceilingFor` already trusts.
+  const PLAN_REFERENCE_CTX = 4096;
+  const planWeightsBytes = modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3;
+  const planResidentBytes = estimateLlamaCppResidentBytes(planWeightsBytes, {
+    mmprojBytes: modelCatalogInfo?.mmprojSizeBytes ?? 0,
+  });
+  const planCapacity = computeCapacityBudget();
+  const planKvBytesPerToken = (kv: LlamaCppKvCacheType) => {
+    const exact = headerSummary
+      ? estimateKvReserveBytes({
+          blockCount: headerSummary.blockCount,
+          embeddingLength: headerSummary.embeddingLength,
+          headCount: headerSummary.headCount,
+          headCountKv: headerSummary.headCountKv,
+          headCountKvPerLayer: headerSummary.headCountKvPerLayer,
+          slidingWindowPattern: headerSummary.slidingWindowPattern,
+          sharedKvLayers: headerSummary.sharedKvLayers,
+          keyLength: headerSummary.keyLength,
+          valueLength: headerSummary.valueLength,
+          keyLengthSwa: headerSummary.keyLengthSwa,
+          valueLengthSwa: headerSummary.valueLengthSwa,
+          fullAttentionInterval: headerSummary.fullAttentionInterval,
+          ssmInnerSize: headerSummary.ssmInnerSize,
+          ssmStateSize: headerSummary.ssmStateSize,
+          ssmConvKernel: headerSummary.ssmConvKernel,
+          ctxTokens: PLAN_REFERENCE_CTX,
+          kvCacheType: kv,
+        })
+      : undefined;
+    return exact !== undefined
+      ? exact / PLAN_REFERENCE_CTX
+      : estimatePerSlotKvBytes({
+          perTurnCtxTokens: PLAN_REFERENCE_CTX,
+          weightsBytes: planWeightsBytes,
+          kvCacheType: kv,
+        }) / PLAN_REFERENCE_CTX;
+  };
+  const planFitsAt = (kv: LlamaCppKvCacheType, ctxTokens: number, slotCount: number) => {
+    // Asking for the whole window as the minimum: a plan admission would
+    // only accept by clamping is not a fit, and clamping is precisely what
+    // the q8_0 rung exists to avoid.
+    const probe = planCtxTokensForMemory({
+      requestedPerTurnCtxTokens: ctxTokens,
+      slots: slotCount,
+      minimumPerTurnCtxTokens: ctxTokens,
+      kvBytesPerToken: planKvBytesPerToken(kv),
+      weightsResidentBytes: planResidentBytes,
+      budgetBytes: brokerSnap?.enforced ? brokerSnap.budgetBytes : planCapacity.budgetBytes,
+      committedOtherBytes,
+      freeSystemRamBytes: availableSystemRamBytes(),
+      vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : planCapacity.vramBytes,
+    });
+    return probe.minimumSatisfied && probe.slots >= slotCount;
+  };
   const kvPlan = planLlamaCppKv({
     architecture: modelCatalogInfo?.architecture,
     modelId: defaultModelId ?? undefined,
@@ -511,6 +570,7 @@ export async function buildLlamaCppProvider(opts: {
     ctxConfigured:
       explicitCtx !== undefined || (config.llamaCppContextSizing ?? 'adaptive') === 'model-max',
     ceilingFor,
+    fitsAt: planFitsAt,
     maxSlots: defaultLocalEngineSlots(budgetBytes),
   });
   kvCacheType = kvPlan.kvCacheType;

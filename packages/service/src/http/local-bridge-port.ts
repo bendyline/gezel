@@ -28,7 +28,18 @@ const SALT_SEPARATOR = String.fromCharCode(0);
  * name that port, so it is not ours to move.
  */
 export function bridgePortForHome(home: string, salt = ''): number {
-  const path = canonicalPath(home);
+  return portForCanonicalHome(canonicalPath(home), salt);
+}
+
+/**
+ * Every derivation below is a function of the *canonical* home, and the later
+ * integrations need their predecessors' ports to step off a collision. Taking
+ * the canonical path as the parameter means one `realpathSync` per public
+ * call instead of one per digest — the VS Code port alone needed eight, and
+ * `realpathSync` on a path that does not exist is a failed syscall plus a
+ * thrown exception, two orders of magnitude dearer than the sha256 it feeds.
+ */
+function portForCanonicalHome(path: string, salt: string): number {
   const digest = createHash('sha256')
     .update(salt === '' ? path : `${path}${SALT_SEPARATOR}${salt}`)
     .digest();
@@ -36,18 +47,41 @@ export function bridgePortForHome(home: string, salt = ''): number {
   return LOCAL_BRIDGE_PORT_RANGE_START + bucket;
 }
 
-export function codexBridgePortForHome(home: string): number {
-  return bridgePortForHome(home);
+/** Next slot in the range, wrapping at the top. */
+function stepPort(port: number): number {
+  return port === LOCAL_BRIDGE_PORT_RANGE_END ? LOCAL_BRIDGE_PORT_RANGE_START : port + 1;
 }
 
-export function opencodeBridgePortForHome(home: string): number {
-  const port = bridgePortForHome(home, 'opencode');
+/** First port for `salt` that none of the older integrations already claimed. */
+function firstFreePort(path: string, salt: string, taken: ReadonlySet<number>): number {
+  let port = portForCanonicalHome(path, salt);
+  while (taken.has(port)) port = stepPort(port);
+  return port;
+}
+
+function codexPort(path: string): number {
+  return portForCanonicalHome(path, '');
+}
+
+function opencodePort(path: string): number {
+  const port = portForCanonicalHome(path, 'opencode');
   // Two independent digests over one home collide about once in 29k installs.
   // Left alone, the second listener to start reports the other integration's
   // port-conflict message, which sends the user looking for a foreign process
   // that does not exist. Stepping one slot is cheaper than explaining that.
-  if (port !== codexBridgePortForHome(home)) return port;
-  return port === LOCAL_BRIDGE_PORT_RANGE_END ? LOCAL_BRIDGE_PORT_RANGE_START : port + 1;
+  return port === codexPort(path) ? stepPort(port) : port;
+}
+
+function piPort(path: string): number {
+  return firstFreePort(path, 'pi', new Set([codexPort(path), opencodePort(path)]));
+}
+
+export function codexBridgePortForHome(home: string): number {
+  return codexPort(canonicalPath(home));
+}
+
+export function opencodeBridgePortForHome(home: string): number {
+  return opencodePort(canonicalPath(home));
 }
 
 /**
@@ -57,12 +91,7 @@ export function opencodeBridgePortForHome(home: string): number {
  * a single step can land on the *other* harness's port.
  */
 export function piBridgePortForHome(home: string): number {
-  const taken = new Set([codexBridgePortForHome(home), opencodeBridgePortForHome(home)]);
-  let port = bridgePortForHome(home, 'pi');
-  while (taken.has(port)) {
-    port = port === LOCAL_BRIDGE_PORT_RANGE_END ? LOCAL_BRIDGE_PORT_RANGE_START : port + 1;
-  }
-  return port;
+  return piPort(canonicalPath(home));
 }
 
 /**
@@ -70,16 +99,12 @@ export function piBridgePortForHome(home: string): number {
  * deterministic address may already be present in a published config file.
  */
 export function vscodeBridgePortForHome(home: string): number {
-  const taken = new Set([
-    codexBridgePortForHome(home),
-    opencodeBridgePortForHome(home),
-    piBridgePortForHome(home),
-  ]);
-  let port = bridgePortForHome(home, 'vscode');
-  while (taken.has(port)) {
-    port = port === LOCAL_BRIDGE_PORT_RANGE_END ? LOCAL_BRIDGE_PORT_RANGE_START : port + 1;
-  }
-  return port;
+  const path = canonicalPath(home);
+  return firstFreePort(
+    path,
+    'vscode',
+    new Set([codexPort(path), opencodePort(path), piPort(path)]),
+  );
 }
 
 function canonicalPath(path: string): string {

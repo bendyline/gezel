@@ -15,7 +15,3 @@ export function findGezmodelArguments(argv: readonly string[], workingDirectory:
   }
   return paths;
 }
-
-export function portableGezmodelFilename(id: string): string {
-  return `${id.replace(/[^a-z0-9._-]+/gi, '-').replace(/^[.-]+/, '') || 'model'}.gezmodel`;
-}

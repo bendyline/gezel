@@ -5,3 +5,4 @@ export * from './discover-or-spawn.js';
 export * from './node-tls.js';
 export * from './processes.js';
 export * from './system-service.js';
+export * from './model-bundle-file.js';

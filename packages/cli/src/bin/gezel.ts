@@ -40,6 +40,7 @@ import {
 } from '../engagement-mode.js';
 import { floatOpt, intOpt, resolvePromptText, saveArtifact } from '../generate.js';
 import { resolveKnowledgeInstallSource } from '../knowledge-install.js';
+import { exportModelToFile } from '../model-export.js';
 import {
   formatNativeList,
   formatNativeStatus,
@@ -1524,6 +1525,29 @@ model
     if (pullError) throw new CliError(`pull failed: ${pullError}`);
   });
 
+model
+  .command('export <id> [file]')
+  .description('Export a catalog model to a portable .gezmodel (downloads it first if needed)')
+  .option('-p, --provider <engine>', 'mlx | llama-cpp | ds4 (default: platform default)')
+  .option('-f, --force', 'Overwrite an existing file')
+  .option('--no-pull', 'Fail instead of downloading a model that is not installed yet')
+  .action(async (id: string, file: string | undefined, opts: ModelExportCommandOptions) => {
+    const client = await connectOwned(cliGlobals());
+    const result = await exportModelToFile(client, id, {
+      engine: resolveModelProvider(opts.provider),
+      cwd: process.cwd(),
+      ...(file ? { destination: file } : {}),
+      ...(opts.force ? { force: true } : {}),
+      ...(opts.pull === false ? { skipPull: true } : {}),
+      output: {
+        writeProgress: (text) => {
+          process.stderr.write(text);
+        },
+      },
+    });
+    console.log(`exported ${id} to ${result.path} (${(result.bytesWritten / 1e9).toFixed(2)} GB)`);
+  });
+
 program
   .command('doctor')
   .description('Check the Gezel installation')
@@ -1714,6 +1738,13 @@ program
 /** Absolute path from whatever the user typed, relative to their shell. */
 function resolvePath(file: string): string {
   return isAbsolutePath(file) ? file : joinPath(process.cwd(), file);
+}
+
+interface ModelExportCommandOptions {
+  provider?: string;
+  force?: boolean;
+  /** Commander sets this to false only when `--no-pull` is passed. */
+  pull?: boolean;
 }
 
 interface CleanupCommandOptions extends CleanupFlags {
