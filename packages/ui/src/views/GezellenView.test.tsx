@@ -1,9 +1,15 @@
+/// <reference types="node" />
+
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { type GezelDetail, type GezelSummary, pickRandomNameWithGender } from '@bendyline/gezel';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
+
+const appShellCss = readFileSync(resolve(process.cwd(), 'src/styles/app-shell.css'), 'utf8');
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
@@ -78,6 +84,16 @@ describe('GezellenView', () => {
       name: 'Bob is working. Open gezel.',
     });
     expect(working.querySelectorAll('.project-row-thinking-dot')).toHaveLength(3);
+
+    // The generic `.side` button recipe is full-width. If it matches this
+    // compact status button, the flex row shrinks the gezel's name and role
+    // down to zero width, leaving only their portrait visible.
+    const fullWidthSidebarSelector =
+      '.side li button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.project-row-thinking):not(.gezel-row)';
+    expect(appShellCss.replaceAll(/\s/g, '')).toContain(
+      `${fullWidthSidebarSelector.replaceAll(/\s/g, '')}{display:block;width:100%;`,
+    );
+    expect(working.matches(fullWidthSidebarSelector)).toBe(false);
   });
 
   it('labels a machine-shared gezel without implying their chats are shared', async () => {

@@ -3987,10 +3987,14 @@ body.app-resizing webview {
   margin: 0;
 }
 
-/* Sidebar rows can contain trailing action triggers. Keep this generic
-   full-width treatment off those compact actions and off `.gezel-row`,
-   which owns a horizontal portrait/text layout further below. */
-.side li button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.gezel-row) {
+/* Sidebar rows can contain trailing action triggers and live-turn indicators.
+   Keep this generic full-width treatment off those compact actions and off
+   `.gezel-row`, which owns a horizontal portrait/text layout further below. */
+.side
+  li
+  button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.project-row-thinking):not(
+    .gezel-row
+  ) {
   display: block;
   width: 100%;
   text-align: left;
@@ -4002,6 +4006,10 @@ body.app-resizing webview {
   cursor: pointer;
 }
 
-.side li button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.gezel-row).active {
+.side
+  li
+  button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.project-row-thinking):not(
+    .gezel-row
+  ).active {
   background: rgba(176, 114, 76, 0.15);
 }
