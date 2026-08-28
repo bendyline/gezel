@@ -2240,6 +2240,16 @@ export const GezelConfigSchema = z.object({
    *     finish; the pending-sends queue is canceled on transition.
    * Degrading to scheduled/reactive does NOT kill the in-flight
    * queue — it drains normally. Only `off` stops the drain.
+   *
+   * Background indexing splits across this line rather than sitting on
+   * one side of it. The model-backed tiers — Boekwachter summaries,
+   * per-file reviews, AI media shadows, area rollups — are task work and
+   * stand down below `scheduled` (`isTaskWorkAllowed`, checked at the
+   * roster boundary in IndexEnrichmentManager). The local tiers —
+   * structural scan, text/image embeddings, faces — keep running in every
+   * mode but `off`: they make no model call, and the retrieval that
+   * reactive-mode chat still depends on would decay silently without
+   * them.
    */
   aiEngagementMode: z.enum(['proactive', 'scheduled', 'reactive', 'off']).optional(),
   /**
@@ -4492,6 +4502,18 @@ export const SearchResultSchema = z.object({
   /** ISO 8601 when the backend supplies it. */
   publishedAt: z.string().optional(),
   source: z.enum(['brave', 'wikipedia', 'tavily', 'mock']),
+  /**
+   * Substantive body text the backend returned alongside the hit, already
+   * plain text (no HTML). Optional because most backends only supply a
+   * snippet; Wikipedia hydrates its top results because a single API call
+   * can join search + article extract, and the alternative — telling the
+   * model to `fetch_url` the article — returns megabytes of page chrome
+   * that is truncated away before any prose is reached.
+   *
+   * Never a substitute for `snippet`: callers that only want a compact
+   * result list keep reading `snippet` and stay unaffected.
+   */
+  content: z.string().optional(),
 });
 export type SearchResult = z.infer<typeof SearchResultSchema>;
 
@@ -4518,6 +4540,39 @@ export const WebSearchResponseSchema = z.object({
   durationMs: z.number().int().nonnegative(),
 });
 export type WebSearchResponse = z.infer<typeof WebSearchResponseSchema>;
+
+/**
+ * `wikipedia_read` request — fetch one article's full plain-text body by
+ * exact title. Separate from {@link WikipediaSearchRequestSchema} because a
+ * full article does not fit the search response budget: the English "Italy"
+ * extract alone is ~96 KB, over the MCP bridge's whole-result cap, so
+ * hydrating every search hit to full text is not an option and a per-title
+ * read is.
+ */
+export const WikipediaReadRequestSchema = z.object({
+  /** Exact article title, as returned in a `wikipedia_search` result. */
+  title: z.string().min(1).max(400),
+  /** BCP-47 language code; selects the Wikipedia corpus. */
+  language: z.string().min(2).max(8).optional(),
+  /**
+   * Character ceiling for the returned body. Bounded well under the bridge's
+   * cap so a long article can never consume a whole context window.
+   */
+  maxChars: z.number().int().min(500).max(60_000).optional(),
+});
+export type WikipediaReadRequest = z.infer<typeof WikipediaReadRequestSchema>;
+
+export const WikipediaReadResponseSchema = z.object({
+  /** Wikipedia's canonical title, which may differ from the request after a redirect. */
+  title: z.string(),
+  url: z.string(),
+  /** Plain-text article body (no wiki markup, no HTML). */
+  content: z.string(),
+  /** True when `maxChars` clipped the body. */
+  truncated: z.boolean(),
+  durationMs: z.number().int().nonnegative(),
+});
+export type WikipediaReadResponse = z.infer<typeof WikipediaReadResponseSchema>;
 
 /**
  * Bounds for the model-facing workspace read tools. The ordinary project

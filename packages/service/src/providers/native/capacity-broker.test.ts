@@ -24,6 +24,7 @@ import {
   planAdaptiveContextGrowth,
   planCtxTokensForMemory,
   plannedLocalEngineSlots,
+  pressureIdleGraceMs,
   resolveLlamaCppContextRequirement,
   resolveLocalContextRequirement,
   setDetectedGpuVramBytes,
@@ -1579,5 +1580,25 @@ describe('availableSystemRamBytes parsers', () => {
 
   it('returns null when MemAvailable is absent', () => {
     expect(parseMeminfoAvailableBytes('MemFree: 12 kB')).toBeNull();
+  });
+});
+
+describe('pressureIdleGraceMs', () => {
+  const GIB = 1024 ** 3;
+
+  it('holds a warm engine for a minute when the accelerator has room to spare', () => {
+    expect(pressureIdleGraceMs(48 * GIB)).toBe(60_000);
+  });
+
+  it('releases fast when one model is most of the accelerator', () => {
+    // Two gezel installs on one 12 GB laptop card spent a night evicting each
+    // other inside the roomy grace — each politely stopping its own idle
+    // engine, the other reloading into the space it left.
+    expect(pressureIdleGraceMs(11.4 * GIB)).toBe(15_000);
+    expect(pressureIdleGraceMs(16 * GIB)).toBe(15_000);
+  });
+
+  it('falls back to the roomy grace when nothing was measured', () => {
+    expect(pressureIdleGraceMs(0)).toBe(60_000);
   });
 });

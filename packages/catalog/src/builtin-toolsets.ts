@@ -250,8 +250,6 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
       'list_project_types',
       'apply_project_type',
       'start_project_from_type',
-      'export_ai_app',
-      'import_ai_app',
       'list_project_gezels',
       'add_gezel_to_project',
       'remove_gezel_from_project',
@@ -259,6 +257,13 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
       'enable_suggested_work',
       'disable_suggested_work',
     ],
+  },
+  {
+    id: 'ai-apps',
+    name: 'AI Apps',
+    description:
+      'Package a configured project into a shareable .gezapp bundle and install one back. Deliberately in no role default: this is a distribution chore the user drives from Settings or the `gezel app` CLI, not something a gezel reaches for mid-conversation. Install it on a gezel whose actual job is publishing app bundles.',
+    tools: ['export_ai_app', 'import_ai_app'],
   },
   {
     id: 'audio',
@@ -315,8 +320,14 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     id: 'web',
     name: 'Web Access',
     description:
-      'Search the web (when a keyed backend like Brave is configured) or Wikipedia, fetch URL contents, and find interactive elements on a browser-controlled page (after a Playwright navigate / click / type). `web_search` only registers when a real keyed backend is configured; `wikipedia_search` only registers for non-cloud models (cloud models already have Wikipedia in training).',
-    tools: ['web_search', 'wikipedia_search', 'fetch_url', 'browser_find_page_element'],
+      'Search the web (when a keyed backend like Brave is configured) or Wikipedia, fetch URL contents, and find interactive elements on a browser-controlled page (after a Playwright navigate / click / type). `web_search` only registers when a real keyed backend is configured; `wikipedia_search` / `wikipedia_read` only register for non-cloud models (cloud models already have Wikipedia in training). Wikipedia search results arrive with article lead text already included, so reading a result does not need a follow-up fetch.',
+    tools: [
+      'web_search',
+      'wikipedia_search',
+      'wikipedia_read',
+      'fetch_url',
+      'browser_find_page_element',
+    ],
   },
   {
     id: 'images',

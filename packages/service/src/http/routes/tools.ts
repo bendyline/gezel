@@ -62,6 +62,8 @@ import {
   UpdateBoekwachterIssueRequestSchema,
   WebSearchRequestSchema,
   type WebSearchResponse,
+  WikipediaReadRequestSchema,
+  type WikipediaReadResponse,
   WikipediaSearchRequestSchema,
   projectManagedWorkspaceWritable,
   resolveSecurityPolicy,
@@ -74,9 +76,12 @@ import { buildPrOverlay } from '../../filemap/pr-overlay.js';
 import { PathSafetyError, resolveInside, safeJoin } from '../../fs/safe-paths.js';
 import { ensureGezel } from '../../gezels/ensure.js';
 import { createSearchProvider } from '../../providers/search/factory.js';
-import { MockSearchProvider } from '../../providers/search/mock.js';
+import { MockSearchProvider, mockWikipediaArticle } from '../../providers/search/mock.js';
 import type { SearchProvider } from '../../providers/search/types.js';
-import { WikipediaSearchProvider } from '../../providers/search/wikipedia.js';
+import {
+  WikipediaSearchProvider,
+  fetchWikipediaArticle,
+} from '../../providers/search/wikipedia.js';
 import { DEFAULT_ARCHIVE_LIMITS, guardZipArchive } from '../../safety/archive-guard.js';
 import { collectProviderSecretValues } from '../../secrets/registry.js';
 import { dispatchTaskEntry } from '../../tasks/entry-dispatch.js';
@@ -307,10 +312,31 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     // Always Wikipedia in production. Mock-provider mode (used by
     // E2E and CI) substitutes the deterministic mock so we don't
     // hit wikipedia.org in tests.
-    const provider: SearchProvider =
-      process.env.GEZEL_MOCK_PROVIDER === '1'
-        ? new MockSearchProvider()
-        : new WikipediaSearchProvider();
+    const mocked = process.env.GEZEL_MOCK_PROVIDER === '1';
+
+    // Same sink-level posture check as fetch-url. This route builds its
+    // provider directly instead of going through `createSearchProvider`,
+    // so it does NOT inherit the factory's `allowExternalServices`
+    // ceiling — and a zero-key lookup is still egress, since it reveals
+    // what is being researched. Stripping the tool from the model's
+    // roster (role-tool-filter's EXTERNAL_SERVICE_TOOLS) is not
+    // sufficient on its own: any direct API caller, or any path that
+    // re-surfaces the tool, would otherwise reach the network.
+    //
+    // Mock mode is exempt in the same order `createSearchProvider` uses:
+    // the mock provider performs no request at all, so there is no
+    // egress for the ceiling to prevent, and gating it would only force
+    // every hermetic test to configure a policy it never exercises.
+    if (!mocked && !resolveSecurityPolicy(config).allowExternalServices) {
+      return c.json(
+        { error: 'request denied: external services are disabled by the current security level.' },
+        403,
+      );
+    }
+
+    const provider: SearchProvider = mocked
+      ? new MockSearchProvider()
+      : new WikipediaSearchProvider();
     const limit = body.limit ?? config.webSearch?.defaultLimit ?? DEFAULT_WEB_SEARCH_LIMIT;
     const controller = new AbortController();
     const timeout = setTimeout(
@@ -331,6 +357,71 @@ export function toolRoutes(ctx: ServiceContext): Hono {
         results,
         source: provider.name,
         query: body.query,
+        durationMs: Date.now() - start,
+      };
+      return c.json(response);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ error: msg }, 502);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  app.post('/:id/tools/wikipedia-read', async (c) => {
+    const body = WikipediaReadRequestSchema.parse(await c.req.json());
+    const config = await ctx.store.readConfig();
+
+    // A title is the outbound payload here, so it gets the same
+    // allow/deny screen a query does — the policy's intent is "what can
+    // leave this install," not "which request shape."
+    const policyDenial = checkQueryPolicy(body.title, config.webSearch);
+    if (policyDenial) return c.json({ error: policyDenial }, 403);
+
+    const storedSecrets = await collectProviderSecretValues(ctx.secrets);
+    if (stringsContainingAnySecret([body.title], storedSecrets)) {
+      return c.json(
+        {
+          error: 'request denied: outbound payload contains a value matching a stored credential.',
+        },
+        403,
+      );
+    }
+
+    // Mock-provider mode keeps this route off the network, exactly as
+    // wikipedia-search does above — without it every E2E/CI run would
+    // reach live wikipedia.org — and is exempt from the posture check
+    // for the same reason: it issues no request.
+    const mocked = process.env.GEZEL_MOCK_PROVIDER === '1';
+    if (!mocked && !resolveSecurityPolicy(config).allowExternalServices) {
+      return c.json(
+        { error: 'request denied: external services are disabled by the current security level.' },
+        403,
+      );
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new Error('wikipedia_read timeout')),
+      DEFAULT_WEB_SEARCH_TIMEOUT_MS,
+    );
+    const start = Date.now();
+    try {
+      const article = mocked
+        ? mockWikipediaArticle({
+            title: body.title,
+            ...(body.maxChars !== undefined ? { maxChars: body.maxChars } : {}),
+          })
+        : await fetchWikipediaArticle(
+            {
+              title: body.title,
+              ...(body.language ? { language: body.language } : {}),
+              ...(body.maxChars !== undefined ? { maxChars: body.maxChars } : {}),
+            },
+            controller.signal,
+          );
+      const response: WikipediaReadResponse = {
+        ...article,
         durationMs: Date.now() - start,
       };
       return c.json(response);

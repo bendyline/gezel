@@ -55,6 +55,7 @@ import {
   type UnrecognizedModelInfo,
   assertModelStorePathSafe,
   findModelRoot,
+  findRenamedModelId,
   hashModelPayloadFiles,
   inspectModelDirectory,
   listIncompleteModelDownloads,
@@ -183,6 +184,12 @@ export type MlxInstallEvent =
 
 interface InstalledManifest {
   id: string;
+  /**
+   * The id this install carried before the quant-suffix rename, when it
+   * was renamed. Keeps pins written against the old id resolvable — see
+   * `models/legacy-quant-suffix.ts`.
+   */
+  renamedFrom?: string;
   name: string;
   approxSizeBytes: number;
   installedAt: string;
@@ -1091,9 +1098,17 @@ export class MlxModelManager {
     log.warn(`[mlx] model directory "${id}" is not runnable: ${reason}`);
   }
 
-  private async loadInstalled(id: string): Promise<InstalledMlxModel | null> {
-    const root = await findModelRoot(this.storageRoots, id);
-    if (!root) return null;
+  private async loadInstalled(requestedId: string): Promise<InstalledMlxModel | null> {
+    let id = requestedId;
+    let root = await findModelRoot(this.storageRoots, id);
+    if (!root) {
+      // A pin written before the quant-suffix rename still names the old id.
+      const renamed = await findRenamedModelId(this.storageRoots, requestedId);
+      if (!renamed) return null;
+      id = renamed;
+      root = await findModelRoot(this.storageRoots, id);
+      if (!root) return null;
+    }
     const metaPath = join(root, id, 'manifest.json');
     let raw: string;
     try {

@@ -786,9 +786,8 @@
  * `--compose-frame-bg`, so a fill-matched tab has nothing to join to and reads
  * as a chip parked in the address line, which is exactly how the first attempt
  * at this landed.
- * Selection is carried by that break plus an accent bar on the tab's top edge
- * — a latched key fill would defeat the point, since the panel it merges into
- * is not tinted. */
+ * Selection is carried by that break — a latched key fill would defeat the
+ * point, since the panel it merges into is not tinted. */
 .compose-mode-tabs {
   display: inline-flex;
   align-items: stretch;
@@ -843,10 +842,8 @@
   background: var(--compose-frame-bg);
   color: var(--text);
   font-weight: 600;
-  /* The join: no bottom edge, so the tab and the band below are one surface.
-   * The inset shadow is the selected marker that the shared fill gives up. */
+  /* The join: no bottom edge, so the tab and the band below are one surface. */
   border-bottom-color: transparent;
-  box-shadow: inset 0 2px 0 var(--accent);
 }
 
 .compose-mode-tab:focus-visible {
@@ -855,7 +852,7 @@
 }
 
 .compose-mode-tab[aria-selected="true"]:focus-visible {
-  box-shadow: inset 0 2px 0 var(--accent), var(--focus-ring);
+  box-shadow: var(--focus-ring);
 }
 
 .compose-mode-tab-glyph {

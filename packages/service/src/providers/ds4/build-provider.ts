@@ -7,7 +7,7 @@ import {
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { LlamaCppProvider } from '../llama-cpp/index.js';
-import { minViableLocalContextTokens } from '../native/capacity-broker.js';
+import { minViableLocalContextTokens, pressureIdleGraceMs } from '../native/capacity-broker.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { patientFetch } from '../patient-fetch.js';
@@ -352,7 +352,12 @@ export async function buildDs4Provider(opts: {
     startupTimeoutMs,
     idleTimeoutMs: idleMs,
     isBusy: () => ds4ProviderHolder.current?.isEngineBusy() ?? false,
-    ...(opts.arbiter ? { memoryPressure: () => opts.arbiter!.getMemoryPressureStatus() } : {}),
+    ...(opts.arbiter
+      ? {
+          memoryPressure: () => opts.arbiter!.getMemoryPressureStatus(),
+          pressureIdleTimeoutMs: pressureIdleGraceMs(),
+        }
+      : {}),
     // ds4 exposes no /health — a 200 on /v1/models is the readiness signal.
     readinessPath: '/v1/models',
     onLog: (line) => {

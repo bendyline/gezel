@@ -222,8 +222,8 @@ importers:
         specifier: workspace:*
         version: link:../core
       '@bendyline/gilde':
-        specifier: 0.1.44
-        version: 0.1.44
+        specifier: 0.1.45
+        version: 0.1.45
       tar:
         specifier: 7.5.21
         version: 7.5.21
@@ -939,8 +939,8 @@ packages:
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
     engines: {node: '>=18'}
 
-  '@bendyline/gilde@0.1.44':
-    resolution: {integrity: sha512-jOZwq174YXp9HIRxCb1i+qPFP9wJDbmcvn/I8TL0tRiQdpV/VMJPz28neXi7UkupcjGCX35DFgIDjFDUNrZZwA==}
+  '@bendyline/gilde@0.1.45':
+    resolution: {integrity: sha512-RnVhPrbv8CTxIcc68yJOm1AVWCrrklVbob5liKKwOQ8TR7/46tP2EdDhpKjKwpEEzhmqdrvYgTfYyj3N4TvBsA==}
 
   '@bendyline/squisq-cli@2.6.1':
     resolution: {integrity: sha512-7hspmvH7MSDuxwOaMvMRT3TMiXzS3hrFE2ALIyWQY2Yn0Qpu/jMHvwVADO21wC98FIwMDKJBGLBYEEieeR1zNA==}
@@ -8203,7 +8203,7 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@bendyline/gilde@0.1.44': {}
+  '@bendyline/gilde@0.1.45': {}
 
   '@bendyline/squisq-cli@2.6.1(supports-color@8.1.1)':
     dependencies:

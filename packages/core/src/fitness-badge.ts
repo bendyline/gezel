@@ -18,6 +18,13 @@ export interface FitnessBadge {
   label: string;
   /** Longer tooltip explanation. */
   detail: string;
+  /**
+   * The failing check's own words, for surfaces that can afford a line under
+   * the pill. Present only when something went wrong and we know what: a
+   * label like "fitness check failed" tells a user nothing they can act on,
+   * and the reason existed all along — it was just buried in a tooltip.
+   */
+  reason?: string;
 }
 
 export interface FitnessBadgeInput {
@@ -48,6 +55,32 @@ const CHECK_LABELS: ReadonlyArray<{
   { key: 'reasoningBudget', label: 'unbounded reasoning' },
   { key: 'contextFit', label: 'small context' },
 ];
+
+/**
+ * Records written before checks carried `reached` still describe an unreached
+ * axis with exactly this sentence, and there are plenty of them on disk. The
+ * flag is the real signal; this is how the same record reads correctly today
+ * instead of only after its next probe.
+ */
+const LEGACY_NOT_REACHED_DETAIL = 'not reached — an earlier probe stage failed';
+
+function neverRan(check: { detail: string; reached?: boolean }): boolean {
+  return check.reached === false || check.detail === LEGACY_NOT_REACHED_DETAIL;
+}
+
+/**
+ * The failing axes that actually ran, in badge order.
+ *
+ * A check that never executed — an earlier stage failed first — carries
+ * `ok: false` as bookkeeping, not as a verdict. Naming one reports "tool calls
+ * failed" at a model whose tool turn was never attempted, which is a defect
+ * invented by the reporting rather than found by the probe.
+ */
+function failingChecks(
+  record: ModelFitnessRecord,
+): ReadonlyArray<{ key: keyof ModelFitnessRecord['checks']; label: string }> {
+  return CHECK_LABELS.filter((c) => !record.checks[c.key].ok && !neverRan(record.checks[c.key]));
+}
 
 /**
  * Speed bands for an admitted model, fastest first. They determine severity
@@ -137,6 +170,7 @@ export function composeFitnessBadge(input: FitnessBadgeInput): FitnessBadge {
     return {
       tier: 'unknown',
       label: 'did not run',
+      reason: 'the engine was busy — nothing is wrong with the model',
       detail: `The fitness check could not run — the engine was busy serving other requests. Nothing is wrong with the model; run the check again in a moment.${softener}${ramCaveat(ramFit)}`,
     };
   }
@@ -146,12 +180,20 @@ export function composeFitnessBadge(input: FitnessBadgeInput): FitnessBadge {
     // reported "engine spawned and served the probe session" as the reason a
     // check failed, because spawn passes whenever the session was created —
     // and native engines start lazily, on the first turn.
-    const cause = CHECK_LABELS.find((c) => !record.checks[c.key].ok);
-    const detail = cause ? record.checks[cause.key].detail : record.checks.spawn.detail;
+    const cause = failingChecks(record)[0];
+    // With no failing axis that actually ran there is nothing honest to name.
+    // Falling back to `checks.spawn` here printed "engine spawned and served
+    // the probe session" as the reason a check FAILED.
+    const reason = cause
+      ? record.checks[cause.key].detail
+      : record.checks.spawn.ok
+        ? 'the probe stopped before it could say why — run it again'
+        : record.checks.spawn.detail;
     return {
       tier: 'warn',
       label: 'fitness check failed',
-      detail: `The fitness check could not complete: ${detail}${softener}${ramCaveat(ramFit)}`,
+      reason,
+      detail: `The fitness check could not complete: ${reason}${softener}${ramCaveat(ramFit)}`,
     };
   }
 
@@ -159,17 +201,20 @@ export function composeFitnessBadge(input: FitnessBadgeInput): FitnessBadge {
     return {
       tier: 'unknown',
       label: 'check deferred',
+      reason: 'waited for memory headroom and gave up — run it manually',
       detail: `The automatic fitness check waited for memory headroom and gave up — run it manually.${ramCaveat(ramFit)}`,
     };
   }
 
   if (!record.admitted) {
-    const failing = CHECK_LABELS.filter((c) => !record.checks[c.key].ok);
+    const failing = failingChecks(record);
     const first = failing[0];
+    const reason = first ? record.checks[first.key].detail : undefined;
     const detail = failing.map((c) => record.checks[c.key].detail).join(' ');
     return {
       tier: 'warn',
       label: first?.label ?? 'fitness concerns',
+      ...(reason ? { reason } : {}),
       detail: detail + softener + ramCaveat(ramFit),
     };
   }

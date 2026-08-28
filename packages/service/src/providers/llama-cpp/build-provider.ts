@@ -21,6 +21,7 @@ import {
   formatContextCapacityDenial,
   minViableLocalContextTokens,
   planAdaptiveContextGrowth,
+  pressureIdleGraceMs,
   resolveLlamaCppContextRequirement,
 } from '../native/capacity-broker.js';
 import { makeEngineKey } from '../native/engine-key.js';
@@ -1097,7 +1098,12 @@ export async function buildLlamaCppProvider(opts: {
     idleTimeoutMs: llamaIdleMs,
     freezeTimeoutMs: llamaFreezeMs,
     isBusy: () => providerHolder.current?.isEngineBusy() ?? false,
-    ...(opts.arbiter ? { memoryPressure: () => opts.arbiter!.getMemoryPressureStatus() } : {}),
+    ...(opts.arbiter
+      ? {
+          memoryPressure: () => opts.arbiter!.getMemoryPressureStatus(),
+          pressureIdleTimeoutMs: pressureIdleGraceMs(),
+        }
+      : {}),
     onFreeze: async () => {
       // flushAll is best-effort and handles its own try/catch — but
       // we await so the supervisor's freeze log line aligns with

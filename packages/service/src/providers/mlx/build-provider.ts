@@ -14,6 +14,7 @@ import {
   availableSystemRamBytes,
   formatContextCapacityDenial,
   minViableLocalContextTokens,
+  pressureIdleGraceMs,
   resolveLocalContextRequirement,
 } from '../native/capacity-broker.js';
 import { pickFreePort } from '../native/port.js';
@@ -580,7 +581,12 @@ export async function buildMlxProvider(opts: {
     idleTimeoutMs: mlxIdleMs,
     freezeTimeoutMs: mlxFreezeMs,
     isBusy: () => providerHolder.current?.isEngineBusy() ?? false,
-    ...(opts.arbiter ? { memoryPressure: () => opts.arbiter!.getMemoryPressureStatus() } : {}),
+    ...(opts.arbiter
+      ? {
+          memoryPressure: () => opts.arbiter!.getMemoryPressureStatus(),
+          pressureIdleTimeoutMs: pressureIdleGraceMs(),
+        }
+      : {}),
     onFreeze: async () => {
       await providerHolder.current?.getCacheAdapter()?.flushAll();
     },

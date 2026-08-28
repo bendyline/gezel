@@ -272,6 +272,51 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(allowlist!.has('list_tasks')).toBe(false);
   });
 
+  it('a default Meester fits under the coordinator diet cap — no trim', async () => {
+    // The diet exists to shed the uncurated ~127-tool workspace/execution
+    // tail, not to hide half a coordinator's own roster. Before the roster
+    // prune a medium-tier Meester on a clamped local engine was trimmed 74
+    // -> 53 and the user got a "tool cap trimmed this session" warning on
+    // "hello?" — the dropped names (`export_ai_app`, the suggested-work
+    // toggles, the craftbook surgery tail) were tools she never uses, so the
+    // fix was to stop registering them rather than to keep paying their
+    // schemas and then dropping them. A trim warning on a stock Meester now
+    // means something real: an installed toolset pushed her over.
+    const trims: { before: number; after: number }[] = [];
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      session: baseSession({}),
+      tier: 'medium',
+      rolesAsTools: true,
+      effectiveContextWindow: 32_768,
+      onCapTrim: (event) => trims.push(event),
+    });
+    expect(trims).toEqual([]);
+    for (const stripped of [
+      'export_ai_app',
+      'import_ai_app',
+      'list_suggested_work',
+      'enable_suggested_work',
+      'disable_suggested_work',
+      'set_step_deliverable',
+      'craftbook_update',
+      'export_task_craftbook',
+      'write_document',
+      'delete_document',
+      'search_docs',
+      'find_entity',
+    ]) {
+      expect(allowlist?.has(stripped)).toBe(false);
+    }
+    // The typed-project front door is the reason the prune was worth doing:
+    // "I want to learn Spanish" -> the language-trainer project type is
+    // concierge work, and the diet used to trim it away.
+    expect(allowlist?.has('list_project_types')).toBe(true);
+    expect(allowlist?.has('start_project_from_type')).toBe(true);
+    expect(allowlist?.has('search_documents')).toBe(true);
+    expect(allowlist?.has('read_document')).toBe(true);
+  });
+
   it('loads the large step-patch schema only for an explicit craftbook editor session', async () => {
     const ordinary = await resolveSessionToolSurface({
       ...baseOpts,
@@ -904,6 +949,15 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
       expect(allowlist!.has('run_playwright_script')).toBe(true);
       expect(allowlist!.has('write_file')).toBe(true);
       expect(allowlist!.has('advance_task_step')).toBe(true);
+      // Research is not only external. `search` is the one tool covering the
+      // shared document library, memories, artifacts, and knowledge catalogs,
+      // and `read_document` opens a shared hit — without both, a research step
+      // walks past whatever the user already wrote and goes straight to the
+      // open web. Note the gate's `tools` list above names neither: what a
+      // step may USE and what COUNTS as source-acquisition evidence are
+      // deliberately different lists.
+      expect(allowlist!.has('search')).toBe(true);
+      expect(allowlist!.has('read_document')).toBe(true);
     }
   });
 

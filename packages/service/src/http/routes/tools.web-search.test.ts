@@ -57,6 +57,17 @@ async function wikipediaSearch(body: Record<string, unknown>): Promise<Response>
   });
 }
 
+async function wikipediaRead(body: Record<string, unknown>): Promise<Response> {
+  return httpFetch(`${baseUrl}/api/projects/default/tools/wikipedia-read`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${svc.context.token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 describe('web_search route', () => {
   it('returns the normalized response shape from the mock provider', async () => {
     const res = await webSearch({ query: 'hello world', limit: 3 });
@@ -131,5 +142,92 @@ describe('wikipedia_search route', () => {
     expect(res.status).toBe(403);
     const json = (await res.json()) as { error: string };
     expect(json.error).toMatch(/denied by policy/i);
+  });
+});
+
+describe('wikipedia_read route', () => {
+  it('returns the article shape (mock provider in test mode)', async () => {
+    const res = await wikipediaRead({ title: 'Belgian beer' });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      title: string;
+      url: string;
+      content: string;
+      truncated: boolean;
+    };
+    expect(json.title).toBe('Belgian beer');
+    expect(json.url).toContain('Belgian_beer');
+    expect(json.content).toContain('Belgian beer');
+    expect(json.truncated).toBe(false);
+  });
+
+  it('reports truncation when maxChars clips the body', async () => {
+    const res = await wikipediaRead({ title: 'Belgian beer', maxChars: 500 });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { content: string; truncated: boolean };
+    expect(json.truncated).toBe(true);
+    expect(json.content.length).toBeLessThanOrEqual(500);
+  });
+
+  it('screens the title against the same deny policy as a query', async () => {
+    await svc.context.store.writeConfig({ webSearch: { deny: ['*forbidden*'] } });
+    const res = await wikipediaRead({ title: 'a forbidden article' });
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toMatch(/denied by policy/i);
+  });
+
+  it('refuses when the title contains a stored credential value', async () => {
+    await svc.context.secrets.set(
+      { kind: 'providerCredential', name: 'braveSearchApiKey' },
+      'BSAhcRr_sentinel_777',
+    );
+    const res = await wikipediaRead({ title: 'leak BSAhcRr_sentinel_777' });
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toMatch(/outbound payload/i);
+    expect(json.error).not.toContain('BSAhcRr_sentinel_777');
+  });
+});
+
+/**
+ * Sink-level posture coverage. Both Wikipedia routes build their provider
+ * directly rather than through `createSearchProvider`, so they do not
+ * inherit its `allowExternalServices` ceiling and must enforce it
+ * themselves — hiding the tool from the model's roster does not stop a
+ * direct API caller.
+ *
+ * `GEZEL_MOCK_PROVIDER` is cleared here because mock mode is deliberately
+ * exempt (it issues no request). Clearing it is also what makes these
+ * assertions meaningful AND hermetic: a 403 is returned before any
+ * provider runs, so nothing reaches wikipedia.org even with the mock off.
+ */
+describe('wikipedia routes under a no-external-services posture', () => {
+  beforeEach(async () => {
+    delete process.env.GEZEL_MOCK_PROVIDER;
+    await svc.context.store.writeConfig({
+      securityPolicy: {
+        level: 'lockdown',
+        allowFileEdits: true,
+        allowExternalChat: true,
+        allowExternalServices: false,
+        allowScriptExecution: true,
+        allowAppNetwork: true,
+      },
+    });
+  });
+
+  it('refuses wikipedia_search at the sink', async () => {
+    const res = await wikipediaSearch({ query: 'belgian beer' });
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toMatch(/external services are disabled/i);
+  });
+
+  it('refuses wikipedia_read at the sink', async () => {
+    const res = await wikipediaRead({ title: 'Belgian beer' });
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toMatch(/external services are disabled/i);
   });
 });

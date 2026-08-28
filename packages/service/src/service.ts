@@ -11,6 +11,7 @@ import {
   formatNightShiftSummary,
   formatSuspension,
   isEngagementAllowed,
+  isTaskWorkAllowed,
   normalizeStepGate,
   nowIso,
   onSuspension,
@@ -131,6 +132,10 @@ import { MemoryHealthMonitor } from './memory/health.js';
 import { MemoryManager } from './memory/manager.js';
 import { createEnsureModelOrchestrator } from './models/ensure.js';
 import { buildChatModelInstallRegistries } from './models/install-jobs.js';
+import {
+  migrateLegacyQuantSuffixIds,
+  remapEngineScopedKeys,
+} from './models/legacy-quant-suffix.js';
 import {
   migrateLegacySystemModels,
   modelStorageRoots,
@@ -2147,6 +2152,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
           },
           resolveBoekwachter: (id) => resolveProjectBoekwachter(store, id).catch(() => null),
           isPaused: () => indexingJob.isPaused(),
+          aiTiersAllowed: async () => isTaskWorkAllowed(await store.readConfig().catch(() => ({}))),
         },
         projectId,
         opts,
@@ -2987,6 +2993,37 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         error: err instanceof Error ? err.message : String(err),
       });
     });
+  }
+
+  // Give pre-convention installs the quantization in their name. The model
+  // table prints the install id, so `gemma4-e4b` (Q8_0) sat one row below
+  // `gemma4-e4b-q4` with nothing on either row to tell them apart. Awaited
+  // rather than backgrounded: it is a handful of directory renames, and a
+  // listing that raced it would show a model under neither name.
+  try {
+    const renames = (
+      await Promise.all(
+        (['llama-cpp', 'ds4', 'mlx'] as const).map((engine) =>
+          migrateLegacyQuantSuffixIds({ roots: modelStorageRoots({ home, engine }), engine }),
+        ),
+      )
+    ).flat();
+    if (renames.length > 0) {
+      const config = await store.readConfig();
+      const modelFitness = remapEngineScopedKeys(config.modelFitness, renames);
+      const modelContextOverrides = remapEngineScopedKeys(config.modelContextOverrides, renames);
+      if (
+        modelFitness !== config.modelFitness ||
+        modelContextOverrides !== config.modelContextOverrides
+      ) {
+        await store.writeConfig({
+          ...(modelFitness ? { modelFitness } : {}),
+          ...(modelContextOverrides ? { modelContextOverrides } : {}),
+        });
+      }
+    }
+  } catch (err) {
+    log.warn('[models] legacy quant-suffix migration failed:', err);
   }
 
   // Reclaim abandoned chat-model downloads: directories with `.partial`

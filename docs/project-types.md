@@ -473,7 +473,10 @@ plus both gezapp manifests, rendered live from core Zod). The CLI surface is
    ([gezapp.ts](../packages/service/src/project-type/gezapp.ts)): exact-version packing,
    per-item SHA-256 verification, dependency locking, reference-closure and conflict
    validation, a review-then-confirm atomic installer with receipts, and
-   `export_ai_app` / `import_ai_app` MCP tools + HTTP endpoints.
+   `export_ai_app` / `import_ai_app` MCP tools + HTTP endpoints. Those two tools live in the
+   opt-in `ai-apps` builtin toolset group, which no role carries by default — packaging is a
+   distribution chore the user drives from Settings or `gezel app`, not something a
+   coordinator should be paying tool-schema prefill for on every turn.
 7. **Craftbook install + schedules** ✅ — adoption copy-installs `craftbooks[]` into the
    project (embedded `craftbooks/<id>.json` docs first, catalog `craftbook-template` ids as
    fallback) with a provenance sidecar so re-apply skips unchanged copies and never clobbers

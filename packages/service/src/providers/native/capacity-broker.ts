@@ -42,6 +42,7 @@ export {
   autoDetectBudgetBytes,
   computeCapacityBudget,
   getDetectedGpuVramBytes,
+  pressureIdleGraceMs,
   setDetectedGpuVramBytes,
   type CapacityBudget,
 } from './capacity-budget.js';
@@ -272,6 +273,15 @@ export class EngineBusyError extends Error {
  * input. The fitness probe records `blocked` ("did not run"); index enrichment
  * defers the file with its retry budget untouched.
  */
+/**
+ * True for a refusal to load a model at all. Like {@link isEngineBusyError}
+ * this is a "never dispatched" signal: nothing reached a model, so it is
+ * evidence about neither the target's health nor the request's content.
+ */
+export function isCapacityDeniedError(err: unknown): boolean {
+  return !!err && typeof err === 'object' && (err as { code?: unknown }).code === 'capacity-denied';
+}
+
 export function isEngineBusyError(err: unknown): boolean {
   if (err && typeof err === 'object' && (err as { code?: unknown }).code === 'engine-busy') {
     return true;

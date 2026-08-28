@@ -1,5 +1,5 @@
 import type { GezelSummary, ProjectDetail, Task } from '@bendyline/gezel';
-import { displayName, pronounFormsForGender } from '@bendyline/gezel';
+import { displayName, isCodingProject, pronounFormsForGender } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { NewTaskDialog } from '../views/tasks/NewTaskDialog.js';
@@ -12,6 +12,7 @@ import { SessionSwitcher } from './SessionSwitcher.js';
 import { TerminalComposer } from './TerminalComposer.js';
 import { pickChatPlaceholder } from './chat-placeholder.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
+import { useShowAdvancedFeatures } from './useShowAdvancedFeatures.js';
 
 /**
  * How recent an ordinary thread has to be for opening the project to resume
@@ -249,6 +250,18 @@ function ProjectChatBody({
     setChatFocusRequestKey((key) => key + 1);
     setComposeMode('chat');
   }, []);
+  // The terminal is a developer surface: the switch (and every other way
+  // into terminal mode — the `> ` draft escape, terminal pills) only exists
+  // on coding-typed projects, and only when "Show advanced features" is on.
+  // Everyone else just gets the chat composer, no mode concept at all.
+  const showAdvancedFeatures = useShowAdvancedFeatures();
+  const showComposeModeTabs = showAdvancedFeatures && isCodingProject(project);
+  // If the gate closes while terminal mode is up (settings toggle flipped
+  // live, or a project's detected type changed), land back on chat rather
+  // than stranding the user on a surface with no switch to leave it.
+  useEffect(() => {
+    if (!showComposeModeTabs && composeMode === 'terminal') switchToChat();
+  }, [showComposeModeTabs, composeMode, switchToChat]);
   // Two pieces of state for the terminal pane, separated on purpose:
   //
   //   - `terminalThreadDir` — the folder used for routing. Sent on
@@ -444,7 +457,7 @@ function ProjectChatBody({
   // the thread picker and draft area read as the panel that tab fronts. The
   // glyphs mirror the escape syntax users can type (`@florian …` → chat,
   // `> ls` → terminal).
-  const composeModeTabs = (
+  const composeModeTabs = !showComposeModeTabs ? null : (
     <div className="compose-mode-tabs" role="tablist" aria-label="Compose surface">
       <button
         type="button"
@@ -507,26 +520,32 @@ function ProjectChatBody({
             onTaskReference(task.ref, { focus: true });
             void focusTask(task);
           }}
-          onFocusTerminal={(thread) => {
-            pickTerminalFolder(thread.workingDir);
-            setActiveTerminalThreadId(thread.id);
-            setComposeMode('terminal');
-            setTerminalFocusRequest((current) => ({
-              threadId: thread.id,
-              requestKey: (current?.requestKey ?? 0) + 1,
-            }));
-            // The thread anchor identifies the persistent shell, while its
-            // latest message records where that shell actually cd'd.
-            void api
-              .getTerminalThread(project.id, thread.id)
-              .then((detail) => {
-                const cwd = [...detail.messages]
-                  .reverse()
-                  .find((message) => message.cwd !== undefined)?.cwd;
-                if (cwd !== undefined) setTerminalPickerDisplay(cwd);
-              })
-              .catch(() => {});
-          }}
+          // Omitting the handler hides terminal pills entirely — a pill
+          // would drop the user into terminal mode with no switch to leave.
+          onFocusTerminal={
+            showComposeModeTabs
+              ? (thread) => {
+                  pickTerminalFolder(thread.workingDir);
+                  setActiveTerminalThreadId(thread.id);
+                  setComposeMode('terminal');
+                  setTerminalFocusRequest((current) => ({
+                    threadId: thread.id,
+                    requestKey: (current?.requestKey ?? 0) + 1,
+                  }));
+                  // The thread anchor identifies the persistent shell, while
+                  // its latest message records where that shell actually cd'd.
+                  void api
+                    .getTerminalThread(project.id, thread.id)
+                    .then((detail) => {
+                      const cwd = [...detail.messages]
+                        .reverse()
+                        .find((message) => message.cwd !== undefined)?.cwd;
+                      if (cwd !== undefined) setTerminalPickerDisplay(cwd);
+                    })
+                    .catch(() => {});
+                }
+              : undefined
+          }
           onNewTask={() => setNewTaskOpen(true)}
         />
       )}
@@ -625,10 +644,14 @@ function ProjectChatBody({
                   }}
                   passiveCcGezelIds={pendingPassiveCcIds}
                   onPassiveCcConsumed={() => setPendingPassiveCcIds([])}
-                  onTerminalEscape={(seed) => {
-                    setTerminalInitialInput(seed);
-                    setComposeMode('terminal');
-                  }}
+                  onTerminalEscape={
+                    showComposeModeTabs
+                      ? (seed) => {
+                          setTerminalInitialInput(seed);
+                          setComposeMode('terminal');
+                        }
+                      : undefined
+                  }
                   addressLineTrailing={composeModeTabs}
                   belowAddressLine={
                     <SessionSwitcher

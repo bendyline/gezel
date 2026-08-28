@@ -28,10 +28,28 @@ export { firstActionForKind };
  * Source-acquisition tools that must survive a Markdown deliverable kit for
  * research work. A research step still writes an ordinary notes/report file,
  * but collapsing it to FILE_CORE turns "research" into model-memory prose.
+ *
+ * `search` + `read_document` are here because research is not only external.
+ * `search` is the one tool covering the shared document library, project and
+ * gezel memories, artifacts, and installed knowledge catalogs — the user's
+ * own material. Without it a research step would go straight to the open web
+ * past whatever notes, briefs, or policies the user already wrote, and the
+ * craftbooks that drive these steps ask for "resolvable URL **or exact file
+ * path**" citations, so they already expect internal sources to be citable.
+ * `read_document` rides along because `search` tells the model to open a
+ * shared hit with it; wiring the finder without the opener surfaces
+ * documents the step cannot actually read.
+ *
+ * Note these are the tools a research step may USE. What COUNTS as evidence
+ * is the separate per-craftbook `researchEvidence.tools` list, which stays
+ * scoped to external acquisition on purpose.
  */
 export const RESEARCH_STEP_TOOLS: readonly string[] = [
+  'search',
+  'read_document',
   'web_search',
   'wikipedia_search',
+  'wikipedia_read',
   'fetch_url',
   'browser_find_page_element',
   'run_playwright_script',

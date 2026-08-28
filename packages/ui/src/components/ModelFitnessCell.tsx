@@ -13,6 +13,10 @@ import type { ModelFitnessEntry } from '@bendyline/gezel-client';
  * large model: a DwarfStar build streams routed experts from SSD and can
  * write at a comfortable rate while still taking a minute to *read* a long
  * prompt. That wait is what the user actually feels, so it goes on the row.
+ *
+ * When something went wrong, the badge's reason goes on the row too. "Fitness
+ * check failed" on its own is unactionable, and the explanation was already
+ * being computed — it just lived in a tooltip nobody thinks to hover.
  */
 
 function displayRate(tokensPerSec: number): string {
@@ -86,6 +90,11 @@ export function ModelFitnessCell({
         >
           {badge.label}
         </span>
+        {badge.reason && (
+          <span className="muted small model-fitness-reason" title={badge.detail}>
+            {badge.reason}
+          </span>
+        )}
         {speeds && (
           <span className="muted small model-fitness-speeds" title={speeds.title}>
             {speeds.label}

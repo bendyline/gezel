@@ -15,6 +15,7 @@ import type { LocalModelTier } from './local-model-tier.js';
 import { promptMandatedTools } from './prompt-tool-contract.js';
 import {
   EXTERNAL_SERVICE_TOOLS,
+  MEESTER_STRIPPED_CRAFTBOOK_TOOLS,
   type WebSearchBackendName,
   computeToolAllowlist,
   constrainAllowlistForDirectFileWork,
@@ -248,6 +249,11 @@ export async function resolveSessionToolSurface(
   if (rawAllowlist && opts.session.craftbookRef) {
     rawAllowlist = new Set(rawAllowlist);
     rawAllowlist.add('craftbook_update_step');
+    // The default Meester roster drops step surgery in favor of the
+    // whole-document `craftbook_read` + `craftbook_write` path
+    // (MEESTER_STRIPPED_CRAFTBOOK_TOOLS). A session pinned to one template
+    // IS the editor, and its prompt names these — same grant, same reason.
+    for (const name of MEESTER_STRIPPED_CRAFTBOOK_TOOLS) rawAllowlist.add(name);
   }
   // Lean-profile hard override: collapse the builtin surface to the minimal
   // essential set. Applied right after the role compute — a game session has
@@ -686,28 +692,41 @@ const MEESTER_TOOL_CAP_PRIORITY = [
   // reads "Craftbook id from list_craftbooks", so dropping this left the
   // schema pointing at a tool the one craftbook-centric role couldn't see.
   'list_craftbooks',
+  // Typed-project front door. "I want to learn Spanish" -> the
+  // language-trainer project type is concierge work by definition, and the
+  // pair was being trimmed by the very diet meant to protect the
+  // coordinator surface, on exactly the medium local models the diet
+  // targets. `apply_project_type` retrofits an existing project, which the
+  // user asks the Meester for in the same breath.
+  'list_project_types',
+  'start_project_from_type',
+  'apply_project_type',
+  // The Handboek lookup: "how do I do X in gezel" is a question the
+  // concierge answers rather than routes.
+  'how_do_i',
+  // Reading surfaces that pair with the curated `search_documents` /
+  // `search_memory` / `list_artifacts` above. Cheap schemas, and a router
+  // that can find a document but not open it is a dead end.
+  'list_documents',
+  'read_document',
+  'list_memories',
+  'grep_artifact',
   //
-  // Deliberately NOT curated here, so the small-tier trim is a decision
-  // rather than an omission:
-  //   - `craftbook_add_step` / `craftbook_remove_step` /
-  //     `craftbook_reorder_steps` / `set_step_deliverable` — redundant with
-  //     the curated `craftbook_read` + `craftbook_write` whole-document
-  //     path, which is the edit route the meester is actually taught.
-  //   - `list_suggested_work` / `enable_suggested_work` /
-  //     `disable_suggested_work` — a settings-shaped side surface; nothing
-  //     in the prompt stack names them, so their absence creates no
-  //     prompt-vs-runtime drift, and three more schemas is real prefill on
-  //     a 8B.
-  //   - the project doc-intel tail (`search_docs`, `read_doc_as_markdown`,
-  //     `find_entity`, …) — workspace-scoped office-document intelligence,
-  //     which a coordinator delegates along with the reading work.
-  //     `search_documents` is NOT in that tail and IS curated above: it
-  //     searches the shared library's content, which nothing else reaches.
-  //     Memory holds what was extracted from conversation, not what a human
-  //     filed in the library, and `read_document` needs a path you must
-  //     already know.
-  // Revisit any of these by adding the name here; the cap follows the list
-  // length, so curating a tool in never squeezes another one out.
+  // This list is now the WHOLE default Meester roster, which is the point:
+  // the diet cap follows the list length, so a default Meester is never
+  // trimmed and the "tool cap trimmed this session" warning again means
+  // something real — an installed toolset pushed her over. Tools that used
+  // to sit below the cut were removed from the roster outright instead
+  // (`MEESTER_STRIPPED_TOOLS` in role-tool-filter.ts, plus dropping the
+  // `doc-intel` / `entity-intel` groups from the role): registering a schema
+  // every turn so the cap can drop it every turn is pure prefill cost.
+  // `search_documents` stays curated above — it searches the shared
+  // library's content, which nothing else reaches; memory holds what was
+  // extracted from conversation, not what a human filed in the library.
+  //
+  // Order still matters at tiny tier, where the cap is a hard 15 rather
+  // than the list length: append new entries at this tail unless they
+  // genuinely outrank the kickoff cluster at the top.
 ] as const;
 
 const VOORMAN_TOOL_CAP_PRIORITY = [

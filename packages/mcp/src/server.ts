@@ -158,6 +158,7 @@ import {
   runtimePageCheckToValidateCheck,
   validateFile,
 } from './validate.js';
+import { formatWebSearchResponse } from './web-search-format.js';
 import { normalizeWorkspaceWriteContent } from './workspace-write-normalization.js';
 import {
   rejectHtmlWithScriptOutsideScriptTag,
@@ -3308,45 +3309,6 @@ function extractApiErrorMessage(err: unknown): string | undefined {
   if (!details || typeof details !== 'object') return undefined;
   const errorField = (details as Record<string, unknown>).error;
   return typeof errorField === 'string' ? errorField : undefined;
-}
-
-/**
- * Format a `web_search` API response as a numbered markdown list. Each
- * entry surfaces title, domain, optional date, snippet, and URL on its
- * own line — domain on the header so the model can scan for credibility,
- * URL last so it's trivially copy-pasteable into `fetch_url`. The
- * footer states which backend answered so the model can weight snippets
- * accordingly (Wikipedia → encyclopedic, Brave → current).
- */
-function formatWebSearchResponse(res: {
-  results: Array<{
-    title: string;
-    url: string;
-    snippet: string;
-    domain: string;
-    publishedAt?: string;
-    source: string;
-  }>;
-  source: string;
-  query: string;
-  durationMs: number;
-}): string {
-  const SNIPPET_CAP = 280;
-  const count = res.results.length;
-  const header =
-    count === 0
-      ? `0 results from ${res.source} (query: ${JSON.stringify(res.query)}). Try broader terms.`
-      : `${count} result${count === 1 ? '' : 's'} from ${res.source} (query: ${JSON.stringify(res.query)}) · ${res.durationMs}ms`;
-  if (count === 0) return header;
-
-  const entries = res.results.map((r, idx) => {
-    const date = r.publishedAt ? `  ·  ${r.publishedAt.slice(0, 10)}` : '';
-    const snippet =
-      r.snippet.length > SNIPPET_CAP ? `${r.snippet.slice(0, SNIPPET_CAP - 1)}…` : r.snippet;
-    const snippetLine = snippet ? `   ${snippet}\n` : '';
-    return `${idx + 1}. **${r.title}**  ·  ${r.domain}${date}\n${snippetLine}   ${r.url}`;
-  });
-  return `${header}\n\n${entries.join('\n\n')}`;
 }
 
 /**
@@ -10189,7 +10151,7 @@ server.tool(
 
 server.tool(
   'wikipedia_search',
-  'Search Wikipedia (the English encyclopedia by default; pass `language` for other corpora) for articles matching a query. Returns a numbered list of {title, domain, snippet, url}; pick a result and pass its `url` to `fetch_url` to read the article. Use for factual, encyclopedic, or historical lookups. For current events, news, or open-web pages use `web_search` if available — Wikipedia is timeless and lags real-world events. Default 10 results.',
+  'Search Wikipedia (the English encyclopedia by default; pass `language` for other corpora) for articles matching a query. The top results come back WITH their article lead text already included, so you can usually cite them directly from this one call — do NOT pass a Wikipedia url to `fetch_url`, which returns the rendered page (megabytes of scripts and navigation chrome) and gets truncated before any article prose. When you need more than the lead section of one article, call `wikipedia_read` with its exact title. Use for factual, encyclopedic, or historical lookups. For current events, news, or open-web pages use `web_search` if available — Wikipedia is timeless and lags real-world events. Default 10 results.',
   {
     query: z.string().min(1).max(400).describe('Plain-language search query.'),
     limit: z
@@ -10216,6 +10178,55 @@ server.tool(
       const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `wikipedia_search failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'wikipedia_read',
+  'Read one Wikipedia article as plain text, by its exact title. Use this only when `wikipedia_search` already gave you the article lead text and you need MORE of that article — the search results carry the lead section already, so a read is a second call you often do not need. Get the exact title from a `wikipedia_search` result; a guessed or approximate title fails. Long articles are truncated to `maxChars` and say so. Never use `fetch_url` on a wikipedia.org url instead of this — that returns the rendered page, which is mostly scripts and navigation and is cut off before the article text begins.',
+  {
+    title: z
+      .string()
+      .min(1)
+      .max(400)
+      .describe('Exact article title, copied from a `wikipedia_search` result.'),
+    language: z
+      .string()
+      .min(2)
+      .max(8)
+      .optional()
+      .describe(
+        'BCP-47 language code (e.g. "en", "de", "ja"). Selects the Wikipedia corpus. Defaults to English.',
+      ),
+    maxChars: z
+      .number()
+      .int()
+      .min(500)
+      .max(60_000)
+      .optional()
+      .describe('Character ceiling for the returned text (default 24000).'),
+  },
+  async (args) => {
+    try {
+      const res = await api.toolWikipediaRead(projectId, args);
+      const note = res.truncated
+        ? `\n\n[truncated at ${res.content.length} chars — raise maxChars for more]`
+        : '';
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `# ${res.title}\n${res.url}\n\n${res.content}${note}`,
+          },
+        ],
+      };
+    } catch (err) {
+      const msg = unwrapApiError(err);
+      return {
+        content: [{ type: 'text' as const, text: `wikipedia_read failed: ${msg}` }],
         isError: true,
       };
     }

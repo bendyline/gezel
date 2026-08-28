@@ -84,6 +84,27 @@ function fitKvBytes(
 }
 
 /**
+ * The fit verdict for one catalog row. The browse filter and the pill that
+ * row shows must read the SAME footprint: they were computed separately and
+ * diverged over the projector term, so a vision model could be hidden as
+ * unrunnable while the pill beside it — priced without its mmproj — claimed a
+ * better tier.
+ */
+function catalogFit(
+  m: ChatModelManifest & { llamaCpp: NonNullable<ChatModelManifest['llamaCpp']> },
+  memory: MemoryProfile,
+) {
+  return computeModelFit({
+    residentBytes:
+      estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes, {
+        mmprojBytes: m.llamaCpp.mmproj?.sizeBytes,
+      }) + fitKvBytes(m, memory),
+    isMoE: isMoEFromTags(m.tags),
+    ...fitMachine(memory),
+  });
+}
+
+/**
  * Adapt the /api/system/memory profile to the recommendation module's
  * device shape. `darwin-unified` is the only source that implies
  * macOS; the unified-pool GB10 case is caught by the vram-vs-ram
@@ -916,15 +937,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
               // fits only via expert-offload to RAM) — hide only the truly
               // too-big. Replaces the old dense-naive `size > budget` hide,
               // which wrongly buried offloadable MoE models.
-              const fit = computeModelFit({
-                residentBytes:
-                  estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes, {
-                    mmprojBytes: m.llamaCpp.mmproj?.sizeBytes,
-                  }) + fitKvBytes(m, memory),
-                isMoE: isMoEFromTags(item.manifest.tags),
-                ...fitMachine(memory),
-              });
-              if (!fit.runnable) return false;
+              if (!catalogFit(m, memory).runnable) return false;
             }
             return true;
           }}
@@ -938,15 +951,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
               inflight && inflight.totalBytes > 0
                 ? Math.min(100, Math.round((inflight.bytesWritten / inflight.totalBytes) * 100))
                 : null;
-            const fit = memory
-              ? computeModelFit({
-                  residentBytes:
-                    estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes) +
-                    fitKvBytes(m, memory),
-                  isMoE: isMoEFromTags(item.manifest.tags),
-                  ...fitMachine(memory),
-                })
-              : null;
+            const fit = memory ? catalogFit(m, memory) : null;
             return (
               <div className="catalog-ollama-action">
                 <div className="catalog-ollama-meta">

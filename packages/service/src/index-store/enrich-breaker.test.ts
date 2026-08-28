@@ -3,23 +3,28 @@ import { describe, expect, it, vi } from 'vitest';
 import { EngineBusyError } from '../providers/native/capacity-broker.js';
 import { EnrichTimeoutBreaker, classifyEnrichFailure } from './enrich-breaker.js';
 
-function breaker(overrides: Partial<{ threshold: number; cooldownMs: number }> = {}) {
+function breaker(
+  overrides: Partial<{ threshold: number; cooldownMs: number; standDownAfter: number }> = {},
+) {
   let clock = 0;
   const opened: Array<{ streak: number; cooldownMs: number }> = [];
+  const stoodDown: Array<{ cycles: number }> = [];
   let closes = 0;
   const b = new EnrichTimeoutBreaker({
     threshold: overrides.threshold ?? 3,
     cooldownMs: overrides.cooldownMs ?? 600_000,
+    standDownAfter: overrides.standDownAfter ?? 4,
     now: () => clock,
     onOpen: (d) => opened.push(d),
     onClose: () => {
       closes += 1;
     },
+    onStandDown: (d) => stoodDown.push(d),
   });
   const advance = (ms: number): void => {
     clock += ms;
   };
-  return { b, opened, advance, closes: () => closes };
+  return { b, opened, stoodDown, advance, closes: () => closes };
 }
 
 describe('EnrichTimeoutBreaker', () => {
@@ -70,6 +75,88 @@ describe('EnrichTimeoutBreaker', () => {
     const { b, opened } = breaker();
     for (let i = 0; i < 10; i++) b.observe('timeout');
     expect(opened).toHaveLength(1);
+  });
+
+  it('re-arms without re-opening when a timeout lands after the cooldown', () => {
+    // The manager is not the only caller of `observe`: a one-shot issued
+    // before the breaker opened can resolve minutes after the cooldown has
+    // elapsed, so the first post-cooldown call may be a timeout rather than
+    // the manager's `isOpen` gate. `isOpen` is what re-arms the streak, and
+    // testing it after the increment let that re-arm land between the count
+    // and the notification — logging "timed out 0x in a row" and re-opening
+    // on one timeout, which turned a 10m back-off into an endless 7m cycle.
+    const { b, opened, advance, closes } = breaker({ threshold: 3, cooldownMs: 600_000 });
+    for (let i = 0; i < 3; i++) b.observe('timeout');
+    expect(opened).toEqual([{ streak: 3, cooldownMs: 600_000 }]);
+    advance(600_001);
+    b.observe('timeout');
+    expect(b.isOpen()).toBe(false);
+    expect(opened).toHaveLength(1);
+    expect(closes()).toBe(1);
+  });
+
+  it('never notifies an open with a zeroed streak', () => {
+    const { b, opened, advance } = breaker({ threshold: 2, cooldownMs: 1_000 });
+    for (let cycle = 0; cycle < 3; cycle++) {
+      b.observe('timeout');
+      b.observe('timeout');
+      advance(1_001);
+      b.observe('timeout');
+    }
+    expect(opened.every((d) => d.streak >= 2)).toBe(true);
+  });
+
+  it('stands down once cooldowns pass with nothing completed in between', () => {
+    const { b, stoodDown, advance } = breaker({
+      threshold: 1,
+      cooldownMs: 1_000,
+      standDownAfter: 3,
+    });
+    for (let cycle = 0; cycle < 3; cycle++) {
+      b.observe('timeout');
+      advance(1_001);
+    }
+    expect(stoodDown).toEqual([{ cycles: 3 }]);
+    expect(b.isStoodDown()).toBe(true);
+    // A stand-down outlives its own cooldown; only proof or a reset lifts it.
+    advance(3_600_000);
+    expect(b.isOpen()).toBe(true);
+  });
+
+  it('does not stand down while the target is still answering', () => {
+    const { b, stoodDown, advance } = breaker({
+      threshold: 1,
+      cooldownMs: 1_000,
+      standDownAfter: 2,
+    });
+    b.observe('timeout');
+    advance(1_001);
+    b.observe('ok');
+    b.observe('timeout');
+    advance(1_001);
+    expect(stoodDown).toHaveLength(0);
+    expect(b.isStoodDown()).toBe(false);
+  });
+
+  it('lifts a stand-down on a completed call, and on reset', () => {
+    const { b, advance } = breaker({ threshold: 1, cooldownMs: 1_000, standDownAfter: 2 });
+    for (let cycle = 0; cycle < 2; cycle++) {
+      b.observe('timeout');
+      advance(1_001);
+    }
+    expect(b.isStoodDown()).toBe(true);
+    b.observe('failed');
+    expect(b.isStoodDown()).toBe(false);
+    expect(b.isOpen()).toBe(false);
+
+    for (let cycle = 0; cycle < 2; cycle++) {
+      b.observe('timeout');
+      advance(1_001);
+    }
+    expect(b.isStoodDown()).toBe(true);
+    b.reset();
+    expect(b.isStoodDown()).toBe(false);
+    expect(b.isOpen()).toBe(false);
   });
 
   it('measures its cooldown on the awake clock by default', () => {

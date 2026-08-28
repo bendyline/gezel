@@ -28,7 +28,9 @@ import type { ExternalToolCall, ExternalToolSpec, LLMProvider } from '../provide
 import {
   FITNESS_MIN_CONTEXT_TOKENS,
   type FitnessEvidence,
+  type IncompleteTurn,
   PROBE_TOOL_NAME,
+  UNBOUNDED_REASONING_THRESHOLD,
   buildFitnessChecks,
   fitnessMinTps,
 } from './checks.js';
@@ -38,12 +40,69 @@ const log = createLogger('fitness');
 /** Engines the probe supports today. Ollama can join later. */
 export type FitnessEngine = 'llama-cpp' | 'ds4' | 'mlx';
 
-/** Turn A dominates on cold GGUF load; generous by design. */
+/**
+ * Turn floors. Each is a MINIMUM — the real budget is scaled up by the
+ * model's own reasoning allowance in {@link scaledTurnBudgetMs}.
+ */
 const GENERATION_TURN_TIMEOUT_MS = 360_000;
 const REPRESENTATIVE_TURN_TIMEOUT_MS = 8 * 60_000;
 const TOOL_TURN_TIMEOUT_MS = 180_000;
-/** Whole-probe hard cap — nothing hangs the serialized probe chain. */
-const PROBE_HARD_CAP_MS = 12 * 60_000;
+
+/**
+ * The decode rate turn budgets are planned against — deliberately pessimistic,
+ * near the floor of what still counts as usable on a local engine.
+ *
+ * A fixed wall clock cannot bound a turn whose length the model decides. A
+ * 27B-Q2 authored with a 4096-token thinking budget, decoding at a perfectly
+ * healthy 8 t/s, needs ~512s to finish THINKING — so a flat 360s turn was
+ * arithmetically unwinnable, and the model was reported to its owner as
+ * broken twice before anyone read the engine log showing it decoding fine the
+ * whole time. Budget the tokens the model was licensed to emit, not a guess
+ * at how long that ought to take.
+ */
+const PROBE_PLANNING_TPS = 8;
+/** Answer allowance on top of the reasoning budget, per turn kind. */
+const GENERATION_ANSWER_TOKENS = 512;
+const TOOL_ANSWER_TOKENS = 256;
+/** No single turn may run longer than this, however large the budget. */
+const MAX_TURN_TIMEOUT_MS = 10 * 60_000;
+/** Room for engine load and teardown on top of the summed turn budgets. */
+const PROBE_HARD_CAP_SLACK_MS = 90_000;
+/** Mirrors core's `estimateTokens`, which the probe cannot call on a count. */
+const CHARS_PER_TOKEN_ESTIMATE = 4;
+
+/**
+ * Time to allow a turn: the floor, or long enough for the model to emit its
+ * whole reasoning allowance plus an answer at {@link PROBE_PLANNING_TPS},
+ * whichever is larger. The unbounded sentinel contributes nothing — a model
+ * that may think forever gets the floor and fails the reasoningBudget check
+ * on its own merits.
+ */
+function scaledTurnBudgetMs(
+  floorMs: number,
+  reasoningBudget: number | undefined,
+  answerTokens: number,
+): number {
+  const think =
+    typeof reasoningBudget === 'number' &&
+    reasoningBudget > 0 &&
+    reasoningBudget < UNBOUNDED_REASONING_THRESHOLD
+      ? reasoningBudget
+      : 0;
+  const needed = Math.ceil(((think + answerTokens) / PROBE_PLANNING_TPS) * 1000);
+  return Math.min(MAX_TURN_TIMEOUT_MS, Math.max(floorMs, needed));
+}
+
+/**
+ * Did this turn end because it ran out of time, rather than because the engine
+ * broke? Matched on the message because every native provider raises a plain
+ * Error for its own deadline; the caller additionally requires that tokens
+ * were observed, so a crash that happens to mention a timeout cannot be
+ * mistaken for a healthy-but-slow model.
+ */
+function isTurnDeadlineError(err: unknown): boolean {
+  return /timed out/i.test(err instanceof Error ? err.message : String(err));
+}
 
 /** Provider-default launch context when nothing narrower is known. */
 const DEFAULT_LAUNCH_NUM_CTX = 65_536;
@@ -206,7 +265,31 @@ export async function runFitnessProbe(
 ): Promise<ModelFitnessRecord> {
   const now = deps.now ?? Date.now;
   const startedAt = now();
-  const hardCapMs = args.timeouts?.hardCapMs ?? PROBE_HARD_CAP_MS;
+
+  const host = await deps
+    .detectMemory()
+    .catch(() => ({ totalRamBytes: 0, gpuVramBytes: null, source: 'unknown' }));
+  const installed = await deps.resolveInstalled(args.provider, args.modelId).catch(() => null);
+  const reasoningBudget = await deps.resolveReasoningBudget(args.modelId).catch(() => undefined);
+  const configuredCtx = await deps
+    .configuredNumCtx(args.provider, args.modelId)
+    .catch(() => undefined);
+
+  // Budgets first, then the cap that contains them. Deriving the cap from the
+  // turns it bounds is what keeps it from firing before they have spent what
+  // they were promised — the old flat 12-minute cap was already shorter than
+  // the 17 minutes its own three turns could legitimately take.
+  const generationMs =
+    args.timeouts?.generationMs ??
+    scaledTurnBudgetMs(GENERATION_TURN_TIMEOUT_MS, reasoningBudget, GENERATION_ANSWER_TOKENS);
+  const representativeMs =
+    args.timeouts?.representativeMs ??
+    scaledTurnBudgetMs(REPRESENTATIVE_TURN_TIMEOUT_MS, reasoningBudget, GENERATION_ANSWER_TOKENS);
+  const toolMs =
+    args.timeouts?.toolMs ??
+    scaledTurnBudgetMs(TOOL_TURN_TIMEOUT_MS, reasoningBudget, TOOL_ANSWER_TOKENS);
+  const hardCapMs =
+    args.timeouts?.hardCapMs ?? generationMs + representativeMs + toolMs + PROBE_HARD_CAP_SLACK_MS;
 
   let hardCapTimer: NodeJS.Timeout | undefined;
   const hardCap = new Promise<never>((_, reject) => {
@@ -217,15 +300,6 @@ export async function runFitnessProbe(
     );
     hardCapTimer.unref?.();
   });
-
-  const host = await deps
-    .detectMemory()
-    .catch(() => ({ totalRamBytes: 0, gpuVramBytes: null, source: 'unknown' }));
-  const installed = await deps.resolveInstalled(args.provider, args.modelId).catch(() => null);
-  const reasoningBudget = await deps.resolveReasoningBudget(args.modelId).catch(() => undefined);
-  const configuredCtx = await deps
-    .configuredNumCtx(args.provider, args.modelId)
-    .catch(() => undefined);
 
   // GEZEL_LLAMA_NUM_CTX reaches only the llama.cpp supervisor. MLX and ds4
   // have their own config paths, so honouring it for either would report a
@@ -252,6 +326,7 @@ export async function runFitnessProbe(
   let activeTurn: ProbeTurn | null = null;
   let shortTurnStats: ProbeTurnStats | undefined;
   let representativeTurnStats: ProbeTurnStats | undefined;
+  const unsubscribes: Array<() => void> = [];
 
   const runTurns = async (): Promise<void> => {
     let provider: LLMProvider;
@@ -274,6 +349,7 @@ export async function runFitnessProbe(
     } catch (err) {
       evidence.spawnError = `session creation failed: ${err instanceof Error ? err.message : String(err)}`;
       machineryFailed = true;
+      if (isEngineBusy(err)) contended = true;
       return;
     }
 
@@ -287,21 +363,113 @@ export async function runFitnessProbe(
 
       const applyPracticalDecodeRate = (): void => {
         const rate = representativeTurnStats?.tokensPerSec ?? shortTurnStats?.tokensPerSec;
-        evidence.genTokensPerSec =
+        const engineRate =
           typeof rate === 'number' && Number.isFinite(rate) && rate > 0 ? rate : null;
+        if (engineRate == null) return;
+        evidence.genTokensPerSec = engineRate;
+        evidence.genTokensPerSecEstimated = false;
+      };
+
+      // An engine reports its token counts only when a turn COMPLETES, so a
+      // turn that runs out of budget used to report `tps=n/a` even though the
+      // server had been printing a steady rate for six minutes. Timing the
+      // deltas gives the one number that distinguishes "healthy but slow" from
+      // "hung", which is exactly the distinction the badge was getting wrong.
+      const streams: Record<ProbeTurn, { firstAt?: number; lastAt?: number; chars: number }> = {
+        short: { chars: 0 },
+        representative: { chars: 0 },
+        tool: { chars: 0 },
+      };
+      const observeDelta = (chunk: string): void => {
+        if (!activeTurn) return;
+        const stream = streams[activeTurn];
+        const at = now();
+        stream.firstAt ??= at;
+        stream.lastAt = at;
+        stream.chars += chunk.length;
+      };
+      // Optional-called: a provider (or a test double) without a delta channel
+      // must lose the rate estimate, never the whole probe.
+      const offDelta = session.onDelta?.(observeDelta);
+      if (offDelta) unsubscribes.push(offDelta);
+      // Reasoning deltas are decoded tokens too, and on a thinking model they
+      // are most of them — counting only visible text would price a 4096-token
+      // think block at zero.
+      const offReasoning = session.onReasoningDelta?.(observeDelta);
+      if (offReasoning) unsubscribes.push(offReasoning);
+
+      // Core's `estimateTokens` ratio applied to a running character count:
+      // the probe keeps the SIZE of what streamed, never the text itself, so
+      // there is nothing to hand the estimator directly.
+      const streamedTokens = (turn: ProbeTurn): number =>
+        Math.ceil(streams[turn].chars / CHARS_PER_TOKEN_ESTIMATE);
+      const streamedRate = (turn: ProbeTurn): number | null => {
+        const { firstAt, lastAt } = streams[turn];
+        if (firstAt === undefined || lastAt === undefined) return null;
+        const spanSeconds = (lastAt - firstAt) / 1000;
+        // Under a couple of seconds the span is dominated by buffering, not
+        // decoding, and the quotient is noise rather than a rate.
+        if (spanSeconds < 2) return null;
+        const rate = streamedTokens(turn) / spanSeconds;
+        return Number.isFinite(rate) && rate > 0 ? rate : null;
+      };
+
+      /**
+       * Classify a turn that threw. A deadline reached while the engine was
+       * still streaming is a verdict about the model; anything else is a
+       * genuine machinery failure and keeps its old handling.
+       */
+      const unfinishedTurn = (
+        err: unknown,
+        turn: ProbeTurn,
+        turnStartedAt: number,
+      ): IncompleteTurn | null => {
+        if (!isTurnDeadlineError(err)) return null;
+        const observedTokens = streamedTokens(turn);
+        if (observedTokens <= 0) return null;
+        return { elapsedMs: Math.max(0, now() - turnStartedAt), observedTokens };
+      };
+
+      /** Fall back to the delta-derived rate when no completed turn supplied one. */
+      const applyStreamEstimate = (turn: ProbeTurn): void => {
+        if (evidence.genTokensPerSec != null) return;
+        const rate = streamedRate(turn);
+        if (rate == null) return;
+        evidence.genTokensPerSec = rate;
+        evidence.genTokensPerSecEstimated = true;
+      };
+
+      /**
+       * File a turn failure. Native engines start LAZILY, so contention for a
+       * resident engine arrives here as a turn error rather than from
+       * `getProviderForModel` — and only that call used to test for it. A
+       * transient scheduling conflict was therefore persisted as "fitness
+       * check failed" against the model, when the honest record is `blocked`
+       * ("did not run"), which is also the one the routing gate ignores.
+       */
+      const failTurn = (err: unknown, axis: 'generationError' | 'toolTurnError'): void => {
+        recordTurnFailure(evidence, err, axis);
+        if (isEngineBusy(err)) contended = true;
+        machineryFailed = true;
       };
 
       const queue = { lane: 'background' as const, job: `fitness check · ${args.modelId}` };
 
+      let turnStartedAt = now();
       try {
         activeTurn = 'short';
-        await session.sendAndWait(GENERATION_PROMPT, {
-          timeoutMs: args.timeouts?.generationMs ?? GENERATION_TURN_TIMEOUT_MS,
-          queue,
-        });
+        turnStartedAt = now();
+        await session.sendAndWait(GENERATION_PROMPT, { timeoutMs: generationMs, queue });
       } catch (err) {
-        recordTurnFailure(evidence, err, 'generationError');
-        machineryFailed = true;
+        const unfinished = unfinishedTurn(err, 'short', turnStartedAt);
+        if (!unfinished) {
+          failTurn(err, 'generationError');
+          return;
+        }
+        // Healthy engine, unfinished answer. Keep the measured rate and let
+        // the checks render a verdict — not a machinery failure.
+        evidence.generationIncomplete = unfinished;
+        applyStreamEstimate('short');
         return;
       }
       applyPracticalDecodeRate();
@@ -310,13 +478,19 @@ export async function runFitnessProbe(
       if (representativeTargetTokens > 0) {
         try {
           activeTurn = 'representative';
+          turnStartedAt = now();
           await session.sendAndWait(buildRepresentativeContextPrompt(representativeTargetTokens), {
-            timeoutMs: args.timeouts?.representativeMs ?? REPRESENTATIVE_TURN_TIMEOUT_MS,
+            timeoutMs: representativeMs,
             queue,
           });
         } catch (err) {
-          recordTurnFailure(evidence, err, 'generationError');
-          machineryFailed = true;
+          const unfinished = unfinishedTurn(err, 'representative', turnStartedAt);
+          if (!unfinished) {
+            failTurn(err, 'generationError');
+            return;
+          }
+          evidence.generationIncomplete = unfinished;
+          applyStreamEstimate('representative');
           return;
         }
         applyPracticalDecodeRate();
@@ -326,13 +500,17 @@ export async function runFitnessProbe(
       let toolTurnText = '';
       try {
         activeTurn = 'tool';
-        toolTurnText = await session.sendAndWait(TOOL_PROMPT, {
-          timeoutMs: args.timeouts?.toolMs ?? TOOL_TURN_TIMEOUT_MS,
-          queue,
-        });
+        turnStartedAt = now();
+        toolTurnText = await session.sendAndWait(TOOL_PROMPT, { timeoutMs: toolMs, queue });
       } catch (err) {
-        recordTurnFailure(evidence, err, 'toolTurnError');
-        machineryFailed = true;
+        const unfinished = unfinishedTurn(err, 'tool', turnStartedAt);
+        if (!unfinished) {
+          failTurn(err, 'toolTurnError');
+          return;
+        }
+        // Narrating past the deadline instead of emitting a call IS the tool
+        // round-trip result, and the model answered every other axis first.
+        evidence.toolTurnIncomplete = unfinished;
         return;
       }
       if (session.getLastTurnReasoning?.() !== undefined) evidence.observedThinking = true;
@@ -343,6 +521,8 @@ export async function runFitnessProbe(
       evidence.toolTurnText = toolTurnText;
     } finally {
       activeTurn = null;
+      for (const off of unsubscribes) off();
+      unsubscribes.length = 0;
       await session.disconnect().catch(() => {});
     }
   };
@@ -371,6 +551,13 @@ export async function runFitnessProbe(
     status: contended ? 'blocked' : machineryFailed ? 'failed' : 'probed',
     admitted: machineryFailed ? false : admitted,
     genTokensPerSec: evidence.genTokensPerSec,
+    ...(evidence.genTokensPerSec != null
+      ? {
+          genTokensPerSecSource: evidence.genTokensPerSecEstimated
+            ? ('stream-estimate' as const)
+            : ('engine' as const),
+        }
+      : {}),
     ...(shortTurnStats
       ? {
           shortPromptGenTokensPerSec:

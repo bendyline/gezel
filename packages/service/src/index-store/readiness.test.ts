@@ -16,6 +16,7 @@ function harness(opts: {
   statuses: WorkspaceIndexStatus[];
   staffed?: boolean;
   paused?: boolean;
+  aiTiersAllowed?: boolean;
   drive?: Promise<void> | null;
   driveModeAfter?: 'background' | 'full' | null;
 }): Harness {
@@ -42,6 +43,7 @@ function harness(opts: {
     },
     resolveBoekwachter: async () => (opts.staffed !== false ? { id: 'bw' } : null),
     isPaused: () => opts.paused ?? false,
+    aiTiersAllowed: () => opts.aiTiersAllowed ?? true,
     now: () => new Date('2026-08-23T12:00:00Z'),
   };
   return { deps, calls };
@@ -157,6 +159,25 @@ describe('ensureIndexFresh', () => {
     expect(report.aiTier.paused).toBe(true);
     expect(report.aiTier.achievable).toBe(false);
     expect(report.notes.join(' ')).toContain('paused');
+  });
+
+  // Under "Reactive only" the drive returns after the local embed tiers, so
+  // the AI counts can never reach zero. Awaiting them would burn the whole
+  // budget on work that is not going to happen — same shape as an unstaffed
+  // crew, and the note has to name the real reason.
+  it('reports the AI tiers unachievable when the engagement mode holds them', async () => {
+    const h = harness({ statuses: [PENDING_FRESH], aiTiersAllowed: false });
+    const report = await ensureIndexFresh(h.deps, 'p1', { waitBudgetMs: 1_000 });
+    expect(h.calls.driveStarted).toBe(0);
+    expect(report.aiTier.paused).toBe(true);
+    expect(report.aiTier.achievable).toBe(false);
+    expect(report.notes.join(' ')).toContain('Reactive only');
+  });
+
+  it('blames the job switch, not the engagement mode, when both would hold', async () => {
+    const h = harness({ statuses: [PENDING_FRESH], paused: true });
+    const report = await ensureIndexFresh(h.deps, 'p1', { waitBudgetMs: 1_000 });
+    expect(report.notes.join(' ')).toContain('paused install-wide');
   });
 
   it('clamps the wait budget to the service-side maximum', async () => {

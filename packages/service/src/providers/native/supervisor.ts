@@ -290,6 +290,12 @@ const RESTART_WINDOW_MS = 60_000;
  */
 const MAX_STARTUP_RECOVERIES = 2;
 const HEALTH_FAIL_THRESHOLD = 3;
+/**
+ * How often to restate that the accelerator is under pressure and this engine
+ * cannot do anything about it. Long, because on a card sized to one model the
+ * condition is ordinary and steady — the point is a trail, not an alarm.
+ */
+const PRESSURE_HELD_LOG_INTERVAL_MS = 5 * 60_000;
 const RECENT_OUTPUT_MAX_BYTES = 64 * 1024;
 const EXIT_ATTRIBUTION_WAIT_MS = 250;
 /**
@@ -341,6 +347,10 @@ export class NativeEngineSupervisor {
   private readonly pressureIdleTimeoutMs: number;
   private pressureCheckInFlight = false;
   private pressureDeadlineAt?: number;
+  /** Awake ms at which the current unbroken stretch of pressure began. */
+  private pressureHeldSince?: number;
+  /** Awake ms of the last "still pressured, cannot act" log line. */
+  private pressureHeldLoggedAt?: number;
   private freezeTimer?: NodeJS.Timeout;
   /** True once the current idle window has fired its Stage-1 freeze.
    *  Reset on next `markUsed` so subsequent idle windows re-fire. */
@@ -1197,6 +1207,20 @@ export class NativeEngineSupervisor {
     this.healthTimer.unref?.();
   }
 
+  /**
+   * Accelerator pressure this engine is currently sitting inside, or null when
+   * there is none. Read by callers that want to explain a symptom the engine
+   * itself cannot see — a turn whose throughput collapsed has no way to know
+   * the card is oversubscribed, and "the engine is slow" is the wrong story.
+   */
+  memoryPressureHeld(): { sinceAwakeMs: number; heldMs: number } | null {
+    if (this.pressureHeldSince === undefined) return null;
+    return {
+      sinceAwakeMs: this.pressureHeldSince,
+      heldMs: Math.max(0, awakeNow() - this.pressureHeldSince),
+    };
+  }
+
   private engineBusy(): boolean {
     try {
       return this.isBusy?.() === true;
@@ -1215,10 +1239,36 @@ export class NativeEngineSupervisor {
       const pressure = await this.memoryPressure();
       if (!pressure.pressured || this.state.kind !== 'running') {
         this.pressureDeadlineAt = undefined;
+        this.pressureHeldSince = undefined;
+        this.pressureHeldLoggedAt = undefined;
         return;
       }
+      const now = awakeNow();
+      if (this.pressureHeldSince === undefined) this.pressureHeldSince = now;
       this.pressureDeadlineAt = this.lastUsedAwakeAt + this.pressureIdleTimeoutMs;
-      if (awakeNow() < this.pressureDeadlineAt || this.engineBusy()) return;
+      const busy = this.engineBusy();
+      if (now < this.pressureDeadlineAt || busy) {
+        // The only lever here is "stop MY engine once MY engine is idle", and
+        // a busy one is out of reach of it. Saying so beats the silence that
+        // preceded it: a four-hour turn on an oversubscribed card ran this
+        // probe about 960 times and emitted nothing at all, so the machine
+        // state that made every other tenant unusable left no trace in the
+        // log. Rate-limited because pressure is normal and steady on a card
+        // sized to one model.
+        if (
+          this.pressureHeldLoggedAt === undefined ||
+          now - this.pressureHeldLoggedAt >= PRESSURE_HELD_LOG_INTERVAL_MS
+        ) {
+          this.pressureHeldLoggedAt = now;
+          const held = Math.round((now - this.pressureHeldSince) / 1000);
+          const why = busy ? 'engine is serving a turn' : 'still inside the warm-retention grace';
+          const detail = pressure.detail ? ` (${pressure.detail})` : '';
+          this.onLog(
+            `${this.logPrefix} memory pressure${detail} held ${held}s — ${why}, not releasing`,
+          );
+        }
+        return;
+      }
       this.onLog(
         `${this.logPrefix} memory pressure${pressure.detail ? ` (${pressure.detail})` : ''} — flushing and stopping idle engine`,
       );

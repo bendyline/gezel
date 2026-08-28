@@ -33,6 +33,14 @@ export interface SearchResult {
   /** ISO 8601 when the backend supplies it. */
   publishedAt?: string;
   source: SearchProviderName;
+  /**
+   * Substantive plain-text body the backend returned with the hit. Only
+   * Wikipedia sets it today: its API joins search + article extract in one
+   * request, so hydrating costs no extra round-trip. Optional so Brave /
+   * Tavily / mock stay untouched — consumers that only want a compact list
+   * keep reading `snippet`.
+   */
+  content?: string;
 }
 
 export interface SearchProvider {

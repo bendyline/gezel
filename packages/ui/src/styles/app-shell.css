@@ -1070,6 +1070,13 @@ button.search-palette-group-more:hover {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   color: var(--titlebar-ink);
   font-size: 0.8rem;
+  /* The fixed-position variant gets a measured max-height from the hook; this
+     is the fallback for the absolute anchor. Either way the slab is its own
+     scroll container with `contain`, so a wheel gesture over an open popover
+     never reaches the page underneath it. */
+  max-height: min(34rem, calc(100vh - 5rem));
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 /* Engine telemetry carries two-column labels plus memory meters, so give it
    a little more breathing room than the compact quota popover. */
@@ -1722,6 +1729,7 @@ button.machine-memory-unload-button {
   width: min(25rem, calc(100vw - 1rem));
   max-height: 30rem;
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--surface, #1f2124);
   border: 1px solid var(--border);
   border-radius: 8px;

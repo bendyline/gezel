@@ -239,3 +239,114 @@ describe('fitnessThroughput', () => {
     expect(t?.ttftMs).toBe(16_279);
   });
 });
+
+describe('composeFitnessBadge — naming a reason a user can act on', () => {
+  const notReached = {
+    ok: false,
+    detail: 'not reached — an earlier probe stage failed',
+    reached: false,
+  };
+
+  it('skips checks that never ran when naming the failing axis', () => {
+    // A probe that overran mid-generation leaves a real throughput verdict and
+    // an unreached tool check. Taking the first `ok: false` in badge order
+    // announced "tool calls failed" at a model whose tool turn was never
+    // attempted — a fabricated defect on top of a misfiled one.
+    const b = composeFitnessBadge({
+      fitness: fresh(
+        record({
+          admitted: false,
+          checks: {
+            spawn: okCheck,
+            toolRoundTrip: notReached,
+            throughput: { ok: false, detail: 'still writing at ~8.1 t/s after 9m 22s' },
+            reasoningBudget: okCheck,
+            contextFit: okCheck,
+          },
+        }),
+      ),
+    });
+
+    expect(b.label).toBe('slow decoding');
+    expect(b.reason).toBe('still writing at ~8.1 t/s after 9m 22s');
+    expect(b.detail).not.toMatch(/not reached/);
+  });
+
+  it('carries a short reason on a machinery failure so the row can show it', () => {
+    const b = composeFitnessBadge({
+      fitness: fresh(
+        record({
+          status: 'failed',
+          admitted: false,
+          checks: {
+            spawn: { ok: false, detail: 'engine exited before the first token' },
+            toolRoundTrip: notReached,
+            throughput: notReached,
+            reasoningBudget: okCheck,
+            contextFit: okCheck,
+          },
+        }),
+      ),
+    });
+
+    expect(b.label).toBe('fitness check failed');
+    expect(b.reason).toBe('engine exited before the first token');
+    expect(b.detail).toContain('engine exited before the first token');
+  });
+
+  it('an admitted model carries no reason', () => {
+    expect(composeFitnessBadge({ fitness: fresh(record()) }).reason).toBeUndefined();
+  });
+});
+
+describe('composeFitnessBadge — records written before checks carried `reached`', () => {
+  const legacyNotReached = { ok: false, detail: 'not reached — an earlier probe stage failed' };
+
+  it('skips a legacy unreached check the same as a flagged one', () => {
+    // Seen on a real install right after the upgrade: the row read "fitness
+    // check failed" over the words "not reached — an earlier probe stage
+    // failed", which names no axis and suggests no action. The stored record
+    // predates the flag, so the sentence itself has to be the signal.
+    const b = composeFitnessBadge({
+      fitness: fresh(
+        record({
+          status: 'failed',
+          admitted: false,
+          checks: {
+            spawn: okCheck,
+            toolRoundTrip: legacyNotReached,
+            throughput: {
+              ok: false,
+              detail: 'generation turn failed: [llama-cpp] timed out after 360s',
+            },
+            reasoningBudget: okCheck,
+            contextFit: okCheck,
+          },
+        }),
+      ),
+    });
+
+    expect(b.reason).toBe('generation turn failed: [llama-cpp] timed out after 360s');
+  });
+
+  it('never quotes a PASSING spawn check as the reason something failed', () => {
+    const b = composeFitnessBadge({
+      fitness: fresh(
+        record({
+          status: 'failed',
+          admitted: false,
+          checks: {
+            spawn: { ok: true, detail: 'engine spawned and served the probe session' },
+            toolRoundTrip: legacyNotReached,
+            throughput: legacyNotReached,
+            reasoningBudget: okCheck,
+            contextFit: okCheck,
+          },
+        }),
+      ),
+    });
+
+    expect(b.reason).not.toMatch(/spawned and served/);
+    expect(b.reason).toMatch(/run it again/);
+  });
+});

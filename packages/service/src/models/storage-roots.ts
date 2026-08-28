@@ -292,6 +292,42 @@ export async function findModelRoot(roots: ModelStorageRoots, id: string): Promi
   return null;
 }
 
+/**
+ * Resolve an id that a quant-suffix migration renamed away, by finding the
+ * install that records it as its {@link InstalledModelRenameRecord.renamedFrom}.
+ *
+ * Config pins, gezel frontmatter, eval caches, and session records all hold
+ * whatever id was current when they were written, and there is no way to
+ * find and rewrite every one of them. Keeping the former id resolvable is
+ * what makes the rename cosmetic rather than a breaking change.
+ *
+ * Only ever called on a miss, and only over directories whose name the
+ * former id prefixes — every rename target is the former id plus a suffix,
+ * so no other directory can be the answer.
+ */
+export async function findRenamedModelId(
+  roots: ModelStorageRoots,
+  formerId: string,
+): Promise<string | null> {
+  if (!formerId) return null;
+  for (const root of modelSearchRoots(roots)) {
+    let entries: string[];
+    try {
+      entries = await readdir(root);
+    } catch {
+      continue;
+    }
+    for (const id of entries) {
+      if (!id.startsWith(`${formerId}-`)) continue;
+      const parsed = await readFile(join(root, id, 'manifest.json'), 'utf8')
+        .then((raw) => JSON.parse(raw) as { renamedFrom?: unknown })
+        .catch(() => null);
+      if (parsed?.renamedFrom === formerId) return id;
+    }
+  }
+  return null;
+}
+
 export async function modelExistsOnlyReadOnly(
   roots: ModelStorageRoots,
   id: string,

@@ -149,3 +149,52 @@ describe('fitnessMinTps', () => {
     expect(fitnessMinTps({ GEZEL_FITNESS_MIN_TPS: '-1' })).toBe(3);
   });
 });
+
+describe('buildFitnessChecks — turns that ran out of budget mid-stream', () => {
+  it('reads an unfinished generation as a verdict about the model, not a broken probe', () => {
+    const { checks, admitted } = buildFitnessChecks(
+      evidence({
+        generationIncomplete: { elapsedMs: 562_000, observedTokens: 4_480 },
+        genTokensPerSec: 8.06,
+        genTokensPerSecEstimated: true,
+      }),
+    );
+
+    expect(admitted).toBe(false);
+    expect(checks.throughput.ok).toBe(false);
+    // The tilde is the only signal that this rate is inferred rather than
+    // reported, so it has to survive into the sentence a user reads.
+    expect(checks.throughput.detail).toContain('~8.1 t/s');
+    expect(checks.throughput.detail).toContain('9m 22s');
+    expect(checks.throughput.detail).toContain('4,480');
+    expect(checks.throughput.detail).toMatch(/engine is healthy/);
+    // Nothing was learned about tools — say so rather than implying a failure.
+    expect(checks.toolRoundTrip.reached).toBe(false);
+  });
+
+  it('an engine-reported rate carries no tilde', () => {
+    const { checks } = buildFitnessChecks(
+      evidence({
+        generationIncomplete: { elapsedMs: 400_000, observedTokens: 3_000 },
+        genTokensPerSec: 8.06,
+      }),
+    );
+    expect(checks.throughput.detail).toContain('at 8.1 t/s');
+    expect(checks.throughput.detail).not.toContain('~');
+  });
+
+  it('a tool turn that narrated past its deadline fails the tool axis, having reached it', () => {
+    const { checks, admitted } = buildFitnessChecks(
+      evidence({
+        toolCall: undefined,
+        toolTurnIncomplete: { elapsedMs: 180_000, observedTokens: 1_440 },
+      }),
+    );
+
+    expect(admitted).toBe(false);
+    expect(checks.toolRoundTrip.ok).toBe(false);
+    expect(checks.toolRoundTrip.reached).toBeUndefined();
+    expect(checks.toolRoundTrip.detail).toContain('without ever calling write_file');
+    expect(checks.throughput.ok).toBe(true);
+  });
+});

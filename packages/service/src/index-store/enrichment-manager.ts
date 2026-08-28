@@ -3,6 +3,7 @@ import {
   type HistoryEvent,
   createLogger,
   isSharedLibraryProject,
+  isTaskWorkAllowed,
 } from '@bendyline/gezel';
 import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
@@ -155,6 +156,14 @@ export class IndexEnrichmentManager {
           `${Math.round(cooldownMs / 60_000)}m instead of re-issuing straight into the same wall`,
       ),
     onClose: () => log.info('[enrich] summarizer back-off cleared — AI tiers resume'),
+    onStandDown: ({ cycles }) =>
+      log.warn(
+        [
+          `[enrich] summarizer has not completed a single call across ${cycles} back-offs — `,
+          'standing the AI tiers down until the next shift. The static, embed, and face tiers ',
+          'keep running; check whether another process is holding the accelerator.',
+        ].join(''),
+      ),
   });
   /** In-flight on-demand drives, one per project (joiners get the same run). */
   private readonly drives = new Map<string, { mode: DriveIntensity; run: Promise<void> }>();
@@ -347,6 +356,10 @@ export class IndexEnrichmentManager {
    */
   catchUpAll(): Promise<void> {
     if (this.stopping) return Promise.resolve();
+    // A new shift is a fresh chance: whatever held the accelerator last night
+    // is usually gone by tonight, and a stand-down that outlived its cause
+    // would silently cost every subsequent shift its AI tiers.
+    this.summarizerBreaker.reset();
     const token: CatchUpToken = { aborted: false };
     this.catchUpAborts.add(token);
     const run = this.runCatchUpAll(token).finally(() => {
@@ -358,6 +371,15 @@ export class IndexEnrichmentManager {
       // window closed, and there is no point starting work that will be
       // held until tomorrow anyway.
       if (!token.aborted && !this.stopping) {
+        // Model-dependent night work planned off this sweep needs the same
+        // target the sweep just proved unreachable. Starting it anyway queues
+        // a fresh batch of turns into the wall the stand-down exists to stop.
+        if (this.summarizerBreaker.isStoodDown()) {
+          log.info(
+            '[enrich] catch-up drained with the AI tiers stood down — not starting downstream night work',
+          );
+          return;
+        }
         // try/catch as well as .catch(): a hook that throws SYNCHRONOUSLY
         // would escape this `finally` and reject the sweep itself, taking
         // down indexing because a downstream planner had a bad day.
@@ -511,6 +533,27 @@ export class IndexEnrichmentManager {
     return config?.faceRecognition?.enabled === true;
   }
 
+  /**
+   * Engagement gate for the model-backed tiers. "Reactive only" promises the
+   * AI answers the user and starts no work of its own, and a Boekwachter turn
+   * on a project the user never opened is exactly that work — competing for
+   * the same engine their next message needs. `isTaskWorkAllowed` rather than
+   * `isProactiveAllowed`: enrichment is a scheduled system job (the
+   * nachtwacht task IS its control surface), so it belongs with task work.
+   *
+   * The local tiers upstream of this — structural scan, text/image
+   * embeddings, faces — are deliberately NOT gated. They make no model call,
+   * and the retrieval that reactive-mode chat still depends on would decay
+   * silently if they stopped.
+   */
+  private async aiTiersAllowed(): Promise<boolean> {
+    // Guarded like `isSharedLibrary`: a narrow test double without
+    // `readConfig` must not take the whole drive down.
+    if (typeof this.store.readConfig !== 'function') return true;
+    const config = await this.store.readConfig().catch(() => null);
+    return isTaskWorkAllowed(config ?? {});
+  }
+
   private async isSharedLibrary(projectId: string): Promise<boolean> {
     // Guarded rather than optional-chained on the call alone: a store that
     // does not expose `getProject` (narrow test doubles) would otherwise
@@ -600,9 +643,24 @@ export class IndexEnrichmentManager {
         }
       }
 
+      // Engagement gate, checked here rather than at the head of the drive:
+      // everything above is local and LLM-free and must still run under
+      // "Reactive only", everything below is a model turn and must not.
+      if (!(await this.aiTiersAllowed())) {
+        log.info(
+          `[enrich] ${projectId}: AI tiers standing down — AI activity is set to reactive or off`,
+        );
+        return;
+      }
       const boekwachter = await this.resolveBoekwachter(projectId);
       if (!boekwachter) return; // static is current; AI needs the roster opt-in
       aiPhase = true;
+      if (this.summarizerBreaker.isStoodDown()) {
+        log.info(
+          `[enrich] ${projectId}: AI tiers stood down — the summarizer never answered this shift`,
+        );
+        return;
+      }
       if (this.summarizerBreaker.isOpen()) {
         log.info(
           `[enrich] ${projectId}: summarizer is not answering — holding the AI tiers for ` +
@@ -782,6 +840,8 @@ export class IndexEnrichmentManager {
       const batch = night ? NIGHT_BATCH : BATCH;
       const deadline = night ? Date.now() + NIGHT_TICK_BUDGET_MS : null;
       const projects = await this.store.listProjects().catch(() => []);
+      // Read once per tick, not per project: the answer is install-wide.
+      const aiTiers = await this.aiTiersAllowed();
       let didWork = false;
       for (const p of projects) {
         if (this.stopping) return;
@@ -849,6 +909,10 @@ export class IndexEnrichmentManager {
             });
           }
         }
+        // Same boundary as `runDrive`: the local tiers above ran for every
+        // project, the model-backed tiers below stand down unless the
+        // engagement mode allows task work.
+        if (!aiTiers) continue;
         // Roster presence is the explicit opt-in for AI indexing (summaries,
         // reviews, media). The cheap WorkspaceIndexManager scan and the
         // embed-only tier above run independently for every project.

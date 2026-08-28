@@ -56,6 +56,7 @@ import {
   type UnrecognizedModelInfo,
   assertModelStorePathSafe,
   findModelRoot,
+  findRenamedModelId,
   hashModelPayloadFiles,
   inspectModelDirectory,
   listIncompleteModelDownloads,
@@ -233,6 +234,12 @@ export interface ActiveInstallSnapshot {
 
 interface InstalledManifest {
   id: string;
+  /**
+   * The id this install carried before the quant-suffix rename, when it
+   * was renamed. Keeps pins written against the old id resolvable — see
+   * `models/legacy-quant-suffix.ts`.
+   */
+  renamedFrom?: string;
   name: string;
   approxSizeBytes: number;
   /**
@@ -1116,9 +1123,19 @@ export class LlamaCppModelManager {
     log.warn(`[${this.engine}] model directory "${id}" is not runnable: ${reason}`);
   }
 
-  private async loadInstalled(id: string): Promise<InstalledLlamaCppModel | null> {
-    const root = await findModelRoot(this.storageRoots, id);
-    if (!root) return null;
+  private async loadInstalled(requestedId: string): Promise<InstalledLlamaCppModel | null> {
+    let id = requestedId;
+    let root = await findModelRoot(this.storageRoots, id);
+    if (!root) {
+      // A pin written before the quant-suffix rename still names the old id.
+      // Config, gezel frontmatter, eval caches, and session records all hold
+      // whatever id was current when they were written.
+      const renamed = await findRenamedModelId(this.storageRoots, requestedId);
+      if (!renamed) return null;
+      id = renamed;
+      root = await findModelRoot(this.storageRoots, id);
+      if (!root) return null;
+    }
     const metaPath = join(root, id, 'manifest.json');
     let raw: string;
     try {

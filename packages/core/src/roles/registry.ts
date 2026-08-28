@@ -106,8 +106,11 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
       'artifacts',
       'memory',
       'documents',
-      'doc-intel',
-      'entity-intel',
+      // No `doc-intel` / `entity-intel`: workspace-scoped office-document and
+      // cross-file entity reading is work the Meester delegates along with the
+      // rest of the reading. `search_documents` (in `documents`) is the one
+      // library-content reach it keeps, because nothing else finds what a
+      // human filed there.
       'interaction',
       'history',
       'handboek',

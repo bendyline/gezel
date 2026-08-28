@@ -11064,7 +11064,17 @@ export class ChatManager {
     builders.ds4 = ds4Builder;
 
     // Replace the empty pool with one that holds the actual builders.
-    const realPool = new ProviderPool({ broker, builders, gpuPanicGuard });
+    const realPool = new ProviderPool({
+      broker,
+      builders,
+      gpuPanicGuard,
+      // The arbiter already reads device-wide accelerator memory for the idle
+      // release hint; the pool needs the same number to refuse a spawn onto a
+      // card another process has filled.
+      ...(this.gpuArbiter
+        ? { vramHeadroom: () => this.gpuArbiter!.getMemoryPressureStatus() }
+        : {}),
+    });
     return new EngineRouter({
       broker,
       pool: realPool,
@@ -11858,6 +11868,66 @@ export class ChatManager {
   }
 
   /**
+   * The memory picture every engine's launch preview prices against.
+   *
+   * One derivation because each engine branch below used to rebuild it, and
+   * they drifted: the llama.cpp branch pinned its admission clamp to usable
+   * VRAM alone on discrete hosts, so a 21 GB MoE the broker would gladly
+   * admit against a 30 GB budget reported "won't fit" — while the MLX branch,
+   * which never passed live RAM, priced the same question correctly. A 4.7 GB
+   * model was denied the same way. Adding an engine must not re-open that.
+   *
+   * Deliberately carries no `freeSystemRamBytes`. A preview answers a policy
+   * question ("what window would this model get?"), where live free RAM is
+   * both the wrong input and a self-referential one — our own resident engine
+   * is what depressed it, so consulting it makes one running model deny every
+   * row in the list, itself included (see
+   * {@link CtxMemoryClampInput.freeSystemRamBytes}). Real placement belongs to
+   * the launch path: `buildLlamaCppProvider` passes `availableSystemRamBytes()`
+   * and is the only caller that should. Confining grown KV to fast memory is
+   * not lost with it — `planAdaptiveContextGrowth` applies that clamp itself
+   * from `budgetKind` + `vramBytes`.
+   */
+  private async previewCapacityInputs(
+    provider: LocalProviderName,
+    modelId: string,
+    opts: { standalone?: boolean },
+  ): Promise<{
+    /** Admission budget for the whole resident set. */
+    budgetBytes: number;
+    /** Fast (on-accelerator) pool — the ceiling adaptive growth may spend. */
+    fastBudgetBytes: number;
+    /** What slot COUNT is sized against; below `fastBudgetBytes` on big hosts. */
+    concurrencySizingBytes: number;
+    /** Usable VRAM on a discrete card; 0 on unified / CPU-only hosts. */
+    vramBytes: number;
+    budgetKind: CapacityCommitted['pools']['kind'];
+    /** Reservations held by models OTHER than this one. */
+    committedOtherBytes: number;
+  }> {
+    const { computeCapacityBudget } = await import('../providers/native/capacity-broker.js');
+    const router = this.engineRouter ?? this.engineRouterCache;
+    const snapshot = router?.broker.committed();
+    // An unenforced budget carries no usable numbers — fall back wholesale
+    // rather than per-field, so a snapshot never contributes half a picture.
+    const enforced = snapshot?.enforced ? snapshot : undefined;
+    const live = computeCapacityBudget();
+    return {
+      budgetBytes: enforced?.budgetBytes ?? live.budgetBytes,
+      fastBudgetBytes:
+        enforced === undefined
+          ? live.fastBytes
+          : (router?.broker.fastBudgetBytes() ?? enforced.pools.fastBytes),
+      concurrencySizingBytes: enforced?.pools.concurrencySizingBytes ?? live.concurrencySizingBytes,
+      vramBytes: enforced?.pools.vramBytes ?? live.vramBytes,
+      budgetKind: enforced?.pools.kind ?? live.kind,
+      committedOtherBytes: opts.standalone
+        ? 0
+        : this.committedOtherBytesFor(snapshot, provider, modelId),
+    };
+  }
+
+  /**
    * Full non-binding launch preview: the context window a native model
    * would receive AND the resident footprint at that window. Powers the
    * models-list "size in memory" column alongside
@@ -11963,26 +12033,19 @@ export class ChatManager {
       const geometry = installed.modelDir ? readMlxModelGeometry(installed.modelDir) : undefined;
       const {
         CapacityBroker,
-        computeCapacityBudget,
         defaultLocalEngineSlots,
         kvQuantScale,
         localEngineSlotCeiling,
         planCtxTokensForMemory,
         plannedLocalEngineSlots,
       } = await import('../providers/native/capacity-broker.js');
-      const router = this.engineRouter ?? this.engineRouterCache;
-      const brokerSnap = router?.broker.committed();
-      const liveBudget = computeCapacityBudget();
-      const budgetBytes = brokerSnap?.enforced ? brokerSnap.budgetBytes : liveBudget.budgetBytes;
-      const fastBudget = brokerSnap?.enforced
-        ? (router?.broker.fastBudgetBytes() ?? brokerSnap.pools.fastBytes)
-        : liveBudget.fastBytes;
-      const committedOtherBytes = opts.standalone
-        ? 0
-        : this.committedOtherBytesFor(brokerSnap, 'mlx', modelId);
-      const concurrencySizingBudget = brokerSnap?.enforced
-        ? brokerSnap.pools.concurrencySizingBytes
-        : liveBudget.concurrencySizingBytes;
+      const capacity = await this.previewCapacityInputs('mlx', modelId, opts);
+      const {
+        budgetBytes,
+        fastBudgetBytes: fastBudget,
+        committedOtherBytes,
+        concurrencySizingBytes: concurrencySizingBudget,
+      } = capacity;
       const kvBits = config.mlxKvBits ?? 0;
       const kvCacheType = kvBits === 4 ? 'q4_0' : kvBits === 8 ? 'q8_0' : 'f16';
       const weightsResident = CapacityBroker.estimateResidentBytes(
@@ -12034,7 +12097,7 @@ export class ChatManager {
           weightsResidentBytes: weightsResident,
           budgetBytes,
           committedOtherBytes,
-          vramBytes: 0,
+          vramBytes: capacity.vramBytes,
         });
         if (!admission.minimumSatisfied) {
           throw new CapacityDeniedError(
@@ -12239,7 +12302,6 @@ export class ChatManager {
       (residentContextWindow !== undefined && !overrideActive) || envNumCtx !== undefined;
 
     const {
-      computeCapacityBudget,
       defaultLocalEngineSlots,
       estimatePerSlotKvBytes,
       kvQuantScale,
@@ -12248,26 +12310,8 @@ export class ChatManager {
       planCtxTokensForMemory,
       plannedLocalEngineSlots,
     } = await import('../providers/native/capacity-broker.js');
-    const router = this.engineRouter ?? this.engineRouterCache;
-    const brokerSnap = router?.broker.committed();
-    const liveBudget = computeCapacityBudget();
-    const fastBudgetBytes = brokerSnap?.enforced
-      ? (router?.broker.fastBudgetBytes() ?? brokerSnap.pools.fastBytes)
-      : liveBudget.fastBytes;
-    const admissionBudgetBytes = brokerSnap?.enforced
-      ? brokerSnap.budgetBytes
-      : liveBudget.budgetBytes;
-    const committedOtherBytes = opts.standalone
-      ? 0
-      : this.committedOtherBytesFor(brokerSnap, 'llama-cpp', modelId);
-    // A preview answers a policy question, so it drops the live-free-RAM half
-    // of the clamp (see CtxMemoryClampInput.freeSystemRamBytes). A discrete
-    // card still gets a placement cap: pass 0 free RAM so the live term
-    // reduces to usable VRAM, which is stable and not self-referential. On a
-    // unified host "VRAM" IS that same RAM, so there is nothing left to cap
-    // with and the field is omitted entirely.
-    const previewBudgetKind = brokerSnap?.enforced ? brokerSnap.pools.kind : liveBudget.kind;
-    const previewLiveRam = previewBudgetKind === 'discrete-gpu' ? { freeSystemRamBytes: 0 } : {};
+    const capacity = await this.previewCapacityInputs('llama-cpp', modelId, opts);
+    const { budgetBytes: admissionBudgetBytes, fastBudgetBytes, committedOtherBytes } = capacity;
     const configuredSlots = config.providerConcurrency?.['llama-cpp'];
     const kvCacheType = resolveLlamaCppKvCacheType({
       architecture: installed.architecture,
@@ -12384,9 +12428,7 @@ export class ChatManager {
     const ceilingAt = (ctx: number, kv: LlamaCppKvCacheType) =>
       llamaCppSlotCeiling({
         budgetBytes: fastBudgetBytes,
-        sizingBudgetBytes: brokerSnap?.enforced
-          ? brokerSnap.pools.concurrencySizingBytes
-          : liveBudget.concurrencySizingBytes,
+        sizingBudgetBytes: capacity.concurrencySizingBytes,
         weightsBytes: installed.approxSizeBytes,
         perTurnCtxTokens: ctx,
         kvCacheType: kv,
@@ -12494,9 +12536,7 @@ export class ChatManager {
       const passCeiling = (kvType: LlamaCppKvCacheType) =>
         llamaCppSlotCeiling({
           budgetBytes: fastBudgetBytes,
-          sizingBudgetBytes: brokerSnap?.enforced
-            ? brokerSnap.pools.concurrencySizingBytes
-            : liveBudget.concurrencySizingBytes,
+          sizingBudgetBytes: capacity.concurrencySizingBytes,
           weightsBytes: installed.approxSizeBytes,
           perTurnCtxTokens: grantedCtx,
           kvCacheType: kvType,
@@ -12565,8 +12605,7 @@ export class ChatManager {
           }),
           budgetBytes: admissionBudgetBytes,
           committedOtherBytes,
-          ...previewLiveRam,
-          vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
+          vramBytes: capacity.vramBytes,
         });
         // Mirror the launch path's windowed-cache admission (see
         // buildLlamaCppProvider): when the launch will decline the Gemma
@@ -12618,8 +12657,7 @@ export class ChatManager {
                 windowed.fixedBytes * slots,
               budgetBytes: admissionBudgetBytes,
               committedOtherBytes,
-              ...previewLiveRam,
-              vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
+              vramBytes: capacity.vramBytes,
             });
             ladderKvLinearization = {
               bytesPerToken: windowed.bytesPerToken,
@@ -12658,9 +12696,8 @@ export class ChatManager {
             }),
             fastBudgetBytes,
             committedOtherBytes,
-            budgetKind: brokerSnap?.enforced ? brokerSnap.pools.kind : liveBudget.kind,
-            ...previewLiveRam,
-            vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
+            budgetKind: capacity.budgetKind,
+            vramBytes: capacity.vramBytes,
             isMoE: (summary.expertCount ?? 0) > 1,
             // A user-chosen lane count is not growth's to spend.
             allowSlotTrade: configuredSlots === undefined,
@@ -16519,6 +16556,10 @@ function researchTargetForToolCall(
   if (name === 'web_search' || name === 'wikipedia_search') {
     const query = typeof args.query === 'string' ? args.query.trim() : '';
     return query ? `query:${query.slice(0, 240)}` : undefined;
+  }
+  if (name === 'wikipedia_read') {
+    const title = typeof args.title === 'string' ? args.title.trim() : '';
+    return title ? `article:${title.slice(0, 240)}` : undefined;
   }
   if (name === 'fetch_url' || name === 'browser_navigate') {
     const url = typeof args.url === 'string' ? args.url.trim() : '';

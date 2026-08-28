@@ -23,7 +23,9 @@ import {
   ReplaceLinesInProjectWorkspaceFileRequestSchema,
   UpdateProjectRequestSchema,
   createLogger,
+  getEngagementMode,
   getProjectType,
+  isTaskWorkAllowed,
   resolveProjectTypeId,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
@@ -785,6 +787,33 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         },
         409,
       );
+    }
+    // Engagement gate — the same boundary IndexEnrichmentManager draws, and
+    // it has to be repeated here because the legacy bounded pass below calls
+    // `contentIndex.enrich` directly rather than going through the manager.
+    // Answer like the unstaffed branch: drain what needs no model, say why
+    // the rest is held.
+    const engagement = getEngagementMode(await ctx.store.readConfig());
+    if (!isTaskWorkAllowed({ aiEngagementMode: engagement })) {
+      if (!(await ctx.indexingJob.isPaused())) {
+        ctx.indexEnrichment.drainEmbedOnly(id);
+      }
+      const pending = await ctx.contentIndex.countNeedingEnrichment(id);
+      return c.json({
+        paused: false,
+        mode: 'embed-only' as const,
+        files: 0,
+        summarized: 0,
+        embedded: 0,
+        pending,
+        areasUpdated: 0,
+        architectureUpdated: false,
+        drained: false,
+        hint:
+          engagement === 'off'
+            ? 'AI is switched off, so only search embeddings are being refreshed. Turn AI back on to resume summaries and reviews.'
+            : 'AI activity is set to "Reactive only", so only search embeddings are being refreshed. Switch to "Tasks + Reactive" or "Proactive" to resume summaries and reviews.',
+      });
     }
     const boekwachter = await resolveProjectBoekwachter(ctx.store, id);
     if (!boekwachter) {

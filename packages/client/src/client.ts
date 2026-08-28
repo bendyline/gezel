@@ -387,6 +387,8 @@ import type {
   VSCodeSetupStatusResponse,
   WebSearchRequest,
   WebSearchResponse,
+  WikipediaReadRequest,
+  WikipediaReadResponse,
   WikipediaSearchRequest,
   WipeFaceDataResponse,
   WorkspaceCommandIndex,
@@ -6194,6 +6196,14 @@ export class GezelClient {
     return this.request(
       'POST',
       `/api/projects/${encodeURIComponent(id)}/tools/wikipedia-search`,
+      body,
+    );
+  }
+
+  toolWikipediaRead(id: string, body: WikipediaReadRequest): Promise<WikipediaReadResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/tools/wikipedia-read`,
       body,
     );
   }

@@ -265,6 +265,22 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Why a check failed, under the badge — clipped to roughly the width of the
+   pill above it, with the full sentence on the element's own tooltip.
+
+   `display: block` is load-bearing: max-width, overflow and text-overflow have
+   no effect on a non-replaced INLINE box, so as a plain span this rule did
+   nothing and the sentence ran the whole width of the table. The reason text
+   is written to lead with its most important clause precisely because this is
+   all most people will read of it. */
+.model-fitness-reason {
+  display: block;
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
+}
+
 .model-actions-table-cell {
   white-space: nowrap;
 }

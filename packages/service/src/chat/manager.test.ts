@@ -5854,12 +5854,16 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
       expect(toolsBlock).toContain('`ask_user_question`');
       expect(toolsBlock).toContain('`write_artifact`');
 
-      // The uncurated tail IS trimmed (161 → curated list length) — see the
-      // small-voorman twin test for the two incidents this reconciles. The
-      // notice reaches chat only because this fixture set `debugMode`.
+      // And nothing is trimmed at all: the Meester roster was pruned to fit
+      // under her own cap (MEESTER_STRIPPED_TOOLS + the curated priority
+      // list, which now covers the whole default roster), so a stock install
+      // never sees the notice — not even in debug, where this fixture would
+      // surface it. A trim here again means an installed toolset pushed her
+      // over. The small-voorman twin still exercises the debug-visible
+      // notice on a role whose roster genuinely exceeds its cap.
       const disk = await localStore.getSession('mira', session.id);
       const assistant = disk?.messages.find((m) => m.role === 'assistant');
-      expect(assistant?.warnings?.some((w) => w.includes('Tool cap trimmed'))).toBe(true);
+      expect(assistant?.warnings?.some((w) => w.includes('Tool cap trimmed'))).not.toBe(true);
     } finally {
       await localMgr.drainBackground();
       await localMgr.shutdown();

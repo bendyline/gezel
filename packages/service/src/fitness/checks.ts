@@ -48,6 +48,17 @@ export const PROBE_MARKER_RE = /proeve/i;
 /** The single synthetic tool the probe advertises. Never executed. */
 export const PROBE_TOOL_NAME = 'write_file';
 
+/**
+ * A turn that hit its deadline mid-stream. `observedTokens` is estimated from
+ * streamed delta volume, because an engine reports its token counts only when
+ * a turn completes — and this turn did not.
+ */
+export interface IncompleteTurn {
+  /** Wall time the turn was allowed before its deadline fired. */
+  elapsedMs: number;
+  observedTokens: number;
+}
+
 export interface FitnessEvidence {
   /** Set when the engine/pool/session never came up. */
   spawnError?: string;
@@ -61,6 +72,23 @@ export interface FitnessEvidence {
   toolTurnText?: string;
   /** Set when the tool turn itself threw (timeout, engine error). */
   toolTurnError?: string;
+  /**
+   * The tool turn ran out of budget while the model was still producing
+   * tokens. Distinct from {@link toolTurnError}: the engine was working, so
+   * this is a verdict about the model (it narrated instead of calling), not
+   * about the probe's machinery.
+   */
+  toolTurnIncomplete?: IncompleteTurn;
+  /**
+   * A generation turn ran out of budget while the model was still producing
+   * tokens. The engine was healthy and decoding — what failed is the model's
+   * ability to finish a short answer inside a budget scaled to its own
+   * reasoning allowance, which is a throughput/verbosity finding rather than
+   * a probe failure.
+   */
+  generationIncomplete?: IncompleteTurn;
+  /** True when `genTokensPerSec` was derived from delta timing, not engine stats. */
+  genTokensPerSecEstimated?: boolean;
   /** Measured decode t/s from the generation turn, or null when unmeasured. */
   genTokensPerSec: number | null;
   /** Set when the generation turn threw (timeout, engine error). */
@@ -82,30 +110,38 @@ export function buildFitnessChecks(ev: FitnessEvidence): {
     ? { ok: false, detail: ev.spawnError }
     : { ok: true, detail: 'engine spawned and served the probe session' };
 
-  const notReached = { ok: false, detail: 'not reached — an earlier probe stage failed' };
+  const notReached = {
+    ok: false,
+    detail: 'not reached — an earlier probe stage failed',
+    reached: false,
+  };
 
   const throughput = ev.spawnError
     ? notReached
     : ev.generationError
       ? { ok: false, detail: `generation turn failed: ${ev.generationError}` }
-      : ev.genTokensPerSec == null
-        ? { ok: true, detail: 'decode rate not measured (no turn stats) — non-gating pass' }
-        : ev.genTokensPerSec >= ev.minGenTokensPerSec
-          ? {
-              ok: true,
-              detail: `decodes at ${ev.genTokensPerSec.toFixed(1)} t/s (floor ${ev.minGenTokensPerSec})`,
-            }
-          : {
-              ok: false,
-              detail: `decodes at ${ev.genTokensPerSec.toFixed(1)} t/s — below the ${ev.minGenTokensPerSec} t/s floor for agentic work`,
-            };
+      : ev.generationIncomplete
+        ? buildUnfinishedGenerationCheck(ev, ev.generationIncomplete)
+        : ev.genTokensPerSec == null
+          ? { ok: true, detail: 'decode rate not measured (no turn stats) — non-gating pass' }
+          : ev.genTokensPerSec >= ev.minGenTokensPerSec
+            ? {
+                ok: true,
+                detail: `decodes at ${formatRate(ev)} (floor ${ev.minGenTokensPerSec} t/s)`,
+              }
+            : {
+                ok: false,
+                detail: `decodes at ${formatRate(ev)} — below the ${ev.minGenTokensPerSec} t/s floor for agentic work`,
+              };
 
   const toolRoundTrip =
-    ev.spawnError || ev.generationError
+    ev.spawnError || ev.generationError || ev.generationIncomplete
       ? notReached
       : ev.toolTurnError
         ? { ok: false, detail: `tool turn failed: ${ev.toolTurnError}` }
-        : buildToolRoundTripCheck(ev);
+        : ev.toolTurnIncomplete
+          ? buildUnfinishedToolCheck(ev.toolTurnIncomplete)
+          : buildToolRoundTripCheck(ev);
 
   const reasoningBudget = buildReasoningBudgetCheck(ev);
 
@@ -192,4 +228,56 @@ function buildReasoningBudgetCheck(ev: FitnessEvidence): { ok: boolean; detail: 
     };
   }
   return { ok: true, detail: 'no thinking observed; no budget needed' };
+}
+
+function formatProbeDuration(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 90) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
+}
+
+/**
+ * `8.1 t/s`, or `~8.1 t/s` when the figure came from delta timing rather than
+ * the engine's own stats. The tilde is the whole honesty budget for an
+ * estimate, so it must survive into every string a user reads.
+ */
+function formatRate(ev: FitnessEvidence): string {
+  if (ev.genTokensPerSec == null) return 'an unmeasured rate';
+  return `${ev.genTokensPerSecEstimated ? '~' : ''}${ev.genTokensPerSec.toFixed(1)} t/s`;
+}
+
+/**
+ * A generation turn that hit its deadline while still decoding.
+ *
+ * Deliberately NOT phrased as a probe failure. The engine was healthy and
+ * producing tokens the whole time; what the trial learned is that this model
+ * cannot finish a 150-word answer inside a budget already scaled to its own
+ * reasoning allowance. That is a real, actionable verdict about working here,
+ * and burying it as "the fitness check could not complete" is what sent a
+ * perfectly functional 8 t/s model to the user as broken.
+ */
+function buildUnfinishedGenerationCheck(
+  ev: FitnessEvidence,
+  turn: IncompleteTurn,
+): { ok: boolean; detail: string } {
+  const rate = ev.genTokensPerSec == null ? '' : ` at ${formatRate(ev)}`;
+  const verdict = 'so the engine is healthy but answers outrun what agentic work can absorb';
+  return {
+    ok: false,
+    detail:
+      `still writing${rate} after ${formatProbeDuration(turn.elapsedMs)} — about ` +
+      `${turn.observedTokens.toLocaleString()} tokens into a request for a short reply, ${verdict}`,
+  };
+}
+
+/** The tool turn kept producing prose until its deadline — a real capability miss. */
+function buildUnfinishedToolCheck(turn: IncompleteTurn): { ok: boolean; detail: string } {
+  return {
+    ok: false,
+    detail:
+      `model wrote about ${turn.observedTokens.toLocaleString()} tokens of prose in ` +
+      `${formatProbeDuration(turn.elapsedMs)} without ever calling ${PROBE_TOOL_NAME}`,
+  };
 }

@@ -48,6 +48,31 @@ export function capacityDenialLogLine(key: string, reason: string): string {
   return `capacity broker denied ${key}: ${reason}`;
 }
 
+/**
+ * Slack allowed between the card's measured free memory and what a new engine
+ * needs on it. Covers the display framebuffer, driver allocations, and the lag
+ * between a `shutdown()` returning and the driver actually handing the memory
+ * back — all of which make a fresh reading pessimistic by a fraction of a GB.
+ * Large enough that only an unambiguous shortfall denies.
+ */
+const MEASURED_VRAM_TOLERANCE_BYTES = 1024 ** 3;
+
+function gb(bytes: number): string {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
+/**
+ * Raw reason for a denial the device reading made, not the ledger. Keeps the
+ * `budget exhausted: would commit N against M` shape {@link capacityDenialLogLine}
+ * carries into the eval harness — this IS a capacity denial, measured rather
+ * than reserved, and any other shape would be reported as a model failure.
+ */
+export function measuredVramDenialReason(requiredBytes: number, freeBytes: number): string {
+  const required = Math.round(requiredBytes);
+  const free = Math.round(freeBytes);
+  return `budget exhausted: would commit ${required} against ${free} (measured free graphics memory)`;
+}
+
 export interface ProviderBuilderArgs {
   modelId: string;
   replicaIdx: number;
@@ -108,6 +133,19 @@ export interface ProviderPoolOptions {
    * for macOS (`GEZEL_SERIALIZE_GPU_LOADS=off` to disable); off elsewhere.
    */
   serializeGpuLoads?: boolean;
+  /**
+   * Optional measured free-accelerator-memory probe, consulted before spawning
+   * a new engine on a discrete card.
+   *
+   * The broker is a reservation ledger, and a per-process one: it is authority
+   * on what THIS daemon has loaded and blind to everything else on the card.
+   * On a captured night a second gezel install read its own empty ledger as
+   * "the whole 12 GB is free" and loaded a model onto a card that already had
+   * 0.3 GB left; both engines then ran ~40x slower for eight hours as the
+   * driver paged GPU memory over PCIe, and no layer ever said why. A device
+   * reading is the only thing that sees a tenant the ledger cannot.
+   */
+  vramHeadroom?: () => Promise<{ freeBytes?: number; totalBytes?: number }>;
 }
 
 export interface PoolEntrySnapshot {
@@ -281,6 +319,7 @@ export class ProviderPool {
   private readonly drainWaitMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly gpuPanicGuard?: GpuSpawnGuard;
+  private readonly vramHeadroom?: ProviderPoolOptions['vramHeadroom'];
   private readonly serializeGpuLoads: boolean;
   /** Tail of the serialized-load chain; each load awaits the previous. */
   private gpuLoadChain: Promise<void> = Promise.resolve();
@@ -303,6 +342,7 @@ export class ProviderPool {
     this.drainWaitMs = opts.drainWaitMs ?? DEFAULT_DRAIN_WAIT_MS;
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     if (opts.gpuPanicGuard) this.gpuPanicGuard = opts.gpuPanicGuard;
+    if (opts.vramHeadroom) this.vramHeadroom = opts.vramHeadroom;
     this.serializeGpuLoads =
       opts.serializeGpuLoads ??
       (process.platform === 'darwin' && process.env.GEZEL_SERIALIZE_GPU_LOADS !== 'off');
@@ -425,6 +465,11 @@ export class ProviderPool {
           coResidencyBytes: c.ramSpillover.coResidencyBytes,
         }),
       );
+    }
+    const measured = await this.measuredVramDenial(modelId, residentBytes);
+    if (measured) {
+      log.error(capacityDenialLogLine(key, measured.reason));
+      throw new CapacityDeniedError(measured.message);
     }
     const built = await this.withGpuLoadSlot(() => builder({ modelId, replicaIdx }));
     // The builder's actual residentBytes wins if it differs from the
@@ -618,6 +663,47 @@ export class ProviderPool {
     });
     this.evicting.set(key, run);
     return run;
+  }
+
+  /**
+   * Deny a spawn the card cannot physically take, whatever the ledger says.
+   *
+   * Runs after `makeRoom`, so everything this daemon was willing to release is
+   * already gone and the reading reflects what is genuinely left. Discrete
+   * cards only: on a unified host there is one pool, the RAM share already
+   * governs it, and the OS pages normally rather than falling off a cliff.
+   *
+   * A model larger than the card is deliberately streamed from system RAM, so
+   * the requirement is capped at the fast pool — otherwise this would refuse
+   * exactly the big-MoE case the two-pool budget was built to allow.
+   */
+  private async measuredVramDenial(
+    modelId: string,
+    residentBytes: number,
+  ): Promise<{ reason: string; message: string } | null> {
+    if (!this.vramHeadroom) return null;
+    const committed = this.broker.committed();
+    if (!committed.enforced || committed.pools.kind !== 'discrete-gpu') return null;
+    const reading = await this.vramHeadroom().catch((err) => {
+      log.debug(`vram headroom probe failed: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    });
+    const freeBytes = reading?.freeBytes;
+    if (typeof freeBytes !== 'number' || !Number.isFinite(freeBytes)) return null;
+    const required = Math.min(residentBytes, committed.pools.fastBytes);
+    if (required <= 0) return null;
+    if (freeBytes + MEASURED_VRAM_TOLERANCE_BYTES >= required) return null;
+    const total = reading?.totalBytes;
+    const reason = measuredVramDenialReason(required, freeBytes);
+    const message = [
+      `Not enough graphics memory to load ${modelId} (about ${gb(required)} on the card). `,
+      `The graphics card has ${gb(freeBytes)} free`,
+      typeof total === 'number' && Number.isFinite(total) ? ` of ${gb(total)}` : '',
+      '. Gezel can only unload its own models, and it has already released what it could, ',
+      'so something else on this machine is holding that memory — another program using the ',
+      'graphics card, or a second copy of gezel. Close it and try again.',
+    ].join('');
+    return { reason, message };
   }
 
   private async evictInner(key: string, force: boolean, drainWaitMs: number): Promise<void> {
