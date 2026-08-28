@@ -199,6 +199,15 @@ export function buildProviderConfig(provider: ChatProvider, modelId: string): Pa
     provider,
     defaultModel: { [provider]: modelId },
   };
+  // A/B knob for KV-cache quantization experiments (mlxKvBits sweep,
+  // 2026-08): set GEZEL_EVAL_MLX_KV_BITS=8 to run the whole trial with
+  // quantized KV. Eval-harness-only — the product default stays whatever
+  // config.mlxKvBits says. Unset = engine default (f16).
+  const kvBitsRaw = process.env.GEZEL_EVAL_MLX_KV_BITS;
+  if (provider === 'mlx' && kvBitsRaw) {
+    const kvBits = Number(kvBitsRaw);
+    if (Number.isInteger(kvBits) && kvBits > 0) base.mlxKvBits = kvBits;
+  }
   if (provider === 'codex-cli') {
     return {
       ...base,
