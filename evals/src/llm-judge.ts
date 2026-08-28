@@ -280,8 +280,22 @@ interface RawJudgeResponse {
 export function resolveJudgeCli(): string | null {
   const override = process.env.GEZEL_JUDGE_CLI?.trim();
   if (override) return existsSync(override) ? override : null;
-  const found = spawnSync('which', ['claude'], { encoding: 'utf8' });
-  const path = found.status === 0 ? found.stdout.trim() : '';
+  // `which` does not exist on Windows — probing with it silently disabled
+  // the CLI backend there, and the whole judge pass booked as "no
+  // artifact" (wild-caught: the 2026-08-27 win32 sweep judged 0 of 308).
+  // `where` lists every PATH match; only a native .exe is accepted because
+  // spawnSync cannot launch a `.cmd` shim without a shell on current Node.
+  const finder = process.platform === 'win32' ? 'where' : 'which';
+  const found = spawnSync(finder, ['claude'], { encoding: 'utf8' });
+  if (found.status !== 0) return null;
+  const lines = (found.stdout ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const path =
+    process.platform === 'win32'
+      ? (lines.find((line) => line.toLowerCase().endsWith('.exe')) ?? '')
+      : (lines[0] ?? '');
   return path && existsSync(path) ? path : null;
 }
 

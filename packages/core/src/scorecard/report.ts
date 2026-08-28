@@ -219,9 +219,11 @@ export function buildSuiteScoreboard(
 /**
  * Compact hardware description for a published table.
  *
- * The chip and memory are what actually determine whether a reader's
- * machine can reproduce a throughput number, so they lead. Falls back to
- * the raw device label when the finer detail was not captured.
+ * The chip, GPU, and memory are what actually determine whether a reader's
+ * machine can reproduce a throughput number, so they lead. On Apple Silicon
+ * the chip already names the GPU, so a discrete `gpuModel` only appears on
+ * hosts where it is a separate adapter. Falls back to the raw device label
+ * when the finer detail was not captured.
  */
 export function hardwareSummary(device: ScorecardDevice): string {
   const reportedCpu = device.cpuModel?.trim();
@@ -229,8 +231,9 @@ export function hardwareSummary(device: ScorecardDevice): string {
     reportedCpu && !/^unknown$/i.test(reportedCpu)
       ? reportedCpu.replace(/^Apple\s+/, '')
       : inferredScorecardDeviceClass(device);
+  const gpu = device.gpuModel?.trim() || null;
   const memory = device.memoryGb ? `${device.memoryGb} GB` : null;
-  const parts = [chip ?? device.label, memory].filter(Boolean);
+  const parts = [chip ?? device.label, gpu, memory].filter(Boolean);
   return parts.join(' · ');
 }
 

@@ -10,6 +10,7 @@ import type {
   ScorecardRun,
 } from '@bendyline/gezel';
 import { ScorecardDatasetSchema, inferredScorecardDeviceClass } from '@bendyline/gezel';
+import { detectGpuModel } from './perf-collector.ts';
 import type { BatchSummary, FailureClass, MatrixSummary, TrialResult } from './types.ts';
 
 /**
@@ -270,6 +271,7 @@ export function modelResultFromMatrix(
 /** Capture the device identity a published number has to carry. */
 export function captureDevice(): ScorecardDevice {
   const cpu = cpus()[0]?.model?.trim();
+  const gpu = detectGpuModel();
   const memoryGb = Math.round(totalmem() / 1024 ** 3);
   const detectedLabel = cpu
     ? `${process.platform === 'darwin' ? 'Mac' : process.platform} · ${cpu}`
@@ -281,6 +283,7 @@ export function captureDevice(): ScorecardDevice {
     memoryGb,
     osRelease: `${process.platform} ${release()}`,
     ...(cpu ? { cpuModel: cpu } : {}),
+    ...(gpu ? { gpuModel: gpu } : {}),
   };
   return {
     ...device,

@@ -269,7 +269,7 @@ export function captureHostInfo(opts: {
   };
 }
 
-function detectGpuModel(): string | null {
+export function detectGpuModel(): string | null {
   // Single-shot nvidia-smi query. On hosts without nvidia-smi this errors
   // out and we fall through to the vendor-neutral probes below.
   try {

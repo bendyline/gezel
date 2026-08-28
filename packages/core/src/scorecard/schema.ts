@@ -61,6 +61,12 @@ export const ScorecardDeviceSchema = z
     /** OS release string, e.g. "darwin 25.5.0". */
     osRelease: z.string().optional(),
     cpuModel: z.string().optional(),
+    /**
+     * Discrete GPU/accelerator model, e.g. "AMD Radeon AI PRO R9700".
+     * On a local-engine host this determines throughput as much as the
+     * CPU does; absent on hosts where no probe identified an adapter.
+     */
+    gpuModel: z.string().optional(),
   })
   .strict();
 export type ScorecardDevice = z.infer<typeof ScorecardDeviceSchema>;
