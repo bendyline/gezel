@@ -480,7 +480,80 @@ if _QWEN3_5_TEXT_ONLY:
         "Detected text-only Qwen 3.5 checkpoint; allowing absent vision-tower weights.",
         flush=True,
     )
-MODEL, PROCESSOR = load(ARGS.model, strict=not _QWEN3_5_TEXT_ONLY)
+
+# ── Tower selection (2026-08-28) ──
+#
+# This server has always served TEXT ONLY ("Vision support is out of scope
+# for v1" — _build_prompt): mlx_vlm here is a loader, not a vision path.
+# Yet mlx_vlm's language towers pay a large context-growing decode tax
+# under the BatchGenerator this server runs on. Measured on
+# qwen3.8-27b-q4 (matched-thermal 2x2, ms per decoded token at
+# 10.9k/54.3k prompt tokens):
+#
+#     mlx_lm tower  x BatchGenerator : 32.1 / 41.2   (= bare serial)
+#     mlx_vlm tower x BatchGenerator : 44.7 / 86.7   (slope 0.97 vs 0.34 us/tok)
+#
+# The vlm tower runs 3-axis multimodal RoPE with per-layer array-offset
+# position ids + left-padding mask machinery per token; mlx_lm's text
+# tower is plain rope(offset) + fused SDPA. Same checkpoint, ~2x decode
+# at working context — so batch mode loads the mlx_lm tower when it can.
+#
+# Scope guards, deliberately conservative:
+#   - allow-listed architectures only (verified by the 2x2 above); other
+#     archs keep the vlm loader until they get their own measurement,
+#   - batch mode only (--max-concurrency >= 1, the default): the legacy
+#     serial path is mlx_vlm's stream_generate and keeps the vlm loader,
+#   - GEZEL_MLX_TEXT_TOWER=off restores the old behavior outright;
+#     =force skips the allowlist (measurement runs).
+# Every branch prints a `[tower]` fingerprint line — an A/B that cannot
+# prove which tower served it is how this class of defect stayed hidden.
+_TEXT_TOWER = None
+_TEXT_TOWER_ALLOWED_ARCHS = {"qwen3_5"}
+
+
+def _model_architecture(model_dir: str) -> str:
+    try:
+        with open(os.path.join(model_dir, "config.json"), "r") as fh:
+            return str(json.load(fh).get("model_type", ""))
+    except Exception:
+        return ""
+
+
+_tower_pref = os.environ.get("GEZEL_MLX_TEXT_TOWER", "auto").strip().lower()
+_arch = _model_architecture(ARGS.model)
+if (
+    _tower_pref not in ("0", "off", "false")
+    and int(getattr(ARGS, "max_concurrency", 1) or 0) >= 1
+    and (_tower_pref == "force" or _arch in _TEXT_TOWER_ALLOWED_ARCHS)
+):
+    try:
+        from mlx_lm.utils import load as _mlx_lm_load
+
+        MODEL, PROCESSOR = _mlx_lm_load(ARGS.model)
+        _TEXT_TOWER = "mlx_lm"
+        print(
+            f"[tower] active=mlx_lm arch={_arch or 'unknown'} "
+            f"(text tower; vlm loader bypassed for batch serving)",
+            flush=True,
+        )
+    except Exception as exc:
+        print(
+            f"[tower] mlx_lm load failed for arch={_arch or 'unknown'}: {exc} "
+            f"— falling back to mlx_vlm",
+            flush=True,
+        )
+if _TEXT_TOWER is None:
+    MODEL, PROCESSOR = load(ARGS.model, strict=not _QWEN3_5_TEXT_ONLY)
+    _reason = (
+        "GEZEL_MLX_TEXT_TOWER=off"
+        if _tower_pref in ("0", "off", "false")
+        else "serial mode (--max-concurrency 0)"
+        if int(getattr(ARGS, "max_concurrency", 1) or 0) < 1
+        else f"arch {_arch or 'unknown'} not in text-tower allowlist"
+        if _tower_pref != "force"
+        else "mlx_lm load failed"
+    )
+    print(f"[tower] active=mlx_vlm ({_reason})", flush=True)
 print("Model and processor loaded successfully.", flush=True)
 
 
@@ -2020,7 +2093,9 @@ def _get_batch_engine() -> "BatchEngine":
     if _BATCH_ENGINE is None:
         lm = getattr(MODEL, "language_model", MODEL)
         tok = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
-        _BATCH_ENGINE = BatchEngine(_UnwrapLM(lm), tok, ARGS.max_concurrency)
+        # mlx_lm models return raw logits — no LanguageModelOutput to unwrap.
+        engine_model = lm if _TEXT_TOWER == "mlx_lm" else _UnwrapLM(lm)
+        _BATCH_ENGINE = BatchEngine(engine_model, tok, ARGS.max_concurrency)
     return _BATCH_ENGINE
 
 
@@ -2723,6 +2798,11 @@ def _build_prompt(
     # No tools + no override, no tokenizer template, or tools-render
     # failed: text-only path. apply_chat_template signature varies across
     # mlx-vlm versions; the (processor, config, messages) form is stable.
+    # The mlx_lm tower has no vlm processor/config pair — its tokenizer
+    # renders directly (same chat_template.jinja on disk either way).
+    if _TEXT_TOWER == "mlx_lm":
+        tok = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
+        return tok.apply_chat_template(raw, tokenize=False, add_generation_prompt=True)
     config = getattr(MODEL, "config", None) or {}
     return apply_chat_template(PROCESSOR, config, raw)
 
@@ -2874,6 +2954,21 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             _batched_stream_iter(sub),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    # Defense in depth: the tower selector requires --max-concurrency >= 1
+    # for the mlx_lm text tower, so this serial branch (mlx_vlm
+    # stream_generate) should be unreachable in lm mode. If a future edit
+    # breaks that invariant, fail loudly instead of feeding an mlx_lm
+    # model into mlx_vlm's generate loop.
+    if _TEXT_TOWER == "mlx_lm":
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "serial generation path is unavailable with the mlx_lm text "
+                "tower; restart without GEZEL_MLX_TEXT_TOWER or with "
+                "--max-concurrency >= 1"
+            ),
         )
 
     # Serial-path guard: mlx_vlm's divergent-prefix branch trims by

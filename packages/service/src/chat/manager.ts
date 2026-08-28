@@ -12533,28 +12533,41 @@ export class ChatManager {
             grantedCtx,
           )
         : undefined;
-      const passCeiling = (kvType: LlamaCppKvCacheType) =>
+      const passPlanCtx = grantedCtx;
+      const passCeiling = (kvType: LlamaCppKvCacheType, ctxTokens: number) =>
         llamaCppSlotCeiling({
           budgetBytes: fastBudgetBytes,
           sizingBudgetBytes: capacity.concurrencySizingBytes,
           weightsBytes: installed.approxSizeBytes,
-          perTurnCtxTokens: grantedCtx,
+          perTurnCtxTokens: ctxTokens,
           kvCacheType: kvType,
           committedOtherBytes,
-          ...(exactAtRequested !== undefined ? { exactPerSlotKvBytesF16: exactAtRequested } : {}),
+          ...(exactAtRequested !== undefined
+            ? { exactPerSlotKvBytesF16: (exactAtRequested * ctxTokens) / passPlanCtx }
+            : {}),
         });
       const kvPlan = planLlamaCppKv({
         architecture: installed.architecture,
         modelId,
         override: config.llamaCppKvCacheType,
         slotsConfigured: configuredSlots !== undefined,
+        ...(configuredSlots !== undefined ? { configuredSlots } : {}),
+        requestedCtxTokens: grantedCtx,
+        minimumCtxTokens: requirement.minimumPerTurnCtxTokens,
+        ctxConfigured:
+          explicitArg !== undefined || (config.llamaCppContextSizing ?? 'adaptive') === 'model-max',
         ceilingFor: passCeiling,
         maxSlots: defaultLocalEngineSlots(fastBudgetBytes),
       });
       kv = kvPlan.kvCacheType;
+      // Mirror the launch: the f16-by-context-cap trade shrinks the granted
+      // window here too, so the settings preview shows what will really run.
+      if (kvPlan.ctxCapTokens !== undefined && kvPlan.ctxCapTokens < grantedCtx) {
+        grantedCtx = kvPlan.ctxCapTokens;
+      }
       let slots = plannedLocalEngineSlots({
         configuredSlots,
-        ceiling: passCeiling(kv),
+        ceiling: passCeiling(kv, grantedCtx),
         tierDefault: defaultLocalEngineSlots(fastBudgetBytes),
       });
       if ((config.llamaCppSpecType ?? manifestEngineConfig?.spec?.type) === 'draft-mtp') slots = 1;

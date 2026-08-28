@@ -8,6 +8,15 @@
 export type LlamaCppKvCacheType = 'f16' | 'q8_0' | 'q4_0';
 
 /**
+ * The context we are willing to keep when trading window size for f16 KV
+ * (policy 2026-08-28: "favor f16 if memory allows, even at the sacrifice
+ * of slots or context above 64k"). Above this, an adaptive context is
+ * capped before falling back to a quantized cache; an explicit operator
+ * context is never capped.
+ */
+export const F16_PREFERRED_CTX_CAP_TOKENS = 65_536;
+
+/**
  * Is this model in the Gemma 3/4 family? The single source of truth for
  * the Gemma-specific engine defaults (f16 KV cache, sliding-window
  * full-cache). Prefers the GGUF architecture string; falls back to the
@@ -19,7 +28,10 @@ export function isGemmaModel(args: { architecture?: string; modelId?: string }):
 }
 
 /**
- * Pick the `--cache-type-k/v` value for a model.
+ * The family FALLBACK `--cache-type-k/v` value — what a model gets when
+ * memory pressure forces the compact cache. This is no longer the whole
+ * default: {@link planLlamaCppKv} prefers f16 whenever the memory plan
+ * fits it, and only lands here when it does not.
  *
  * Gemma 3/4 are unusually sensitive to a quantized KV cache: large
  * attention head dims (key/value_length = 512), a final logit softcap,
@@ -27,9 +39,9 @@ export function isGemmaModel(args: { architecture?: string; modelId?: string }):
  * *stored prompt tokens* — the model reasons fine but recalls cached
  * source/text as garbled multilingual tokens. Wild-caught
  * (gemma4-12b): quoted source lines came back as Korean glyphs + emoji
- * with `K/V = q8_0`. So the Gemma family defaults to f16; every other
- * family keeps the well-trodden q8_0 (~50% KV memory, ~zero quality
- * impact). An explicit operator override always wins.
+ * with `K/V = q8_0`. So the Gemma family falls back to f16; every other
+ * family falls back to q8_0 (~50% KV memory; quality-equivalent per the
+ * 2026-08-03 A/B). An explicit operator override always wins.
  *
  * The `modelId` fallback covers installs whose GGUF metadata didn't
  * record an architecture string — a `gemma`-named model still gets f16.
@@ -44,39 +56,116 @@ export function resolveLlamaCppKvCacheType(args: {
 }
 
 /**
- * Trade Gemma's conservative f16 KV for a second engine slot when memory
- * is the only thing forcing single-slot.
+ * Memory-aware KV precision + the sacrifices it is allowed to make.
  *
- * Why: multi-gezel work alternates 2+ sessions, and on a single-slot
- * server a Gemma-family model re-prefills the other session's WHOLE
- * context on every switch — SWA models are excluded from llama-server's
- * native prompt cache, so nothing rescues them (wild-caught: one ~41K
- * re-prefill ≈ 79s per schema-migration trial). A second slot removes the
- * class entirely. The 2026-08-03 KV A/B (f16 8/8, q8_0 6/8, q4_0 7/8 —
- * no dose-response, no garbling, failures on the known coin-flip
- * scenario) showed no measurable q8_0 fidelity cost, so paying half the
- * KV memory for a slot is the better default whenever it actually buys
- * one.
+ * f16 KV is measurably faster than q8_0 on llama.cpp, and the gap grows
+ * with context where it hurts most: the 2026-08-28 ABBA
+ * (muse-glimmer-30b, reports/llama-kv-q8-longctx-20260828.md) measured a
+ * flat ~6% decode tax and a prefill tax growing −6% → −12% → −17% at
+ * 8k/40k/90k. The original q8_0 default was priced on a 2B model whose
+ * KV was too small for the tax to show. Policy (2026-08-28): **prefer
+ * f16 whenever memory allows, sacrificing engine slots first and then
+ * context above 64k tokens; fall back to the family default
+ * ({@link resolveLlamaCppKvCacheType}) only when f16 cannot fit even a
+ * single 64k slot.**
  *
- * Explicit operator choices always win: a `kvCacheType` override or an
- * explicit slot-count config means no auto-trade.
+ * Explicit operator choices always win and are never sacrificed: a
+ * `kvCacheType` override short-circuits entirely; an explicit slot count
+ * is honored (f16 only if it fits that many); an explicit context
+ * (env / per-model / machine-wide numeric, or `model-max` sizing) is
+ * never capped.
+ *
+ * GEMMA IS THE DELIBERATE EXCEPTION and keeps its long-standing shape:
+ * f16 for correctness (the garbling incident above), traded to q8_0
+ * only when that buys a second slot — because single-slot Gemma
+ * alternation re-prefills the other session's whole context (SWA models
+ * get nothing from llama-server's prompt cache; wild-caught ~41K tok ≈
+ * 79s per switch), a far larger cost than q8_0's prefill tax. The
+ * general "sacrifice slots for f16" ladder would reinstate exactly that
+ * pathology, so it does not apply to Gemma.
  */
 export function planLlamaCppKv(args: {
   architecture?: string;
   modelId?: string;
   override?: LlamaCppKvCacheType;
   slotsConfigured: boolean;
-  /** Memory-ceiling slots under a given KV type (caller's budget math). */
-  ceilingFor: (kv: LlamaCppKvCacheType) => number;
+  /** The explicit slot count when `slotsConfigured` (honored verbatim). */
+  configuredSlots?: number;
+  /** Per-turn context the launch is currently asking for. */
+  requestedCtxTokens: number;
+  /** Admission floor — a cap below this is never proposed. */
+  minimumCtxTokens: number;
+  /** True when the context came from explicit operator intent. */
+  ctxConfigured: boolean;
+  /** Memory-ceiling slots for a KV type at a context (caller's budget math). */
+  ceilingFor: (kv: LlamaCppKvCacheType, ctxTokens: number) => number;
   /** Upper bound on slots regardless of memory (policy default). */
   maxSlots: number;
-}): { kvCacheType: LlamaCppKvCacheType; upgraded: boolean } {
-  const base = resolveLlamaCppKvCacheType(args);
-  if (args.override || args.slotsConfigured) return { kvCacheType: base, upgraded: false };
-  if (base !== 'f16' || args.maxSlots < 2) return { kvCacheType: base, upgraded: false };
-  const f16Slots = Math.min(args.maxSlots, args.ceilingFor('f16'));
-  if (f16Slots >= 2) return { kvCacheType: base, upgraded: false };
-  const q8Slots = Math.min(args.maxSlots, args.ceilingFor('q8_0'));
-  if (q8Slots >= 2) return { kvCacheType: 'q8_0', upgraded: true };
-  return { kvCacheType: base, upgraded: false };
+}): {
+  kvCacheType: LlamaCppKvCacheType;
+  /** Gemma f16→q8_0 slot trade fired (pre-existing meaning, kept). */
+  upgraded: boolean;
+  /** Set when f16 was bought by capping context; assign to effectiveNumCtx. */
+  ctxCapTokens?: number;
+  /** One-line rationale for the launch log. */
+  reason: string;
+} {
+  if (args.override) {
+    return { kvCacheType: args.override, upgraded: false, reason: 'operator kvCacheType override' };
+  }
+  const fallback = resolveLlamaCppKvCacheType(args);
+
+  if (isGemmaModel(args)) {
+    // Long-standing Gemma shape, verbatim (see the doc block above).
+    if (args.slotsConfigured || args.maxSlots < 2) {
+      return { kvCacheType: fallback, upgraded: false, reason: 'gemma f16 (correctness default)' };
+    }
+    const f16Slots = Math.min(args.maxSlots, args.ceilingFor('f16', args.requestedCtxTokens));
+    if (f16Slots >= 2) {
+      return { kvCacheType: fallback, upgraded: false, reason: 'gemma f16 fits multi-slot' };
+    }
+    const q8Slots = Math.min(args.maxSlots, args.ceilingFor('q8_0', args.requestedCtxTokens));
+    if (q8Slots >= 2) {
+      return {
+        kvCacheType: 'q8_0',
+        upgraded: true,
+        reason: 'gemma f16 traded for a second slot (SWA re-prefill pathology)',
+      };
+    }
+    return { kvCacheType: fallback, upgraded: false, reason: 'gemma f16 (trade buys nothing)' };
+  }
+
+  // Non-Gemma: f16-first ladder.
+  const desiredSlots = args.slotsConfigured ? (args.configuredSlots ?? 1) : args.maxSlots;
+  const f16AtRequested = args.ceilingFor('f16', args.requestedCtxTokens);
+  if (f16AtRequested >= desiredSlots) {
+    return { kvCacheType: 'f16', upgraded: false, reason: 'f16 fits the full plan' };
+  }
+  if (!args.slotsConfigured && f16AtRequested >= 1) {
+    return {
+      kvCacheType: 'f16',
+      upgraded: false,
+      reason: `f16 preferred at ${f16AtRequested} slot(s) instead of q8_0 at ${desiredSlots}`,
+    };
+  }
+  const canCapCtx =
+    !args.ctxConfigured &&
+    args.requestedCtxTokens > F16_PREFERRED_CTX_CAP_TOKENS &&
+    F16_PREFERRED_CTX_CAP_TOKENS >= args.minimumCtxTokens;
+  if (canCapCtx) {
+    const neededSlots = args.slotsConfigured ? desiredSlots : 1;
+    if (args.ceilingFor('f16', F16_PREFERRED_CTX_CAP_TOKENS) >= neededSlots) {
+      return {
+        kvCacheType: 'f16',
+        upgraded: false,
+        ctxCapTokens: F16_PREFERRED_CTX_CAP_TOKENS,
+        reason: `f16 preferred with context capped ${args.requestedCtxTokens} -> ${F16_PREFERRED_CTX_CAP_TOKENS}`,
+      };
+    }
+  }
+  return {
+    kvCacheType: fallback,
+    upgraded: false,
+    reason: 'f16 does not fit even one 64k slot — q8_0 for the memory saving',
+  };
 }

@@ -479,35 +479,58 @@ export async function buildLlamaCppProvider(opts: {
         effectiveNumCtx,
       )
     : undefined;
-  const ceilingFor = (kv: LlamaCppKvCacheType) =>
+  // Context-aware so the KV plan can probe "does f16 fit at 64k" without
+  // committing the launch to it. The exact header-derived per-slot bytes
+  // were measured at the plan-time window; scale linearly for other
+  // windows — right for full-attention layers, conservative for the fixed
+  // SSM/SWA component (over-reserving is the safe direction, and Gemma
+  // never takes the cap ladder anyway).
+  const planTimeCtx = effectiveNumCtx;
+  const ceilingFor = (kv: LlamaCppKvCacheType, ctxTokens: number) =>
     llamaCppSlotCeiling({
       budgetBytes,
       sizingBudgetBytes: brokerSnap?.enforced
         ? brokerSnap.pools.concurrencySizingBytes
         : computeCapacityBudget().concurrencySizingBytes,
       weightsBytes: modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3,
-      perTurnCtxTokens: effectiveNumCtx,
+      perTurnCtxTokens: ctxTokens,
       kvCacheType: kv,
       committedOtherBytes,
-      ...(exactPerSlotKvF16 !== undefined ? { exactPerSlotKvBytesF16: exactPerSlotKvF16 } : {}),
+      ...(exactPerSlotKvF16 !== undefined
+        ? { exactPerSlotKvBytesF16: (exactPerSlotKvF16 * ctxTokens) / planTimeCtx }
+        : {}),
     });
   const kvPlan = planLlamaCppKv({
     architecture: modelCatalogInfo?.architecture,
     modelId: defaultModelId ?? undefined,
     override: config.llamaCppKvCacheType,
     slotsConfigured: configuredSlots !== undefined,
+    ...(configuredSlots !== undefined ? { configuredSlots } : {}),
+    requestedCtxTokens: effectiveNumCtx,
+    minimumCtxTokens: contextRequirement.minimumPerTurnCtxTokens,
+    ctxConfigured:
+      explicitCtx !== undefined || (config.llamaCppContextSizing ?? 'adaptive') === 'model-max',
     ceilingFor,
     maxSlots: defaultLocalEngineSlots(budgetBytes),
   });
+  kvCacheType = kvPlan.kvCacheType;
   if (kvPlan.upgraded) {
-    kvCacheType = kvPlan.kvCacheType;
     log.info(
       `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: trading f16 KV for q8_0 to fit a second engine slot (single-slot SWA session alternation re-prefills wholesale; KV A/B 2026-08-03 showed no measurable q8_0 fidelity cost)`,
+    );
+  } else if (kvPlan.ctxCapTokens !== undefined && kvPlan.ctxCapTokens < effectiveNumCtx) {
+    log.info(
+      `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: keeping f16 KV by capping context ${effectiveNumCtx} -> ${kvPlan.ctxCapTokens} (f16 prefill is up to ~17% faster at long context than q8_0; reports/llama-kv-q8-longctx-20260828.md)`,
+    );
+    effectiveNumCtx = kvPlan.ctxCapTokens;
+  } else if (kvCacheType === 'f16' || kvCacheType === 'q8_0') {
+    log.info(
+      `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: kv=${kvCacheType} (${kvPlan.reason})`,
     );
   }
   let slots = plannedLocalEngineSlots({
     configuredSlots,
-    ceiling: ceilingFor(kvCacheType),
+    ceiling: ceilingFor(kvCacheType, effectiveNumCtx),
     tierDefault: defaultLocalEngineSlots(budgetBytes),
   });
   // The bundled llama.cpp line still has known multi-slot MTP allocation

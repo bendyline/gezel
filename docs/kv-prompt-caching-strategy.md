@@ -151,7 +151,7 @@ full caching-relevant argv:
 --ctx-size   <effectiveNumCtx * slots>     # TOTAL KV; llama-server splits it across slots
 --parallel   <slots>                       # one KV slot per request lane (RAM-tiered default: 4 at ≥64GB)
 --slot-save-path <dir>                     # enables per-slot disk save/restore (else 501)
---cache-type-k q8_0   --cache-type-v q8_0  # KV quantization (default; Gemma family forces f16 — see below)
+--cache-type-k <kv>   --cache-type-v <kv>   # memory-aware: f16 when it fits, else q8_0 (Gemma special — see below)
 [--mlock] [--flash-attn] [--ubatch-size N] [--mmproj …] [--reasoning-budget N]
 ```
 
@@ -160,13 +160,21 @@ full caching-relevant argv:
   budget. Default per-turn context is `PREFERRED_CTX_DEFAULT = 65_536`
   (`chat/manager.ts:11039`), clamped down to the model's native context from GGUF metadata, and
   overridable via `config.llamaCppNumCtx` / env `GEZEL_LLAMA_NUM_CTX`.
-- **KV quantization defaults to `q8_0` for both K and V** — ~50% KV-memory savings with
-  essentially no quality impact — **except the Gemma family, which forces `f16`**: Gemma 3/4's
-  large attention head dims + final logit softcap + sliding-window attention make a quantized KV
-  cache corrupt the *stored prompt tokens* (recalled source came back as Korean glyphs + emoji
-  under q8_0; see `chat/manager.ts` `resolveLlamaCppKvCacheType`). So the
-  family default is model-conditioned, not flat. Operator-tunable via `config.llamaCppKvCacheType`
-  (down to `q4_0` or out to `f16`). **It is not hardware-tiered**: `hardware-tier.ts` only selects
+- **KV precision is memory-aware, f16-first (2026-08-28)** — the old flat `q8_0` default was
+  priced on a 2B model; at 30B the q8_0 tax is ~6% decode flat and **−6% → −17% prefill as
+  context grows 8k → 90k** ([reports/llama-kv-q8-longctx-20260828.md](../reports/llama-kv-q8-longctx-20260828.md)).
+  `planLlamaCppKv` ([llama-cpp/kv-cache-type.ts](../packages/service/src/providers/llama-cpp/kv-cache-type.ts))
+  now prefers **f16 whenever the memory plan fits it, sacrificing engine slots first and then
+  context above `F16_PREFERRED_CTX_CAP_TOKENS = 65_536`**, and falls back to `q8_0` only when
+  f16 cannot fit a single 64k slot (~50% KV-memory saving where it is genuinely needed).
+  Explicit operator choices are never sacrificed: a `config.llamaCppKvCacheType` override wins
+  outright, an explicit slot count is honored, and an explicit context (numeric or `model-max`
+  sizing) is never capped. **The Gemma family is the deliberate exception** and keeps its
+  long-standing shape — `f16` for correctness (Gemma 3/4's large attention head dims + final
+  logit softcap + sliding-window attention corrupt *stored prompt tokens* under q8_0; recalled
+  source came back as Korean glyphs + emoji), traded to `q8_0` only when that buys a second slot
+  (single-slot SWA alternation re-prefills wholesale, ~79 s/switch wild-caught — a far larger
+  cost than q8_0's prefill tax). **It is not hardware-tiered**: `hardware-tier.ts` only selects
   *which Gemma model* to run from RAM/VRAM, never a launch flag.
 - **`--cache-reuse 256` auto-enables at single-slot (`--parallel 1`); no `--n-keep`, no
   `--no-context-shift`.** b9843 rejects `--cache-reuse` under multi-slot non-unified KV, so the
@@ -228,6 +236,23 @@ env: HF_HUB_OFFLINE=1, TRANSFORMERS_OFFLINE=1, …
 | `DELETE /v1/cache/{cache_id}` | Drop from memory **and** disk. |
 | `POST /admin/flush` | Persist every in-memory entry to disk without dropping (idle-freeze hook). |
 | `GET /health` | Supervisor readiness probe. |
+
+#### Tower selection (2026-08-28)
+
+The MLX sidecar serves text only, but historically loaded every model through
+`mlx_vlm` — whose language towers pay a context-growing decode tax under the
+BatchGenerator (matched-thermal 2x2 on qwen3.8-27b-q4: 0.97 vs 0.34 us per
+context token; ~2x decode at 54k). Boot now picks the tower: allow-listed
+architectures (`qwen3_5`) with `--max-concurrency >= 1` load via
+`mlx_lm.utils.load` and feed BatchGenerator raw logits; other archs, serial
+mode, lm-load failures, and `GEZEL_MLX_TEXT_TOWER=off` keep the `mlx_vlm`
+loader. Template rendering is token-identical across towers (verified against
+the same `chat_template.jinja`), so prefix caches survive the switch. Every
+boot prints a `[tower] active=...` fingerprint — any A/B touching this layer
+must confirm it from the engine log. Growing the allowlist requires the arch's
+own 2x2 first (`scratchpad stack-aba/instrument2.py` pattern). Measured
+effect through the full server: 23.2 -> 31.8 tok/s at ~11k, 12.1 -> 22.0 at
+~54k; eval preflight 164.7 -> 217.7 tok/s at unchanged smoke pass rate.
 
 ### 2.3 Side by side
 
@@ -716,7 +741,7 @@ KV state survives process death so a returning user doesn't pay cold prefill.
 | `config.cacheBudgetMb.{mlx,llama-cpp}` | RAM-tiered (§6) | Controller LRU budget per engine. |
 | `config.providerConcurrency['llama-cpp']` | 2 | Slots = queue concurrency = `--parallel` = adapter `slotCount`. |
 | `config.providerConcurrency['mlx']` | 1 | MLX queue concurrency (single-stream). |
-| `config.llamaCppKvCacheType` | `q8_0` | `--cache-type-k/v` (`f16`, `q8_0`, `q4_0`). |
+| `config.llamaCppKvCacheType` | memory-aware (f16-first) | `--cache-type-k/v` (`f16`, `q8_0`, `q4_0`); override disables the ladder. |
 | `config.llamaCppNumCtx` / `GEZEL_LLAMA_NUM_CTX` | 65536 | Per-slot context (clamped to model native). |
 | `config.llamaCppMlock` / `…FlashAttn` / `…UbatchSize` | off / off / unset | Optional launch flags. |
 | `config.mlxNumCtx` | 32768 | TS-side compaction threshold only (not sent to engine). |
