@@ -23,7 +23,9 @@ import {
   resolveDaemonEntry,
   stopOwnedDaemon,
   stopProcessByPid,
+  systemServiceHome,
 } from '@bendyline/gezel-client/node';
+import { activeMachineSharedHome } from '@bendyline/gezel/paths';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { connectForTui } from './connection.js';
 
@@ -105,6 +107,18 @@ afterAll(async () => {
 // allows, so a loaded runner timed the suite out rather than failing an
 // assertion. Match the budget to the work the tests actually do.
 describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
+  // A developer machine that ever ran a packaged install carries a real
+  // machine-shared root. The daemon mounts it by design, so a machine-shared
+  // project resolves its content there rather than under this suite's temp
+  // home — which both breaks fresh-home assertions and writes into real user
+  // state. vitest.config.ts points both roots at paths that never carry a
+  // trust marker; fail loudly here if that stops reaching the workers.
+  it('isolates installer-managed host state from these fresh homes', () => {
+    expect(process.env.GEZEL_MACHINE_SHARED_HOME).toContain('gezel-cli-host-isolation-');
+    expect(activeMachineSharedHome()).toBeNull();
+    expect(systemServiceHome()).toBe(process.env.GEZEL_SYSTEM_SERVICE_HOME);
+  });
+
   it('writes runtime files that readRuntime can parse', async () => {
     const runtime = await readRuntime(gezelHome);
     expect(runtime).not.toBeNull();
