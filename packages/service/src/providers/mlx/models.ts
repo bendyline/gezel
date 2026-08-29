@@ -828,10 +828,42 @@ export class MlxModelManager {
       // rewriting after verification is expected (we're the ones who
       // want the file to match the model we're actually going to run).
       let chatTemplatePresent = summary.chatTemplatePresent;
-      let templateSource: 'upstream' | 'sidecar' | 'catalog' | null = chatTemplatePresent
-        ? 'upstream'
-        : null;
+      let templateSource: 'upstream' | 'sidecar' | 'catalog' | 'override' | null =
+        chatTemplatePresent ? 'upstream' : null;
       const tokenizerConfigPath = join(itemDir, 'tokenizer_config.json');
+      const chatTemplateSidecarPath = join(itemDir, 'chat_template.jinja');
+
+      // An override runs BEFORE the recovery ladder and short-circuits it,
+      // because the ladder asks "is a template present?" and an override
+      // exists precisely for the case where one is present and wrong.
+      //
+      // Both resolution paths get written. mlx_vlm loads the sidecar
+      // natively, so that is the file that decides behavior; but leaving a
+      // contradicting `tokenizer_config.chat_template` behind would mean
+      // the effective template depended on which loader ran, which is the
+      // kind of difference that only shows up as a model "sometimes"
+      // looping on tool calls. tokenizer_config is touched only when it
+      // already carries a template — otherwise its verified sha256 stands.
+      if (src.chatTemplateOverride) {
+        try {
+          await writeFile(chatTemplateSidecarPath, src.chatTemplateOverride, 'utf8');
+          delete verifiedDigests['chat_template.jinja'];
+          if (summary.chatTemplatePresent) {
+            await injectChatTemplate(tokenizerConfigPath, src.chatTemplateOverride);
+            delete verifiedDigests['tokenizer_config.json'];
+          }
+          chatTemplatePresent = true;
+          templateSource = 'override';
+        } catch (err) {
+          // Non-fatal, but not silent: falling through leaves the model
+          // running the upstream template the catalog was trying to
+          // correct, and that is worth saying out loud.
+          log.warn(
+            `[mlx] ${catalogId}: chat template override failed to write, ` +
+              `falling back to the upstream template: ${describeError(err)}`,
+          );
+        }
+      }
 
       if (!chatTemplatePresent) {
         // mlx_vlm reads `chat_template.jinja` natively (per-architecture
@@ -851,7 +883,7 @@ export class MlxModelManager {
         }
       }
 
-      if (!chatTemplatePresent && src.chatTemplate) {
+      if (!chatTemplatePresent && templateSource !== 'override' && src.chatTemplate) {
         try {
           await injectChatTemplate(tokenizerConfigPath, src.chatTemplate);
           // The file no longer hashes to what the download verified, so its
@@ -901,15 +933,19 @@ export class MlxModelManager {
 
       // The sidecar case is the modern norm (Gemma 4, etc.) and mlx_vlm
       // reads it natively — nothing actionable to surface, so no warning.
-      // The catalog-pin and no-template-anywhere cases are rarer and
-      // worth flagging because they say something about the install:
-      // either the catalog entry is patching around an upstream gap, or
-      // the engine is about to fall back to a generic template that
-      // probably won't match the model.
+      // The other three are rarer and worth flagging because they say
+      // something about the install: the catalog entry is filling an
+      // upstream gap, it is overriding an upstream template we believe is
+      // wrong, or the engine is about to fall back to a generic template
+      // that probably won't match the model. The override deserves a line
+      // even though it is deliberate — it is the only signal that the
+      // bytes the model runs on differ from the bytes the repo shipped.
       const warning = chatTemplatePresent
         ? templateSource === 'catalog'
           ? 'Upstream tokenizer_config had no chat_template — injected the known-good template pinned in the catalog entry.'
-          : undefined
+          : templateSource === 'override'
+            ? 'Replaced the template shipped by this repo with the corrected one pinned in the catalog entry.'
+            : undefined
         : 'Model has no embedded chat template (tokenizer_config.json missing chat_template and no sidecar). mlx_vlm.server will fall back to a generic template that may not match this model — replies may be incoherent.';
       try {
         this.onInstalled?.({ engine: 'mlx', id: catalogId });

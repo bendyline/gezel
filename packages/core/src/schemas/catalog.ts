@@ -1675,6 +1675,30 @@ export const ChatModelMlxSourceSchema = z
      */
     chatTemplate: z.string().optional(),
     /**
+     * Jinja chat template that REPLACES whatever the repo ships, rather
+     * than filling a gap. `chatTemplate` above is a recovery path — it
+     * fires only when the download carried no template at all — so it
+     * cannot correct a template that is present but wrong. This field
+     * can: the install writes it to the `chat_template.jinja` sidecar
+     * (the file mlx_vlm loads natively) and overwrites any
+     * `tokenizer_config.chat_template`, so both resolution paths agree.
+     *
+     * Reach for this when an upstream conversion froze a template the
+     * model's authors have since fixed. The MLX gemma-4 line is the
+     * motivating case: every community conversion — the mlx-community
+     * `qat-*` builds, the `unsloth-*-qat-oQ4` rebuilds, the non-QAT
+     * builds — was cut before Google published the 2026-07-09 canonical
+     * template ("Fixed tool-calling loops, turn closures, and thinking
+     * content-ordering"), and `mlx_lm.convert` copies whatever it finds,
+     * so no repo choice fixes it. The llama.cpp GGUFs carry the
+     * corrected template; that asymmetry is a standing suspect whenever
+     * one engine loops on tool calls and the other does not.
+     *
+     * Pinning one means owning it — a template that drifts from the
+     * weights is worse than a stale one. Re-check on version bumps.
+     */
+    chatTemplateOverride: z.string().optional(),
+    /**
      * When set, this MLX build is KNOWN NOT TO LOAD/RUN and must be treated
      * as if the model had no MLX source — hidden from the MLX install picker,
      * refused by the install endpoint, and reported `mlx: false` by source

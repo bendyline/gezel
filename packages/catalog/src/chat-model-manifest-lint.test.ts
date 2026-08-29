@@ -72,6 +72,50 @@ describe('lintChatModelManifest rules', () => {
     expect(r.warnings).toEqual([]);
   });
 
+  describe('mlx chat template override (stale-template families)', () => {
+    const gemma = {
+      ...complete,
+      id: 'gemma4-12b-q4',
+      llamaCpp: { ...complete.llamaCpp, huggingfaceRepo: 'unsloth/x-qat-GGUF', quantization: '4bit' },
+      mlx: {
+        residentBytes: 9_000_000_000,
+        huggingfaceRepo: 'vendor/x-qat-4bit',
+        quantization: '4bit',
+        chatTemplateOverride: '{%- set preserve_thinking = false -%}{{ messages }}',
+      },
+    };
+
+    it('accepts a gemma4 manifest carrying an override', () => {
+      const rules = lintChatModelManifest(gemma).errors.map((e) => e.rule);
+      expect(rules).not.toContain('mlx-missing-chat-template-override');
+    });
+
+    it('fires when a gemma4 manifest has an MLX source but no override', () => {
+      const { chatTemplateOverride: _dropped, ...mlx } = gemma.mlx;
+      const rules = lintChatModelManifest({ ...gemma, mlx }).errors.map((e) => e.rule);
+      expect(rules).toContain('mlx-missing-chat-template-override');
+    });
+
+    it('fires when the override is not a Jinja template (a fetched error page)', () => {
+      const mlx = { ...gemma.mlx, chatTemplateOverride: '<html>404 Not Found</html>' };
+      const rules = lintChatModelManifest({ ...gemma, mlx }).errors.map((e) => e.rule);
+      expect(rules).toContain('mlx-chat-template-override-not-jinja');
+    });
+
+    it('does not require an override from families outside the list', () => {
+      const { chatTemplateOverride: _dropped, ...mlx } = gemma.mlx;
+      const rules = lintChatModelManifest({ ...gemma, id: 'qwen3.6-27b-q4', mlx }).errors.map(
+        (e) => e.rule,
+      );
+      expect(rules).not.toContain('mlx-missing-chat-template-override');
+    });
+
+    it('does not require an override from a gemma4 entry with no MLX source at all', () => {
+      const rules = lintChatModelManifest({ ...gemma, mlx: undefined }).errors.map((e) => e.rule);
+      expect(rules).not.toContain('mlx-missing-chat-template-override');
+    });
+  });
+
   it.each(['OpenMDW-1.0', 'OpenMDW-1.1'])(
     '%s is permissive and must use the open license class',
     (license) => {
