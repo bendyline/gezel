@@ -313,9 +313,22 @@ export class ContentIndex {
       // unreadable CSV must not take down the index pass around it.
       // Both halves of the user's gate: the project-wide indexing opt-out the
       // enrichment manager already honours, and the per-feature one.
-      const meta = await this.store.getProject(projectId).catch(() => null);
-      const tablesAllowed =
-        meta !== null && meta.indexingEnabled !== false && projectAllowsWorkspaceTables(meta);
+      //
+      // A project we cannot read is skipped rather than assumed permissive:
+      // deriving tables spends CPU and disk, and doing that for a project
+      // whose settings are unreadable is the wrong way to be wrong. The drain
+      // is idempotent, so the next pass picks the work up.
+      //
+      // Wrapped rather than `.catch`ed because a Store that lacks the method
+      // throws synchronously, which no promise catch would see.
+      let tablesAllowed = false;
+      try {
+        const meta = await this.store.getProject(projectId);
+        tablesAllowed =
+          meta != null && meta.indexingEnabled !== false && projectAllowsWorkspaceTables(meta);
+      } catch {
+        tablesAllowed = false;
+      }
       if (this.duck && tablesAllowed) {
         await drainWorkspaceTables({
           store: post.index,
