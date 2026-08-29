@@ -1,6 +1,11 @@
 import type { ChatMessageToolCall } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
-import { type ReplaySourceMessage, buildToolEvidenceReplay } from './tool-evidence-replay.js';
+import {
+  DEFAULT_TOOL_EVIDENCE_BUDGET_CHARS,
+  type ReplaySourceMessage,
+  buildToolEvidenceReplay,
+  toolEvidenceBudgetChars,
+} from './tool-evidence-replay.js';
 
 const read = (path: string, resultText: string, over: Partial<ChatMessageToolCall> = {}) =>
   ({
@@ -246,5 +251,36 @@ describe('buildToolEvidenceReplay', () => {
     expect(out.superseded).toBe(50);
     expect(out.budgetDropped).toBe(0);
     expect(out.chars).toBeLessThan(60_000);
+  });
+});
+
+describe('toolEvidenceBudgetChars', () => {
+  it('keeps the legacy floor when the window is unknown', () => {
+    // Cloud/CLI providers that do not report a window must not regress.
+    expect(toolEvidenceBudgetChars(undefined)).toBe(DEFAULT_TOOL_EVIDENCE_BUDGET_CHARS);
+    expect(toolEvidenceBudgetChars(null)).toBe(DEFAULT_TOOL_EVIDENCE_BUDGET_CHARS);
+    expect(toolEvidenceBudgetChars(0)).toBe(DEFAULT_TOOL_EVIDENCE_BUDGET_CHARS);
+    expect(toolEvidenceBudgetChars(Number.NaN)).toBe(DEFAULT_TOOL_EVIDENCE_BUDGET_CHARS);
+  });
+
+  it('never drops below the floor for a small window', () => {
+    expect(toolEvidenceBudgetChars(8_192)).toBe(DEFAULT_TOOL_EVIDENCE_BUDGET_CHARS);
+  });
+
+  it('grows with the window so long-context sessions stop starving', () => {
+    // The wild-caught loop: batch 9 deduplicated to ~132 KB and was capped at
+    // 60 KB every rebuild on a model whose 84k-token prompts fit fine.
+    const budget = toolEvidenceBudgetChars(98_304);
+    expect(budget).toBeGreaterThan(132_000);
+  });
+
+  it('caps so a huge window does not volunteer everything', () => {
+    expect(toolEvidenceBudgetChars(1_000_000)).toBeLessThanOrEqual(600_000);
+  });
+
+  it('is monotonic in the window size', () => {
+    const a = toolEvidenceBudgetChars(32_768);
+    const b = toolEvidenceBudgetChars(131_072);
+    expect(b).toBeGreaterThanOrEqual(a);
   });
 });

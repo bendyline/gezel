@@ -616,4 +616,29 @@ describe('buildInstructions workspace inventory', () => {
     expect(full).toContain('file assets/generated/map.png');
     expect(full).not.toContain('📁 assets');
   });
+
+  it('teaches incremental persistence only when a persistence tool is wired', () => {
+    // Reading more than fits is routine; the shape that loops is
+    // "read everything, then write once". The advice is useless — worse,
+    // it prescribes a tool that does not exist — on a roster that cannot
+    // persist, which is the ADR 0001 failure mode.
+    const project = { id: 'default', name: 'Default' } as unknown as ProjectDetail;
+    const base = { name: 'Reviewer', about: 'Review the corpus.', project };
+
+    const withPersistence = buildInstructions({
+      ...base,
+      availableTools: [
+        { name: 'read_file', description: 'Read a file.' },
+        { name: 'write_task_note', description: 'Append a task note.' },
+      ],
+    } as unknown as Parameters<typeof buildInstructions>[0]).full;
+    expect(withPersistence).toContain('larger than you can hold at once');
+    expect(withPersistence).toContain('write_task_note');
+
+    const readOnly = buildInstructions({
+      ...base,
+      availableTools: [{ name: 'read_file', description: 'Read a file.' }],
+    } as unknown as Parameters<typeof buildInstructions>[0]).full;
+    expect(readOnly).not.toContain('larger than you can hold at once');
+  });
 });

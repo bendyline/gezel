@@ -65,7 +65,6 @@ import { autoAllowedToolsForToolsets, buildAutoAllowHook } from '../craftbook/au
 import { toolsetIdsExplicitlyDisabledForStep } from '../craftbook/step-toolsets.js';
 import { resolveInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
-import { hasObservationTables } from '../observations/query.js';
 import { rankProjectsForGezel } from '../gezels/roster.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
 import type { KeurmeesterManager } from '../keurmeester/manager.js';
@@ -93,6 +92,7 @@ import type {
   TurnCtx,
 } from '../model-profile/types.js';
 import { reconcileDefaultModel } from '../models/default-model-fallback.js';
+import { hasObservationTables } from '../observations/query.js';
 import { type PreviewLogBuffer, formatPreviewLogPrelude } from '../preview-log/buffer.js';
 import {
   reconcileScriptTools,
@@ -338,7 +338,7 @@ import {
   TaskBudgetTracker,
 } from './task-budget.js';
 import { extractToolCard } from './tool-cards.js';
-import { buildToolEvidenceReplay } from './tool-evidence-replay.js';
+import { buildToolEvidenceReplay, toolEvidenceBudgetChars } from './tool-evidence-replay.js';
 import type { AvailableToolInfo } from './tools-block.js';
 import { describeTurnError } from './turn-error.js';
 import { UsageTracker } from './usage.js';
@@ -3925,11 +3925,43 @@ export class ChatManager {
       : roleBasedNameOnlyMode
         ? undefined
         : args.fromGezelName;
+    // What has this task already put on disk? A restart mid-batch is the
+    // moment a model most needs to know that its own partial deliverable
+    // survived — otherwise its only recovery is to re-read every source
+    // record, which is precisely the loop that cannot converge when the
+    // evidence is larger than any replay budget. Naming the artifacts turns
+    // "read all 25 records again" into "read back what I already wrote and
+    // continue from there".
+    let persistedWork = '';
+    if (resumedExisting) {
+      const parsedForResume = parseTaskRef(args.taskRef);
+      const resumeTask = parsedForResume
+        ? await this.store
+            .readTask(parsedForResume.projectId, parsedForResume.num)
+            .catch(() => null)
+        : null;
+      const dir = resumeTask?.artifactDir ?? (resumeTask ? `tasks/${resumeTask.num}` : null);
+      if (dir && parsedForResume) {
+        const written = await this.store
+          .listProjectArtifactsRecursive(parsedForResume.projectId, { subpath: dir })
+          .catch(() => [])
+          .then((entries) => entries.filter((e) => !e.isDirectory).map((e) => e.path));
+        if (written.length > 0) {
+          persistedWork =
+            ` You have already written these artifacts for this task: ${written
+              .map((f) => `\`${f}\``)
+              .join(', ')}. Read them back with \`read_artifact\` before re-reading any source —` +
+            ' they hold the work you already did, and continuing them is cheaper and more reliable' +
+            ' than reconstructing it. Persist each finding as you go rather than holding every' +
+            ' source in your head; that is what makes a restart cheap.';
+        }
+      }
+    }
     const seed =
       args.kind === 'retry'
         ? `You paused on step \`${dispatchStepId}\` of task ${args.taskRef}, and the user has asked you to try again. Call \`read_task_notes\` first — the newest note says why it stopped. Then take a DIFFERENT approach to the same deliverable instead of repeating the attempt that failed, and call \`advance_task_step\` when it is done. If it still cannot work, say exactly what you need with \`ask_user_question\` rather than going quiet.`
         : resumedExisting
-          ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Your earlier tool results are restored above, each marked \`[recovered from an earlier turn]\` — treat those as already read and do NOT read them again. Re-read only the ones whose marker says the result was TRUNCATED or was not replayed. Keep appending focused notes with \`write_task_note\`, and call \`advance_task_step\` when the step is done.`
+          ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Your earlier tool results are restored above, each marked \`[recovered from an earlier turn]\` — treat those as already read and do NOT read them again. Some may be missing or marked TRUNCATED: if a source is larger than what can be restored, do NOT keep re-reading everything hoping it all lands at once — work through the remainder in small groups, writing what you conclude after each group so progress survives the next restart.${persistedWork} Keep appending focused notes with \`write_task_note\`, and call \`advance_task_step\` when the step is done.`
           : args.kind === 'entry'
             ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
             : selfHandoff
@@ -15287,12 +15319,18 @@ export class ChatManager {
               ? stripReasoningTags(m.content)
               : spliceIntoText(m.content, m.recognizedImages),
         }));
-      const replay = buildToolEvidenceReplay(replaySources);
+      // Scale what we volunteer to the window the model actually has;
+      // a fixed cap starves long-context sessions into re-read loops.
+      const replayBudget = toolEvidenceBudgetChars(
+        this.providers.get(record.providerName)?.getContextWindow?.(),
+      );
+      const replay = buildToolEvidenceReplay(replaySources, replayBudget);
       opts.priorMessages = replay.entries;
       if (replay.replayed > 0 || replay.superseded > 0) {
         log.info(
           `session ${record.id}: replayed ${replay.replayed} tool result(s) (${replay.chars} chars) ` +
-            `into the rebuilt context; ${replay.superseded} superseded, ${replay.budgetDropped} over budget`,
+            `into the rebuilt context; ${replay.superseded} superseded, ${replay.budgetDropped} over budget ` +
+            `(budget ${replayBudget} chars)`,
         );
       }
     }

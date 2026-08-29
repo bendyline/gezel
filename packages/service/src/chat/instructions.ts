@@ -825,7 +825,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       projectContext +=
         '\n\n### Data tables\n\nThis project holds **data tables** — spreadsheets and large data files ' +
         'stored in a form you query rather than read. Call `list_tables` to see them, `describe_table` ' +
-        'to learn a table\'s columns and units, then `query_table` to answer the question with SQL. ' +
+        "to learn a table's columns and units, then `query_table` to answer the question with SQL. " +
         'Aggregate in the query rather than selecting rows: the tables are far larger than you can read, ' +
         'and you never need to handle the rows yourself.';
     }
@@ -869,6 +869,20 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       singleReadTools.length > 0
         ? `\nReading efficiently: use ${formatToolList(singleReadTools)} with \`{ path, startLine, endLine }\` for one known range${batchReadTools.length > 0 ? ` and ${formatToolList(batchReadTools)} for several independent known paths/ranges` : ''}${grepReadTools.length > 0 ? `; use ${formatToolList(grepReadTools)} first when the location is unknown` : ''}.`
         : '';
+    // Reading more than fits is a routine assignment (review 25 files, audit
+    // an export), and the shape that fails is "read it all, then write once":
+    // its peak requirement is the whole corpus and a stopped turn loses
+    // everything. Wild-caught on gezel/44 batch 9, where a restart could not
+    // restore 25 large records, the model re-read them, and the next restart
+    // dropped them again — a loop no amount of re-reading escapes.
+    // Gated on a persistence tool actually being on the roster: prescribing
+    // "write it down" to a session that cannot write is the McKinley Park
+    // failure (ADR 0001) in a new costume.
+    const incrementalPersistTools = toolsFrom(['write_task_note', 'write_artifact']);
+    const incrementalReadGuidance =
+      singleReadTools.length > 0 && incrementalPersistTools.length > 0
+        ? `\nWhen the material is larger than you can hold at once, work through it in groups: read a group, record what you concluded with ${formatToolList([incrementalPersistTools[0] as string])}, then move to the next. Do not read everything before writing anything — if the turn stops, only the unwritten part is lost.`
+        : '';
     const workspaceWriteTools = toolsFrom(['write_file']);
     const workspaceDelegationTools = toolsFrom([
       'message_gezel',
@@ -893,7 +907,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
 
 - **Workspace** (${formatToolList([...workspaceWriteTools, ...workspaceReadTools])}) — files the user ships: source, configs, assets, README, tests for their product.
 ${artifactsLine}
-${decisionLine}${efficientReadGuidance}`;
+${decisionLine}${efficientReadGuidance}${incrementalReadGuidance}`;
     } else if (hasReadFile) {
       const artifactsLine = hasArtifactTools
         ? `\n- **Artifacts** (${formatToolList(artifactTools)}) — a separate scratch drawer for plans, diagnoses, and handoff notes. It is not a fallback for workspace files: saving \`packages/...\`, \`src/...\`, or a path listed in \`### Workspace files\` with an artifact-writing tool creates only a side-drawer copy and does not change the project.\n`
@@ -906,6 +920,7 @@ ${decisionLine}${efficientReadGuidance}`;
 ${artifactsLine}
 - **Workspace writes are delegated.** ${workspaceDelegationGuidance} Don't paste source into chat — that can't be applied.`;
       projectContext += efficientReadGuidance;
+      projectContext += incrementalReadGuidance;
     } else if (hasWriteFile) {
       projectContext += `
 
