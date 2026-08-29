@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import collections
+import hashlib
 import json
 import os
 import re
@@ -46,6 +47,7 @@ import sys
 import threading
 import time
 import traceback
+import types
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -73,6 +75,7 @@ import cache_persist  # noqa: E402
 import think_budget  # noqa: E402
 import cache_seed  # noqa: E402
 import tool_grammar  # noqa: E402
+import spec_decode  # noqa: E402
 import tool_call_stream  # noqa: E402
 import template_stability  # noqa: E402
 from lfm2_compat import ensure_lfm2_config_compat  # noqa: E402
@@ -260,6 +263,25 @@ parser.add_argument(
     type=int,
     default=2048,
     help="Tokens per prefill step. Lower = less peak memory, slower.",
+)
+parser.add_argument(
+    "--spec-draft-model",
+    type=str,
+    default=None,
+    help="Path to an MTP drafter directory; enables speculative decoding "
+    "for eligible (greedy, processor-free) requests. See spec_decode.py.",
+)
+parser.add_argument(
+    "--spec-draft-kind",
+    type=str,
+    default=None,
+    help="Drafter kind override (default: auto-detect from the drafter's model_type).",
+)
+parser.add_argument(
+    "--spec-block-size",
+    type=int,
+    default=None,
+    help="Draft block size override (default: the drafter's configured block_size).",
 )
 parser.add_argument(
     "--persist-dir",
@@ -525,6 +547,9 @@ if (
     _tower_pref not in ("0", "off", "false")
     and int(getattr(ARGS, "max_concurrency", 1) or 0) >= 1
     and (_tower_pref == "force" or _arch in _TEXT_TOWER_ALLOWED_ARCHS)
+    # A configured MTP drafter needs the vlm tower (rollback lives there);
+    # an explicit GEZEL_MLX_TEXT_TOWER=force still wins and spec turns off.
+    and not (getattr(ARGS, "spec_draft_model", None) and _tower_pref != "force")
 ):
     try:
         from mlx_lm.utils import load as _mlx_lm_load
@@ -549,12 +574,25 @@ if _TEXT_TOWER is None:
         if _tower_pref in ("0", "off", "false")
         else "serial mode (--max-concurrency 0)"
         if int(getattr(ARGS, "max_concurrency", 1) or 0) < 1
+        else "spec drafter configured (MTP runs on the vlm tower)"
+        if (getattr(ARGS, "spec_draft_model", None) and _tower_pref != "force")
         else f"arch {_arch or 'unknown'} not in text-tower allowlist"
         if _tower_pref != "force"
         else "mlx_lm load failed"
     )
     print(f"[tower] active=mlx_vlm ({_reason})", flush=True)
 print("Model and processor loaded successfully.", flush=True)
+
+# ── MTP speculative decoding (2026-08-28) ──
+# Armed only when a drafter is configured AND the capability probe passes;
+# every failure logs one `[spec] off` line and the server serves normally.
+_SPEC = spec_decode.resolve_spec(ARGS, MODEL, _TEXT_TOWER)
+if _SPEC is not None:
+    print(
+        f"[spec] active drafter={_SPEC.drafter_dir} kind={_SPEC.kind} "
+        f"block={_SPEC.block_size or 'config-default'} tower=mlx_vlm",
+        flush=True,
+    )
 
 
 # Prefix-stability work (template relocation + reasoning-stable snapshot
@@ -913,6 +951,32 @@ class CacheEntry:
 # Module-level cache. Bounded by `--cache-budget-mb` via LRU eviction.
 _CACHE: Dict[str, CacheEntry] = {}
 
+# Diagnostic (temporary, Phase-0 churn census): tool-roster shape recorded
+# at save time per cache_id so a later churn event can print BOTH sides'
+# shapes. Process-lifetime only — entries loaded from disk report
+# saved_roster=unknown, and the cached-text preview covers those.
+_LAST_SAVE_ROSTER: Dict[str, str] = {}
+
+
+def _roster_fp_of(tools) -> str:
+    """Compact fingerprint of a request's tool roster: "sha8/count", or "0"
+    for an empty roster. Diagnostics only — must never raise."""
+    try:
+        names = []
+        for t in tools or []:
+            if isinstance(t, dict):
+                fn = t.get("function") or {}
+                names.append(str(fn.get("name") or t.get("name") or "?"))
+            else:
+                fn = getattr(t, "function", None)
+                names.append(str(getattr(fn, "name", None) or getattr(t, "name", "?")))
+        if not names:
+            return "0"
+        digest = hashlib.sha256("\n".join(sorted(names)).encode("utf-8")).hexdigest()[:8]
+        return f"{digest}/{len(names)}"
+    except Exception:  # noqa: BLE001 — diagnostics never break a turn
+        return "err"
+
 
 # Cache ids (session + its seed prefix) currently being SERVED — registered
 # at the top of a chat-completions request and cleared when its stream ends.
@@ -999,19 +1063,32 @@ def _budget_bytes() -> int:
     return ARGS.cache_budget_mb * 1024 * 1024
 
 
-# Per-token byte estimate. 100 KB is a reasonable mid-figure for
-# sliding-window-attention models (Gemma 3/4) where most layers are
-# windowed and don't grow linearly with token count. Higher estimates
-# (e.g. naive 2 × num_layers × hidden_size × 2 bytes for full KV)
-# overcommit memory and trigger spurious eviction. Used purely for
-# LRU + budget math; the underlying mlx_vlm cache state is what
-# actually consumes memory.
+# Fallback per-token byte estimate, used only when a state's layers don't
+# expose `nbytes` (every mlx_lm/mlx_vlm cache class does today, via
+# _BaseCache). The old blanket 100 KB/token figure measured ~55% high for
+# qwen3.8's 16 full-attention layers (64 KiB/token) and was blind to the
+# fixed ~147 MiB recurrent state of its 48 linear-attention layers; real
+# per-layer `nbytes` (shape math, no graph eval) prices both correctly.
 _BYTES_PER_TOKEN = 100 * 1024
 
 
 def _estimate_cache_bytes(state: PromptCacheState) -> int:
     if state.token_ids is None:
         return 0
+    layers = list(getattr(state, "cache", None) or [])
+    total = 0
+    complete = bool(layers)
+    try:
+        for layer in layers:
+            nb = getattr(layer, "nbytes", None)
+            if nb is None:
+                complete = False
+                break
+            total += int(nb)
+    except Exception:  # noqa: BLE001 — budget math must never break a turn
+        complete = False
+    if complete and total > 0:
+        return total
     return len(state.token_ids) * _BYTES_PER_TOKEN
 
 
@@ -1198,6 +1275,7 @@ def _seed_prefix_from_session(request, state: PromptCacheState) -> None:
     try:
         if cache_persist.save_cache(PERSIST_DIR, MODEL_FINGERPRINT, gp, state):  # type: ignore[arg-type]
             _SEEDED_PREFIXES.add(gp)
+            _LAST_SAVE_ROSTER[gp] = _roster_fp_of(getattr(request, "tools", None))
             _enforce_disk_budget()
             print(
                 f"[cache] prefix-seeded {gp} from cache_id={request.cache_id} "
@@ -1298,7 +1376,7 @@ class _Sub:
         "pinned_cache_ids", "prefill_total", "first_token_seen",
         "reused_tokens", "seed_mode", "prompt_snapshot", "snapshot_target",
         "saved_cache_state", "prefill_started_at", "generation_started_at",
-        "prompt_tps", "generation_tps",
+        "prompt_tps", "generation_tps", "roster_fp",
     )
 
     def __init__(
@@ -1310,6 +1388,7 @@ class _Sub:
         request_id,
         http_request,
         snapshot_target=None,
+        roster_fp=None,
     ):
         self.request = request
         self.prompt_tokens = prompt_tokens   # List[int], full prompt
@@ -1317,6 +1396,14 @@ class _Sub:
         self.seed_state = seed_state         # PromptCacheState from the cascade
         self.request_id = request_id
         self.http_request = http_request
+        # Diagnostic (temporary, Phase-0 churn census): the tool-roster
+        # shape this sub's prompt was rendered with. The warm path passes
+        # it explicitly because its internal ChatRequest omits tools.
+        self.roster_fp = (
+            roster_fp
+            if roster_fp is not None
+            else _roster_fp_of(getattr(request, "tools", None))
+        )
         self.uid = None
         self.queue: asyncio.Queue = asyncio.Queue()
         self.cancelled = False
@@ -1385,6 +1472,7 @@ class BatchEngine:
         for e in tool_close:
             if e not in eos_list:
                 eos_list.append(e)
+        self._stop_ids = {int(e) for e in eos_list}
         stop_tokens = [[int(e)] for e in eos_list]
         self._gen = BatchGenerator(
             model,
@@ -1521,6 +1609,14 @@ class BatchEngine:
                     f"had divergent untrimmable state (tokens={len(plan.segment)})",
                     flush=True,
                 )
+                print(
+                    f"[batch] churn-shape cache_id={sub.request.cache_id} "
+                    f"probe_roster={sub.roster_fp} "
+                    f"saved_roster={_LAST_SAVE_ROSTER.get(sub.request.cache_id, 'unknown')} "
+                    f"path={'warm' if str(sub.request_id).startswith('cachewarm-') else 'chat'} "
+                    f"prompt_len={len(sub.prompt_tokens)}",
+                    flush=True,
+                )
         return plan.segment, plan.caches, plan.all_tokens
 
     def _snapshot_segments(self, sub, segment):
@@ -1635,6 +1731,18 @@ class BatchEngine:
                         f"deferring {len(self._pending)} to next wave "
                         f"(active={_safe_active_memory() // (1024 * 1024)}MB, "
                         f"ceiling={_MEM_LIMIT_BYTES // (1024 * 1024)}MB)",
+                        flush=True,
+                    )
+                if len(batch) == 1 and _SPEC is not None:
+                    spec_sub = batch[0]
+                    mode, why = spec_decode.spec_mode(
+                        spec_sub.request, spec_sub.grammar
+                    )
+                    if mode is not None:
+                        await self._run_spec_wave(spec_sub, mode)
+                        continue
+                    print(
+                        f"[spec] off request={spec_sub.request_id} reason={why}",
                         flush=True,
                     )
                 segments, caches, alltoks, samplers, lps, maxtoks = [], [], [], [], [], []
@@ -1762,6 +1870,256 @@ class BatchEngine:
                         self._subs.pop(r.uid, None)
                 # Yield so SSE generators flush + new requests get admitted.
                 await asyncio.sleep(0)
+
+    async def _run_spec_wave(self, sub, mode="greedy"):
+        """Serve one eligible sub via MTP speculation (sidecar-owned wave).
+
+        Replaces BatchGenerator for this wave only: seed plan + direct
+        chunked prefill (with the planted boundary snapshot) + upstream's
+        serial _mtp_rounds. Emit, liveness, cancellation, stats, and the
+        finish-time save reuse the engine's existing machinery, so a spec
+        turn is indistinguishable downstream from a batch turn. Measured
+        basis + eligibility rationale live in spec_decode.py."""
+        sub.prefill_started_at = time.perf_counter()
+        try:
+            # SeedPlan's third field is the tokens ALREADY IN the seeded
+            # cache (the reused prefix — empty on fresh), mirroring what
+            # insert_segments' all_tokens means to mlx_lm.
+            seg, seeded, prefix_toks = self._seed_args(sub)
+            tower = getattr(MODEL, "language_model", MODEL)
+            cache_layers = seeded
+            if cache_layers is not None and not spec_decode.cache_matches_tower(
+                cache_layers, tower
+            ):
+                print(
+                    f"[spec] seed-guard: cached layer classes mismatch the "
+                    f"active tower for cache_id={sub.request.cache_id}; "
+                    f"treating as fresh",
+                    flush=True,
+                )
+                cache_layers = None
+                seg = list(sub.prompt_tokens)
+                prefix_toks = []
+                sub.reused_tokens = 0
+                sub.prefill_total = len(seg)
+                sub.seed_mode = "fresh"
+            if cache_layers is None:
+                cache_layers = tower.make_cache()
+            full_prompt = list(prefix_toks or []) + list(seg)
+            max_toks = (
+                int(sub.request.max_tokens) if sub.request.max_tokens else 2048
+            )
+
+            cut = None
+            if self._needs_snapshot and sub.request.cache_id:
+                plan = cache_seed.plan_snapshot_segments(
+                    seg,
+                    sub.reused_tokens,
+                    len(sub.prompt_tokens),
+                    sub.snapshot_target,
+                    _SNAPSHOT_BOUNDARY_MARGIN,
+                )
+                sub.snapshot_target = plan.target
+                if plan.target:
+                    rel = int(plan.target) - int(sub.reused_tokens)
+                    if 0 < rel < len(seg):
+                        cut = rel
+
+            self._prefill_total = max(0, int(sub.prefill_total or 0))
+            self._prefill_done = {}
+            self._last_prefill_emit = 0.0
+
+            final_out = None
+            for kind, done, _total, maybe_out in spec_decode.chunked_prefill_steps(
+                tower, cache_layers, list(seg), ARGS.prefill_step_size, cut=cut
+            ):
+                if sub.cancelled:
+                    print(
+                        f"[spec] wave cancelled during prefill "
+                        f"request={sub.request_id}",
+                        flush=True,
+                    )
+                    return
+                self._prefill_done[0] = int(done)
+                self._emit_prefill_liveness()
+                if kind == "cut":
+                    self._capture_spec_snapshot(sub, cache_layers, full_prompt)
+                elif kind == "final":
+                    final_out = maybe_out
+                await asyncio.sleep(0)
+
+            self._prefill_total = 0
+            self._prefill_done = {}
+
+            # Assisted mode: positioned target sampling (temperature/top_p/
+            # top_k, per-(seed,position) keys) and/or the processed walk.
+            # The processor list is built by the SAME _processors_for the
+            # normal path uses, so constrained decoding is identical either
+            # route. Seed is logged for replay.
+            sampler = None
+            processors = None
+            history = None
+            wave_seed = None
+            if mode == "assisted":
+                processors = self._processors_for(sub.request, sub.grammar) or None
+                t = sub.request.temperature
+                if t not in (None, 0, 0.0):
+                    wave_seed = int.from_bytes(os.urandom(6), "big")
+                    sampler = spec_decode.PositionedSampler(
+                        temperature=float(t),
+                        top_p=float(sub.request.top_p)
+                        if sub.request.top_p is not None
+                        else 0.0,
+                        top_k=int(sub.request.top_k)
+                        if sub.request.top_k is not None
+                        else 0,
+                        seed=wave_seed,
+                    )
+                history = list(full_prompt)
+
+            def emit(tok):
+                now = time.perf_counter()
+                if sub.generation_started_at is None:
+                    # Mirror the batch worker: the step yielding the first
+                    # token counts with prefill/TTFT; decode is measured
+                    # from inter-token intervals after it.
+                    sub.generation_started_at = now
+                    prefill_seconds = max(
+                        now - (sub.prefill_started_at or now), 1e-9
+                    )
+                    if sub.prefill_total > 0:
+                        sub.prompt_tps = sub.prefill_total / prefill_seconds
+                sub.first_token_seen = True
+                sub.token_ids.append(int(tok))
+                intervals = len(sub.token_ids) - 1
+                gen_seconds = now - sub.generation_started_at
+                if intervals > 0 and gen_seconds > 0:
+                    sub.generation_tps = intervals / gen_seconds
+                self._emit_delta(sub)
+
+            finish_reason = None
+            if mode == "assisted":
+                first = spec_decode.processed_first_token(
+                    final_out, sampler, processors, history
+                )
+                history.append(first)
+            else:
+                first = spec_decode.first_token_from(final_out)
+            emit(first)
+            if first in self._stop_ids:
+                finish_reason = "stop"
+            elif len(sub.token_ids) >= max_toks:
+                finish_reason = "length"
+
+            if finish_reason is None:
+                if mode == "assisted":
+                    rounds = spec_decode.assisted_rounds(
+                        MODEL,
+                        _SPEC,
+                        cache_layers,
+                        list(seg),
+                        final_out,
+                        first,
+                        max_toks,
+                        sampler=sampler,
+                        processors=processors,
+                        history=history,
+                    )
+                else:
+                    rounds = spec_decode.make_rounds(
+                        MODEL,
+                        _SPEC,
+                        cache_layers,
+                        list(seg),
+                        final_out,
+                        first,
+                        max_toks,
+                    )
+                mem_steps = 0
+                for tok, _lp in rounds:
+                    if sub.cancelled:
+                        print(
+                            f"[spec] wave cancelled request={sub.request_id}",
+                            flush=True,
+                        )
+                        return
+                    emit(tok)
+                    if tok in self._stop_ids:
+                        finish_reason = "stop"
+                        break
+                    if len(sub.token_ids) >= max_toks:
+                        finish_reason = "length"
+                        break
+                    mem_steps += 1
+                    if mem_steps >= 32:
+                        mem_steps = 0
+                        _reclaim_mlx_buffer_cache("spec-pressure")
+                    await asyncio.sleep(0)
+                if finish_reason is None:
+                    finish_reason = (
+                        "length" if len(sub.token_ids) >= max_toks else "stop"
+                    )
+
+            line = spec_decode.stats_line(_SPEC)
+            if line:
+                print(
+                    f"[spec] stats request={sub.request_id} mode={mode} "
+                    + (f"seed={wave_seed} " if wave_seed is not None else "")
+                    + f"ctx={len(sub.prompt_tokens)} gen={len(sub.token_ids)} "
+                    f":: {line}",
+                    flush=True,
+                )
+            # Rounds can exit mid-round (stop token, budget) with verified-
+            # but-rejected tokens still in the KV. Hybrid stacks are immune —
+            # their save always uses the boundary snapshot — but a trimmable
+            # stack must be trimmed back to exactly the tokens we report, or
+            # the saved entry's offsets outrun its token list.
+            try:
+                reported = len(sub.prompt_tokens) + len(sub.token_ids)
+                offsets = [
+                    int(getattr(c, "offset", 0) or 0) for c in cache_layers
+                ]
+                excess = max(offsets) - reported if offsets else 0
+                if excess > 0:
+                    cache_seed.trim_layers(cache_layers, excess)
+            except Exception:  # noqa: BLE001 — snapshot path covers hybrids
+                pass
+            r = types.SimpleNamespace(
+                finish_reason=finish_reason,
+                prompt_cache=list(cache_layers),
+                all_tokens=full_prompt + [int(t) for t in sub.token_ids],
+                token=sub.token_ids[-1] if sub.token_ids else 0,
+            )
+            self._finish(sub, r)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[spec] wave failed request={sub.request_id}: {exc}", flush=True)
+            traceback.print_exc()
+            sub.queue.put_nowait(("err", str(exc)))
+
+    def _capture_spec_snapshot(self, sub, cache_layers, full_prompt):
+        """Boundary snapshot for the spec wave's direct prefill. The cache
+        is quiescent at the planted chunk edge; clone_layers reconstructs
+        standalone layers (MLX arrays are immutable, so sharing buffers is
+        safe), and the same token-prefix proof as _capture_prompt_snapshot
+        guards the boundary invariant."""
+        try:
+            boundary = int(sub.snapshot_target)
+            layers = spec_decode.clone_layers(cache_layers)
+            if cache_seed.snapshot_matches_prompt(
+                layers, full_prompt[:boundary], sub.prompt_tokens, boundary
+            ):
+                sub.prompt_snapshot = (layers, boundary)
+            elif not self._snapshot_warned:
+                self._snapshot_warned = True
+                print(
+                    f"[spec] prompt snapshot skipped: boundary={boundary} "
+                    f"(post-gen save fallback)",
+                    flush=True,
+                )
+        except Exception as exc:  # noqa: BLE001 — snapshot is best-effort
+            if not self._snapshot_warned:
+                self._snapshot_warned = True
+                print(f"[spec] prompt snapshot failed: {exc}", flush=True)
 
     def _capture_prompt_snapshot(self, sub, at_tokens):
         """Capture the KV state at a mid-prompt boundary of `at_tokens`.
@@ -1892,6 +2250,7 @@ class BatchEngine:
                         if state.token_ids:
                             _save_cache(sub.request.cache_id, state)
                             sub.saved_cache_state = state
+                            _LAST_SAVE_ROSTER[sub.request.cache_id] = sub.roster_fp
                             _seed_prefix_from_session(sub.request, state)
                             print(
                                 f"[batch] saved cache_id={sub.request.cache_id} "
@@ -2403,6 +2762,7 @@ async def cache_warm(req: CacheWarmRequest) -> JSONResponse:
         request_id=f"cachewarm-{uuid.uuid4()}",
         http_request=None,
         snapshot_target=snapshot_target,
+        roster_fp=_roster_fp_of(req.tools),
     )
     sub.pinned_cache_ids = _mark_inflight(req.cache_id)
     sub.prefill_total = len(prompt_tokens)

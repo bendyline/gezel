@@ -34,8 +34,11 @@ import type {
 
 /**
  * Bytes-per-token estimate for MLX KV cache, used only as a fallback
- * when the wrapped server's `est_bytes` is missing. Matches the
- * Python side's _BYTES_PER_TOKEN — keep in sync.
+ * when the wrapped server's `est_bytes` is missing. The server itself
+ * reports real per-layer `nbytes` sums (fixed recurrent state priced
+ * in, full-attention KV no longer ~55% over-priced) and only falls
+ * back to its matching _BYTES_PER_TOKEN constant when a layer hides
+ * its size — keep the two constants in sync.
  */
 const ESTIMATED_BYTES_PER_TOKEN = 100 * 1024;
 

@@ -340,6 +340,20 @@ export async function buildMlxProvider(opts: {
   const kvQuantArgs: string[] =
     kvBits > 0 ? ['--kv-bits', String(kvBits), '--kv-quant-scheme', 'uniform'] : [];
 
+  // ── MTP speculative decoding (opt-in) ──
+  // Arms the sidecar's spec wave for eligible (greedy, processor-free)
+  // requests. Every safety lives sidecar-side — capability probe, the
+  // mlx-vlm >= 0.6.17 exactness gate, per-request eligibility, `[spec]`
+  // fingerprints — so a missing/incompatible drafter degrades to normal
+  // serving with a logged reason, never a launch failure.
+  const specArgs: string[] = config.mlxSpecDraftModelPath
+    ? [
+        '--spec-draft-model',
+        config.mlxSpecDraftModelPath,
+        ...(config.mlxSpecBlockSize ? ['--spec-block-size', String(config.mlxSpecBlockSize)] : []),
+      ]
+    : [];
+
   // ── Memory-aware batch sizing ──
   // Size concurrent slots to what actually fits GPU memory, not just a tiered
   // default. This is the fix for the width-4-on-a-27B Metal abort: a Metal
@@ -662,6 +676,7 @@ export async function buildMlxProvider(opts: {
               ]
             : []),
           ...kvQuantArgs,
+          ...specArgs,
         ],
         env: {
           // Force the engine to operate purely off-disk. We've already

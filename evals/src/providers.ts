@@ -208,6 +208,14 @@ export function buildProviderConfig(provider: ChatProvider, modelId: string): Pa
     const kvBits = Number(kvBitsRaw);
     if (Number.isInteger(kvBits) && kvBits > 0) base.mlxKvBits = kvBits;
   }
+  // Same shape for MTP speculation: set GEZEL_EVAL_MLX_SPEC to a drafter
+  // directory to run the whole trial with the spec wave armed (the
+  // sidecar's own probe/eligibility still applies per request). The
+  // product default stays whatever config.mlxSpecDraftModelPath says.
+  const specDrafterRaw = process.env.GEZEL_EVAL_MLX_SPEC;
+  if (provider === 'mlx' && specDrafterRaw && specDrafterRaw !== 'off') {
+    base.mlxSpecDraftModelPath = specDrafterRaw;
+  }
   if (provider === 'codex-cli') {
     return {
       ...base,

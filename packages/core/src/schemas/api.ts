@@ -1670,6 +1670,25 @@ export const GezelConfigSchema = z.object({
    */
   mlxKvBits: z.number().int().min(0).max(8).optional(),
   /**
+   * MLX-only: absolute path to an MTP drafter directory (built from an
+   * MTP-preserving source checkpoint via mlx_vlm's qwen3_5_mtp split).
+   * When set, the wrapped server arms speculative decoding for eligible
+   * (greedy, processor-free) requests — measured +34% decode on
+   * qwen3.8-27b at 11k and 73k context, token-exact under greedy. The
+   * sidecar owns every safety: capability probe, an mlx-vlm >= 0.6.17
+   * exactness gate (older MTP verify is measured-inexact), per-request
+   * eligibility, and `[spec]` log fingerprints; any failure degrades to
+   * normal serving with a logged reason. Default unset (off).
+   */
+  mlxSpecDraftModelPath: z.string().optional(),
+  /**
+   * MLX-only: draft block size override for speculative decoding.
+   * Default unset = the drafter's configured block_size, which measured
+   * optimal — deeper drafting measured net-negative (acceptance per
+   * draft collapses past the MTP head's depth).
+   */
+  mlxSpecBlockSize: z.number().int().positive().optional(),
+  /**
    * MLX-only: tokens per prefill chunk. Smaller values reduce peak
    * memory during prefill (useful on tight unified-memory machines)
    * at the cost of throughput; larger values can speed up prefill
@@ -2827,6 +2846,8 @@ export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
   mlxModelPath: z.string().nullable().optional(),
   mlxPackageSpec: z.string().nullable().optional(),
   mlxKvBits: z.number().int().min(0).max(8).nullable().optional(),
+  mlxSpecDraftModelPath: z.string().nullable().optional(),
+  mlxSpecBlockSize: z.number().int().positive().nullable().optional(),
   /**
    * Direct mutation is rejected by the route — the move worker is the
    * only writer, immediately before triggering a service restart. The

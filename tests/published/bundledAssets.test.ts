@@ -44,6 +44,21 @@ describe('service bundled assets', () => {
     expect(existsSync(resolve(service.dist, 'ui/ffmpeg-core/ffmpeg-core.js'))).toBe(false);
     expect(existsSync(resolve(service.dist, 'ui/ffmpeg-core/ffmpeg-core.wasm'))).toBe(false);
   });
+
+  it('stages the MLX sidecar python tree, including its hard imports', () => {
+    // gezel_mlx_server.py does `import spec_decode` (and cache_seed etc.)
+    // at module top, so a dropped sibling kills the whole MLX engine at
+    // boot — but only for people who installed from npm, the same silent
+    // failure mode as the handboek hook.
+    for (const f of [
+      'gezel_mlx_server.py',
+      'spec_decode.py',
+      'cache_seed.py',
+      'cache_persist.py',
+    ]) {
+      expect(existsSync(resolve(service.dist, 'providers/mlx/python', f)), f).toBe(true);
+    }
+  });
 });
 
 /**

@@ -39,6 +39,7 @@ const STDLIB_SUITES: ReadonlyArray<{ file: string; ranMarker: RegExp }> = [
   // MLX python sidecar". It is pure stdlib, so it can simply gate.
   { file: 'cache_seed_test.py', ranMarker: /all cache_seed tests passed/ },
   { file: 'template_stability_test.py', ranMarker: /PASS / },
+  { file: 'spec_decode_test.py', ranMarker: /all spec_decode tests passed/ },
 ];
 
 function python3(): string | null {
