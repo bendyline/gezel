@@ -787,6 +787,8 @@ function nativeLabel(engine: NativeEngineName): string {
       return 'local runtime helper';
     case 'ds4-server':
       return 'ds4';
+    case 'duckdb':
+      return 'data query engine';
   }
 }
 

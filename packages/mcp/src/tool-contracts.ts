@@ -81,6 +81,28 @@ export const ListToolOutputSchema = ToolResultSummarySchema.extend({
   packageManager: z.string().optional(),
 });
 
+/** `describe_table` — the semantic layer a model reads before writing SQL. */
+export const TableDescribeToolOutputSchema = ToolResultSummarySchema.extend({
+  table: z.string(),
+  markdown: z.string(),
+  rows: z.number().int().nonnegative(),
+  columns: z.number().int().nonnegative(),
+  schemaInferred: z.boolean().optional(),
+});
+
+/**
+ * `query_table` — a result set, never corpus rows in bulk. `rows` carries
+ * whatever the engine returned, so the value types are deliberately open.
+ */
+export const TableQueryToolOutputSchema = ToolResultSummarySchema.extend({
+  rows: z.array(z.record(z.string(), z.unknown())),
+  columns: z.array(z.string()),
+  count: z.number().int().nonnegative(),
+  truncated: z.boolean().optional(),
+  limit: z.number().int().positive().optional(),
+  tablesInScope: z.array(z.string()).optional(),
+});
+
 export const StatToolOutputSchema = ToolResultSummarySchema.extend({
   path: z.string(),
   kind: z.enum(['file', 'dir', 'missing']),
@@ -185,6 +207,9 @@ export const VideoToolOutputSchema = z.object({
 export type ToolOutputSchema = z.ZodType;
 
 const TOOL_OUTPUT_SCHEMAS = {
+  list_tables: ListToolOutputSchema,
+  describe_table: TableDescribeToolOutputSchema,
+  query_table: TableQueryToolOutputSchema,
   search: SearchToolOutputSchema,
   search_memory: SearchToolOutputSchema,
   save_memory: MemorySaveToolOutputSchema,
@@ -313,6 +338,9 @@ export function errorResult(message: string, options: ToolErrorOptions = {}): Ca
  * hints, never an authorization boundary.
  */
 const READ_ONLY_TOOLS = new Set<CanonicalToolName>([
+  'list_tables',
+  'describe_table',
+  'query_table',
   'search',
   'search_memory',
   'list_memories',

@@ -14,12 +14,20 @@
 import type { ConnectorTypeManifest } from '@bendyline/gezel';
 import { McpBridge, type McpServerSpec } from '../../providers/mcp-bridge.js';
 import { type NormalizeSpec, applyNormalize, jget, ordinalKeyFromTs } from '../normalize.js';
+import {
+  type ObservationSourceSpec,
+  isObservationNormalize,
+  newestTimestamp,
+  observationPageRef,
+  toObservationBatches,
+} from '../observation-normalize.js';
 import { connectorSecretKey } from '../registry.js';
 import type {
   AdapterDeps,
   ChangeBatch,
   ConnectorAdapter,
   ConnectorBindingRef,
+  ConnectorRecord,
   NormalizedRecord,
   RecordRef,
 } from '../types.js';
@@ -105,8 +113,14 @@ export function isRateLimitToolError(message: string): boolean {
   return /\b429\b|rate.?limit|too many requests/i.test(message);
 }
 
-export class McpConnectorAdapter implements ConnectorAdapter {
+export class McpConnectorAdapter
+  implements ConnectorAdapter<NormalizedRecord | ConnectorRecord, unknown>
+{
   readonly typeId: string;
+  /** True when this type declares the tabular corpus shape. */
+  private readonly observations: boolean;
+  /** Page counter for sources whose cursor is not itself a page number. */
+  private pageSeq = 0;
   private readonly bridge = new McpBridge();
   private readonly src: McpSource;
 
@@ -116,6 +130,7 @@ export class McpConnectorAdapter implements ConnectorAdapter {
     private readonly deps: AdapterDeps,
   ) {
     this.typeId = type.id;
+    this.observations = isObservationNormalize(type.normalize);
     this.src = type.source as unknown as McpSource;
   }
 
@@ -148,6 +163,15 @@ export class McpConnectorAdapter implements ConnectorAdapter {
     }
     const json = safeParse(text);
     const items = (jget(json, list.itemsPath) as unknown[]) ?? [];
+    if (this.observations) {
+      // One ref per PAGE, not per row — the engine's backfill cap counts refs,
+      // and a tabular page routinely holds thousands of rows.
+      const pageRecords = items.length > 0 ? [observationPageRef(items, this.pageSeq++)] : [];
+      const advanced = list.cursorFrom
+        ? jget(json, list.cursorFrom)
+        : newestTimestamp(items, list.tsPath);
+      return { records: pageRecords, cursor: advanced };
+    }
     const records: RecordRef[] = items.map((it, i) => {
       const ts = list.tsPath ? jget(it, list.tsPath) : undefined;
       return {
@@ -161,7 +185,15 @@ export class McpConnectorAdapter implements ConnectorAdapter {
     return { records, cursor: next };
   }
 
-  async fetchRecord(_scope: string, ref: RecordRef): Promise<NormalizedRecord> {
+  async fetchRecord(_scope: string, ref: RecordRef): Promise<ConnectorRecord | NormalizedRecord> {
+    if (this.observations) {
+      // No per-record fetch in tabular mode: the list call already returned
+      // the rows, and re-fetching each one would be a request per row.
+      return {
+        kind: 'observations',
+        batches: toObservationBatches(ref.raw, this.src as ObservationSourceSpec, this.type.id),
+      };
+    }
     const raw = this.src.fetch
       ? safeParse(
           await this.bridge.callTool(

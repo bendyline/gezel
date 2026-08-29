@@ -53,6 +53,7 @@ const THIRD_PARTY_PATTERNS = [
   // pnpm's optional fastlist helpers are unsigned as published; node.exe
   // carries OpenJS's own signature and must keep it.
   { pattern: '^uv\\.exe$', source: 'Astral uv (prebuilt release)' },
+  { pattern: '^duckdb\\.exe$', source: 'DuckDB Foundation (prebuilt CLI release)' },
   { pattern: '^node\\.exe$', source: 'OpenJS Node.js (prebuilt release)' },
   { pattern: '^rg\\.exe$', source: 'Microsoft vscode-ripgrep (prebuilt ripgrep)' },
   {

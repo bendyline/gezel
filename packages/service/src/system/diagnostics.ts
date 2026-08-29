@@ -42,6 +42,7 @@ const ENGINE_ENV_VAR: Record<NativeEngineName, string> = {
   'sd-server': 'GEZEL_SD_SERVER_BIN',
   'whisper-server': 'GEZEL_WHISPER_SERVER_BIN',
   uv: 'GEZEL_UV_BIN',
+  duckdb: 'GEZEL_DUCKDB_BIN',
 };
 
 const LOCAL_ENGINE_PROVIDERS = ['llama-cpp', 'mlx', 'ds4'] as const;

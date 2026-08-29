@@ -1682,6 +1682,17 @@ export const GezelConfigSchema = z.object({
    */
   mlxSpecDraftModelPath: z.string().optional(),
   /**
+   * MLX-only: master switch for MTP speculative decoding. **Unset = on**,
+   * which means "on for any model that has a drafter beside it" (see
+   * providers/mlx/spec-drafter.ts) — a model without one serves normally.
+   * Set false to keep every turn on the ordinary decode path regardless.
+   * Measured +34% decode on qwen3.8-27b; greedy output is token-exact and
+   * sampled output is drawn from the same (processor-shaped) distribution
+   * as the ordinary path, though from a different RNG stream — so sampled
+   * text differs token-for-token from a non-speculative run.
+   */
+  mlxSpeculativeDecoding: z.boolean().optional(),
+  /**
    * MLX-only: draft block size override for speculative decoding.
    * Default unset = the drafter's configured block_size, which measured
    * optimal — deeper drafting measured net-negative (acceptance per
@@ -2847,6 +2858,7 @@ export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
   mlxPackageSpec: z.string().nullable().optional(),
   mlxKvBits: z.number().int().min(0).max(8).nullable().optional(),
   mlxSpecDraftModelPath: z.string().nullable().optional(),
+  mlxSpeculativeDecoding: z.boolean().nullable().optional(),
   mlxSpecBlockSize: z.number().int().positive().nullable().optional(),
   /**
    * Direct mutation is rejected by the route — the move worker is the
@@ -4750,6 +4762,71 @@ export const SearchFilesResponseSchema = z.object({
   engine: z.enum(['ripgrep', 'javascript']),
 });
 export type SearchFilesResponse = z.infer<typeof SearchFilesResponseSchema>;
+
+// ── observation tables (the tabular connector corpus) ───────────────────────
+
+export const ListTablesRequestSchema = z.object({});
+export type ListTablesRequest = z.infer<typeof ListTablesRequestSchema>;
+
+export const ObservationTableSummarySchema = z.object({
+  /** The name a query uses. Qualified only when two corpora collide. */
+  table: z.string(),
+  title: z.string().optional(),
+  /** What one row is. Prevents double-counting more effectively than prose. */
+  grain: z.string().optional(),
+  rows: z.number().int().nonnegative(),
+  columns: z.number().int().nonnegative(),
+  partitions: z.number().int().nonnegative(),
+  earliestPartition: z.string().optional(),
+  latestPartition: z.string().optional(),
+  /** Whether this table mirrors an external system or a file in the project. */
+  origin: z.enum(['connector', 'workspace']).default('connector'),
+  /** The connector's display name, or the workspace file the table came from. */
+  source: z.string(),
+  /** True when the schema was probed from the data rather than authored. */
+  schemaInferred: z.boolean(),
+});
+export type ObservationTableSummary = z.infer<typeof ObservationTableSummarySchema>;
+
+export const ListTablesResponseSchema = z.object({
+  tables: z.array(ObservationTableSummarySchema),
+});
+export type ListTablesResponse = z.infer<typeof ListTablesResponseSchema>;
+
+export const DescribeTableRequestSchema = z.object({
+  table: z.string().min(1).max(200),
+});
+export type DescribeTableRequest = z.infer<typeof DescribeTableRequestSchema>;
+
+export const DescribeTableResponseSchema = z.object({
+  table: z.string(),
+  /** The semantic layer rendered as markdown, for a model to read. */
+  markdown: z.string(),
+  summary: ObservationTableSummarySchema,
+});
+export type DescribeTableResponse = z.infer<typeof DescribeTableResponseSchema>;
+
+export const QueryTableRequestSchema = z.object({
+  /** A single read-only SQL statement. Validated by DuckDB's own parser. */
+  sql: z.string().min(1).max(20_000),
+  /** Rows to return. Clamped server-side; one extra is fetched to detect more. */
+  limit: z.number().int().positive().max(10_000).optional(),
+  /** Restrict which table views are in scope. Default: every table. */
+  tables: z.array(z.string().min(1).max(200)).max(32).optional(),
+  timeoutMs: z.number().int().min(1_000).max(300_000).optional(),
+});
+export type QueryTableRequest = z.infer<typeof QueryTableRequestSchema>;
+
+export const QueryTableResponseSchema = z.object({
+  /** Result rows. Cell values are whatever the engine returned. */
+  rows: z.array(z.record(z.string(), z.unknown())),
+  columns: z.array(z.string()),
+  /** More rows matched than were returned. */
+  truncated: z.boolean(),
+  limit: z.number().int().positive(),
+  tablesInScope: z.array(z.string()),
+});
+export type QueryTableResponse = z.infer<typeof QueryTableResponseSchema>;
 
 export const FindFilesRequestSchema = z.object({
   glob: z.string().min(1),

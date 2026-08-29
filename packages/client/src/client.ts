@@ -323,6 +323,11 @@ import type {
   SearchDocsResponse,
   SearchDocumentsRequest,
   SearchDocumentsResponse,
+  DescribeTableRequest,
+  DescribeTableResponse,
+  ListTablesResponse,
+  QueryTableRequest,
+  QueryTableResponse,
   SearchFilesRequest,
   SearchFilesResponse,
   SearchImagesRequest,
@@ -5543,6 +5548,23 @@ export class GezelClient {
       disabled?: boolean;
       /** Rate-limit backoff expiry (ISO); autonomous sync skips until then. */
       backoffUntil?: string;
+      /**
+       * Present only for an observation corpus — data mirrored as columnar
+       * tables rather than readable records. Its absence means a document
+       * corpus, so it is never an empty array.
+       */
+      tables?: {
+        table: string;
+        rows: number;
+        partitions: number;
+        earliestPartition?: string;
+        latestPartition?: string;
+        schemaInferred: boolean;
+        /** Sealed parts still awaiting the night shift's compaction. */
+        pendingParts: number;
+        lastCompactionAt?: string;
+        retentionDays?: number;
+      }[];
     }[];
   }> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/connectors`);
@@ -6210,6 +6232,31 @@ export class GezelClient {
 
   toolSearchFiles(id: string, body: SearchFilesRequest): Promise<SearchFilesResponse> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/search-files`, body);
+  }
+
+  // ── observation tables (the tabular connector corpus) ────────────────────
+
+  /** Every observation table in the project, with row counts and time span. */
+  toolListTables(id: string): Promise<ListTablesResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/list-tables`, {});
+  }
+
+  /** One table's semantic layer, rendered as markdown for a model to read. */
+  toolDescribeTable(id: string, body: DescribeTableRequest): Promise<DescribeTableResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/tools/describe-table`,
+      body,
+    );
+  }
+
+  /**
+   * Run one read-only SQL statement against the project's observation tables.
+   * The statement is validated by DuckDB's own parser service-side before it
+   * runs; a rejected statement comes back as a 400 carrying the reason.
+   */
+  toolQueryTable(id: string, body: QueryTableRequest): Promise<QueryTableResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/query-table`, body);
   }
 
   toolReadWorkspaceFiles(

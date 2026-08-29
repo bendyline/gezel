@@ -456,6 +456,20 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/knowledge/` — installed `.gezk` knowledge catalogs: `registry.json` (the authoritative per-user record of installed/enabled catalogs), immutable extracted versions under `catalogs/<publisher>/<catalog>/<version>/<digest16>/`, and resumable `downloads/`. Owned by [KnowledgeRegistry](packages/service/src/knowledge/registry.ts) + [KnowledgeManager](packages/service/src/knowledge/manager.ts); catalog SQLite is only ever opened read-only+immutable, on the knowledge worker thread
   - `~/.gezel/git-clones/` and per-project checkouts (`workingDir`, `<workingDir>/gh/`, or the project workspace) — git working copies, owned by [git/manager.ts](packages/service/src/git/manager.ts)'s `resolveCheckout`
   - `~/.gezel/projects/{id}/diffpacks.json` plus `artifacts/diffpacks/<packId>/` — change proposals a gezel drafted but never applied, owned by [diffpack/manager.ts](packages/service/src/diffpack/manager.ts). The pack folder holds `after/` (the copy-on-write draft tree the re-rooted workspace-write tools land in), `files/` (the sealed single-file unified diffs), `notes.md`, and `manifest.json`. `after/` and `files/` are written straight to disk by [diffpack/draft-store.ts](packages/service/src/diffpack/draft-store.ts) and are write-denied through the artifact store (`isReservedDiffpackArtifactPath`), so a model cannot forge a diff it never drafted; `notes.md` stays writable because explaining the fix is the model's job
+  - `~/.gezel/projects/{id}/artifacts/data/{corpus}/tables/` — **observation
+    corpora**: the tabular connector shape, mirrored as Hive-partitioned Parquet
+    (plus not-yet-compacted NDJSON) with a per-table `manifest.json` semantic
+    layer and `state.json` bookkeeping, owned by
+    [observations/writer.ts](packages/service/src/observations/writer.ts) and
+    [observations/compactor.ts](packages/service/src/observations/compactor.ts).
+    Deliberately NOT underscore-prefixed, so it inherits
+    `isProtectedConnectorCorpusPath`'s existing gezel-write denial rather than
+    needing a second guard. Never text- or vector-indexed — `artifacts-indexer.ts`
+    skips the subtree at the directory level, which protects the project's other
+    corpora as much as it saves work. Gezels read it only through
+    `list_tables` / `describe_table` / `query_table`. See
+    [docs/observation-corpora.md](docs/observation-corpora.md) and
+    [ADR 0009](docs/decisions/0009-observation-corpora.md)
   - `~/.gezel/projects/{id}/code-reviews.json` — durable code-review records (kickoff → task ref → settled outcome), owned by [git/reviews.ts](packages/service/src/git/reviews.ts)'s `CodeReviewManager`; the snapshot inputs and reports live in the project artifacts drawer under `reviews/<reviewId>/`
   - `~/.gezel/sandbox/` — sandboxed script runs, owned by [sandbox/runner.ts](packages/service/src/sandbox/runner.ts)
   - `~/.gezel/python/` — uv runtime, owned by [python/uv-runtime.ts](packages/service/src/python/uv-runtime.ts)
@@ -572,6 +586,9 @@ For automated coverage, [packages/cli/src/daemon-integration.test.ts](packages/c
 | A document isn't findable in search | Is the `shared` project indexing? `GET /api/projects/<sharedId>/index/status`. Check the path isn't filtered as an outside-in twin or sync junk ([fs/sync-junk.ts](packages/service/src/fs/sync-junk.ts)). For a keywordless query, the match may be falling under `VECTOR_ARM_MIN_SIMILARITY` ([index-store.ts](packages/service/src/index-store/index-store.ts)) — that floor is embedder-specific and does not survive a model swap unmeasured |
 | Search returns the same documents for every query | The vector arm lost its floor. KNN always returns its k nearest rows, and rank fusion scores a rank-0 vector hit at a flat 1.0, so an unfloored arm outranks genuine keyword matches with the whole corpus |
 | A `.gezel/` dir or `*.db` appeared in the documents folder | The home-side index placement was bypassed — `projectContentIndexDbFile(..., { forceHomeSide })` in [content-index.ts](packages/service/src/index-store/content-index.ts)'s `open` |
+| A gezel says a data table is empty, or `query_table` errors | Is there a corpus? `GET /api/projects/<id>/connectors` shows `tables[]` per binding. The tools are registered only when `GEZEL_TABLES_ENABLED` is set, which the chat manager does after probing for `artifacts/data/*/tables/` — a project with no tabular corpus has no query tools at all, by design |
+| `query_table` refuses a query that looks read-only | The guard is DuckDB's own parser, not a keyword list, and it accepts only a single SELECT. `WITH … INSERT` and every `EXPLAIN` form are rejected on purpose — see [statement-guard.ts](packages/service/src/observations/statement-guard.ts) |
+| Rows synced but a query returns none | Compaction has not run and the view lost its NDJSON arm, or the partition filter is wrong. Views union Parquet *and* `sealed-*`/`open-*.ndjson`, so fresh rows should be visible immediately; check `tables/<t>/state.json` for `lastError` from a refused compaction |
 | A gezel's edits vanished — the file is unchanged | It was drafting a change proposal, not editing. Check `task.diffpackId`; the edits are in `artifacts/diffpacks/<packId>/after/` and land in the workspace only when the user applies from the project's Proposals tab |
 | A drafting shard wrote into the wrong pack folder | Its step used `{{task.num}}`, which `TaskManager.create` froze to the HOST's number when it snapshotted the spawn template. Spawn steps address their own pack with `{{diffpack.dir}}` |
 | Applying a proposal 409s with `drifted` | The target file changed since the proposal was sealed (`baseHash` mismatch). The UI names the files and offers to apply anyway; a hunk that genuinely no longer fits is still refused by the patcher |

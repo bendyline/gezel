@@ -23,6 +23,7 @@ import { patientFetch } from '../patient-fetch.js';
 import { readMlxModelGeometry } from './model-geometry.js';
 import { MlxProvider } from './provider.js';
 import { templateOpensReasoning } from './reasoning-stream.js';
+import { resolveSpecDrafter } from './spec-drafter.js';
 import { MLX_DEFAULT_PACKAGE_SPEC, MLX_VENV_NAME, mlxVenvPackages } from './venv.js';
 
 const log = createLogger('chat');
@@ -340,19 +341,35 @@ export async function buildMlxProvider(opts: {
   const kvQuantArgs: string[] =
     kvBits > 0 ? ['--kv-bits', String(kvBits), '--kv-quant-scheme', 'uniform'] : [];
 
-  // ── MTP speculative decoding (opt-in) ──
-  // Arms the sidecar's spec wave for eligible (greedy, processor-free)
-  // requests. Every safety lives sidecar-side — capability probe, the
-  // mlx-vlm >= 0.6.17 exactness gate, per-request eligibility, `[spec]`
-  // fingerprints — so a missing/incompatible drafter degrades to normal
-  // serving with a logged reason, never a launch failure.
-  const specArgs: string[] = config.mlxSpecDraftModelPath
+  // Speculative decoding is on whenever a drafter for this model exists
+  // (see spec-drafter.ts). Resolved before the memory figures because a
+  // drafter is a second resident model: leaving its ~0.8 GB out of the
+  // weights term is the over-commit that aborts the python process.
+  const specDrafter = resolveSpecDrafter({
+    ...(modelDir ? { modelDir } : {}),
+    configuredPath: config.mlxSpecDraftModelPath ?? null,
+    enabled: config.mlxSpeculativeDecoding ?? null,
+  });
+
+  // ── MTP speculative decoding ──
+  // Arms the sidecar's spec wave. Every safety lives sidecar-side — the
+  // capability probe, the mlx-vlm >= 0.6.17 exactness gate, per-request
+  // routing (greedy vs the processed/positioned assisted path), `[spec]`
+  // fingerprints — so an incompatible drafter degrades to normal serving
+  // with a logged reason, never a launch failure.
+  const specArgs: string[] = specDrafter
     ? [
         '--spec-draft-model',
-        config.mlxSpecDraftModelPath,
+        specDrafter.dir,
         ...(config.mlxSpecBlockSize ? ['--spec-block-size', String(config.mlxSpecBlockSize)] : []),
       ]
     : [];
+  if (specDrafter) {
+    log.info(
+      `[mlx] speculative decoding armed (${specDrafter.source}): ${specDrafter.dir} ` +
+        `(+${Math.round(specDrafter.bytes / 1024 ** 2)}MB resident, priced into the memory plan)`,
+    );
+  }
 
   // ── Memory-aware batch sizing ──
   // Size concurrent slots to what actually fits GPU memory, not just a tiered
@@ -370,7 +387,8 @@ export async function buildMlxProvider(opts: {
     localEngineKvBudgetBytes,
     fastMemoryBudgetBytes,
   } = await import('../native/capacity-broker.js');
-  const mlxWeightsBytes = modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3;
+  const mlxWeightsBytes =
+    (modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3) + (specDrafter?.bytes ?? 0);
   const mlxBrokerSnap = opts.broker?.committed();
   // Fast memory, not the admission budget — same reason as the llama path.
   // MLX only runs on unified-memory Macs today, where the two are equal.

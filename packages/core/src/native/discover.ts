@@ -47,7 +47,8 @@ export type NativeBinaryName =
   | 'sd-server'
   | 'whisper-server'
   | 'device-health'
-  | 'uv';
+  | 'uv'
+  | 'duckdb';
 
 export interface DiscoverInput {
   /** GEZEL_HOME — backend cache file lives at `<home>/engines/llama-cpp/`. */
@@ -122,6 +123,15 @@ export interface DiscoverResult {
  * Returns `null` when the file isn't on disk. Caller decides whether
  * to fall through to a variant-less subdir or surface "not found."
  */
+/**
+ * Binaries we vendor unmodified from an upstream release. They keep the
+ * upstream file name — no `gezel-` prefix — because the bytes are the
+ * vendor's and the Windows signing allowlist
+ * (packages/app/scripts/third-party-binaries.cjs) matches on exactly that
+ * name. Everything we compile is emitted as `gezel-<name>`.
+ */
+const UNPREFIXED_BINARIES = new Set<NativeBinaryName>(['uv', 'duckdb']);
+
 export function resolveNativeBinaryUnder(
   root: string,
   name: NativeBinaryName,
@@ -133,10 +143,13 @@ export function resolveNativeBinaryUnder(
   // Build scripts emit the binary under a `gezel-` prefix (the process shows
   // as `gezel-llama-server` in Task Manager / GPU listings — Gezel attribution,
   // upstream lineage kept in the suffix). Prefer that, fall back to the bare
-  // upstream name so binaries bundled BEFORE the rename still resolve. `uv` is
-  // vendored unmodified and never prefixed; its fallback covers it. `name`
-  // stays the logical/upstream identifier everywhere else.
-  const candidates = name === 'uv' ? [`uv${ext}`] : [`gezel-${name}${ext}`, `${name}${ext}`];
+  // upstream name so binaries bundled BEFORE the rename still resolve. `uv`
+  // and `duckdb` are vendored unmodified and never prefixed; they resolve by
+  // their bare upstream name only. `name` stays the logical/upstream
+  // identifier everywhere else.
+  const candidates = UNPREFIXED_BINARIES.has(name)
+    ? [`${name}${ext}`]
+    : [`gezel-${name}${ext}`, `${name}${ext}`];
   for (const file of candidates) {
     const p = join(root, subdir, file);
     if (fileExists(p)) return p;
@@ -171,6 +184,7 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
       'whisper-server',
       'device-health',
       'uv',
+      'duckdb',
     ] as const) {
       binaries.push({ name, source: 'no-platform-key' });
     }
@@ -310,6 +324,7 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
     { name: 'whisper-server' as const, envVar: 'GEZEL_WHISPER_SERVER_BIN' },
     { name: 'device-health' as const, envVar: 'GEZEL_DEVICE_HEALTH_BIN' },
     { name: 'uv' as const, envVar: 'GEZEL_UV_BIN' },
+    { name: 'duckdb' as const, envVar: 'GEZEL_DUCKDB_BIN' },
   ]) {
     if (process.env[envVar]) {
       binaries.push({ name, source: 'pre-set', path: process.env[envVar] });

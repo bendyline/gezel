@@ -1,7 +1,9 @@
+import { execFile } from 'node:child_process';
 import { constants, existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { promisify } from 'node:util';
 import { chatModelInstallIdentity } from './model-sources.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from './spawn.ts';
 
@@ -496,6 +498,33 @@ export async function linkModelIntoTrial(opts: {
   await cloneDirectory(target, link);
 }
 
+const execFileAsync = promisify(execFile);
+
+/**
+ * Copy-on-write clone one file, or fall back to a byte copy.
+ *
+ * `copyFile(..., COPYFILE_FICLONE)` does NOT clone on macOS — measured on
+ * APFS, a 6.94 GB model file took 3.1 s and consumed 6.6 GB of real space
+ * through Node, versus 23 ms and 0 bytes through `cp -c`. The flag is
+ * accepted and silently ignored, which is why trial homes for a 16 GB model
+ * cost 16 GB apiece: a core-suite run would materialize the same weights
+ * eleven times and ENOSPC on a machine with plenty of nominal headroom.
+ *
+ * The fallback keeps the old behavior wherever cloning is unavailable
+ * (non-APFS volumes, Linux CI) — a slower trial setup, never a broken one.
+ */
+async function cloneFile(source: string, destination: string): Promise<void> {
+  if (process.platform === 'darwin') {
+    try {
+      await execFileAsync('cp', ['-c', source, destination]);
+      return;
+    } catch {
+      // Cross-volume, non-APFS, or a cp that lacks -c: copy the bytes.
+    }
+  }
+  await copyFile(source, destination, constants.COPYFILE_FICLONE);
+}
+
 async function cloneDirectory(source: string, destination: string): Promise<void> {
   await mkdir(destination, { recursive: true });
   const entries = await readdir(source, { withFileTypes: true });
@@ -509,6 +538,6 @@ async function cloneDirectory(source: string, destination: string): Promise<void
     if (!entry.isFile()) {
       throw new Error(`refusing to clone linked or non-file model payload: ${sourcePath}`);
     }
-    await copyFile(sourcePath, destinationPath, constants.COPYFILE_FICLONE);
+    await cloneFile(sourcePath, destinationPath);
   }
 }

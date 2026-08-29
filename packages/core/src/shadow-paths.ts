@@ -1,4 +1,8 @@
-import { PROJECT_DIFFPACKS_DIR_NAME, PROJECT_SHADOW_DIR_NAME } from './paths.js';
+import {
+  PROJECT_DIFFPACKS_DIR_NAME,
+  PROJECT_SHADOW_DIR_NAME,
+  PROJECT_TABULAR_DIR_NAME,
+} from './paths.js';
 
 /**
  * Normalize an artifacts-relative path to its collapsed segment list so
@@ -30,6 +34,22 @@ function artifactSegments(path: string): string[] {
  */
 export function isReservedShadowArtifactPath(path: string): boolean {
   return artifactSegments(path)[0]?.toLowerCase() === PROJECT_SHADOW_DIR_NAME;
+}
+
+/**
+ * True for artifacts-relative paths inside the reserved `tabular/` subtree —
+ * Parquet tables derived from workspace CSVs and spreadsheets.
+ *
+ * Denied unconditionally, like `shadow/` and unlike a connector corpus. The
+ * corpus guard only fires for gezel-initiated writes because the mirror is
+ * arguably the user's to edit; a table here is not a mirror of anything the
+ * user typed — it is derived output whose only legitimate writer is the
+ * materializer, which bypasses the artifact store. A hand-edited Parquet part
+ * would simply be overwritten on the source file's next content change, so
+ * accepting the write would be a lie.
+ */
+export function isReservedTabularArtifactPath(path: string): boolean {
+  return artifactSegments(path)[0]?.toLowerCase() === PROJECT_TABULAR_DIR_NAME;
 }
 
 /**

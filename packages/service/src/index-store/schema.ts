@@ -402,6 +402,30 @@ CREATE TABLE IF NOT EXISTS symbol_summary_state (
   attempts INTEGER DEFAULT 0
 );
 
+-- Workspace tabular files → derived Parquet tables. Content-hash primary key,
+-- same discipline as shadow_state: an 'ok' row survives a rename or a revert,
+-- and a failure retries up to a cap per hash rather than on every pass.
+--
+-- Deliberately its own table rather than a reuse of shadow_state or the
+-- doc:convert metadata key. Both already gate a different pass over some of
+-- the same files (an .xlsx gets BOTH a markdown shadow and a table), and
+-- sharing a gate means one pass's success permanently suppresses the other's
+-- work — the exact failure recorded above for embed_state.
+--
+-- state is 'ok' | 'deferred' | 'blocked' | 'failed'; 'deferred' is a file too
+-- large for the interactive pass, which the night shift picks up.
+CREATE TABLE IF NOT EXISTS tabular_state (
+  content_hash TEXT PRIMARY KEY,
+  collection_id TEXT,
+  file_path TEXT,
+  corpus_dir TEXT,
+  state TEXT,
+  rows INTEGER DEFAULT 0,
+  attempts INTEGER DEFAULT 0,
+  reason TEXT,
+  updated_at TEXT
+);
+
 -- Mirror of the append-only history JSONL (the audit log). kind/project/gezel/at
 -- are real columns so HistoryFilter fields stay SQL-filterable; only the q text
 -- goes through fts_history. INSERT OR IGNORE on the event id makes JSONL

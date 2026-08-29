@@ -27,6 +27,7 @@ export const repoRoot = resolve(scriptDir, '..');
 
 const ENGINE_NOTICE_NAMES = {
   ds4: 'ds4 / DwarfStar',
+  duckdb: 'DuckDB',
   'llama-cpp': 'llama.cpp',
   'sd-cpp': 'stable-diffusion.cpp',
   uv: 'uv',

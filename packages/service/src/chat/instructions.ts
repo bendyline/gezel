@@ -148,6 +148,14 @@ export interface BuildInstructionsOptions {
    */
   executionDensity?: ExecutionDensity;
   project?: import('@bendyline/gezel').ProjectDetail | null;
+  /**
+   * True when this project holds observation tables — the tabular connector
+   * corpus. Changes the Connected data block's closing advice from "read
+   * these files" to "query them", because for a tabular corpus reading the
+   * files is the wrong instruction: they are columnar, often enormous, and
+   * the query tools exist precisely so the model never handles the rows.
+   */
+  hasObservationTables?: boolean;
   workspaceFiles?: ProjectFileEntry[];
   /**
    * True when the recursive workspace walk hit its entry cap, i.e.
@@ -798,7 +806,28 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       });
       if (bindings.length > shown.length)
         lines.push(`- …and ${bindings.length - shown.length} more`);
-      projectContext += `\n\n### Connected data\n\nExternal sources mirrored into this project's artifacts as readable files:\n${lines.join('\n')}\nUse the artifact listing/reading tools for these paths. These directories are read-only mirrors — write analysis elsewhere in artifacts. To change something at the source, draft a connector action for the user to approve.`;
+      // Data tables get their own block below rather than a note here, because
+      // they no longer only come from connectors — a project can hold nothing
+      // but spreadsheets, in which case this section does not render at all.
+      const tabularNote = '';
+      projectContext += `\n\n### Connected data\n\nExternal sources mirrored into this project's artifacts as readable files:\n${lines.join('\n')}\nUse the artifact listing/reading tools for these paths.${tabularNote} These directories are read-only mirrors — write analysis elsewhere in artifacts. To change something at the source, draft a connector action for the user to approve.`;
+    }
+    // Data tables — a standalone block, because they come from two places now:
+    // a synced connector, and spreadsheets or large data files already in the
+    // workspace. A project can have the second without the first, so this
+    // cannot ride inside the connector section.
+    //
+    // Deliberately short. What each column means belongs in `describe_table`,
+    // fetched on demand; the prompt budget compounds at depth, and all this
+    // has to do is stop the model reaching for `read_artifact` on a Parquet
+    // file and route it to the grounding step instead.
+    if (opts.hasObservationTables) {
+      projectContext +=
+        '\n\n### Data tables\n\nThis project holds **data tables** — spreadsheets and large data files ' +
+        'stored in a form you query rather than read. Call `list_tables` to see them, `describe_table` ' +
+        'to learn a table\'s columns and units, then `query_table` to answer the question with SQL. ' +
+        'Aggregate in the query rather than selecting rows: the tables are far larger than you can read, ' +
+        'and you never need to handle the rows yourself.';
     }
     // Gezels split four ways here based on what they can actually
     // touch in the workspace:

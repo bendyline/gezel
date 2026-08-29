@@ -811,6 +811,122 @@ export class IndexStore {
       .map(rowToFile);
   }
 
+  // ── Workspace tabular files → derived tables ─────────────────────────────
+
+  /**
+   * Files that need a table built or rebuilt: enrolled in `files`, tabular by
+   * extension, and either never materialized or materialized under a different
+   * content hash. Failures are capped per hash so one unreadable CSV does not
+   * cost a conversion attempt every pass forever.
+   */
+  listTabularWork(
+    exts: readonly string[],
+    minBytes: number,
+    maxAttempts: number,
+    limit: number,
+  ): { path: string; hash: string; size: number }[] {
+    if (exts.length === 0) return [];
+    const extClause = exts.map(() => 'lower(f.path) LIKE ?').join(' OR ');
+    return this.db
+      .prepare(
+        `SELECT f.path AS path, f.hash AS hash, f.size AS size
+           FROM files f
+           LEFT JOIN tabular_state t ON t.content_hash = f.hash
+          WHERE f.collection_id = ?
+            AND f.hash IS NOT NULL
+            AND f.size >= ?
+            AND (${extClause})
+            AND (t.content_hash IS NULL
+                 OR (t.state NOT IN ('ok', 'blocked') AND COALESCE(t.attempts, 0) < ?))
+          ORDER BY f.size DESC
+          LIMIT ?`,
+      )
+      .all<{ path: string; hash: string; size: number }>(
+        this.collectionId,
+        minBytes,
+        ...exts.map((ext) => `%.${ext.toLowerCase()}`),
+        maxAttempts,
+        limit,
+      );
+  }
+
+  /** Every materialized table's companion dir, for orphan collection. */
+  listTabularCorpusDirs(): { corpusDir: string; filePath: string }[] {
+    return this.db
+      .prepare(
+        `SELECT corpus_dir AS corpusDir, file_path AS filePath
+           FROM tabular_state
+          WHERE collection_id = ? AND corpus_dir IS NOT NULL AND state = 'ok'`,
+      )
+      .all<{ corpusDir: string; filePath: string }>(this.collectionId);
+  }
+
+  markTabularOk(
+    contentHash: string,
+    filePath: string,
+    corpusDir: string,
+    rows: number,
+  ): void {
+    this.db
+      .prepare(
+        `INSERT OR REPLACE INTO tabular_state
+           (content_hash, collection_id, file_path, corpus_dir, state, rows, attempts, reason, updated_at)
+         VALUES (?, ?, ?, ?, 'ok', ?, 0, NULL, ?)`,
+      )
+      .run(contentHash, this.collectionId, filePath, corpusDir, rows, nowIso());
+  }
+
+  /**
+   * Record a non-success. `blocked` is terminal for this hash — an empty file
+   * or one the engine cannot read will not become readable by retrying — while
+   * `deferred` and `failed` are retried under the attempts cap.
+   */
+  markTabularOutcome(
+    contentHash: string,
+    filePath: string,
+    state: 'deferred' | 'blocked' | 'failed',
+    reason?: string,
+    corpusDir?: string,
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO tabular_state
+           (content_hash, collection_id, file_path, corpus_dir, state, rows, attempts, reason, updated_at)
+         VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?)
+         ON CONFLICT(content_hash) DO UPDATE SET
+           state=excluded.state,
+           corpus_dir=COALESCE(excluded.corpus_dir, tabular_state.corpus_dir),
+           attempts=COALESCE(tabular_state.attempts, 0) + 1,
+           reason=excluded.reason,
+           updated_at=excluded.updated_at`,
+      )
+      .run(
+        contentHash,
+        this.collectionId,
+        filePath,
+        corpusDir ?? null,
+        state,
+        reason ?? null,
+        nowIso(),
+      );
+  }
+
+  /** Drop a gate row, so a re-appearing file is rebuilt from scratch. */
+  clearTabularState(contentHash: string): void {
+    this.db.prepare('DELETE FROM tabular_state WHERE content_hash = ?').run(contentHash);
+  }
+
+  /**
+   * Drop every gate row for a path. Keyed by path rather than hash because the
+   * sweep knows which FILE vanished, and a file may have left rows under
+   * several hashes across its edits.
+   */
+  clearTabularStateForPath(filePath: string): void {
+    this.db
+      .prepare('DELETE FROM tabular_state WHERE collection_id = ? AND file_path = ?')
+      .run(this.collectionId, filePath);
+  }
+
   markAiShadowOk(contentHash: string, filePath: string, model?: string): void {
     this.db
       .prepare(

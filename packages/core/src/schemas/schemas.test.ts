@@ -24,6 +24,7 @@ import {
   UpdateTaskRequestSchema,
   parseTaskRef,
   projectAllowsAmbientWork,
+  projectAllowsWorkspaceTables,
   taskRef,
 } from './index.js';
 
@@ -934,5 +935,16 @@ describe('projectAllowsAmbientWork', () => {
       updatedAt: 't',
     });
     expect(parsed.archived).toBe(true);
+  });
+});
+
+describe('projectAllowsWorkspaceTables', () => {
+  it('is on by default, because the size threshold already gates it', () => {
+    expect(projectAllowsWorkspaceTables({})).toBe(true);
+    expect(projectAllowsWorkspaceTables({ workspaceTablesEnabled: true })).toBe(true);
+  });
+
+  it('has a findable off switch for a project full of data fixtures', () => {
+    expect(projectAllowsWorkspaceTables({ workspaceTablesEnabled: false })).toBe(false);
   });
 });

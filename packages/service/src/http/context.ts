@@ -8,6 +8,7 @@ import type { ChatManager } from '../chat/manager.js';
 import type { CodexSetupManager } from '../codex-setup/manager.js';
 import type { ConnectorActionManager } from '../connectors/actions.js';
 import type { ConnectorManager } from '../connectors/manager.js';
+import type { DuckRunner } from '../observations/duck.js';
 import type { DebugFlag } from '../debug/flag.js';
 import type { DiffpackManager } from '../diffpack/manager.js';
 import type { EngineBinaryRegistry } from '../engines/registry.js';
@@ -135,6 +136,14 @@ export interface ServiceContext {
   diffpacks: DiffpackManager;
   connectors: ConnectorManager;
   connectorActions: ConnectorActionManager;
+  /**
+   * The bundled DuckDB CLI, used to read observation corpora (the tabular
+   * connector shape). Stateless — one short-lived child per statement — so it
+   * needs no lifecycle beyond construction, and it stays usable even when no
+   * binary is installed: `available()` is false and the query routes return an
+   * actionable 409 rather than the daemon failing to boot.
+   */
+  duck: DuckRunner;
   renderer: ImageRenderer;
   /**
    * Image-generation provider manager. Holds a lazily-built underlying

@@ -75,3 +75,79 @@ describe('ProjectArtifactsStore unresolved-template paths', () => {
     }
   });
 });
+
+describe('the reserved tabular subtree', () => {
+  async function harness() {
+    const home = await mkdtemp(join(tmpdir(), 'gezel-tabular-store-'));
+    const artifacts = new ProjectArtifactsStore({ home, touchProject: async () => {} });
+    const root = join(home, 'projects', 'p1', 'artifacts');
+    await mkdir(join(root, 'tabular', 'data', 'sales.csv_tables', 'tables', 'sales'), {
+      recursive: true,
+    });
+    await writeFile(
+      join(root, 'tabular', 'data', 'sales.csv_tables', 'tables', 'sales', 'manifest.json'),
+      '{}',
+    );
+    await mkdir(join(root, 'reports'), { recursive: true });
+    await writeFile(join(root, 'reports', 'q3.md'), '# Q3');
+    return { home, artifacts };
+  }
+
+  it('refuses every write, not only gezel-initiated ones', async () => {
+    const { home, artifacts } = await harness();
+    try {
+      // Unlike a connector corpus — which the user may arguably edit — a table
+      // here is derived output. A hand edit would be overwritten on the source
+      // file's next change, so accepting the write would be a lie.
+      await expect(
+        artifacts.writeProjectArtifact('p1', 'tabular/data/sales.csv_tables/x.md', 'hi'),
+      ).rejects.toMatchObject({ code: 'tabular-readonly' });
+      await expect(
+        artifacts.writeProjectArtifact('p1', 'tabular/x.md', 'hi', { initiatedByGezel: true }),
+      ).rejects.toMatchObject({ code: 'tabular-readonly' });
+      await expect(
+        artifacts.createProjectArtifactFolder('p1', 'tabular/new'),
+      ).rejects.toMatchObject({ code: 'tabular-readonly' });
+      await expect(
+        artifacts.renameProjectArtifactPath('p1', 'reports/q3.md', 'tabular/q3.md'),
+      ).rejects.toMatchObject({ code: 'tabular-readonly' });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('normalizes traversal before deciding, so the guard cannot be walked around', async () => {
+    const { home, artifacts } = await harness();
+    try {
+      await expect(
+        artifacts.writeProjectArtifact('p1', 'reports/../tabular/sneak.md', 'hi'),
+      ).rejects.toMatchObject({ code: 'tabular-readonly' });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('stays out of default listings but is reachable when asked for', async () => {
+    const { home, artifacts } = await harness();
+    try {
+      const listed = await artifacts.listProjectArtifacts('p1');
+      expect(listed.map((e) => e.name)).not.toContain('tabular');
+      expect(listed.map((e) => e.name)).toContain('reports');
+
+      const hidden = await artifacts.listProjectArtifacts('p1', '', { includeHidden: true });
+      expect(hidden.map((e) => e.name)).toContain('tabular');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('never lets a Parquet part hijack a bare-filename lookup', async () => {
+    const { home, artifacts } = await harness();
+    try {
+      const recursive = await artifacts.listProjectArtifactsRecursiveDetailed('p1');
+      expect(recursive.entries.some((e) => e.path.startsWith('tabular/'))).toBe(false);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});

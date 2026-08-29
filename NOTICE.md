@@ -207,6 +207,7 @@ their pin-bound manifest live in [`native/licenses/`](native/licenses/).
 | **stable-diffusion.cpp** (`sd-server`) | tag `master-789-5114672` | MIT | [leejet/stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) |
 | **whisper.cpp** (`whisper-server`) | tag `v1.9.1` | MIT | [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) |
 | **uv** (precompiled binary, not built from source) | tag `0.11.32` | Apache-2.0 OR MIT | [astral-sh/uv](https://github.com/astral-sh/uv) |
+| **DuckDB** (`duckdb` CLI, precompiled binary, not built from source) | tag `v1.5.5` | MIT | [duckdb/duckdb](https://github.com/duckdb/duckdb) |
 | **Vulkan loader** (`libvulkan.so.1`, bundled beside stable-diffusion.cpp on `linux-x64`) | build-platform version | Apache-2.0 | [KhronosGroup/Vulkan-Loader](https://github.com/KhronosGroup/Vulkan-Loader) |
 
 The `ggml` compute library is vendored as a submodule of both
@@ -214,7 +215,10 @@ llama.cpp and whisper.cpp and is compiled into the shared libraries
 that ship beside those servers; its MIT license travels with those
 binaries. `uv` is used only to bootstrap the managed Python venv for
 the MLX provider — the MLX framework and `mlx-vlm` are installed into
-that venv at runtime (Apache-2.0/MIT) and are not bundled.
+that venv at runtime (Apache-2.0/MIT) and are not bundled. The `duckdb` CLI is the
+query engine for observation corpora — the tabular connector shape that
+mirrors high-volume sources as partitioned Parquet; it is vendored
+unmodified and runs only as a short-lived child process.
 
 The **ds4** engine (antirez's DeepSeek-V4 inference engine) is MIT-licensed:
 its `LICENSE` carries the dual copyright *"The ds4.c authors"* and *"The ggml

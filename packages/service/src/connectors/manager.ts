@@ -46,11 +46,25 @@ import {
 } from './oauth.js';
 import { NATIVE_ADAPTERS, connectorCredentialName, connectorSecretKey } from './registry.js';
 import { connectorCorpusStorage } from './storage.js';
-import type {
-  AdapterDeps,
-  ConnectorAdapter,
-  ConnectorBindingRef,
-  NormalizedRecord,
+import {
+  listPartitionFiles,
+  listPartitions,
+  listTables,
+  partitionValueFromDir,
+  readTableManifest,
+  readTableState,
+} from '../observations/layout.js';
+import {
+  ObservationWriter,
+  type ObservationWriteSummary,
+} from '../observations/writer.js';
+import {
+  type AdapterDeps,
+  type ConnectorAdapter,
+  type ConnectorBindingRef,
+  type ConnectorRecord,
+  type NormalizedRecord,
+  isObservationRecord,
 } from './types.js';
 import {
   type PruneInput,
@@ -138,7 +152,7 @@ export function corpusDirFor(
   );
 }
 
-export interface SyncBindingOptions<Cur = unknown> {
+export interface SyncBindingOptions<Cur = unknown, Rec = NormalizedRecord> {
   /** Project artifacts root where this connector's corpus lands. */
   storageDir: string;
   /** Resolved workspace root used only for quarantined raw bodies. */
@@ -178,12 +192,18 @@ export interface SyncBindingOptions<Cur = unknown> {
   backfillLimit: number;
   /** Starting cursor (opaque, adapter-shaped). */
   cursor: Cur | undefined;
-  /** Injectable writer — defaults to the real `writeRecord` (tests pass a fake). */
+  /**
+   * Injectable writer — defaults to the real `writeRecord` (tests pass a fake).
+   * Generic in the record type so an observation corpus can supply a writer
+   * that appends rows instead of writing one markdown file per record; every
+   * other concern in the pass (scopes, cursors, paging, retry, rate limits)
+   * is shape-independent and reused verbatim.
+   */
   write?: (input: {
     storageDir: string;
     quarantineWorkspaceDir: string;
     corpusDir: string;
-    record: NormalizedRecord;
+    record: Rec;
   }) => Promise<WriteRecordResult>;
   /** Injectable pruner — defaults to the real `pruneRecords`. */
   prune?: (input: PruneInput) => Promise<PruneResult>;
@@ -248,11 +268,17 @@ const MAX_PARTIAL_ROUNDS = 4;
  * so the batch retries next pass (the writer is idempotent, so already-written
  * records dedupe rather than the failed one being skipped forever).
  */
-export async function syncWithAdapter<Cur = unknown>(
-  adapter: ConnectorAdapter<NormalizedRecord, Cur>,
-  opts: SyncBindingOptions<Cur>,
+export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
+  adapter: ConnectorAdapter<Rec, Cur>,
+  opts: SyncBindingOptions<Cur, Rec>,
 ): Promise<BindingSyncResult<Cur>> {
-  const write = opts.write ?? defaultWriteRecord;
+  // The default writer is the markdown-per-record one, reachable only when
+  // `Rec` is `NormalizedRecord` — i.e. every document adapter. Observation
+  // callers always inject a row-appending writer, so the cast is narrowing a
+  // default that their code path never reaches.
+  const write =
+    opts.write ??
+    (defaultWriteRecord as unknown as NonNullable<SyncBindingOptions<Cur, Rec>['write']>);
   const prune = opts.prune ?? pruneRecords;
   const scoped = opts.scopedCursors ?? true;
   const envelope = scoped ? asScopedCursor(opts.cursor) : null;
@@ -311,7 +337,13 @@ export async function syncWithAdapter<Cur = unknown>(
               attempts: 3,
               label: `${adapter.typeId} record ${ref.id}`,
             });
-            seenHashes.add(sha8(record.recordId));
+            // Prune identity is a document-corpus concept: `pruneRecords`
+            // matches on the markdown filename grammar, and observation
+            // corpora never set `allowPrune`. A record without a `recordId`
+            // therefore contributes nothing to keep — skip it rather than
+            // hashing `undefined`.
+            const recordId = (record as Partial<NormalizedRecord>).recordId;
+            if (typeof recordId === 'string') seenHashes.add(sha8(recordId));
             const w = await write({
               storageDir: opts.storageDir,
               quarantineWorkspaceDir: opts.quarantineWorkspaceDir,
@@ -381,7 +413,7 @@ export async function createConnectorAdapter(
   type: ConnectorTypeManifest,
   binding: ConnectorBindingRef,
   deps: AdapterDeps,
-): Promise<ConnectorAdapter> {
+): Promise<ConnectorAdapter<NormalizedRecord | ConnectorRecord, unknown>> {
   switch (type.driver) {
     case 'native': {
       const adapterId = String((type.source as { adapterId?: string }).adapterId ?? '');
@@ -436,6 +468,23 @@ export interface ConnectorStatus {
     disabled?: boolean;
     /** Rate-limit backoff expiry (ISO); autonomous sync skips until then. */
     backoffUntil?: string;
+    /**
+     * Present only for an observation corpus — a binding whose data is
+     * columnar tables rather than readable records. Its absence is what the
+     * UI reads as "this is a document corpus", so it is never an empty array.
+     */
+    tables?: {
+      table: string;
+      rows: number;
+      partitions: number;
+      earliestPartition?: string;
+      latestPartition?: string;
+      schemaInferred: boolean;
+      /** Sealed parts still awaiting the night shift's compaction. */
+      pendingParts: number;
+      lastCompactionAt?: string;
+      retentionDays?: number;
+    }[];
   }[];
 }
 
@@ -800,11 +849,55 @@ export class ConnectorManager {
         .catch(() => null);
       completenessByType.set(b.type, manifest?.completeness);
     }
+    // Table stats are read from the corpus on disk rather than recomputed, so
+    // this stays a stat() walk even for a binding holding hundreds of
+    // millions of rows.
+    const storageDir = this.opts.store.projectArtifactsDir(project.id);
+    const tablesByBinding = new Map<string, NonNullable<ConnectorStatus['bindings'][number]['tables']>>();
+    for (const b of bindings) {
+      const corpusDir = corpusDirFor(bindings, b);
+      const stats: NonNullable<ConnectorStatus['bindings'][number]['tables']> = [];
+      for (const table of await listTables(storageDir, corpusDir).catch(() => [])) {
+        const [manifest, state, partitionDirs] = await Promise.all([
+          readTableManifest(storageDir, corpusDir, table).catch(() => null),
+          readTableState(storageDir, corpusDir, table).catch(() => null),
+          listPartitions(storageDir, corpusDir, table).catch(() => []),
+        ]);
+        let pendingParts = 0;
+        for (const partition of partitionDirs) {
+          const files = await listPartitionFiles(storageDir, corpusDir, table, partition).catch(
+            () => ({ parquet: [], sealed: [], open: [] }),
+          );
+          pendingParts += files.sealed.length + files.open.length;
+        }
+        const values = partitionDirs
+          .map((d) => partitionValueFromDir(d)?.value)
+          .filter((v): v is string => Boolean(v));
+        stats.push({
+          table,
+          rows: state?.totalRows ?? 0,
+          partitions: partitionDirs.length,
+          ...(values.length > 0
+            ? {
+                earliestPartition: values[values.length - 1] as string,
+                latestPartition: values[0] as string,
+              }
+            : {}),
+          schemaInferred: manifest?.inferred === true,
+          pendingParts,
+          ...(state?.lastCompactionAt ? { lastCompactionAt: state.lastCompactionAt } : {}),
+          ...(manifest?.retention?.rawDays ? { retentionDays: manifest.retention.rawDays } : {}),
+        });
+      }
+      if (stats.length > 0) tablesByBinding.set(b.id, stats);
+    }
+
     return {
       configured: bindings.length > 0,
       bindings: bindings.map((b) => {
         const backoffAt = this.backoffUntil(b.id);
         const completeness = completenessByType.get(b.type);
+        const tables = tablesByBinding.get(b.id);
         return {
           id: b.id,
           type: b.type,
@@ -814,6 +907,7 @@ export class ConnectorManager {
           ...(b.lastError ? { lastError: b.lastError } : {}),
           ...(b.disabled ? { disabled: b.disabled } : {}),
           ...(backoffAt ? { backoffUntil: new Date(backoffAt).toISOString() } : {}),
+          ...(tables ? { tables } : {}),
         };
       }),
     };
@@ -912,15 +1006,75 @@ export class ConnectorManager {
         project.id,
         corpusDir,
       );
-      const r = await syncWithAdapter(adapter, {
-        storageDir,
-        quarantineWorkspaceDir,
-        corpusDir,
-        allowPrune: resolved.manifest.completeness === 'mirror',
-        backfillLimit: Math.max(1, Math.min(opts?.backfillLimit ?? DEFAULT_BACKFILL_LIMIT, 5_000)),
-        cursor: binding.cursor,
-        ...(opts?.scopes ? { scopes: opts.scopes } : {}),
-      });
+      // Which corpus shape this type writes. Everything about the pass is
+      // identical either way — scopes, the per-scope cursor envelope, paging,
+      // retry, rate-limit back-off — and only the terminal write differs,
+      // which is exactly what `syncWithAdapter`'s injectable writer is for.
+      const observation =
+        resolved.manifest.normalize.kind === 'observations'
+          ? new ObservationWriter({
+              storageDir,
+              corpusDir,
+              ...(resolved.manifest.normalize.tables
+                ? {
+                    manifests: new Map(
+                      resolved.manifest.normalize.tables.map((t) => [t.table, t]),
+                    ),
+                  }
+                : {}),
+            })
+          : null;
+
+      const r = await syncWithAdapter<unknown, NormalizedRecord | ConnectorRecord>(adapter, {
+          storageDir,
+          quarantineWorkspaceDir,
+          corpusDir,
+          // Prune deletes records the source no longer returns, keyed off the
+          // markdown filename grammar. An append-only observation corpus has
+          // no such notion, and a manifest that wrongly claims `mirror` must
+          // not be able to reach the pruner.
+          allowPrune: !observation && resolved.manifest.completeness === 'mirror',
+          backfillLimit: Math.max(
+            1,
+            Math.min(opts?.backfillLimit ?? DEFAULT_BACKFILL_LIMIT, 5_000),
+          ),
+          cursor: binding.cursor,
+          ...(opts?.scopes ? { scopes: opts.scopes } : {}),
+          ...(observation
+            ? {
+                write: async (input) => {
+                  const record = input.record;
+                  if (!isObservationRecord(record)) {
+                    // A type declared as `observations` whose adapter emits
+                    // documents is a manifest/adapter mismatch, not a record
+                    // to salvage: writing it into the corpus root would leave
+                    // markdown the query layer can never see.
+                    throw new Error(
+                      `connector type '${resolved.manifest.id}' declares the observation shape but its adapter returned a document record`,
+                    );
+                  }
+                  let rows = 0;
+                  for (const batch of record.batches) {
+                    rows += (await observation.writeBatch(batch)).rows;
+                  }
+                  return { status: rows > 0 ? 'written' : 'exists' };
+                },
+              }
+            : {}),
+        },
+      );
+
+      // Seal open parts before anything reads the corpus. Compaction to
+      // Parquet is deliberately NOT done here: it is minutes of CPU on a
+      // large pass, the NDJSON is already queryable, and the night shift is
+      // where that work belongs.
+      let observationSummary: ObservationWriteSummary | null = null;
+      if (observation) {
+        observationSummary = await observation.finish();
+        log.info(
+          `${binding.type}: wrote ${observationSummary.rowsWritten} row(s) across ${observationSummary.tables.length} table(s)`,
+        );
+      }
       if (r.rateLimited) this.noteRateLimit(binding.id);
       else if (!r.error) this.backoff.delete(binding.id);
       const lastSyncedAt = new Date().toISOString();
@@ -938,11 +1092,12 @@ export class ConnectorManager {
       await this.writeCorpusMeta(storageDir, corpusDir, binding, resolved.manifest, {
         scopes: r.scopes ?? [],
         ...(r.error ? {} : { lastSyncedAt }),
+        ...(observationSummary ? { observations: observationSummary } : {}),
       }).catch(() => {});
       // Corpus records live under artifacts, outside the workspace indexer's
       // walk — the dedicated artifacts index is what makes them searchable.
       // Fire-and-forget; the façade debounces per project.
-      if ((r.written + r.pruned > 0 || migrated) && this.opts.contentIndex) {
+      if ((r.written + r.pruned > 0 || migrated) && !observation && this.opts.contentIndex) {
         this.opts.contentIndex.refreshArtifacts(project.id).catch(() => {});
       }
       // The content index scans the workspace, not artifacts. A one-time
@@ -992,7 +1147,11 @@ export class ConnectorManager {
     corpusDir: string,
     binding: ProjectConnectorBinding,
     manifest: ConnectorTypeManifest,
-    pass: { scopes: string[]; lastSyncedAt?: string },
+    pass: {
+      scopes: string[];
+      lastSyncedAt?: string;
+      observations?: ObservationWriteSummary;
+    },
   ): Promise<void> {
     const abs = await resolveInside(storageDir, `${corpusDir}/_meta.json`);
     await mkdir(dirname(abs), { recursive: true });
@@ -1001,8 +1160,23 @@ export class ConnectorManager {
       type: binding.type,
       version: binding.version ?? manifest.version,
       ...(binding.displayName ? { displayName: binding.displayName } : {}),
+      // `_meta.json` answers "what is this directory?" for anyone already
+      // reading the files. For an observation corpus the honest answer is
+      // "not files you should read" — the data is columnar and belongs to the
+      // query tools — so say the shape plainly and name the tables.
+      shape: pass.observations ? ('observations' as const) : ('documents' as const),
       scopes: pass.scopes,
       completeness: manifest.completeness ?? 'mirror',
+      ...(pass.observations
+        ? {
+            tables: pass.observations.tables.map((t) => ({
+              table: t.table,
+              partitions: t.partitions,
+              schemaInferred: t.manifestInferred,
+            })),
+            rowsLastPass: pass.observations.rowsWritten,
+          }
+        : {}),
       ...(pass.lastSyncedAt ? { lastSyncedAt: pass.lastSyncedAt } : {}),
     };
     await writeFileAtomic(abs, `${JSON.stringify(meta, null, 2)}\n`);

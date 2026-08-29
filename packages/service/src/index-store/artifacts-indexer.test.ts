@@ -205,3 +205,26 @@ describe('ContentIndex artifacts façade', () => {
     expect(capped.truncated).toBe(true);
   });
 });
+
+describe('observation corpora are not text-indexed', () => {
+  it('skips the tables/ subtree so partition directories cost nothing', async () => {
+    // A normal corpus record, which must still be indexed.
+    await seedRecord(POST_1, '# First light\nThe zonnebloem stood tall.\n');
+
+    // An observation corpus. The stray markdown is the point: the subtree is
+    // skipped at the directory level, not merely filtered by extension, so a
+    // corpus with thousands of partitions never costs a readdir per pass — and
+    // log rows never reach the vector index, where near-identical text
+    // collapses the space and degrades retrieval for everything else.
+    await seedRecord('data/traffic/tables/requests/dt=2026-08-04/notes.md', '# not indexed\n');
+    const partition = join(artifacts, 'data/traffic/tables/requests/dt=2026-08-04');
+    await writeFile(join(partition, 'part-000000.parquet'), 'PAR1');
+    await writeFile(join(partition, 'sealed-000001.ndjson'), '{"a":1}\n');
+
+    const stats = await indexProjectArtifacts(store, home, PROJECT);
+    expect(stats).toEqual({ files: 1, indexed: 1, removed: 0 });
+
+    const listed = await ci.listArtifactIndexFiles(PROJECT);
+    expect(listed).toEqual([POST_1]);
+  });
+});

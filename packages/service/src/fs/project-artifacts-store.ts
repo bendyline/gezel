@@ -2,10 +2,15 @@ import type { Stats } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
-import { isReservedDiffpackArtifactPath, isReservedShadowArtifactPath } from '@bendyline/gezel';
+import {
+  isReservedDiffpackArtifactPath,
+  isReservedShadowArtifactPath,
+  isReservedTabularArtifactPath,
+} from '@bendyline/gezel';
 import {
   type ExternalFolders,
   PROJECT_SHADOW_DIR_NAME,
+  PROJECT_TABULAR_DIR_NAME,
   projectArtifactsDir,
 } from '@bendyline/gezel/paths';
 import { writeFileAtomic } from './atomic.js';
@@ -109,6 +114,16 @@ export class ShadowPathWriteDeniedError extends Error {
   }
 }
 
+export class TabularPathWriteDeniedError extends Error {
+  readonly code = 'tabular-readonly' as const;
+  constructor() {
+    super(
+      'artifacts/tabular/ holds tables derived from workspace spreadsheets and data files, rebuilt automatically whenever the source file changes. Anything written there would be overwritten. Write your file elsewhere in artifacts.',
+    );
+    this.name = 'TabularPathWriteDeniedError';
+  }
+}
+
 export class ArtifactPathNotFoundError extends Error {
   readonly code = 'artifact-not-found' as const;
   constructor(path: string) {
@@ -155,11 +170,11 @@ export class ProjectArtifactsStore {
     const entries = await listDirEntries(this.projectArtifactsDir(id), subpath, {
       includeHidden: opts?.includeHidden === true,
     });
-    // The reserved shadow cache stays out of listings (it would drown real
-    // artifacts); explicit-path reads under shadow/ still work. `includeHidden`
-    // is the user asking to see it anyway.
+    // The reserved derived caches stay out of listings (they would drown real
+    // artifacts); explicit-path reads under them still work. `includeHidden`
+    // is the user asking to see them anyway.
     if (subpath !== '' || opts?.includeHidden) return entries;
-    return entries.filter((e) => !(e.isDirectory && e.name === PROJECT_SHADOW_DIR_NAME));
+    return entries.filter((e) => !(e.isDirectory && RESERVED_ROOT_SKIP.has(e.name)));
   }
 
   async listProjectArtifactsRecursive(
@@ -194,7 +209,7 @@ export class ProjectArtifactsStore {
       ...(opts?.includeHidden ? { includeHidden: true } : {}),
       // The reserved shadow cache only exists at the drawer root; scoping the
       // walk into a subtree makes a same-named folder there an ordinary one.
-      ...(subpath === '' ? { skipRootDirs: SHADOW_SKIP } : {}),
+      ...(subpath === '' ? { skipRootDirs: RESERVED_ROOT_SKIP } : {}),
     });
     if (subpath === '') return walked;
     return {
@@ -252,7 +267,7 @@ export class ProjectArtifactsStore {
     if (!targetBase) return { kind: 'missing' };
     // Shadow twins must not hijack fuzzy basename lookups — a converted
     // `architecture.md` would otherwise shadow the artifact the model meant.
-    const all = await walkDir(base, { skipRootDirs: SHADOW_SKIP });
+    const all = await walkDir(base, { skipRootDirs: RESERVED_ROOT_SKIP });
     const matches = all.filter((e) => !e.isDirectory && e.name.toLowerCase() === targetBase);
     if (matches.length === 1) {
       const hit = matches[0]!;
@@ -405,6 +420,7 @@ export class ProjectArtifactsStore {
     // only legitimate writer is the indexer's converter, which bypasses this
     // store entirely, so every write arriving here is a mistake.
     if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
+    if (isReservedTabularArtifactPath(cleaned)) throw new TabularPathWriteDeniedError();
     if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
@@ -424,6 +440,7 @@ export class ProjectArtifactsStore {
     if (!cleaned) throw new Error('empty artifact path');
     assertNoTemplatePlaceholderPath(cleaned);
     if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
+    if (isReservedTabularArtifactPath(cleaned)) throw new TabularPathWriteDeniedError();
     if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
@@ -449,6 +466,7 @@ export class ProjectArtifactsStore {
     if (!cleaned) throw new Error('empty artifact path');
     assertNoTemplatePlaceholderPath(cleaned);
     if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
+    if (isReservedTabularArtifactPath(cleaned)) throw new TabularPathWriteDeniedError();
     if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
     const full = safeJoin(base, cleaned);
     if (!full) throw new Error('path traversal blocked');
@@ -474,6 +492,9 @@ export class ProjectArtifactsStore {
     assertNoTemplatePlaceholderPath(to);
     if (isReservedShadowArtifactPath(from) || isReservedShadowArtifactPath(to)) {
       throw new ShadowPathWriteDeniedError();
+    }
+    if (isReservedTabularArtifactPath(from) || isReservedTabularArtifactPath(to)) {
+      throw new TabularPathWriteDeniedError();
     }
     const fromFull = safeJoin(base, from);
     const toFull = safeJoin(base, to);
@@ -509,7 +530,16 @@ async function pathExists(full: string): Promise<boolean> {
   }
 }
 
-const SHADOW_SKIP: ReadonlySet<string> = new Set([PROJECT_SHADOW_DIR_NAME]);
+/**
+ * Reserved roots hidden from default artifact listings and from the fuzzy
+ * basename walk. Both are derived caches: surfacing them would spend the
+ * walk budget on machine output and let a shadow twin or a Parquet part
+ * hijack a bare-filename lookup.
+ */
+const RESERVED_ROOT_SKIP: ReadonlySet<string> = new Set([
+  PROJECT_SHADOW_DIR_NAME,
+  PROJECT_TABULAR_DIR_NAME,
+]);
 
 /**
  * Strip leading `./`, `/`, and repeated `artifacts/` prefixes. Defense

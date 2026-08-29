@@ -46,6 +46,7 @@ import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
 import { createCodexSetupManager } from './codex-setup/manager.js';
 import { ConnectorActionManager } from './connectors/actions.js';
 import { ConnectorManager, corpusDirFor } from './connectors/manager.js';
+import { registerAzureMonitorLogsAdapters } from './connectors/natives/azure-monitor-logs.js';
 import { registerBlueskyAdapters } from './connectors/natives/bluesky-posts.js';
 import { registerCalendarAdapters } from './connectors/natives/calendar-google.js';
 import { registerGitHubPullsAdapters } from './connectors/natives/github-pulls.js';
@@ -55,6 +56,8 @@ import { registerInstagramAdapters } from './connectors/natives/instagram-media.
 import { registerLinkedInAdapters } from './connectors/natives/linkedin-posts.js';
 import { registerXAdapters } from './connectors/natives/x-posts.js';
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
+import { DuckRunner } from './observations/duck.js';
+import { runObservationNightly } from './observations/nightly.js';
 import { runConnectorTaskPrep } from './connectors/task-prep.js';
 import { listApplicableCraftbooks, projectCraftbookSummaries } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
@@ -2106,6 +2109,15 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     },
   });
   indexEnrichmentRef = indexEnrichment;
+  // Stateless: one short-lived child per statement, so there is nothing to
+  // start or stop. Constructing it when no binary is installed is deliberate —
+  // the query routes then return an actionable "engine not installed" rather
+  // than the daemon refusing to boot over a feature most projects never use.
+  const duck = new DuckRunner();
+  // The index's derived-table drain needs the engine, but the index is
+  // constructed far earlier in boot order — hand it over once both exist.
+  contentIndex.setDuckRunner(duck);
+
   // Night bug fixing: once the shift's index sweep drains, hand every
   // qualifying project's open Boekwachter issues to its developer, who drafts
   // change proposals into artifacts. Runs here rather than on activation so
@@ -2124,6 +2136,17 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       history,
       nightShiftWindow: () => nightShift.currentWindow(),
     }).catch((err) => log.warn(`[diffpack] night fix planning failed: ${String(err)}`));
+
+    // Observation-corpus maintenance rides the same edge: compact the
+    // NDJSON that daytime syncs left sealed, materialize declared rollups
+    // for the partitions that changed, then apply retention. Deliberately
+    // NOT done inline at sync time — compaction is minutes of CPU on a large
+    // pass, and the rows are already queryable before it runs.
+    await runObservationNightly({
+      store,
+      duck,
+      nightShiftWindow: () => nightShift.currentWindow(),
+    }).catch((err) => log.warn(`[observations] nightly maintenance failed: ${String(err)}`));
   });
   // Scan-complete → immediate embed drain: the moment a workspace scan
   // enrolls files, the always-on local embed tiers start filling vectors —
@@ -2182,6 +2205,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   registerLinkedInAdapters();
   registerGitHubReleasesAdapters();
   registerGitHubWikiAdapters();
+  registerAzureMonitorLogsAdapters();
   // Sync passes, binding mutations, and action commits all read-modify-write
   // the same project state (project.json bindings, the corpus, the `_actions`
   // staging dirs), so the sync manager and the action manager share ONE lock —
@@ -2584,6 +2608,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     diffpacks,
     connectors,
     connectorActions,
+    duck,
     renderer,
     imageProvider,
     imagePulls,

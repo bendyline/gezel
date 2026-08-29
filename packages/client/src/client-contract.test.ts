@@ -10,6 +10,34 @@ interface ContractCase {
 }
 
 const cases: ContractCase[] = [
+  {
+    name: 'list observation tables',
+    method: 'POST',
+    path: '/api/projects/p1/tools/list-tables',
+    body: {},
+    invoke: (c) => c.toolListTables('p1'),
+  },
+  {
+    name: 'describe an observation table',
+    method: 'POST',
+    path: '/api/projects/p1/tools/describe-table',
+    body: { table: 'requests' },
+    invoke: (c) => c.toolDescribeTable('p1', { table: 'requests' }),
+  },
+  {
+    name: 'query observation tables',
+    method: 'POST',
+    path: '/api/projects/p1/tools/query-table',
+    body: { sql: 'SELECT 1', limit: 10 },
+    invoke: (c) => c.toolQueryTable('p1', { sql: 'SELECT 1', limit: 10 }),
+  },
+  {
+    name: 'observation table routes escape the project id',
+    method: 'POST',
+    path: '/api/projects/p%2F1/tools/list-tables',
+    body: {},
+    invoke: (c) => c.toolListTables('p/1'),
+  },
   { name: 'health', method: 'GET', path: '/api/health', invoke: (c) => c.health() },
   {
     name: 'system diagnostics',

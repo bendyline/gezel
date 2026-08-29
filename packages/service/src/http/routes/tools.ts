@@ -17,6 +17,8 @@ import { readFile as fsReadFile, mkdir, stat, writeFile } from 'node:fs/promises
 import { join, posix, relative, resolve, sep, win32 } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import {
+  DescribeTableRequestSchema,
+  QueryTableRequestSchema,
   ArchiveExtractRequestSchema,
   type ArchiveExtractResponse,
   ArchiveListRequestSchema,
@@ -72,6 +74,16 @@ import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { Hono } from 'hono';
 import type { ReadEntry } from 'tar';
 import { suggestCraftbooks, usefulCraftbooksForSearch } from '../../craftbook/suggest.js';
+import { DuckQueryError, DuckUnavailableError } from '../../observations/duck.js';
+import {
+  NoTablesError,
+  findTable,
+  listProjectTables,
+  renderTableDescription,
+  runQuery,
+  summarizeTable,
+} from '../../observations/query.js';
+import { SqlRejectedError } from '../../observations/statement-guard.js';
 import { buildPrOverlay } from '../../filemap/pr-overlay.js';
 import { PathSafetyError, resolveInside, safeJoin } from '../../fs/safe-paths.js';
 import { ensureGezel } from '../../gezels/ensure.js';
@@ -447,6 +459,78 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       }
       return c.json(
         { error: `grep failed: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
+    }
+  });
+
+  // ── observation tables ─────────────────────────────────────────────────
+  //
+  // The read side of a tabular connector corpus. `query-table` is the only
+  // route in this file that runs caller-supplied SQL, and it never does so
+  // unvalidated: `runQuery` puts every statement through DuckDB's own parser
+  // first. See observations/statement-guard.ts for why a leading-keyword
+  // check would not be enough.
+
+  app.post('/:id/tools/list-tables', async (c) => {
+    const id = c.req.param('id');
+    const project = await ctx.store.getProject(id);
+    if (!project) return c.json({ error: 'project not found' }, 404);
+    const tables = await listProjectTables(ctx.store, project);
+    return c.json({ tables: tables.map(summarizeTable) });
+  });
+
+  app.post('/:id/tools/describe-table', async (c) => {
+    const id = c.req.param('id');
+    const project = await ctx.store.getProject(id);
+    if (!project) return c.json({ error: 'project not found' }, 404);
+    const body = DescribeTableRequestSchema.parse(await c.req.json());
+    const tables = await listProjectTables(ctx.store, project);
+    const ref = findTable(tables, body.table);
+    if (!ref) {
+      // Naming what IS there turns a dead end into the next call.
+      const available = tables.map((t) => t.queryName);
+      return c.json(
+        {
+          error:
+            available.length > 0
+              ? `no table named '${body.table}'; available: ${available.join(', ')}`
+              : `no table named '${body.table}'; this project has no observation tables yet`,
+          code: 'table-not-found',
+        },
+        404,
+      );
+    }
+    return c.json({
+      table: ref.queryName,
+      markdown: renderTableDescription(ref),
+      summary: summarizeTable(ref),
+    });
+  });
+
+  app.post('/:id/tools/query-table', async (c) => {
+    const id = c.req.param('id');
+    const project = await ctx.store.getProject(id);
+    if (!project) return c.json({ error: 'project not found' }, 404);
+    const body = QueryTableRequestSchema.parse(await c.req.json());
+    try {
+      return c.json(await runQuery({ store: ctx.store, duck: ctx.duck }, project, body));
+    } catch (err) {
+      // A rejected statement is the caller's mistake to fix, so it comes back
+      // as a 400 carrying the reason verbatim; a missing engine or an absent
+      // corpus is a 409 the caller cannot repair by rewriting the SQL.
+      if (err instanceof SqlRejectedError) {
+        return c.json({ error: err.message, code: err.code }, 400);
+      }
+      if (err instanceof NoTablesError || err instanceof DuckUnavailableError) {
+        return c.json({ error: err.message, code: err.code }, 409);
+      }
+      if (err instanceof DuckQueryError) {
+        // DuckDB's own text, forwarded so the model can repair its SQL.
+        return c.json({ error: err.message, code: err.code }, 400);
+      }
+      return c.json(
+        { error: `query failed: ${err instanceof Error ? err.message : String(err)}` },
         500,
       );
     }

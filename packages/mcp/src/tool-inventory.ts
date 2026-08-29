@@ -291,6 +291,14 @@ export const CONDITIONALLY_REGISTERED_TOOLS = {
     envValue: '1',
     modelFacing: false,
   },
+  // Observation-table tools — registered only for projects that actually hold
+  // a tabular corpus (the chat manager sets GEZEL_TABLES_ENABLED after a
+  // directory probe). The tool listing is injected into every system prompt,
+  // so three tools a project can never use are pure prompt cost at depth —
+  // and a model that sees a tool tends to reach for it.
+  list_tables: { envVar: 'GEZEL_TABLES_ENABLED', envValue: '1', modelFacing: true },
+  describe_table: { envVar: 'GEZEL_TABLES_ENABLED', envValue: '1', modelFacing: true },
+  query_table: { envVar: 'GEZEL_TABLES_ENABLED', envValue: '1', modelFacing: true },
   // Email write tools — registered only for mail-enabled projects (the chat
   // manager sets GEZEL_MAIL_ENABLED when project.mail is configured).
   draft_email: { envVar: 'GEZEL_MAIL_ENABLED', envValue: '1', modelFacing: true },

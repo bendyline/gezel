@@ -3,7 +3,11 @@ import { existsSync } from 'node:fs';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createLogger, nowIso } from '@bendyline/gezel';
-import { PROJECT_SHADOW_DIR_NAME, projectArtifactsIndexDbFile } from '@bendyline/gezel/paths';
+import {
+  CONNECTOR_TABLES_DIR_NAME,
+  PROJECT_SHADOW_DIR_NAME,
+  projectArtifactsIndexDbFile,
+} from '@bendyline/gezel/paths';
 import type { Store } from '../fs/store.js';
 import { classifyFile, isDenseBlob } from './classify.js';
 import { chunkMarkdown } from './docs.js';
@@ -23,7 +27,8 @@ import { IndexStore } from './index-store.js';
  * mtime+size gate, then content-hash gate, replace-by-file writes, prune of
  * vanished records. Only `.md` records are indexed; the corpus's mutable
  * `_`-prefixed surface (`_meta.json`, `_actions/`, `_flags.json`),
- * `attachments/` payloads, and any reserved `shadow/` subtree are skipped.
+ * `attachments/` payloads, any reserved `shadow/` subtree, and the `tables/`
+ * subtree of an observation corpus are skipped.
  */
 
 const log = createLogger('index:artifacts');
@@ -98,7 +103,19 @@ async function walkCorpus(
       if (e.name.startsWith('_')) continue;
       const childRel = `${rel}/${e.name}`;
       if (e.isDirectory()) {
-        if (e.name === 'attachments' || e.name === PROJECT_SHADOW_DIR_NAME) continue;
+        // `tables/` holds observation corpora: partitioned Parquet and NDJSON,
+        // never markdown. The `.md` filter below already excludes the files,
+        // but descending would still `readdir` one directory per partition —
+        // thousands on a busy corpus — on every pass, for nothing. Skipping at
+        // the directory level is also what keeps log rows out of the vector
+        // index, where near-identical text collapses the space and degrades
+        // retrieval for the corpora that need it.
+        if (
+          e.name === 'attachments' ||
+          e.name === PROJECT_SHADOW_DIR_NAME ||
+          e.name === CONNECTOR_TABLES_DIR_NAME
+        )
+          continue;
         queue.push(childRel);
         continue;
       }

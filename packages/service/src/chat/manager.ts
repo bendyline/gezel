@@ -65,6 +65,7 @@ import { autoAllowedToolsForToolsets, buildAutoAllowHook } from '../craftbook/au
 import { toolsetIdsExplicitlyDisabledForStep } from '../craftbook/step-toolsets.js';
 import { resolveInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
+import { hasObservationTables } from '../observations/query.js';
 import { rankProjectsForGezel } from '../gezels/roster.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
 import type { KeurmeesterManager } from '../keurmeester/manager.js';
@@ -14532,6 +14533,12 @@ export class ChatManager {
       this.store.listInstalledToolsets({ kind: 'project', projectId: record.projectId }),
     ]);
     const projectWorkspaceDirForMcp = await this.store.projectWorkspaceDir(record.projectId);
+    // Directory probe, not a scan: stops at the first table and reads no
+    // manifests. Only projects that actually hold tabular data get the
+    // observation-table tools registered on their bridge.
+    const hasTables = project
+      ? await hasObservationTables(this.store, project).catch(() => false)
+      : false;
     const discoveredProjectMcp = await discoverProjectMcpToolsets(
       projectWorkspaceDirForMcp,
       record.projectId,
@@ -14842,6 +14849,7 @@ export class ChatManager {
       providerName: record.providerName,
       executionDensity,
       project,
+      hasObservationTables: hasTables,
       workspaceFiles,
       ...(workspaceListing.truncated ? { workspaceFilesTruncated: true } : {}),
       documentFiles,
@@ -15604,6 +15612,11 @@ export class ChatManager {
           : {}),
         // Only projects with bound connectors expose draft_connector_action.
         ...(project?.connectors?.length ? { GEZEL_CONNECTORS_ENABLED: '1' } : {}),
+        // Same pattern again for the observation-table tools. A project with
+        // no tabular corpus would otherwise carry list_tables/describe_table/
+        // query_table in every system prompt's tool listing for nothing, and
+        // a model that sees a tool tends to reach for it.
+        ...(hasTables ? { GEZEL_TABLES_ENABLED: '1' } : {}),
         // Named script-backed tools from the applied project type; gezel-mcp
         // registers each as a real tool dispatching through the run_script
         // pipeline (script-tools.ts on both sides).

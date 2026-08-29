@@ -54,7 +54,8 @@ native/build/<platform>/            # single-backend engines + helpers
 ├── gezel-sd-server[.exe]
 ├── gezel-whisper-server[.exe]
 ├── gezel-ds4-server                # darwin-arm64 + linux-* (GPU-only)
-├── uv[.exe]
+├── uv[.exe]                        # vendored unmodified, never gezel- prefixed
+├── duckdb[.exe]                    # vendored unmodified; observation-corpus queries
 └── THIRD_PARTY_LICENSES/           # staged per artifact before upload
 
 native/build/<platform>-<variant>/  # multi-backend engines (llama-cpp)
@@ -130,21 +131,47 @@ now.
 
 ## Adding a new engine
 
-1. `mkdir native/engines/<name>/` — copy the shape of `sd-cpp/`.
-2. Write `VERSION` pinning an upstream commit + tag.
-3. Write `build.sh` (POSIX) and `build.ps1` (Windows) that invoke the
-   engine's own CMake and emit a single binary into
-   `native/build/<platform>/<binary-name>`.
-4. Add an entry to `.github/workflows/build-native.yml`'s matrix so
-   the new engine is built on each supported platform.
-5. Teach `packages/service/src/providers/image/factory.ts` (or the
-   equivalent provider for STT/TTS) to look for the new binary.
-6. Add `<binary-name>` to the electron-builder `extraResources`
-   glob so the installer picks it up.
+Two shapes. **Compiled** engines (llama-cpp, sd-cpp, whisper-cpp, ds4)
+clone upstream and build it; **vendored** engines (`uv`, `duckdb`) download
+a prebuilt binary and verify it against a pinned sha256. Copy `sd-cpp/`
+for the first, `uv/` for the second.
 
-That is the entire checklist. No changes to the app, the service
-bootstrap, or the supervisor shape are required — each engine reuses
-`ImageEngineSupervisor` (or analogous) with its own `resolveLaunch()`.
+1. `mkdir native/engines/<name>/` and write `VERSION`. Compiled engines
+   pin an upstream commit + tag; vendored ones add per-platform
+   `sha256_<platform>` digests and keep a real `commit=` so the shared
+   workflow preflight sees the engine as pinned.
+2. Write `build.sh` (POSIX) and `build.ps1` (Windows) emitting a single
+   binary at `native/build/<platform>/<binary-name>[.exe]`. Everything we
+   compile is emitted as `gezel-<name>`; a binary vendored unmodified keeps
+   its upstream name, because the Windows signing allowlist matches on
+   exactly that basename.
+3. Add license text to `native/licenses/`, register it in that directory's
+   `manifest.json`, add a row to the native table in `NOTICE.md`, and add
+   the engine id to `ENGINE_NOTICE_NAMES` in `scripts/check-notice.mjs`.
+4. Add matrix rows to `.github/workflows/build-native.yml`, one per
+   platform. A vendored engine also joins the `matrix.engine != 'uv'`
+   guards on the Windows signing step and the build-host-path assertion.
+5. Add the binary to **both** `NATIVE_PAYLOAD` and `ENGINE_FOR_BINARY` in
+   `scripts/native-payload.mjs`. `scripts/native-payload.test.mjs` asserts
+   the matrix and this table agree in both directions, so a half-finished
+   addition fails the build rather than silently never reaching an
+   installer.
+6. Add the name to `NativeEngineNameSchema`
+   (`packages/core/src/schemas/native-engines.ts`) and `NativeBinaryName`
+   (`packages/core/src/native/discover.ts`), with its `GEZEL_<X>_BIN`
+   variable in the discovery loop. The enum change then forces the four
+   `Record<NativeEngineName, …>` maps in `engines/registry.ts`,
+   `engines/resolver.ts`, `http/routes/engines.ts` and
+   `system/diagnostics.ts` — let `tsc` find them.
+7. Stamp the env var in `packages/app/src/supervisor/index.ts` beside the
+   existing blocks, and teach whichever provider or subsystem consumes the
+   binary to read it.
+8. Windows-unsigned vendored binaries also need a pattern in
+   `packages/app/scripts/third-party-binaries.cjs`.
+
+No electron-builder change is needed — `files:`/`asarUnpack:` already glob
+`native-bin/**/*`. Cut the release with `scripts/cut-native-release.mjs`,
+then re-pin with `scripts/pin-native-release.mjs <ver>`.
 
 ## Adding a first-party helper
 

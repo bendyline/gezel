@@ -746,6 +746,10 @@ KV state survives process death so a returning user doesn't pay cold prefill.
 | `config.llamaCppMlock` / `…FlashAttn` / `…UbatchSize` | off / off / unset | Optional launch flags. |
 | `config.mlxNumCtx` | 32768 | TS-side compaction threshold only (not sent to engine). |
 | `config.mlxKvBits` | **0 (off)** | `--kv-bits`; see §12 caveat. |
+| `config.mlxSpeculativeDecoding` | **unset = on** | MTP speculative decoding, armed for any model with a drafter beside it (§14). `false` disables it everywhere. |
+| `config.mlxSpecDraftModelPath` | unset (convention path) | Explicit drafter directory, overriding the `drafters/<modelDir>-mtp` convention. |
+| `config.mlxSpecBlockSize` | unset (drafter config) | Draft depth override. The configured depth measured optimal; deeper went net-negative. |
+| `GEZEL_MLX_SPEC` | unset | `off` kills speculation engine-side; `greedy-only` restricts it to greedy, processor-free turns. |
 | `config.mlxPrefillStepSize` | 2048 | `--prefill-step-size` (peak-memory vs. speed). |
 | `config.mlxDiskCacheBudgetMb` | 8192 | `--disk-cache-budget-mb` (0 disables disk pruning). |
 | `config.localEngineIdleTimeoutMs` | 30 min | Idle SIGTERM; freeze fires at half. |
@@ -1091,6 +1095,53 @@ and hits both engines, but llama-server takes its template from the GGUF and
 would need `--chat-template-file`. llama-cpp already achieves 43% prompt-token
 reuse on qwen3.8 (one turn at 92%), so any gain there sits on top of a
 working baseline — unlike MLX, where reuse was ~0.
+
+## 14. MTP speculative decoding (on by default, 2026-08-28)
+
+qwen3.8-27b ships an unused multi-token-prediction head. Driving it as a
+drafter measured **+34% decode against the shipped configuration at both 11k
+and 73k context** (reports/mlx-mtp-rig-20260828.md), and on live 76–81k-token
+agentic turns it sustains 2.4–2.7 accepted tokens per round — the long-context
+workload this whole document exists because of.
+
+**What "on by default" means.** No configuration arms it; a drafter's
+*presence* does. The launcher looks for `<engines>/mlx/drafters/<modelDir>-mtp`
+([spec-drafter.ts](../packages/service/src/providers/mlx/spec-drafter.ts)) and a
+model without one serves exactly as before, with one `[spec] off` line naming
+the reason. The path is keyed on the model directory rather than a base-model
+guess, because string-surgering a quantization suffix is how a drafter ends up
+silently paired with the wrong checkpoint; sharing one across quantizations is
+a symlink or an explicit path, so the decision stays the operator's.
+
+**Two things this must never get wrong, both learned the hard way:**
+
+1. **The drafter is a second resident model.** Its ~0.8 GB is added to the
+   weights term *before* slot planning, because an MLX over-commit aborts the
+   whole python process rather than failing one request (§6's rule, applied to
+   a model the ceiling math otherwise cannot see).
+2. **Constrained decoding must survive it.** Upstream's speculative batch takes
+   a sampler and no logits processors — measured, it applies them to the first
+   token and silently drops them thereafter, which for a tool grammar is worse
+   than having none. So gezel routes: greedy + processor-free turns take the
+   fused path (token-exact against ordinary decode, verified on-device), and
+   everything else takes a sidecar-owned **processed walk** where each
+   position's target logits pass through the request's real processor list
+   before acceptance. Grammar and think-budget therefore consume tokens exactly
+   once, in order, and every emitted token is a draw from the processed target
+   distribution.
+
+**The pin is correctness-forced.** mlx-vlm 0.6.6's MTP verify is
+measured-inexact (greedy speculation diverged from greedy decode), so
+`spec_decode.py` refuses to arm below 0.6.17 regardless of configuration.
+
+**What changes visibly.** Greedy output is identical. *Sampled* output is drawn
+from the same processor-shaped distribution but a different RNG stream
+(positioned, per-(seed,position) keys), so sampled text differs token-for-token
+from a non-speculative run of the same prompt — a different sample, not a worse
+one. Per-turn `[spec] stats` lines carry mode, seed, context, and acceptance;
+an A/B arm without them is not evidence.
+
+---
 
 ## 13. Key-file index
 

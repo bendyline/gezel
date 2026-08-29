@@ -324,6 +324,17 @@ export const ProjectSchema = z.object({
    */
   nightlyFixesEnabled: z.boolean().optional(),
   /**
+   * Whether spreadsheets and large data files in the workspace are turned into
+   * queryable tables. Missing = on, deliberately: the capability already gates
+   * itself on a file being too big to simply read, so it only fires where
+   * reading is not an option anyway.
+   *
+   * It spends CPU and disk rather than model time, and it writes only into the
+   * reserved `artifacts/tabular/` cache — but a project full of data fixtures
+   * has no use for it, so the off switch has to exist and has to be findable.
+   */
+  workspaceTablesEnabled: z.boolean().optional(),
+  /**
    * Which knowledge catalogs are in scope for sessions here. Absent =
    * inherit the user's global enabled set. Unresolvable refs under
    * 'selected' are retained so a restored project regains its selection
@@ -508,6 +519,17 @@ export function projectAllowsNightlyFixes(project: {
   nightlyFixesEnabled?: boolean;
 }): boolean {
   return project.nightlyFixesEnabled !== false;
+}
+
+/**
+ * True when the project has not opted out of deriving tables from its own
+ * spreadsheets and data files. Missing = on; see `workspaceTablesEnabled`.
+ * The size threshold is the other half of the gate.
+ */
+export function projectAllowsWorkspaceTables(project: {
+  workspaceTablesEnabled?: boolean;
+}): boolean {
+  return project.workspaceTablesEnabled !== false;
 }
 
 export const InstalledPackageSchema = z.object({

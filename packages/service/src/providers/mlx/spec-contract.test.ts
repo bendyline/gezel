@@ -27,10 +27,23 @@ describe('MLX MTP speculative-decoding contract', () => {
     }
   });
 
-  it('speculation is config-gated and never armed by default', () => {
-    // An unset mlxSpecDraftModelPath must produce zero spec flags — the
-    // feature is opt-in until the eval gates say otherwise.
-    expect(BUILDER).toMatch(/config\.mlxSpecDraftModelPath\s*\n?\s*\?/);
+  it('arms from a resolved drafter, not from raw config', () => {
+    // Default-on means "on when a drafter exists beside the model", so the
+    // launcher must go through the resolver (which also prices the drafter
+    // into the weights term) rather than reading a config path directly.
+    expect(BUILDER).toContain('resolveSpecDrafter(');
+    expect(BUILDER).toMatch(/specArgs[^=]*=\s*specDrafter/);
+  });
+
+  it('prices the drafter into the memory plan', () => {
+    // A drafter is a second resident model. Leaving its bytes out of
+    // mlxWeightsBytes under-reserves, and an MLX over-commit aborts the
+    // whole python process rather than failing one request.
+    expect(BUILDER).toMatch(/mlxWeightsBytes\s*=[\s\S]{0,200}specDrafter\?\.bytes/);
+  });
+
+  it('keeps a master off switch in config', () => {
+    expect(BUILDER).toContain('config.mlxSpeculativeDecoding');
   });
 
   it('the sidecar refuses mlx-vlm lines with inexact MTP verify', () => {
@@ -64,9 +77,9 @@ describe('MLX MTP speculative-decoding contract', () => {
     // The sidecar imports mlx_lm.generate.BatchGenerator unconditionally,
     // so a venv provisioned without an explicit mlx-lm pin kills the
     // batch engine at import time — on every fresh install, silently.
-    const [, minor, patch] = (MLX_DEFAULT_PACKAGE_SPEC.match(/==0\.(\d+)\.(\d+)/) ?? []).map(
-      Number,
-    );
+    const m = MLX_DEFAULT_PACKAGE_SPEC.match(/==0\.(\d+)\.(\d+)/);
+    expect(m, `unparseable pin: ${MLX_DEFAULT_PACKAGE_SPEC}`).not.toBeNull();
+    const [minor, patch] = [Number(m?.[1]), Number(m?.[2])];
     expect(minor * 1000 + patch, 'spec_decode.py refuses MTP below 0.6.17').toBeGreaterThanOrEqual(
       6017,
     );

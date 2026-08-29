@@ -13,6 +13,12 @@
 
 import type { ConnectorTypeManifest } from '@bendyline/gezel';
 import type { ScriptRunner } from '../../scripts/runner.js';
+import {
+  type ObservationSourceSpec,
+  isObservationNormalize,
+  observationPageRef,
+  toObservationBatches,
+} from '../observation-normalize.js';
 import { type NormalizeSpec, applyNormalize, jget, ordinalKeyFromTs } from '../normalize.js';
 import { connectorCredentialName } from '../registry.js';
 import type {
@@ -20,6 +26,7 @@ import type {
   ChangeBatch,
   ConnectorAdapter,
   ConnectorBindingRef,
+  ConnectorRecord,
   NormalizedRecord,
   RecordRef,
 } from '../types.js';
@@ -32,13 +39,25 @@ interface ScriptSource {
   idPath?: string;
   /** Path to a record timestamp — drives newest-first ordering under the cap. */
   tsPath?: string;
+  /** Tabular sources: table name, column mapping, partition. See
+   *  observation-normalize.ts for why this lives in `source`. */
+  table?: string;
+  tablePath?: string;
+  rowMap?: Record<string, string>;
+  partition?: string;
 }
 
-export class ScriptConnectorAdapter implements ConnectorAdapter {
+export class ScriptConnectorAdapter
+  implements ConnectorAdapter<NormalizedRecord | ConnectorRecord, unknown>
+{
   readonly typeId: string;
   private readonly src: ScriptSource;
   private readonly runner: ScriptRunner;
   private readonly projectId: string;
+  /** True when this type declares the tabular corpus shape. */
+  private readonly observations: boolean;
+  /** Page counter for sources whose cursor is not itself a page number. */
+  private pageSeq = 0;
 
   constructor(
     private readonly type: ConnectorTypeManifest,
@@ -47,6 +66,7 @@ export class ScriptConnectorAdapter implements ConnectorAdapter {
   ) {
     this.typeId = type.id;
     this.src = type.source as unknown as ScriptSource;
+    this.observations = isObservationNormalize(type.normalize);
     if (!deps.scriptRunner || !deps.projectId) {
       throw new Error("the 'script' driver requires a script runner + project id");
     }
@@ -86,8 +106,20 @@ export class ScriptConnectorAdapter implements ConnectorAdapter {
       rateLimited?: unknown;
       partial?: unknown;
     };
+    const items = out.records ?? [];
+    if (this.observations) {
+      // One ref per PAGE. The engine's backfill cap counts refs, so mapping a
+      // 10,000-row page to 10,000 refs would silently window most of it away.
+      const pageIndex = typeof out.cursor === 'number' ? out.cursor : (this.pageSeq += 1);
+      return {
+        records: items.length > 0 ? [observationPageRef(items, pageIndex)] : [],
+        cursor: out.cursor,
+        ...(out.rateLimited === true ? { rateLimited: true } : {}),
+        ...(out.partial === true ? { partial: true } : {}),
+      };
+    }
     const idPath = this.src.idPath ?? '$.id';
-    const records: RecordRef[] = (out.records ?? []).map((r, i) => {
+    const records: RecordRef[] = items.map((r, i) => {
       const ts = this.src.tsPath ? jget(r, this.src.tsPath) : undefined;
       return {
         id: String(jget(r, idPath) ?? i),
@@ -111,7 +143,13 @@ export class ScriptConnectorAdapter implements ConnectorAdapter {
     };
   }
 
-  async fetchRecord(_scope: string, ref: RecordRef): Promise<NormalizedRecord> {
+  async fetchRecord(_scope: string, ref: RecordRef): Promise<ConnectorRecord | NormalizedRecord> {
+    if (this.observations) {
+      return {
+        kind: 'observations',
+        batches: toObservationBatches(ref.raw, this.src as ObservationSourceSpec, this.type.id),
+      };
+    }
     return applyNormalize(this.type.normalize as NormalizeSpec, ref.raw, {
       namespace: this.type.id,
       runScript: async (scriptName, raw) => {

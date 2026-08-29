@@ -134,6 +134,8 @@ import {
   ExecutionToolOutputSchema,
   GitToolOutputSchema,
   ListToolOutputSchema,
+  TableDescribeToolOutputSchema,
+  TableQueryToolOutputSchema,
   MemoryListToolOutputSchema,
   MemorySaveToolOutputSchema,
   SearchToolOutputSchema,
@@ -1208,6 +1210,195 @@ function registerConnectorTools() {
 
 if (process.env.GEZEL_CONNECTORS_ENABLED === '1') {
   registerConnectorTools();
+}
+
+// ── Observation tables (the tabular connector corpus) ───────────────────────
+//
+// A document corpus is read as files: `list_artifacts` then `read_artifact`.
+// That does not work past a few thousand records, and it is the wrong shape
+// entirely for telemetry — a million rows will not fit a context window and
+// no amount of reading them produces `p95 by route`.
+//
+// So these three tools invert the access pattern: the gezel reads a SCHEMA
+// and then an ANSWER, never the rows. That is what lets a table be far larger
+// than the model's context. Registered only for projects that actually hold a
+// tabular corpus (GEZEL_TABLES_ENABLED).
+function registerObservationTableTools(): void {
+  server.tool(
+    'list_tables',
+    "List this project's mirrored data tables — the tabular corpora connectors sync (web traffic, logs, exports). These hold far too many rows to read as files; query them with `query_table` instead. Start here when a question is about counts, totals, rates, or trends over time rather than about a document's contents.",
+    {},
+    async () => {
+      try {
+        const res = await api.toolListTables(projectId);
+        if (res.tables.length === 0) {
+          return okResult(ListToolOutputSchema, {
+            summary:
+              'This project has no data tables. They appear once a data connector has been synced, or once a spreadsheet or large data file in the workspace has been indexed.',
+            items: [],
+            count: 0,
+          });
+        }
+        const lines = res.tables.map((t) => {
+          const span =
+            t.earliestPartition && t.latestPartition
+              ? `, ${t.earliestPartition}→${t.latestPartition}`
+              : '';
+          const inferred = t.schemaInferred ? ', schema inferred' : '';
+          // Naming the source matters most for a workspace table: "which
+          // spreadsheet is this?" is the question a user actually asks, and
+          // the file path is the answer.
+          const from = t.origin === 'workspace' ? ` · from ${t.source}` : ` · ${t.source}`;
+          return `📊 ${t.table} — ${t.rows.toLocaleString('en-US')} rows, ${t.columns} columns${span}${inferred}${from}${t.grain ? ` · ${t.grain}` : ''}`;
+        });
+        return okResult(
+          ListToolOutputSchema,
+          {
+            summary: `${res.tables.length} data table(s). Call describe_table before writing SQL — it gives you the columns, their units, and worked example queries.`,
+            items: res.tables as unknown as Record<string, unknown>[],
+            count: res.tables.length,
+          },
+          { text: `${lines.join('\n')}\n\nCall \`describe_table\` on one before querying it.` },
+        );
+      } catch (err) {
+        return errorResult(`list_tables failed: ${unwrapApiError(err)}`);
+      }
+    },
+  );
+
+  server.tool(
+    'describe_table',
+    'Explain one data table before you query it: every column with its type, role and unit, what one row represents, which column to filter on for speed, and worked example queries. Always call this before `query_table` on a table you have not queried this session — guessing column names wastes a turn, and the units are how you avoid answering in the wrong magnitude.',
+    {
+      table: z
+        .string()
+        .min(1)
+        .max(200)
+        .describe('Table name as reported by `list_tables`.'),
+    },
+    async ({ table }) => {
+      try {
+        const res = await api.toolDescribeTable(projectId, { table });
+        return okResult(
+          TableDescribeToolOutputSchema,
+          {
+            summary: `Schema for ${res.table}: ${res.summary.columns} columns over ${res.summary.rows.toLocaleString('en-US')} rows.`,
+            table: res.table,
+            markdown: res.markdown,
+            rows: res.summary.rows,
+            columns: res.summary.columns,
+            ...(res.summary.schemaInferred ? { schemaInferred: true } : {}),
+          },
+          { text: res.markdown },
+        );
+      } catch (err) {
+        return errorResult(`describe_table failed: ${unwrapApiError(err)}`, {
+          hint: 'call list_tables to see which tables exist',
+        });
+      }
+    },
+  );
+
+  server.tool(
+    'query_table',
+    "Run ONE read-only SQL query against this project's data tables and get the answer back. Aggregate in SQL — GROUP BY, counts, sums, percentiles — rather than selecting raw rows and reasoning over them; the tables are far too large for that and the point of this tool is that you never handle the rows. Filter on the partition column named by `describe_table` whenever the question allows, since that skips whole files. DuckDB SQL. Only SELECT/WITH/FROM/DESCRIBE/SUMMARIZE are accepted; the corpus mirrors an external source and cannot be modified.",
+    {
+      sql: z
+        .string()
+        .min(1)
+        .max(20_000)
+        .describe(
+          'One read-only SQL statement. Reference tables by the names `list_tables` reported.',
+        ),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(10_000)
+        .optional()
+        .describe('Maximum rows to return (default 100). Aggregate rather than raising this.'),
+      tables: coerceStringArray(
+        z
+          .array(z.string().min(1).max(200))
+          .max(32)
+          .optional()
+          .describe('Restrict which tables are in scope. Default: all of them.'),
+      ),
+      timeoutMs: z
+        .number()
+        .int()
+        .min(1_000)
+        .max(300_000)
+        .optional()
+        .describe('Query deadline in milliseconds (default 60000).'),
+    },
+    async ({ sql, limit, tables, timeoutMs }) => {
+      try {
+        const res = await api.toolQueryTable(projectId, {
+          sql,
+          ...(limit !== undefined ? { limit } : {}),
+          ...(tables !== undefined ? { tables } : {}),
+          ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        });
+        const summary = res.rows.length
+          ? `${res.rows.length} row(s)${res.truncated ? ` (capped at ${res.limit}; more matched)` : ''}.`
+          : 'The query matched no rows.';
+        const truncation = res.truncated
+          ? `\n\nOnly the first ${res.limit} row(s) are shown and more matched. Aggregate further, add a WHERE clause, or raise \`limit\`.`
+          : '';
+        return okResult(
+          TableQueryToolOutputSchema,
+          {
+            summary,
+            rows: res.rows,
+            columns: res.columns,
+            count: res.rows.length,
+            truncated: res.truncated,
+            limit: res.limit,
+            tablesInScope: res.tablesInScope,
+          },
+          { text: `${summary}\n\n${renderResultTable(res.columns, res.rows)}${truncation}` },
+        );
+      } catch (err) {
+        // The daemon forwards DuckDB's own message — including its "did you
+        // mean" column suggestions — which is far more repairable than
+        // anything this layer could invent.
+        return errorResult(`query_table failed: ${unwrapApiError(err)}`, {
+          hint: 'call describe_table for the exact column names and types',
+        });
+      }
+    },
+  );
+}
+
+/**
+ * Render a result set as a markdown table. Cells are truncated and newlines
+ * flattened so one wide value cannot blow the turn's output cap — the caller
+ * already bounded the row count, this bounds the width.
+ */
+function renderResultTable(
+  columns: readonly string[],
+  rows: readonly Record<string, unknown>[],
+): string {
+  if (rows.length === 0 || columns.length === 0) return '(no rows)';
+  const cell = (value: unknown): string => {
+    const text =
+      value === null || value === undefined
+        ? ''
+        : typeof value === 'object'
+          ? JSON.stringify(value)
+          : String(value);
+    const flat = text.replace(/\s*\n\s*/g, ' ').replace(/\|/g, '\\|');
+    return flat.length > 200 ? `${flat.slice(0, 197)}…` : flat;
+  };
+  const head = `| ${columns.join(' | ')} |`;
+  const rule = `| ${columns.map(() => '---').join(' | ')} |`;
+  const body = rows.map((row) => `| ${columns.map((c) => cell(row[c])).join(' | ')} |`);
+  return [head, rule, ...body].join('\n');
+}
+
+if (process.env.GEZEL_TABLES_ENABLED === '1') {
+  registerObservationTableTools();
 }
 
 // ── Project file tools (operate on the default surface: the workspace) ──

@@ -2503,6 +2503,20 @@
   white-space: nowrap;
 }
 
+/* Data tables under a bound connector. A quiet, indented list rather than a
+   stat grid: the reader wants to see that their data arrived and is current,
+   and one sentence per table says that better than a row of counters. */
+.gz-connector-tables {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0 0 0 0.75rem;
+  border-left: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+.gz-connector-tables > li {
+  margin: 0.1rem 0;
+}
+
 .gz-connector-card-meta {
   display: flex;
   flex-wrap: wrap;

@@ -42,6 +42,19 @@ const REPO = 'bendyline/gezel';
 const GITHUB_API = 'https://api.github.com';
 
 /** Map each engine to the env var the providers read (mirrors discover.ts). */
+/**
+ * Engines we redistribute exactly as their upstream published them. They keep
+ * the upstream file name (no `gezel-` prefix) and, on Windows, ship unsigned —
+ * so the signature policy softens to `prefer` and no publisher is asserted.
+ * Kept in lockstep with `UNPREFIXED_BINARIES` in core's native/discover.ts and
+ * the Windows allowlist in packages/app/scripts/third-party-binaries.cjs.
+ */
+const VENDORED_UNMODIFIED_ENGINES = new Set<string>(['uv', 'duckdb']);
+
+function isVendoredUnmodifiedEngine(engine: string): boolean {
+  return VENDORED_UNMODIFIED_ENGINES.has(engine);
+}
+
 const ENGINE_ENV_VAR: Record<NativeBinaryName, string> = {
   'llama-server': 'GEZEL_LLAMA_SERVER_BIN',
   'ds4-server': 'GEZEL_DS4_SERVER_BIN',
@@ -49,6 +62,7 @@ const ENGINE_ENV_VAR: Record<NativeBinaryName, string> = {
   'whisper-server': 'GEZEL_WHISPER_SERVER_BIN',
   'device-health': 'GEZEL_DEVICE_HEALTH_BIN',
   uv: 'GEZEL_UV_BIN',
+  duckdb: 'GEZEL_DUCKDB_BIN',
 };
 
 /**
@@ -144,18 +158,22 @@ export async function* resolveEngine(
   // Build scripts emit the server under a `gezel-` prefix (so the running
   // process reads as `gezel-llama-server` for attribution while keeping the
   // upstream lineage in the suffix). Prefer that name, but fall back to the
-  // bare upstream name so releases cut BEFORE the rename still resolve. `uv`
-  // is vendored unmodified and never prefixed. `engine` stays the logical id.
-  // gezel- prefixed name is primary (`uv` is vendored unmodified, never prefixed).
-  const primaryBinaryFile = engine === 'uv' ? `uv${exeExt}` : `gezel-${engine}${exeExt}`;
-  const binaryFileCandidates =
-    engine === 'uv' ? [primaryBinaryFile] : [primaryBinaryFile, `${engine}${exeExt}`];
+  // bare upstream name so releases cut BEFORE the rename still resolve.
+  // Vendored-unmodified engines are never prefixed. `engine` stays the
+  // logical id.
+  const vendored = isVendoredUnmodifiedEngine(engine);
+  const primaryBinaryFile = vendored ? `${engine}${exeExt}` : `gezel-${engine}${exeExt}`;
+  const binaryFileCandidates = vendored
+    ? [primaryBinaryFile]
+    : [primaryBinaryFile, `${engine}${exeExt}`];
   const requestedPolicy = opts.signaturePolicy ?? 'require';
-  // Astral ships uv.exe unsigned. It remains an explicit, narrow exception:
-  // source-bundled archive SHA + upstream bytes are authoritative, while an
-  // actually invalid Authenticode signature is still rejected by `prefer`.
+  // Astral ships uv.exe and the DuckDB Foundation ships duckdb.exe unsigned.
+  // A narrow, explicit exception: the source-bundled archive SHA plus the
+  // upstream bytes are authoritative, while an actually invalid Authenticode
+  // signature is still rejected by `prefer`. macOS is NOT exempt — the native
+  // build re-signs every Mach-O there because notarization demands it.
   const policy =
-    process.platform === 'win32' && engine === 'uv' && requestedPolicy === 'require'
+    process.platform === 'win32' && vendored && requestedPolicy === 'require'
       ? 'prefer'
       : requestedPolicy;
   const archiveName = `gezel-native-${version}-${assetPlatformKey}.${ext}`;
@@ -175,7 +193,7 @@ export async function* resolveEngine(
   const verifyAuthenticity = opts.verifyOverride ?? verifyCodeSignature;
   const verifyOptions = {
     policy,
-    ...(engine === 'uv' && process.platform === 'win32'
+    ...(vendored && process.platform === 'win32'
       ? {}
       : { expectedPublisher: BENDYLINE_PUBLISHER, expectedAppleTeamId: BENDYLINE_APPLE_TEAM_ID }),
   } as const;

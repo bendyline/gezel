@@ -18,6 +18,7 @@ import {
 import { ProviderNameSchema } from './gezel.js';
 import { HookSpecSchema } from './hook.js';
 import { BehaviorEntrySchema, ModelStyleSchema } from './model-profile.js';
+import { ObservationTableManifestSchema } from './observations.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { PreviewSourceSchema } from './preview.js';
 import { ProjectTabVisibilitySchema } from './project.js';
@@ -1144,6 +1145,19 @@ const ConnectorNormalizeSchema = z.union([
   z.object({ kind: z.literal('mapping'), map: z.record(z.string(), z.unknown()) }),
   z.object({ kind: z.literal('script'), script: z.string() }),
   z.object({ kind: z.literal('native') }),
+  /**
+   * The observation shape: this type mirrors rows into partitioned columnar
+   * tables rather than one markdown file per record. Declaring the tables here
+   * — rather than inferring them — is what lets a source ship real column
+   * documentation, units, and worked example queries as *content*, PR-able to
+   * gilde and shippable without an app release. A type that omits `tables`
+   * still works; its schema is inferred from the rows that land and labelled
+   * as inferred so a model knows the types are a guess.
+   */
+  z.object({
+    kind: z.literal('observations'),
+    tables: z.array(ObservationTableManifestSchema).min(1).max(64).optional(),
+  }),
 ]);
 
 const ConnectorActionSchema = z.object({
