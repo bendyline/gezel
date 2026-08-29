@@ -498,6 +498,33 @@ export async function linkModelIntoTrial(opts: {
   await cloneDirectory(target, link);
 }
 
+/**
+ * Materialize a model's MTP drafter into the trial home, when one exists.
+ *
+ * Speculative decoding arms from a drafter's *presence* beside the model
+ * (`engines/mlx/drafters/<modelId>-mtp`), so a trial home that only received
+ * the model tree runs with speculation silently off — and a core-suite gate
+ * then measures the opposite of what it claims to. Measured the hard way: a
+ * full 11-scenario run produced zero `[spec]` lines.
+ *
+ * Absent drafter is the normal case (most models have none) and stays silent.
+ */
+export async function linkDrafterIntoTrial(opts: {
+  sourceHome: string;
+  trialHome: string;
+  modelId: string;
+}): Promise<boolean> {
+  const { sourceHome, trialHome, modelId } = opts;
+  const name = `${modelId}-mtp`;
+  const target = join(sourceHome, 'engines', 'mlx', 'drafters', name);
+  if (!existsSync(target)) return false;
+  const link = join(trialHome, 'engines', 'mlx', 'drafters', name);
+  if (existsSync(link)) return true;
+  await mkdir(dirname(link), { recursive: true });
+  await cloneDirectory(target, link);
+  return true;
+}
+
 const execFileAsync = promisify(execFile);
 
 /**

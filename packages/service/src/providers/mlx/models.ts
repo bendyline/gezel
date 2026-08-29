@@ -36,7 +36,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve as resolvePath } from 'node:path';
-import { createLogger } from '@bendyline/gezel';
+import { type ChatModelMlxSource, createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
   type ModelBundleSource,
@@ -797,6 +797,8 @@ export class MlxModelManager {
         );
       }
 
+      if (src.drafter) await this.installDrafter(catalogId, src.drafter);
+
       tracked.phase = 'extracting-metadata';
       yield { type: 'extracting-metadata' };
       let summary: Awaited<ReturnType<typeof readMlxSummary>>;
@@ -933,6 +935,87 @@ export class MlxModelManager {
    *                  failed); no terminal event pushed, the failing
    *                  worker owns the error.
    */
+  /**
+   * Install a model's speculative-decoding drafter beside it, if the catalog
+   * declares one.
+   *
+   * Deliberately best-effort and deliberately AFTER the model commits: a
+   * drafter only makes decoding faster — every token it proposes is verified
+   * against the target model — so failing to fetch it must leave a working
+   * install rather than failing one. On any error the model serves normally
+   * and the launcher logs `speculative decoding off — no drafter at <path>`.
+   *
+   * Lands at `engines/mlx/drafters/<catalogId>-mtp`, the path
+   * `resolveSpecDrafter` reads, so installing IS enabling.
+   */
+  private async installDrafter(
+    catalogId: string,
+    drafter: NonNullable<ChatModelMlxSource['drafter']>,
+  ): Promise<void> {
+    const draftersRoot = join(dirname(this.modelsRoot), 'drafters');
+    const destDir = join(draftersRoot, `${catalogId}-${drafter.kind}`);
+    try {
+      // Create before asserting: the containment check resolves realpaths, so
+      // it needs both ends to exist. Same order the model payload uses.
+      await mkdir(draftersRoot, { recursive: true });
+      await assertModelStorePathSafe(draftersRoot, destDir);
+      await mkdir(destDir, { recursive: true });
+      await assertModelStorePathSafe(draftersRoot, destDir);
+      for (const file of drafter.files) {
+        const finalPath = join(destDir, file.name);
+        const tmpPath = `${finalPath}.partial`;
+        await mkdir(dirname(finalPath), { recursive: true });
+        const ref = drafter.revision ?? 'main';
+        const url = `https://huggingface.co/${drafter.huggingfaceRepo}/resolve/${encodeURIComponent(ref)}/${file.name
+          .split('/')
+          .map(encodeURIComponent)
+          .join('/')}?download=true`;
+        const gen = downloadWithRetry({
+          url,
+          destPath: finalPath,
+          approxSizeBytes: file.sizeBytes,
+          fetchImpl: this.fetchImpl,
+        });
+        let done = false;
+        while (!done) {
+          const step = await gen.next();
+          if (step.done) {
+            if (step.value.kind !== 'ok') throw new Error(`download ${step.value.kind}`);
+            done = true;
+          }
+        }
+        const hasher = createHash('sha256');
+        await new Promise<void>((resolveHash, reject) => {
+          const stream = createReadStream(tmpPath, { highWaterMark: MODEL_HASH_READ_BUFFER_BYTES });
+          stream.on('data', (chunk) => hasher.update(chunk));
+          stream.on('end', () => resolveHash());
+          stream.on('error', reject);
+        });
+        const actual = hasher.digest('hex');
+        if (actual !== file.sha256.toLowerCase()) {
+          await rm(tmpPath, { force: true });
+          throw new Error(
+            `sha256 mismatch for ${file.name}: expected ${file.sha256}, got ${actual}`,
+          );
+        }
+        await rm(finalPath, { force: true });
+        await rename(tmpPath, finalPath);
+      }
+      log.info(
+        `[models] [mlx] installed ${drafter.kind} drafter for "${catalogId}" from ` +
+          `${drafter.huggingfaceRepo} (speculative decoding enabled)`,
+      );
+    } catch (err) {
+      // Leave no half-written drafter: a partial one would arm speculation
+      // and then fail at engine boot, which is worse than not having it.
+      await rm(destDir, { recursive: true, force: true }).catch(() => {});
+      log.warn(
+        `[models] [mlx] drafter install skipped for "${catalogId}": ${describeError(err)} ` +
+          `— the model works normally, without speculative decoding`,
+      );
+    }
+  }
+
   private async downloadFileConcurrent(
     itemDir: string,
     repo: string,

@@ -18,8 +18,8 @@ import {
 import { ProviderNameSchema } from './gezel.js';
 import { HookSpecSchema } from './hook.js';
 import { BehaviorEntrySchema, ModelStyleSchema } from './model-profile.js';
-import { ObservationTableManifestSchema } from './observations.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
+import { ObservationTableManifestSchema } from './observations.js';
 import { PreviewSourceSchema } from './preview.js';
 import { ProjectTabVisibilitySchema } from './project.js';
 
@@ -1607,6 +1607,58 @@ export const ChatModelMlxSourceSchema = z
     residentBytes: z.number().int().positive().optional(),
     /** Short quant tag for display (`4bit`, `8bit`, `bf16`). */
     quantization: z.string().optional(),
+    /**
+     * Optional speculative-decoding drafter to install beside the model.
+     *
+     * MLX speculation arms from a drafter's *presence* next to the model
+     * (`engines/mlx/drafters/<modelId>-mtp`), so this block is what turns the
+     * feature on for an entry — no per-user configuration. Absent means the
+     * model simply decodes normally.
+     *
+     * A drafter carries a model's multi-token-prediction head and nothing
+     * else: it binds to the target's embeddings at load, so ONE artifact
+     * serves every quantization of the same base model, and several catalog
+     * entries may legitimately point at the same repo. It cannot change what
+     * the model emits — every proposed token is verified against the target —
+     * so a mismatched or corrupt drafter costs throughput, never correctness.
+     *
+     * Same download contract as the model above (pinned `revision`, per-file
+     * `sha256`), because it rides the same verified install path. Failing to
+     * fetch it is NOT an install failure: the model is usable without it.
+     */
+    drafter: z
+      .object({
+        /** Hugging Face repo id, e.g. `Bendyline/Qwen3.8-27B-mtp-drafter-mlx-4bit`. */
+        huggingfaceRepo: z.string().regex(/^[A-Za-z0-9_\-.]+\/[A-Za-z0-9_\-.]+$/),
+        /** Commit SHA to fetch from. Pin it — `main` can be rewritten. */
+        revision: z.string().optional(),
+        /**
+         * Drafter architecture. `mtp` is the model's own native
+         * multi-token-prediction head; other kinds (eagle3, dflash) use
+         * separately-trained heads and are not wired yet.
+         */
+        kind: z.enum(['mtp']).default('mtp'),
+        /** Files to download, each with an LFS-derived sha256. */
+        files: z
+          .array(
+            z.object({
+              name: ContainedPosixModelPathSchema,
+              sha256: z.string().regex(/^[a-f0-9]{64}$/),
+              sizeBytes: z.number().int().positive(),
+            }),
+          )
+          .min(1),
+        /** Total on-disk size of the drafter. */
+        approxSizeBytes: z.number().int().positive(),
+        /**
+         * Resident cost when speculation is active. The drafter is a second
+         * model in memory, so this is added to the target's weights before
+         * slot planning — an unpriced one is exactly the over-commit that
+         * aborts the MLX process. Absent → the on-disk size is used.
+         */
+        residentBytes: z.number().int().positive().optional(),
+      })
+      .optional(),
     /**
      * Last-resort Jinja chat template to inject into `tokenizer_config.json`
      * when the downloaded tokenizer_config has no `chat_template` and no

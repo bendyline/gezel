@@ -23,7 +23,7 @@ import { patientFetch } from '../patient-fetch.js';
 import { readMlxModelGeometry } from './model-geometry.js';
 import { MlxProvider } from './provider.js';
 import { templateOpensReasoning } from './reasoning-stream.js';
-import { resolveSpecDrafter } from './spec-drafter.js';
+import { drafterDirFor, resolveSpecDrafter } from './spec-drafter.js';
 import { MLX_DEFAULT_PACKAGE_SPEC, MLX_VENV_NAME, mlxVenvPackages } from './venv.js';
 
 const log = createLogger('chat');
@@ -368,6 +368,15 @@ export async function buildMlxProvider(opts: {
     log.info(
       `[mlx] speculative decoding armed (${specDrafter.source}): ${specDrafter.dir} ` +
         `(+${Math.round(specDrafter.bytes / 1024 ** 2)}MB resident, priced into the memory plan)`,
+    );
+  } else if (modelDir && config.mlxSpeculativeDecoding !== false) {
+    // Default-on makes silence the wrong answer: without this line a launch
+    // that quietly found no drafter is indistinguishable from one that armed,
+    // which is exactly how an entire 11-scenario eval measured speculation
+    // OFF while reporting a speculation gate.
+    log.info(
+      `[mlx] speculative decoding off — no drafter at ${drafterDirFor(modelDir)} ` +
+        `(build one to enable; nothing else is required)`,
     );
   }
 
