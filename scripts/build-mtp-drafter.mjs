@@ -41,6 +41,7 @@ const OUT = opt('out', '').replace(/^~/, homedir());
 const BITS = Number(opt('bits', '4'));
 const PYTHON = opt('python', join(homedir(), '.gezel-dev/engines/uv/venvs/mlx/bin/python'));
 const KEEP = args.includes('--keep-source');
+const LICENSE_OVERRIDE = opt('license', '');
 
 if (!OUT) {
   console.error('--out <drafter dir> is required');
@@ -61,6 +62,26 @@ const fetchText = async (url) => {
 
 const staging = mkdtempSync(join(tmpdir(), 'mtp-src-'));
 try {
+  // The drafter is a derivative of the source checkpoint and inherits its
+  // licence — so read it, never assume. This script shipped a hardcoded
+  // apache-2.0 that happened to be right for Qwen and was wrong for the very
+  // next model (Ornith 1.5 is MIT); a mislabelled licence is the kind of
+  // error that is invisible in testing and serious in publication.
+  let license = LICENSE_OVERRIDE;
+  if (!license) {
+    const meta = await fetch(`https://huggingface.co/api/models/${SOURCE}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+    license = meta?.cardData?.license ?? '';
+  }
+  if (!license) {
+    throw new Error(
+      `Could not determine the licence of ${SOURCE}. Pass --license <spdx-id> ` +
+        'explicitly — a derivative must not be published under a guessed licence.',
+    );
+  }
+  console.log(`      source licence: ${license}`);
+
   console.log(`[1/3] resolving ${SOURCE} weight index…`);
   const index = JSON.parse(
     await fetchText(`${HF}/${SOURCE}/resolve/main/model.safetensors.index.json`),
@@ -79,9 +100,8 @@ try {
     );
   }
   const mtpCount = Object.keys(index.weight_map).filter((k) => k.startsWith('mtp.')).length;
-  console.log(
-    `      ${mtpCount} mtp tensors in ${shards.length} of ${new Set(Object.values(index.weight_map)).size} shards`,
-  );
+  const totalShards = new Set(Object.values(index.weight_map)).size;
+  console.log(`      ${mtpCount} mtp tensors in ${shards.length} of ${totalShards} shards`);
 
   // The splitter reads config.json + the index to find the head; tokenizer
   // files ride along into the drafter so it is self-describing.
@@ -148,7 +168,7 @@ print(f"  kind={kind} quantized to {bits}-bit")
   // source checkpoint and carry its license.
   writeFileSync(
     join(OUT, 'README.md'),
-    `---\nbase_model: ${SOURCE}\nlicense: apache-2.0\nlibrary_name: mlx\ntags:\n- mlx\n- speculative-decoding\n- mtp\n---\n\n` +
+    `---\nbase_model: ${SOURCE}\nlicense: ${license}\nlibrary_name: mlx\ntags:\n- mlx\n- speculative-decoding\n- mtp\n---\n\n` +
       `# MTP drafter for ${SOURCE}\n\n` +
       `The native multi-token-prediction head of [${SOURCE}](${HF}/${SOURCE}), extracted as a\n` +
       `standalone MLX drafter${BITS > 0 ? ` and quantized to ${BITS}-bit affine (group 64)` : ''}.\n` +
@@ -162,9 +182,9 @@ print(f"  kind={kind} quantized to {bits}-bit")
       `run on your own machine:\n\n` +
       `\`\`\`bash\ngit clone ${GEZEL_REPO}.git\n` +
       `node scripts/build-mtp-drafter.mjs --source ${SOURCE} --out <dir>${BITS !== 4 ? ` --bits ${BITS}` : ''}\n\`\`\`\n\n` +
-      `The script fetches only the checkpoint shard(s) carrying the \`mtp.*\` tensors (1 of 18 for this\n` +
-      `model), splits the head into a standalone drafter${BITS > 0 ? `, and quantizes it to ${BITS}-bit` : ''}.\n\n` +
-      `## License\n\nApache-2.0, inherited from ${SOURCE}. Weights are a derivative of that checkpoint.\n`,
+      `The script fetches only the checkpoint shard(s) carrying the \`mtp.*\` tensors (${shards.length} of\n` +
+      `${totalShards} for this model), splits the head into a standalone drafter${BITS > 0 ? `, and quantizes it to ${BITS}-bit` : ''}.\n\n` +
+      `## License\n\n${license}, inherited from ${SOURCE}. Weights are a derivative of that checkpoint.\n`,
     'utf8',
   );
 
