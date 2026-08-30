@@ -14863,6 +14863,19 @@ export class ChatManager {
       (envLayeredOverride ??
         config.layeredPrefixCache?.enabled ??
         record.providerName === 'llama-cpp');
+    // Shared-band prefix reuse (ADR 0010). MLX-only and default OFF: it
+    // changes what every session publishes to a shared on-disk cache, and
+    // that surface has produced two wrong diagnoses and one 6.6x-waste
+    // incident. Flip the default only behind the cross-session A/B.
+    const envBand = (process.env.GEZEL_MLX_SHARED_BAND_PREFIX ?? '').trim().toLowerCase();
+    const sharedBandPrefixEnabled =
+      record.providerName === 'mlx' &&
+      (envBand === '1' || envBand === 'true'
+        ? true
+        : envBand === '0' || envBand === 'false'
+          ? false
+          : (config.mlxSharedBandPrefix?.enabled ?? false));
+
     const executionDensity = resolveExecutionDensity(
       config.executionDensity,
       record.providerName,
@@ -15029,6 +15042,9 @@ export class ChatManager {
     const opts: BuiltSessionOpts = {
       systemMessage,
       ...(systemInstructions.layers ? { systemPromptLayers: systemInstructions.layers } : {}),
+      ...(sharedBandPrefixEnabled && systemInstructions.sharedPrefix
+        ? { systemSharedPrefix: systemInstructions.sharedPrefix }
+        : {}),
       ...(volatileContext ? { volatileContext } : {}),
       model: resolvedModel,
       reasoningEffort: resolvedReasoningEffort,

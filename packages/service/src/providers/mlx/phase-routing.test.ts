@@ -79,6 +79,26 @@ describe('MLX engine-phase fanout', () => {
     expect(b.seen).toHaveLength(1);
   });
 
+  it('catches a late joiner up on engine-wide phases only', () => {
+    // A session registering mid-run replays the last phase so a chat opened
+    // during a long weight load shows what the engine is doing. But a TAGGED
+    // phase belongs to one session's prefill — replaying it is how a fresh
+    // chat would inherit a neighbour's progress bar, which is the same
+    // fanout bug one level removed.
+    const a = session('sess-a');
+    const p = providerWith(a);
+
+    p.onStdoutLine('[mlx] Loading model from: /models/qwen');
+    const late = session('sess-late');
+    p._registerActiveSession(late as never);
+    expect(late.seen.map((e) => e.phase)).toEqual(['loading_model']);
+
+    const tagged = session('sess-tagged');
+    p.onStdoutLine('[mlx] Prefill:  20%|          | 400/2048 [batched] cache=sess-a');
+    p._registerActiveSession(tagged as never);
+    expect(tagged.seen).toHaveLength(0);
+  });
+
   it('drops a tagged marker no live session owns', () => {
     const a = session('sess-a');
     const p = providerWith(a);

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { MlxCacheAdapter, gezelLayerPrefixIds, gezelPrefixId } from './cache-adapter.js';
+import {
+  MlxCacheAdapter,
+  gezelBandPrefixId,
+  gezelLayerPrefixIds,
+  gezelPrefixId,
+} from './cache-adapter.js';
 
 describe('MlxCacheAdapter — layered prefix caching', () => {
   it('gezelLayerPrefixIds: distinct gp/gezel namespaces, stable, gp rotates with project', () => {
@@ -310,5 +315,58 @@ describe('MlxCacheAdapter — tool roster in the prefix identity', () => {
     // No-roster ids stay byte-identical to the pre-roster scheme so
     // existing tool-less prefix files stay warm across the upgrade.
     expect(gezelLayerPrefixIds(layers, [])).toEqual(gezelLayerPrefixIds(layers));
+  });
+});
+
+describe('MlxCacheAdapter — shared-band prefix reuse (ADR 0010)', () => {
+  const BAND = 'IDENTITY + PROJECT + WORKSPACE MAP — identical across siblings';
+  const tools = [{ function: { name: 'read_file', parameters: { properties: { path: {} } } } }];
+
+  it('two siblings differing only in their task band share one prefix id', async () => {
+    // The measured failure: four PR-review sessions of the same gezel+project
+    // minted four distinct ids because the whole system prompt was hashed,
+    // task band included — so cross-session reuse could never fire even
+    // though they shared 33,742 leading characters.
+    const a = new MlxCacheAdapter({ resolveBaseUrl: async () => null });
+    const b = new MlxCacheAdapter({ resolveBaseUrl: async () => null });
+    await a.prepareForSend('sess-a', `${BAND}\n### Current task: gezel/43`, undefined, tools, BAND);
+    await b.prepareForSend('sess-b', `${BAND}\n### Current task: gezel/44`, undefined, tools, BAND);
+    const ea = a.buildRequestExtras('sess-a') as Record<string, unknown>;
+    const eb = b.buildRequestExtras('sess-b') as Record<string, unknown>;
+    expect(ea.prefix_cache_id).toMatch(/^prefix-band-[0-9a-f]{16}$/);
+    expect(eb.prefix_cache_id).toBe(ea.prefix_cache_id);
+    // And the engine is told where to cut its snapshot.
+    expect(ea.stable_prefix_chars).toBe(BAND.length);
+  });
+
+  it('the roster stays part of band identity', async () => {
+    // §3.7: Qwen renders the tool block at the TOP of the system message, so
+    // two renders with different rosters share ~3 tokens. A same-id/different
+    // roster collision is not a miss here — it seeds a wrong-shape entry that
+    // forces a full re-prefill.
+    const a = new MlxCacheAdapter({ resolveBaseUrl: async () => null });
+    const b = new MlxCacheAdapter({ resolveBaseUrl: async () => null });
+    await a.prepareForSend('s', BAND, undefined, tools, BAND);
+    await b.prepareForSend('s', BAND, undefined, [], BAND);
+    expect(a.buildRequestExtras('s')).not.toEqual(b.buildRequestExtras('s'));
+  });
+
+  it('band ids live in their own namespace, disjoint from whole-prompt ids', () => {
+    // A band entry is deliberately SHORT; a legacy entry holds a full
+    // session. A collision between the shapes is a full re-prefill, not a
+    // miss, so the namespaces must never overlap.
+    expect(gezelPrefixId(BAND, tools)).toMatch(/^prefix-[0-9a-f]{16}$/);
+    expect(gezelBandPrefixId(BAND, tools)).toMatch(/^prefix-band-[0-9a-f]{16}$/);
+    expect(gezelBandPrefixId(BAND, tools)).not.toBe(gezelPrefixId(BAND, tools));
+  });
+
+  it('omitting the band leaves today’s whole-prompt behaviour byte-identical', async () => {
+    const adapter = new MlxCacheAdapter({ resolveBaseUrl: async () => null });
+    await adapter.prepareForSend('sess', `${BAND}\n### Current task: gezel/43`, undefined, tools);
+    const extras = adapter.buildRequestExtras('sess') as Record<string, unknown>;
+    expect(extras.prefix_cache_id).toBe(
+      gezelPrefixId(`${BAND}\n### Current task: gezel/43`, tools),
+    );
+    expect(extras.stable_prefix_chars).toBeUndefined();
   });
 });

@@ -23,6 +23,13 @@ export interface SessionOpts {
    */
   systemPromptLayers?: import('../cache/adapter.js').SystemPromptLayers;
   /**
+   * Leading run of `systemMessage` that sibling sessions of the same
+   * (gezel, project) render identically. Set only when the shared-band
+   * prefix flag is on; drives the MLX adapter's `prefix-band-` key and the
+   * sidecar's snapshot cut. See ADR 0010.
+   */
+  systemSharedPrefix?: string;
+  /**
    * Volatile band (workspace files, task, recall, anchor, …) split out
    * of `systemMessage` when layered caching is ON. The session seeds it
    * as a frozen `system` message right after `messages[0]` so the wire

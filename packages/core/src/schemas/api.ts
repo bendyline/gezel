@@ -1894,6 +1894,25 @@ export const GezelConfigSchema = z.object({
     })
     .optional(),
   /**
+   * Shared-band prompt-prefix reuse on MLX (ADR 0010). Keys the engine's
+   * prefix entry on the leading run of the system prompt that sibling
+   * sessions of the same (gezel, project) render identically — everything
+   * before the task band — instead of the whole prompt, and publishes that
+   * entry from a real turn's boundary snapshot so it stays a strict token
+   * prefix. Default OFF; `GEZEL_MLX_SHARED_BAND_PREFIX` (`1`/`true`/`0`/
+   * `false`) overrides config as the eval A/B toggle.
+   *
+   * Distinct from `layeredPrefixCache`, which restructures the prompt into
+   * two system messages — a layout the Qwen chat template rejects outright
+   * (`System message must be at the beginning.`). This flag changes only
+   * cache KEYING; the rendered prompt is byte-identical either way.
+   */
+  mlxSharedBandPrefix: z
+    .object({
+      enabled: z.boolean().optional(),
+    })
+    .optional(),
+  /**
    * Tuning knobs for the per-provider request queue.
    *   - `affinity`: when true (the default), the queue prefers
    *     dispatching items that share a session / gezel with recently

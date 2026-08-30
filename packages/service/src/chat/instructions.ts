@@ -81,6 +81,21 @@ export interface BuiltInstructions {
    * so the wire prefix `[stable system][tools]` stays reusable.
    */
   volatileContext?: string;
+  /**
+   * The leading run of `full` that sibling sessions of the same
+   * (gezel, project) render identically — everything before the
+   * session-scoped tail (`taskContext` onward). A byte-prefix of `full`,
+   * never a rewrite of it.
+   *
+   * This exists so the MLX cache adapter can key a prefix entry on what
+   * siblings actually share. Hashing the WHOLE system prompt puts the
+   * task band in the key, which measured 4 distinct prefix ids for 4
+   * sibling PR-review sessions that shared 33,742 leading characters —
+   * i.e. cross-session reuse could never fire. See ADR 0010.
+   *
+   * Only returned on the flat path. Layered mode has its own `layers`.
+   */
+  sharedPrefix?: string;
 }
 
 export interface BuildInstructionsOptions {
@@ -1723,9 +1738,13 @@ ${artifactsLine}
 
   // Legacy single-band ordering (flag OFF) — byte-identical to before.
   if (!layeredPrefixCache) {
-    return {
-      full: `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}${projectContext}${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}${taskContext}${assignedTasksContext}${recall}\n\n---\n\n${actDontNarrate}\n\n${askWhenStuck}${browsingForRole}\n\n---\n\n${markdownGuidance}${untrustedContentBlock}${localHints}${verboseModelHints}${availableToolsBlock}${fileEditsDisabledNote}${consultationAddendum}${freshProjectAddendum}${activeTaskAnchor}`,
-    };
+    // Split at the session-scoped boundary so `sharedPrefix` is a literal
+    // byte-prefix of `full` — siblings of the same (gezel, project) render
+    // everything up to `taskContext` identically. Concatenation order is
+    // unchanged, so `full` stays byte-identical to the single-string form.
+    const sharedPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}${projectContext}${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}`;
+    const sessionTail = `${taskContext}${assignedTasksContext}${recall}\n\n---\n\n${actDontNarrate}\n\n${askWhenStuck}${browsingForRole}\n\n---\n\n${markdownGuidance}${untrustedContentBlock}${localHints}${verboseModelHints}${availableToolsBlock}${fileEditsDisabledNote}${consultationAddendum}${freshProjectAddendum}${activeTaskAnchor}`;
+    return { full: `${sharedPrefix}${sessionTail}`, sharedPrefix };
   }
 
   // Layered ordering (flag ON). The stable system message keeps every

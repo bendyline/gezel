@@ -16,3 +16,4 @@ regression surface when an anecdote is carrying architectural weight.
 | [0007](0007-ambient-display-applier.md) | Accepted | Gezel is the wallpaper rotator, applied from Electron main |
 | [0008](0008-per-task-artifact-folders.md) | Accepted | Per-task artifact folders (`tasks/<num>/`) over dedicated task-file tools |
 | [0009](0009-observation-corpora.md) | Accepted | Observation corpora: tabular connector data, Parquet, and a local query engine |
+| [0010](0010-shared-band-prefix-reuse.md) | Accepted | Shared-band prompt-prefix reuse on MLX (cache keying + the never-lengthen invariant) |

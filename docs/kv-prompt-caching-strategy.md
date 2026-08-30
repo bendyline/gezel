@@ -41,6 +41,8 @@
 10. Telemetry & operator surface
 11. Configuration & environment reference
 12. Known limitations, gotchas & correctness invariants
+12b. Open findings — 2026-08-18
+12c. Cross-session reuse — 2026-08-30
 13. Key-file index
 
 ---
@@ -373,8 +375,17 @@ the tool schemas) reusable across sessions. It is a **local-engine-only** optimi
 the volatile band into a second `system` message that only the llama-cpp / mlx provider sessions
 seed, so it **never applies to cloud providers** (they'd drop that band). Per-engine default when
 `config.layeredPrefixCache.enabled` is unset: **ON for `llama-cpp`** (perf-proven, no regression),
-**OFF for `mlx`** (cache mechanism validated end-to-end — see §coverage — but no MLX quality A/B
-yet). Set `enabled: true`/`false` to
+**OFF for `mlx`** — and that default is now **correctness-forced, not provisional**. The layout
+puts a second `system` message at index 1, and the Qwen chat template raises on exactly that
+(`raise_exception('System message must be at the beginning.')`), so on a Qwen-family model the
+render drops the tools and the request 500s. Measured 2026-08-30 on qwen3.8-27b: **2/2 pass with
+the flag OFF, 0/2 with it ON.** Every prior validation of this feature ran on **Gemma** — the
+llama-cpp 9/9 quality A/B on `gemma4-e4b-q8`, and the MLX end-to-end mechanism check on
+`mlx-community/gemma-4-E4B-it-qat-4bit` — which is the template family the layout was designed
+for (see the wire-prefix argument below). It was never tried on Qwen. Cross-session prefix reuse
+for MLX is instead delivered by the shared-band keying in
+[ADR 0010](decisions/0010-shared-band-prefix-reuse.md), which changes cache identity only and
+leaves the rendered prompt byte-identical. Set `enabled: true`/`false` to
 override both engines; `GEZEL_LAYERED_PREFIX_CACHE` (`1`/`0`) overrides config (the eval A/B
 toggle). When off for an engine, its system message is byte-identical to the legacy single string.
 
@@ -458,7 +469,27 @@ adapter keys on the now-volatile-free system message.
 
 Qwen-family chat templates render the tool block at the **top** of the system message. Two renders
 of the same prompt text — one with a roster, one without — therefore share **~3 tokens**. This is
-not a degradation; it is a different prefix. Three rules follow, all enforced in
+not a degradation; it is a different prefix.
+
+The template also constrains message *shape*, not just content placement — and
+**it varies by repacker, not by model family**, which is the trap. Measured
+2026-08-30 on two artifacts of the *same base model*:
+
+| Artifact | Leading `system` run |
+| --- | --- |
+| `mlx-community/Qwen3.8-27B-4bit` (8,952-char template) | **raises** — `{%- if not loop.first %}{{- raise_exception('System message must be at the beginning.') }}` |
+| `unsloth/Qwen3.8-27B-GGUF` (9,993-char template) | **merges** — walks the leading run into `merged_system`, records `num_sys`, and raises only for a `system` message *after* it |
+
+So the layered two-system-message layout is fatal on the MLX artifact and
+perfectly fine on the GGUF one. Never infer a template constraint from the
+model family, the architecture, or a sibling quant: read the artifact's own
+`chat_template.jinja` (or, for a GGUF, its `tokenizer.chat_template` metadata —
+a ranged fetch of the first ~12 MB is enough to parse it without downloading
+the weights). This is what closed the layered layout for MLX (§3.6) and why
+[ADR 0010](decisions/0010-shared-band-prefix-reuse.md) changes cache *identity*
+rather than prompt structure.
+
+Three rules follow, all enforced in
 [mlx/cache-adapter.ts](../packages/service/src/providers/mlx/cache-adapter.ts) and pinned by its
 tests:
 
@@ -755,6 +786,7 @@ KV state survives process death so a returning user doesn't pay cold prefill.
 | `config.localEngineIdleTimeoutMs` | 30 min | Idle SIGTERM; freeze fires at half. |
 | `GEZEL_LLAMA_STARTUP_TIMEOUT_MS` / `GEZEL_MLX_STARTUP_TIMEOUT_MS` | 180 s / 300 s | Engine cold-start ceiling. Lift MLX's for a cold first turn that must build the `mlx-vlm`/torch venv (§3.6). |
 | `config.layeredPrefixCache.enabled` / `GEZEL_LAYERED_PREFIX_CACHE` | llama-cpp **on**, mlx **off**, cloud **n/a** | Volatile-out restructure + layered `prefix-gp`/`prefix-gezel` keys (§3.6). Local-engine only. `enabled` overrides both engines; env (`1`/`0`) overrides config. |
+| `config.mlxSharedBandPrefix.enabled` / `GEZEL_MLX_SHARED_BAND_PREFIX` | mlx **off**, others **n/a** | Cross-session reuse by keying the `prefix-band-` entry on the shared band and publishing it from a real turn's boundary snapshot (§12c, [ADR 0010](decisions/0010-shared-band-prefix-reuse.md)). Cache identity only — the rendered prompt is byte-identical either way. Env (`1`/`0`) overrides config. |
 | `GEZEL_CAPACITY_BUDGET_GB` | auto (60%/80%, cap 96) | Hard memory budget for engine residency. |
 | `GEZEL_FORCE_BEHAVIORS` / `GEZEL_REMOVE_BEHAVIORS` | — | A/B inject/remove model-profile behaviors. |
 
@@ -795,6 +827,64 @@ KV state survives process death so a returning user doesn't pay cold prefill.
     skips engines a live supervisor owns. Only owner-less orphans are reaped.
 
 ---
+
+## 12c. Cross-session reuse — measured 2026-08-30 (qwen3.8-27b-q4, M5 Max)
+
+§"MLX: why trimming can never be the answer" concluded that **"every remaining
+avenue must make the prompt a pure EXTENSION rather than rewind the cache."**
+This section records the first demonstration that such an avenue exists, and
+the three things that were blocking it. The decision and its rejected
+alternatives are [ADR 0010](decisions/0010-shared-band-prefix-reuse.md); this
+is the evidence.
+
+**Pure extension works, live.** A short entry warmed under one `cache_id`, then
+consumed by a longer prompt under a *different* `cache_id`:
+
+```
+[cache] prefix-seed cache_id=probe-session-A from prefix=probe-shared-prefix tokens=7202
+[batch] seed cache_id=probe-session-A mode=extension reused=7202 prefill=822
+```
+
+89.8% of the prompt served from the entry (`cached_tokens: 7202` of
+`input_tokens: 8024`). `_offsets_consistent` held; nothing needed trimming.
+
+**Why production never saw it.** Three independent causes:
+
+1. **The key carried the task band.** Two live PR-review siblings' rendered
+   system prompts share a literal **33,742 characters**, diverging only at
+   `### Current task: gezel/43` vs `/44`. But `gezelPrefixId` hashed the whole
+   prompt, so four sibling sessions minted four distinct ids — sharing was
+   arithmetically impossible before any cache logic ran.
+2. **The entry was published at full length.** The line immediately after the
+   successful reuse above:
+   `[cache] prefix-seeded probe-shared-prefix from cache_id=probe-session-A tokens=8008`
+   — the session's full post-turn state replaced the 7,202-token entry that had
+   just delivered 90%. A longer entry is not a partial hit here; `lcp < n` is
+   `fresh-untrimmable`, a full re-prefill.
+3. **Short is not the same as prefix.** A 961-token entry against an
+   1,842-token prompt still produced `mode=fresh-untrimmable reused=0` — it was
+   rendered through a different template branch, so it shared ~3 tokens
+   (§3.7). Snapshotting a real turn avoids this by construction; a synthetic
+   warm does not.
+
+**Band composition**, measured from the live rendered prompt (59,729 chars,
+~14.9K tok):
+
+| Band | Chars | Share |
+| --- | --- | --- |
+| Shared across siblings (through `documentsContext`) | 33,742 | 56.5% |
+| Session-scoped tail (`taskContext` onward) | 25,987 | 43.5% |
+
+Note the layered `gp` id would have keyed on only 22,053 chars — 35% less than
+is actually shared — because workspace map/files/documents are tagged volatile
+yet are identical across siblings of one project. The band boundary is
+therefore drawn at the *session* scope, not the volatile tag.
+
+**Where to look when this regresses.** The engine log is
+`~/.gezel-dev/logs/mlx-server-*.log`, **not** `service-*.log`. The decisive line
+is `[batch] seed … mode=`: `extension` is reuse, `fresh-untrimmable` names a
+cache that was longer than the shared head, and `[cache] prefix-keep …` is the
+never-lengthen guard refusing to replace a good short entry.
 
 ## 12b. Open findings — measured 2026-08-18 (qwen3.8-27b-q4, M4 Max)
 

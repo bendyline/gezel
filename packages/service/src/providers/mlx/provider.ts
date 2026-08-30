@@ -123,6 +123,7 @@ import type {
   SessionOpts,
   TurnUsage,
 } from '../types.js';
+import { EngineLogRouter } from './engine-log-router.js';
 import { StreamingReasoningSplit } from './reasoning-stream.js';
 import {
   type MlxFatalError,
@@ -360,7 +361,35 @@ export class MlxProvider implements LLMProvider {
   /** See the constructor option of the same name. */
   private readonly templateOpensReasoning: boolean = false;
   private readonly activeSessions = new Set<MlxSession>();
-  private lastStartupPhase: EnginePhaseEvent | null = null;
+  /**
+   * Engine stdout → per-session phase events, plus the "is this line fatal?"
+   * state machine. See {@link EngineLogRouter}; the rules there are load-bearing.
+   */
+  private readonly logRouter = new EngineLogRouter({
+    modelDisplayName: () => this.modelDisplayName,
+    // A tagged phase belongs to exactly one session; anything untagged is an
+    // engine-wide signal every session should see. Without this, a session
+    // streaming its reply picks up a neighbour's prefill bar — at the
+    // neighbour's token total — because one engine has one stdout.
+    deliver: (phase) => {
+      for (const s of this.activeSessions) {
+        if (phase.cacheId && !s.ownsCacheId(phase.cacheId)) continue;
+        s.publishEnginePhase(phase);
+      }
+    },
+    onFatal: (fatal) => {
+      // If a session is blocked inside `supervisor.ensureRunning()` waiting on
+      // `/health`, abortStartup rejects that wait with the real error now
+      // instead of letting it burn the full startup budget (up to 5 minutes);
+      // the session-level catch turns it into the red bubble in chat.
+      const hintSuffix = fatal.hint ? `\n\n${fatal.hint}` : '';
+      const err = new Error(`[mlx] engine failed to start: ${fatal.message}${hintSuffix}`);
+      this.supervisor?.abortStartup(err);
+      // Tear the child down so the next `ensureRunning()` respawns fresh.
+      void this.supervisor?.stop().catch(() => {});
+    },
+    onReady: () => this.scheduleEngineStatsSample(),
+  });
   // Replayed to sessions that register after the engine finishes
   // loading — same pattern as llama-cpp's `lastEngineStats` — so a
   // chat started mid-run can surface the memory footprint in the
@@ -370,29 +399,6 @@ export class MlxProvider implements LLMProvider {
   // (e.g. when uvicorn logs both "Application startup complete" and
   // "Uvicorn running" — both classify as `ready`).
   private engineStatsPending = false;
-  // Latest fatal error seen on mlx_lm.server's stderr — the server's
-  // httpd keeps accepting connections after `_generate` dies, so we
-  // can't trust /health. When this is non-null, `sendAndWait` short-
-  // circuits with this error instead of letting requests hang on an
-  // unresponsive completions endpoint. Cleared on supervisor restart.
-  private fatalError: MlxFatalError | null = null;
-  /**
-   * Whether the engine has reported itself ready and is therefore serving
-   * traffic. Gates fatal-error handling: the classifier reads any
-   * `SomeError: …` leaf line as engine death, which is right during startup
-   * and wrong afterwards. A caught, contained Python exception prints the
-   * same shape as a fatal one, and killing the engine for it takes down
-   * every *other* session sharing it — a spec-decode wave that failed one
-   * request and returned an error to that request alone SIGKILLed a 27B
-   * mid-turn and dropped an unrelated session with it.
-   */
-  private serving = false;
-  /**
-   * Most recent error line seen while serving. Not fatal — recorded so a
-   * turn that dies on a dropped stream can name the real cause instead of
-   * "something closed the HTTP request."
-   */
-  private lastRuntimeError: MlxFatalError | null = null;
   /**
    * Width-N gate over actual engine requests. The width is the engine's
    * batch capability ({@link batchMaxConcurrency}). At width 1 this is strict
@@ -639,6 +645,7 @@ export class MlxProvider implements LLMProvider {
       numCtx: this.numCtx,
       systemMessage: opts.systemMessage,
       ...(opts.systemPromptLayers ? { systemPromptLayers: opts.systemPromptLayers } : {}),
+      ...(opts.systemSharedPrefix ? { systemSharedPrefix: opts.systemSharedPrefix } : {}),
       ...(opts.volatileContext ? { volatileContext: opts.volatileContext } : {}),
       // Pass widened priorMessages through — the session translates
       // tool-role entries into ChatMessage tool_calls / role:'tool'
@@ -663,130 +670,17 @@ export class MlxProvider implements LLMProvider {
 
   /** Classifier hook wired into the supervisor's `onRawLine`. */
   onStdoutLine(line: string): void {
-    // Fatal error takes precedence over phase classification — one
-    // `ValueError: ...` leaf line in a traceback is enough to mark
-    // the engine broken. We kill the supervisor so a subsequent
-    // `ensureRunning()` respawns fresh (and hits the same error if
-    // nothing's changed, but at least surfaces it immediately rather
-    // than hanging for the full turn-timeout window).
-    //
-    // Only before the engine is serving, though. Once it is up, the same
-    // line shape carries *contained* per-request failures the sidecar has
-    // already handled and answered, and tearing the process down for one
-    // of those kills every concurrent session on the engine.
-    const fatal = classifyMlxFatalErrorLine(line);
-    if (fatal) {
-      if (this.serving) this.noteRuntimeError(fatal);
-      else this.handleFatalError(fatal);
-      return;
-    }
-    const phase = classifyMlxStartupLine(line);
-    if (!phase) return;
-    // Surface the model name in the engine pill during the long
-    // weight-load window so the user sees "Loading model — Qwen 3.5"
-    // instead of a bare "Loading weights". Only augments when we
-    // actually know the friendly name — otherwise the classifier's
-    // generic "Loading weights" stands.
-    if (phase.phase === 'loading_model' && this.modelDisplayName) {
-      phase.detail = `Loading model — ${this.modelDisplayName}`;
-    }
-    // A fresh child — clear any stale fatal error from the previous
-    // lifecycle so this spawn gets a clean slate. If it errors again
-    // during boot, handleFatalError will capture the new one.
-    // Both flags move before the dedupe below: a repeated identical phase
-    // line returns early, and readiness must not depend on which line won.
-    if (phase.phase === 'starting') {
-      this.fatalError = null;
-      this.lastRuntimeError = null;
-      this.serving = false;
-    }
-    if (phase.phase === 'ready') this.serving = true;
-    if (
-      this.lastStartupPhase &&
-      this.lastStartupPhase.phase === phase.phase &&
-      this.lastStartupPhase.detail === phase.detail &&
-      // Two subs prefilling in lockstep can render identical detail; without
-      // the owner in the key the second one's marker is dropped as a repeat
-      // and that session's bar stalls at whatever it last saw.
-      this.lastStartupPhase.cacheId === phase.cacheId
-    ) {
-      return;
-    }
-    this.lastStartupPhase = phase.phase === 'ready' ? null : phase;
-    // A tagged phase belongs to exactly one session; anything untagged is an
-    // engine-wide signal every session should see. Without this, a session
-    // streaming its reply picks up a neighbour's prefill bar — at the
-    // neighbour's token total — because one engine has one stdout.
-    for (const s of this.activeSessions) {
-      if (phase.cacheId && !s.ownsCacheId(phase.cacheId)) continue;
-      s.publishEnginePhase(phase);
-    }
-    if (phase.phase === 'ready') this.scheduleEngineStatsSample();
+    this.logRouter.onLine(line);
   }
 
-  /**
-   * Called by MlxSession before each send so it fails fast when the
-   * supervised engine is known-broken instead of queuing a request
-   * that will hang on the dead httpd. Returns the error to throw, or
-   * null when the engine looks healthy.
-   *
-   * Consumes on read — the caller still throws the returned error, so
-   * the *current* send fails fast, but subsequent sends get a fresh
-   * shot at respawning the engine. Without this, a fix the user made
-   * out-of-process (reinstalled missing Python deps, swapped to a
-   * working model in Settings, ran a Reset venv) wouldn't take effect
-   * until the whole gezeld process restarted — every send would keep
-   * replaying the cached error from the failed startup. The next
-   * `starting` phase from a successful respawn re-clears via
-   * `onStdoutLine`; this is the bridge for the in-between window.
-   */
+  /** See {@link EngineLogRouter.takeFatalError}. */
   takeFatalError(): MlxFatalError | null {
-    const fatal = this.fatalError;
-    this.fatalError = null;
-    return fatal;
+    return this.logRouter.takeFatalError();
   }
 
-  /**
-   * An error line from an engine that is up and serving. Deliberately does
-   * NOT stop the supervisor: the sidecar prints these from handlers that
-   * already contained the failure and answered the affected request, so the
-   * engine is still correct for everyone else on it. Kept for diagnostics —
-   * see {@link takeRuntimeError}.
-   */
-  private noteRuntimeError(fatal: MlxFatalError): void {
-    this.lastRuntimeError = fatal;
-    log.warn(`engine error while serving (engine left running): ${fatal.message}`);
-  }
-
-  /** Consume the last serving-time error, if one was seen. */
+  /** See {@link EngineLogRouter.takeRuntimeError}. */
   takeRuntimeError(): MlxFatalError | null {
-    const err = this.lastRuntimeError;
-    this.lastRuntimeError = null;
-    return err;
-  }
-
-  private handleFatalError(fatal: MlxFatalError): void {
-    // First-seen wins — subsequent traceback frames shouldn't
-    // overwrite the leaf exception with something further up the
-    // stack. Also avoids thrashing the supervisor if the server
-    // spams the same error repeatedly before we kill it.
-    if (this.fatalError) return;
-    this.fatalError = fatal;
-    log.error(`fatal engine error detected: ${fatal.message}`);
-    // If a session is blocked inside `supervisor.ensureRunning()`
-    // waiting on `/health`, abortStartup rejects that wait with the
-    // real error right now instead of letting it run the full
-    // startup-timeout budget (up to 5 minutes). The subsequent
-    // session-level catch turns this into the red error bubble in
-    // chat. If we're not currently starting, abortStartup is a
-    // no-op and the next send hits `takeFatalError()` on entry.
-    const hintSuffix = fatal.hint ? `\n\n${fatal.hint}` : '';
-    const err = new Error(`[mlx] engine failed to start: ${fatal.message}${hintSuffix}`);
-    this.supervisor?.abortStartup(err);
-    // Tear the child down so the next `ensureRunning()` respawns
-    // fresh. abortStartup handles in-flight startups; this cleans
-    // up the already-running-but-broken case.
-    void this.supervisor?.stop().catch(() => {});
+    return this.logRouter.takeRuntimeError();
   }
 
   /**
@@ -827,7 +721,11 @@ export class MlxProvider implements LLMProvider {
 
   _registerActiveSession(session: MlxSession): void {
     this.activeSessions.add(session);
-    if (this.lastStartupPhase) session.publishEnginePhase(this.lastStartupPhase);
+    // Catch a late joiner up on the engine-wide phase only. A tagged phase
+    // belongs to one session's prefill; replaying it here is how a fresh chat
+    // would inherit a neighbour's progress bar.
+    const pending = this.logRouter.lastPhase();
+    if (pending && !pending.cacheId) session.publishEnginePhase(pending);
     if (this.lastEngineStats) session.publishEngineStats(this.lastEngineStats);
   }
 
@@ -889,6 +787,8 @@ interface MlxSessionDeps {
   systemMessage: string;
   /** Layered prefix-cache keys (flag ON only). See {@link SystemPromptLayers}. */
   systemPromptLayers?: import('../../cache/adapter.js').SystemPromptLayers;
+  /** See {@link SessionOpts.systemSharedPrefix}. */
+  systemSharedPrefix?: string;
   /** Volatile band seeded as a frozen system message after messages[0] (flag ON only). */
   volatileContext?: string;
   priorMessages: Array<
@@ -1156,6 +1056,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           // a no-tools render from the real turn's — the send path at the
           // bottom of `send()` has always passed it; this one did not.
           body.tools as readonly unknown[] | undefined,
+          this.deps.systemSharedPrefix,
         );
         Object.assign(body, adapter.buildRequestExtras(opts.sessionId));
       }
@@ -1751,6 +1652,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             // them renders a prompt through a different template branch,
             // which on Qwen shares 3 tokens with the real turn.
             body.tools as readonly unknown[] | undefined,
+            this.deps.systemSharedPrefix,
           );
           const extras = adapter.buildRequestExtras(cacheId);
           Object.assign(body, extras);

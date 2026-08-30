@@ -1267,6 +1267,49 @@ def _request_prefix_ids(request) -> List[str]:
 _SEEDED_PREFIXES: set = set()
 
 
+def _band_snapshot_target(sub) -> Optional[int]:
+    """Token index of the shared band's end for this request, or None.
+
+    The TS side knows the band as a CHARACTER length inside the system
+    message (`stable_prefix_chars`); only the engine has the tokenizer, and
+    the rendered prompt carries template framing plus the tool block ahead
+    of the system content — so the offset is located by finding the first
+    token index whose decode contains the band's tail. See ADR 0010.
+    """
+    n_chars = getattr(sub.request, "stable_prefix_chars", None)
+    if not n_chars or int(n_chars) <= 0:
+        return None
+    system = next(
+        (m for m in (getattr(sub.request, "messages", None) or [])
+         if getattr(m, "role", None) == "system"),
+        None,
+    )
+    content = getattr(system, "content", None) if system is not None else None
+    if not isinstance(content, str):
+        return None
+    marker = content[: int(n_chars)][-_BAND_MARKER_CHARS:]
+    if len(marker) < _BAND_MARKER_MIN_CHARS:
+        return None
+    tok = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
+    toks = list(sub.prompt_tokens or [])
+    try:
+        target = cache_seed.token_boundary_for_marker(
+            lambda k: tok.decode(toks[:k]), len(toks), marker, _SNAPSHOT_BOUNDARY_MARGIN
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort; fall back to today
+        print(f"[cache] band-boundary probe failed: {exc}", flush=True)
+        return None
+    # One line naming the decision — the thing to grep when a sibling
+    # re-prefills instead of extending. `target=0` means the band's tail was
+    # not found in the render, which is a marker problem, not a cache one.
+    print(
+        f"[cache] band-boundary chars={int(n_chars)} target={target} "
+        f"prompt_tokens={len(toks)}",
+        flush=True,
+    )
+    return target or None
+
+
 def _seed_prefix_from_session(request, state: PromptCacheState) -> None:
     """Seed the most-specific (gp) prefix entry from a real session's saved
     state so a SIBLING session (same gezel+project, different volatile state)
@@ -1289,6 +1332,28 @@ def _seed_prefix_from_session(request, state: PromptCacheState) -> None:
     if gp in _SEEDED_PREFIXES:
         return
     try:
+        # INVARIANT: a prefix entry may never be replaced by a LONGER state.
+        # On this model family `seed_from_state` reuses an entry only when it
+        # is a strict prefix (`lcp == n` -> extension); an entry longer than
+        # the shared head cannot be trimmed (48 of 64 layers are
+        # linear-attention `ArraysCache`), so it degrades every sibling to a
+        # full re-prefill. Lengthening is therefore never an improvement, and
+        # a shorter entry that already works must survive a later process
+        # that would otherwise overwrite it with a whole session. Measured:
+        # a 7,202-token entry that delivered 89.8% reuse was overwritten by
+        # the same session's 8,008-token post-turn state moments later.
+        incoming = len(state.token_ids or [])
+        existing = cache_persist.load_cache(PERSIST_DIR, MODEL_FINGERPRINT, gp)
+        prior = len(getattr(existing, "token_ids", None) or []) if existing else 0
+        if prior and incoming > prior:
+            _SEEDED_PREFIXES.add(gp)
+            print(
+                f"[cache] prefix-keep {gp}: existing {prior} tokens is shorter "
+                f"than this session's {incoming} — a longer entry cannot be "
+                f"trimmed by a sibling",
+                flush=True,
+            )
+            return
         if cache_persist.save_cache(PERSIST_DIR, MODEL_FINGERPRINT, gp, state):  # type: ignore[arg-type]
             _SEEDED_PREFIXES.add(gp)
             _LAST_SAVE_ROSTER[gp] = _roster_fp_of(getattr(request, "tools", None))
@@ -1380,6 +1445,11 @@ _PREFILL_LIVENESS_INTERVAL_S = 4.0
 # wrapped rotating layers can't trim even that. 16 is generous; the cost
 # is at most 16 re-prefilled tokens per turn.
 _SNAPSHOT_BOUNDARY_MARGIN = 16
+# Tail of the shared band used to locate its token boundary. Long enough to
+# be unique in a 60k-char prompt, short enough that one BPE re-merge at the
+# cut cannot swallow it.
+_BAND_MARKER_CHARS = 256
+_BAND_MARKER_MIN_CHARS = 64
 
 
 class _Sub:
@@ -1590,6 +1660,15 @@ class BatchEngine:
         sub.prefill_total = len(plan.segment)
         sub.reused_tokens = plan.reused
         sub.seed_mode = plan.mode
+        # Publish the shared band ONLY from a session that reused nothing —
+        # the "pioneer" of this prefix. Its own saved entry is then the band
+        # rather than end-minus-margin, so its next turn re-prefills the
+        # tail; every sibling after it inherits the band and skips it. One
+        # session pays so N-1 do not. A session that already extended from
+        # the band keeps the normal boundary, which is what preserves the
+        # intra-session reuse that works today (`extension reused=91413`).
+        if sub.snapshot_target is None and str(plan.mode).startswith("fresh"):
+            sub.snapshot_target = _band_snapshot_target(sub)
         if sub.request.cache_id:
             print(
                 f"[batch] seed cache_id={sub.request.cache_id} mode={plan.mode} "
@@ -2589,6 +2668,19 @@ class ChatRequest(BaseModel):
     # session inherits the warmest matching layer (gezel+project > gezel).
     # When set, takes precedence over the singular `prefix_cache_id`.
     prefix_cache_ids: Optional[List[str]] = None
+    # Length in CHARACTERS of the shared band inside messages[0].content —
+    # the leading run sibling sessions of the same (gezel, project) render
+    # identically. When set, the engine plants its prompt-snapshot cut at
+    # that boundary and publishes the SHORT snapshot as the prefix entry
+    # instead of the session's full post-turn state.
+    #
+    # Why this matters here and not on llama.cpp: 48 of qwen3.8's 64 layers
+    # are linear-attention `ArraysCache` holding a fixed-size recurrent
+    # state with no `trim()`, so a prefix entry LONGER than the shared head
+    # is not a partial hit — `seed_from_state` falls to `fresh-untrimmable`
+    # and the whole prompt is re-prefilled. Short entries are the only
+    # reusable shape. See ADR 0010.
+    stable_prefix_chars: Optional[int] = None
     # Generation knobs (subset of mlx-vlm's). Not all are honored today —
     # we just need enough to run sensible defaults.
     max_tokens: Optional[int] = None

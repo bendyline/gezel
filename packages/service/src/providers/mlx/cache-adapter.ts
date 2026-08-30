@@ -102,6 +102,31 @@ export function gezelPrefixId(systemPrompt: string, tools?: readonly unknown[]):
 }
 
 /**
+ * Shared-band prefix id (flag `mlxSharedBandPrefix`). Hashes only the leading
+ * run of the system prompt that sibling sessions of the same (gezel, project)
+ * render identically — everything before the task band — instead of the whole
+ * prompt.
+ *
+ * Why a SEPARATE `prefix-band-` namespace rather than reusing
+ * {@link gezelPrefixId}'s: a band entry is deliberately SHORT (it holds only
+ * the shared head), while a legacy whole-prompt entry holds a full session.
+ * On this model family a prefix entry longer than the shared head is not a
+ * miss, it is a full re-prefill (`lcp < n` cannot be trimmed — 48 of
+ * qwen3.8's 64 layers are linear-attention `ArraysCache` with no `trim()`).
+ * Keeping the namespaces disjoint means the two shapes can never collide.
+ * See ADR 0010.
+ */
+export function gezelBandPrefixId(sharedPrefix: string, tools?: readonly unknown[]): string {
+  const h = createHash('sha256').update(sharedPrefix, 'utf8');
+  // The roster is prefix IDENTITY on every id in this file — see
+  // {@link toolRosterSignature}.
+  if (tools && tools.length > 0) {
+    h.update('\u0000tools\u0000', 'utf8').update(toolRosterSignature(tools), 'utf8');
+  }
+  return `prefix-band-${h.digest('hex').slice(0, 16)}`;
+}
+
+/**
  * Layered prefix ids (flag `layeredPrefixCache`). Distinct `gp` / `gezel`
  * namespaces, most-specific first. `gp` (full stable system) is the
  * workhorse — shared across sessions of the same model+gezel+project;
@@ -149,6 +174,16 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
   private readonly sessionLayerPrefixIds = new Map<string, string[]>();
   /** Tracks which prefixes we've already warmed in this process so
    *  back-to-back session opens don't issue redundant warm requests. */
+  /**
+   * sessionId → length in CHARACTERS of the shared band inside this session's
+   * system message. Sent to the engine as `stable_prefix_chars` so the sidecar
+   * can plant its prompt-snapshot cut at the band boundary and publish a
+   * SHORT prefix entry rather than the session's full post-turn state.
+   * Chars, not tokens: only the engine has the tokenizer, and its snapshot
+   * capture already verifies the token-prefix and drops a mismatched cut.
+   */
+  private readonly sessionBandChars = new Map<string, number>();
+
   private readonly warmedPrefixes = new Set<string>();
   /**
    * Prefix warms already in progress. `warmedPrefixes` is only populated after
@@ -170,9 +205,18 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
    * derives the hash via {@link gezelPrefixId}. Idempotent; same
    * (sessionId, systemPrompt) → same prefixId → same map state.
    */
-  setSessionPrefix(sessionId: string, systemPrompt: string, tools?: readonly unknown[]): string {
-    const prefixId = gezelPrefixId(systemPrompt, tools);
+  setSessionPrefix(
+    sessionId: string,
+    systemPrompt: string,
+    tools?: readonly unknown[],
+    sharedPrefix?: string,
+  ): string {
+    const prefixId = sharedPrefix
+      ? gezelBandPrefixId(sharedPrefix, tools)
+      : gezelPrefixId(systemPrompt, tools);
     this.sessionPrefix.set(sessionId, prefixId);
+    if (sharedPrefix) this.sessionBandChars.set(sessionId, sharedPrefix.length);
+    else this.sessionBandChars.delete(sessionId);
     return prefixId;
   }
 
@@ -188,6 +232,7 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
     systemPrompt?: string,
     layers?: SystemPromptLayers,
     tools?: readonly unknown[],
+    sharedPrefix?: string,
   ): Promise<void> {
     if (layers) {
       // Layered mode: register the [gp, gezel] ids the server will try
@@ -201,6 +246,17 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
       const { gp, gezel } = gezelLayerPrefixIds(layers, tools);
       this.sessionLayerPrefixIds.set(sessionId, [gp, gezel]);
       this.sessionPrefix.set(sessionId, gp);
+      return;
+    }
+    if (sharedPrefix) {
+      // Band path: register the id and stop. We deliberately do NOT warm.
+      // A synthetic warm renders a different template branch than the real
+      // turn (on Qwen the tool block heads the system message, so a
+      // no-tools render shares ~3 tokens), and `persist: true` would write
+      // that shape over a good entry — the measured oscillation in §3.7.
+      // The entry is instead published from a real turn's boundary snapshot,
+      // so it is a genuine token prefix by construction.
+      this.setSessionPrefix(sessionId, systemPrompt ?? '', tools, sharedPrefix);
       return;
     }
     if (!systemPrompt) return;
@@ -248,6 +304,11 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
     }
     const prefixId = this.sessionPrefix.get(sessionId);
     if (prefixId) extras.prefix_cache_id = prefixId;
+    // Band path only: tells the sidecar where to cut its prompt snapshot so
+    // the published entry is the shared head, not the whole session. Absent
+    // ⇒ the sidecar keeps its end-minus-margin default, i.e. today's shape.
+    const bandChars = this.sessionBandChars.get(sessionId);
+    if (bandChars !== undefined && bandChars > 0) extras.stable_prefix_chars = bandChars;
     return extras;
   }
 
@@ -260,6 +321,7 @@ export class MlxCacheAdapter implements EngineCacheAdapter {
     for (const id of sessionIds) {
       this.sessionPrefix.delete(id);
       this.sessionLayerPrefixIds.delete(id);
+      this.sessionBandChars.delete(id);
     }
     // Fire deletes in parallel — they're idempotent and small.
     await Promise.all(

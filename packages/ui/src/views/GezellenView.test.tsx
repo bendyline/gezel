@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
 
-const appShellCss = readFileSync(resolve(process.cwd(), 'src/styles/app-shell.css'), 'utf8');
+const appShellCss = readFileSync(resolve(import.meta.dirname, '../styles/app-shell.css'), 'utf8');
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
