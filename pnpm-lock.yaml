@@ -259,8 +259,8 @@ importers:
         specifier: 2.10.0
         version: 2.10.0(supports-color@8.1.1)
       '@bendyline/squisq-formats':
-        specifier: 2.5.0
-        version: 2.5.0(supports-color@8.1.1)
+        specifier: 2.5.1
+        version: 2.5.1(supports-color@8.1.1)
       '@bendyline/squisq-react':
         specifier: 2.10.0
         version: 2.10.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
@@ -568,11 +568,11 @@ importers:
         specifier: 2.10.0
         version: 2.10.0(supports-color@8.1.1)
       '@bendyline/squisq-cli':
-        specifier: 2.7.0
-        version: 2.7.0(supports-color@8.1.1)
+        specifier: 2.7.1
+        version: 2.7.1(supports-color@8.1.1)
       '@bendyline/squisq-formats':
-        specifier: 2.5.0
-        version: 2.5.0(supports-color@8.1.1)
+        specifier: 2.5.1
+        version: 2.5.1(supports-color@8.1.1)
       '@hono/node-server':
         specifier: 2.0.11
         version: 2.0.11(hono@4.12.34)
@@ -712,11 +712,11 @@ importers:
         specifier: 2.10.0
         version: 2.10.0(supports-color@8.1.1)
       '@bendyline/squisq-editor-react':
-        specifier: 2.10.0
-        version: 2.10.0(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+        specifier: 2.10.1
+        version: 2.10.1(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
       '@bendyline/squisq-formats':
-        specifier: 2.5.0
-        version: 2.5.0(supports-color@8.1.1)
+        specifier: 2.5.1
+        version: 2.5.1(supports-color@8.1.1)
       '@bendyline/squisq-react':
         specifier: 2.10.0
         version: 2.10.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
@@ -945,13 +945,13 @@ packages:
   '@bendyline/gilde@0.1.49':
     resolution: {integrity: sha512-0/j/QLo6cE61yB5RwohBM8Z1vighkFeB8I67RURCdJrCtfmPD+48CAO7pVy9V1GIceUA4DjqDcwbVi1ClSfgqw==}
 
-  '@bendyline/squisq-cli@2.7.0':
-    resolution: {integrity: sha512-hJS8Td0lxsEtNoHZf1YpbjgINZ6B/pikccTYoxjYWtwVNJOV8lwZydPa4MmypkZAyahdk6kOfFSQwNsNJdCk3Q==}
+  '@bendyline/squisq-cli@2.7.1':
+    resolution: {integrity: sha512-Qao8efvWYe/QRYysPXKg1yDIlwTrTIcr+Ld73WwIbyt8umfLr8TP0iACl5O8Sxyjx4ABK1qpPSgil+yOTB1MDw==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     hasBin: true
 
-  '@bendyline/squisq-editor-react@2.10.0':
-    resolution: {integrity: sha512-dRR3TE3YNoeP2x6a0CAXZAJfRJg1S1A8nAF04g1fmFrYxPYXmfJCKxuyLhGK1MdLlIgxrbwy+IWtI5cJGhJPdQ==}
+  '@bendyline/squisq-editor-react@2.10.1':
+    resolution: {integrity: sha512-nwaPleZNLeApa2fNnfSfPG1r7ogIMXENRglyaU4S0ZNyriqsxD9TF1JgDbNNrwXybJgpxlRBMO2eYwIXQQCkRw==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       harper.js: ^2.7.0
@@ -962,8 +962,8 @@ packages:
       harper.js:
         optional: true
 
-  '@bendyline/squisq-formats@2.5.0':
-    resolution: {integrity: sha512-aVRqwa3fc101u9eguKROn1zu0ogvbswCg4NQhVMSWEXUU3ymxGh75FyXNb5LfjuIQznEYkI3/DYpDWCrDUk8hg==}
+  '@bendyline/squisq-formats@2.5.1':
+    resolution: {integrity: sha512-Wl8yTQkBIZSVWM7YH59CqIRUgwYxPRc0aqnuf2JBT6KAQs7iMbJuq2cjrDRHl2t6VQZZdsunIMth3GcUWGa5lw==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
   '@bendyline/squisq-react@2.10.0':
@@ -3727,10 +3727,9 @@ packages:
     engines: {node: '>=14.6'}
     deprecated: this version has critical issues, please update to the latest version
 
-  '@xmldom/xmldom@0.9.11':
-    resolution: {integrity: sha512-tW8bcK3hsG0/uqSnNz6TK4BkcuZSezoU7DlnYssILmZDktPnSHHuDJJFM0AJv+13gz2r0iGdrj6qqKeUnxXEDg==}
+  '@xmldom/xmldom@0.9.12':
+    resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
     engines: {node: '>=14.6'}
-    deprecated: this version has critical issues, please update to the latest version
 
   '@zone-eu/mailsplit@5.4.14':
     resolution: {integrity: sha512-rz0FQOhN3Vq1XrSeSSa9+dPcaFbBxmQPjiZm6zS9oxdVHV7rOWIAYX3yP2YAUf0qBncY8CI+NogzPCmMVrMXcw==}
@@ -8218,20 +8217,20 @@ snapshots:
 
   '@bendyline/gilde@0.1.49': {}
 
-  '@bendyline/squisq-cli@2.7.0(supports-color@8.1.1)':
+  '@bendyline/squisq-cli@2.7.1(supports-color@8.1.1)':
     dependencies:
       '@bendyline/squisq': 2.10.0(supports-color@8.1.1)
-      '@bendyline/squisq-formats': 2.5.0(supports-color@8.1.1)
+      '@bendyline/squisq-formats': 2.5.1(supports-color@8.1.1)
       '@bendyline/squisq-video': 2.3.2(supports-color@8.1.1)
       commander: 12.1.0
       playwright-core: 1.61.1
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq-editor-react@2.10.0(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
+  '@bendyline/squisq-editor-react@2.10.1(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
     dependencies:
       '@bendyline/squisq': 2.10.0(supports-color@8.1.1)
-      '@bendyline/squisq-formats': 2.5.0(supports-color@8.1.1)
+      '@bendyline/squisq-formats': 2.5.1(supports-color@8.1.1)
       '@bendyline/squisq-react': 2.10.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
       '@bendyline/squisq-video-react': 2.4.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
       '@fortawesome/fontawesome-free': 7.2.0
@@ -8261,12 +8260,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq-formats@2.5.0(supports-color@8.1.1)':
+  '@bendyline/squisq-formats@2.5.1(supports-color@8.1.1)':
     dependencies:
       '@bendyline/squisq': 2.10.0(supports-color@8.1.1)
       '@pdf-lib/fontkit': 1.1.1
       '@pdf-lib/upng': 1.0.1
-      '@xmldom/xmldom': 0.9.11
+      '@xmldom/xmldom': 0.9.12
       jszip: 3.10.1
       pdf-lib: 1.17.1
       pdfjs-dist: 4.10.38
@@ -10953,7 +10952,7 @@ snapshots:
 
   '@xmldom/xmldom@0.9.10': {}
 
-  '@xmldom/xmldom@0.9.11': {}
+  '@xmldom/xmldom@0.9.12': {}
 
   '@zone-eu/mailsplit@5.4.14':
     dependencies:
