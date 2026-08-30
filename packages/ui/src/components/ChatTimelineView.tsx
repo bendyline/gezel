@@ -2093,6 +2093,7 @@ export function ChatTimelineView({
           delete slot.thinkingLabel;
           delete slot.thinkingProgress;
           delete slot.thinkingDetail;
+          delete slot.thinkingPhase;
         } else {
           // When the phase event carries a `progress` value (chunked
           // prefill batches), surface the friendly base label and
@@ -2107,10 +2108,19 @@ export function ChatTimelineView({
             if (event.detail) slot.thinkingDetail = event.detail;
             else delete slot.thinkingDetail;
           } else {
+            // A progress-less event for the phase already showing a bar is a
+            // liveness heartbeat, not the end of the bar — engines interleave
+            // both (MLX ticks every 4s between `Prefill:` lines), and dropping
+            // progress here blinked the bar and its token count for the whole
+            // prefill. A real phase change still clears it, as do deltas,
+            // reasoning tokens, and `ready`.
             slot.thinkingLabel = event.detail ?? base;
-            delete slot.thinkingProgress;
-            delete slot.thinkingDetail;
+            if (slot.thinkingPhase !== event.phase) {
+              delete slot.thinkingProgress;
+              delete slot.thinkingDetail;
+            }
           }
+          slot.thinkingPhase = event.phase;
         }
         liveRef.current.set(sessionId, slot);
         liveStore.markItemChanged(sessionId);

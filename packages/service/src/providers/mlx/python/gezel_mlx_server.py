@@ -82,6 +82,22 @@ from lfm2_compat import ensure_lfm2_config_compat  # noqa: E402
 from qwen3_5_text_compat import is_text_only_qwen3_5_checkpoint  # noqa: E402
 
 
+def log_contained_exception(tag: str) -> None:
+    """Print the current traceback for a failure the caller has CONTAINED.
+
+    Tagged line by line, and never `traceback.print_exc()`: the supervisor's
+    stdout classifier reads a bare `SomeError: <message>` leaf line as proof
+    the engine is dead and tears the process down. That is right during
+    startup, which is what it was written for, and wrong at every call site
+    here — each one has already answered the affected request and left the
+    engine serving everyone else on it. A speculative-decode wave that failed
+    one request this way SIGKILLed a 27B three minutes into serving and took
+    an unrelated session's turn down with it.
+    """
+    for line in traceback.format_exc().rstrip().splitlines():
+        print(f"[{tag}] | {line}", flush=True)
+
+
 # ───────── Leaked special-token scrub ─────────
 
 # Chat-template framing tokens — turn / sequence / tool-response
@@ -1739,6 +1755,12 @@ class BatchEngine:
                         spec_sub.request, spec_sub.grammar
                     )
                     if mode is not None:
+                        admit, gate_why = spec_decode.draft_prefill_gate(
+                            _SPEC, len(spec_sub.prompt_tokens)
+                        )
+                        if not admit:
+                            mode, why = None, gate_why
+                    if mode is not None:
                         await self._run_spec_wave(spec_sub, mode)
                         continue
                     print(
@@ -1765,7 +1787,7 @@ class BatchEngine:
                     )
                 except Exception as exc:  # noqa: BLE001
                     print(f"[batch] insert failed: {exc}", flush=True)
-                    traceback.print_exc()
+                    log_contained_exception("batch")
                     for sub in batch:
                         sub.queue.put_nowait(("err", str(exc)))
                     continue
@@ -1800,7 +1822,7 @@ class BatchEngine:
                     step_ended_at = time.perf_counter()
                 except Exception as exc:  # noqa: BLE001
                     print(f"[batch] step failed: {exc}", flush=True)
-                    traceback.print_exc()
+                    log_contained_exception("batch")
                     for sub in list(self._subs.values()):
                         sub.queue.put_nowait(("err", str(exc)))
                     self._subs.clear()
@@ -2093,7 +2115,12 @@ class BatchEngine:
             self._finish(sub, r)
         except Exception as exc:  # noqa: BLE001
             print(f"[spec] wave failed request={sub.request_id}: {exc}", flush=True)
-            traceback.print_exc()
+            # Tag every traceback line. The supervisor's stdout classifier
+            # reads a bare `SomeError: ...` leaf line as proof the engine is
+            # dead and tears the process down — right during startup, wrong
+            # here, where this handler has already contained the failure and
+            # the engine is still serving other requests.
+            log_contained_exception("spec")
             sub.queue.put_nowait(("err", str(exc)))
 
     def _capture_spec_snapshot(self, sub, cache_layers, full_prompt):
@@ -2771,12 +2798,12 @@ async def cache_warm(req: CacheWarmRequest) -> JSONResponse:
     except Exception as exc:
         _unmark_inflight(sub.pinned_cache_ids)
         sub.pinned_cache_ids = []
-        traceback.print_exc()
+        log_contained_exception("http")
         raise HTTPException(status_code=500, detail=str(exc))
     try:
         await _await_batched_completion(sub)
     except Exception as exc:
-        traceback.print_exc()
+        log_contained_exception("http")
         raise HTTPException(status_code=500, detail=str(exc))
 
     cache_state = sub.saved_cache_state
@@ -3542,7 +3569,7 @@ async def chat_completions(request: ChatRequest, http_request: Request):
 
         except Exception as e:
             print(f"Error during stream generation: {e}", flush=True)
-            traceback.print_exc()
+            log_contained_exception("stream")
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
         finally:

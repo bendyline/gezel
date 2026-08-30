@@ -180,9 +180,83 @@ def test_spec_mode():
     print("PASS spec_mode")
 
 
+def test_draft_prefill_chunks():
+    assert spec_decode.draft_prefill_chunks(0, 2048) == []
+    assert spec_decode.draft_prefill_chunks(-5, 2048) == []
+    assert spec_decode.draft_prefill_chunks(3, 2048) == [(0, 3)]
+    assert spec_decode.draft_prefill_chunks(5, 2) == [(0, 2), (2, 4), (4, 5)]
+    # Spans must tile the whole range with no gap and no overlap — a
+    # dropped span is a hole in the drafter's KV that only shows up as
+    # degraded acceptance, never as an error.
+    spans = spec_decode.draft_prefill_chunks(61523, 2048)
+    assert spans[0][0] == 0 and spans[-1][1] == 61523
+    assert all(a[1] == b[0] for a, b in zip(spans, spans[1:]))
+    # A missing/zero step falls back to the module default rather than
+    # looping forever on a zero-width span.
+    assert spec_decode.draft_prefill_chunks(10, 0) == [(0, 10)]
+    print("PASS draft_prefill_chunks")
+
+
+class _Drafter:
+    """Minimal stand-in for the incremental surface the wrapper needs."""
+
+    def __init__(self, full=True):
+        self._cache = [] if full else None
+        if full:
+            self._forward_tokens = lambda *a, **k: None
+            self._set_seed_from_hidden = lambda *a, **k: None
+        self.prefill_from_target_hidden = lambda *a, **k: None
+
+
+def test_chunked_prefill_probe_and_install():
+    ok = _Drafter()
+    assert spec_decode.drafter_supports_chunked_prefill(ok)
+    logs, log = _logs()
+    assert spec_decode.install_chunked_draft_prefill(ok, 512, log=log)
+    assert getattr(ok, "_gezel_chunked_prefill", False)
+    assert any("chunked at 512" in l for l in logs), logs
+    # Idempotent: re-arming the resolved drafter must not re-wrap.
+    wrapped = ok.prefill_from_target_hidden
+    assert spec_decode.install_chunked_draft_prefill(ok, 512, log=log)
+    assert ok.prefill_from_target_hidden is wrapped
+
+    partial = _Drafter(full=False)
+    assert not spec_decode.drafter_supports_chunked_prefill(partial)
+    assert not spec_decode.install_chunked_draft_prefill(partial, 512, log=log)
+    assert not getattr(partial, "_gezel_chunked_prefill", False)
+    print("PASS chunked prefill probe/install")
+
+
+def test_draft_prefill_gate():
+    def state(drafter):
+        return spec_decode.SpecState(
+            drafter=drafter, kind="mtp", block_size=None, drafter_dir="/x"
+        )
+
+    limit = spec_decode.UNCHUNKED_DRAFT_PREFILL_LIMIT
+    ok = _Drafter()
+    spec_decode.install_chunked_draft_prefill(ok, 512, log=lambda _l: None)
+    admit, why = spec_decode.draft_prefill_gate(state(ok), limit * 100)
+    assert admit and why == "", (admit, why)
+
+    raw = _Drafter(full=False)
+    admit, why = spec_decode.draft_prefill_gate(state(raw), limit)
+    assert admit, why
+    admit, why = spec_decode.draft_prefill_gate(state(raw), limit + 1)
+    assert not admit and "quadratic" in why, (admit, why)
+
+    # No drafter at all is not this gate's business.
+    admit, why = spec_decode.draft_prefill_gate(None, 10**9)
+    assert admit and why == ""
+    print("PASS draft_prefill_gate")
+
+
 def main():
     test_eligibility()
     test_spec_mode()
+    test_draft_prefill_chunks()
+    test_chunked_prefill_probe_and_install()
+    test_draft_prefill_gate()
     test_resolve_unconfigured_is_silent()
     test_resolve_kill_switch()
     test_resolve_mlx_lm_tower_refused()

@@ -377,6 +377,23 @@ export class MlxProvider implements LLMProvider {
   // unresponsive completions endpoint. Cleared on supervisor restart.
   private fatalError: MlxFatalError | null = null;
   /**
+   * Whether the engine has reported itself ready and is therefore serving
+   * traffic. Gates fatal-error handling: the classifier reads any
+   * `SomeError: …` leaf line as engine death, which is right during startup
+   * and wrong afterwards. A caught, contained Python exception prints the
+   * same shape as a fatal one, and killing the engine for it takes down
+   * every *other* session sharing it — a spec-decode wave that failed one
+   * request and returned an error to that request alone SIGKILLed a 27B
+   * mid-turn and dropped an unrelated session with it.
+   */
+  private serving = false;
+  /**
+   * Most recent error line seen while serving. Not fatal — recorded so a
+   * turn that dies on a dropped stream can name the real cause instead of
+   * "something closed the HTTP request."
+   */
+  private lastRuntimeError: MlxFatalError | null = null;
+  /**
    * Width-N gate over actual engine requests. The width is the engine's
    * batch capability ({@link batchMaxConcurrency}). At width 1 this is strict
    * FIFO with one HTTP request in flight, while the sidecar still uses its
@@ -652,9 +669,15 @@ export class MlxProvider implements LLMProvider {
     // `ensureRunning()` respawns fresh (and hits the same error if
     // nothing's changed, but at least surfaces it immediately rather
     // than hanging for the full turn-timeout window).
+    //
+    // Only before the engine is serving, though. Once it is up, the same
+    // line shape carries *contained* per-request failures the sidecar has
+    // already handled and answered, and tearing the process down for one
+    // of those kills every concurrent session on the engine.
     const fatal = classifyMlxFatalErrorLine(line);
     if (fatal) {
-      this.handleFatalError(fatal);
+      if (this.serving) this.noteRuntimeError(fatal);
+      else this.handleFatalError(fatal);
       return;
     }
     const phase = classifyMlxStartupLine(line);
@@ -670,7 +693,14 @@ export class MlxProvider implements LLMProvider {
     // A fresh child — clear any stale fatal error from the previous
     // lifecycle so this spawn gets a clean slate. If it errors again
     // during boot, handleFatalError will capture the new one.
-    if (phase.phase === 'starting') this.fatalError = null;
+    // Both flags move before the dedupe below: a repeated identical phase
+    // line returns early, and readiness must not depend on which line won.
+    if (phase.phase === 'starting') {
+      this.fatalError = null;
+      this.lastRuntimeError = null;
+      this.serving = false;
+    }
+    if (phase.phase === 'ready') this.serving = true;
     if (
       this.lastStartupPhase &&
       this.lastStartupPhase.phase === phase.phase &&
@@ -703,6 +733,25 @@ export class MlxProvider implements LLMProvider {
     const fatal = this.fatalError;
     this.fatalError = null;
     return fatal;
+  }
+
+  /**
+   * An error line from an engine that is up and serving. Deliberately does
+   * NOT stop the supervisor: the sidecar prints these from handlers that
+   * already contained the failure and answered the affected request, so the
+   * engine is still correct for everyone else on it. Kept for diagnostics —
+   * see {@link takeRuntimeError}.
+   */
+  private noteRuntimeError(fatal: MlxFatalError): void {
+    this.lastRuntimeError = fatal;
+    log.warn(`engine error while serving (engine left running): ${fatal.message}`);
+  }
+
+  /** Consume the last serving-time error, if one was seen. */
+  takeRuntimeError(): MlxFatalError | null {
+    const err = this.lastRuntimeError;
+    this.lastRuntimeError = null;
+    return err;
   }
 
   private handleFatalError(fatal: MlxFatalError): void {
@@ -1477,9 +1526,22 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // and NOT `publishEnginePhase`, so it does NOT reset the stall watchdog — a
     // genuinely hung engine still trips the idle abort.
     let prepLabel = 'Preparing…';
+    this.lastPrefillEvent = null;
     const emitPrep = (): void => {
       if (firstTokenAt !== null) return;
-      this.emitEnginePhase({ provider: 'mlx', phase: 'prefill', detail: prepLabel });
+      // Carry the last observed prefill progress forward. A phase event
+      // WITHOUT `progress` tells the UI the bar is over (the timeline's
+      // engine_phase handler deletes `thinkingProgress` and its detail), so
+      // a bare heartbeat landing between two `Prefill:` lines blinked the
+      // bar and its token count out every 4s for the whole prefill — which
+      // on a 61K-token prompt is minutes of flicker.
+      const last = this.lastPrefillEvent;
+      this.emitEnginePhase({
+        provider: 'mlx',
+        phase: 'prefill',
+        detail: last?.detail || prepLabel,
+        ...(last ? { progress: last.progress } : {}),
+      });
     };
     const statusHeartbeat = setInterval(emitPrep, 4_000);
     emitPrep();
@@ -1924,7 +1986,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           // heartbeat label and emit once immediately so the pill updates
           // without waiting for the next heartbeat tick.
           prepLabel = 'Processing prompt';
-          this.emitEnginePhase({ provider: 'mlx', phase: 'prefill', detail: prepLabel });
+          emitPrep();
         }
 
         let turnContent = '';

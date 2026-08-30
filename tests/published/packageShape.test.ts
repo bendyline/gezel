@@ -54,8 +54,12 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   '@bendyline/gezel-cli': 150_000, //                   31 KB
   // Carries the bundled web UI (`dist/ui`) and the handboek content so a
   // Node-only CLI install can serve `gezel start --web` with nothing else
-  // to fetch. That is essentially all of this budget.
-  '@bendyline/gezel-service': 25_000_000, //          18.1 MB
+  // to fetch. That is essentially all of this budget. About 16 MB of it is
+  // harper's two WASM binaries under `dist/ui/harper/` — a pinned, fixed
+  // floor the proofing feature cannot ship without (both binaries are
+  // load-bearing; see the proofing gotcha in CLAUDE.md), so the headroom
+  // here covers the ~21 MB that actually grows with feature work.
+  '@bendyline/gezel-service': 45_000_000, //          36.7 MB
 };
 
 const ROOT_LICENSE = readFileSync(resolve(REPO_ROOT, 'LICENSE'), 'utf8');

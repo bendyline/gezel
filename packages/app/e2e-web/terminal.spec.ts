@@ -4,11 +4,35 @@
  * completion sources: commands/scripts, craftbooks, project-wide MCP tools
  * (list + run), and workspace file paths. Drives the real built UI in
  * Chromium, so monaco + the completion provider run for real.
+ *
+ * The terminal is a gated developer surface — it exists only on a coding-typed
+ * project with "Show advanced features" on (see `showComposeModeTabs` in
+ * ProjectChat). The shared fixture world is neither, so this spec opens the
+ * gate around its own tests and closes it again, leaving the world as the other
+ * specs (and the screenshot gallery) expect to find it.
  */
+import { GezelClient } from '@bendyline/gezel-client';
 import { expect, test } from './fixtures/test.js';
 import { settle } from './helpers/determinism.js';
 import { gotoHome, openProject } from './helpers/nav.js';
 import { shot } from './helpers/shot.js';
+
+/** A coding taxonomy id, so `isCodingProject` admits the fixture project. */
+const TERMINAL_PROJECT_TYPE_ID = 'web-app';
+
+test.beforeEach(async ({ world, daemon }) => {
+  const client = new GezelClient({ baseUrl: daemon.baseURL, token: daemon.token });
+  await client.updateConfig({ showAdvancedFeatures: true });
+  await client.updateProject(world!.projectId, { projectTypeId: TERMINAL_PROJECT_TYPE_ID });
+});
+
+test.afterEach(async ({ world, daemon }) => {
+  const client = new GezelClient({ baseUrl: daemon.baseURL, token: daemon.token });
+  // `null` clears the override rather than pinning a non-coding type, so the
+  // project goes back to being unclassified the way the seed left it.
+  await client.updateProject(world!.projectId, { projectTypeId: null }).catch(() => {});
+  await client.updateConfig({ showAdvancedFeatures: false }).catch(() => {});
+});
 
 /** How far the mode tabs may sit from the compose frame's right edge. Both
  *  address lines end with a small gutter, so this is a ceiling, not a target. */

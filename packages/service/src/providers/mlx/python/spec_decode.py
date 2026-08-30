@@ -117,6 +117,13 @@ def resolve_spec(args, model, text_tower: Optional[str], log=print) -> Optional[
     except Exception as exc:  # noqa: BLE001
         _off(log, f"drafter incompatible with target: {exc}")
         return None
+    if not install_chunked_draft_prefill(
+        drafter, int(getattr(args, "prefill_step_size", 0) or 0), log=log
+    ):
+        log(
+            "[spec] drafter has no incremental prefill surface — long prompts "
+            f"(> {UNCHUNKED_DRAFT_PREFILL_LIMIT} tokens) will run without speculation"
+        )
     block = getattr(args, "spec_block_size", None)
     return SpecState(
         drafter=drafter,
@@ -124,6 +131,125 @@ def resolve_spec(args, model, text_tower: Optional[str], log=print) -> Optional[
         block_size=int(block) if block else None,
         drafter_dir=str(draft_dir),
     )
+
+
+# ── Drafter prompt-prefill ──
+#
+# The drafter's `prefill_from_target_hidden` runs ONE forward over every
+# prefilled position, so its attention mask is quadratic in prompt length
+# while the target tower's own prefill is chunked (`chunked_prefill_steps`).
+# At 61,523 tokens that asked Metal for 61523 * 61523 * 48 bytes = 181 GB and
+# raised mid-turn on a healthy engine. Both round loops reach the drafter
+# through the same `prefill_from_target_hidden` attribute — ours positionally,
+# upstream `_mtp_rounds` via `sampler_rng.draft_call` — so wrapping it once on
+# the instance covers every path.
+#
+# Chunking is exact, not an approximation: `_forward_tokens` appends to the
+# drafter's own KV cache and advances `_next_position` by the chunk length,
+# and `_position_ids` derives from `_next_position`, so N sliced calls build
+# the identical cache one call would. Same argument the target tower's chunked
+# prefill rests on.
+DRAFT_PREFILL_STEP = int(os.environ.get("GEZEL_MLX_SPEC_DRAFT_STEP") or 2048)
+
+# Ceiling for a drafter we could NOT wrap. Peak is `L^2 * bytes-per-(query,
+# key) pair`; at the 48 B/pair measured on qwen3_5_mtp, 4096 tokens is
+# ~800 MB — a transient allocation an engine can absorb. Above it we refuse
+# the wave rather than gamble the whole engine on an unbounded allocation.
+UNCHUNKED_DRAFT_PREFILL_LIMIT = int(
+    os.environ.get("GEZEL_MLX_SPEC_UNCHUNKED_LIMIT") or 4096
+)
+
+
+def draft_prefill_chunks(total: int, step: int) -> List[Tuple[int, int]]:
+    """`[start, end)` spans covering `total` positions, `step` at a time."""
+    if int(total) <= 0:
+        return []
+    size = int(step) if step and int(step) > 0 else DRAFT_PREFILL_STEP
+    return [(i, min(int(total), i + size)) for i in range(0, int(total), size)]
+
+
+def drafter_supports_chunked_prefill(drafter) -> bool:
+    """Whether the drafter exposes the incremental surface chunking needs:
+    `_forward_tokens` (the per-call step that appends to the drafter's own
+    cache), `_set_seed_from_hidden` (plants the seed the first draft block
+    reads), and `_cache` (what we evaluate against between chunks). A family
+    missing any of them keeps the one-shot path and the length gate."""
+    return (
+        callable(getattr(drafter, "_forward_tokens", None))
+        and callable(getattr(drafter, "_set_seed_from_hidden", None))
+        and getattr(drafter, "_cache", None) is not None
+    )
+
+
+def install_chunked_draft_prefill(drafter, step: int = 0, log=print) -> bool:
+    """Replace the drafter's one-shot prompt-prefill with a chunked one.
+
+    Bound to the instance, not the class: `resolve_spec` owns exactly one
+    drafter per process, and leaving other instances untouched keeps the
+    seam narrow. Idempotent — re-arming a resolved drafter is a no-op.
+    """
+    if not drafter_supports_chunked_prefill(drafter):
+        return False
+    if not callable(getattr(drafter, "prefill_from_target_hidden", None)):
+        return False
+    if getattr(drafter, "_gezel_chunked_prefill", False):
+        return True
+    size = int(step) if step and int(step) > 0 else DRAFT_PREFILL_STEP
+
+    def chunked(
+        input_ids, hidden, bonus_token, sampler, token_dtype=None, greedy=False
+    ) -> None:
+        import mlx.core as mx
+
+        dtype = token_dtype if token_dtype is not None else mx.int32
+        if int(input_ids.shape[1]) == 0:
+            return
+        if isinstance(bonus_token, int):
+            bonus = mx.array([[bonus_token]], dtype=dtype)
+        else:
+            bonus = bonus_token[:, None].astype(dtype)
+        # Upstream's alignment: the drafter predicts token t+1 from token
+        # t+1's embedding paired with the target hidden at t, so the token
+        # stream shifts left one and closes with the bonus token.
+        shifted = mx.concatenate([input_ids[:, 1:].astype(dtype), bonus], axis=1)
+        aligned = hidden[:, : shifted.shape[1], :]
+        drafter._next_position = 0
+        out = None
+        for start, end in draft_prefill_chunks(int(shifted.shape[1]), size):
+            out = drafter._forward_tokens(
+                shifted[:, start:end], aligned[:, start:end, :], dtype
+            )
+            # Evaluate against the drafter's cache each chunk. Holding the
+            # lazy graph across the whole prompt rebuilds the peak this
+            # chunking exists to remove.
+            mx.eval([c.state for c in drafter._cache], out)
+        if out is not None:
+            drafter._set_seed_from_hidden(out[:, -1:, :], sampler, greedy)
+
+    drafter.prefill_from_target_hidden = chunked
+    drafter._gezel_chunked_prefill = True
+    log(f"[spec] drafter prompt-prefill chunked at {size} tokens")
+    return True
+
+
+def draft_prefill_gate(spec: Optional[SpecState], prompt_len: int) -> Tuple[bool, str]:
+    """Admission gate for a wave whose drafter prefill could not be wrapped.
+
+    Runs before the wave starts, because by the time `assisted_rounds` reaches
+    the drafter the target's prefill is already spent — refusing there would
+    throw that work away."""
+    if spec is None:
+        return True, ""
+    if getattr(spec.drafter, "_gezel_chunked_prefill", False):
+        return True, ""
+    if int(prompt_len) > UNCHUNKED_DRAFT_PREFILL_LIMIT:
+        return (
+            False,
+            f"drafter prompt-prefill is unchunked and this prompt is "
+            f"{int(prompt_len)} tokens (> {UNCHUNKED_DRAFT_PREFILL_LIMIT}) — "
+            f"its attention mask is quadratic in prompt length",
+        )
+    return True, ""
 
 
 def eligibility(request, grammar) -> Tuple[bool, str]:

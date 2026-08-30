@@ -89,6 +89,48 @@ describe('MLX MTP speculative-decoding contract', () => {
     ).toBe(true);
   });
 
+  it('chunks the drafter prompt-prefill, and gates the wave when it cannot', () => {
+    // The drafter's `prefill_from_target_hidden` runs ONE forward over every
+    // prefilled position while the target tower's prefill is chunked, so its
+    // attention mask is quadratic in prompt length: 61,523 tokens asked
+    // Metal for 181 GB and raised mid-turn on a healthy engine. Both round
+    // loops reach the drafter through that same attribute (ours positionally,
+    // upstream `_mtp_rounds` via `sampler_rng.draft_call`), so the wrapper
+    // must be installed on the instance at resolve time — a fix applied only
+    // inside `assisted_rounds` would leave the greedy path exposed.
+    const helperAt = SPEC.indexOf('def install_chunked_draft_prefill');
+    const resolveAt = SPEC.indexOf('def resolve_spec');
+    expect(helperAt, 'the chunked-prefill wrapper moved or was renamed').toBeGreaterThan(-1);
+    // Slice resolve_spec's body specifically — a substring search over the
+    // whole file would happily match the definition and prove nothing.
+    expect(SPEC.slice(resolveAt, helperAt)).toContain('install_chunked_draft_prefill(');
+    // A drafter family without the incremental surface keeps the one-shot
+    // call, so the length gate is the only thing standing between it and the
+    // same allocation. It must run at ADMISSION — by the time the rounds
+    // reach the drafter the target's prefill is already spent.
+    expect(SPEC).toContain('def draft_prefill_gate');
+    expect(SIDECAR).toMatch(/spec_decode\.spec_mode[\s\S]{0,400}spec_decode\.draft_prefill_gate\(/);
+  });
+
+  it('no contained handler prints a traceback the classifier can read', () => {
+    // `traceback.print_exc()` puts a bare `SomeError: ...` leaf line on
+    // stdout, which the supervisor's classifier treats as proof the engine is
+    // dead — it SIGKILLed a serving 27B for a wave failure the handler had
+    // already caught and answered. Every contained handler in the sidecar
+    // (spec wave, batch insert/step, the HTTP 500 paths, stream generation)
+    // has the same shape, so the rule is module-wide, not per-site.
+    const start = SIDECAR.indexOf('def log_contained_exception');
+    expect(start, 'the contained-traceback helper moved or was renamed').toBeGreaterThan(-1);
+    // The helper's own docstring names the banned call; scan everything else.
+    const end = SIDECAR.indexOf('\n# ─────────', start);
+    const outsideHelper = SIDECAR.slice(0, start) + SIDECAR.slice(end);
+    expect(
+      outsideHelper,
+      'contained handlers must use log_contained_exception, not traceback.print_exc',
+    ).not.toContain('traceback.print_exc()');
+    expect(SIDECAR).toMatch(/def log_contained_exception[\s\S]{0,1200}print\(f"\[\{tag\}\] \| /);
+  });
+
   it('boot and per-turn fingerprints exist so an A/B can prove its arms', () => {
     expect(SIDECAR).toContain('[spec] active drafter=');
     expect(SIDECAR).toContain('[spec] stats request=');

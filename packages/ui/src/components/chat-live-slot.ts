@@ -162,6 +162,13 @@ export interface LiveSlot {
    */
   thinkingDetail?: string;
   /**
+   * Phase of the last `engine_phase` event. Only read to tell a liveness
+   * heartbeat (same phase, no `progress`) apart from a genuine phase
+   * change, so a heartbeat between two progress events doesn't blink the
+   * bar out.
+   */
+  thinkingPhase?: string;
+  /**
    * Set when a `gpu_swap` event with `state: 'started'` has arrived
    * for this session and not yet been paired with `state: 'ended'`.
    * Means the GPU is currently held by a non-LLM workload (today:
