@@ -46,7 +46,9 @@ describe('buildDuckPrelude', () => {
   });
 
   it('clamps the thread count', () => {
-    expect(buildDuckPrelude({ allowedDirectories: ['/c'], threads: 0 })).toContain('SET threads=1;');
+    expect(buildDuckPrelude({ allowedDirectories: ['/c'], threads: 0 })).toContain(
+      'SET threads=1;',
+    );
     expect(buildDuckPrelude({ allowedDirectories: ['/c'], threads: 999 })).toContain(
       'SET threads=64;',
     );

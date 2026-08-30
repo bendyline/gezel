@@ -134,12 +134,12 @@ import {
   ExecutionToolOutputSchema,
   GitToolOutputSchema,
   ListToolOutputSchema,
-  TableDescribeToolOutputSchema,
-  TableQueryToolOutputSchema,
   MemoryListToolOutputSchema,
   MemorySaveToolOutputSchema,
   SearchToolOutputSchema,
   StatToolOutputSchema,
+  TableDescribeToolOutputSchema,
+  TableQueryToolOutputSchema,
   TaskToolOutputSchema,
   annotationsForTool,
   errorResult,
@@ -1270,11 +1270,7 @@ function registerObservationTableTools(): void {
     'describe_table',
     'Explain one data table before you query it: every column with its type, role and unit, what one row represents, which column to filter on for speed, and worked example queries. Always call this before `query_table` on a table you have not queried this session — guessing column names wastes a turn, and the units are how you avoid answering in the wrong magnitude.',
     {
-      table: z
-        .string()
-        .min(1)
-        .max(200)
-        .describe('Table name as reported by `list_tables`.'),
+      table: z.string().min(1).max(200).describe('Table name as reported by `list_tables`.'),
     },
     async ({ table }) => {
       try {

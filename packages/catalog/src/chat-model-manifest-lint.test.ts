@@ -76,7 +76,11 @@ describe('lintChatModelManifest rules', () => {
     const gemma = {
       ...complete,
       id: 'gemma4-12b-q4',
-      llamaCpp: { ...complete.llamaCpp, huggingfaceRepo: 'unsloth/x-qat-GGUF', quantization: '4bit' },
+      llamaCpp: {
+        ...complete.llamaCpp,
+        huggingfaceRepo: 'unsloth/x-qat-GGUF',
+        quantization: '4bit',
+      },
       mlx: {
         residentBytes: 9_000_000_000,
         huggingfaceRepo: 'vendor/x-qat-4bit',

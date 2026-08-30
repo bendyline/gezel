@@ -1,8 +1,8 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildInstructions } from '../chat/instructions.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { buildInstructions } from '../chat/instructions.js';
 import type { Store } from '../fs/store.js';
 import { hasObservationTables } from './query.js';
 import { synthRequests, synthRequestsManifest } from './testing/synth.js';

@@ -200,8 +200,8 @@ describe('MlxModelManager — chat template override', () => {
 
     await drain(manager.install(id));
 
-    await expect(
-      readFile(join(modelDir(home, id), 'chat_template.jinja'), 'utf8'),
-    ).resolves.toBe(OLD_TEMPLATE);
+    await expect(readFile(join(modelDir(home, id), 'chat_template.jinja'), 'utf8')).resolves.toBe(
+      OLD_TEMPLATE,
+    );
   });
 });

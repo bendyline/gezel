@@ -1,5 +1,5 @@
-import { createRequire } from 'node:module';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
@@ -8,7 +8,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { compactCorpus } from '../observations/compactor.js';
 import { DuckRunner } from '../observations/duck.js';
 import { findRealDuckdb, hasRealDuckdb } from '../observations/testing/duck-fixture.js';
-import { expectedRouteStats, synthRequests, synthRequestsManifest } from '../observations/testing/synth.js';
+import {
+  expectedRouteStats,
+  synthRequests,
+  synthRequestsManifest,
+} from '../observations/testing/synth.js';
 import { ObservationWriter } from '../observations/writer.js';
 import { type RunningService, startService } from '../service.js';
 import { McpBridge } from './mcp-bridge.js';

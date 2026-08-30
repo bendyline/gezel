@@ -25,13 +25,13 @@
  * that is what seals the open parts and flushes state.
  */
 
-import { createWriteStream, existsSync, type WriteStream } from 'node:fs';
+import { type WriteStream, createWriteStream, existsSync } from 'node:fs';
 import { mkdir, rename, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { createLogger, nowIso, type ObservationTableManifest } from '@bendyline/gezel';
-import { resolveInside } from '../fs/safe-paths.js';
-import { slug } from '../connectors/writer.js';
+import { type ObservationTableManifest, createLogger, nowIso } from '@bendyline/gezel';
 import type { ObservationBatch } from '../connectors/types.js';
+import { slug } from '../connectors/writer.js';
+import { resolveInside } from '../fs/safe-paths.js';
 import {
   type ObservationTableState,
   UNPARTITIONED,

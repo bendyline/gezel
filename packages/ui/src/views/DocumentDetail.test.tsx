@@ -61,6 +61,8 @@ vi.mock('../components/SquisqIntegration/index.js', () => ({
   }),
   resolveOutsideInLayout: (path: string) =>
     path.endsWith('.docx') ? { targetPath: path, format: 'docx' } : null,
+  gezelProofingProvider: () => ({ kind: 'proofing-provider' }),
+  gezelProofingIgnoreStore: { load: () => undefined, save: () => {} },
 }));
 
 vi.mock('./OutsideInDocumentDetail.js', () => ({

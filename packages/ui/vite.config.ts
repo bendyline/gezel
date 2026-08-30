@@ -1,8 +1,9 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { harperWasmPlugin } from './scripts/vite-harper-wasm.js';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), harperWasmPlugin()],
   // With `pnpm link:squisq` active, the squisq packages resolve to the
   // sibling checkout — whose own workspace carries react 18 for its dev
   // tooling. Without dedupe, their bare `import "react"` resolves THERE,

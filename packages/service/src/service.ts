@@ -56,8 +56,6 @@ import { registerInstagramAdapters } from './connectors/natives/instagram-media.
 import { registerLinkedInAdapters } from './connectors/natives/linkedin-posts.js';
 import { registerXAdapters } from './connectors/natives/x-posts.js';
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
-import { DuckRunner } from './observations/duck.js';
-import { runObservationNightly } from './observations/nightly.js';
 import { runConnectorTaskPrep } from './connectors/task-prep.js';
 import { listApplicableCraftbooks, projectCraftbookSummaries } from './craftbook/applicable.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
@@ -144,6 +142,8 @@ import {
   modelStorageRoots,
   reclaimAbandonedModelDownloads,
 } from './models/storage-roots.js';
+import { DuckRunner } from './observations/duck.js';
+import { runObservationNightly } from './observations/nightly.js';
 import { createOpenCodeSetupManager } from './opencode-setup/manager.js';
 import { discoverManagedScriptRuntimes } from './packages/managed-runtimes.js';
 import { normalizeBundledPnpmPath } from './packages/pnpm.js';

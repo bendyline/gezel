@@ -8,8 +8,8 @@ as ordinary files you can `cat` and `grep`, and talks to whichever LLM provider
 you point it at. No cloud service of ours stands between you and the model.
 
 ```bash
-npm install -g @bendyline/gezel-cli
-gezel
+npm install @bendyline/gezel-cli
+npx gezel
 ```
 
 On a clean machine, the TUI stays in first-time setup until you decide what to

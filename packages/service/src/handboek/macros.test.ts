@@ -281,7 +281,10 @@ describe('data macros', () => {
     expect(app.markdown).toContain('| **large** |');
     const site = await expandMacros('::handboek-device-hardware', { ...ctx('site') });
     expect(site.markdown).not.toContain('64.0 GB');
-    expect(site.markdown).toContain('Open this page in the app');
+    expect(site.markdown).toContain('Gezel classifies each device');
+    // The site build has no device to report on, so it must not tell a web
+    // reader to open a page they are already reading.
+    expect(site.markdown).not.toContain('in the app');
   });
 });
 

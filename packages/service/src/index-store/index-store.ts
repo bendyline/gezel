@@ -861,12 +861,7 @@ export class IndexStore {
       .all<{ corpusDir: string; filePath: string }>(this.collectionId);
   }
 
-  markTabularOk(
-    contentHash: string,
-    filePath: string,
-    corpusDir: string,
-    rows: number,
-  ): void {
+  markTabularOk(contentHash: string, filePath: string, corpusDir: string, rows: number): void {
     this.db
       .prepare(
         `INSERT OR REPLACE INTO tabular_state

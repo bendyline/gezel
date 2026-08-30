@@ -7,6 +7,8 @@ import {
   chooseOutsideInSource,
   createDocumentLinkProvider,
   createDocumentsContentContainer,
+  gezelProofingIgnoreStore,
+  gezelProofingProvider,
   importOutsideInDocument,
   isOutsideInMarkdownEditingEnabled,
   relativePath,
@@ -262,6 +264,8 @@ function OutsideInEditor({
           fullWidth
           workspaceContainer={container}
           documentLinkProvider={documentLinkProvider}
+          proofing={gezelProofingProvider()}
+          proofingIgnoreStore={gezelProofingIgnoreStore}
           allowVersioning={prepared.editingEnabled}
           versionBasename={basename(prepared.sourcePath)}
           toolbarSlotAfterActions={

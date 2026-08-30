@@ -43,7 +43,10 @@ function manager(home: string, files: Record<string, Buffer>, seen?: string[]) {
     seen?.push(url);
     const bytes = files[name];
     if (!bytes) return new Response(null, { status: 404, statusText: 'Not Found' });
-    return new Response(bytes, { status: 200, headers: { 'content-length': String(bytes.length) } });
+    return new Response(bytes, {
+      status: 200,
+      headers: { 'content-length': String(bytes.length) },
+    });
   }) as unknown as typeof fetch;
   return new MlxModelManager({ home, catalog: {} as unknown as CatalogService, fetchImpl });
 }
@@ -61,10 +64,9 @@ afterEach(async () => {
 describe('MLX drafter install', () => {
   it('lands files where the launcher arms speculation from', async () => {
     const m = manager(home, { 'config.json': CONFIG, 'model.safetensors': WEIGHTS });
-    await (m as never as { installDrafter: (id: string, d: unknown) => Promise<void> }).installDrafter(
-      'fixture-model',
-      drafterSpec(),
-    );
+    await (
+      m as never as { installDrafter: (id: string, d: unknown) => Promise<void> }
+    ).installDrafter('fixture-model', drafterSpec());
     const dir = drafterDir(home);
     expect(existsSync(join(dir, 'model.safetensors'))).toBe(true);
     expect(readFileSync(join(dir, 'model.safetensors'))).toEqual(WEIGHTS);
@@ -76,10 +78,9 @@ describe('MLX drafter install', () => {
   it('fetches from the pinned revision, not main', async () => {
     const seen: string[] = [];
     const m = manager(home, { 'config.json': CONFIG, 'model.safetensors': WEIGHTS }, seen);
-    await (m as never as { installDrafter: (id: string, d: unknown) => Promise<void> }).installDrafter(
-      'fixture-model',
-      drafterSpec(),
-    );
+    await (
+      m as never as { installDrafter: (id: string, d: unknown) => Promise<void> }
+    ).installDrafter('fixture-model', drafterSpec());
     expect(seen.length).toBeGreaterThan(0);
     for (const url of seen) expect(url).toContain(`/resolve/${'a'.repeat(40)}/`);
   });
@@ -87,11 +88,13 @@ describe('MLX drafter install', () => {
   it('installs nothing when a file fails its sha256', async () => {
     // A corrupt drafter that armed speculation would fail at engine boot;
     // absent is strictly better than wrong.
-    const m = manager(home, { 'config.json': CONFIG, 'model.safetensors': Buffer.from('tampered') });
-    await (m as never as { installDrafter: (id: string, d: unknown) => Promise<void> }).installDrafter(
-      'fixture-model',
-      drafterSpec(),
-    );
+    const m = manager(home, {
+      'config.json': CONFIG,
+      'model.safetensors': Buffer.from('tampered'),
+    });
+    await (
+      m as never as { installDrafter: (id: string, d: unknown) => Promise<void> }
+    ).installDrafter('fixture-model', drafterSpec());
     expect(existsSync(drafterDir(home))).toBe(false);
   });
 

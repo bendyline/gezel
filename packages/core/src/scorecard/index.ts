@@ -3,6 +3,7 @@ import { type ScorecardDataset, ScorecardDatasetSchema } from './schema.js';
 
 export * from './schema.js';
 export * from './report.js';
+export * from './filter.js';
 
 /**
  * The checked-in scorecard, parsed once.

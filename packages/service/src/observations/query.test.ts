@@ -89,7 +89,10 @@ describe('table discovery', () => {
       manifests: new Map([['requests', synthRequestsManifest('requests') as never]]),
     });
     await second.writeBatch({ table: 'requests', rows: synthRequests({ rows: 10 }) });
-    await second.writeBatch({ table: 'errors', rows: [{ ts: '2026-08-01T00:00:00Z', route: '/a' }] });
+    await second.writeBatch({
+      table: 'errors',
+      rows: [{ ts: '2026-08-01T00:00:00Z', route: '/a' }],
+    });
     await second.finish();
 
     const tables = await listProjectTables(makeStore(), {
@@ -144,7 +147,9 @@ describe('describe_table rendering', () => {
     await writer.finish();
     const tables = await listProjectTables(makeStore(), PROJECT);
     const ref = findTable(tables, 'guessed');
-    expect(renderTableDescription(ref as NonNullable<typeof ref>)).toMatch(/inferred from the data/);
+    expect(renderTableDescription(ref as NonNullable<typeof ref>)).toMatch(
+      /inferred from the data/,
+    );
   });
 
   it('summarizes a table for the listing tool', async () => {
@@ -193,7 +198,10 @@ describe.runIf(hasRealDuckdb())('runQuery (real engine)', () => {
       corpusDir: 'data/traffic',
       manifests: new Map([['requests', synthRequestsManifest('requests') as never]]),
     });
-    await writer.writeBatch({ table: 'requests', rows: synthRequests({ rows: 120, seed: 99, days: 2 }) });
+    await writer.writeBatch({
+      table: 'requests',
+      rows: synthRequests({ rows: 120, seed: 99, days: 2 }),
+    });
     await writer.finish();
 
     const result = await runQuery({ store: makeStore(), duck }, PROJECT, {
@@ -254,7 +262,7 @@ describe.runIf(hasRealDuckdb())('runQuery (real engine)', () => {
     await seed(10, { days: 1 });
     await expect(
       runQuery({ store: makeStore(), duck }, PROJECT, {
-        sql: "WITH c AS (SELECT 1 AS v) INSERT INTO requests SELECT v FROM c",
+        sql: 'WITH c AS (SELECT 1 AS v) INSERT INTO requests SELECT v FROM c',
       }),
     ).rejects.toBeInstanceOf(SqlRejectedError);
   });
@@ -356,8 +364,11 @@ describe('workspace-derived tables', () => {
   });
 
   it('explains both routes when a project has no tables at all', async () => {
-    const err = await runQuery({ store: makeStore(), duck }, { id: 'p1' }, { sql: 'SELECT 1' })
-      .catch((e) => e);
+    const err = await runQuery(
+      { store: makeStore(), duck },
+      { id: 'p1' },
+      { sql: 'SELECT 1' },
+    ).catch((e) => e);
     expect(err).toBeInstanceOf(NoTablesError);
     expect((err as Error).message).toMatch(/connector/);
     expect((err as Error).message).toMatch(/workspace/);

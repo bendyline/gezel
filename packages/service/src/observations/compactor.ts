@@ -30,7 +30,8 @@
 import { existsSync } from 'node:fs';
 import { rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { createLogger, nowIso, type ObservationTableManifest } from '@bendyline/gezel';
+import { type ObservationTableManifest, createLogger, nowIso } from '@bendyline/gezel';
+import { resolveInside } from '../fs/safe-paths.js';
 import { DuckQueryError, type DuckRunOptions, sqlLiteral } from './duck.js';
 import {
   listPartitionFiles,
@@ -40,7 +41,6 @@ import {
   readTableState,
   writeTableState,
 } from './layout.js';
-import { resolveInside } from '../fs/safe-paths.js';
 import { tableRelDir } from './layout.js';
 
 const log = createLogger('observations');
@@ -163,7 +163,9 @@ async function compactPart(args: {
   const partitionDirAbs = dirname(sealed);
   // `sealed-000123.ndjson` → `part-000123.parquet`, keeping the ordinal so a
   // part's identity survives the format change.
-  const ordinalPart = basename(sealed).replace(/^sealed-/, 'part-').replace(/\.ndjson$/, '');
+  const ordinalPart = basename(sealed)
+    .replace(/^sealed-/, 'part-')
+    .replace(/\.ndjson$/, '');
   const target = join(partitionDirAbs, `${ordinalPart}.parquet`);
   const tmp = `${target}.tmp`;
 
@@ -201,36 +203,30 @@ async function compactPart(args: {
   return written;
 }
 
-async function countNdjsonRows(
-  duck: DuckLike,
-  file: string,
-  allowedDir: string,
-): Promise<number> {
+async function countNdjsonRows(duck: DuckLike, file: string, allowedDir: string): Promise<number> {
   // Counted by the engine rather than by reading the file in Node: the part is
   // sized for Parquet (tens of MB), and it would otherwise be read twice.
-  const rows = await duck.runTrusted<{ n: number }>(
-    `SELECT count(*) AS n FROM read_ndjson('${sqlLiteral(file)}', columns = {'__gezel_probe': 'JSON'}, ignore_errors = false)`,
-    { allowedDirectories: [allowedDir], timeoutMs: COMPACTION_TIMEOUT_MS },
-  ).catch(async (err) => {
-    if (err instanceof DuckQueryError) {
-      // A probe column the data does not have still counts lines in most
-      // shapes, but not all. Fall back to a line count over the raw text.
-      const lines = await duck.runTrusted<{ n: number }>(
-        `SELECT count(*) AS n FROM read_csv('${sqlLiteral(file)}', header = false, columns = {'line': 'VARCHAR'}, delim = '\\x07', quote = '', escape = '')`,
-        { allowedDirectories: [allowedDir], timeoutMs: COMPACTION_TIMEOUT_MS },
-      );
-      return lines;
-    }
-    throw err;
-  });
+  const rows = await duck
+    .runTrusted<{ n: number }>(
+      `SELECT count(*) AS n FROM read_ndjson('${sqlLiteral(file)}', columns = {'__gezel_probe': 'JSON'}, ignore_errors = false)`,
+      { allowedDirectories: [allowedDir], timeoutMs: COMPACTION_TIMEOUT_MS },
+    )
+    .catch(async (err) => {
+      if (err instanceof DuckQueryError) {
+        // A probe column the data does not have still counts lines in most
+        // shapes, but not all. Fall back to a line count over the raw text.
+        const lines = await duck.runTrusted<{ n: number }>(
+          `SELECT count(*) AS n FROM read_csv('${sqlLiteral(file)}', header = false, columns = {'line': 'VARCHAR'}, delim = '\\x07', quote = '', escape = '')`,
+          { allowedDirectories: [allowedDir], timeoutMs: COMPACTION_TIMEOUT_MS },
+        );
+        return lines;
+      }
+      throw err;
+    });
   return Number(rows[0]?.n ?? 0);
 }
 
-async function countParquetRows(
-  duck: DuckLike,
-  file: string,
-  allowedDir: string,
-): Promise<number> {
+async function countParquetRows(duck: DuckLike, file: string, allowedDir: string): Promise<number> {
   if (!existsSync(file)) return 0;
   if ((await stat(file)).size === 0) return 0;
   const rows = await duck.runTrusted<{ n: number }>(

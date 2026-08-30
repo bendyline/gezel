@@ -8,6 +8,8 @@ import {
   createDocumentLinkProvider,
   createDocumentsContentContainer,
   deriveContainerScope,
+  gezelProofingIgnoreStore,
+  gezelProofingProvider,
   resolveOutsideInLayout,
 } from '../components/SquisqIntegration/index.js';
 import { BINARY_FILE, NonTextFilePreview, looksBinary } from '../components/file-browser/index.js';
@@ -151,6 +153,8 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
           fullWidth
           workspaceContainer={markdown ? container : null}
           documentLinkProvider={markdown ? documentLinkProvider : null}
+          proofing={markdown ? gezelProofingProvider() : null}
+          proofingIgnoreStore={gezelProofingIgnoreStore}
           allowVersioning={markdown}
           versionBasename={primaryDocumentFilename}
           toolbarSlotAfterActions={

@@ -68,11 +68,7 @@ describe('toObservationBatches', () => {
   it('passes items through untouched when no mapping is declared', () => {
     // The right default for an API that already returns flat rows — the
     // writer projects them onto the manifest's columns anyway.
-    const [batch] = toObservationBatches(
-      [{ a: 1, b: 'x' }],
-      { table: 'raw' },
-      'fallback',
-    );
+    const [batch] = toObservationBatches([{ a: 1, b: 'x' }], { table: 'raw' }, 'fallback');
     expect(batch?.rows).toEqual([{ a: 1, b: 'x' }]);
   });
 
@@ -111,7 +107,11 @@ describe('newestTimestamp', () => {
   it('derives a window cursor for a source with none of its own', () => {
     expect(
       newestTimestamp(
-        [{ t: '2026-08-01T00:00:00Z' }, { t: '2026-08-04T00:00:00Z' }, { t: '2026-08-02T00:00:00Z' }],
+        [
+          { t: '2026-08-01T00:00:00Z' },
+          { t: '2026-08-04T00:00:00Z' },
+          { t: '2026-08-02T00:00:00Z' },
+        ],
         '$.t',
       ),
     ).toBe('2026-08-04T00:00:00Z');

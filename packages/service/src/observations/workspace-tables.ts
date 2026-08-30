@@ -44,15 +44,11 @@ import {
   createLogger,
   nowIso,
 } from '@bendyline/gezel';
-import {
-  PROJECT_TABULAR_DIR_NAME,
-  TABULAR_COMPANION_SUFFIX,
-} from '@bendyline/gezel/paths';
-import { safeJoin } from '../fs/safe-paths.js';
+import { PROJECT_TABULAR_DIR_NAME, TABULAR_COMPANION_SUFFIX } from '@bendyline/gezel/paths';
 import { slug } from '../connectors/writer.js';
+import { safeJoin } from '../fs/safe-paths.js';
 import { columnsStruct } from './compactor.js';
 import { type DuckRunner, sqlLiteral } from './duck.js';
-import { safeColumnName } from './schema-inference.js';
 import {
   UNPARTITIONED,
   partName,
@@ -62,6 +58,7 @@ import {
   writeTableManifest,
   writeTableState,
 } from './layout.js';
+import { safeColumnName } from './schema-inference.js';
 
 const log = createLogger('observations');
 
@@ -198,7 +195,10 @@ interface SniffedColumn {
 
 /** DuckDB's sniffed type names → our closed column-type vocabulary. */
 export function duckTypeToColumnType(duckType: string): ObservationColumnType {
-  const t = duckType.toUpperCase().replace(/\(.*\)$/, '').trim();
+  const t = duckType
+    .toUpperCase()
+    .replace(/\(.*\)$/, '')
+    .trim();
   if (t === 'BOOLEAN') return 'BOOLEAN';
   if (['TINYINT', 'SMALLINT', 'INTEGER', 'BIGINT', 'HUGEINT', 'UBIGINT', 'UINTEGER'].includes(t)) {
     return 'BIGINT';
@@ -227,10 +227,7 @@ interface SniffResult {
  * names after normalization are suffixed, because a CSV with two `Total`
  * columns is common and a silently dropped column is not acceptable.
  */
-export async function sniffCsv(
-  duck: DuckRunner,
-  absPath: string,
-): Promise<SniffResult> {
+export async function sniffCsv(duck: DuckRunner, absPath: string): Promise<SniffResult> {
   const dir = dirname(absPath);
   const rows = await duck.runTrusted<{
     Columns: unknown;

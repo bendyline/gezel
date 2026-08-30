@@ -37,7 +37,10 @@ beforeAll(async () => {
     corpusDir: CORPUS,
     manifests: new Map([['requests', synthRequestsManifest('requests') as never]]),
   });
-  await writer.writeBatch({ table: 'requests', rows: synthRequests({ rows: 400, seed: 4, days: 3 }) });
+  await writer.writeBatch({
+    table: 'requests',
+    rows: synthRequests({ rows: 400, seed: 4, days: 3 }),
+  });
   await writer.finish();
   if (real) {
     await compactCorpus({

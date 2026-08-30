@@ -55,7 +55,11 @@ describe('observation table tools', () => {
       const raw = Buffer.concat(chunks).toString('utf8');
       const body = raw ? (JSON.parse(raw) as Record<string, unknown>) : undefined;
       try {
-        const result = handler(new URL(req.url ?? '/', 'http://127.0.0.1'), req.method ?? 'GET', body);
+        const result = handler(
+          new URL(req.url ?? '/', 'http://127.0.0.1'),
+          req.method ?? 'GET',
+          body,
+        );
         res.writeHead(isFixture(result) ? result.__status : 200, {
           'content-type': 'application/json',
         });
@@ -235,7 +239,8 @@ describe('observation table tools', () => {
     handler = () => ({
       __status: 400,
       body: {
-        error: 'query failed: Binder Error: Referenced column "rout" not found. Did you mean "route"?',
+        error:
+          'query failed: Binder Error: Referenced column "rout" not found. Did you mean "route"?',
         code: 'duckdb-query-failed',
       },
     });
@@ -252,7 +257,8 @@ describe('observation table tools', () => {
     handler = () => ({
       __status: 400,
       body: {
-        error: '`DELETE` is not allowed here — this corpus is read-only; it mirrors an external source.',
+        error:
+          '`DELETE` is not allowed here — this corpus is read-only; it mirrors an external source.',
         code: 'sql-rejected',
       },
     });

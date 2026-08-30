@@ -15,11 +15,7 @@ import {
   tableRelDir,
 } from './layout.js';
 import { findRealDuckdb, hasRealDuckdb } from './testing/duck-fixture.js';
-import {
-  expectedRouteStats,
-  synthRequests,
-  synthRequestsManifest,
-} from './testing/synth.js';
+import { expectedRouteStats, synthRequests, synthRequestsManifest } from './testing/synth.js';
 import { ObservationWriter, coerceRow, isoDay, resolvePartition } from './writer.js';
 
 const CORPUS = 'data/traffic';
@@ -97,7 +93,11 @@ describe('partition resolution', () => {
 describe('ObservationWriter', () => {
   it('lands rows as sealed NDJSON parts, partitioned by day', async () => {
     const rows = synthRequests({ rows: 300, seed: 7, days: 3 });
-    const writer = new ObservationWriter({ storageDir, corpusDir: CORPUS, manifests: manifestMap() });
+    const writer = new ObservationWriter({
+      storageDir,
+      corpusDir: CORPUS,
+      manifests: manifestMap(),
+    });
     await writer.writeBatch({ table: 'requests', rows });
     const summary = await writer.finish();
 
@@ -121,7 +121,11 @@ describe('ObservationWriter', () => {
   });
 
   it('writes the authored manifest to disk so describe_table can read it', async () => {
-    const writer = new ObservationWriter({ storageDir, corpusDir: CORPUS, manifests: manifestMap() });
+    const writer = new ObservationWriter({
+      storageDir,
+      corpusDir: CORPUS,
+      manifests: manifestMap(),
+    });
     await writer.writeBatch({ table: 'requests', rows: synthRequests({ rows: 5 }) });
     await writer.finish();
 
@@ -177,7 +181,11 @@ describe('ObservationWriter', () => {
   });
 
   it('rejects a page whose declared row count does not match its payload', async () => {
-    const writer = new ObservationWriter({ storageDir, corpusDir: CORPUS, manifests: manifestMap() });
+    const writer = new ObservationWriter({
+      storageDir,
+      corpusDir: CORPUS,
+      manifests: manifestMap(),
+    });
     await expect(
       writer.writeBatch({
         table: 'requests',
@@ -221,7 +229,11 @@ describe.runIf(hasRealDuckdb())('write → seal → compact → query (real engi
 
   it('compacts sealed parts to Parquet and preserves every row', async () => {
     const rows = synthRequests({ rows: 2_000, seed: 11, days: 4 });
-    const writer = new ObservationWriter({ storageDir, corpusDir: CORPUS, manifests: manifestMap() });
+    const writer = new ObservationWriter({
+      storageDir,
+      corpusDir: CORPUS,
+      manifests: manifestMap(),
+    });
     await writer.writeBatch({ table: 'requests', rows });
     await writer.finish();
 
@@ -247,7 +259,11 @@ describe.runIf(hasRealDuckdb())('write → seal → compact → query (real engi
 
   it('answers an aggregate query with the same numbers computed in JS', async () => {
     const rows = synthRequests({ rows: 3_000, seed: 23, days: 5 });
-    const writer = new ObservationWriter({ storageDir, corpusDir: CORPUS, manifests: manifestMap() });
+    const writer = new ObservationWriter({
+      storageDir,
+      corpusDir: CORPUS,
+      manifests: manifestMap(),
+    });
     await writer.writeBatch({ table: 'requests', rows });
     await writer.finish();
     await compactCorpus({ storageDir, corpusDir: CORPUS, duck });
@@ -272,7 +288,11 @@ describe.runIf(hasRealDuckdb())('write → seal → compact → query (real engi
 
   it('partition pruning means a one-day question never opens the other days', async () => {
     const rows = synthRequests({ rows: 1_000, seed: 5, days: 4, startDate: '2026-08-01' });
-    const writer = new ObservationWriter({ storageDir, corpusDir: CORPUS, manifests: manifestMap() });
+    const writer = new ObservationWriter({
+      storageDir,
+      corpusDir: CORPUS,
+      manifests: manifestMap(),
+    });
     await writer.writeBatch({ table: 'requests', rows });
     await writer.finish();
     await compactCorpus({ storageDir, corpusDir: CORPUS, duck });
@@ -335,9 +355,9 @@ describe.runIf(hasRealDuckdb())('write → seal → compact → query (real engi
     expect(existsSync(sealed)).toBe(true);
     const after = await listPartitionFiles(storageDir, CORPUS, 'requests', partition as string);
     expect(after.parquet).toHaveLength(0);
-    expect(existsSync(`${sealed.replace('sealed-', 'part-').replace('.ndjson', '.parquet')}.tmp`)).toBe(
-      false,
-    );
+    expect(
+      existsSync(`${sealed.replace('sealed-', 'part-').replace('.ndjson', '.parquet')}.tmp`),
+    ).toBe(false);
 
     // And the failure is recorded where the next pass and the UI can see it.
     const state = await readTableState(storageDir, CORPUS, 'requests');

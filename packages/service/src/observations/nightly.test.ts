@@ -135,8 +135,9 @@ describe.runIf(hasRealDuckdb())('nightly maintenance (real engine)', () => {
   it('compacts what the daytime sync left sealed', async () => {
     await seed({ rows: 400, days: 3 });
     for (const partition of await listPartitions(artifacts, CORPUS, 'requests')) {
-      expect((await listPartitionFiles(artifacts, CORPUS, 'requests', partition)).sealed.length)
-        .toBeGreaterThan(0);
+      expect(
+        (await listPartitionFiles(artifacts, CORPUS, 'requests', partition)).sealed.length,
+      ).toBeGreaterThan(0);
     }
 
     const result = await runProjectObservationNightly(deps(), 'p1');

@@ -33,3 +33,5 @@ export type { DroppedDocumentImportResult, DroppedFileTarget } from './document-
 
 export { createDocumentLinkProvider } from './document-link-provider.js';
 export type { DocumentLinkProviderOptions } from './document-link-provider.js';
+
+export { gezelProofingIgnoreStore, gezelProofingProvider } from './proofing.js';

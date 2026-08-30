@@ -13,39 +13,27 @@
     "duckdb": {
       "tag": "v1.5.5",
       "commit": "d8cdaa33fda8df955cc76ef58a280f68f4cd43fa",
-      "files": [
-        "LICENSE-duckdb-MIT.txt"
-      ]
+      "files": ["LICENSE-duckdb-MIT.txt"]
     },
     "llama-cpp": {
       "tag": "v0.3.0",
       "commit": "c1d0e7a004015f23bc0233470b747b596f29b264",
-      "files": [
-        "LICENSE-ggml-MIT.txt"
-      ]
+      "files": ["LICENSE-ggml-MIT.txt"]
     },
     "sd-cpp": {
       "tag": "master-789-5114672",
       "commit": "5114672c482012d77d24bbd09eae86b53c48256b",
-      "files": [
-        "LICENSE-stable-diffusion-cpp-MIT.txt",
-        "LICENSE-vulkan-loader-APACHE.txt"
-      ]
+      "files": ["LICENSE-stable-diffusion-cpp-MIT.txt", "LICENSE-vulkan-loader-APACHE.txt"]
     },
     "uv": {
       "tag": "0.11.32",
       "commit": "3010295ae7ff572de459987ad70db315a62ecd61",
-      "files": [
-        "LICENSE-uv-APACHE.txt",
-        "LICENSE-uv-MIT.txt"
-      ]
+      "files": ["LICENSE-uv-APACHE.txt", "LICENSE-uv-MIT.txt"]
     },
     "whisper-cpp": {
       "tag": "v1.9.1",
       "commit": "f049fff95a089aa9969deb009cdd4892b3e74916",
-      "files": [
-        "LICENSE-ggml-MIT.txt"
-      ]
+      "files": ["LICENSE-ggml-MIT.txt"]
     }
   }
 }

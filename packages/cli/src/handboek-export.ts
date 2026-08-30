@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { cp, mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { HandboekArea, HandboekTocArea, HandboekTocEntry } from '@bendyline/gezel';
+import { SCORECARD_DATA_ATTRS } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import {
   createHandboekEngine,
@@ -13,6 +14,7 @@ import { PLAYER_BUNDLE } from '@bendyline/squisq-react/standalone-source';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { BASELINE_CSS } from './handboek-site-css.js';
+import { SCORECARD_FILTER_JS } from './handboek-site-scorecard.js';
 
 /**
  * Render the Handboek as a static HTML site — the same documentation
@@ -66,6 +68,19 @@ export interface HandboekExportOptions {
  */
 const NAV_INLINE_MAX = 40;
 
+/** Filter for the model scorecard, linked only where a scorecard renders. */
+const SCORECARD_SCRIPT = 'scorecard.js';
+
+/**
+ * Behavior scripts a rendered page needs, decided from the markup it
+ * actually produced rather than from its article id — the scorecard macro
+ * is free to move to another article, and a hard-coded id would silently
+ * stop linking the filter when it did.
+ */
+export function pageScripts(body: string): string[] {
+  return body.includes(SCORECARD_DATA_ATTRS.root) ? [SCORECARD_SCRIPT] : [];
+}
+
 const AREA_BLURBS: Record<HandboekArea, string> = {
   conceptual: 'What gezel is, who your crew are, and how the pieces fit together.',
   'gezel-roles': 'The roles a gezel can take, and what each one is good at.',
@@ -112,6 +127,7 @@ export async function runHandboekExport(
 
   await mkdir(join(out, 'assets'), { recursive: true });
   await writeFile(join(out, 'assets', 'squisq-player.js'), PLAYER_BUNDLE, 'utf8');
+  await writeFile(join(out, 'assets', SCORECARD_SCRIPT), SCORECARD_FILTER_JS, 'utf8');
   const skipped: string[] = [];
   let pages = 0;
 
@@ -132,7 +148,16 @@ export async function runHandboekExport(
     await mkdir(dir, { recursive: true });
     await writeFile(
       join(dir, 'index.html'),
-      articlePage({ entry, body, headings, areas, depth, css, siteUrl }),
+      articlePage({
+        entry,
+        body,
+        headings,
+        areas,
+        depth,
+        css,
+        siteUrl,
+        scripts: pageScripts(body),
+      }),
       'utf8',
     );
 
@@ -428,10 +453,16 @@ function articlePage(args: {
   depth: number;
   css: string[];
   siteUrl: string | undefined;
+  scripts: string[];
 }): string {
-  const { entry, body, headings, areas, depth, css, siteUrl } = args;
+  const { entry, body, headings, areas, depth, css, siteUrl, scripts } = args;
   const area = areas.find((a) => a.area === entry.area);
   const aside = onThisPage(headings);
+  // Deferred and last: the markup it enhances is already complete, so a
+  // slow or blocked asset costs a reader nothing but the controls.
+  const scriptTags = scripts
+    .map((name) => `<script defer src="${up(depth)}assets/${esc(name)}"></script>`)
+    .join('\n');
   return `${head(`${entry.title} — Gezel Handboek`, css, depth, entry.summary)}
 <body class="hb hb-article-page">
 ${masthead(areas, depth, siteUrl, entry.area)}
@@ -449,6 +480,7 @@ ${body}
 ${aside}
 </div>
 ${footer(depth)}
+${scriptTags}
 </body>
 </html>`;
 }

@@ -59,10 +59,10 @@ function harness(
       const call = { url: String(input), headers, body: String(init?.body ?? '') };
       calls.push(call);
       const res = handler(call);
-      return new Response(
-        res.body === undefined ? '' : JSON.stringify(res.body),
-        { status: res.status ?? 200, headers: res.headers ?? {} },
-      );
+      return new Response(res.body === undefined ? '' : JSON.stringify(res.body), {
+        status: res.status ?? 200,
+        headers: res.headers ?? {},
+      });
     },
   };
   const adapter = new AzureMonitorLogsAdapter(
@@ -90,10 +90,12 @@ describe('config parsing', () => {
   it('rejects a table or column name that is not a Kusto identifier', () => {
     // These are interpolated into the query, so they are constrained rather
     // than trusted. A filter clause is arbitrary KQL by design and is not.
-    expect(() => parseConfig({ workspaceId: 'w', kqlTable: 'Bad Name' })).toThrow(/not a valid table/);
-    expect(() =>
-      parseConfig({ workspaceId: 'w', kqlTable: 'T', timeColumn: 'a; drop' }),
-    ).toThrow(/not a valid column/);
+    expect(() => parseConfig({ workspaceId: 'w', kqlTable: 'Bad Name' })).toThrow(
+      /not a valid table/,
+    );
+    expect(() => parseConfig({ workspaceId: 'w', kqlTable: 'T', timeColumn: 'a; drop' })).toThrow(
+      /not a valid column/,
+    );
   });
 
   it('refuses a non-HTTPS endpoint — the token is a bearer credential', () => {
@@ -108,7 +110,12 @@ describe('config parsing', () => {
   });
 
   it('clamps the page size and backfill window', () => {
-    const wide = parseConfig({ workspaceId: 'w', kqlTable: 'T', pageRows: 10_000_000, backfillDays: 9_999 });
+    const wide = parseConfig({
+      workspaceId: 'w',
+      kqlTable: 'T',
+      pageRows: 10_000_000,
+      backfillDays: 9_999,
+    });
     expect(wide.pageRows).toBeLessThanOrEqual(50_000);
     expect(wide.backfillDays).toBeLessThanOrEqual(365);
   });
@@ -253,11 +260,18 @@ describe('AzureMonitorLogsAdapter', () => {
     const listed = await adapter.listChangesSince('', undefined);
     const record = await adapter.fetchRecord('', listed.records[0]!);
     if (!isObservationRecord(record)) throw new Error('unreachable');
-    expect(record.batches.map((b) => b.table).sort()).toEqual(['app_exceptions', 'azure_diagnostics']);
+    expect(record.batches.map((b) => b.table).sort()).toEqual([
+      'app_exceptions',
+      'azure_diagnostics',
+    ]);
   });
 
   it('reports a throttle as a signal rather than failing the pass', async () => {
-    const { adapter } = harness(() => ({ status: 429, headers: { 'retry-after': '30' }, body: {} }));
+    const { adapter } = harness(() => ({
+      status: 429,
+      headers: { 'retry-after': '30' },
+      body: {},
+    }));
     await adapter.ensureAuth();
     const listed = await adapter.listChangesSince('', { watermark: '2026-08-01T00:00:00.000Z' });
     // A throw would void the batch and re-read the same window next tick,

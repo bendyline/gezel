@@ -20,9 +20,10 @@
  * - **Execution.** Guard, then run under the lockdown, then cap.
  */
 
-import { createLogger, type ObservationTableManifest } from '@bendyline/gezel';
-import type { Store } from '../fs/store.js';
+import { type ObservationTableManifest, createLogger } from '@bendyline/gezel';
 import { corpusDirFor } from '../connectors/manager.js';
+import { resolveInside } from '../fs/safe-paths.js';
+import type { Store } from '../fs/store.js';
 import { DEFAULT_DUCK_TIMEOUT_MS, type DuckRunner, sqlLiteral } from './duck.js';
 import {
   type ObservationTableState,
@@ -35,11 +36,7 @@ import {
   tableRelDir,
 } from './layout.js';
 import { assertReadOnlyStatement } from './statement-guard.js';
-import {
-  listWorkspaceCorpusDirs,
-  sourceRelPathFromCorpusDir,
-} from './workspace-tables.js';
-import { resolveInside } from '../fs/safe-paths.js';
+import { listWorkspaceCorpusDirs, sourceRelPathFromCorpusDir } from './workspace-tables.js';
 
 const log = createLogger('observations');
 
@@ -175,10 +172,7 @@ export async function listProjectTables(
  * that gates the mail and social write tools. Stops at the first table found
  * and reads no manifests, so it stays a directory probe rather than a scan.
  */
-export async function hasObservationTables(
-  store: Store,
-  project: ProjectLike,
-): Promise<boolean> {
+export async function hasObservationTables(store: Store, project: ProjectLike): Promise<boolean> {
   const bindings = project.connectors ?? [];
   const storageDir = store.projectArtifactsDir(project.id);
   for (const binding of bindings) {
@@ -381,8 +375,7 @@ export function renderTableDescription(ref: ObservationTableRef): string {
   if (m.partitionColumn) {
     lines.push(
       '',
-      `**Filter on \`${m.partitionColumn}\` whenever you can.** It is the physical partition, ` +
-        'so a query that constrains it skips whole files instead of scanning them.',
+      `**Filter on \`${m.partitionColumn}\` whenever you can.** It is the physical partition, so a query that constrains it skips whole files instead of scanning them.`,
     );
   }
   if (m.inferred) {

@@ -30,8 +30,8 @@ All eleven packages published from the Gezel repository require Node.js 24 or ne
 For example, the command-line install is:
 
 ```bash
-npm install -g @bendyline/gezel-cli
-gezel
+npm install @bendyline/gezel-cli
+npx gezel
 ```
 
 A library belongs in the application that uses it:

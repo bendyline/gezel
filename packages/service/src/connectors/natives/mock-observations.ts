@@ -15,6 +15,8 @@
  * succeed proves none of them.
  */
 
+import { synthRequests } from '../../observations/testing/synth.js';
+import { registerNativeAdapter } from '../registry.js';
 import type {
   AdapterDeps,
   ChangeBatch,
@@ -23,8 +25,6 @@ import type {
   ConnectorRecord,
   RecordRef,
 } from '../types.js';
-import { registerNativeAdapter } from '../registry.js';
-import { synthRequests } from '../../observations/testing/synth.js';
 
 export const MOCK_OBSERVATIONS_ADAPTER_ID = 'mock-observations';
 
@@ -150,6 +150,7 @@ class MockObservationsAdapter implements ConnectorAdapter<ConnectorRecord, MockC
 export function registerMockObservationsAdapter(): void {
   registerNativeAdapter(
     MOCK_OBSERVATIONS_ADAPTER_ID,
-    async (binding: ConnectorBindingRef, _deps: AdapterDeps) => new MockObservationsAdapter(binding),
+    async (binding: ConnectorBindingRef, _deps: AdapterDeps) =>
+      new MockObservationsAdapter(binding),
   );
 }

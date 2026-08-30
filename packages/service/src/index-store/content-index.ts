@@ -47,8 +47,6 @@ import {
   nowIso,
   projectAllowsWorkspaceTables,
 } from '@bendyline/gezel';
-import type { DuckRunner } from '../observations/duck.js';
-import { drainWorkspaceTables } from '../observations/workspace-drain.js';
 import {
   fallbackProjectIndexDir,
   fallbackProjectVillageFile,
@@ -75,6 +73,8 @@ import type {
   ImageEmbedOutcome,
 } from '../memory/image-embeddings.js';
 import { IMAGE_EMBED_EXTS } from '../memory/image-pixels.js';
+import type { DuckRunner } from '../observations/duck.js';
+import { drainWorkspaceTables } from '../observations/workspace-drain.js';
 import { runSecurityScan } from '../security/scan.js';
 import { type AiShadowDeps, aiShadowFile } from './ai-shadow.js';
 import { ARCHITECTURE_KEY, type AreaPassResult, runAreaPass } from './area-pass.js';

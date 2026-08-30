@@ -76,8 +76,7 @@ try {
   }
   if (!license) {
     throw new Error(
-      `Could not determine the licence of ${SOURCE}. Pass --license <spdx-id> ` +
-        'explicitly — a derivative must not be published under a guessed licence.',
+      `Could not determine the licence of ${SOURCE}. Pass --license <spdx-id> explicitly — a derivative must not be published under a guessed licence.`,
     );
   }
   console.log(`      source licence: ${license}`);
@@ -95,8 +94,7 @@ try {
   ];
   if (!shards.length) {
     throw new Error(
-      `${SOURCE} has no mtp.* tensors — it is not an MTP-preserving checkpoint. ` +
-        'Use the ORIGINAL vendor repo, not an MLX/GGUF conversion.',
+      `${SOURCE} has no mtp.* tensors — it is not an MTP-preserving checkpoint. Use the ORIGINAL vendor repo, not an MLX/GGUF conversion.`,
     );
   }
   const mtpCount = Object.keys(index.weight_map).filter((k) => k.startsWith('mtp.')).length;
@@ -166,27 +164,46 @@ print(f"  kind={kind} quantized to {bits}-bit")
 
   // Attribution travels with the artifact: the weights are a derivative of the
   // source checkpoint and carry its license.
-  writeFileSync(
-    join(OUT, 'README.md'),
-    `---\nbase_model: ${SOURCE}\nlicense: ${license}\nlibrary_name: mlx\ntags:\n- mlx\n- speculative-decoding\n- mtp\n---\n\n` +
-      `# MTP drafter for ${SOURCE}\n\n` +
-      `The native multi-token-prediction head of [${SOURCE}](${HF}/${SOURCE}), extracted as a\n` +
-      `standalone MLX drafter${BITS > 0 ? ` and quantized to ${BITS}-bit affine (group 64)` : ''}.\n` +
-      `It carries no embedding or LM head of its own — it binds to the target model's at load,\n` +
-      `so it pairs with any quantization of the same base model.\n\n` +
-      `Speculative decoding verifies every proposed token against the target model, so this\n` +
-      `drafter changes throughput only, never output: greedy decoding is byte-identical with\n` +
-      `and without it.\n\n` +
-      `## Reproducing\n\nBuilt by [\`scripts/build-mtp-drafter.mjs\`](${GEZEL_REPO}/blob/main/scripts/build-mtp-drafter.mjs)\n` +
-      `from [Gezel](${GEZEL_REPO}) — a local-first desktop app for assembling a team of AI agents that\n` +
-      `run on your own machine:\n\n` +
-      `\`\`\`bash\ngit clone ${GEZEL_REPO}.git\n` +
-      `node scripts/build-mtp-drafter.mjs --source ${SOURCE} --out <dir>${BITS !== 4 ? ` --bits ${BITS}` : ''}\n\`\`\`\n\n` +
-      `The script fetches only the checkpoint shard(s) carrying the \`mtp.*\` tensors (${shards.length} of\n` +
-      `${totalShards} for this model), splits the head into a standalone drafter${BITS > 0 ? `, and quantizes it to ${BITS}-bit` : ''}.\n\n` +
-      `## License\n\n${license}, inherited from ${SOURCE}. Weights are a derivative of that checkpoint.\n`,
-    'utf8',
-  );
+  const readme = `---
+base_model: ${SOURCE}
+license: ${license}
+library_name: mlx
+tags:
+- mlx
+- speculative-decoding
+- mtp
+---
+
+# MTP drafter for ${SOURCE}
+
+The native multi-token-prediction head of [${SOURCE}](${HF}/${SOURCE}), extracted as a
+standalone MLX drafter${BITS > 0 ? ` and quantized to ${BITS}-bit affine (group 64)` : ''}.
+It carries no embedding or LM head of its own — it binds to the target model's at load,
+so it pairs with any quantization of the same base model.
+
+Speculative decoding verifies every proposed token against the target model, so this
+drafter changes throughput only, never output: greedy decoding is byte-identical with
+and without it.
+
+## Reproducing
+
+Built by [\`scripts/build-mtp-drafter.mjs\`](${GEZEL_REPO}/blob/main/scripts/build-mtp-drafter.mjs)
+from [Gezel](${GEZEL_REPO}) — a local-first desktop app for assembling a team of AI agents that
+run on your own machine:
+
+\`\`\`bash
+git clone ${GEZEL_REPO}.git
+node scripts/build-mtp-drafter.mjs --source ${SOURCE} --out <dir>${BITS !== 4 ? ` --bits ${BITS}` : ''}
+\`\`\`
+
+The script fetches only the checkpoint shard(s) carrying the \`mtp.*\` tensors (${shards.length} of
+${totalShards} for this model), splits the head into a standalone drafter${BITS > 0 ? `, and quantizes it to ${BITS}-bit` : ''}.
+
+## License
+
+${license}, inherited from ${SOURCE}. Weights are a derivative of that checkpoint.
+`;
+  writeFileSync(join(OUT, 'README.md'), readme, 'utf8');
 
   console.log(`\ndrafter written to ${OUT}`);
   console.log('verify before publishing: acceptance + greedy exactness against the target model.');

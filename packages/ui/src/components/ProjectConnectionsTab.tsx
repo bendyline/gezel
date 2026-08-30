@@ -83,8 +83,7 @@ function TableStats({ tables }: { tables: NonNullable<ConnBinding['tables']> }) 
             : null;
         return (
           <li key={t.table} className="small muted">
-            <strong>{t.table}</strong> · {t.rows.toLocaleString()}{' '}
-            {t.rows === 1 ? 'row' : 'rows'}
+            <strong>{t.table}</strong> · {t.rows.toLocaleString()} {t.rows === 1 ? 'row' : 'rows'}
             {span ? ` · ${span}` : ''}
             {t.retentionDays ? ` · keeps ${t.retentionDays} days` : ''}
             {t.schemaInferred ? ' · schema inferred' : ''}

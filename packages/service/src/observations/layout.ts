@@ -31,10 +31,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import {
-  type ObservationTableManifest,
-  ObservationTableManifestSchema,
-} from '@bendyline/gezel';
+import { type ObservationTableManifest, ObservationTableManifestSchema } from '@bendyline/gezel';
 import {
   CONNECTOR_ROLLUPS_DIR_NAME,
   CONNECTOR_TABLES_DIR_NAME,
@@ -228,10 +225,7 @@ export async function listPartitionFiles(
   table: string,
   partitionDir: string,
 ): Promise<{ parquet: string[]; sealed: string[]; open: string[] }> {
-  const root = await resolveInside(
-    storageDir,
-    `${tableRelDir(corpusDir, table)}/${partitionDir}`,
-  );
+  const root = await resolveInside(storageDir, `${tableRelDir(corpusDir, table)}/${partitionDir}`);
   const out = { parquet: [] as string[], sealed: [] as string[], open: [] as string[] };
   if (!existsSync(root)) return out;
   for (const entry of await readdir(root, { withFileTypes: true }).catch(() => [])) {

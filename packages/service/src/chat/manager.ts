@@ -3947,13 +3947,15 @@ export class ChatManager {
           .catch(() => [])
           .then((entries) => entries.filter((e) => !e.isDirectory).map((e) => e.path));
         if (written.length > 0) {
-          persistedWork =
-            ` You have already written these artifacts for this task: ${written
+          persistedWork = ` ${[
+            `You have already written these artifacts for this task: ${written
               .map((f) => `\`${f}\``)
-              .join(', ')}. Read them back with \`read_artifact\` before re-reading any source —` +
-            ' they hold the work you already did, and continuing them is cheaper and more reliable' +
-            ' than reconstructing it. Persist each finding as you go rather than holding every' +
-            ' source in your head; that is what makes a restart cheap.';
+              .join(', ')}.`,
+            'Read them back with `read_artifact` before re-reading any source — they hold the work',
+            'you already did, and continuing them is cheaper and more reliable than reconstructing it.',
+            'Persist each finding as you go rather than holding every source in your head;',
+            'that is what makes a restart cheap.',
+          ].join(' ')}`;
         }
       }
     }

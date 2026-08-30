@@ -36,7 +36,7 @@
  */
 
 import { type ChildProcess, spawn } from 'node:child_process';
-import { createLogger, createAwakeTimeout } from '@bendyline/gezel';
+import { createAwakeTimeout, createLogger } from '@bendyline/gezel';
 import { sandboxEnv } from '../sandbox/runner.js';
 
 const log = createLogger('duckdb');

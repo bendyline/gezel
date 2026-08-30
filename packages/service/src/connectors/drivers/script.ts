@@ -13,13 +13,13 @@
 
 import type { ConnectorTypeManifest } from '@bendyline/gezel';
 import type { ScriptRunner } from '../../scripts/runner.js';
+import { type NormalizeSpec, applyNormalize, jget, ordinalKeyFromTs } from '../normalize.js';
 import {
   type ObservationSourceSpec,
   isObservationNormalize,
   observationPageRef,
   toObservationBatches,
 } from '../observation-normalize.js';
-import { type NormalizeSpec, applyNormalize, jget, ordinalKeyFromTs } from '../normalize.js';
 import { connectorCredentialName } from '../registry.js';
 import type {
   AdapterDeps,
@@ -110,7 +110,13 @@ export class ScriptConnectorAdapter
     if (this.observations) {
       // One ref per PAGE. The engine's backfill cap counts refs, so mapping a
       // 10,000-row page to 10,000 refs would silently window most of it away.
-      const pageIndex = typeof out.cursor === 'number' ? out.cursor : (this.pageSeq += 1);
+      let pageIndex: number;
+      if (typeof out.cursor === 'number') {
+        pageIndex = out.cursor;
+      } else {
+        this.pageSeq += 1;
+        pageIndex = this.pageSeq;
+      }
       return {
         records: items.length > 0 ? [observationPageRef(items, pageIndex)] : [],
         cursor: out.cursor,

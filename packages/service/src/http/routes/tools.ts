@@ -17,14 +17,13 @@ import { readFile as fsReadFile, mkdir, stat, writeFile } from 'node:fs/promises
 import { join, posix, relative, resolve, sep, win32 } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import {
-  DescribeTableRequestSchema,
-  QueryTableRequestSchema,
   ArchiveExtractRequestSchema,
   type ArchiveExtractResponse,
   ArchiveListRequestSchema,
   type ArchiveListResponse,
   DelegateSecurityFindingRequestSchema,
   DescribeFolderRequestSchema,
+  DescribeTableRequestSchema,
   DiffFilesRequestSchema,
   type DiffFilesResponse,
   FetchUrlRequestSchema,
@@ -46,6 +45,7 @@ import {
   MapRepoRequestSchema,
   OutlineFileRequestSchema,
   ProjectSearchRequestSchema,
+  QueryTableRequestSchema,
   ReadDocAsMarkdownRequestSchema,
   ReadImageBase64RequestSchema,
   type ReadImageBase64Response,
@@ -74,6 +74,9 @@ import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { Hono } from 'hono';
 import type { ReadEntry } from 'tar';
 import { suggestCraftbooks, usefulCraftbooksForSearch } from '../../craftbook/suggest.js';
+import { buildPrOverlay } from '../../filemap/pr-overlay.js';
+import { PathSafetyError, resolveInside, safeJoin } from '../../fs/safe-paths.js';
+import { ensureGezel } from '../../gezels/ensure.js';
 import { DuckQueryError, DuckUnavailableError } from '../../observations/duck.js';
 import {
   NoTablesError,
@@ -84,9 +87,6 @@ import {
   summarizeTable,
 } from '../../observations/query.js';
 import { SqlRejectedError } from '../../observations/statement-guard.js';
-import { buildPrOverlay } from '../../filemap/pr-overlay.js';
-import { PathSafetyError, resolveInside, safeJoin } from '../../fs/safe-paths.js';
-import { ensureGezel } from '../../gezels/ensure.js';
 import { createSearchProvider } from '../../providers/search/factory.js';
 import { MockSearchProvider, mockWikipediaArticle } from '../../providers/search/mock.js';
 import type { SearchProvider } from '../../providers/search/types.js';

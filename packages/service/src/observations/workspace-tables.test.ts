@@ -13,8 +13,8 @@ import {
   removeWorkspaceTable,
   shouldMaterialize,
   sourceRelPathFromCorpusDir,
-  tabularCorpusDir,
   tableNameForSource,
+  tabularCorpusDir,
 } from './workspace-tables.js';
 
 let artifacts: string;
@@ -141,9 +141,9 @@ describe.runIf(hasRealDuckdb())('materializeCsv (real engine)', () => {
     expect(manifest?.columns.find((c) => c.name === 'units')?.type).toBe('BIGINT');
     expect(manifest?.columns.find((c) => c.name === 'active')?.type).toBe('BOOLEAN');
     expect(manifest?.inferred).toBe(true);
-    expect(
-      manifest?.columns.find((c) => c.name === 'total_revenue_usd')?.description,
-    ).toContain('Total Revenue (USD)');
+    expect(manifest?.columns.find((c) => c.name === 'total_revenue_usd')?.description).toContain(
+      'Total Revenue (USD)',
+    );
 
     const state = await readTableState(artifacts, corpusDir, 'sales');
     expect(state.totalRows).toBe(3);

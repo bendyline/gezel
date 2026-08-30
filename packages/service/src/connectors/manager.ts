@@ -26,6 +26,15 @@ import { writeFileAtomic } from '../fs/atomic.js';
 import { resolveInside } from '../fs/safe-paths.js';
 import type { Store } from '../fs/store.js';
 import type { ContentIndex } from '../index-store/content-index.js';
+import {
+  listPartitionFiles,
+  listPartitions,
+  listTables,
+  partitionValueFromDir,
+  readTableManifest,
+  readTableState,
+} from '../observations/layout.js';
+import { type ObservationWriteSummary, ObservationWriter } from '../observations/writer.js';
 import { normalizeHttpsOrigin } from '../secrets/origins.js';
 import type { SecretStore } from '../secrets/types.js';
 import { validateConnectorConfig } from './config-validate.js';
@@ -46,18 +55,6 @@ import {
 } from './oauth.js';
 import { NATIVE_ADAPTERS, connectorCredentialName, connectorSecretKey } from './registry.js';
 import { connectorCorpusStorage } from './storage.js';
-import {
-  listPartitionFiles,
-  listPartitions,
-  listTables,
-  partitionValueFromDir,
-  readTableManifest,
-  readTableState,
-} from '../observations/layout.js';
-import {
-  ObservationWriter,
-  type ObservationWriteSummary,
-} from '../observations/writer.js';
 import {
   type AdapterDeps,
   type ConnectorAdapter,
@@ -853,7 +850,10 @@ export class ConnectorManager {
     // this stays a stat() walk even for a binding holding hundreds of
     // millions of rows.
     const storageDir = this.opts.store.projectArtifactsDir(project.id);
-    const tablesByBinding = new Map<string, NonNullable<ConnectorStatus['bindings'][number]['tables']>>();
+    const tablesByBinding = new Map<
+      string,
+      NonNullable<ConnectorStatus['bindings'][number]['tables']>
+    >();
     for (const b of bindings) {
       const corpusDir = corpusDirFor(bindings, b);
       const stats: NonNullable<ConnectorStatus['bindings'][number]['tables']> = [];
@@ -1017,52 +1017,46 @@ export class ConnectorManager {
               corpusDir,
               ...(resolved.manifest.normalize.tables
                 ? {
-                    manifests: new Map(
-                      resolved.manifest.normalize.tables.map((t) => [t.table, t]),
-                    ),
+                    manifests: new Map(resolved.manifest.normalize.tables.map((t) => [t.table, t])),
                   }
                 : {}),
             })
           : null;
 
       const r = await syncWithAdapter<unknown, NormalizedRecord | ConnectorRecord>(adapter, {
-          storageDir,
-          quarantineWorkspaceDir,
-          corpusDir,
-          // Prune deletes records the source no longer returns, keyed off the
-          // markdown filename grammar. An append-only observation corpus has
-          // no such notion, and a manifest that wrongly claims `mirror` must
-          // not be able to reach the pruner.
-          allowPrune: !observation && resolved.manifest.completeness === 'mirror',
-          backfillLimit: Math.max(
-            1,
-            Math.min(opts?.backfillLimit ?? DEFAULT_BACKFILL_LIMIT, 5_000),
-          ),
-          cursor: binding.cursor,
-          ...(opts?.scopes ? { scopes: opts.scopes } : {}),
-          ...(observation
-            ? {
-                write: async (input) => {
-                  const record = input.record;
-                  if (!isObservationRecord(record)) {
-                    // A type declared as `observations` whose adapter emits
-                    // documents is a manifest/adapter mismatch, not a record
-                    // to salvage: writing it into the corpus root would leave
-                    // markdown the query layer can never see.
-                    throw new Error(
-                      `connector type '${resolved.manifest.id}' declares the observation shape but its adapter returned a document record`,
-                    );
-                  }
-                  let rows = 0;
-                  for (const batch of record.batches) {
-                    rows += (await observation.writeBatch(batch)).rows;
-                  }
-                  return { status: rows > 0 ? 'written' : 'exists' };
-                },
-              }
-            : {}),
-        },
-      );
+        storageDir,
+        quarantineWorkspaceDir,
+        corpusDir,
+        // Prune deletes records the source no longer returns, keyed off the
+        // markdown filename grammar. An append-only observation corpus has
+        // no such notion, and a manifest that wrongly claims `mirror` must
+        // not be able to reach the pruner.
+        allowPrune: !observation && resolved.manifest.completeness === 'mirror',
+        backfillLimit: Math.max(1, Math.min(opts?.backfillLimit ?? DEFAULT_BACKFILL_LIMIT, 5_000)),
+        cursor: binding.cursor,
+        ...(opts?.scopes ? { scopes: opts.scopes } : {}),
+        ...(observation
+          ? {
+              write: async (input) => {
+                const record = input.record;
+                if (!isObservationRecord(record)) {
+                  // A type declared as `observations` whose adapter emits
+                  // documents is a manifest/adapter mismatch, not a record
+                  // to salvage: writing it into the corpus root would leave
+                  // markdown the query layer can never see.
+                  throw new Error(
+                    `connector type '${resolved.manifest.id}' declares the observation shape but its adapter returned a document record`,
+                  );
+                }
+                let rows = 0;
+                for (const batch of record.batches) {
+                  rows += (await observation.writeBatch(batch)).rows;
+                }
+                return { status: rows > 0 ? 'written' : 'exists' };
+              },
+            }
+          : {}),
+      });
 
       // Seal open parts before anything reads the corpus. Compaction to
       // Parquet is deliberately NOT done here: it is minutes of CPU on a

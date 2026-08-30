@@ -38,8 +38,8 @@ import {
   nowIso,
   projectAllowsAmbientWork,
 } from '@bendyline/gezel';
-import type { Store } from '../fs/store.js';
 import { resolveInside } from '../fs/safe-paths.js';
+import type { Store } from '../fs/store.js';
 import { compactCorpus } from './compactor.js';
 import { type DuckRunner, sqlLiteral } from './duck.js';
 import {

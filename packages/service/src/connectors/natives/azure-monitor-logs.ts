@@ -35,7 +35,9 @@
  */
 
 import { createLogger } from '@bendyline/gezel';
+import type { ObservationColumn, ObservationColumnType } from '@bendyline/gezel';
 import { connectorSecretKey } from '../registry.js';
+import { registerNativeAdapter } from '../registry.js';
 import type {
   AdapterDeps,
   ChangeBatch,
@@ -45,8 +47,6 @@ import type {
   ObservationBatch,
   RecordRef,
 } from '../types.js';
-import { registerNativeAdapter } from '../registry.js';
-import type { ObservationColumn, ObservationColumnType } from '@bendyline/gezel';
 
 const log = createLogger('connectors');
 
@@ -121,7 +121,9 @@ export function parseConfig(raw: unknown): AzureMonitorLogsConfig {
     throw new Error(`Azure Monitor: '${timeColumn}' is not a valid column name.`);
   }
 
-  const apiBaseUrl = String(cfg.apiBaseUrl ?? DEFAULT_API_BASE).trim().replace(/\/+$/, '');
+  const apiBaseUrl = String(cfg.apiBaseUrl ?? DEFAULT_API_BASE)
+    .trim()
+    .replace(/\/+$/, '');
   let base: URL;
   try {
     base = new URL(apiBaseUrl);
@@ -238,9 +240,7 @@ function asCursor(raw: unknown): AzureCursor {
   return typeof watermark === 'string' && watermark ? { watermark } : {};
 }
 
-export class AzureMonitorLogsAdapter
-  implements ConnectorAdapter<ConnectorRecord, AzureCursor>
-{
+export class AzureMonitorLogsAdapter implements ConnectorAdapter<ConnectorRecord, AzureCursor> {
   readonly typeId = AZURE_MONITOR_LOGS_ADAPTER_ID;
   private config?: AzureMonitorLogsConfig;
   private token = '';
@@ -280,8 +280,7 @@ export class AzureMonitorLogsAdapter
     const { watermark } = asCursor(cursor);
 
     const since =
-      watermark ??
-      new Date(Date.now() - config.backfillDays * 86_400_000).toISOString();
+      watermark ?? new Date(Date.now() - config.backfillDays * 86_400_000).toISOString();
 
     let response: KustoResponse;
     try {
@@ -321,8 +320,7 @@ export class AzureMonitorLogsAdapter
       // window forever. That is a misconfigured `timeColumn`, and saying so
       // is far better than syncing in a silent loop.
       throw new Error(
-        `Azure Monitor: no usable '${config.timeColumn}' value in the results, so the sync cannot advance. ` +
-          'Check the time column against the table you are querying.',
+        `Azure Monitor: no usable '${config.timeColumn}' value in the results, so the sync cannot advance. Check the time column against the table you are querying.`,
       );
     }
     // `partial` when the page came back full: there is very likely more in
@@ -431,7 +429,9 @@ export class AzureMonitorLogsAdapter
     }
     const parsed = (await response.json()) as KustoResponse;
     if (parsed.error) {
-      throw new Error(`Azure Monitor rejected the query: ${parsed.error.message ?? 'unknown error'}`);
+      throw new Error(
+        `Azure Monitor rejected the query: ${parsed.error.message ?? 'unknown error'}`,
+      );
     }
     return parsed;
   }

@@ -174,7 +174,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     id: 'data-tables',
     name: 'Data Tables',
     description:
-      'Read a project\'s mirrored data tables with SQL. `list_tables` shows what is there, `describe_table` explains a table\'s columns and units, and `query_table` runs one read-only query and returns the answer — never the underlying rows, which is what lets a table be far larger than the context window.',
+      "Read a project's mirrored data tables with SQL. `list_tables` shows what is there, `describe_table` explains a table's columns and units, and `query_table` runs one read-only query and returns the answer — never the underlying rows, which is what lets a table be far larger than the context window.",
     tools: ['list_tables', 'describe_table', 'query_table'],
   },
   {

@@ -119,7 +119,10 @@ export function inferTableManifest(
         if (!types.has(key)) types.set(key, 'VARCHAR');
         continue;
       }
-      types.set(key, types.has(key) ? widen(types.get(key) as ObservationColumnType, observed) : observed);
+      types.set(
+        key,
+        types.has(key) ? widen(types.get(key) as ObservationColumnType, observed) : observed,
+      );
 
       if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
         const text = String(value);
@@ -149,7 +152,10 @@ export function inferTableManifest(
         ? { description: `Source field \`${originalName.get(name)}\`.` }
         : {}),
       ...(seen && seen.size > 0
-        ? { cardinalityHint: seen.size >= 64 ? '64+ distinct in sample' : `~${seen.size} distinct in sample` }
+        ? {
+            cardinalityHint:
+              seen.size >= 64 ? '64+ distinct in sample' : `~${seen.size} distinct in sample`,
+          }
         : {}),
       ...(ex.length > 0 ? { examples: ex } : {}),
     };

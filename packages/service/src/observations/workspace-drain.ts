@@ -14,11 +14,12 @@
  * mtime moves.
  */
 
+import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import { MAX_INDEXABLE_BYTES } from '../index-store/classify.js';
+import { shadowDocFilesPaths, writeConvertedMarkdownAt } from '../index-store/docs.js';
 import type { IndexStore } from '../index-store/index-store.js';
 import type { DuckRunner } from './duck.js';
-import { shadowDocFilesPaths, writeConvertedMarkdownAt } from '../index-store/docs.js';
 import { readTableManifest } from './layout.js';
 import {
   INLINE_MATERIALIZE_MAX_BYTES,
@@ -29,7 +30,6 @@ import {
   sourceRelPathFromCorpusDir,
   tabularCorpusDir,
 } from './workspace-tables.js';
-import { join } from 'node:path';
 
 const log = createLogger('observations');
 
@@ -178,8 +178,7 @@ export async function drainWorkspaceTables(opts: DrainOptions): Promise<DrainRes
 
   if (result.materialized > 0 || result.swept > 0) {
     log.info(
-      `derived tables: ${result.materialized} built (${result.rows} rows), ${result.swept} swept` +
-        (result.remaining > 0 ? `, ${result.remaining} queued` : ''),
+      `derived tables: ${result.materialized} built (${result.rows} rows), ${result.swept} swept${result.remaining > 0 ? `, ${result.remaining} queued` : ''}`,
     );
   }
   return result;
@@ -215,10 +214,7 @@ async function writeTableCard(
  * that, a deleted `sales.csv` and a live `sales.xlsx` would be
  * indistinguishable and the sweep would take the wrong one.
  */
-export async function sweepOrphanedTables(
-  store: IndexStore,
-  storageDir: string,
-): Promise<number> {
+export async function sweepOrphanedTables(store: IndexStore, storageDir: string): Promise<number> {
   const live = new Set(store.allFilePaths());
   let swept = 0;
   for (const row of store.listTabularCorpusDirs()) {

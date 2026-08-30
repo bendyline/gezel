@@ -375,8 +375,7 @@ export async function buildMlxProvider(opts: {
     // which is exactly how an entire 11-scenario eval measured speculation
     // OFF while reporting a speculation gate.
     log.info(
-      `[mlx] speculative decoding off — no drafter at ${drafterDirFor(modelDir)} ` +
-        `(build one to enable; nothing else is required)`,
+      `[mlx] speculative decoding off — no drafter at ${drafterDirFor(modelDir)} (build one to enable; nothing else is required)`,
     );
   }
 

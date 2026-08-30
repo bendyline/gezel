@@ -1038,16 +1038,14 @@ export class MlxModelManager {
         await rename(tmpPath, finalPath);
       }
       log.info(
-        `[models] [mlx] installed ${drafter.kind} drafter for "${catalogId}" from ` +
-          `${drafter.huggingfaceRepo} (speculative decoding enabled)`,
+        `[models] [mlx] installed ${drafter.kind} drafter for "${catalogId}" from ${drafter.huggingfaceRepo} (speculative decoding enabled)`,
       );
     } catch (err) {
       // Leave no half-written drafter: a partial one would arm speculation
       // and then fail at engine boot, which is worse than not having it.
       await rm(destDir, { recursive: true, force: true }).catch(() => {});
       log.warn(
-        `[models] [mlx] drafter install skipped for "${catalogId}": ${describeError(err)} ` +
-          `— the model works normally, without speculative decoding`,
+        `[models] [mlx] drafter install skipped for "${catalogId}": ${describeError(err)} — the model works normally, without speculative decoding`,
       );
     }
   }

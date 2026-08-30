@@ -54,6 +54,8 @@ vi.mock('../components/SquisqIntegration/index.js', () => ({
   runtimePathForTarget: () => '_squisq/squisq-player.js',
   withOutsideInMarkdownEditing: (content: string) => `${content}\neditable: true`,
   withOutsideInMetadata: (content: string) => content,
+  gezelProofingProvider: () => ({ kind: 'proofing-provider' }),
+  gezelProofingIgnoreStore: { load: () => undefined, save: () => {} },
 }));
 vi.mock('../components/transform/TransformToolbarButton.js', () => ({
   TransformToolbarButton: () => <span>transform</span>,

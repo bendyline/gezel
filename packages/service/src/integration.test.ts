@@ -80,10 +80,21 @@ describe('health', () => {
     // Semantic-search health rides the daemon health check (F1 surfacing).
     expect((data.embeddings as { status?: string })?.status).toBeDefined();
     expect(data.version).toBeDefined();
+    // Cross-origin isolation stays OFF. It was only ever here for
+    // ffmpeg.wasm's SharedArrayBuffer, which left with the browser encoder;
+    // the proofing engine below is single-threaded and does not want it back.
     expect(res.headers.get('cross-origin-opener-policy')).toBeNull();
     expect(res.headers.get('cross-origin-embedder-policy')).toBeNull();
     expect(res.headers.get('content-security-policy')).toContain("script-src 'self'");
-    expect(res.headers.get('content-security-policy')).not.toContain("'wasm-unsafe-eval'");
+    // 'wasm-unsafe-eval' is present for exactly one consumer: the harper.js
+    // proofing engine the UI loads from /harper/. It unblocks WebAssembly
+    // compilation only — not eval() and not inline script. Kept as a named
+    // assertion rather than a blanket ban so the permission cannot drift
+    // back in for some other reason unnoticed, the way it drifted out when
+    // the browser ffmpeg fallback was dropped.
+    expect(res.headers.get('content-security-policy')).toContain(
+      "script-src 'self' 'wasm-unsafe-eval'",
+    );
   });
 });
 
