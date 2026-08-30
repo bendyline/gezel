@@ -707,7 +707,9 @@ export class LlamaCppModelManager {
     options?: { skipSha?: boolean; includeMmproj?: boolean },
   ): AsyncIterable<InstallEvent> {
     const skipSha = options?.skipSha === true;
-    const includeMmproj = options?.includeMmproj === true;
+    // Default ON — see `planDownloads`. Only an explicit `false` (ds4, which
+    // has no sidecar path) suppresses it.
+    const includeMmproj = options?.includeMmproj !== false;
     if (!isSafeId(catalogId)) {
       yield { type: 'error', error: `unsafe catalog id: ${catalogId}` };
       return;
@@ -1237,13 +1239,21 @@ function planDownloads(
     draftModel?: { filename: string; sha256: string; sizeBytes: number };
   },
   /**
-   * Whether to also fetch the vision projector. Off by default even when the
-   * catalog declares one: loading an mmproj makes llama-server 501 on slot
-   * save/restore, which latches disk-KV prefix caching off for that model
-   * process-wide. Paying that on every text turn is a choice the user makes
-   * per model, not a side effect of installing something that ships one.
+   * Whether to also fetch the vision projector. On by default: fetch what the
+   * catalog ships, and let the *runtime* decide whether to load it.
+   *
+   * This used to be off, on the reasoning that an mmproj-backed server 501s
+   * on slot save/restore and so shouldn't be imposed by an install. But the
+   * cost is paid at `--mmproj` on the command line, not at download — so
+   * withholding the file bought nothing and cost a lot: a user who enabled
+   * vision got a model that silently could not see, because the projector
+   * had never been fetched and nothing re-fetched it. Turning the toggle on
+   * now works immediately instead of requiring a re-install nobody knew to
+   * run.
+   *
+   * ds4 passes `false` explicitly — it has no sidecar path at all.
    */
-  includeMmproj = false,
+  includeMmproj = true,
 ): DownloadPlanEntry[] {
   const out: DownloadPlanEntry[] = [];
   if (src.shards && src.shards.length > 0) {

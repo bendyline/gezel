@@ -13243,7 +13243,21 @@ export class ChatManager {
   private async resolveTurnVisionContext(
     state: LiveSessionState,
   ): Promise<{ modelId?: string; mmprojPath?: string; nativeVisionEnabled?: boolean }> {
-    const modelId = state.record.model ?? undefined;
+    // Ask about the model that is actually SERVING this turn.
+    //
+    // `record.model` is only one input to model resolution (gezel
+    // frontmatter, the install default, and the config default all feed it),
+    // so it routinely names something other than what the engine bound —
+    // wild-caught with `record.model = 'gemma4-e4b'` on a session whose
+    // `engineKey` was `llama-cpp:qwen3.8-27b-q2:0`. That made the whole
+    // vision decision answer the wrong question: it resolved gemma's
+    // projector to decide what qwen could see, and printed gemma's name in
+    // the reason the user was shown. `engineKey` is stamped at bind time and
+    // is the authoritative record of what ran.
+    const boundModelId = state.record.engineKey
+      ? parseEngineKey(state.record.engineKey)?.modelId
+      : undefined;
+    const modelId = boundModelId ?? state.record.model ?? undefined;
     if (!modelId || !this.llamaCppModels) return modelId ? { modelId } : {};
     try {
       const resolved = await this.llamaCppModels.resolveModel(modelId);

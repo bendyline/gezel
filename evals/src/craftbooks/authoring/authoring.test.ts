@@ -266,7 +266,10 @@ describe('authoring scenario registration', () => {
   // spread into the main registry and eval:all grows by design.
   it('is part of SCENARIOS / listScenarios so the ids can carry suite membership', () => {
     for (const id of AUTHORING_IDS) {
-      expect(SCENARIOS[id], `${id} must be in the main registry to be suite-eligible`).toBeDefined();
+      expect(
+        SCENARIOS[id],
+        `${id} must be in the main registry to be suite-eligible`,
+      ).toBeDefined();
     }
     const listedIds = listScenarios().map((s) => s.id);
     for (const id of AUTHORING_IDS) {

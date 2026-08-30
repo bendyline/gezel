@@ -27,6 +27,19 @@ const log = createLogger('chat');
 
 export interface TurnImageLimits {
   maxImagesPerTurn: number;
+  /**
+   * Hard ceiling for one image, NOT the working budget.
+   *
+   * The reader streams and is policed by a no-progress watchdog
+   * (`RECOGNITION_STREAM_IDLE_MS`), so a wedged engine is caught in ~30s
+   * regardless of what this says. This value only bounds a model that keeps
+   * producing forever — and when it does bite, the partial transcript is
+   * kept rather than discarded.
+   *
+   * It was 45s, which was shorter than the work it was guarding: `ocr`/`ui`
+   * permit 1600 tokens, and a 4B vision model at ~26 tok/s needs ~61s to
+   * spend them. Every dense image therefore timed out by construction.
+   */
   timeoutMsPerImage: number;
   maxDigestChars: number;
   /**
@@ -39,7 +52,7 @@ export interface TurnImageLimits {
 
 export const DEFAULT_TURN_IMAGE_LIMITS: TurnImageLimits = {
   maxImagesPerTurn: 4,
-  timeoutMsPerImage: 45_000,
+  timeoutMsPerImage: 180_000,
   maxDigestChars: 2000,
   maxMegapixels: 12,
 };
