@@ -12,6 +12,7 @@ import { type ElectronApplication, type Page, expect, test } from '@playwright/t
 import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { captureScreenshot } from './helpers/screenshot.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const screenshotDir = join(_dirname, '..', 'screenshots');
@@ -66,7 +67,7 @@ test('Home renders the workshop once configured', async () => {
   expect(fits).toBe(true);
   await expect(page.getByRole('button', { name: 'Send' })).toBeVisible();
 
-  await page.screenshot({
+  await captureScreenshot(page, {
     path: join(screenshotDir, 'home-01-workshop.png'),
     fullPage: true,
   });
@@ -89,7 +90,7 @@ test('the greeting collapses and the tour tab swaps content', async () => {
   await expect(page.getByRole('radio', { name: 'Watch' })).toBeVisible();
   await expect(page.getByText(/off-disk/i)).toHaveCount(0);
 
-  await page.screenshot({
+  await captureScreenshot(page, {
     path: join(screenshotDir, 'home-03-workshop-tour.png'),
     fullPage: true,
   });
@@ -128,7 +129,7 @@ test('renders the workshop in dark (dusk) mode', async () => {
   });
   expect(paper).toBe('#1f1c18');
 
-  await page.screenshot({
+  await captureScreenshot(page, {
     path: join(screenshotDir, 'home-02-workshop-dark.png'),
     fullPage: true,
   });

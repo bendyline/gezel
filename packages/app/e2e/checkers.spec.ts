@@ -6,6 +6,7 @@ import { type ElectronApplication, type Page, expect, test } from '@playwright/t
 import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { captureScreenshot } from './helpers/screenshot.js';
 
 /**
  * End-to-end: the interactive-page rails through the shipped Checkers type
@@ -278,5 +279,5 @@ test('checkers: create from gallery, move on the board, the reaction summons the
   await expect(board.locator('[data-square="g7"] .piece.red')).toBeVisible({ timeout: 10_000 });
   await expect(board.getByText('Red c3xg7')).toBeVisible();
   await expect(completedAssistantTurns).toHaveCount(2, { timeout: 30_000 });
-  await page.screenshot({ path: '/tmp/gezel-checkers-board.png', fullPage: false });
+  await captureScreenshot(page, { path: '/tmp/gezel-checkers-board.png', fullPage: false });
 });
