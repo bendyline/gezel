@@ -41,8 +41,38 @@ Each scenario maps to one or more axes. New scenarios should explicitly state wh
 | Runbook execution + anomaly stop | Follows a procedure and stops at the required boundary | `ops-runbook-anomaly` |
 | Planning decomposition | Produces a checkable dependency-aware estimate | `plan-and-estimate` |
 | Conflict synthesis | Reconciles sources while preserving explicit disagreement | `conflict-synthesis` |
+| Recipe routing | Recognizes which library craftbook fits a plain brief and invokes it | `dev-craftbook-routing`, `craftbook-find-vs-create` |
+| Route then execute | Carries a selected recipe through to a deliverable that holds up | `craftbook-route-multi` |
+| Review precision | Reports the real defect without flagging correct code | `craftbook-deep-security-review`, `large-pr-review` |
+| Craftbook authoring | Emits a valid, gated, reusable book and runs it | `craftbook-author-linear`, `craftbook-author-params` |
+| Structural authoring | Expresses fanout or an embedded gate script in the document itself | `craftbook-author-fanout`, `craftbook-author-gate-script` |
+| Recipe repair + generalization | Fixes a defective live book; turns one-off work into a reusable one | `craftbook-edit-midtask`, `craftbook-export-generalize` |
 
 The extended suites add deeper probes for image/retrieval routing, real-codebase debugging, API authoring, requirement changes, grounding, and research verification. Long-context handoff and refusal correctness still lack isolated core probes; those remain deliberate signposts for future scenarios.
+
+## Where a hard suite's difficulty comes from
+
+`developer` and `complex-work` are the first suites written to a difficulty TARGET
+rather than to a coverage gap, so the reasoning is worth recording.
+
+Stacking more constraints onto one artifact does not work. If a scenario is a
+conjunction of *k* independent sub-gates that a strong local model each clears with
+probability *p ≈ 0.92*, reaching a 40% scenario pass rate needs
+`ln(0.40)/ln(0.92) ≈ 11` gates. Eleven gates on one deliverable buys brittleness, not
+difficulty — and tuning gates against a model's observed failures is forbidden below.
+
+Difficulty has to come from axes where a good local model is *already* weak. Three
+carry these suites: **routing** (qwen3.6-27b invoked the right recipe in 1 of 4 trials
+even when steered — see `prompt-meester-craftbook-prelude.ts`), **authoring** (never
+measured before these suites; the whole-document write has an anti-stub gate floor),
+and **precision under decoys** (a review that flags safe code fails, which recall-only
+gates never caught).
+
+One corollary shapes every fixture: **the seeded defects should be obvious.** An
+authorization check that returns true for everyone; a rename that missed three call
+sites; a quantity spelled "two". The difficulty is finding it in volume and not
+crying wolf — not subtlety. A subtle defect makes the scenario a coin flip, which
+measures nothing.
 
 ## Suites — standardized units of evaluation
 
@@ -52,13 +82,15 @@ The registry has grown well past the point where "run everything" is a routine a
 - **`smoke`** — 3 fast probes for a pulse check before/after a risky change. Never a scorecard.
 - **`extended-coding` / `extended-grounding` / `extended-retrieval`** — per-axis deep dives, reached for when core surfaces a weakness on that axis or a change targets it.
 - **`productivity`** — end-user knowledge work: constrained communications, meeting follow-through, records, planning, calendar synthesis, experiment analysis, local-MCP research, bibliography, conflict synthesis, spreadsheet modeling, and DocBlocks document production (PPTX, DOCX, and a theme round-trip). Six of its thirteen members are shared with `core`/`extended-grounding` (the axes genuinely overlap with office work); the other seven are what it uniquely buys. Deliberately excludes creative writing (that's `extended-writing`) and coding. Three gate kinds: prose/structure, **arithmetic oracles** (a locked-schema JSON of computed figures checked field-by-field, so a well-shaped readout with a wrong p-value fails), and **binary container gates** (the DocBlocks members must produce a real ZIP-shaped PPTX/DOCX — a byte floor alone accepted the Markdown source renamed to `.pptx`). Hermetic by *enforcement*, not assertion: mocked dependencies, a mocked web-search backend, and a grader assertion that no live-retrieval tool was called — the live Wikipedia API is keyless and on by default, so a config-only guarantee would fail silently while every content gate still passed. Budget 6h05m at `--count 1`; `productivity-smoke` is the 1h15m pulse-check subset.
+- **`developer`** — the engineering scorecard, and deliberately hard. Ten hermetic scenarios covering recipe routing under near-neighbour ambiguity, defect identification graded on **precision as well as recall**, and code change proven by execution receipts. The target band is a frontier cloud model passing most of it, the best local model landing around 4/10, and a small local model 1-2/10. Budget 5h40m at `--count 1`; `developer-smoke` is the 1h40m subset.
+- **`complex-work`** — multi-phase orchestration and, in six of its nine members, **authoring the recipe rather than consuming one**: a parameterized book run twice, a fanout book, an embedded gate script, a book repaired mid-task, one-off work generalized into a reusable recipe. Same difficulty target as `developer`. Budget 5h40m; `complex-work-smoke` is the 1h50m subset.
 - **`headroom`** — deliberately hard probes (arcade-deluxe, squisq-review) that are NOT expected to pass 100%; they keep a saturated scorecard honest and separate frontier-class from medium-class execution.
 
 Suite membership changes are deliberate: adding to `core` taxes every future scorecard's wall-clock, and removing breaks comparability across time. Grow the extended suites freely; promote into `core` only when an axis has proven to differentiate models and is missing there.
 
 ## The published scorecard
 
-`core` and `productivity` are the two suites whose results **ship in the product** — the handboek's [How we test models](handboek/technical/how-we-test-models.md) and [Model scorecard](handboek/technical/model-scorecard.md) articles render them for end users. That raises the bar from "a number we discussed" to "a number a customer reads", so the path from measurement to publication is a single command:
+`core`, `productivity`, `developer` and `complex-work` are the suites whose results **ship in the product** — the handboek's [How we test models](handboek/technical/how-we-test-models.md) and [Model scorecard](handboek/technical/model-scorecard.md) articles render them for end users. That raises the bar from "a number we discussed" to "a number a customer reads", so the path from measurement to publication is a single command:
 
 ```bash
 pnpm eval:scorecard --list                    # plan: models, suites, wall-clock ceiling

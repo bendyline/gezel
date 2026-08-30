@@ -56,6 +56,22 @@ reconciled summary.
 | Plan and estimate (`plan-and-estimate`) | Produce an office-relocation plan with valid owners, correctly ordered dependencies, risks, and a checkable definition of done for every task. |
 | Conflict synthesis (`conflict-synthesis`) | Reconcile five documents that disagree about a launch date, budget, and owner; show each conflict and use the authoritative answer consistently. |
 
+**The engineering set** is developer work, and it is deliberately harder
+than the first two. A model has to pick the right recipe out of a library of
+several hundred when two of them look almost identical, find real defects in a
+change set without flagging code that is perfectly correct, and prove a fix by
+running the tests rather than by claiming it works.
+
+**The complex-workflow set** asks a model to build the recipe, not just follow
+one: write a reusable procedure with its own quality gates, run it twice against
+different inputs, repair one that is broken, and turn a job it just did by hand
+into something the crew can run again next quarter.
+
+Nobody should expect full marks on either. They exist because the best models
+now score close to full marks on the first two sets, and a column of near-perfect
+scores cannot tell you which model to choose. Low numbers here are headroom, not
+breakage.
+
 **The productivity set** is office work — a customer notice written to a hard
 word limit, a meeting turned into an action register, a research brief with
 its sources cited, an A/B test read-out, a spreadsheet model, a slide deck,

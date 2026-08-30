@@ -1,9 +1,13 @@
 import type { EvalScenario } from '../../types.ts';
+import { authorFanoutScenario } from './author-fanout.ts';
 import { authorLinearScenario } from './author-linear.ts';
+import { authorParamsScenario } from './author-params.ts';
 import { editMidtaskScenario } from './edit-midtask.ts';
+import { exportGeneralizeScenario } from './export-generalize.ts';
 import { findVsCreateScenario } from './find-vs-create.ts';
 import { gateScriptScenario } from './gate-script.ts';
 import { devCraftbookRoutingScenario } from './route-dev.ts';
+import { routeMultiScenario } from './route-multi.ts';
 
 /**
  * The craftbook SELECTION + AUTHORING scenarios — the matrix for the
@@ -24,6 +28,10 @@ export const CRAFTBOOK_AUTHORING_SCENARIOS: Record<string, EvalScenario> = {
   [editMidtaskScenario.id]: editMidtaskScenario,
   [findVsCreateScenario.id]: findVsCreateScenario,
   [devCraftbookRoutingScenario.id]: devCraftbookRoutingScenario,
+  [routeMultiScenario.id]: routeMultiScenario,
+  [authorParamsScenario.id]: authorParamsScenario,
+  [exportGeneralizeScenario.id]: exportGeneralizeScenario,
+  [authorFanoutScenario.id]: authorFanoutScenario,
 };
 
 export function listCraftbookAuthoringScenarios(): EvalScenario[] {

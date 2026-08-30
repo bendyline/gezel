@@ -57,8 +57,30 @@ import { suiteScenarios } from '../suites.ts';
 import type { MatrixSummary } from '../types.ts';
 import { assertKnownFlags, parseArgs } from './args.ts';
 
-/** The suites a scorecard always covers. Not configurable on purpose. */
-const SCORECARD_SUITES = ['core', 'productivity'] as const;
+/**
+ * The suites a scorecard always covers. Not configurable on purpose.
+ *
+ * Four, not two, since `developer` and `complex-work` landed. The two new
+ * suites are deliberately hard — they exist because the 27b/31b/35b class
+ * saturates `core` (qwen3.8-27b at 33/33) and a wall of 32/33 cannot rank
+ * the models we actually choose between. Expect low absolute numbers there
+ * and read them as headroom, not as regressions.
+ *
+ * Two consequences for whoever runs the sweep, and the first is worse than
+ * it looks. The ceiling this function sums is the AUTHORED one, but the
+ * runner extends a deadline in 15-minute steps whenever hard progress moved
+ * within the last 10 minutes, capped at 2x (`hardCeilingCapMs` in
+ * runner.ts). That rule rarely fires on core — trials there pass early or
+ * stall outright — and reliably fires on a hard suite, where a model grinds
+ * without converging and looks like progress every ten minutes. Budget 2x
+ * what `--list` prints for `developer` and `complex-work`.
+ *
+ * And a model far below the new suites' floor will book a long run of zeros
+ * — probe with `--suite developer-smoke --count 1` first and skip the full
+ * suite for models that score 0/3, recording that as unmeasured rather than
+ * paying six hours (or twelve) to confirm it.
+ */
+const SCORECARD_SUITES = ['core', 'productivity', 'developer', 'complex-work'] as const;
 
 /**
  * `--verify`: the shortest run that exercises every code path a published

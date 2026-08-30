@@ -2164,6 +2164,78 @@ describe('sniff escalation ladder', () => {
     expect(client.messageGezel).toHaveBeenCalledTimes(3);
   });
 
+  // The terminal deferral waits longer than an ordinary nudge so the last
+  // message the target reads is not lost mid-stream — but it was UNBOUNDED,
+  // so a target that never closed its turn held a decided trial open until
+  // the runner's hard ceiling. Wild-caught on the inaugural frontier run:
+  // craftbook-author-gate-script exhausted its ladder at 28 minutes and then
+  // deferred for another 42 minutes of one unbroken turn.
+  it('stops deferring the terminal handoff once the in-flight turn is hopeless', async () => {
+    const logs: string[] = [];
+    const requestTerminalFailure = vi.fn();
+    const inflight: Array<{
+      sessionId: string;
+      gezelId: string;
+      projectId: string;
+      elapsedMs: number;
+    }> = [];
+    const client = makeClient({
+      sessions: [
+        {
+          id: 's',
+          gezelId: 'dev-1',
+          projectId: 'project-1',
+          lastActivityAt: '2026-06-04T05:00:00Z',
+        },
+      ],
+      inflight,
+    });
+    const ctx = {
+      ...makeCtx(client),
+      log: (message: string) => logs.push(message),
+      requestTerminalFailure,
+    };
+    const sniff = failingSniff();
+
+    for (const sourceText of ['rev-1', 'rev-2', 'rev-3']) {
+      await postSniffFeedback(ctx, 'openapi.yaml', sniff, {
+        sourceText,
+        projectId: 'project-1',
+      });
+    }
+
+    // Inside the terminal window: still deferred, as before.
+    inflight.push({
+      sessionId: 's',
+      gezelId: 'dev-1',
+      projectId: 'project-1',
+      elapsedMs: 10 * 60_000,
+    });
+    expect(
+      await postSniffFeedback(ctx, 'openapi.yaml', sniff, {
+        sourceText: 'rev-4',
+        projectId: 'project-1',
+      }),
+    ).toEqual({ status: 'deferred' });
+    expect(requestTerminalFailure).not.toHaveBeenCalled();
+
+    // Past it: the turn is not "about to finish" in any useful sense, so the
+    // verdict is delivered rather than waiting for the runner's hard ceiling.
+    inflight.length = 0;
+    inflight.push({
+      sessionId: 's',
+      gezelId: 'dev-1',
+      projectId: 'project-1',
+      elapsedMs: 42 * 60_000,
+    });
+    const settled = await postSniffFeedback(ctx, 'openapi.yaml', sniff, {
+      sourceText: 'rev-5',
+      projectId: 'project-1',
+    });
+    expect(settled.status).toBe('exhausted');
+    expect(requestTerminalFailure).toHaveBeenCalledTimes(1);
+  });
+
   it('hands off exhaustion even when the final target lookup fails', async () => {
     const logs: string[] = [];
     const requestTerminalFailure = vi.fn();

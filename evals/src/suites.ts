@@ -237,6 +237,142 @@ export const SUITES: Record<string, EvalSuite> = {
     scenarios: ['arcade-deluxe', 'squisq-review'],
   },
 
+  // Engineering scorecard, and deliberately HARD: the target band is a
+  // frontier cloud model passing most of it, the best local model landing
+  // around 4/10, and a small local model 1-2/10. That difficulty does NOT
+  // come from stacking constraints onto one artifact — at a ~0.92 per-gate
+  // base rate you would need eleven conjunctive gates to reach 40%, which
+  // buys brittleness, not difficulty. It comes from three axes where a good
+  // local model is measurably weak:
+  //
+  //   - ROUTING. Recognizing which library recipe fits and invoking it.
+  //     qwen3.6-27b managed 1 of 4 even when steered
+  //     (prompt-meester-craftbook-prelude.ts). No scorecard suite measured
+  //     this before.
+  //   - PRECISION UNDER DECOYS. Finding the real defect without reporting
+  //     three that aren't. The seeded defects are deliberately OBVIOUS —
+  //     an authorization check that returns true for everyone, a rename
+  //     that missed three call sites. A subtle defect makes the scenario a
+  //     coin flip, which measures nothing.
+  //   - EXECUTION RECEIPTS. Red-then-green commandEvidence and runtime
+  //     oracles that prose cannot fake.
+  //
+  // Hermetic: every codebase, diff, and dependency corpus is written by
+  // scenario setup. squisq-review stays in `headroom` because it needs
+  // network.
+  //
+  // schema-migration, failing-tests-spec and symptom-debug are deliberately
+  // NOT duplicated from `core`. A scorecard that charges the same trial to
+  // two suites reads as a bigger sample than it is.
+  //
+  // Budget 5h40m at --count 1, ordered cheapest-first.
+  developer: {
+    id: 'developer',
+    description:
+      'Engineering scorecard (10 scenarios, <=5h40m at --count 1), deliberately hard: craftbook ' +
+      'routing under near-neighbour ambiguity, defect identification graded on precision as ' +
+      'well as recall, and code change proven by execution receipts. Fully hermetic. Not ' +
+      'expected to pass 100% — it exists to rank models that saturate core.',
+    scenarios: [
+      'fix-squisq-bugs', // 25m — three documented bugs in a seeded codebase, runtime driver + tsc
+      'dev-craftbook-routing', // 25m — 3-way recipe discrimination; a wrong-but-plausible pick is terminal
+      'interface-contract', // 30m — coupled delegation across a shared type module
+      'craftbook-code-review', // 30m — one staged change set, precision-graded
+      'craftbook-api-contract-review', // 30m — OpenAPI reconciled against implemented routes
+      'craftbook-codemod-sweep', // 35m — 9-file rename with a deliberate CHANGELOG exception
+      'large-pr-review', // 40m — 120-file corpus, planted defect AND planted false-positive trap
+      'craftbook-bug-fix-tdd', // 40m — red-then-green receipts plus a mutant oracle
+      'craftbook-deep-security-review', // 40m — seeded source-to-sink vulns, structured findings
+      'craftbook-refactor-module', // 45m — behavior-equivalence matrix + duplication oracle
+    ],
+  },
+
+  // Pulse check for "is the engineering suite broken?" — one member per
+  // GATE KIND, which is what makes three scenarios informative: recipe
+  // routing, an executed code oracle, and precision/recall over seeded
+  // defects. Same relationship to `developer` that `smoke` has to `core`.
+  'developer-smoke': {
+    id: 'developer-smoke',
+    description:
+      'Fast engineering pulse check (3 scenarios, <=1h40m): recipe routing, an executed codemod ' +
+      'oracle, and a precision-graded security review. Not a scorecard — use developer for that.',
+    scenarios: [
+      'dev-craftbook-routing',
+      'craftbook-codemod-sweep',
+      'craftbook-deep-security-review',
+    ],
+  },
+
+  // The other half of the headroom pair: multi-phase orchestration, and
+  // BUILDING the recipe rather than consuming one. Six of the nine members
+  // grade the craftbook the model authored — its paramSchema, its spawn
+  // block, its embedded gate script, its repaired step — rather than an
+  // artifact some crew produced. That is a capability the product sells and
+  // no scorecard suite has ever measured.
+  //
+  // Two structural facts from the bundled library shape this suite, and
+  // both are worth knowing before editing it:
+  //   - Only 3 of 287 bundled books carry a `spawn` block (invoice-run,
+  //     nightly-fix-sweep, pull-request-review), so craftbook-author-fanout
+  //     is the member most likely to be unwinnable rather than merely hard.
+  //     It stays until the frontier ceiling check says otherwise.
+  //   - Exactly ONE book uses `branches` (ship), and ship is already
+  //     validated on gemma4-e4b-q4. So there is no branch-authoring member
+  //     here: with 286 of 287 books offering no example to read, that
+  //     scenario would measure inventing an unexemplified schema feature,
+  //     not authoring. Revisit when gilde ships a second branching book.
+  //
+  // craftbook-executive-level-review was the tenth candidate and is the
+  // first promotion candidate if a member has to be replaced: 7 steps, two
+  // terminal, no local validation recorded. It was left out because its
+  // difficulty is genuinely UNMEASURED, which is a weaker seat than every
+  // other member can claim, and because the 45m it costs bought no axis the
+  // nine below do not already cover.
+  //
+  // Budget 5h40m at --count 1, ordered cheapest-first.
+  'complex-work': {
+    id: 'complex-work',
+    description:
+      'Complex-workflow scorecard (9 scenarios, <=5h40m at --count 1), deliberately hard: ' +
+      'selecting and executing multi-phase recipes, and AUTHORING new ones — parameterized, ' +
+      'fanned-out, self-gating, and repaired mid-flight. Six of nine members grade the craftbook ' +
+      'the model wrote. Fully hermetic. Not expected to pass 100%.',
+    scenarios: [
+      'craftbook-find-vs-create', // 20m — find the library recipe instead of authoring one
+      'craftbook-route-multi', // 30m — route AND execute: the selection-to-delivery handoff
+      'craftbook-invoice-run', // 35m — declarative fanout execution, non-code
+      'craftbook-author-params', // 35m — a recipe reusable across two inputs, not hardcoded to one
+      'craftbook-export-generalize', // 40m — generalize finished one-off work into a reusable recipe
+      'craftbook-author-linear', // 45m — the authoring anchor: three gated steps, run to completion
+      'craftbook-author-gate-script', // 45m — embedded inline gate script with an anti-stub floor
+      'craftbook-edit-midtask', // 45m — diagnose an unwinnable gate and repair the live book
+      'craftbook-author-fanout', // 45m — author a spawn block; the hardest document shape
+    ],
+  },
+
+  // Pulse check for "is the workflow suite broken?" — one member per KIND
+  // of work the suite grades: SELECTING a recipe, AUTHORING one, and
+  // EXECUTING an existing one. Same shape as `productivity-smoke`, which is
+  // one member per kind of GATE.
+  //
+  // `craftbook-author-fanout` was the third member and was swapped out on
+  // measurement, not taste. A pulse check answers "is this broken?", which
+  // requires a healthy system to pass it: the inaugural run put frontier at
+  // 2/3 and qwen3.8-27b-q4 at 1/3 on the old set, because fanout authoring
+  // is the member deliberately placed AT the difficulty ceiling — frontier
+  // stalls at 6/8, the best local model at 2/8. A subset that a healthy
+  // system fails cannot distinguish "hard" from "broken", which is the only
+  // question a smoke suite is for. Fanout stays in the full suite, where
+  // being unpassable is the job.
+  'complex-work-smoke': {
+    id: 'complex-work-smoke',
+    description:
+      'Fast complex-workflow pulse check (3 scenarios, <=1h40m): recipe selection, baseline ' +
+      'craftbook authoring, and declarative-fanout execution — one per kind of work the suite ' +
+      'grades. Not a scorecard — use complex-work for that.',
+    scenarios: ['craftbook-find-vs-create', 'craftbook-invoice-run', 'craftbook-author-linear'],
+  },
+
   // Bundled project-type rails, driven through the Job Hunt exemplar:
   // typed create, two-gezel crew, named store tools, seeded workspace
   // stores. Non-frozen — grows a scenario per new bundled type worth

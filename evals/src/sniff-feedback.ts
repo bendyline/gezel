@@ -44,6 +44,25 @@ const nudgeMemory = new WeakMap<EvalContext, Set<string>>();
  * rejected payload every five seconds only floods logs and cannot heal. */
 const permanentNudgeFailureMemory = new WeakMap<EvalContext, Set<string>>();
 const INFLIGHT_FEEDBACK_DEFER_MS = 4 * 60_000;
+/**
+ * Upper bound on deferring the TERMINAL (stage >= 3) handoff behind an
+ * in-flight turn.
+ *
+ * Ordinary nudges defer for at most `INFLIGHT_FEEDBACK_DEFER_MS` so a
+ * productive turn is not interrupted. The terminal handoff deliberately
+ * defers longer — its message is the last thing the target will read, and
+ * delivering it mid-stream risks it being lost — but it was unbounded, so
+ * a target that never closed its turn held a DECIDED trial open until the
+ * runner's hard ceiling.
+ *
+ * Wild-caught on the inaugural frontier run of the hard suites:
+ * `craftbook-author-gate-script` exhausted its repair ladder at 28 minutes
+ * and then deferred the terminal handoff for another 42 minutes of a single
+ * unbroken turn, burning device time on an outcome that was already settled.
+ * Past this bound the turn is not "about to finish" in any useful sense, so
+ * deliver and let the runner settle.
+ */
+const INFLIGHT_TERMINAL_DEFER_MS = 15 * 60_000;
 const FEEDBACK_DEFERRAL_LOG_INTERVAL_MS = 60_000;
 const feedbackDeferralLogMemory = new WeakMap<EvalContext, Map<string, number>>();
 
@@ -489,7 +508,10 @@ export async function postSniffFeedback(
   const deliveryProjectId = opts.projectId ?? target?.projectId;
   const inflight = target ? await targetInflightTurn(ctx, target, deliveryProjectId) : null;
   const inflightFeedbackDeferMs = opts.inflightDeferMs ?? INFLIGHT_FEEDBACK_DEFER_MS;
-  if (inflight && (stage >= 3 || inflight.elapsedMs < inflightFeedbackDeferMs)) {
+  // The terminal handoff waits longer than an ordinary nudge, but not
+  // forever — see INFLIGHT_TERMINAL_DEFER_MS.
+  const deferCeilingMs = stage >= 3 ? INFLIGHT_TERMINAL_DEFER_MS : inflightFeedbackDeferMs;
+  if (inflight && inflight.elapsedMs < deferCeilingMs) {
     logFeedbackDeferral(
       ctx,
       `sniff:${filePath}:${target?.gezelId ?? 'unknown'}:${deliveryProjectId ?? 'default'}:${stage >= 3 ? 'exhaustion' : 'nudge'}`,

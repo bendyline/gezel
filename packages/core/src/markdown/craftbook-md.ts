@@ -76,6 +76,15 @@ const FRONTMATTER_KEYS = [
   'connectors',
   'paramSchema',
   'hooks',
+  // Whole-book declarations that are NOT step fields. Omitting one here is
+  // worse than dropping it: the parser reports `unknown key "spawn"` and
+  // refuses the save, so a model that correctly authored a fanout book in
+  // the markdown arm is told its document is malformed.
+  'spawn',
+  'commands',
+  'diffpackCapable',
+  'capabilityFloor',
+  'minGezelVersion',
   'version',
   'releasedAt',
 ] as const;
@@ -97,6 +106,9 @@ const STEP_FENCE_KEYS = [
   'next',
   'branches',
   'terminal',
+  // Marks the step the spawn block fans out from. Without it a book can
+  // declare `spawn` and have no step that triggers it.
+  'spawnFanout',
 ] as const;
 
 export interface CraftbookMarkdownParse {

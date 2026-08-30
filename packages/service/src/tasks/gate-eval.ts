@@ -585,6 +585,7 @@ async function evalCheckInner(
         ...(c.minRows !== undefined ? { minRows: c.minRows } : {}),
         ...(c.uniqueBy ? { uniqueBy: c.uniqueBy } : {}),
         ...(c.format ? { format: c.format } : {}),
+        ...(c.allowExtraFields !== undefined ? { allowExtraFields: c.allowExtraFields } : {}),
       });
       const rowCount = (r as { rowCount?: number }).rowCount;
       return {

@@ -686,6 +686,8 @@ export function renderScorecardMarkdown(
 const SCORECARD_SUITE_HEADINGS: Record<string, string> = {
   core: 'General capability',
   productivity: 'Office and knowledge work',
+  developer: 'Engineering work',
+  'complex-work': 'Complex workflows',
 };
 
 interface ScorecardRound {

@@ -961,3 +961,36 @@ describe('detectTypeScriptOnlySyntax (TS-in-plain-script diagnosis)', () => {
     expect(detectTypeScriptOnlySyntax('const ok = !!value;')).toBeNull();
   });
 });
+
+describe('recordSchema allowExtraFields', () => {
+  const spec = {
+    fields: [
+      { name: 'file', type: 'nonempty', required: true },
+      { name: 'severity', type: 'nonempty', required: true },
+    ],
+  };
+  const enriched = JSON.stringify([
+    { file: 'src/a.ts', severity: 'high', cwe: 'CWE-89', title: 'SQL injection' },
+  ]);
+
+  // Strict is right for a locked-schema data deliverable. It is wrong for a
+  // REGISTER: a security review that also records a cwe and a title has
+  // produced a better artifact, and failing it grades schema-guessing rather
+  // than the review. Wild-caught when claude-sonnet-4-6 was rejected for
+  // exactly that on craftbook-deep-security-review.
+  it('rejects extra fields by default', () => {
+    expect(recordSchema(enriched, spec).ok).toBe(false);
+    expect(recordSchema(enriched, spec).detail).toContain('unexpected field');
+  });
+
+  it('accepts them when the check opts in', () => {
+    expect(recordSchema(enriched, { ...spec, allowExtraFields: true }).ok).toBe(true);
+  });
+
+  it('still enforces the required fields when extras are allowed', () => {
+    const missing = JSON.stringify([{ file: 'src/a.ts', cwe: 'CWE-89' }]);
+    const result = recordSchema(missing, { ...spec, allowExtraFields: true });
+    expect(result.ok).toBe(false);
+    expect(result.detail).toContain('severity');
+  });
+});

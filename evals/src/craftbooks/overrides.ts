@@ -133,7 +133,8 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
         'Reworked for the weekly maintenance suite to reconcile OpenAPI and implemented routes with deterministic semantics, drift, auth, pagination, and corrected-snippet gates; not yet rerun locally.',
     },
     gaps: [
-      'Add a parser-backed operation oracle that compares every OpenAPI path with the implemented route inventory.',
+      'Run on a local model to establish the difficulty band.',
+      'The recordSchema gate prescribes drift-record field names; a model that emits different keys fails it before the oracle runs. Watch for that in the first local sweep.',
     ],
   },
   'audio-ad-spot': {
@@ -362,9 +363,7 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
       notes:
         'Adapted from the shipped test.json. Joined the developer suite as the single-change-set review probe; needs local-model validation under the precision oracle.',
     },
-    gaps: [
-      'Add a precision oracle: seeded plausible non-defects that a shotgun review reports and a real review does not.',
-    ],
+    gaps: ['Run on a local model to establish the difficulty band.'],
   },
   'codemod-sweep': {
     runAsCraftbookTask: true,
@@ -773,10 +772,10 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     coverage: {
       status: 'implemented',
       notes:
-        'Replaced the generic prose smoke with a systemic security fixture, confirmed-path report gates, and a structured findings.json schema; not yet run on a local model.',
+        'Systemic security fixture with a precision/recall oracle: src/reports.ts seeds three constructs that pattern-match the seeded defects but are correct (exec with no request data, an allow-list-mapped ORDER BY column, a documented-public /health), each declared deliberate in docs/security.md. The oracle fails a shotgun review on precision and an incomplete one on recall; both arms were proven against fabricated deliverables before landing. Joined the developer suite.',
     },
     gaps: [
-      'Add a custom oracle that validates every findings.json line and category against parsed source paths.',
+      'Not yet run on a local model under the precision oracle — the frontier ceiling is proven, the difficulty band is not.',
     ],
   },
   'dependency-audit': {
