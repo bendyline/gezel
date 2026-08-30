@@ -97,7 +97,9 @@ describe('type mapping', () => {
 
 describe('parsing the worker output', () => {
   it('reads one table per line', () => {
-    expect(parseExtractedTables(`${JSON.stringify(REVENUE)}\n${JSON.stringify(SECOND)}\n`)).toHaveLength(2);
+    expect(
+      parseExtractedTables(`${JSON.stringify(REVENUE)}\n${JSON.stringify(SECOND)}\n`),
+    ).toHaveLength(2);
   });
 
   it('loses only the bad line, not the workbook', () => {
@@ -145,7 +147,13 @@ describe('manifest', () => {
 
   it('keeps two columns that normalize to the same name', () => {
     const manifest = manifestForTable(
-      { ...REVENUE, columns: [{ name: 'Total', kind: 'number' }, { name: 'total', kind: 'number' }] },
+      {
+        ...REVENUE,
+        columns: [
+          { name: 'Total', kind: 'number' },
+          { name: 'total', kind: 'number' },
+        ],
+      },
       't',
       'a.xlsx',
     );

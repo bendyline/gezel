@@ -831,9 +831,7 @@ export class IndexStore {
     if (exts.length === 0) return [];
     const extClause = exts.map(() => 'lower(f.path) LIKE ?').join(' OR ');
     const alwaysClause =
-      alwaysExts.length > 0
-        ? alwaysExts.map(() => 'lower(f.path) LIKE ?').join(' OR ')
-        : '0 = 1';
+      alwaysExts.length > 0 ? alwaysExts.map(() => 'lower(f.path) LIKE ?').join(' OR ') : '0 = 1';
     return this.db
       .prepare(
         `SELECT f.path AS path, f.hash AS hash, f.size AS size

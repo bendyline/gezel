@@ -2494,7 +2494,8 @@ export class ContentIndex {
     let allowed = false;
     try {
       const meta = await this.store.getProject(projectId);
-      allowed = meta != null && meta.indexingEnabled !== false && projectAllowsWorkspaceTables(meta);
+      allowed =
+        meta != null && meta.indexingEnabled !== false && projectAllowsWorkspaceTables(meta);
     } catch {
       allowed = false;
     }

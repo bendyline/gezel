@@ -31,8 +31,8 @@ import {
   createLogger,
   nowIso,
 } from '@bendyline/gezel';
-import { safeJoin } from '../fs/safe-paths.js';
 import { slug } from '../connectors/writer.js';
+import { safeJoin } from '../fs/safe-paths.js';
 import { columnsStruct } from './compactor.js';
 import { type DuckRunner, sqlLiteral } from './duck.js';
 import {
@@ -235,7 +235,11 @@ export async function materializeWorkbook(
   }
 
   if (written.length === 0) {
-    return { state: 'failed', corpusDir, reason: 'no table from this spreadsheet could be written' };
+    return {
+      state: 'failed',
+      corpusDir,
+      reason: 'no table from this spreadsheet could be written',
+    };
   }
   if (tables.length > maxTables) {
     log.warn(

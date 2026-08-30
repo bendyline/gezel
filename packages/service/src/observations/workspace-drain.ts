@@ -19,10 +19,9 @@ import { createLogger } from '@bendyline/gezel';
 import { MAX_INDEXABLE_BYTES } from '../index-store/classify.js';
 import { shadowDocFilesPaths, writeConvertedMarkdownAt } from '../index-store/docs.js';
 import type { IndexStore } from '../index-store/index-store.js';
+import { convertInSandbox } from '../index-store/sandbox-convert.js';
 import type { DuckRunner } from './duck.js';
 import { readTableManifest } from './layout.js';
-import { convertInSandbox } from '../index-store/sandbox-convert.js';
-import { materializeWorkbook } from './workspace-xlsx.js';
 import {
   ALWAYS_TABLE_EXTS,
   INLINE_MATERIALIZE_MAX_BYTES,
@@ -33,6 +32,7 @@ import {
   sourceRelPathFromCorpusDir,
   tabularCorpusDir,
 } from './workspace-tables.js';
+import { materializeWorkbook } from './workspace-xlsx.js';
 
 const log = createLogger('observations');
 
