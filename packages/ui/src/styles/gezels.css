@@ -281,6 +281,14 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  /* The roster is the scroll container, so its scrollbar is drawn inside the
+     pane's right padding: every row's trailing actions trigger ended up a
+     scrollbar-width further from the edge than the rows' left inset. Bleed the
+     list into that gutter so the bar rides the pane edge, and keep the gutter
+     reserved so the inset does not shift when the roster is short enough not
+     to scroll. */
+  margin-right: -1rem;
+  scrollbar-gutter: stable;
 }
 
 .side li .gezel-row {

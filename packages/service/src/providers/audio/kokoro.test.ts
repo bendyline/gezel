@@ -158,6 +158,18 @@ describe('KokoroProvider.synthesize', () => {
     expect(out.meta.voice).toBe('bm_george');
     expect(out.meta.model).toBe(KOKORO_DEFAULT_MODEL_ID);
   });
+
+  it('does not load the model for an already-cancelled request', async () => {
+    const { module, calls } = makeModule({ withSplitter: true });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      provider(module).synthesize({ text: 'Never spoken.', signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(calls.splitters).toHaveLength(0);
+    expect(calls.generate).toBe(0);
+  });
 });
 
 describe('KokoroProvider watchdog', () => {

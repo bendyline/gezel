@@ -352,6 +352,19 @@ export const ProjectSchema = z.object({
    */
   tabVisibility: ProjectTabVisibilitySchema.optional(),
   /**
+   * Whether the Output pane is shown for this project. Absent follows the
+   * capability default (a previewable workspace `index.html`, or a project
+   * type that pins a dashboard page); an explicit boolean is the user's own
+   * toggle and always wins.
+   *
+   * It lives on the project rather than only in the renderer's localStorage
+   * because the desktop shell's origin moves whenever the daemon falls back
+   * off the canonical port, which silently discards every localStorage
+   * preference. Same reasoning as `sidebarSide` and the theme preference,
+   * which mirror to the config for exactly this failure.
+   */
+  outputPaneVisible: z.boolean().optional(),
+  /**
    * Policy for Gezel-managed workspace mutations. `auto` (and an absent
    * value) permits internal workspaces and denies external `workingDir`s;
    * `allow` and `deny` are explicit user choices. Provider-native harnesses

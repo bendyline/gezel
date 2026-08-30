@@ -41,6 +41,7 @@ export class RemoteTtsProvider implements TextToSpeechProvider {
     const res = await this.opts.fetch(`${this.opts.baseUrl}/v1/remote/audio/synthesize`, {
       method: 'POST',
       headers: this.headers(),
+      ...(input.signal ? { signal: input.signal } : {}),
       body: JSON.stringify({
         text: input.text,
         ...(input.voice ? { voice: input.voice } : {}),

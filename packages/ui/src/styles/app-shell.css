@@ -2152,6 +2152,12 @@ button.machine-memory-unload-button {
   color: var(--text);
 }
 
+/* The Gezels pane's toolbar carries a single button and no right-edge control,
+   so it centers rather than sitting flush left like the Projects strip. */
+.gezels-side > .area-toolbar {
+  justify-content: center;
+}
+
 /* Pushed to the right edge (Projects collapse control). */
 .area-toolbar-toggle {
   margin-left: auto;
@@ -2365,66 +2371,9 @@ button.machine-memory-unload-button {
   min-height: 0;
 }
 
-/* Recolor the Squisq editor's bottom status bar to match the gezel
-   header/title-bar green instead of Squisq's default slate-blue
-   (`#1f2937` in dark / `#f9fafb` in light). Applies wherever EditorShell
-   is mounted in gezel (Documents, project artifacts, etc.). */
-.squisq-editor-shell .squisq-status-bar,
-.squisq-editor-shell[data-theme="dark"] .squisq-status-bar,
-.squisq-editor-shell[data-theme="light"] .squisq-status-bar {
-  background: var(--titlebar, #667f62);
-  color: var(--titlebar-ink, #f3ede0);
-  border-top-color: rgba(0, 0, 0, 0.25);
-}
-.squisq-editor-shell[data-theme="dark"] .squisq-status-ok,
-.squisq-editor-shell .squisq-status-ok {
-  color: var(--titlebar-ink, #f3ede0);
-}
-
-/* Squisq editor → gezel palette bridge. The editor's chrome accents are
-   `var(--squisq-accent…, <indigo>)` fallback chains — defining the tokens
-   on the shell root swaps the whole indigo family for the terracotta
-   accent wherever an EditorShell is mounted (documents, project briefs,
-   chat composer, script editors). Same seam idea as the GezelJsonEditor
-   form bridge at the end of this file. */
-.squisq-editor-shell {
-  --squisq-accent: var(--accent);
-  --squisq-accent-hover: var(--accent-hover);
-  --squisq-outline-accent: var(--accent);
-}
-
-/* The block-outline panel hardcodes cool greys (#dcd8d0 panel, #f3f4f6
-   hover) rather than reading tokens — repaint it with the gezel surface
-   family so the editor's left rail reads as part of the app, not an
-   embedded foreign product. */
-.squisq-editor-shell .squisq-outline {
-  /* The outline <aside> itself carries `--squisq-outline-accent: <blue>`
-     as an INLINE style, so this same-element declaration needs
-     `!important` to win — the same reason the GezelJsonEditor bridge at
-     the end of this file uses it. */
-  --squisq-outline-accent: var(--accent) !important;
-  background: var(--surface);
-  color: var(--text);
-}
-.squisq-editor-shell .squisq-outline-row:hover,
-.squisq-editor-shell
-  .squisq-outline-row-wrap:hover
-  .squisq-outline-row:not(.squisq-outline-row--current) {
-  background: color-mix(in oklch, var(--accent) 10%, transparent);
-}
-.squisq-editor-shell
-  .squisq-outline-row-wrap:has(.squisq-outline-row--current)
-  .squisq-outline-row-actions {
-  background: color-mix(in oklch, var(--accent) 14%, var(--surface));
-}
-.squisq-editor-shell[data-theme="dark"] .squisq-outline {
-  background: var(--panel);
-}
-.squisq-editor-shell[data-theme="dark"]
-  .squisq-outline-row-wrap:has(.squisq-outline-row--current)
-  .squisq-outline-row-actions {
-  background: color-mix(in oklch, var(--accent) 26%, var(--panel));
-}
+/* Squisq editor chrome is themed in styles/squisq-theme.css — squisq now
+   declares its whole chrome palette as `--squisq-*` tokens, so gezel rebinds
+   the palette in one place instead of patching selectors here. */
 
 /* Dropdown that collects the less-frequent top-nav destinations
    (Gezels, Documents, Tasks, Scripts, History, Settings). Trigger

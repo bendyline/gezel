@@ -57,7 +57,9 @@ describe('craftbook categories', () => {
 
   it('reports the family for grouping, defaulting to the ungrouped shelf', () => {
     expect(craftbookCategoryFamily('code-build')).toBe('code');
-    expect(craftbookCategoryFamily('personal')).toBe('non-code');
+    expect(craftbookCategoryFamily('media')).toBe('creative');
+    expect(craftbookCategoryFamily('research')).toBe('business');
+    expect(craftbookCategoryFamily('personal')).toBe('personal');
     expect(craftbookCategoryFamily('practice')).toBe('universal');
   });
 });

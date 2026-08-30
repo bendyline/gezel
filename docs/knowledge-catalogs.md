@@ -61,9 +61,9 @@ mid-embed resumed to a byte-identical release, verified by archive
 sha256). `sign-knowledge-release` signs releases with the offline Ed25519
 key (generate/rotate via `--generate-key`; keyId-indexed trust anchors),
 re-hashes every archive, self-verifies against the public key, and stages
-the CDN tree: immutable `_knowledge/catalogs/<id>/<version>/*.gezk`
-plus the RFC 8785-signed `_knowledge/registry/index.json`, uploaded
-catalogs-first/registry-LAST by the `_knowledge` block in qualla's
+the CDN tree: immutable `_k/catalogs/<id>/<version>/*.gezk`
+plus the RFC 8785-signed `_k/registry/index.json`, uploaded
+catalogs-first/registry-LAST by the `_k` block in qualla's
 sync-to-azure scripts (which re-verify every archive against the signed
 contentDigest before publishing; procedure + withdrawal runbook in
 qualla's RUNBOOK §6.6). The signed chain is proven end-to-end in-repo
@@ -895,7 +895,7 @@ https://qualla.com/cdn/gezel/knowledge/v1/<id>/<version>/<sha256>.gezk
 Immutable archives get long-lived immutable cache headers. The signed registry
 gets a short TTL/ETag and is uploaded only after every referenced archive is
 present and independently downloadable. Never reuse an archive URL for new bytes.
-Extend Qualla's Azure sync scripts with a dedicated `_knowledge/` tree,
+Extend Qualla's Azure sync scripts with a dedicated tree (shipped as `_k/`),
 catalog-specific shrink guards, MIME type, and cache policy; do not mix it into
 the multi-million-file media sync.
 

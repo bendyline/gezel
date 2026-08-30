@@ -4041,6 +4041,11 @@ export const UpdateProjectRequestSchema = z.object({
   /** Replace the project's optional-tab visibility overrides. */
   tabVisibility: ProjectTabVisibilitySchema.optional(),
   /**
+   * Show or hide the Output pane for this project. `null` clears the choice
+   * and returns the pane to its capability-driven default.
+   */
+  outputPaneVisible: z.boolean().nullable().optional(),
+  /**
    * Enable or disable structural and content indexing for this workspace.
    * Chat history, memories, and shared-document indexing are unaffected.
    */

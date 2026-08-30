@@ -168,7 +168,7 @@ describe('registry index signing', () => {
         documents: 100_000,
         archiveBytes: 1_234_567,
         contentDigest: 'a'.repeat(64),
-        url: 'https://qualla.com/_knowledge/catalogs/world-history/2026.08.0/world-history-2026.08.0.gezk',
+        url: 'https://qualla.com/_k/catalogs/world-history/2026.08.0/world-history-2026.08.0.gezk',
         license: { name: 'CC BY-SA 4.0', attributionRequired: true },
         sourceSnapshot: { name: 'enwiki', date: '2026-08-01' },
       },
