@@ -124,6 +124,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add a property checker that verifies exactly the expected anomalous row ids.'],
   },
   'api-contract-review': {
+    // Bounded for the `developer` suite.
+    timeoutMs: 30 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
@@ -349,6 +352,19 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
         'Tactical 1.0.0 sidecar (vendored v1->v2 upgrade with renamed API; staged green receipts).',
     },
     gaps: ['Run across local model tiers.'],
+  },
+  'code-review': {
+    // Bounded for the `developer` suite.
+    timeoutMs: 30 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
+    coverage: {
+      status: 'implemented',
+      notes:
+        'Adapted from the shipped test.json. Joined the developer suite as the single-change-set review probe; needs local-model validation under the precision oracle.',
+    },
+    gaps: [
+      'Add a precision oracle: seeded plausible non-defects that a shotgun review reports and a real review does not.',
+    ],
   },
   'codemod-sweep': {
     runAsCraftbookTask: true,
@@ -751,6 +767,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     ],
   },
   'deep-security-review': {
+    // Bounded for the `developer` suite.
+    timeoutMs: 40 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'implemented',
       notes:
@@ -1303,6 +1322,9 @@ export const CRAFTBOOK_EVAL_OVERRIDES: Record<string, CraftbookEvalOverride> = {
     gaps: ['Add Playwright behavior checks for the class-specific controls.'],
   },
   'invoice-run': {
+    // Bounded for the `complex-work` suite.
+    timeoutMs: 35 * 60_000,
+    progressTimeoutMs: 12 * 60_000,
     coverage: {
       status: 'implemented',
       localModels: ['gemma4-e4b-q4'],

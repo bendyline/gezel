@@ -247,25 +247,30 @@ describe('authoring fixtures', () => {
 
 /* ── registration contract ───────────────────────────────────────────── */
 
-describe('authoring scenario registration (opt-in)', () => {
+describe('authoring scenario registration', () => {
   const AUTHORING_IDS = [
     'craftbook-author-linear',
     'craftbook-author-gate-script',
     'craftbook-edit-midtask',
     'craftbook-find-vs-create',
+    'dev-craftbook-routing',
   ];
 
-  it('exports exactly the four authoring scenarios', () => {
+  it('exports exactly the selection + authoring scenarios', () => {
     expect(Object.keys(CRAFTBOOK_AUTHORING_SCENARIOS).sort()).toEqual([...AUTHORING_IDS].sort());
   });
 
-  it('is NOT part of SCENARIOS / listScenarios (eval:all must not grow)', () => {
+  // These were opt-in until they became suite members. suites.test.ts
+  // resolves membership through SCENARIOS[sid], not getScenario(), so a
+  // scenario reachable only by name cannot join a suite — the map is now
+  // spread into the main registry and eval:all grows by design.
+  it('is part of SCENARIOS / listScenarios so the ids can carry suite membership', () => {
     for (const id of AUTHORING_IDS) {
-      expect(SCENARIOS[id]).toBeUndefined();
+      expect(SCENARIOS[id], `${id} must be in the main registry to be suite-eligible`).toBeDefined();
     }
     const listedIds = listScenarios().map((s) => s.id);
     for (const id of AUTHORING_IDS) {
-      expect(listedIds).not.toContain(id);
+      expect(listedIds).toContain(id);
     }
   });
 

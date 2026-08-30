@@ -337,6 +337,11 @@ The first changed file calls assuredApi. Before alleging that an API is missing,
 
 The final report must include "Coverage: 120/120 changed files", a findings table, and "Verdict: request-changes". Do not modify source and do not post anything externally.`,
   suggestedTrials: 1,
+  // Bounded for the `developer` suite. Until that suite landed this
+  // scenario carried no ceiling at all and inherited the runner's 8-hour
+  // default, so a wedged trial could hold the device for a working day.
+  timeoutMs: 40 * 60_000,
+  progressTimeoutMs: 12 * 60_000,
   skipInitialPrompt: true,
   setup,
   successCheck,
