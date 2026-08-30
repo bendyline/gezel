@@ -2,6 +2,8 @@ import { ProviderNameSchema } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
   applyRecognitionPolicy,
+  mmprojBudgetBytes,
+  nativeVisionEnabledFor,
   resolveImageStrategy,
   resolveVisionCapability,
 } from './vision-capability.js';
@@ -141,5 +143,31 @@ describe('resolveImageStrategy', () => {
       AVAILABLE,
     );
     expect(plan.verdict).toBe('preprocess');
+  });
+});
+
+describe('nativeVisionEnabledFor / mmprojBudgetBytes', () => {
+  it('defaults ON when the model has no explicit entry', () => {
+    expect(nativeVisionEnabledFor(undefined, 'qwen3.8-27b-q2')).toBe(true);
+    expect(nativeVisionEnabledFor({}, 'qwen3.8-27b-q2')).toBe(true);
+    expect(nativeVisionEnabledFor({ other: false }, 'qwen3.8-27b-q2')).toBe(true);
+  });
+
+  it('honors an explicit opt-out, and only for that model', () => {
+    const cfg = { 'qwen3.8-27b-q2': false, 'gemma4-e4b-q4': true };
+    expect(nativeVisionEnabledFor(cfg, 'qwen3.8-27b-q2')).toBe(false);
+    expect(nativeVisionEnabledFor(cfg, 'gemma4-e4b-q4')).toBe(true);
+  });
+
+  it('is false without a model id — there is nothing to enable', () => {
+    expect(nativeVisionEnabledFor({}, undefined)).toBe(false);
+  });
+
+  it('drops the projector from the memory budget when vision is off', () => {
+    // The point of the opt-out: reserving for a file the launch will not
+    // load silently shrinks the context window the user traded vision for.
+    expect(mmprojBudgetBytes(927_607_488, true)).toBe(927_607_488);
+    expect(mmprojBudgetBytes(927_607_488, false)).toBe(0);
+    expect(mmprojBudgetBytes(undefined, true)).toBe(0);
   });
 });

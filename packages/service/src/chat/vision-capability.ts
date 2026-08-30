@@ -94,6 +94,44 @@ export interface VisionCapabilityInput {
   nativeVisionEnabled?: boolean;
 }
 
+/**
+ * Whether native vision is on for `modelId`, given `config.nativeVision`.
+ *
+ * **Absent means ON.** The projector is downloaded with the model, memory
+ * planning already prices it in, and a model that ships one can see — so
+ * having to discover a hidden switch before your screenshot works was the
+ * wrong default. `false` is an explicit opt-OUT, and it buys something
+ * concrete: the projector's bytes leave the memory budget, which on a tight
+ * card is more context (see `mmprojBudgetBytes`).
+ *
+ * Every reader of `config.nativeVision` must go through here. Three call
+ * sites already decide this — the engine launch, the per-turn image plan, and
+ * the model list the UI renders — and a default that lives in three
+ * expressions is a default that will disagree with itself.
+ */
+export function nativeVisionEnabledFor(
+  nativeVision: Record<string, boolean> | undefined,
+  modelId: string | undefined,
+): boolean {
+  if (!modelId) return false;
+  return nativeVision?.[modelId] !== false;
+}
+
+/**
+ * Projector bytes to charge against the memory budget.
+ *
+ * Zero when vision is off, because the launch then omits `--mmproj` and the
+ * weights genuinely are not resident. Reserving for a file we chose not to
+ * load would silently shrink the context window the user could otherwise
+ * have had — which is exactly the trade someone turns vision off to make.
+ */
+export function mmprojBudgetBytes(
+  mmprojSizeBytes: number | undefined,
+  visionEnabled: boolean,
+): number {
+  return visionEnabled ? (mmprojSizeBytes ?? 0) : 0;
+}
+
 export function resolveVisionCapability(input: VisionCapabilityInput): {
   native: boolean;
   reason: string;
