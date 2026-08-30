@@ -332,7 +332,9 @@ export class KokoroProvider implements TextToSpeechProvider {
 
   async synthesize(input: SynthesizeInput): Promise<SynthesizeOutput> {
     const started = Date.now();
+    input.signal?.throwIfAborted();
     const tts = await this.ensureLoaded();
+    input.signal?.throwIfAborted();
     const splitterCtor = (await this.module()).TextSplitterStream;
     const voice = input.voice ?? DEFAULT_VOICE_ID;
     const speed = clamp(input.speed ?? 1, 0.5, 2);
@@ -367,11 +369,13 @@ export class KokoroProvider implements TextToSpeechProvider {
       let stalled = false;
       try {
         for (;;) {
+          input.signal?.throwIfAborted();
           const step = await withTimeout(
             iterator.next(),
             this.inferenceTimeoutMs,
             `Kokoro produced no audio for ${Math.round(this.inferenceTimeoutMs / 1000)}s after ${chunks.length} chunk(s) — giving up so the request doesn't hang. Retry, and restart the Gezel service if it persists.`,
           );
+          input.signal?.throwIfAborted();
           if (step.done) break;
           chunks.push(step.value.audio.audio);
           sampleRate ??= step.value.audio.sampling_rate;
@@ -405,6 +409,7 @@ export class KokoroProvider implements TextToSpeechProvider {
         this.inferenceTimeoutMs,
         `Kokoro produced no audio for ${Math.round(this.inferenceTimeoutMs / 1000)}s — giving up so the request doesn't hang. Retry, and restart the Gezel service if it persists.`,
       );
+      input.signal?.throwIfAborted();
       chunks = [result.audio];
       sampleRate = result.sampling_rate;
     }

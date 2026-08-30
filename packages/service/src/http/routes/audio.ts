@@ -165,6 +165,7 @@ export function audioRoutes(ctx: ServiceContext): Hono {
       const provider = await ctx.tts.providerForModel(req.model);
       const out = await provider.synthesize({
         text: req.text,
+        signal: c.req.raw.signal,
         ...(resolvedVoice ? { voice: resolvedVoice } : {}),
         ...(req.model ? { model: req.model } : {}),
         ...(req.speed !== undefined ? { speed: req.speed } : {}),

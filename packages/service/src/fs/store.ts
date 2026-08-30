@@ -3374,6 +3374,13 @@ export class Store {
       knowledgeCatalogs?: import('@bendyline/gezel').ProjectKnowledgeCatalogs;
       /** Replaces the optional project-tab visibility overrides. */
       tabVisibility?: ProjectTabVisibility;
+      /**
+       * Output-pane visibility for this project; `null` returns it to the
+       * capability-driven default. Deliberately absent from `metaChanged` —
+       * it is a view toggle, and logging every click would bury the history
+       * view in noise.
+       */
+      outputPaneVisible?: boolean | null;
       /** Project shape — `solo` (a single-gezel job/game) vs `crew`. */
       mode?: 'crew' | 'solo';
       /** Custom project-lead label (e.g. checkers → "Opponent"); `null` clears it. */
@@ -3516,6 +3523,11 @@ export class Store {
         ? { knowledgeCatalogs: patch.knowledgeCatalogs }
         : {}),
       ...(patch.tabVisibility !== undefined ? { tabVisibility: patch.tabVisibility } : {}),
+      ...(patch.outputPaneVisible === null
+        ? { outputPaneVisible: undefined }
+        : patch.outputPaneVisible !== undefined
+          ? { outputPaneVisible: patch.outputPaneVisible }
+          : {}),
       ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
       ...(patch.leadLabel === null
         ? { leadLabel: undefined }

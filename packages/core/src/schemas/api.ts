@@ -1032,15 +1032,32 @@ export const GezelConfigSchema = z.object({
     })
     .optional(),
   /**
-   * Per-model opt-in for native vision (`--mmproj` at launch), keyed by
-   * catalog id. Absent means off.
+   * Per-model native vision (`--mmproj` at launch), keyed by catalog id.
    *
-   * Off by default because loading a projector makes llama-server 501 on slot
-   * save/restore, which latches disk-KV prefix caching off for that model
-   * process-wide — costing cached session resume on *every* text turn, image
-   * or not. Users who want image fidelity more than resume latency opt in per
-   * model; everyone else gets the recognition pre-step, which is uniform
-   * across engines including ds4.
+   * **Absent means ON**; `false` is an explicit opt-out. The projector now
+   * ships with the model and memory planning prices it in, so a model that
+   * can see does, without the user first finding a switch. Resolve it only
+   * through `nativeVisionEnabledFor` — three layers read this and a default
+   * spelled out in three places drifts.
+   *
+   * Turning it off is a real trade, not just a modality toggle: the
+   * projector's bytes leave the memory budget, so a text-only model can be
+   * granted a larger context window. Worth it for, say, a night-shift model
+   * that will never be handed a screenshot.
+   *
+   * Off by default because an mmproj-backed llama-server 501s on slot
+   * save/restore, so gezel cannot persist that model's KV to disk. Scope
+   * that precisely, because it is narrower than it first reads: llama-server's
+   * own in-request prefix reuse (`cache_prompt` + `id_slot`, which
+   * `LlamaCppCacheAdapter.buildRequestExtras` sends unconditionally) is NOT
+   * affected, so turn-to-turn speed inside a live conversation is unchanged.
+   * What is lost is the *disk* layer — resuming a session's KV after slot
+   * recycle or an engine restart, and the `prefix-<hash>.bin` seed that lets
+   * a fresh session for the same gezel skip the system-prompt prefill. The
+   * cost lands on cold starts, not on every turn.
+   *
+   * llama.cpp only. MLX has no slot save/restore to lose (and no vision path
+   * yet — see `MLX_VISION_SUPPORTED`).
    */
   nativeVision: z.record(z.string(), z.boolean()).optional(),
   /** Optional bearer token used by the webhook channel. Never stored in config.json —
@@ -4023,6 +4040,11 @@ export const UpdateProjectRequestSchema = z.object({
   nudgeConfig: ProjectNudgeConfigSchema.optional(),
   /** Replace the project's optional-tab visibility overrides. */
   tabVisibility: ProjectTabVisibilitySchema.optional(),
+  /**
+   * Show or hide the Output pane for this project. `null` clears the choice
+   * and returns the pane to its capability-driven default.
+   */
+  outputPaneVisible: z.boolean().nullable().optional(),
   /**
    * Enable or disable structural and content indexing for this workspace.
    * Chat history, memories, and shared-document indexing are unaffected.

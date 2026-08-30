@@ -1,0 +1,131 @@
+/*
+ * Squisq editor chrome → gezel palette.
+ *
+ * Squisq ships its own chrome palette (a cool Tailwind slate ramp with a blue
+ * accent) as `--squisq-*` custom properties, declared inside `:where()` at
+ * zero specificity precisely so a host can rebind them. This file is that
+ * rebinding: every token gets a gezel value, so the editors read as part of
+ * the workshop instead of an embedded foreign product. The contract lives in
+ * squisq's `docs/theming.md`.
+ *
+ * Scope. The selector list mirrors squisq's own, and both halves are
+ * load-bearing:
+ *   - `:root` covers the app and every editor mounted inside it.
+ *   - `[data-theme]` covers the editor shell and the menus, dialogs and
+ *     flyouts that PORTAL to `document.body`. Those stamp their own
+ *     `data-theme`, which squisq keys its dark values off — a declaration on
+ *     an element beats one inherited from an ancestor, so binding only on
+ *     `:root` would leave squisq's dark blue winning inside the shell.
+ *
+ * Only the chrome is themed here. The document being edited keeps its own
+ * Squisq `Theme` (gezellig, via components/chat-theme.ts) — the two palettes
+ * are deliberately independent, and a link inside a document should look like
+ * the author's theme, not like gezel's UI.
+ *
+ * Derived tones use `color-mix` against the semantic aliases in
+ * foundation.css rather than naming new colors, so a palette change there
+ * carries into the editors with no edit here.
+ */
+
+:root,
+[data-theme] {
+  /* Ink. Gezel has two ink steps; squisq wants five, so the intermediate
+     tones are mixes rather than new values. */
+  --squisq-text-strong: var(--text);
+  --squisq-text: var(--text);
+  --squisq-text-soft: color-mix(in oklch, var(--text) 78%, var(--text-muted));
+  --squisq-text-muted: var(--text-muted);
+  --squisq-text-faint: color-mix(in oklch, var(--text-muted) 65%, transparent);
+
+  /* Surfaces. `--panel` is gezel's elevated paper, `--surface` the tone
+     pressed into it — which maps onto squisq's surface/sunken pair. */
+  --squisq-bg: var(--bg);
+  --squisq-surface: var(--panel);
+  --squisq-surface-subtle: color-mix(in oklch, var(--panel) 72%, var(--bg));
+  --squisq-surface-sunken: var(--surface);
+  --squisq-surface-hover: color-mix(in oklch, var(--accent) 9%, var(--panel));
+  --squisq-surface-raised: color-mix(in oklch, var(--accent) 16%, var(--panel));
+  --squisq-input-bg: var(--surface);
+  --squisq-row-hover: color-mix(in oklch, var(--accent) 10%, transparent);
+
+  /* The "desk" the editing page floats on. Squisq's own default is a cool
+     grey slab; gezel's is the warm inset paper the whole app already uses for
+     recessed chrome, so the page reads as a sheet on a bench. */
+  --squisq-desk-bg: var(--surface);
+  --squisq-desk-rail: var(--bg);
+  --squisq-desk-border: var(--border);
+
+  --squisq-border-subtle: color-mix(in oklch, var(--border) 55%, transparent);
+  --squisq-border: var(--border);
+  --squisq-border-strong: color-mix(in oklch, var(--text) 32%, transparent);
+
+  /* Accent. Terracotta stays a medium tone in both themes, so white ink sits
+     on it either way — squisq's default flips to dark ink for dark mode
+     because its accent goes pale there, which is exactly the kind of thing
+     `--squisq-text-on-accent` exists to let a host disagree about. */
+  --squisq-accent: var(--accent);
+  --squisq-accent-hover: var(--accent-hover);
+  --squisq-accent-strong: var(--accent-hover);
+  --squisq-accent-soft: color-mix(in oklch, var(--accent) 20%, var(--panel));
+  --squisq-accent-subtle: color-mix(in oklch, var(--accent) 9%, var(--panel));
+  --squisq-accent-border: color-mix(in oklch, var(--accent) 45%, transparent);
+  --squisq-text-on-accent: #fff;
+
+  --squisq-danger: var(--danger);
+  --squisq-danger-hover: color-mix(in oklch, var(--danger) 82%, var(--text));
+  --squisq-danger-strong: var(--danger);
+  --squisq-danger-soft: var(--danger-bg);
+  --squisq-danger-border: color-mix(in oklch, var(--danger) 45%, transparent);
+  --squisq-text-on-danger: #fff;
+
+  --squisq-warning: var(--warning);
+  --squisq-warning-hover: color-mix(in oklch, var(--warning) 82%, var(--text));
+  --squisq-warning-strong: color-mix(in oklch, var(--warning) 72%, var(--text));
+  --squisq-warning-soft: var(--warning-bg);
+  --squisq-warning-border: color-mix(in oklch, var(--warning) 50%, transparent);
+
+  --squisq-success: var(--success);
+  --squisq-success-border: color-mix(in oklch, var(--success) 55%, transparent);
+
+  /* The annotation chip and the find highlight keep squisq's warm tones —
+     both are marker-pen affordances on the text rather than app chrome, and
+     recoloring them to terracotta would make a template tag look like a
+     selected control. */
+
+  /* Depth. Gezel's shadows are warm-black; squisq builds every elevation from
+     one rgb triple so binding it retints them all. */
+  --squisq-shadow-rgb: 60 45 30;
+
+  --squisq-focus-ring: var(--accent);
+
+  /* Monaco's canvas while it is being prepared. Left as squisq's defaults
+     would flash a white slab on the parchment before the editor mounts. */
+  --squisq-editor-background: var(--panel);
+  --squisq-editor-foreground: var(--text);
+}
+
+/* Recolor the Squisq editor's bottom status bar to match the gezel
+   header/title-bar green instead of the app-surface tone the chrome palette
+   would otherwise give it. This one is a deliberate departure from the
+   bridge above: the status bar is chrome gezel owns visually, the way the
+   title bar is. */
+.squisq-editor-shell .squisq-status-bar,
+.squisq-editor-shell[data-theme="dark"] .squisq-status-bar,
+.squisq-editor-shell[data-theme="light"] .squisq-status-bar {
+  background: var(--titlebar, #667f62);
+  color: var(--titlebar-ink, #f3ede0);
+  border-top-color: rgba(0, 0, 0, 0.25);
+}
+.squisq-editor-shell[data-theme="dark"] .squisq-status-ok,
+.squisq-editor-shell .squisq-status-ok {
+  color: var(--titlebar-ink, #f3ede0);
+}
+
+/* The outline pane echoes the DOCUMENT theme's primary color by design —
+   squisq's OutlinePanel writes `--squisq-outline-accent` as an inline style
+   from `activeTheme.colors.primary`. In gezel the outline is app chrome
+   sitting beside the page rather than part of it, so the app accent wins.
+   An inline style can only be beaten by `!important`. */
+.squisq-editor-shell .squisq-outline {
+  --squisq-outline-accent: var(--accent) !important;
+}

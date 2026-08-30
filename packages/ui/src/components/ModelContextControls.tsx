@@ -71,6 +71,7 @@ export function ModelActionsMenu({
   contextEditorOpen,
   onToggleContextEditor,
   fitnessAction,
+  visionAction,
   onUpdate,
   updateLabel = { idle: 'Update', busy: 'Updating…' },
   onDelete,
@@ -83,6 +84,11 @@ export function ModelActionsMenu({
   contextEditorOpen: boolean;
   onToggleContextEditor: () => void;
   fitnessAction?: { label: string; checking?: boolean; onRun: () => void };
+  /**
+   * Present only when this model actually has a projector on disk. Loading it
+   * is a per-model choice because it is not free — see the item's own title.
+   */
+  visionAction?: { enabled: boolean; busy?: boolean; onToggle: () => void };
   onUpdate?: () => void;
   /** MLX says "Download again" for a stale catalog install; same action slot. */
   updateLabel?: { idle: string; busy: string };
@@ -132,6 +138,24 @@ export function ModelActionsMenu({
                 onSelect={() => fitnessAction.onRun()}
               >
                 {fitnessAction.label}
+              </DropdownMenu.Item>
+            )}
+            {visionAction && (
+              <DropdownMenu.Item
+                className="app-nav-menu-item"
+                disabled={visionAction.busy}
+                title={
+                  visionAction.enabled
+                    ? 'Stop sending images straight to this model. Pictures still reach it as a written description from the image reader, and this model regains cached session resume.'
+                    : "Send images to this model itself instead of a written description of them. Costs cached session resume for this model: the engine won't save or reload its conversation state to disk, so a session that goes cold re-reads its history. Speed within a live conversation is unaffected."
+                }
+                onSelect={() => visionAction.onToggle()}
+              >
+                {visionAction.busy
+                  ? 'Saving…'
+                  : visionAction.enabled
+                    ? 'Turn off vision'
+                    : 'Turn on vision'}
               </DropdownMenu.Item>
             )}
             <DropdownMenu.Item

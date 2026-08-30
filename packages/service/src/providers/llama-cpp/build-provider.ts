@@ -9,6 +9,7 @@ import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { LlamaBackend } from '@bendyline/gezel/native';
 import { recordLlamaQuarantine } from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
+import { mmprojBudgetBytes, nativeVisionEnabledFor } from '../../chat/vision-capability.js';
 import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
 import { noModelYetMessage } from '../active-install-message.js';
 import {
@@ -287,6 +288,20 @@ export async function buildLlamaCppProvider(opts: {
     if (modelCatalogInfo) modelPath = modelCatalogInfo.weightsPath;
   }
 
+  // Resolved HERE, above the memory planning, because the two must agree: if
+  // the launch will pass `--mmproj` the projector is resident and has to be
+  // budgeted, and if it will not, budgeting for it silently shrinks the
+  // context window this model could otherwise have been granted. Turning
+  // vision off is a deliberate trade of modality for context — a night-shift
+  // model that will never see a screenshot should get the memory back.
+  const nativeVisionEnabled =
+    !!modelCatalogInfo?.mmprojPath &&
+    nativeVisionEnabledFor(config.nativeVision, modelCatalogInfo.id);
+  const visionBudgetBytes = mmprojBudgetBytes(
+    modelCatalogInfo?.mmprojSizeBytes,
+    nativeVisionEnabled,
+  );
+
   // KV-cache precision. Gemma 3/4 are unusually sensitive to a quantized
   // KV cache: large attention head dims (key/value_length = 512), a final
   // logit softcap, and sliding-window attention mean an 8-bit KV cache
@@ -509,7 +524,7 @@ export async function buildLlamaCppProvider(opts: {
   const PLAN_REFERENCE_CTX = 4096;
   const planWeightsBytes = modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3;
   const planResidentBytes = estimateLlamaCppResidentBytes(planWeightsBytes, {
-    mmprojBytes: modelCatalogInfo?.mmprojSizeBytes ?? 0,
+    mmprojBytes: visionBudgetBytes,
   });
   const planCapacity = computeCapacityBudget();
   const planKvBytesPerToken = (kv: LlamaCppKvCacheType) => {
@@ -747,7 +762,7 @@ export async function buildLlamaCppProvider(opts: {
       }
       const approxBytes = modelCatalogInfo?.approxSizeBytes ?? summary.fileSizeBytes;
       const residentBytes = estimateLlamaCppResidentBytes(approxBytes, {
-        mmprojBytes: modelCatalogInfo?.mmprojSizeBytes ?? 0,
+        mmprojBytes: visionBudgetBytes,
       });
       const vramBytes = maxGpuVramBytes(llamaDevices);
       const split =
@@ -1167,10 +1182,6 @@ export async function buildLlamaCppProvider(opts: {
   // a tool loop parked between requests can release the GPU normally.
   const llamaIdleMs = config.localEngineIdleTimeoutMs ?? DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS;
   const llamaFreezeMs = Math.floor(llamaIdleMs / 2);
-  // Per-model native-vision opt-in. Absent means off — see the `--mmproj`
-  // block below for why this isn't simply "the projector is on disk".
-  const nativeVisionEnabled =
-    !!modelCatalogInfo?.mmprojPath && config.nativeVision?.[modelCatalogInfo.id] === true;
   // Startup timeout: 180s covers a 7B–30B model's CUDA warmup on
   // typical hardware. Frontier-tier 100B+ MoE models on unified-memory
   // boxes (DGX Spark, M-series Macs) routinely take 4–6 minutes for

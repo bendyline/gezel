@@ -13,6 +13,7 @@ import { type ElectronApplication, type Page, expect, test } from '@playwright/t
 import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { captureScreenshot } from './helpers/screenshot.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const screenshotDir = join(_dirname, '..', 'screenshots');
@@ -68,7 +69,7 @@ test.describe('Image recognition settings', () => {
     await expect(page.getByText('Granite Vision 4.1 (4B)')).toBeVisible();
     await expect(page.getByText('NuExtract 3 (4B)')).toBeVisible();
 
-    await page.screenshot({
+    await captureScreenshot(page, {
       path: join(screenshotDir, 'image-recognition-settings.png'),
       fullPage: true,
     });

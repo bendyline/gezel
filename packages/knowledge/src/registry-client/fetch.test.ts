@@ -23,7 +23,7 @@ const registryFixture = (): KnowledgeRegistryIndex => ({
       documents: 177,
       archiveBytes: 5_233_521,
       contentDigest: 'a'.repeat(64),
-      url: 'https://qualla.com/_knowledge/catalogs/wikipedia-people/2026.08.1/wikipedia-people-2026.08.1.gezk',
+      url: 'https://qualla.com/_k/catalogs/wikipedia-people/2026.08.1/wikipedia-people-2026.08.1.gezk',
       license: { name: 'CC BY-SA 4.0', attributionRequired: true },
     },
     {
@@ -34,7 +34,7 @@ const registryFixture = (): KnowledgeRegistryIndex => ({
       documents: 180,
       archiveBytes: 5_400_000,
       contentDigest: 'b'.repeat(64),
-      url: 'https://qualla.com/_knowledge/catalogs/wikipedia-people/2026.09.0/wikipedia-people-2026.09.0.gezk',
+      url: 'https://qualla.com/_k/catalogs/wikipedia-people/2026.09.0/wikipedia-people-2026.09.0.gezk',
       license: { name: 'CC BY-SA 4.0', attributionRequired: true },
     },
   ],

@@ -136,7 +136,7 @@ describe('handboek engine', () => {
     // Shelved by subject, with the family named because the list is flat.
     expect(craftbooks.entries[1]?.subcategory).toEqual({
       id: 'business',
-      title: 'Non-code · Business & admin',
+      title: 'Business · Money & admin',
       order: 12,
     });
     const technical = toc.areas.find((a) => a.area === 'technical')!;

@@ -35,6 +35,7 @@ import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
+import { DocumentNarration } from '../components/DocumentNarration.js';
 import { FileFlatList } from '../components/FileFlatList.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
 import { FileHiddenKey, FileViewModeKeys } from '../components/FileViewModeKeys.js';
@@ -317,6 +318,38 @@ function readStoredOutputFraction(): number {
     return clampOutputFraction(Number.parseFloat(raw));
   } catch {
     return DEFAULT_OUTPUT_FRACTION;
+  }
+}
+
+/**
+ * Output-pane visibility used to live only under this localStorage key. It
+ * now lives on `project.outputPaneVisible`; these two read and retire a
+ * value written by an older build so the user's existing choice isn't lost
+ * in the move. The key was per-project and never global.
+ *
+ * localStorage is the wrong home for it in the desktop shell at all: the
+ * renderer's origin is `https://127.0.0.1:<daemon port>`, and the daemon
+ * falls back off the canonical port whenever it is taken, silently handing
+ * the window an empty store. That is what made a closed pane reappear.
+ */
+function legacyOutputVisibleKey(projectId: string): string {
+  return `gezel.projectOutputVisible:${projectId}`;
+}
+
+function readLegacyOutputVisible(projectId: string): boolean | null {
+  try {
+    const raw = window.localStorage.getItem(legacyOutputVisibleKey(projectId));
+    return raw === null ? null : raw === '1';
+  } catch {
+    return null;
+  }
+}
+
+function forgetLegacyOutputVisible(projectId: string): void {
+  try {
+    window.localStorage.removeItem(legacyOutputVisibleKey(projectId));
+  } catch {
+    /* unavailable — nothing to retire */
   }
 }
 
@@ -632,8 +665,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     useState<WorkspaceSourceRevealRequest | null>(null);
   // Output-pane visibility override. `null` = follow the auto default
   // (visible when the workspace has a previewable index.html); an
-  // explicit boolean is the user's toggle choice, persisted per project
-  // so it survives reloads and project switches. See the toggle in the
+  // explicit boolean is the user's toggle choice, persisted onto the
+  // project as `outputPaneVisible` so it survives reloads, project
+  // switches, and a daemon port change. See the toggle in the
   // entity-tabs-row and [ProjectOutputPane](../components/ProjectOutputPane.tsx).
   const [outputOverride, setOutputOverride] = useState<boolean | null>(null);
   // When the selected project has an applied custom project type that pins an
@@ -2041,23 +2075,40 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // Output pane: the set of previewable workspace HTML files, whether a
   // previewable index.html exists (drives the auto-on default), and the
   // resolved visibility (per-project user override wins over the auto
-  // default). The toggle persists the override to localStorage.
+  // default). The toggle persists the override onto the project, so it
+  // survives reloads, project switches, and the daemon changing ports.
   const hasIndexHtml = useMemo(
     () => workspaceHtmlFiles.some((p) => /(^|\/)index\.html?$/i.test(p)),
     [workspaceHtmlFiles],
   );
   // Load the persisted per-project override whenever the project changes.
+  // `project.outputPaneVisible` is the source of truth; a leftover
+  // localStorage value from before the choice moved server-side is adopted
+  // once and then dropped, so the two can never disagree afterwards.
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the selected project id.
   useEffect(() => {
     if (!selected) {
       setOutputOverride(null);
       return;
     }
-    try {
-      const raw = window.localStorage.getItem(`gezel.projectOutputVisible:${selected.id}`);
-      setOutputOverride(raw === null ? null : raw === '1');
-    } catch {
-      setOutputOverride(null);
+    if (typeof selected.outputPaneVisible === 'boolean') {
+      setOutputOverride(selected.outputPaneVisible);
+      forgetLegacyOutputVisible(selected.id);
+      return;
+    }
+    const legacy = readLegacyOutputVisible(selected.id);
+    setOutputOverride(legacy);
+    if (legacy !== null) {
+      const projectId = selected.id;
+      void api
+        .updateProject(projectId, { outputPaneVisible: legacy })
+        .then((updated) => {
+          forgetLegacyOutputVisible(projectId);
+          setSelected((current) => (current?.id === projectId ? updated : current));
+        })
+        .catch(() => {
+          /* keep the cached value; the next load retries the migration */
+        });
     }
   }, [selected?.id]);
   // Resolve the pinned type page (if any) whenever the selected project's
@@ -2113,12 +2164,16 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const toggleOutput = useCallback(() => {
     if (!selected) return;
     const next = !outputVisible;
+    const projectId = selected.id;
     setOutputOverride(next);
-    try {
-      window.localStorage.setItem(`gezel.projectOutputVisible:${selected.id}`, next ? '1' : '0');
-    } catch {
-      /* quota / private mode — state still lives in memory */
-    }
+    void api
+      .updateProject(projectId, { outputPaneVisible: next })
+      .then((updated) => {
+        setSelected((current) => (current?.id === projectId ? updated : current));
+      })
+      .catch((err) => {
+        setError((err as Error).message);
+      });
   }, [selected, outputVisible]);
 
   // Resizable splitter between the output pane and the tab content. The
@@ -2582,6 +2637,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
                       <ProjectDocEditor
                         key={`${selected.id}:about`}
+                        projectId={selected.id}
                         resourceKey={`project:${selected.id}:about`}
                         id="project-about-overview"
                         label="About this project"
@@ -2600,6 +2656,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
                       <ProjectDocEditor
                         key={`${selected.id}:mission`}
+                        projectId={selected.id}
                         resourceKey={`project:${selected.id}:mission`}
                         id="project-about-mission"
                         label="Mission objectives"
@@ -3697,7 +3754,10 @@ function ProjectOutsideInEditor({
         versionBasename={basenameOf(sourcePath)}
         outline
         toolbarSlotAfterActions={
-          !isReadOnly ? <TransformToolbarButton context="generic" /> : undefined
+          <>
+            {!isReadOnly && <TransformToolbarButton context="generic" />}
+            <DocumentNarration fileName={file.path} projectId={projectId} />
+          </>
         }
         toolbarSlotRight={
           <>
@@ -3825,7 +3885,12 @@ function ProjectFileEditor({
         versionBasename={primaryDocumentFilename}
         outline={markdown}
         toolbarSlotAfterActions={
-          markdown && !isReadOnly ? <TransformToolbarButton context="generic" /> : undefined
+          markdown ? (
+            <>
+              {!isReadOnly && <TransformToolbarButton context="generic" />}
+              <DocumentNarration fileName={file.path} projectId={projectId} />
+            </>
+          ) : undefined
         }
         toolbarSlotRight={
           <>
@@ -4160,6 +4225,7 @@ function formatPreviewComplaint(
  * same debounced auto-save pattern as the gezel about.md flow.
  */
 function ProjectDocEditor({
+  projectId,
   resourceKey,
   id,
   label,
@@ -4167,6 +4233,7 @@ function ProjectDocEditor({
   initial,
   onSave,
 }: {
+  projectId: string;
   resourceKey: string;
   id: string;
   label: string;
@@ -4207,7 +4274,12 @@ function ProjectDocEditor({
           colorScheme={editorTheme}
           showPlayTab={false}
           fullWidth
-          toolbarSlotAfterActions={<TransformToolbarButton context="generic" />}
+          toolbarSlotAfterActions={
+            <>
+              <TransformToolbarButton context="generic" />
+              <DocumentNarration fileName={`${label}.md`} projectId={projectId} />
+            </>
+          }
           statusBarSlotRight={<AutosaveStatus autosave={autosave} />}
         />
       </div>

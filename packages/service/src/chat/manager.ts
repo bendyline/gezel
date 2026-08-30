@@ -343,6 +343,7 @@ import type { AvailableToolInfo } from './tools-block.js';
 import { describeTurnError } from './turn-error.js';
 import { UsageTracker } from './usage.js';
 import type { RecognitionMode } from './vision-capability.js';
+import { mmprojBudgetBytes, nativeVisionEnabledFor } from './vision-capability.js';
 import { renderWorkspaceGestalt } from './workspace-gestalt.js';
 
 const DEFAULT_PROJECT_ID = 'default';
@@ -12362,6 +12363,17 @@ export class ChatManager {
     const installed = await this.llamaCppModels?.resolveModel(modelId);
     if (!installed) throw new ModelNotInstalledError(name, modelId);
 
+    // Charge the projector against memory only when the launch will actually
+    // load it. Every estimate below used to pass `installed.mmprojSizeBytes`
+    // unconditionally, which was harmless while the file only existed for
+    // models that had opted in — but the projector now ships with the model,
+    // so an unconditional charge would quietly tax every multimodal model
+    // (~900MB on a 27B) including the ones deliberately running text-only.
+    const visionBudgetBytes = mmprojBudgetBytes(
+      installed.mmprojSizeBytes,
+      !!installed.mmprojPath && nativeVisionEnabledFor(config.nativeVision, modelId),
+    );
+
     const envNumCtx = (() => {
       const raw = process.env.GEZEL_LLAMA_NUM_CTX;
       if (!raw) return undefined;
@@ -12483,7 +12495,7 @@ export class ChatManager {
       );
       if (perSlotF16 === undefined) return undefined;
       const weightsBytes = estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-        mmprojBytes: installed.mmprojSizeBytes,
+        mmprojBytes: visionBudgetBytes,
       });
       const perSlotBytes = perSlotF16 * kvQuantScale(kv);
       return {
@@ -12562,7 +12574,7 @@ export class ChatManager {
               reservedResidentBytes: planned.reserved,
               plannedSlots: planned.slots,
               weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-                mmprojBytes: installed.mmprojSizeBytes,
+                mmprojBytes: visionBudgetBytes,
               }),
             }
           : {}),
@@ -12683,7 +12695,7 @@ export class ChatManager {
             }) / referenceCtx;
       };
       const weightsResidentBytes = estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-        mmprojBytes: installed.mmprojSizeBytes,
+        mmprojBytes: visionBudgetBytes,
       });
       const planFitsAt = (kvType: LlamaCppKvCacheType, ctxTokens: number, slotCount: number) => {
         // `minimumPerTurnCtxTokens: ctxTokens` makes this ask for the WHOLE
@@ -12744,7 +12756,7 @@ export class ChatManager {
           minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
           kvBytesPerToken,
           weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-            mmprojBytes: installed.mmprojSizeBytes,
+            mmprojBytes: visionBudgetBytes,
           }),
           budgetBytes: admissionBudgetBytes,
           committedOtherBytes,
@@ -12795,7 +12807,7 @@ export class ChatManager {
               kvBytesPerToken: windowed.bytesPerToken,
               weightsResidentBytes:
                 estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-                  mmprojBytes: installed.mmprojSizeBytes,
+                  mmprojBytes: visionBudgetBytes,
                 }) +
                 windowed.fixedBytes * slots,
               budgetBytes: admissionBudgetBytes,
@@ -12835,7 +12847,7 @@ export class ChatManager {
             kvBytesPerToken: ladderKvLinearization.bytesPerToken,
             kvFixedPerSlotBytes: ladderKvLinearization.fixedPerSlotBytes,
             weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-              mmprojBytes: installed.mmprojSizeBytes,
+              mmprojBytes: visionBudgetBytes,
             }),
             fastBudgetBytes,
             committedOtherBytes,
@@ -12894,7 +12906,7 @@ export class ChatManager {
             reservedResidentBytes: planned.reserved,
             plannedSlots: planned.slots,
             weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-              mmprojBytes: installed.mmprojSizeBytes,
+              mmprojBytes: visionBudgetBytes,
             }),
           }
         : {}),
@@ -13272,7 +13284,7 @@ export class ChatManager {
     try {
       const resolved = await this.llamaCppModels.resolveModel(modelId);
       const cfg = await this.store.readConfig().catch(() => null);
-      const enabled = cfg?.nativeVision?.[modelId] === true;
+      const enabled = nativeVisionEnabledFor(cfg?.nativeVision, modelId);
       return {
         modelId,
         ...(resolved?.mmprojPath ? { mmprojPath: resolved.mmprojPath } : {}),

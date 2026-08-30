@@ -66,6 +66,8 @@ export interface TranscribeOutput {
 
 export interface SynthesizeInput {
   text: string;
+  /** Stop after the current inference chunk when the caller disconnects or cancels. */
+  signal?: AbortSignal;
   /**
    * Voice identifier. Kokoro ships 54+ named voices (`af_heart`,
    * `am_adam`, …); falls back to the provider's default when omitted.

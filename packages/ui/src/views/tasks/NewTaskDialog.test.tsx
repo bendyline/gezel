@@ -164,7 +164,7 @@ describe('NewTaskDialog', () => {
     expect(await screen.findByRole('radio', { name: 'Social Digest' })).toBeInTheDocument();
   });
 
-  it('shelves craftbooks by subject category, grouped code / non-code', async () => {
+  it('shelves craftbooks by subject category, grouped into subject families', async () => {
     vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
       items: [
         bookItem('branding-website', 'Branding Website', {
@@ -191,7 +191,7 @@ describe('NewTaskDialog', () => {
     expect(screen.getByRole('button', { name: /Research & analysis/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /General work/ })).not.toBeInTheDocument();
     expect(screen.getByText('Code')).toBeInTheDocument();
-    expect(screen.getByText('Non-code')).toBeInTheDocument();
+    expect(screen.getByText('Business')).toBeInTheDocument();
 
     await user.click(starters);
     expect(screen.getByRole('radio', { name: 'Branding Website' })).toBeInTheDocument();

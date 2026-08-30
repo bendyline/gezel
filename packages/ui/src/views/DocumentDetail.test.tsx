@@ -51,6 +51,9 @@ vi.mock('@bendyline/squisq-editor-react/styles', () => ({}));
 vi.mock('../components/DocumentExport/index.js', () => ({
   ExportToolbarControls: () => <span data-testid="export-toolbar">export</span>,
 }));
+vi.mock('../components/DocumentNarration.js', () => ({
+  DocumentNarration: () => <span data-testid="narration-toolbar">narrate</span>,
+}));
 vi.mock('../components/SquisqIntegration/index.js', () => ({
   createDocumentsContentContainer: () => ({}),
   createArtifactsContentContainer: () => ({}),
@@ -243,6 +246,7 @@ describe('DocumentDetail', () => {
       expect(screen.getByTestId('editor-shell')).toBeInTheDocument();
     });
     expect(screen.queryByTestId('ai-toolbar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('narration-toolbar')).not.toBeInTheDocument();
     expect(screen.queryByTestId('export-toolbar')).not.toBeInTheDocument();
   });
 
@@ -258,6 +262,7 @@ describe('DocumentDetail', () => {
       expect(screen.getByTestId('editor-shell')).toBeInTheDocument();
     });
     expect(screen.getByTestId('ai-toolbar')).toBeInTheDocument();
+    expect(screen.getByTestId('narration-toolbar')).toBeInTheDocument();
     expect(screen.getByTestId('export-toolbar')).toBeInTheDocument();
   });
 });

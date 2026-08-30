@@ -229,6 +229,10 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
   const [showAll, setShowAll] = useState(false);
   // Which model row has the context-size editor expanded beneath it.
   const [contextEditorFor, setContextEditorFor] = useState<string | null>(null);
+  // Which model's vision toggle is mid-save. The toggle's *state* comes from
+  // the row (`m.nativeVisionEnabled`), server-resolved — the client must not
+  // re-derive "absent config means on" or the two will drift.
+  const [visionSaving, setVisionSaving] = useState<string | null>(null);
   // False until the override endpoint answers — an older daemon or machine
   // broker 404s and the affordance hides rather than erroring per row.
   const [contextOverridesSupported, setContextOverridesSupported] = useState(false);
@@ -247,6 +251,23 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
       probingRef.current = res.probing;
     } catch {
       /* fitness surface is advisory — a blip just keeps the last state */
+    }
+  }, []);
+
+  // Writes only. The row carries the resolved state, so after a flip we
+  // re-read the list rather than second-guessing the server's default.
+  const toggleVision = useCallback(async (modelId: string, next: boolean) => {
+    setVisionSaving(modelId);
+    try {
+      const cfg = await api.getConfig();
+      await api.updateConfig({
+        nativeVision: { ...(cfg.nativeVision ?? {}), [modelId]: next },
+      });
+      await refresh();
+    } catch {
+      /* leave the previous state visible rather than lying about the flip */
+    } finally {
+      setVisionSaving(null);
     }
   }, []);
 
@@ -853,6 +874,16 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                                   onToggleContextEditor={() =>
                                     setContextEditorFor((prev) => (prev === m.id ? null : m.id))
                                   }
+                                  {...(m.nativeVisionEnabled !== undefined
+                                    ? {
+                                        visionAction: {
+                                          enabled: m.nativeVisionEnabled,
+                                          busy: visionSaving === m.id,
+                                          onToggle: () =>
+                                            void toggleVision(m.id, !m.nativeVisionEnabled),
+                                        },
+                                      }
+                                    : {})}
                                   fitnessAction={fitnessMenuAction(
                                     entry,
                                     probing.includes(fitnessKey),

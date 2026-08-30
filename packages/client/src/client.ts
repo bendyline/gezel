@@ -1775,6 +1775,13 @@ export interface LlamaCppInstalledModel {
    * explicitly via `estimateLlamaCppResidentBytes`'s `mmprojBytes`.
    */
   mmprojSizeBytes?: number;
+  /**
+   * Whether this model will be launched with `--mmproj` — i.e. images go
+   * straight to it rather than through the image reader. Present only when a
+   * projector is installed. Server-resolved: the "absent config means on"
+   * rule lives in the daemon, not in each client.
+   */
+  nativeVisionEnabled?: boolean;
   installedAt: string;
   weightsPath: string;
   /** Context capacity advertised by the GGUF metadata. */

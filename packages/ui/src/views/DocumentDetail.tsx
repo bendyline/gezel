@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
+import { DocumentNarration } from '../components/DocumentNarration.js';
 import {
   createDocumentLinkProvider,
   createDocumentsContentContainer,
@@ -158,7 +159,12 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
           allowVersioning={markdown}
           versionBasename={primaryDocumentFilename}
           toolbarSlotAfterActions={
-            markdown ? <TransformToolbarButton context="generic" /> : undefined
+            markdown ? (
+              <>
+                <TransformToolbarButton context="generic" />
+                <DocumentNarration fileName={path} />
+              </>
+            ) : undefined
           }
           toolbarSlotRight={
             markdown ? (
