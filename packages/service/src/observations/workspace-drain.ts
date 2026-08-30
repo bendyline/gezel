@@ -21,7 +21,10 @@ import { shadowDocFilesPaths, writeConvertedMarkdownAt } from '../index-store/do
 import type { IndexStore } from '../index-store/index-store.js';
 import type { DuckRunner } from './duck.js';
 import { readTableManifest } from './layout.js';
+import { convertInSandbox } from '../index-store/sandbox-convert.js';
+import { materializeWorkbook } from './workspace-xlsx.js';
 import {
+  ALWAYS_TABLE_EXTS,
   INLINE_MATERIALIZE_MAX_BYTES,
   TABULAR_EXTS,
   materializeCsv,
@@ -46,6 +49,14 @@ export const MAX_TABLES_PER_DRAIN = 12;
  * make useful. Overflow is logged, never silent.
  */
 export const MAX_TABLES_PER_PROJECT = 200;
+
+/**
+ * Night budgets. Nobody is waiting on the pass, so the size ceiling that keeps
+ * a huge file off the interactive path lifts, and the per-run cap widens to
+ * drain a backlog in one window rather than over days of index refreshes.
+ */
+export const NIGHT_MAX_TABLES_PER_DRAIN = 200;
+export const NIGHT_MAX_INLINE_BYTES = 8 * 1024 * 1024 * 1024;
 
 /** Attempts per content hash before a file is left alone until it changes. */
 export const MAX_TABULAR_ATTEMPTS = 3;
@@ -129,6 +140,7 @@ export async function drainWorkspaceTables(opts: DrainOptions): Promise<DrainRes
     minBytes,
     MAX_TABULAR_ATTEMPTS,
     maxTables + 1,
+    [...ALWAYS_TABLE_EXTS],
   );
   if (work.length > maxTables) result.remaining = work.length - maxTables;
 
@@ -137,17 +149,29 @@ export async function drainWorkspaceTables(opts: DrainOptions): Promise<DrainRes
     if (budget <= 0) break;
     budget -= 1;
     try {
-      const outcome = await materializeCsv({
-        storageDir,
-        duck,
-        maxInlineBytes,
-        source: {
-          relPath: file.path,
-          absPath: join(workspaceDir, file.path),
-          hash: file.hash,
-          size: file.size,
-        },
-      });
+      const source = {
+        relPath: file.path,
+        absPath: join(workspaceDir, file.path),
+        hash: file.hash,
+        size: file.size,
+      };
+      // A spreadsheet cannot go through DuckDB — `read_xlsx` lives in an
+      // extension our lockdown cannot load — so it takes the sandboxed
+      // squisq route and lands several tables, one per data island.
+      const outcome = file.path.toLowerCase().endsWith('.xlsx')
+        ? await materializeWorkbook({
+            storageDir,
+            duck,
+            source,
+            extract: async (absPath) => {
+              const res = await convertInSandbox(absPath, 'xlsx', 'tables');
+              return {
+                ndjson: res.ndjson ?? null,
+                ...(res.blocked ? { blocked: res.blocked } : {}),
+              };
+            },
+          })
+        : await materializeCsv({ storageDir, duck, maxInlineBytes, source });
 
       if (outcome.state === 'ok') {
         store.markTabularOk(file.hash, file.path, outcome.corpusDir as string, outcome.rows ?? 0);

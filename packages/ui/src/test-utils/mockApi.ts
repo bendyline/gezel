@@ -28,6 +28,8 @@ export type MockApi = Partial<Record<keyof GezelClient, ReturnType<typeof vi.fn>
 const DEFAULT_RESPONSES: Record<string, unknown> = {
   getEngineRetention: { idleTimeoutMs: 300_000 },
   listGezels: { gezels: [] },
+  // A project with no data tables is the common case for a view test.
+  toolListTables: { tables: [] },
   listProjectLocalGezels: { gezels: [] },
   listProjects: { projects: [] },
   listProjectWorkspaceHtmlPages: { files: [] },

@@ -2503,6 +2503,18 @@
   white-space: nowrap;
 }
 
+/* Data tables on the project overview. A quiet list, matching the connector
+   variant: one sentence per table rather than a grid of counters. */
+.project-overview-tables {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.project-overview-tables > li {
+  margin: 0.15rem 0;
+}
+
 /* Data tables under a bound connector. A quiet, indented list rather than a
    stat grid: the reader wants to see that their data arrived and is current,
    and one sentence per table says that better than a row of counters. */

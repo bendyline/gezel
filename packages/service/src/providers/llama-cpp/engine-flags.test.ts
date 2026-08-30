@@ -328,10 +328,34 @@ describe('buildLlamaCppEngineArgs — speculative decoding', () => {
     expect(argValue(args, '--spec-draft-model')).toBe('/models/laguna/dflash.gguf');
   });
 
-  it('keeps manifest spec.mtp as capability metadata instead of auto-enabling MTP', () => {
+  it('enables MTP by default when the GGUF confirms an MTP head', () => {
+    // Policy changed 2026-08-30 after the A/B gate this used to wait for:
+    // +4% to +19% decode, growing with context, byte-identical greedy output
+    // (reports/llama-mtp-eval-20260829.md). `ggufHasMtp` — real GGUF
+    // metadata — is what enables it, never manifest `spec.mtp` alone.
     const args = buildLlamaCppEngineArgs({
       config: {},
       perModel: { spec: { mtp: true } },
+      ggufHasMtp: true,
+    });
+    expect(argValue(args, '--spec-type')).toBe('draft-mtp');
+  });
+
+  it('does NOT enable MTP from manifest capability metadata alone', () => {
+    // spec.mtp is a claim about the model; ggufHasMtp is a fact about the
+    // installed file. Only the fact may enable it — llama-server exits
+    // fatally when draft-mtp is selected for a GGUF with no MTP tensors.
+    const args = buildLlamaCppEngineArgs({
+      config: {},
+      perModel: { spec: { mtp: true } },
+      ggufHasMtp: false,
+    });
+    expect(has(args, '--spec-type')).toBe(false);
+  });
+
+  it('an explicit "none" disables the new default', () => {
+    const args = buildLlamaCppEngineArgs({
+      config: { llamaCppSpecType: 'none' },
       ggufHasMtp: true,
     });
     expect(has(args, '--spec-type')).toBe(false);

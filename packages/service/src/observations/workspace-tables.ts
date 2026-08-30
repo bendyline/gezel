@@ -75,7 +75,14 @@ export const INLINE_MATERIALIZE_MAX_BYTES = 64 * 1024 * 1024;
 const MAX_COMPANION_DEPTH = 24;
 
 /** Extensions this module can turn into a table today. */
-export const TABULAR_EXTS = new Set(['csv', 'tsv']);
+export const TABULAR_EXTS = new Set(['csv', 'tsv', 'xlsx']);
+
+/**
+ * Extensions a gezel cannot read at all, so a table is its only access.
+ * These qualify at any size — unlike a CSV, which below the readable
+ * threshold is better served by simply reading it.
+ */
+export const ALWAYS_TABLE_EXTS = new Set(['xlsx']);
 
 export type TabularState = 'ok' | 'deferred' | 'blocked' | 'failed';
 
@@ -185,6 +192,9 @@ export function shouldMaterialize(
 ): boolean {
   const ext = extname(relPath).slice(1).toLowerCase();
   if (!TABULAR_EXTS.has(ext)) return false;
+  // A spreadsheet is binary: no size makes it readable, so the threshold that
+  // protects small CSVs from becoming noise does not apply to it.
+  if (ALWAYS_TABLE_EXTS.has(ext)) return size > 0;
   return size >= opts.minBytes;
 }
 

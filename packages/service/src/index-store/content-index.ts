@@ -74,7 +74,12 @@ import type {
 } from '../memory/image-embeddings.js';
 import { IMAGE_EMBED_EXTS } from '../memory/image-pixels.js';
 import type { DuckRunner } from '../observations/duck.js';
-import { drainWorkspaceTables } from '../observations/workspace-drain.js';
+import {
+  type DrainResult,
+  NIGHT_MAX_INLINE_BYTES,
+  NIGHT_MAX_TABLES_PER_DRAIN,
+  drainWorkspaceTables,
+} from '../observations/workspace-drain.js';
 import { runSecurityScan } from '../security/scan.js';
 import { type AiShadowDeps, aiShadowFile } from './ai-shadow.js';
 import { ARCHITECTURE_KEY, type AreaPassResult, runAreaPass } from './area-pass.js';
@@ -2475,6 +2480,41 @@ export class ContentIndex {
   }
 
   // ── internals ──────────────────────────────────────────────────────────
+
+  /**
+   * Convert tabular files the interactive pass deferred for being too large.
+   *
+   * Same drain, night budgets. A 2 GB CSV is refused during indexing because a
+   * user is waiting on that pass; at night nobody is, so the size ceiling and
+   * the per-run cap both lift. Returns null when the project has nothing to do
+   * or has opted out.
+   */
+  async drainWorkspaceTablesAtNight(projectId: string): Promise<DrainResult | null> {
+    if (!this.duck) return null;
+    let allowed = false;
+    try {
+      const meta = await this.store.getProject(projectId);
+      allowed = meta != null && meta.indexingEnabled !== false && projectAllowsWorkspaceTables(meta);
+    } catch {
+      allowed = false;
+    }
+    if (!allowed) return null;
+
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    try {
+      return await drainWorkspaceTables({
+        store: opened.index,
+        duck: this.duck,
+        storageDir: opened.artifactsDir,
+        workspaceDir: opened.workspaceDir,
+        maxTables: NIGHT_MAX_TABLES_PER_DRAIN,
+        maxInlineBytes: NIGHT_MAX_INLINE_BYTES,
+      });
+    } finally {
+      opened.index.close();
+    }
+  }
 
   private async open(projectId: string): Promise<{
     index: IndexStore;

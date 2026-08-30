@@ -31,9 +31,9 @@ const MAX_INPUT_BYTES = 25 * 1024 * 1024;
 const ZIP_EXTS = new Set(['docx', 'pptx', 'xlsx']);
 
 export interface SandboxConvertResult {
-  /** Converted markdown, or null when unsupported / parse failed. */
   markdown: string | null;
-  /** Set when refused for safety (size / type confusion / zip bomb / timeout). */
+  /** Newline-delimited typed tables, when the caller asked for `tables`. */
+  ndjson?: string | null;
   blocked?: string;
 }
 
@@ -101,6 +101,7 @@ function workerEntry(): { path: string; stripTypes: boolean } | null {
 export async function convertInSandbox(
   absPath: string,
   ext: string,
+  mode: 'markdown' | 'tables' = 'markdown',
 ): Promise<SandboxConvertResult> {
   let bytes: Buffer;
   try {
@@ -149,7 +150,7 @@ export async function convertInSandbox(
       entry: worker.path,
       cwd: scratch,
       input: '',
-      scriptArgs: [inputName, ext],
+      scriptArgs: [inputName, ext, mode],
       stripTypes: worker.stripTypes,
       denyNet: true, // a parser never needs the network
       maxOldSpaceMb: 512, // bound a runaway / bomb allocation
@@ -163,6 +164,10 @@ export async function convertInSandbox(
         `sandboxed ${ext} conversion failed (exit ${res.exitCode}): ${res.stderr || res.stdout || 'no worker output'}`,
       );
       return { markdown: null };
+    }
+    if (mode === 'tables') {
+      const ndjson = await readFile(join(scratch, 'output.ndjson'), 'utf8').catch(() => null);
+      return { markdown: null, ndjson };
     }
     const md = await readFile(join(scratch, 'output.md'), 'utf8').catch(() => null);
     return { markdown: md };

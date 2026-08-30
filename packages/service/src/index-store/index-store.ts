@@ -824,9 +824,16 @@ export class IndexStore {
     minBytes: number,
     maxAttempts: number,
     limit: number,
+    /** Extensions exempt from the byte floor — binary formats with no
+     *  readable alternative, which qualify at any size. */
+    alwaysExts: readonly string[] = [],
   ): { path: string; hash: string; size: number }[] {
     if (exts.length === 0) return [];
     const extClause = exts.map(() => 'lower(f.path) LIKE ?').join(' OR ');
+    const alwaysClause =
+      alwaysExts.length > 0
+        ? alwaysExts.map(() => 'lower(f.path) LIKE ?').join(' OR ')
+        : '0 = 1';
     return this.db
       .prepare(
         `SELECT f.path AS path, f.hash AS hash, f.size AS size
@@ -834,7 +841,7 @@ export class IndexStore {
            LEFT JOIN tabular_state t ON t.content_hash = f.hash
           WHERE f.collection_id = ?
             AND f.hash IS NOT NULL
-            AND f.size >= ?
+            AND (f.size >= ? OR ${alwaysClause})
             AND (${extClause})
             AND (t.content_hash IS NULL
                  OR (t.state NOT IN ('ok', 'blocked') AND COALESCE(t.attempts, 0) < ?))
@@ -844,6 +851,7 @@ export class IndexStore {
       .all<{ path: string; hash: string; size: number }>(
         this.collectionId,
         minBytes,
+        ...alwaysExts.map((ext) => `%.${ext.toLowerCase()}`),
         ...exts.map((ext) => `%.${ext.toLowerCase()}`),
         maxAttempts,
         limit,

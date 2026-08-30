@@ -593,10 +593,15 @@ export async function buildLlamaCppProvider(opts: {
     ceiling: ceilingFor(kvCacheType, effectiveNumCtx),
     tierDefault: defaultLocalEngineSlots(budgetBytes),
   });
-  // The bundled llama.cpp line still has known multi-slot MTP allocation
-  // failures. Keep an explicitly selected MTP mode on one slot so its first
-  // decode is reliable; `spec.mtp` alone is capability metadata, not an
-  // auto-enable policy.
+  // The bundled llama.cpp line had known multi-slot MTP allocation failures,
+  // so an explicitly selected MTP mode is clamped to one slot.
+  //
+  // Deliberately NOT extended to the default-on path (engine-flags.ts): this
+  // runs BEFORE the GGUF is read, so `ggufHasMtp` is not yet known here.
+  // Measured on build 10621, `--parallel 2 --spec-type draft-mtp` served two
+  // concurrent requests correctly with zero engine errors, so the failure this
+  // clamp guards against looks stale — but one probe is not grounds for
+  // deleting a safety measure, so it stays for anyone who opted in explicitly.
   const selectedSpecType = config.llamaCppSpecType ?? manifestEngineConfig?.spec?.type;
   if (selectedSpecType === 'draft-mtp' && slots > 1) {
     log.info(
@@ -1126,9 +1131,13 @@ export async function buildLlamaCppProvider(opts: {
       // draft-mtp` on a model llama.cpp can't build an MTP context for is a
       // fatal launch error, and current model/backend pairs still need A/B
       // qualification before default-on.
-      if (ggufHasMtp && !manifestEngineConfig?.spec?.mtp && !manifestEngineConfig?.spec?.type) {
+      if (ggufHasMtp) {
         log.info(
-          `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'} ships an MTP head (nextn_predict_layers=${mtpLayerCount}); select MTP speculative decoding in Advanced llama.cpp settings to test it.`,
+          `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'} ships an MTP head (nextn_predict_layers=${mtpLayerCount}); speculative decoding ${
+            config.llamaCppSpecType || manifestEngineConfig?.spec?.type
+              ? 'follows the explicit setting'
+              : 'is ON by default (+4-19% decode; disable with llamaCppSpecType: "none")'
+          }.`,
         );
       }
     } catch (err) {

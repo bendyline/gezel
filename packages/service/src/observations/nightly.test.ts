@@ -370,3 +370,82 @@ describe.runIf(hasRealDuckdb())('retention', () => {
     expect(await listPartitions(artifacts, CORPUS, 'lookup')).toContain('dt=region-emea');
   });
 });
+
+/**
+ * The night shift is where files the interactive pass refused get converted.
+ * The ordering here is the whole point: a project whose only tabular content
+ * was deferred has no tables yet, so anything that checks for tables first
+ * would skip it as empty — every night, forever.
+ */
+describe('workspace tables at night', () => {
+  function withDrain(materialized: number, rows = 0) {
+    const calls: string[] = [];
+    const d = {
+      ...deps(),
+      drainWorkspaceTables: async (projectId: string) => {
+        calls.push(projectId);
+        return { materialized, rows, deferred: 0 };
+      },
+    };
+    return { d, calls };
+  }
+
+  it('converts deferred files for a project that has no tables yet', async () => {
+    // No seeding: this project's tables do not exist until the drain runs.
+    const { d, calls } = withDrain(2, 5_000);
+    const result = await runProjectObservationNightly(d, 'p1');
+
+    expect(calls).toEqual(['p1']);
+    expect(result.workspaceTables).toBe(2);
+    expect(result.workspaceRows).toBe(5_000);
+    // Reported as work done, not as an empty night.
+    expect(result.skipped).toBeUndefined();
+  });
+
+  it('still reports no-tables when the drain also found nothing', async () => {
+    const { d } = withDrain(0);
+    expect((await runProjectObservationNightly(d, 'p1')).skipped).toBe('no-tables');
+  });
+
+  it('runs the drain before deciding a window is already done', async () => {
+    await seed({ rows: 50, days: 1 });
+    const now = new Date('2026-08-10T02:00:00Z');
+    await runProjectObservationNightly(deps(now), 'p1');
+
+    // Second pass in the same window: maintenance stands down, but a file
+    // dropped in since must still convert.
+    const { d, calls } = withDrain(1, 12);
+    const second = await runProjectObservationNightly({ ...d, now: () => now }, 'p1');
+    expect(calls).toEqual(['p1']);
+    expect(second.workspaceTables).toBe(1);
+  });
+
+  it('does not run the drain for a project that opted out of ambient work', async () => {
+    const { calls } = withDrain(1);
+    const d = {
+      ...deps(),
+      store: makeStore({ ...PROJECT, status: 'readonly' }),
+      drainWorkspaceTables: async (projectId: string) => {
+        calls.push(projectId);
+        return { materialized: 1, rows: 1, deferred: 0 };
+      },
+    };
+    expect((await runProjectObservationNightly(d, 'p1')).skipped).toBe('inactive');
+    expect(calls).toEqual([]);
+  });
+
+  it('carries on with maintenance when the drain throws', async () => {
+    await seed({ rows: 50, days: 1 });
+    const d = {
+      ...deps(),
+      drainWorkspaceTables: async () => {
+        throw new Error('disk full');
+      },
+    };
+    // A failed conversion must not cost the compaction and rollups that were
+    // the night's other job.
+    const result = await runProjectObservationNightly(d, 'p1');
+    expect(result.skipped).toBeUndefined();
+    expect(result.workspaceTables).toBe(0);
+  });
+});

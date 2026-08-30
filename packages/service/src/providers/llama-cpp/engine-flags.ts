@@ -269,12 +269,20 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
   if (perModel?.chatTemplate) args.push('--chat-template', perModel.chatTemplate);
 
   // ── Speculative decoding (`--spec-type` + draft knobs) ────────────
-  // `spec.mtp` is capability metadata only. MTP stays explicit opt-in
-  // through config or a manifest `spec.type` until a model/backend pair has
-  // cleared deterministic-output and agent-path A/B gates. Even an explicit
-  // draft-mtp request is safety-gated by the installed GGUF metadata:
-  // llama-server exits fatally when the selected model has no MTP tensors.
-  const specType = config.llamaCppSpecType ?? perModel?.spec?.type;
+  // MTP is ON by default for a GGUF that carries the head, having cleared the
+  // A/B gate this comment used to wait for (reports/llama-mtp-eval-20260829.md):
+  // +12.7% / +4.1% / +15.6% / +19.3% decode at 5.5k / 21.7k / 54k / 87k
+  // context, never negative, byte-identical greedy output, +1.35 GB resident.
+  // The gain GROWS with context — long-context decode is bound by reading the
+  // KV cache, and verifying K drafted tokens costs one pass over it instead of
+  // K — which is the regime agent turns actually run in.
+  //
+  // `ggufHasMtp` is the load-bearing gate either way: llama-server exits
+  // FATALLY when draft-mtp is selected for a model with no MTP tensors, so
+  // the default may only ever apply where the metadata confirms the head.
+  // Explicit config and manifest `spec.type` still win, including 'none'.
+  const specType =
+    config.llamaCppSpecType ?? perModel?.spec?.type ?? (ggufHasMtp ? 'draft-mtp' : undefined);
   const safeSpecType = specType === 'draft-mtp' && !ggufHasMtp ? undefined : specType;
   if (safeSpecType && safeSpecType !== 'none') {
     args.push('--spec-type', safeSpecType);

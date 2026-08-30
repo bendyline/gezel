@@ -69,6 +69,16 @@ const ROLLUP_SOURCE_VIEW = 'gezel_rollup_source';
 export interface ObservationNightlyDeps {
   store: Store;
   duck: DuckRunner;
+  /**
+   * Converts tabular workspace files the interactive pass deferred for being
+   * too large. Optional so the nightly pass still runs where no index is
+   * wired — a connector-only project needs nothing from it.
+   */
+  drainWorkspaceTables?: (projectId: string) => Promise<{
+    materialized: number;
+    rows: number;
+    deferred: number;
+  } | null>;
   nightShiftWindow: () => NightShiftWindow;
   now?: () => Date;
   maxParts?: number;
@@ -81,6 +91,9 @@ export interface ObservationNightlyResult {
   compactedRows: number;
   rollupPartitions: number;
   prunedPartitions: number;
+  /** Workspace files converted this window, and the rows they yielded. */
+  workspaceTables: number;
+  workspaceRows: number;
   /** Work the per-night caps left behind, so truncation is never silent. */
   deferred: number;
   errors: string[];
@@ -94,6 +107,8 @@ function emptyResult(projectId: string): ObservationNightlyResult {
     compactedRows: 0,
     rollupPartitions: 0,
     prunedPartitions: 0,
+    workspaceTables: 0,
+    workspaceRows: 0,
     deferred: 0,
     errors: [],
   };
@@ -109,14 +124,18 @@ export async function runObservationNightly(
     out.push(await runProjectObservationNightly(deps, project.id));
   }
   const worked = out.filter(
-    (r) => r.compactedParts > 0 || r.rollupPartitions > 0 || r.prunedPartitions > 0,
+    (r) =>
+      r.compactedParts > 0 ||
+      r.rollupPartitions > 0 ||
+      r.prunedPartitions > 0 ||
+      r.workspaceTables > 0,
   );
   if (worked.length > 0) {
     log.info(
       `nightly maintenance: ${worked
         .map(
           (r) =>
-            `${r.projectId} (${r.compactedParts} part(s), ${r.rollupPartitions} rollup partition(s), ${r.prunedPartitions} pruned)`,
+            `${r.projectId} (${r.compactedParts} part(s), ${r.rollupPartitions} rollup partition(s), ${r.prunedPartitions} pruned, ${r.workspaceTables} file table(s))`,
         )
         .join(', ')}`,
     );
@@ -140,8 +159,30 @@ export async function runProjectObservationNightly(
   if (!projectAllowsAmbientWork(project)) return skip('inactive');
   if (!deps.duck.available()) return skip('engine-unavailable');
 
+  // BEFORE the no-tables check, deliberately. A project whose only tabular
+  // content is a deferred 2 GB CSV has no tables *yet* — checking first would
+  // skip it as empty and the file would never convert, on any night.
+  let workspaceTables = 0;
+  let workspaceRows = 0;
+  if (deps.drainWorkspaceTables) {
+    const drained = await deps.drainWorkspaceTables(projectId).catch((err) => {
+      log.warn(`workspace table drain failed for ${projectId}: ${String(err)}`);
+      return null;
+    });
+    if (drained) {
+      workspaceTables = drained.materialized;
+      workspaceRows = drained.rows;
+    }
+  }
+
   const tables = await listProjectTables(deps.store, project);
-  if (tables.length === 0) return skip('no-tables');
+  if (tables.length === 0) {
+    // Report what the drain did even when there is nothing further to
+    // maintain, so a night that converted files does not read as a no-op.
+    return workspaceTables > 0
+      ? { ...emptyResult(projectId), workspaceTables, workspaceRows }
+      : skip('no-tables');
+  }
 
   const windowKey = nightShiftDayKey(now, deps.nightShiftWindow());
   const pending = [] as ObservationTableRef[];
@@ -155,9 +196,15 @@ export async function runProjectObservationNightly(
     // the tables it did not reach instead of redoing the ones it did.
     if (state.lastNightlyWindow !== windowKey) pending.push(ref);
   }
-  if (pending.length === 0) return skip('already-run');
+  if (pending.length === 0) {
+    return workspaceTables > 0
+      ? { ...emptyResult(projectId), workspaceTables, workspaceRows }
+      : skip('already-run');
+  }
 
   const result = emptyResult(projectId);
+  result.workspaceTables = workspaceTables;
+  result.workspaceRows = workspaceRows;
   const storageDir = deps.store.projectArtifactsDir(projectId);
   let partBudget = deps.maxParts ?? MAX_PARTS_PER_NIGHT;
   let rollupBudget = deps.maxRollupPartitions ?? MAX_ROLLUP_PARTITIONS_PER_NIGHT;

@@ -470,6 +470,17 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
     `list_tables` / `describe_table` / `query_table`. See
     [docs/observation-corpora.md](docs/observation-corpora.md) and
     [ADR 0009](docs/decisions/0009-observation-corpora.md)
+  - `~/.gezel/projects/{id}/artifacts/tabular/` — **workspace tables**: Parquet
+    derived from spreadsheets and large data files in the project *workspace*,
+    laid out as `<parent>/<basename>_tables/tables/<table>/` and owned by
+    [observations/workspace-tables.ts](packages/service/src/observations/workspace-tables.ts)
+    + [workspace-xlsx.ts](packages/service/src/observations/workspace-xlsx.ts).
+    A **snapshot** of one file, not a stream: rebuilt wholesale when the source's
+    content hash moves, swept when it is deleted, so no sealing, partitioning,
+    rollups or retention apply. Write-denied unconditionally (unlike a connector
+    corpus, whose guard is gezel-only) because a hand edit would simply be
+    overwritten. Never text- or vector-indexed. Regenerable, safe to delete. See
+    [ADR 0011](docs/decisions/0011-workspace-tables.md)
   - `~/.gezel/projects/{id}/code-reviews.json` — durable code-review records (kickoff → task ref → settled outcome), owned by [git/reviews.ts](packages/service/src/git/reviews.ts)'s `CodeReviewManager`; the snapshot inputs and reports live in the project artifacts drawer under `reviews/<reviewId>/`
   - `~/.gezel/sandbox/` — sandboxed script runs, owned by [sandbox/runner.ts](packages/service/src/sandbox/runner.ts)
   - `~/.gezel/python/` — uv runtime, owned by [python/uv-runtime.ts](packages/service/src/python/uv-runtime.ts)
@@ -591,6 +602,8 @@ For automated coverage, [packages/cli/src/daemon-integration.test.ts](packages/c
 | A document isn't findable in search | Is the `shared` project indexing? `GET /api/projects/<sharedId>/index/status`. Check the path isn't filtered as an outside-in twin or sync junk ([fs/sync-junk.ts](packages/service/src/fs/sync-junk.ts)). For a keywordless query, the match may be falling under `VECTOR_ARM_MIN_SIMILARITY` ([index-store.ts](packages/service/src/index-store/index-store.ts)) — that floor is embedder-specific and does not survive a model swap unmeasured |
 | Search returns the same documents for every query | The vector arm lost its floor. KNN always returns its k nearest rows, and rank fusion scores a rank-0 vector hit at a flat 1.0, so an unfloored arm outranks genuine keyword matches with the whole corpus |
 | A `.gezel/` dir or `*.db` appeared in the documents folder | The home-side index placement was bypassed — `projectContentIndexDbFile(..., { forceHomeSide })` in [content-index.ts](packages/service/src/index-store/content-index.ts)'s `open` |
+| A spreadsheet or big CSV never became a table | Check `tabular_state` in the project index: `blocked` is terminal for that content hash (empty file, unreadable, unsafe path), `deferred` means it was too large for the interactive pass and the night shift has it. A CSV under `MAX_INDEXABLE_BYTES` is deliberately left alone — it is already chunked and readable |
+| A spreadsheet's numbers are wrong by 100x, or dates are text | Something read the markdown shadow instead of the typed path. `formattedNumberText` renders `0.15` as `"15.0%"`; the data path is squisq's `xlsxToTables` via `convertInSandbox(path, 'xlsx', 'tables')` |
 | A gezel says a data table is empty, or `query_table` errors | Is there a corpus? `GET /api/projects/<id>/connectors` shows `tables[]` per binding. The tools are registered only when `GEZEL_TABLES_ENABLED` is set, which the chat manager does after probing for `artifacts/data/*/tables/` — a project with no tabular corpus has no query tools at all, by design |
 | `query_table` refuses a query that looks read-only | The guard is DuckDB's own parser, not a keyword list, and it accepts only a single SELECT. `WITH … INSERT` and every `EXPLAIN` form are rejected on purpose — see [statement-guard.ts](packages/service/src/observations/statement-guard.ts) |
 | Rows synced but a query returns none | Compaction has not run and the view lost its NDJSON arm, or the partition filter is wrong. Views union Parquet *and* `sealed-*`/`open-*.ndjson`, so fresh rows should be visible immediately; check `tables/<t>/state.json` for `lastError` from a refused compaction |

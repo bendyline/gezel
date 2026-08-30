@@ -21,6 +21,8 @@ import { RailSection } from './home/RailSection.js';
  * fresh project shows an honest "still being studied" state instead.
  */
 
+type ProjectTable = Awaited<ReturnType<typeof api.toolListTables>>['tables'][number];
+
 interface DigestPreview {
   path: string;
   content: string;
@@ -47,11 +49,13 @@ export function ProjectOverviewView({
   const [indexStatus, setIndexStatus] = useState<WorkspaceIndexStatus | null>(null);
   const [recent, setRecent] = useState<HistoryEntry[]>([]);
   const [digest, setDigest] = useState<DigestPreview | null>(null);
+  const [tables, setTables] = useState<ProjectTable[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     setMap(null);
     setDigest(null);
+    setTables([]);
     api
       .toolMapRepo(projectId, {})
       .then((m) => {
@@ -71,6 +75,14 @@ export function ProjectOverviewView({
       .then((r) => {
         if (!cancelled) setRecent(r.entries);
       })
+      .catch(() => undefined);
+    api
+      .toolListTables(projectId)
+      .then((r) => {
+        if (!cancelled) setTables(r.tables);
+      })
+      // A project with no data tables is the common case, and the engine may
+      // not be installed at all — neither is worth surfacing here.
       .catch(() => undefined);
     api
       .listProjectArtifacts(projectId, 'reports', true)
@@ -253,6 +265,29 @@ export function ProjectOverviewView({
                   {(e.entryType === 'event' ? e.at : e.lastActivityAt).slice(0, 10)}
                 </span>{' '}
                 {e.entryType === 'event' ? e.summary : `Chat: ${e.title}`}
+              </li>
+            ))}
+          </ul>
+        </RailSection>
+      )}
+
+      {tables.length > 0 && (
+        <RailSection
+          label="Data tables"
+          hint={`${tables.length} table${tables.length === 1 ? '' : 's'}`}
+        >
+          {/* Spreadsheets and data files stored in a form gezels query rather
+              than read. Plain sentences, not a stat grid: what a reader wants
+              is confirmation the data arrived and is current. */}
+          <ul className="project-overview-tables">
+            {tables.map((t) => (
+              <li key={`${t.origin}:${t.table}`} className="small">
+                <strong>{t.table}</strong>{' '}
+                <span className="muted">
+                  {t.rows.toLocaleString()} {t.rows === 1 ? 'row' : 'rows'} · {t.columns} columns
+                  {t.origin === 'workspace' ? ` · from ${t.source}` : ` · ${t.source}`}
+                  {t.schemaInferred ? ' · schema inferred' : ''}
+                </span>
               </li>
             ))}
           </ul>

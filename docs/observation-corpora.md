@@ -43,6 +43,29 @@ a `MAX_ARTIFACT_FILES = 20_000` ceiling and this one does not.
 | Lifecycle | keep forever | retention + rollup tiering |
 | Prune | mirror types prune vanished records | never; append-only |
 
+## 0. Two sources, one shape
+
+Tables reach a project two ways, and the difference is worth holding onto
+because it decides how each is maintained:
+
+| | **Connector corpus** | **Workspace table** |
+|---|---|---|
+| Comes from | a synced external system | a file already in the project |
+| Lives at | `artifacts/data/<corpus>/tables/` | `artifacts/tabular/<file>_tables/tables/` |
+| Lifecycle | append-only **stream** | **snapshot** of one file |
+| Grows by | a cursor advancing | the file being edited |
+| Needs | sealing, compaction, rollups, retention | none of those |
+| Rebuilt when | never (rows are immutable) | the file's content hash moves |
+| Disappears when | the binding is unbound | the file is deleted |
+
+Both are read through the same `list_tables` / `describe_table` /
+`query_table`, and both use the same layout helpers, manifest schema and
+query path — `corpusDir` is an opaque artifact-relative string everywhere, so
+nothing below the discovery layer knows or cares which kind it is holding.
+
+The snapshot/stream distinction is recorded in
+[ADR 0011](./decisions/0011-workspace-tables.md).
+
 ## 1. Declaring the shape
 
 A connector type opts in through `normalize`:
@@ -101,6 +124,23 @@ artifacts/data/<corpusName>/
         │   └── open-000125.ndjson    this pass's landing buffer
         └── rollups/<name>/dt=…/part-000000.parquet
 ```
+
+A workspace table's layout is the same one level down:
+
+```
+artifacts/tabular/<parent>/<basename>_tables/     ← corpusDir
+└── tables/<table>/
+    ├── manifest.json
+    ├── state.json
+    └── part=all/part-000000.parquet
+```
+
+Companion directories keep the source's **full basename** (`sales.xlsx_tables`),
+so `X_tables` → `X` is a lossless reverse map for orphan collection and `a.csv`
+cannot collide with `a.xlsx` — the same reasoning as the shadow tree's `_files`
+convention. Reusing the inner `tables/` level is what makes the artifacts
+indexer skip the whole subtree for free, since it excludes that directory name
+at any depth.
 
 `tables/` is deliberately **not** underscore-prefixed. Inside a corpus the
 underscore marks the *mutable* surface, and `isProtectedConnectorCorpusPath`
@@ -264,6 +304,79 @@ None of these layers needs a network, a credential, or even the real engine:
   payloads inline as `const`s, and header hygiene asserted (no credential in a
   URL, a body, or across an origin change).
 
+## 11. Workspace files → tables
+
+### Which files, and why that line
+
+- **CSV/TSV: exactly when the indexer would otherwise mark it `trivial`** —
+  above `MAX_INDEXABLE_BYTES` or `isDenseBlob`. Below that line the file is
+  already chunked, searchable, and readable with `read_file`, and a table adds
+  noise; above it, the file is invisible to search *and* too big to read, which
+  is a dead end. Reusing the existing constant makes the rule principled rather
+  than a new magic number.
+- **XLSX: always.** A gezel cannot read the binary at any size, so the table is
+  the only access it will ever have.
+- Nothing `discoverWorkspaceFiles` already excludes (`.gitignore`), nothing
+  whose path cannot be safely slugged, and never more than
+  `MAX_TABLES_PER_PROJECT`.
+
+### Two very different ingest paths
+
+**CSV needs no intermediate.** `read_csv` is built into the pinned engine and
+works under the full lockdown, and `sniff_csv` returns typed columns, delimiter
+and header detection — so a CSV becomes Parquet in one `COPY`, with a schema
+the engine derived rather than one we guessed.
+
+**XLSX cannot go through DuckDB at all.** `read_xlsx` lives in the `excel`
+extension, which is not installed and cannot be autoloaded or fetched once the
+prelude closes network access; under lockdown it fails with
+`Catalog Error: … it exists in the excel extension`. So a workbook takes the
+sandboxed squisq route instead, via `convertInSandbox(path, 'xlsx', 'tables')`
+— the same isolated worker that produces the markdown shadow, in a second mode
+that emits typed rows as NDJSON.
+
+**Markdown is not the data path**, and it is worth being explicit about why:
+squisq's `formattedNumberText` renders a percent-formatted `0.15` as `"15.0%"`,
+a date serial as text, and a zero-padded `7` as `"007"`. Those are renderings
+for people. squisq knows each cell's underlying value, so the data path reads
+`XlsxCell.value` through `xlsxToTables`; markdown stays the FTS path.
+
+A sheet is not a table — it is several data islands with captions, notes and
+totals in the gaps — so one workbook yields **one table per island**, named
+from the island's caption, or its sheet and anchor. `role=formulas` and
+`role=loose` regions are excluded: useful to a reader, meaningless to a query.
+
+### When it runs
+
+1. **Mark** — the static index pass enrols the file and hashes it, recording a
+   row in the `tabular_state` gate table (content-hash keyed, its own table:
+   sharing `shadow_state` or the `doc:convert` key would let one pass's success
+   permanently suppress the other's work, and an `.xlsx` wants both).
+2. **Drain** — a post-pass in `ContentIndex.refresh`, back on the service side
+   where `DuckRunner` lives, converts what changed. Bounded per pass; anything
+   over `INLINE_MATERIALIZE_MAX_BYTES` is recorded `deferred`.
+3. **Night** — `drainWorkspaceTablesAtNight` runs the same drain with the size
+   ceiling and per-run cap lifted, because nobody is waiting.
+
+The night pass runs **before** the nightly maintenance decides a project has no
+tables. A project whose only tabular content is a deferred 2 GB CSV has no
+tables *yet*; checking first would skip it as empty, on every night, forever.
+
+### Discoverability
+
+A large CSV is invisible to keyword search — the indexer marks it `trivial`, so
+it has no chunks. The drain therefore writes a thin **table card** into the
+shadow tree: source path, row count, column names, and a pointer to
+`describe_table`. Names and shape only, never rows: rows in the text or vector
+index are precisely the poisoning §10 forbids.
+
+### Opt-out
+
+`workspaceTablesEnabled` (default on, like `nightlyFixesEnabled`), checked
+alongside the project-wide `indexingEnabled`. A project whose settings cannot
+be read is **skipped**, not assumed permissive — deriving tables spends CPU and
+disk, and the drain is idempotent, so the next pass retries.
+
 ## 10. What must never happen
 
 - **Rows must never reach the model in bulk.** The entire scaling argument is
@@ -274,3 +387,8 @@ None of these layers needs a network, a credential, or even the real engine:
 - **Retention must never run before rollups.**
 - **The statement guard must never be relaxed** on the theory that the config
   lockdown covers writes. It does not; see §5.
+- **A workspace table must never be treated as a stream.** It is a snapshot:
+  appending to one, or partitioning it by time, would leave the corpus
+  disagreeing with the file it was built from.
+- **A spreadsheet's numbers must never come from its markdown rendering.**
+  See §11.

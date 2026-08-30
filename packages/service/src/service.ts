@@ -2145,6 +2145,9 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     await runObservationNightly({
       store,
       duck,
+      // Picks up tabular workspace files the interactive index pass deferred
+      // for being too large to convert while a user was waiting.
+      drainWorkspaceTables: (projectId) => contentIndex.drainWorkspaceTablesAtNight(projectId),
       nightShiftWindow: () => nightShift.currentWindow(),
     }).catch((err) => log.warn(`[observations] nightly maintenance failed: ${String(err)}`));
   });
