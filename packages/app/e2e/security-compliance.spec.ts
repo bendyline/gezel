@@ -16,13 +16,14 @@ import { type ElectronApplication, type Page, expect, test } from '@playwright/t
 import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { captureScreenshot } from './helpers/screenshot.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const screenshotDir = join(_dirname, '..', 'screenshots');
 const appRoot = join(_dirname, '..');
 
 async function shot(page: Page, name: string): Promise<void> {
-  await page.screenshot({ path: join(screenshotDir, name), fullPage: true });
+  await captureScreenshot(page, { path: join(screenshotDir, name), fullPage: true });
 }
 
 test.describe('Security & Compliance — first run', () => {
