@@ -74,6 +74,21 @@ describe('classifyMlxStartupLine', () => {
     expect(ev?.phase).toBe('prefill');
     expect(ev?.progress).toBe(0);
     expect(ev?.detail).toBe('0 / 31,896 tokens');
+    // Untagged means engine-wide: the provider broadcasts it, as before.
+    expect(ev?.cacheId).toBeUndefined();
+  });
+
+  it('carries the owning cache id from a tagged liveness marker', () => {
+    // One engine, one stdout. Without the owner the provider fans this at
+    // every in-flight session, so a session streaming its reply draws this
+    // bar — at this total — on its own row.
+    const ev = classifyMlxStartupLine(
+      '[mlx] Prefill:  46%|          | 28672/62915 [batched] cache=3ffa34f7-f95f-4f53-af8d-72bcb5b87347',
+    );
+    expect(ev?.phase).toBe('prefill');
+    expect(ev?.progress).toBeCloseTo(0.46, 5);
+    expect(ev?.detail).toBe('28,672 / 62,915 tokens');
+    expect(ev?.cacheId).toBe('3ffa34f7-f95f-4f53-af8d-72bcb5b87347');
   });
 });
 

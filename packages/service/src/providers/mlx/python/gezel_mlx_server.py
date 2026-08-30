@@ -1524,6 +1524,12 @@ class BatchEngine:
         # alive + prefilling N tokens, and the UI pill shows it.
         self._prefill_total = 0      # new tokens the active wave is prefilling
         self._prefill_done = {}      # uid → tokens prefilled so far (this wave)
+        # uid → (cache_id, that sub's own prefill total). The engine has ONE
+        # stdout, so an untagged `Prefill:` line is broadcast by the supervisor
+        # to every in-flight session — a session streaming its reply would draw
+        # a neighbour's prefill bar on its own row, at that neighbour's token
+        # count. This map is what makes each marker addressable.
+        self._prefill_meta = {}
         self._last_prefill_emit = 0.0
         self._memory_check_steps = 0
         print(
@@ -1670,7 +1676,13 @@ class BatchEngine:
         Progress is real: the worker consumes `BatchGenerator.next()` per
         internal step, so each prompt chunk reports its (processed, total)
         and the marker carries an actual percentage instead of a constant
-        0%."""
+        0%.
+
+        Each marker names the sub it belongs to (`cache=<cache_id>`), and
+        carries THAT sub's own done/total rather than the wave aggregate —
+        see `_prefill_meta`. An untagged marker still parses, and the
+        supervisor still broadcasts it, so an engine without the tag degrades
+        to the old behaviour rather than going dark."""
         total = self._prefill_total
         if total < _PREFILL_LIVENESS_MIN_TOKENS:
             return
@@ -1678,11 +1690,24 @@ class BatchEngine:
         if now - self._last_prefill_emit < _PREFILL_LIVENESS_INTERVAL_S:
             return
         self._last_prefill_emit = now
-        done = min(total, sum(self._prefill_done.values()))
-        pct = min(99, (100 * done) // total) if total > 0 else 0
         # Format MUST match stdout-parser's Prefill regex:
-        #   Prefill:  42%|   | 8192/<total> [batched]
-        print(f"Prefill: {pct:3d}%|          | {done}/{total} [batched]", flush=True)
+        #   Prefill:  42%|   | 8192/<total> [batched] cache=<id>
+        if not self._prefill_meta:
+            done = min(total, sum(self._prefill_done.values()))
+            pct = min(99, (100 * done) // total) if total > 0 else 0
+            print(f"Prefill: {pct:3d}%|          | {done}/{total} [batched]", flush=True)
+            return
+        for key, (cache_id, sub_total) in self._prefill_meta.items():
+            sub_total = max(0, int(sub_total or 0))
+            if sub_total <= 0:
+                continue
+            done = min(sub_total, int(self._prefill_done.get(key, 0)))
+            pct = min(99, (100 * done) // sub_total)
+            tag = f" cache={cache_id}" if cache_id else ""
+            print(
+                f"Prefill: {pct:3d}%|          | {done}/{sub_total} [batched]{tag}",
+                flush=True,
+            )
 
     def _admit_count(self, pending: int) -> int:
         """How many of the `pending` co-arrived subs to start THIS wave.
@@ -1803,6 +1828,13 @@ class BatchEngine:
                     max(0, int(getattr(s, "prefill_total", 0))) for s in batch
                 )
                 self._prefill_done = {}
+                self._prefill_meta = {
+                    uid: (
+                        getattr(s.request, "cache_id", None),
+                        max(0, int(getattr(s, "prefill_total", 0))),
+                    )
+                    for uid, s in self._subs.items()
+                }
                 self._last_prefill_emit = 0.0
 
             # One engine step across all active sequences. `next()` (not
@@ -1861,6 +1893,7 @@ class BatchEngine:
                     # watchdog's tighter streaming-idle bound).
                     self._prefill_total = 0
                     self._prefill_done = {}
+                    self._prefill_meta = {}
                 for r in responses:
                     sub = self._subs.get(r.uid)
                     if sub is None:
@@ -1949,6 +1982,12 @@ class BatchEngine:
 
             self._prefill_total = max(0, int(sub.prefill_total or 0))
             self._prefill_done = {}
+            self._prefill_meta = {
+                0: (
+                    getattr(sub.request, "cache_id", None),
+                    max(0, int(sub.prefill_total or 0)),
+                )
+            }
             self._last_prefill_emit = 0.0
 
             final_out = None
@@ -1972,6 +2011,7 @@ class BatchEngine:
 
             self._prefill_total = 0
             self._prefill_done = {}
+            self._prefill_meta = {}
 
             # Assisted mode: positioned target sampling (temperature/top_p/
             # top_k, per-(seed,position) keys) and/or the processed walk.

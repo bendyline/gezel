@@ -704,12 +704,23 @@ export class MlxProvider implements LLMProvider {
     if (
       this.lastStartupPhase &&
       this.lastStartupPhase.phase === phase.phase &&
-      this.lastStartupPhase.detail === phase.detail
+      this.lastStartupPhase.detail === phase.detail &&
+      // Two subs prefilling in lockstep can render identical detail; without
+      // the owner in the key the second one's marker is dropped as a repeat
+      // and that session's bar stalls at whatever it last saw.
+      this.lastStartupPhase.cacheId === phase.cacheId
     ) {
       return;
     }
     this.lastStartupPhase = phase.phase === 'ready' ? null : phase;
-    for (const s of this.activeSessions) s.publishEnginePhase(phase);
+    // A tagged phase belongs to exactly one session; anything untagged is an
+    // engine-wide signal every session should see. Without this, a session
+    // streaming its reply picks up a neighbour's prefill bar — at the
+    // neighbour's token total — because one engine has one stdout.
+    for (const s of this.activeSessions) {
+      if (phase.cacheId && !s.ownsCacheId(phase.cacheId)) continue;
+      s.publishEnginePhase(phase);
+    }
     if (phase.phase === 'ready') this.scheduleEngineStatsSample();
   }
 
@@ -993,6 +1004,13 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
    */
   private lastPrefillEvent: { progress: number; detail: string; at: number } | null = null;
 
+  /**
+   * The `cache_id` this session sends to the engine. Set on every send, and
+   * the key the provider routes per-sub engine phases by — see
+   * {@link MlxSession.ownsCacheId}.
+   */
+  private currentCacheId: string | null = null;
+
   private readonly externalToolNames: Set<string>;
   private capturedCalls: ExternalToolCall[] = [];
 
@@ -1170,6 +1188,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
 
   getLastTurnAttemptedToolCalls(): Array<{ body: string; reason?: string }> | undefined {
     return this.lastTurnAttemptedToolCalls.length > 0 ? this.lastTurnAttemptedToolCalls : undefined;
+  }
+
+  /**
+   * Whether a phase tagged with this engine cache id belongs to this session.
+   * The id is the one sent as `cache_id` on every request, so it is exactly
+   * what the sidecar stamps onto its per-sub prefill markers.
+   */
+  ownsCacheId(cacheId: string): boolean {
+    return this.currentCacheId === cacheId;
   }
 
   publishEnginePhase(ev: EnginePhaseEvent): void {
@@ -1708,6 +1735,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         const adapter = this.deps.provider.getCacheAdapter();
         const durableCacheId = opts?.queue?.sessionId;
         const cacheId = durableCacheId ?? this.fallbackCacheId;
+        // The sidecar stamps per-sub prefill markers with the request's
+        // `cache_id`, so this is the key the provider routes them by. With no
+        // adapter the id never reaches the engine and its markers arrive
+        // untagged — which the fanout treats as engine-wide and broadcasts,
+        // exactly as before.
+        this.currentCacheId = cacheId;
         if (adapter) {
           if (!durableCacheId) this.fallbackCacheUsed = true;
           await adapter.prepareForSend(

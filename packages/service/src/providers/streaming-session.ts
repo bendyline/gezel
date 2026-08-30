@@ -23,6 +23,18 @@ export interface EnginePhaseEvent {
   outputTokens?: number;
   /** Exact engine-measured decode rate right now, tokens/sec. */
   tokensPerSec?: number;
+  /**
+   * Which session this event belongs to, as the engine's own cache id.
+   *
+   * A supervised engine has one stdout shared by every session running on it,
+   * so a phase parsed from a log line is broadcast to all of them by default.
+   * That is right for whole-engine phases (`starting`, `loading_model`) and
+   * wrong for per-request progress: a session streaming its reply would paint
+   * a neighbour's prefill bar, at the neighbour's token count, on its own row.
+   * When set, the provider delivers the event only to the owning session.
+   * Absent means "engine-wide" and keeps the broadcast.
+   */
+  cacheId?: string;
 }
 
 /**
