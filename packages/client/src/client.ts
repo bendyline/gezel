@@ -1230,6 +1230,8 @@ export interface ConfigResponse {
    * speaking gezel's per-character voice. Opt-in; default `false`.
    */
   narrateAssistantReplies?: boolean;
+  /** Catalog id of the whisper.cpp model transcription runs on. */
+  defaultSttModel?: string;
   /**
    * Global AI engagement mode — panic-button control over proactive
    * behavior. Materialized on GET so the Settings UI can bind directly.
@@ -1443,8 +1445,9 @@ export interface ConfigResponse {
   };
   /** Active image-generation provider; undefined → 'sd-cpp'. */
   imageProvider?: 'sd-cpp' | 'google-ai' | 'openai' | 'mock';
-  /** Per-cloud-provider default image model id. */
+  /** Per-provider default image model id. `'sd-cpp'` names a locally installed model. */
   defaultImageModel?: {
+    'sd-cpp'?: string;
     'google-ai'?: string;
     openai?: string;
   };

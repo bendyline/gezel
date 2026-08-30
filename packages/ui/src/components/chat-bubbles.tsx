@@ -412,6 +412,26 @@ export interface MessageBubbleProps {
    * time cue.
    */
   timestampLabel?: string;
+  /**
+   * The persisted message's `synthetic` marker. Only `'turn-aborted'`
+   * changes rendering: a killed turn's salvage record carries whatever
+   * the model streamed before the kill, so an abort that never reached
+   * visible text is otherwise shaped exactly like a model that had
+   * nothing to say. Without this the empty-body placeholder guesses
+   * from `reasoning`/`toolCalls` and reports a four-hour timeout as
+   * "produced reasoning but no visible reply".
+   */
+  synthetic?: import('@bendyline/gezel').ChatMessage['synthetic'];
+  /**
+   * Warnings persisted on the message — on a `turn-aborted` record the
+   * first entry is the abort reason itself (`[llama-cpp] timed out
+   * after 14400s`), and provider degradation / context-pressure notices
+   * arrive here too. `StreamingBubble` renders these live; without the
+   * same banner on the persisted bubble they disappear the moment it
+   * replaces the streaming one, leaving the reason readable only in a
+   * session-debug bundle.
+   */
+  warnings?: WarningValue[];
 }
 
 /**
@@ -551,6 +571,8 @@ export function MessageBubble({
   recoveredInNextTurn,
   suppressHeader,
   timestampLabel,
+  synthetic,
+  warnings,
 }: MessageBubbleProps) {
   // When the assistant reply referenced real files, pre-process the
   // markdown so code spans matching those filenames become clickable
@@ -855,6 +877,13 @@ export function MessageBubble({
         // model was actually doing work:
         //   1. `recoveredInNextTurn` — continuation loop produced the
         //      follow-up; quiet stub.
+        //   1b. `synthetic: 'turn-aborted'` — the turn was killed (turn
+        //      timeout, guard abort, cancelled request) and this is its
+        //      salvage record. Ranked above the signal-sniffing branches
+        //      below because every one of them describes what the model
+        //      was DOING, and none can say that it was stopped; the
+        //      reason itself rides in `warnings`, banner-rendered under
+        //      the body.
         //   2. `attemptedToolCalls` — model tried to call a tool but
         //      the salvage layer dropped it; surface what they tried
         //      to do so the user sees intent, not "nothing happened."
@@ -868,13 +897,17 @@ export function MessageBubble({
           <em>
             {recoveredInNextTurn
               ? '(continued in the next turn)'
-              : attemptedToolCalls && attemptedToolCalls.length > 0
-                ? buildAttemptedCallSummary(attemptedToolCalls)
-                : reasoning && reasoning.trim().length > 0
-                  ? '(model produced reasoning but no visible reply — see Thinking above)'
-                  : toolCalls && toolCalls.length > 0
-                    ? `No written response — ${toolCalls.length} tool${toolCalls.length === 1 ? '' : 's'} ran but the model didn't produce a summary. Ask again or prompt for a recap.`
-                    : 'No response — the model finished its turn without producing any text. This is usually a small local model timing out mid-thought; try resending, a larger model, or a shorter prompt.'}
+              : synthetic === 'turn-aborted'
+                ? warnings && warnings.length > 0
+                  ? '(this turn was stopped before the model wrote a reply — see the notice below)'
+                  : '(this turn was stopped before the model wrote a reply)'
+                : attemptedToolCalls && attemptedToolCalls.length > 0
+                  ? buildAttemptedCallSummary(attemptedToolCalls)
+                  : reasoning && reasoning.trim().length > 0
+                    ? '(model produced reasoning but no visible reply — see Thinking above)'
+                    : toolCalls && toolCalls.length > 0
+                      ? `No written response — ${toolCalls.length} tool${toolCalls.length === 1 ? '' : 's'} ran but the model didn't produce a summary. Ask again or prompt for a recap.`
+                      : 'No response — the model finished its turn without producing any text. This is usually a small local model timing out mid-thought; try resending, a larger model, or a shorter prompt.'}
           </em>
         </div>
       ) : (
@@ -898,6 +931,13 @@ export function MessageBubble({
             ),
           )}
         </div>
+      )}
+      {!isUser && warnings && warnings.length > 0 && (
+        // The persisted twin of `StreamingBubble`'s banner. The live
+        // bubble showed these while the turn ran; re-rendering them here
+        // is what keeps an abort reason readable after the turn settles
+        // or the app reloads, instead of only inside a debug bundle.
+        <WarningBanner warnings={warnings} />
       )}
       {!isUser && question && (
         <PendingQuestionCard question={question} onAnswered={onQuestionAnswered} />

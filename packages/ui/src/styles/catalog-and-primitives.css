@@ -204,6 +204,22 @@
   letter-spacing: 0.04em;
 }
 
+/* Active-model radio in an installed-models table. The column holds nothing
+   but the control, so it takes only the width it needs; the nudge down lines
+   the dot up with the first line of the model id beside it, which is
+   top-aligned like every other cell. */
+.ollama-model-table .gz-active-model-radio {
+  margin: 0.2rem 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.ollama-model-table th.gz-active-model-column,
+.ollama-model-table td.gz-active-model-column {
+  width: 1%;
+  white-space: nowrap;
+}
+
 /* Installed-model rows use two deliberate lines instead of wrapping based on
    incidental space. The model id stays intact on line one; any status marks
    occupy line two. */

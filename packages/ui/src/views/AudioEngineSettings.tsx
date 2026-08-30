@@ -20,6 +20,7 @@ export function AudioEngineSettings() {
   const [previewState, setPreviewState] = useState<
     { kind: 'idle' } | { kind: 'synthesizing' } | { kind: 'error'; msg: string }
   >({ kind: 'idle' });
+  const [defaultSttModel, setDefaultSttModel] = useState<string | undefined>(undefined);
   const [narrate, setNarrate] = useState<boolean>(false);
   const [narrateSaving, setNarrateSaving] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -34,6 +35,7 @@ export function AudioEngineSettings() {
       setStatus(s);
       setVoices(v.voices);
       setNarrate(cfg.narrateAssistantReplies ?? false);
+      setDefaultSttModel(cfg.defaultSttModel);
       setStatusError(null);
     } catch (err) {
       setStatus(null);
@@ -59,6 +61,20 @@ export function AudioEngineSettings() {
       setStatusError((err as Error).message);
     } finally {
       setNarrateSaving(false);
+    }
+  }, []);
+
+  const onSetActiveSttModel = useCallback(async (id: string) => {
+    // Optimistic so the radio moves under the click; the engine restart the
+    // save triggers takes long enough that waiting on it reads as a dead
+    // control.
+    setDefaultSttModel(id);
+    try {
+      const res = await api.updateConfig({ defaultSttModel: id });
+      setDefaultSttModel(res.defaultSttModel);
+    } catch (err) {
+      setDefaultSttModel(undefined);
+      setStatusError((err as Error).message);
     }
   }, []);
 
@@ -105,6 +121,8 @@ export function AudioEngineSettings() {
         <EngineGuidance engine={status?.stt} />
         <AudioModelManager
           kind="stt"
+          {...(defaultSttModel ? { configuredDefaultModelId: defaultSttModel } : {})}
+          onSetActiveModel={onSetActiveSttModel}
           {...(engineDisabled(status?.stt)
             ? {
                 disabledReason:

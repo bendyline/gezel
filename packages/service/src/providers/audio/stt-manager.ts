@@ -5,6 +5,7 @@
  */
 
 import { createLogger } from '@bendyline/gezel';
+import type { Store } from '../../fs/store.js';
 import type { RemotesRegistry } from '../../remotes/registry.js';
 import { type RemoteTarget, resolveRemoteTarget } from '../remote/resolve.js';
 import { ProviderRetirementGate, trackProviderOperations } from '../retirement-gate.js';
@@ -17,11 +18,18 @@ const log = createLogger('audio');
 export interface SpeechToTextManagerOptions {
   home: string;
   env?: NodeJS.ProcessEnv;
+  /**
+   * Read on every build so the engine launches with the user's configured
+   * `defaultSttModel`. Optional: tests and the machine-engine broker build a
+   * manager with no store and get the first-installed fallback.
+   */
+  store?: Store;
 }
 
 export class SpeechToTextProviderManager {
   private readonly home: string;
   private readonly env: NodeJS.ProcessEnv | undefined;
+  private readonly store: Store | undefined;
 
   private current_: SpeechToTextProvider | null = null;
   private currentView_: SpeechToTextProvider | null = null;
@@ -39,6 +47,7 @@ export class SpeechToTextProviderManager {
   constructor(opts: SpeechToTextManagerOptions) {
     this.home = opts.home;
     this.env = opts.env;
+    this.store = opts.store;
   }
 
   setRemotes(remotes: RemotesRegistry): void {
@@ -85,9 +94,13 @@ export class SpeechToTextProviderManager {
     if (this.current_) return this.currentView_ ?? this.current_;
     if (this.buildPromise) return this.buildPromise;
     this.buildPromise = (async () => {
+      const defaultModelId = this.store
+        ? (await this.store.readConfig()).defaultSttModel
+        : undefined;
       const provider = await createSpeechToTextProvider({
         home: this.home,
         ...(this.env ? { env: this.env } : {}),
+        ...(defaultModelId ? { defaultModelId } : {}),
       });
       this.current_ = provider;
       this.currentView_ = trackProviderOperations(provider, this.activity, new Set(['transcribe']));

@@ -164,6 +164,24 @@ describe('operational API surface', () => {
     }
   });
 
+  it('round-trips the per-engine default media models through PUT and GET', async () => {
+    // Same whitelist bug class as the Codex case above: the video panel's
+    // active-model radio and confirmation tray were saved to config.json but
+    // never echoed, so both snapped back to their defaults on the next read.
+    const overrides = {
+      defaultImageModel: { 'sd-cpp': 'krea-2-turbo-q4' },
+      defaultVideoModel: 'ltx-2.3-22b-fp8',
+      videoGenerationConfirmation: 'always-allow',
+      defaultSttModel: 'whisper-small.en',
+    };
+    const update = await api('PUT', '/api/config', overrides);
+    expect(update.status).toBe(200);
+    expect((await update.json()) as Record<string, unknown>).toMatchObject(overrides);
+
+    const read = await api('GET', '/api/config');
+    expect((await read.json()) as Record<string, unknown>).toMatchObject(overrides);
+  });
+
   it('round-trips llama-cpp Advanced overrides through PUT and GET, and clears on null', async () => {
     // Regression: the GET/PUT config responses hand-pick a whitelist of
     // fields. These llama-cpp Advanced knobs were written to disk but

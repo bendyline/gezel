@@ -3361,6 +3361,7 @@ export function ChatTimelineView({
         {...(opts?.timestampLabel ? { timestampLabel: opts.timestampLabel } : {})}
         {...(m.intents && m.intents.length > 0 ? { intents: m.intents } : {})}
         {...(m.warnings && m.warnings.length > 0 ? { warnings: m.warnings } : {})}
+        {...(m.synthetic ? { synthetic: m.synthetic } : {})}
         {...(m.pendingQuestionId && questionsById.get(m.pendingQuestionId)
           ? {
               question: questionsById.get(m.pendingQuestionId)!,

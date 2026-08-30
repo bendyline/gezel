@@ -89,6 +89,10 @@ export async function createImageProvider(
     return new MockImageProvider();
   }
 
+  // The user's pick in Settings -> Image generation. Only meaningful for the
+  // local engine; the cloud branches carry their own per-provider default.
+  const defaultLocalModelId = opts.config?.defaultImageModel?.['sd-cpp'];
+
   const choice = opts.localOnly ? undefined : opts.config?.imageProvider;
   if (choice === 'google-ai') {
     const apiKey = opts.secrets
@@ -115,6 +119,7 @@ export async function createImageProvider(
       modelsRoot,
       storageRoots,
       fetchImpl: patientFetch(),
+      ...(defaultLocalModelId ? { defaultModelId: defaultLocalModelId } : {}),
     });
   }
 
@@ -147,13 +152,14 @@ export async function createImageProvider(
       resolveLaunch: async () => {
         const port = cachedPort ?? (await pickFreePort());
         cachedPort = port;
-        // Prefer the model the provider asked for; fall back to the
-        // first installed (e.g. a generate with no explicit model, or
-        // the requested one having been deleted).
+        // Prefer the model the provider asked for, then the user's
+        // configured default, then the first installed — covering a
+        // generate with no explicit model, and a requested (or
+        // configured) model having since been deleted.
+        const requestedId = launchState.modelId ?? defaultLocalModelId;
         const model =
-          (launchState.modelId
-            ? await findInstalledModel(storageRoots, launchState.modelId)
-            : undefined) ?? (await findFirstInstalledModel(storageRoots));
+          (requestedId ? await findInstalledModel(storageRoots, requestedId) : undefined) ??
+          (await findFirstInstalledModel(storageRoots));
         if (!model) {
           throw new Error(
             'No image model is available locally. Download one from Settings → Image generation before generating.',
@@ -175,6 +181,7 @@ export async function createImageProvider(
       supervisor,
       launchState,
       fetchImpl: patientFetch(),
+      ...(defaultLocalModelId ? { defaultModelId: defaultLocalModelId } : {}),
       ...(opts.arbiter ? { arbiter: opts.arbiter } : {}),
     });
   }
@@ -183,6 +190,7 @@ export async function createImageProvider(
     baseUrl: 'http://127.0.0.1:9081',
     modelsRoot,
     storageRoots,
+    ...(defaultLocalModelId ? { defaultModelId: defaultLocalModelId } : {}),
     // Branch 4: nothing was wired up. Flag the provider so `health()`
     // can return `not-configured` (distinct UI guidance) rather than
     // making the user wait for a generic "unreachable" probe to fail.

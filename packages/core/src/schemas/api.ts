@@ -880,6 +880,13 @@ export const GezelConfigSchema = z.object({
    * with audio output the first time they open a chat.
    */
   narrateAssistantReplies: z.boolean().optional(),
+  /**
+   * Catalog id of the whisper.cpp model transcription runs on. whisper-server
+   * binds one model per process, so this is the model the engine launches
+   * with. Unset (or naming a model that is no longer installed) falls back to
+   * the first installed model by id.
+   */
+  defaultSttModel: z.string().optional(),
   githubToken: z.string().optional(),
   /** Non-secret companion to `githubToken`. See {@link GitHubAuthMetaSchema}. */
   githubAuth: GitHubAuthMetaSchema.optional(),
@@ -912,11 +919,14 @@ export const GezelConfigSchema = z.object({
    */
   imageProvider: z.enum(['sd-cpp', 'google-ai', 'openai', 'mock']).optional(),
   /**
-   * Default model id per cloud image provider. sd-cpp's default comes
-   * from the on-disk install layout, not config, so it isn't here.
+   * Default model id per image provider. `'sd-cpp'` names one of the
+   * locally installed models; when unset (or naming a model that is no
+   * longer installed) the engine falls back to the first installed model
+   * by id, which is what every install used before this setting existed.
    */
   defaultImageModel: z
     .object({
+      'sd-cpp': z.string().optional(),
       'google-ai': z.string().optional(),
       openai: z.string().optional(),
     })

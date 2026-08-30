@@ -68,9 +68,22 @@ interface Props {
   disabledReason?: string;
   /** Fired after an install / delete so the parent can refresh status pills. */
   onModelsChanged?: () => void;
+  /**
+   * The `config.defaultImageModel['sd-cpp']` value. Drives which installed
+   * row is marked active. When {@link onSetActiveModel} is also supplied the
+   * Local models table grows a leading radio column for picking it.
+   */
+  configuredDefaultModelId?: string;
+  /** Persist a new default image model. Enables the active-model radios. */
+  onSetActiveModel?: (id: string) => void | Promise<void>;
 }
 
-export function ImageModelManager({ disabledReason, onModelsChanged }: Props) {
+export function ImageModelManager({
+  disabledReason,
+  onModelsChanged,
+  configuredDefaultModelId,
+  onSetActiveModel,
+}: Props) {
   const [installed, setInstalled] = useState<InstalledImageModel[]>([]);
   const [installedError, setInstalledError] = useState<string | null>(null);
   const [pulls, setPulls] = useState<Map<string, ActivePull>>(new Map());
@@ -268,6 +281,16 @@ export function ImageModelManager({ disabledReason, onModelsChanged }: Props) {
 
   const installedIds = useMemo(() => new Set(installed.map((m) => m.id)), [installed]);
 
+  // The model sd-server actually binds: the configured default when it's
+  // still installed, else the first installed model (the engine's own
+  // fallback). The highlighted radio mirrors what a
+  // generation would really load.
+  const showActivePicker = Boolean(onSetActiveModel) && installed.length > 0;
+  const activeModelId =
+    configuredDefaultModelId && installedIds.has(configuredDefaultModelId)
+      ? configuredDefaultModelId
+      : installed[0]?.id;
+
   return (
     <div className="ollama-model-manager">
       {pulls.size > 0 && (
@@ -292,10 +315,22 @@ export function ImageModelManager({ disabledReason, onModelsChanged }: Props) {
         <div className="ollama-section">
           <h4>Local models</h4>
           {installedError && <p className="error">{installedError}</p>}
+          {showActivePicker && installed.length > 1 && (
+            <p className="muted small">
+              The <strong>active</strong> model is what the image-generator gezel and the{' '}
+              <code>render_image</code> tool use by default. A gezel can still ask for a specific
+              model per image; switching reloads the engine, which takes a moment.
+            </p>
+          )}
           {installed.length > 0 && (
             <table className="ollama-model-table">
               <thead>
                 <tr>
+                  {showActivePicker && (
+                    <th scope="col" className="gz-active-model-column">
+                      Active
+                    </th>
+                  )}
                   <th>Name</th>
                   <th>Size</th>
                   <th>Added</th>
@@ -305,6 +340,22 @@ export function ImageModelManager({ disabledReason, onModelsChanged }: Props) {
               <tbody>
                 {installed.map((m) => (
                   <tr key={m.id}>
+                    {showActivePicker && (
+                      <td className="gz-active-model-column">
+                        <input
+                          type="radio"
+                          name="active-image-model"
+                          className="gz-active-model-radio"
+                          aria-label={`Use ${m.id} as the active image model`}
+                          checked={activeModelId === m.id}
+                          onChange={() => {
+                            // Re-selecting the active model would still reset the
+                            // provider and cold-reload a warm engine — no-op it.
+                            if (activeModelId !== m.id) void onSetActiveModel?.(m.id);
+                          }}
+                        />
+                      </td>
+                    )}
                     <td>
                       <code>{m.id}</code>
                       <div className="muted small">{m.name}</div>

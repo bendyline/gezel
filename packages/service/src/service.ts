@@ -1359,7 +1359,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // Audio (STT + TTS) provider managers. Same lazy-build / reset
   // shape as `imageProvider`; lifecycle hangs off this same scope so
   // shutdown() is awaited below alongside the other managers.
-  const stt = new SpeechToTextProviderManager({ home });
+  const stt = new SpeechToTextProviderManager({ home, store });
   const tts = new TextToSpeechProviderManager({ home });
   // Remote model execution: route `remote:<id>/…` multimodal models to the
   // hosting paired server (GPU-heavy generation runs there; the artifact still

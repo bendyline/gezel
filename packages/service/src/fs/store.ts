@@ -5637,6 +5637,7 @@ export class Store {
           ...(m.attemptedToolCalls && m.attemptedToolCalls.length > 0
             ? { attemptedToolCalls: m.attemptedToolCalls }
             : {}),
+          ...(m.synthetic ? { synthetic: m.synthetic } : {}),
         });
       }
     }

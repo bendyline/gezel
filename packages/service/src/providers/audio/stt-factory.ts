@@ -35,6 +35,13 @@ import { WhisperCppProvider } from './whisper-cpp.js';
 export interface SpeechToTextFactoryOptions {
   home: string;
   env?: NodeJS.ProcessEnv;
+  /**
+   * The user's configured default model (`config.defaultSttModel`,
+   * Settings -> Audio). whisper-server binds one model per process, so this
+   * is the model it launches with. An id that is no longer installed falls
+   * through to the first installed model by id.
+   */
+  defaultModelId?: string;
 }
 
 export async function createSpeechToTextProvider(
@@ -68,15 +75,15 @@ export async function createSpeechToTextProvider(
       resolveLaunch: async () => {
         const port = cachedPort ?? (await pickFreePort());
         cachedPort = port;
-        const firstModel = await findFirstInstalledWhisperModel(storageRoots);
-        if (!firstModel) {
+        const model = await selectWhisperModel(storageRoots, opts.defaultModelId);
+        if (!model) {
           throw new Error(
             'No STT model is available locally. Download one from Settings → Audio before transcribing.',
           );
         }
         return {
           command: binary,
-          args: ['--host', '127.0.0.1', '--port', String(port), '--model', firstModel.weightsPath],
+          args: ['--host', '127.0.0.1', '--port', String(port), '--model', model.weightsPath],
           baseUrl: `http://127.0.0.1:${port}`,
         };
       },
@@ -98,10 +105,57 @@ export async function createSpeechToTextProvider(
   });
 }
 
-interface ResolvedWhisperModel {
+export interface ResolvedWhisperModel {
   id: string;
   name: string;
   weightsPath: string;
+}
+
+/**
+ * The model whisper-server should launch with: the user's configured default
+ * when it is still installed, else the first installed model by id — which is
+ * what every install did before `config.defaultSttModel` existed.
+ */
+export async function selectWhisperModel(
+  storageRoots: ModelStorageRoots,
+  defaultModelId?: string,
+): Promise<ResolvedWhisperModel | undefined> {
+  const configured = defaultModelId
+    ? await resolveWhisperModel(storageRoots, defaultModelId)
+    : undefined;
+  return configured ?? (await findFirstInstalledWhisperModel(storageRoots));
+}
+
+/** Read one installed whisper model's launch info, or undefined when it is
+ *  absent, malformed, or fails the read-only payload check. */
+async function resolveWhisperModel(
+  storageRoots: ModelStorageRoots,
+  id: string,
+): Promise<ResolvedWhisperModel | undefined> {
+  try {
+    const root = await findModelRoot(storageRoots, id);
+    if (!root) return undefined;
+    const raw = await readFile(join(root, id, 'manifest.json'), 'utf8');
+    const parsed = JSON.parse(raw) as {
+      id?: string;
+      name?: string;
+      files?: Array<{ role?: string; filename?: string }>;
+      fileSha256?: Record<string, string>;
+    };
+    if (!parsed.id || !parsed.name || !Array.isArray(parsed.files)) return undefined;
+    if (!(await verifyReadOnlyModelPayload(storageRoots, root, id, parsed.fileSha256))) {
+      return undefined;
+    }
+    const weightsFile = parsed.files.find((f) => f.role === 'weights' && f.filename);
+    if (!weightsFile?.filename) return undefined;
+    return {
+      id: parsed.id,
+      name: parsed.name,
+      weightsPath: join(root, id, weightsFile.filename),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 async function findFirstInstalledWhisperModel(
@@ -110,30 +164,8 @@ async function findFirstInstalledWhisperModel(
   const entries = await listOverlayModelIds(storageRoots);
   entries.sort();
   for (const id of entries) {
-    try {
-      const root = await findModelRoot(storageRoots, id);
-      if (!root) continue;
-      const raw = await readFile(join(root, id, 'manifest.json'), 'utf8');
-      const parsed = JSON.parse(raw) as {
-        id?: string;
-        name?: string;
-        files?: Array<{ role?: string; filename?: string }>;
-        fileSha256?: Record<string, string>;
-      };
-      if (!parsed.id || !parsed.name || !Array.isArray(parsed.files)) continue;
-      if (!(await verifyReadOnlyModelPayload(storageRoots, root, id, parsed.fileSha256))) {
-        continue;
-      }
-      const weightsFile = parsed.files.find((f) => f.role === 'weights' && f.filename);
-      if (!weightsFile?.filename) continue;
-      return {
-        id: parsed.id,
-        name: parsed.name,
-        weightsPath: join(root, id, weightsFile.filename),
-      };
-    } catch {
-      /* skip malformed */
-    }
+    const model = await resolveWhisperModel(storageRoots, id);
+    if (model) return model;
   }
   return undefined;
 }

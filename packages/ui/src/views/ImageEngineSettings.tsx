@@ -119,6 +119,25 @@ export function ImageEngineSettings({ onModelsChanged }: Props) {
     }
   }, [provider]);
 
+  const onActiveModelChange = useCallback(
+    async (id: string) => {
+      setStatus('saving…');
+      try {
+        // `defaultImageModel` is keyed by provider, so patch the sd-cpp slot
+        // and carry the cloud entries through — a bare `{ 'sd-cpp': id }`
+        // would drop whichever cloud default the user had set.
+        const updated = await api.updateConfig({
+          defaultImageModel: { ...config?.defaultImageModel, 'sd-cpp': id },
+        });
+        setConfig(updated);
+        setStatus(null);
+      } catch (err) {
+        setStatus(`save failed: ${(err as Error).message}`);
+      }
+    },
+    [config?.defaultImageModel],
+  );
+
   const onConfirmationChange = useCallback(async (mode: 'ask' | 'always-allow') => {
     setStatus('saving…');
     try {
@@ -203,6 +222,10 @@ export function ImageEngineSettings({ onModelsChanged }: Props) {
                       : 'Image engine is not reachable.',
                 }
               : {})}
+            {...(config?.defaultImageModel?.['sd-cpp']
+              ? { configuredDefaultModelId: config.defaultImageModel['sd-cpp'] }
+              : {})}
+            onSetActiveModel={onActiveModelChange}
             onModelsChanged={() => {
               setRefreshTick((n) => n + 1);
               onModelsChanged?.();
