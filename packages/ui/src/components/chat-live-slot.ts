@@ -109,9 +109,22 @@ export interface LiveSlot {
   /**
    * When set, this turn is waiting in the provider queue — not yet
    * streaming. Number is how many turns are ahead of it. Populated
-   * from `queued` SSE events; cleared on the first delta.
+   * from `queued` SSE events; cleared on the first real output.
    */
   queueAhead?: number;
+  /**
+   * When the most recent `queued` event arrived.
+   *
+   * The queue state EXPIRES rather than being cleared by whatever
+   * unrelated signal happens to fire next. The daemon re-asserts the wait
+   * every few seconds and goes silent the moment it acquires a slot, so
+   * freshness is the honest read of "still waiting" — and it is the only
+   * read that survives a long wait. Clearing on any liveness event (a
+   * heartbeat, a wire pulse) is what used to drop the badge minutes into
+   * a queue wait, after which the turn showed no queue position and no
+   * output and the silence banner called it wedged.
+   */
+  queuedAt?: number;
   /**
    * Count of bare framing chunks ("wire pulses") received from the
    * provider since the last visible event (delta / tool /
@@ -254,4 +267,27 @@ export function countSegmentTools(segments: LiveSegment[]): number {
   let n = 0;
   for (const s of segments) if (s.kind === 'tool') n++;
   return n;
+}
+
+/**
+ * How long a `queued` event stays authoritative, in ms.
+ *
+ * Mirrors the daemon's own re-assert cadence (every 5s while a turn waits
+ * for a provider slot) with room for two missed frames, so a still-waiting
+ * turn never flickers out of the queued state and an acquired one leaves it
+ * within a few seconds without needing an explicit "acquired" event.
+ */
+export const QUEUE_NOTICE_FRESH_MS = 12_000;
+
+/**
+ * Whether a slot's queue notice is still current — see
+ * {@link QUEUE_NOTICE_FRESH_MS}.
+ *
+ * An undated notice counts as fresh: it carries no expiry information, so
+ * the honest reading is "current", and a caller that sets a position
+ * without a timestamp keeps the pre-expiry behavior rather than silently
+ * losing its badge.
+ */
+export function queueNoticeIsFresh(queuedAt: number | undefined, now: number): boolean {
+  return queuedAt === undefined || now - queuedAt < QUEUE_NOTICE_FRESH_MS;
 }

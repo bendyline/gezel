@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { lookupBehavior } from '../../model-profile/registry.js';
 import { GpuArbiter } from '../gpu-arbiter.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
@@ -174,6 +174,91 @@ describe('llama.cpp JSON Schema compatibility', () => {
     expect(stripJsonSchemaPatternsForLlamaCpp({ pattern: '^x$', type: 'string' })).toEqual({
       type: 'string',
     });
+  });
+
+  it('remembers a rejected tool grammar so the next session skips the rejected round-trip', async () => {
+    // Wild-caught: a 48-tool roster blew llama.cpp's grammar repetition
+    // ceiling on EVERY turn, and the ladder re-derived the same answer from
+    // scratch each time — 16 rejected round-trips in one afternoon. The
+    // floor is remembered on the provider, so it also covers a fresh
+    // session on the same engine, not just later turns in this one.
+    const bodies: Array<{
+      tools?: Array<{
+        function: { parameters?: { properties?: { uri?: { pattern?: string } } } };
+      }>;
+    }> = [];
+    let rejectNext = true;
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? '{}')) as (typeof bodies)[number]);
+      // Reject only a payload that still carries pattern constraints —
+      // exactly what the engine's converter chokes on.
+      const carriesPattern =
+        bodies.at(-1)?.tools?.[0]?.function.parameters?.properties?.uri?.pattern !== undefined;
+      if (rejectNext && carriesPattern) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 400,
+              message: 'Failed to initialize samplers: failed to parse grammar',
+              type: 'invalid_request_error',
+            },
+          }),
+          { status: 400, statusText: 'Bad Request' },
+        );
+      }
+      return sseResponse([{ choices: [{ index: 0, delta: { content: 'ok' } }] }, '[DONE]']);
+    }) as typeof fetch;
+
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    const externalTools = [
+      {
+        name: 'read_artifact',
+        parameters: {
+          type: 'object',
+          properties: {
+            uri: { type: 'string', pattern: '^scheme:\\/\\/artifacts\\/[A-Za-z0-9]+$' },
+          },
+        },
+      },
+    ];
+
+    const first = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'qwen',
+      externalTools,
+    });
+    await expect(first.sendAndWait('read it')).resolves.toBe('ok');
+    // Rejected once, recovered on the retry.
+    expect(bodies).toHaveLength(2);
+
+    // A brand-new session on the same provider must not re-pay that.
+    bodies.length = 0;
+    rejectNext = true;
+    const second = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'qwen',
+      externalTools,
+    });
+    await expect(second.sendAndWait('read it again')).resolves.toBe('ok');
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]?.tools?.[0]?.function.parameters?.properties?.uri?.pattern).toBeUndefined();
+  });
+
+  it('does not degrade a smaller tool roster because a larger one blew the grammar limit', () => {
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    provider.noteToolGrammarFloor(48, 'simplified');
+    // The ceiling that failed is a grammar-SIZE limit, so it says nothing
+    // about a small roster; degrading that one would cost tool-argument
+    // fidelity for free.
+    expect(provider.toolGrammarFloorFor(5)).toBe('none');
+    expect(provider.toolGrammarFloorFor(48)).toBe('simplified');
+    expect(provider.toolGrammarFloorFor(75)).toBe('simplified');
+    // The floor only ever widens: a smaller failing count lowers the bar,
+    // and a more permissive tier sticks.
+    provider.noteToolGrammarFloor(12, 'strip-patterns');
+    expect(provider.toolGrammarFloorFor(12)).toBe('simplified');
+    provider.noteToolGrammarFloor(48, 'permissive');
+    expect(provider.toolGrammarFloorFor(12)).toBe('permissive');
   });
 
   it('reduces grammar-hostile unions and validation constraints while preserving argument guidance', () => {
@@ -10286,5 +10371,55 @@ describe('constrained-turn reasoning allowance', () => {
     expect(constrainedToolReasoningCharLimitForModel('muse-glimmer-30b-dynamic')).toBe(3072);
     // Models that honor no-think keep the tight guard.
     expect(constrainedToolReasoningCharLimitForModel('qwen3.6-27b-q4')).toBe(1024);
+  });
+});
+
+describe('LlamaCppProvider — waiting for a physical engine slot', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('announces the wait instead of parking silently', async () => {
+    vi.useFakeTimers();
+    // One physical slot, the shape a supervised single-slot launch has.
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test', concurrency: 1 });
+    const held = await provider.acquireExclusiveEngineRequest('first');
+
+    const seen: number[] = [];
+    const pending = provider.acquireExclusiveEngineRequest('second', undefined, ({ aheadOf }) =>
+      seen.push(aheadOf),
+    );
+
+    // A brief wait (a background one-shot between iterations) stays quiet.
+    await vi.advanceTimersByTimeAsync(150);
+    expect(seen).toEqual([]);
+
+    // Past the threshold the turn says so, and keeps saying so. Before this,
+    // a turn could sit here for the whole of another session's round-trip —
+    // minutes on one slot — with nothing but a debug line to show for it,
+    // which the silence banner read as a wedged model.
+    await vi.advanceTimersByTimeAsync(100);
+    expect(seen).toEqual([1]);
+    await vi.advanceTimersByTimeAsync(11_000);
+    expect(seen.length).toBeGreaterThanOrEqual(3);
+
+    held();
+    const release = await pending;
+    const atAcquire = seen.length;
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(seen).toHaveLength(atAcquire);
+    release();
+  });
+
+  it('does not announce anything when a slot is free', async () => {
+    vi.useFakeTimers();
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test', concurrency: 1 });
+    const seen: number[] = [];
+    const release = await provider.acquireExclusiveEngineRequest('only', undefined, ({ aheadOf }) =>
+      seen.push(aheadOf),
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(seen).toEqual([]);
+    release();
   });
 });

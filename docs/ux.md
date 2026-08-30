@@ -622,6 +622,24 @@ task streams a turn: the live bubble is its representation, and a "waiting"
 card beside it contradicts what the reader can see. Batches collapse past a
 few cards into one counted line rather than burying the conversation.
 
+**Waiting is not wedged, and silence alone cannot tell them apart.** A turn
+that has produced no tokens may be parked behind another gezel — Gezel's
+provider queue and, separately, the engine's own physical slot, which on a
+single-slot launch serialises every session on the machine. Both look
+identical from the transcript: no badge, no output. Two rules follow. The
+queued state is **re-asserted for the length of the wait** and expires on
+freshness ([`queueNoticeIsFresh`](../packages/ui/src/components/chat-live-slot.ts)),
+never torn down by whatever unrelated liveness event happens to arrive next
+— a heartbeat means the daemon is holding the turn, which is equally true
+while it waits, and clearing on it dropped the badge minutes into a wait. And
+the silence banner may only say a turn "looks stalled … may have wedged
+mid-turn" once it has actually streamed something: *mid*-turn presumes a turn
+in progress. With no output the honest copy names the ordinary causes —
+waiting behind another gezel, loading the model, reading a long prompt — and
+offers waiting as a real option beside stopping. The old copy sent users to
+cancel and retry turns that were queued and would have run on their own,
+which on a one-slot engine put them back at the end of the same queue.
+
 **A craftbook run gets a receipt card, not just a pill.** When a tool call
 starts a craftbook (`invoke_craftbook`) or moves a task a step
 (`advance_task_step`), the transcript renders an inline card under the tool

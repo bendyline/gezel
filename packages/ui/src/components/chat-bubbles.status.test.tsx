@@ -75,3 +75,83 @@ describe('StreamingBubble status', () => {
     expect(screen.queryByText(/30-60s|macOS/)).toBeNull();
   });
 });
+
+describe('StreamingBubble — waiting for the engine vs wedged mid-turn', () => {
+  it('keeps the queue badge while the daemon is still re-asserting the wait', () => {
+    const { container } = render(
+      <StreamingBubble
+        authorLabel="Luciana"
+        authorIcon={null}
+        localEngine="llama-cpp"
+        segments={[]}
+        startedAt={Date.now() - 8 * 60_000}
+        lastActivityAt={Date.now() - 5 * 60_000}
+        hasProgress
+        queueAhead={1}
+        queuedAt={Date.now() - 2_000}
+      />,
+    );
+
+    // Eight minutes in with a live queue notice: still the queue state, and
+    // emphatically NOT the "wedged" banner. This is the wild-caught case —
+    // a Voorman parked behind another gezel's agentic loop on a
+    // single-slot engine.
+    expect(screen.getByText('model queue · position 2')).toBeInTheDocument();
+    expect(container.querySelector('.msg-slow-banner')).toBeNull();
+  });
+
+  it('expires a stale queue notice instead of showing a frozen position', () => {
+    render(
+      <StreamingBubble
+        authorLabel="Luciana"
+        authorIcon={null}
+        localEngine="llama-cpp"
+        segments={[]}
+        startedAt={Date.now() - 60_000}
+        lastActivityAt={Date.now() - 40_000}
+        queueAhead={1}
+        queuedAt={Date.now() - 60_000}
+      />,
+    );
+
+    // The daemon stopped re-asserting, so the turn acquired its slot.
+    expect(screen.queryByText('model queue · position 2')).toBeNull();
+    expect(screen.getByText(/Still working/)).toBeInTheDocument();
+  });
+
+  it('does not call a turn wedged when it never produced any output', () => {
+    render(
+      <StreamingBubble
+        authorLabel="Luciana"
+        authorIcon={null}
+        localEngine="llama-cpp"
+        segments={[]}
+        startedAt={Date.now() - 5 * 60_000}
+        lastActivityAt={Date.now() - 5 * 60_000}
+        hasProgress
+      />,
+    );
+
+    // "Wedged mid-turn" presumes a mid-turn. With no text streamed, the
+    // honest reading is that it has not started producing yet.
+    expect(screen.queryByText(/may have wedged mid-turn/)).toBeNull();
+    expect(screen.getByText(/hasn't started producing output/)).toBeInTheDocument();
+    expect(screen.getByText(/waiting its turn on the engine/)).toBeInTheDocument();
+  });
+
+  it('still reports a genuine mid-turn wedge once output has streamed', () => {
+    render(
+      <StreamingBubble
+        authorLabel="Luciana"
+        authorIcon={null}
+        localEngine="llama-cpp"
+        segments={[{ kind: 'text', content: 'Reading the task notes…' }]}
+        startedAt={Date.now() - 5 * 60_000}
+        lastActivityAt={Date.now() - 5 * 60_000}
+        hasProgress
+      />,
+    );
+
+    expect(screen.getByText(/may have wedged mid-turn/)).toBeInTheDocument();
+  });
+});

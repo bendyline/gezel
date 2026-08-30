@@ -132,6 +132,10 @@ export async function resolveTurnImages(
   const digests: MessageImageDigest[] = [];
   const warnings: string[] = [];
   let announced = false;
+  // Images this turn MEANT to read but couldn't. Tracked only over
+  // `described` — an overflow image is static-only by design and already
+  // has its own warning.
+  const unreadable: string[] = [];
 
   for (const image of described) {
     const meta = readImageStaticMeta(image.bytes);
@@ -160,6 +164,9 @@ export async function resolveTurnImages(
         recognition = staticOnly(meta, err instanceof Error ? err.message : String(err));
       }
     }
+    if (recognition.status === 'failed' || recognition.status === 'static-only') {
+      unreadable.push(recognition.failureReason ?? 'no description available');
+    }
     digests.push(toMessageDigest(image.ref, recognition, { maxChars: limits.maxDigestChars }));
   }
 
@@ -187,6 +194,22 @@ export async function resolveTurnImages(
       recognitionAvailable
         ? `This model can't see images, and local image reading is turned off. ${plan.reason}.`
         : "This model can't see images. Install a reader in Settings → Workloads → Image recognition, or switch to a model with vision.",
+    );
+  } else if (unreadable.length > 0) {
+    // The plan promised a local read and the read did not happen — a
+    // timed-out reader, an oversized image, a reader that errored. The
+    // model IS told per-image (`renderDigestBody` writes "Could not read
+    // this image"), but nothing reached the person who attached it: they
+    // saw their screenshot go up, assumed the gezel could see it, and got
+    // an answer written from the filename and dimensions.
+    const scope =
+      unreadable.length === described.length
+        ? described.length === 1
+          ? 'the image'
+          : 'any of the images'
+        : `${unreadable.length} of ${described.length} images`;
+    warnings.push(
+      `Couldn't read ${scope} you attached (${unreadable[0]}). The gezel is answering from the file details only — it cannot see the picture.`,
     );
   }
 

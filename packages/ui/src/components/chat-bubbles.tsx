@@ -20,6 +20,7 @@ import {
 } from '@bendyline/gezel';
 import type { MediaProvider, SurfaceScheme } from '@bendyline/squisq';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { queueNoticeIsFresh } from './chat-live-slot.js';
 
 // Chat-bubble light surface — shared with the Home intro's embedded
 // Handboek page; the scheme and its rationale live in
@@ -1412,6 +1413,15 @@ export interface StreamingBubbleProps {
    */
   queueAhead?: number;
   /**
+   * When the queue position above was last reported. The daemon
+   * re-asserts an ongoing wait every few seconds, so this is what
+   * separates "still waiting" from "waited, then started" — see
+   * {@link queueNoticeIsFresh}. Without it the queued state had to be
+   * torn down by some other event, and the events available to do it
+   * (heartbeats, wire pulses) fire just as happily mid-wait.
+   */
+  queuedAt?: number;
+  /**
    * Wall-clock timestamp of the last observable signal for this turn
    * (a delta token or a completed tool call). Drives the "Still
    * working" reassurance banner: the banner only shows during *silent*
@@ -1854,6 +1864,7 @@ export function StreamingBubble({
   errorDetail,
   errorActions,
   queueAhead,
+  queuedAt,
   lastActivityAt,
   hasProgress,
   onProbeOllama,
@@ -2012,6 +2023,12 @@ export function StreamingBubble({
   // streamed something and THEN went quiet. Until then, the reassuring
   // "still working / first load is slow" copy is the honest signal.
   const stalledSilence = isStalledSilence(silentFor, hasProgress === true);
+  // A turn that has produced no visible output cannot have "wedged
+  // mid-turn" — there was no mid-turn. It is either still waiting for the
+  // engine or still working up to its first token, and both are ordinary.
+  // Saying "wedged" here sent users to stop-and-retry a turn that was
+  // queued behind another gezel and would have run on its own.
+  const stalledBeforeAnyOutput = stalledSilence && !hasText;
   // Inline diagnostic state for the slow-banner's "Check Ollama"
   // button. `null` = idle (haven't probed); object = result of last
   // probe. Re-clicking the button re-probes and overwrites.
@@ -2034,7 +2051,11 @@ export function StreamingBubble({
     }
   }, [onProbeOllama]);
   const failed = Boolean(error);
-  const queued = queueAhead !== undefined && !hasText && !failed;
+  // Re-derived on every tick of `useElapsedSeconds` above, which is what
+  // lets the queued state expire on its own a few seconds after the daemon
+  // stops re-asserting it (i.e. the turn got its slot).
+  const queueNoticeFresh = queueNoticeIsFresh(queuedAt, Date.now());
+  const queued = queueAhead !== undefined && queueNoticeFresh && !hasText && !failed;
   // Parked inside a synchronous ask_gezel/ask_specialist consultation:
   // the model is idle, blocked on a peer's reply. Only honor it while
   // the turn hasn't failed — an errored turn's banner takes precedence.
@@ -2308,7 +2329,14 @@ export function StreamingBubble({
             // doubly wrong (silent ≠ slow ≠ contended).
             <div className="msg-slow-banner">
               <div>
-                {stalledSilence ? (
+                {stalledBeforeAnyOutput ? (
+                  <>
+                    Nothing back yet — {formatElapsedLong(silentFor)}. This turn hasn't started
+                    producing output: it may still be waiting its turn on the engine behind another
+                    gezel, loading the model, or reading a long prompt. You can keep waiting, or
+                    stop it and start again.
+                  </>
+                ) : stalledSilence ? (
                   <>
                     This turn looks stalled — no signal for {formatElapsedLong(silentFor)}. The
                     model may have wedged mid-turn; you can stop it and ask it to pick up where it

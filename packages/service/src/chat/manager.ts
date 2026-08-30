@@ -374,6 +374,12 @@ const TURN_LIBRARY_RECALL_MIN_CHARS = 15;
  * the app never reads as a hang.
  */
 const BACKGROUND_DRAIN_TIMEOUT_MS = 15_000;
+/**
+ * How long a queue-wait stamp stays authoritative. `runInQueue` re-asserts
+ * every 5s while waiting and stops on acquire, so anything older than a
+ * couple of cycles means the turn is running, not queued.
+ */
+const QUEUE_WAIT_FRESH_MS = 12_000;
 const DEFAULT_INTERACTIVE_RECALL_DEADLINE_MS = 2_000;
 
 export function resolveInteractiveRecallDeadlineMs(env: NodeJS.ProcessEnv = process.env): number {
@@ -1116,6 +1122,22 @@ export class ChatManager {
    * silently wedged. Cleared in the `finally` at the end of `send()`.
    */
   private readonly inflight = new Map<string, InflightTurn>();
+  /**
+   * When each in-flight turn last reported that it is still WAITING for a
+   * provider slot rather than generating.
+   *
+   * "In flight" and "running on the model" are not the same state, and
+   * conflating them is what let a turn parked behind another gezel's
+   * agentic loop be reported — to the UI and in the debug bundle — as an
+   * ordinary in-progress turn that had simply gone quiet.
+   *
+   * Self-expiring rather than explicitly cleared: `runInQueue` re-asserts
+   * the wait every few seconds and stops the moment it acquires, so a
+   * stamp older than {@link QUEUE_WAIT_FRESH_MS} means the turn got its
+   * slot. That avoids threading an "acquired" hook back through the
+   * provider layer purely to flip a status bit.
+   */
+  private readonly queueWaitingSince = new Map<string, number>();
   /**
    * Per-session FIFO queue of messages that arrived while the session
    * was already mid-turn. Before this existed, `send()` threw
@@ -2761,6 +2783,7 @@ export class ChatManager {
     if (!entry) return { cancelled: false };
     entry.cancelled = true;
     this.inflight.delete(sessionId);
+    this.queueWaitingSince.delete(sessionId);
     this.telemetry.noteTurnEnd(sessionId);
     // Do NOT clear the per-turn salvage buffers (tools / warnings /
     // content / reasoning) here. Aborting below rejects the in-flight
@@ -3244,9 +3267,12 @@ export class ChatManager {
             },
           }
         : {}),
-      turnStatus:
-        this.inflight.has(sessionId) ||
-        this.externalConversations.listActive().some((activity) => activity.sessionId === sessionId)
+      turnStatus: this.isAwaitingProviderSlot(sessionId)
+        ? 'queued'
+        : this.inflight.has(sessionId) ||
+            this.externalConversations
+              .listActive()
+              .some((activity) => activity.sessionId === sessionId)
           ? 'in-progress'
           : (this.pendingSends.get(sessionId)?.length ?? 0) > 0
             ? 'queued'
@@ -4888,6 +4914,33 @@ export class ChatManager {
   }
 
   /**
+   * Canonical gezel id for a reference that may be an id, a display name,
+   * or a roleBasedName — `null` when nothing matches.
+   *
+   * Any caller comparing two gezel references for identity must put BOTH
+   * through here first. The references are not stored in one normal form:
+   * a task's `assignee.gezelId` keeps whatever the model typed
+   * (`"Alejandro"`), while `project.voormanGezelId` keeps the slug id
+   * (`"alejandro"`). A raw `===` between the two reads as "different
+   * gezels", so a self-message guard passes and {@link messageGezel} —
+   * which *does* resolve — then throws `cannot message yourself` on every
+   * attempt. That is a permanent condition, so the caller retries forever.
+   */
+  async resolveGezelIdRef(idOrName: string, projectId?: string): Promise<string | null> {
+    return (await this.resolveGezel(idOrName, projectId))?.id ?? null;
+  }
+
+  /**
+   * Whether this session's in-flight turn is parked waiting for a provider
+   * slot instead of running on the model. See {@link queueWaitingSince}.
+   */
+  isAwaitingProviderSlot(sessionId: string): boolean {
+    if (!this.inflight.has(sessionId)) return false;
+    const at = this.queueWaitingSince.get(sessionId);
+    return at !== undefined && Date.now() - at < QUEUE_WAIT_FRESH_MS;
+  }
+
+  /**
    * Subscribe to the target session's event bus and, on the first
    * `complete` event, queue a reply summary into the sender's inbox.
    * Auto-unsubscribes after first fire or the listener's idle timeout.
@@ -6166,6 +6219,7 @@ export class ChatManager {
     // idle rather than enqueue behind a turn that no longer exists.
     if (this.inflight.get(sessionId) === finishedTurn) {
       this.inflight.delete(sessionId);
+      this.queueWaitingSince.delete(sessionId);
     }
     // A cancelled adapter can take a moment to unwind after the UI starts a
     // replacement turn. Never let the old turn's finally block clear or
@@ -7198,6 +7252,7 @@ export class ChatManager {
             ...(isAskTarget ? { bypassQueue: true } : {}),
             signal: turnAbort.signal,
             onQueueWait: ({ aheadOf }) => {
+              this.queueWaitingSince.set(sessionId, Date.now());
               this.events.publish(scope, { type: 'queued', aheadOf });
             },
           },

@@ -140,6 +140,14 @@ const MAX_TOOL_LOOP_TURNS = 96;
 // this with `OLLAMA_TURN_TIMEOUT_MS` (30 min); the constant here is
 // only the fallback for one-shot / test paths.
 const DEFAULT_TIMEOUT_MS = 600_000;
+
+/**
+ * Don't announce an engine-gate wait shorter than this — a brief handoff
+ * between iterations is normal and would flash the queue badge for a frame.
+ */
+const ENGINE_GATE_WAIT_NOTICE_DELAY_MS = 200;
+/** Re-assert cadence, matching `runInQueue`'s so the UI sees one rhythm. */
+const ENGINE_GATE_WAIT_NOTICE_MS = 5_000;
 // Fallback for direct/external provider construction where no catalog model
 // metadata is available. Supervised catalog models pass their native context
 // window explicitly from buildMlxProvider.
@@ -537,7 +545,11 @@ export class MlxProvider implements LLMProvider {
     return this.supervisor?.lifecycleSnapshot();
   }
 
-  async acquireExclusiveEngineRequest(label: string, signal?: AbortSignal): Promise<() => void> {
+  async acquireExclusiveEngineRequest(
+    label: string,
+    signal?: AbortSignal,
+    onWait?: (info: { aheadOf: number }) => void,
+  ): Promise<() => void> {
     if (signal?.aborted)
       throw new DOMException(`MLX engine request ${label} aborted`, 'AbortError');
 
@@ -550,24 +562,48 @@ export class MlxProvider implements LLMProvider {
       // stays at `width` across the handoff, so we never exceed it — at
       // Width 1 is a strict provider-side FIFO; the sidecar still uses its
       // singleton BatchGenerator path for cache snapshots.
-      await new Promise<void>((resolve, reject) => {
-        const waiter: (typeof this.engineGateWaiters)[number] = {
-          resolve,
-          reject,
-          ...(signal ? { signal } : {}),
-        };
-        if (signal) {
-          waiter.onAbort = () => {
-            const idx = this.engineGateWaiters.indexOf(waiter);
-            if (idx === -1) return;
-            this.engineGateWaiters.splice(idx, 1);
-            signal.removeEventListener('abort', waiter.onAbort!);
-            reject(new DOMException(`MLX engine request ${label} aborted`, 'AbortError'));
+      let waitNotice: ReturnType<typeof setInterval> | null = null;
+      let waitNoticeDelay: ReturnType<typeof setTimeout> | null = null;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const waiter: (typeof this.engineGateWaiters)[number] = {
+            resolve,
+            reject,
+            ...(signal ? { signal } : {}),
           };
-          signal.addEventListener('abort', waiter.onAbort, { once: true });
-        }
-        this.engineGateWaiters.push(waiter);
-      });
+          if (signal) {
+            waiter.onAbort = () => {
+              const idx = this.engineGateWaiters.indexOf(waiter);
+              if (idx === -1) return;
+              this.engineGateWaiters.splice(idx, 1);
+              signal.removeEventListener('abort', waiter.onAbort!);
+              reject(new DOMException(`MLX engine request ${label} aborted`, 'AbortError'));
+            };
+            signal.addEventListener('abort', waiter.onAbort, { once: true });
+          }
+          this.engineGateWaiters.push(waiter);
+          // Announce the park. Same reasoning as the llama.cpp gate: a turn
+          // that already cleared the ProviderQueue can still wait here for
+          // the length of another session's round-trip, and a wait with no
+          // signal reads to the user as a wedged model.
+          if (onWait) {
+            const publish = () => {
+              const idx = this.engineGateWaiters.indexOf(waiter);
+              if (idx === -1) return;
+              onWait({ aheadOf: this.engineGateActive + idx });
+            };
+            waitNoticeDelay = setTimeout(() => {
+              publish();
+              waitNotice = setInterval(publish, ENGINE_GATE_WAIT_NOTICE_MS);
+              waitNotice.unref?.();
+            }, ENGINE_GATE_WAIT_NOTICE_DELAY_MS);
+            waitNoticeDelay.unref?.();
+          }
+        });
+      } finally {
+        if (waitNoticeDelay) clearTimeout(waitNoticeDelay);
+        if (waitNotice) clearInterval(waitNotice);
+      }
     }
     const waitedMs = Date.now() - waitStartedAt;
     if (waitedMs > 1_000) {
@@ -1695,6 +1731,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           releaseEngineRequest = await this.deps.provider.acquireExclusiveEngineRequest(
             `turn#${seq}.${turn}`,
             engineWaitSignal,
+            // To the user, waiting for the queue and waiting for the engine
+            // gate are one state: this turn has not started yet.
+            opts?.queue?.onQueueWait,
           );
         } catch (err) {
           if ((err as Error).name === 'AbortError') {

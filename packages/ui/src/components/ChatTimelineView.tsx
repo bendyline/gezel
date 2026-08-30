@@ -55,6 +55,7 @@ import type { LiveSegment, LiveSlot, TerminalLiveSlot } from './chat-live-slot.j
 import {
   countSegmentTools,
   liveStatusLabel,
+  queueNoticeIsFresh,
   segmentsHaveText,
   staleLiveSessionIds,
 } from './chat-live-slot.js';
@@ -1713,6 +1714,7 @@ export function ChatTimelineView({
         // label would make the status line read "thinking…" while the
         // model is actively producing output.
         delete slot.queueAhead;
+        delete slot.queuedAt;
         slot.wirePulseCount = 0;
         slot.thinkingLabel = undefined;
         delete slot.thinkingProgress;
@@ -1737,6 +1739,7 @@ export function ChatTimelineView({
         slot.lastActivityAt = Date.now();
         slot.hasProgress = true;
         delete slot.queueAhead;
+        delete slot.queuedAt;
         slot.wirePulseCount = 0;
         delete slot.thinkingProgress;
         delete slot.thinkingDetail;
@@ -1770,6 +1773,7 @@ export function ChatTimelineView({
         slot.lastActivityAt = Date.now();
         slot.hasProgress = true;
         delete slot.queueAhead;
+        delete slot.queuedAt;
         liveRef.current.set(sessionId, slot);
         liveStore.markItemChanged(sessionId);
       } else if (event.type === 'wire_pulse') {
@@ -1780,12 +1784,13 @@ export function ChatTimelineView({
         // "the model is silently thinking." Reset to 0 on real
         // delta / tool / complete (above + below). Wire pulses only
         // come from a provider that's actually processing the turn,
-        // so the queue-wait is over — drop any stale `queueAhead`.
+        // so the queue-wait is over — but we no longer CLEAR the queue
+        // state here. It expires on its own (`queueNoticeIsFresh`), which
+        // is the only read that survives a wait longer than one event.
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.wirePulseCount = (slot.wirePulseCount ?? 0) + 1;
         slot.lastActivityAt = Date.now();
         slot.hasProgress = true;
-        delete slot.queueAhead;
         liveRef.current.set(sessionId, slot);
         liveStore.markItemChanged(sessionId);
       } else if (event.type === 'intent') {
@@ -1802,6 +1807,7 @@ export function ChatTimelineView({
         slot.hasProgress = true;
         slot.wirePulseCount = 0;
         delete slot.queueAhead;
+        delete slot.queuedAt;
         liveRef.current.set(sessionId, slot);
         liveStore.markItemChanged(sessionId);
       } else if (event.type === 'heartbeat') {
@@ -1813,12 +1819,15 @@ export function ChatTimelineView({
         // noise). Optional `label` surfaces through `thinkingLabel`
         // so the status line can read "thinking…" during Copilot
         // reasoning stretches.
+        // Liveness, NOT output: a heartbeat says the daemon is still
+        // holding the turn, which is equally true while it waits for a
+        // provider slot. Clearing the queue state on it is what dropped
+        // the badge mid-wait; expiry handles the acquired case instead.
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.lastActivityAt = Date.now();
         slot.hasProgress = true;
         slot.wirePulseCount = 0;
         slot.thinkingLabel = event.label;
-        delete slot.queueAhead;
         liveRef.current.set(sessionId, slot);
         liveStore.markItemChanged(sessionId);
       } else if (event.type === 'warning') {
@@ -1837,6 +1846,7 @@ export function ChatTimelineView({
         // debouncing. Cleared on first delta or on done.
         const slot = liveRef.current.get(sessionId) ?? createSlot(gezelId, projectId, sessionId);
         slot.queueAhead = event.aheadOf;
+        slot.queuedAt = Date.now();
         liveRef.current.set(sessionId, slot);
         liveStore.markItemChanged(sessionId);
       } else if (event.type === 'queue_enqueued') {
@@ -1906,6 +1916,7 @@ export function ChatTimelineView({
         // de-queue without a preceding `delta`. (Tool-first turns are
         // normal for agentic models.)
         delete slot.queueAhead;
+        delete slot.queuedAt;
         liveRef.current.set(sessionId, slot);
         liveStore.markItemChanged(sessionId);
         onToolActivity?.(tool);
@@ -3480,6 +3491,7 @@ export function ChatTimelineView({
             }
           : {})}
         {...(slot.queueAhead !== undefined ? { queueAhead: slot.queueAhead } : {})}
+        {...(slot.queuedAt !== undefined ? { queuedAt: slot.queuedAt } : {})}
         {...(slot.wirePulseCount && slot.wirePulseCount > 0
           ? { wirePulseCount: slot.wirePulseCount }
           : {})}
@@ -4065,7 +4077,11 @@ export function ChatStickyHeader({
         {isLive && slotForLive && (
           <StreamingStatusLine
             failed={Boolean(slotForLive.error)}
-            queued={slotForLive.queueAhead !== undefined && !segmentsHaveText(slotForLive.segments)}
+            queued={
+              slotForLive.queueAhead !== undefined &&
+              queueNoticeIsFresh(slotForLive.queuedAt, Date.now()) &&
+              !segmentsHaveText(slotForLive.segments)
+            }
             queueAhead={slotForLive.queueAhead}
             elapsedSeconds={liveElapsed}
             toolCount={countSegmentTools(slotForLive.segments)}
