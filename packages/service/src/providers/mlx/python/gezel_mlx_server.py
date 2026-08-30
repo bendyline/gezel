@@ -1656,6 +1656,22 @@ class BatchEngine:
         stamps the authoritative prefill/reuse counts on the sub so the
         liveness marker and usage frames report engine reality, and logs
         the decision — the line to grep when turns re-prefill."""
+        # Late prefix re-check. The lookup in the request handler runs when the
+        # HTTP request ARRIVES; a band is published when its pioneer's turn
+        # ENDS. Static-wave admission puts minutes between the two, so every
+        # sibling dispatched alongside the pioneer — which is the whole fanout
+        # case this exists for — resolved `fresh` before the entry existed.
+        # Measured: two real sibling sessions agreed on
+        # `prefix-band-8977c4fc5f74e5d9`, the pioneer published 16,576 tokens
+        # to it, and the sibling still cold-prefilled 71,346 because its
+        # lookup had run 55ms too early. Re-checking here, at the moment the
+        # wave actually starts, is the only point that sees the publish.
+        if sub.request.cache_id and not getattr(sub.seed_state, "token_ids", None):
+            for pid in _request_prefix_ids(sub.request):
+                seeded = _try_seed_from_prefix(sub.request.cache_id, pid)
+                if seeded is not None:
+                    sub.seed_state = seeded
+                    break
         plan = cache_seed.seed_from_state(sub.seed_state, sub.prompt_tokens)
         sub.prefill_total = len(plan.segment)
         sub.reused_tokens = plan.reused

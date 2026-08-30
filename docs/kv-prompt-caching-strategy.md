@@ -880,6 +880,26 @@ is actually shared — because workspace map/files/documents are tagged volatile
 yet are identical across siblings of one project. The band boundary is
 therefore drawn at the *session* scope, not the volatile tag.
 
+**Shipped and measured end-to-end (flag `mlxSharedBandPrefix`, default OFF).**
+Two sibling task sessions, one gezel+project, real prompts:
+`seed <pioneer> mode=fresh reused=0 prefill=39446` → `prefix-seeded … tokens=36576`
+→ `seed <sibling> mode=extension reused=36576 prefill=2867` (**92.7% reused**),
+settling to `reused=39427 prefill=240` by the next turn. The pioneer's own turn 2
+still extends (`reused=36576 prefill=3094`), so publishing costs it ~2,900 extra
+tokens once rather than a full re-prefill. Note `chars=13177 target=36576`: the
+band is system *text*, but it resolves late in the token stream because the tool
+block renders ahead of the system message (§3.7) — the reusable prefix is
+`[tools][band]` and the tool block dominates it.
+
+One hazard is worth naming because two layers of testing missed it: the prefix
+lookup runs when the HTTP request ARRIVES, while a band is published when its
+pioneer's turn ENDS, and static-wave admission puts minutes between them. Every
+sibling dispatched alongside the pioneer resolved `fresh` until `_seed_args`
+learned to re-check at wave admission. Unit tests and a synthetic single-engine
+probe both passed beforehand — the probe ran the pioneer to completion before
+issuing the sibling request, the one ordering that hides it. Test this area with
+two sessions dispatched *together*, never sequentially.
+
 **Where to look when this regresses.** The engine log is
 `~/.gezel-dev/logs/mlx-server-*.log`, **not** `service-*.log`. The decisive line
 is `[batch] seed … mode=`: `extension` is reuse, `fresh-untrimmable` names a

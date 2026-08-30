@@ -196,6 +196,21 @@ describe('shared-band prefix reuse (ADR 0010)', () => {
     expect(guard).toContain('[cache] prefix-keep');
   });
 
+  it('re-checks the prefix at wave admission, not only at request arrival', () => {
+    // The lookup in the request handler runs when the HTTP request arrives; a
+    // band is published when its pioneer's turn ends, and static-wave
+    // admission puts minutes between them. Without a re-check every sibling
+    // dispatched alongside the pioneer resolves `fresh` — which is the entire
+    // fanout case. Measured before the fix: two real siblings agreed on
+    // `prefix-band-8977c4fc5f74e5d9`, the pioneer published 16,576 tokens,
+    // and the sibling still cold-prefilled 71,346.
+    const seedArgs = SIDECAR.slice(SIDECAR.indexOf('def _seed_args'));
+    // Anchor on the assignment: the docstring names the helper too.
+    const beforePlan = seedArgs.slice(0, seedArgs.indexOf('plan = cache_seed.seed_from_state'));
+    expect(beforePlan).toContain('_try_seed_from_prefix(sub.request.cache_id, pid)');
+    expect(beforePlan).toContain('not getattr(sub.seed_state, "token_ids", None)');
+  });
+
   it('derives the token boundary rather than trusting the char offset', () => {
     // Only the engine has the tokenizer, and the render carries template
     // framing plus the tool block ahead of the system content — so the

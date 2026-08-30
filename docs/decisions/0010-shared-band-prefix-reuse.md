@@ -86,6 +86,13 @@ Mechanically:
   sibling after it inherits and skips the band. One session pays so N−1 do not,
   which preserves the intra-session reuse that already works
   (`extension reused=91413 prefill=290`).
+- **The prefix is re-checked when the wave starts, not only when the request
+  arrives.** The lookup in the `chat_completions` handler runs at HTTP arrival;
+  a band is published when its pioneer's turn *ends*, and static-wave admission
+  puts minutes between the two. Every sibling dispatched alongside the pioneer
+  — the entire fanout case — therefore resolved `fresh` before the entry
+  existed. `_seed_args` retries the lookup when the sub still has no usable
+  seed state.
 
 Default OFF. The flag exists because failures in this area are *slowness, not
 errors*, which is what made the previous incidents take so long to find.
@@ -160,6 +167,45 @@ family, the architecture, or a sibling quant — two repacks of one base model
 disagreed here. Read the artifact's own template before reasoning about prompt
 shape. For a GGUF that costs a ranged fetch of the first ~12 MB and a
 50-line GGUF header parse, not a weights download.
+
+## Validation — measured end-to-end 2026-08-30
+
+Two sibling task sessions of one gezel+project, real prompts, flag on:
+
+```
+band-boundary chars=13177 target=36576 prompt_tokens=39446
+seed ad209603 mode=fresh     reused=0      prefill=39446   <- pioneer, cold
+prefix-seeded prefix-band-dd0e075cb2034d8c … tokens=36576  <- publishes the band
+prefix-seed   403a07c8 from prefix=…                       <- late re-check, 7ms later
+seed 403a07c8 mode=extension reused=36576 prefill=2867     <- sibling: 92.7% reused
+seed ad209603 mode=extension reused=36576 prefill=3094     <- pioneer turn 2
+seed 403a07c8 mode=extension reused=39427 prefill=240      <- steady state
+```
+
+Three things this settles:
+
+- **Keying works on real prompts.** Two live sessions that previously minted
+  distinct ids produced the same `prefix-band-…`; on the production koray
+  prompt the TS side computed `chars=33710`, within 32 characters of the 33,742
+  measured independently from two other live prompts.
+- **`chars` ≪ `target` is the mechanism, not a fault.** 13,177 chars of system
+  text resolves to token 36,576 of 39,446 because the Qwen template renders the
+  tool block *ahead* of the system message (§3.7). The reusable prefix is
+  `[tools][band]` and the tool block dominates it — which is why the reuse
+  fraction is so high, and the strongest argument for band keying over
+  whole-prompt keying.
+- **The pioneer tax is small.** The worry was that publishing shrinks the
+  pioneer's own entry to the band, costing a solo session a large re-prefill
+  next turn for nobody's benefit. Measured at ~2,900 extra tokens (~7% of one
+  turn's prefill, once), because the band is a valid prefix of the pioneer's
+  *own* next prompt and it extends from it. Not a reason to complicate the
+  "any fresh session publishes" gate.
+
+The wave-admission race was found by exactly this run, after unit tests and a
+synthetic single-engine probe had both passed — the probe ran the pioneer to
+completion before issuing the sibling request, which is the one ordering that
+hides it. Any future change here needs a two-sessions-dispatched-together test,
+not a sequential one.
 
 ## Regression surface
 
