@@ -14863,10 +14863,13 @@ export class ChatManager {
       (envLayeredOverride ??
         config.layeredPrefixCache?.enabled ??
         record.providerName === 'llama-cpp');
-    // Shared-band prefix reuse (ADR 0010). MLX-only and default OFF: it
-    // changes what every session publishes to a shared on-disk cache, and
-    // that surface has produced two wrong diagnoses and one 6.6x-waste
-    // incident. Flip the default only behind the cross-session A/B.
+    // Shared-band prefix reuse (ADR 0010). MLX-only, default ON since the
+    // matched cross-session A/B: two sibling sessions, 22,516 → 12,794 tokens
+    // prefilled (43% less), the sibling's own turn −86%, no
+    // `fresh-untrimmable` in either arm. The pioneer pays ~1,327 extra tokens
+    // ONCE (turn 2 saves at end-minus-margin again), so only a session that
+    // never gets a sibling is net-negative, and only mildly.
+    // `enabled: false` or the env var turns it off.
     const envBand = (process.env.GEZEL_MLX_SHARED_BAND_PREFIX ?? '').trim().toLowerCase();
     const sharedBandPrefixEnabled =
       record.providerName === 'mlx' &&
@@ -14874,7 +14877,7 @@ export class ChatManager {
         ? true
         : envBand === '0' || envBand === 'false'
           ? false
-          : (config.mlxSharedBandPrefix?.enabled ?? false));
+          : (config.mlxSharedBandPrefix?.enabled ?? true));
 
     const executionDensity = resolveExecutionDensity(
       config.executionDensity,

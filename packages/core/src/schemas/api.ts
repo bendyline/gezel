@@ -1909,8 +1909,10 @@ export const GezelConfigSchema = z.object({
    * sessions of the same (gezel, project) render identically — everything
    * before the task band — instead of the whole prompt, and publishes that
    * entry from a real turn's boundary snapshot so it stays a strict token
-   * prefix. Default OFF; `GEZEL_MLX_SHARED_BAND_PREFIX` (`1`/`true`/`0`/
-   * `false`) overrides config as the eval A/B toggle.
+   * prefix. **Default ON for mlx** (matched A/B: 43% less prefill from one
+   * sibling); set `enabled: false` to opt out.
+   * `GEZEL_MLX_SHARED_BAND_PREFIX` (`1`/`true`/`0`/`false`) overrides config
+   * as the eval A/B toggle.
    *
    * Distinct from `layeredPrefixCache`, which restructures the prompt into
    * two system messages — a layout the Qwen chat template rejects outright

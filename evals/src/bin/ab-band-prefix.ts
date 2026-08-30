@@ -35,17 +35,25 @@
  * request arrival while the band is published at turn end. A harness that
  * fully drains A before creating B hides it.
  */
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { acquireEvalDeviceLock } from '../eval-device-lock.ts';
-import { defaultCacheRoot, linkDrafterIntoTrial, linkModelIntoTrial } from '../model-cache.js';
+import { linkDrafterIntoTrial, linkModelIntoTrial } from '../model-cache.js';
 import { shutdownTrialDaemon, spawnTrialDaemon } from '../spawn.js';
 
 const MODEL = 'qwen3.8-27b-q4';
+/**
+ * MLX weights, drafter and uv venv all come from the DEV home, not the eval
+ * cache: `ensureWarmModel` refuses for mlx, so nothing ever populates
+ * `~/.gezel-eval-cache/engines/mlx`. `runner.ts` passes this same home as
+ * `cacheRoot` when it links an mlx trial.
+ */
+const MLX_SOURCE_HOME = join(homedir(), '.gezel-dev');
 const PROMPT = 'In one short sentence, say what you would do first. Do not call any tools.';
 const TURN_TIMEOUT_MS = 600_000;
 
@@ -85,21 +93,42 @@ async function waitForIdle(client: any, gezelId: string, label: string): Promise
   console.warn(`[ab-band] ${label}: turn did not idle within ${TURN_TIMEOUT_MS}ms — continuing`);
 }
 
+/**
+ * Symlink the uv venv tree from the dev home so the trial daemon's
+ * `UvRuntime.ensureVenv` short-circuits. Without it each arm spends ~10
+ * minutes installing mlx-lm + transformers + torch before its first token.
+ * Mirrors `linkUvTreeIntoTrial` in runner.ts, which is private to that module.
+ */
+async function linkUvTree(trialHome: string): Promise<void> {
+  const sourceUv = join(MLX_SOURCE_HOME, 'engines', 'uv');
+  if (!existsSync(sourceUv)) {
+    console.warn(`[ab-band] no uv venv at ${sourceUv} — the trial will provision one (slow)`);
+    return;
+  }
+  const trialUv = join(trialHome, 'engines', 'uv');
+  if (existsSync(trialUv)) return;
+  await mkdir(join(trialHome, 'engines'), { recursive: true });
+  await symlink(sourceUv, trialUv, process.platform === 'win32' ? 'junction' : 'dir');
+}
+
 async function runArm(arm: 'baseline' | 'treatment'): Promise<SeedDecision[]> {
   const home = await mkdtemp(join(tmpdir(), `gezel-band-${arm}-`));
   const logPath = join(home, 'daemon.log');
   console.log(`\n=== ARM: ${arm} (home=${home}) ===`);
-  const cacheRoot = defaultCacheRoot();
-  // MLX weights are never fetched by the harness (`ensureWarmModel` refuses
-  // for mlx): the dev home is the source of truth and we link into the trial.
-  await linkModelIntoTrial({ cacheRoot, trialHome: home, engine: 'mlx', modelId: MODEL });
+  await linkModelIntoTrial({
+    cacheRoot: MLX_SOURCE_HOME,
+    trialHome: home,
+    engine: 'mlx',
+    modelId: MODEL,
+  });
   // Without the drafter the trial silently measures speculation OFF — the
   // exact trap the core gate hit before `linkDrafterIntoTrial` existed.
   await linkDrafterIntoTrial({
-    sourceHome: join(homedir(), '.gezel-dev'),
+    sourceHome: MLX_SOURCE_HOME,
     trialHome: home,
     modelId: MODEL,
   }).catch(() => {});
+  await linkUvTree(home);
   const spawned = await spawnTrialDaemon({
     home,
     stderrLogPath: logPath,
@@ -135,19 +164,34 @@ async function runArm(arm: 'baseline' | 'treatment'): Promise<SeedDecision[]> {
         steps: [{ name: 'Answer once' }],
       });
 
+    const sessionIds: string[] = [];
     for (const [label, title] of [
       ['A', 'Sibling A — the pioneer'],
       ['B', 'Sibling B — should inherit the band'],
     ] as const) {
       const task = await mkTask(title);
-      await client.createChatSession({
+      const session = await client.createChatSession({
         gezelId: meesterId,
         projectId,
         taskRef: task.ref,
         ...(task.activeStepId ? { stepId: task.activeStepId } : {}),
       });
-      await client.sendChatMessage(meesterId, { message: PROMPT, projectId });
+      const sessionId: string = session.id ?? session.session?.id ?? session.sessionId;
+      // Address the session EXPLICITLY. `sendChatMessage(gezelId, …)` is the
+      // legacy per-(gezel, project) helper that resolves to the most-recent
+      // session, so both sends landed in one session and the run measured
+      // intra-session reuse — two turns of one chat — while reporting itself
+      // as a sibling comparison. The whole point here is two DISTINCT
+      // sessions; the ids are printed so a future run cannot hide this.
+      console.log(`[ab-band] ${arm}/${label}: task=${task.ref} session=${sessionId}`);
+      await client.sendToChatSession(sessionId, { message: PROMPT });
       await waitForIdle(client, meesterId, `${arm}/${label}`);
+      sessionIds.push(sessionId);
+    }
+    if (new Set(sessionIds).size < 2) {
+      throw new Error(
+        `[ab-band] ${arm}: expected 2 distinct sessions, got ${JSON.stringify(sessionIds)} — the arm measured intra-session reuse, not a sibling`,
+      );
     }
   } finally {
     await shutdownTrialDaemon(spawned).catch(() => {});

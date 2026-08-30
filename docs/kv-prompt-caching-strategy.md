@@ -786,7 +786,7 @@ KV state survives process death so a returning user doesn't pay cold prefill.
 | `config.localEngineIdleTimeoutMs` | 30 min | Idle SIGTERM; freeze fires at half. |
 | `GEZEL_LLAMA_STARTUP_TIMEOUT_MS` / `GEZEL_MLX_STARTUP_TIMEOUT_MS` | 180 s / 300 s | Engine cold-start ceiling. Lift MLX's for a cold first turn that must build the `mlx-vlm`/torch venv (§3.6). |
 | `config.layeredPrefixCache.enabled` / `GEZEL_LAYERED_PREFIX_CACHE` | llama-cpp **on**, mlx **off**, cloud **n/a** | Volatile-out restructure + layered `prefix-gp`/`prefix-gezel` keys (§3.6). Local-engine only. `enabled` overrides both engines; env (`1`/`0`) overrides config. |
-| `config.mlxSharedBandPrefix.enabled` / `GEZEL_MLX_SHARED_BAND_PREFIX` | mlx **off**, others **n/a** | Cross-session reuse by keying the `prefix-band-` entry on the shared band and publishing it from a real turn's boundary snapshot (§12c, [ADR 0010](decisions/0010-shared-band-prefix-reuse.md)). Cache identity only — the rendered prompt is byte-identical either way. Env (`1`/`0`) overrides config. |
+| `config.mlxSharedBandPrefix.enabled` / `GEZEL_MLX_SHARED_BAND_PREFIX` | mlx **on**, others **n/a** | Cross-session reuse by keying the `prefix-band-` entry on the shared band and publishing it from a real turn's boundary snapshot (§12c, [ADR 0010](decisions/0010-shared-band-prefix-reuse.md)). Cache identity only — the rendered prompt is byte-identical either way. Env (`1`/`0`) overrides config. |
 | `GEZEL_CAPACITY_BUDGET_GB` | auto (60%/80%, cap 96) | Hard memory budget for engine residency. |
 | `GEZEL_FORCE_BEHAVIORS` / `GEZEL_REMOVE_BEHAVIORS` | — | A/B inject/remove model-profile behaviors. |
 
@@ -880,7 +880,7 @@ is actually shared — because workspace map/files/documents are tagged volatile
 yet are identical across siblings of one project. The band boundary is
 therefore drawn at the *session* scope, not the volatile tag.
 
-**Shipped and measured end-to-end (flag `mlxSharedBandPrefix`, default OFF).**
+**Shipped and measured end-to-end (flag `mlxSharedBandPrefix`, default ON for mlx).**
 Two sibling task sessions, one gezel+project, real prompts:
 `seed <pioneer> mode=fresh reused=0 prefill=39446` → `prefix-seeded … tokens=36576`
 → `seed <sibling> mode=extension reused=36576 prefill=2867` (**92.7% reused**),

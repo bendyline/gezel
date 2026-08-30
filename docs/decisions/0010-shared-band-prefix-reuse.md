@@ -1,6 +1,6 @@
 # 0010 — Shared-band prompt-prefix reuse on MLX
 
-Status: Accepted (2026-08), shipped default-OFF behind `mlxSharedBandPrefix`
+Status: Accepted (2026-08). Default **ON for mlx** since the matched A/B below; `mlxSharedBandPrefix.enabled: false` opts out.
 
 ## Context
 
@@ -94,8 +94,10 @@ Mechanically:
   existed. `_seed_args` retries the lookup when the sub still has no usable
   seed state.
 
-Default OFF. The flag exists because failures in this area are *slowness, not
-errors*, which is what made the previous incidents take so long to find.
+Shipped default-OFF and flipped ON only after the matched A/B below. The flag
+survives the flip because failures in this area are *slowness, not errors* —
+which is what made the previous incidents take so long to find, and what makes
+a one-line opt-out worth keeping.
 
 ## Alternatives rejected
 
@@ -200,6 +202,38 @@ Three things this settles:
   turn's prefill, once), because the band is a valid prefix of the pioneer's
   *own* next prompt and it extends from it. Not a reason to complicate the
   "any fresh session publishes" gate.
+
+### Matched A/B (`pnpm eval:ab-band-prefix`, 2026-08-30)
+
+Two sibling task sessions per arm, fresh project, same model and prompts:
+
+```
+baseline  (OFF): 958f0fea fresh reused=0 prefill=11255
+                 f9f96ee2 fresh reused=0 prefill=11261     <- sibling also cold
+                 0 extensions, 0.0% reused, 22,516 prefilled
+treatment (ON):  7d28aab6 fresh     reused=0    prefill=11254
+                 d3c6b2bb extension reused=9720 prefill=1540  <- sibling inherits
+                 1 extension, 43.2% reused, 12,794 prefilled
+```
+
+**43% less prefill work from a single sibling**; the sibling's own turn dropped
+86% (11,261 → 1,540). No `fresh-untrimmable` in either arm — the signature of
+an over-long band entry, and the stated abort condition for the default flip.
+
+The pioneer tax is once per session, not per turn: turn 1 is `fresh` so it
+publishes and saves at the band; turn 2 is `extension`, so `_band_snapshot_target`
+is not consulted and the save reverts to end-minus-margin. Measured at ~1,327
+extra tokens on that one turn (a separate run of the same harness before the
+sibling bug below was fixed). Against ~9,700 saved per sibling here and ~36,600
+on a real fanout, the trade is roughly 6:1 to 12:1 in favour whenever any
+sibling exists — and mildly negative only for a session that never gets one.
+
+> The first version of this harness sent both turns with
+> `sendChatMessage(gezelId, …)`, the legacy per-(gezel, project) helper that
+> resolves to the most-recent session. Both landed in ONE session, so the arm
+> measured intra-session reuse and reported `✗ no additional extension` as
+> though it had answered the cross-session question. It now addresses sessions
+> explicitly and throws unless two distinct ids were created.
 
 The wave-admission race was found by exactly this run, after unit tests and a
 synthetic single-engine probe had both passed — the probe ran the pioneer to
