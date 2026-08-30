@@ -14,6 +14,12 @@ import { GezelTimeline } from './GezelTimeline.js';
 import { ProjectTimeline } from './ProjectTimeline.js';
 import { SessionSwitcher } from './SessionSwitcher.js';
 import { pickChatPlaceholder } from './chat-placeholder.js';
+import {
+  gezelAllProjectsThreadKey,
+  gezelThreadKey,
+  readChatThreadSelection,
+  writeChatThreadSelection,
+} from './chat-thread-memory.js';
 import { type OpenSessionIntent, consumeOpenSession } from './pending-open-session.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
@@ -316,7 +322,13 @@ function GezelChatBody({
 }) {
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
   const gezelDisplayName = displayName(gezel, roleBasedNameOnlyMode);
-  const [sessionId, setSessionId] = useState<string>(focusSessionId ?? '');
+  const threadKey = gezelThreadKey(gezel.id, project.projectId);
+  // A search result asking for a specific session outranks whatever thread was
+  // last open here; otherwise resume it, since leaving this tab (and so
+  // unmounting) is not a decision to abandon the conversation.
+  const [sessionId, setSessionId] = useState<string>(
+    () => focusSessionId ?? readChatThreadSelection(threadKey)?.sessionId ?? '',
+  );
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
   const [composerFocusRequestKey, setComposerFocusRequestKey] = useState(0);
   const [activeSource, setActiveSource] = useState<ChatSessionSource | null>(null);
@@ -325,6 +337,10 @@ function GezelChatBody({
   useEffect(() => {
     if (focusSessionId) setSessionId(focusSessionId);
   }, [focusSessionId]);
+
+  useEffect(() => {
+    writeChatThreadSelection(threadKey, { sessionId });
+  }, [threadKey, sessionId]);
 
   // Note: the parent keys us on `${gezel.id}:${selectedProjectId}` so we
   // always remount when either changes — no in-component reset effect
@@ -432,6 +448,7 @@ function GezelChatBody({
               recentReferences={recentReferences}
               onOpenReference={onOpenReference}
               placeholder={composerPlaceholder}
+              draftScope="gezel"
               belowAddressLine={
                 <SessionSwitcher
                   gezelId={gezel.id}
@@ -461,11 +478,27 @@ function GezelChatBody({
 function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
   const gezelDisplayName = displayName(gezel, roleBasedNameOnlyMode);
+  const threadKey = gezelAllProjectsThreadKey(gezel.id);
   const [focused, setFocused] = useState<{
     sessionId: string;
     projectId: string;
     source?: ChatSessionSource;
-  } | null>(null);
+  } | null>(() => {
+    // `source` is deliberately not remembered: it decides whether the surface
+    // is read-only, and the timeline's own focus handler re-reads it from the
+    // daemon. Guessing it from memory could hand back a writable composer for
+    // a conversation that has since been claimed by an external app.
+    const remembered = readChatThreadSelection(threadKey);
+    if (!remembered?.sessionId || !remembered.projectId) return null;
+    return { sessionId: remembered.sessionId, projectId: remembered.projectId };
+  });
+
+  useEffect(() => {
+    writeChatThreadSelection(threadKey, {
+      sessionId: focused?.sessionId ?? '',
+      projectId: focused?.projectId ?? '',
+    });
+  }, [threadKey, focused?.sessionId, focused?.projectId]);
 
   const emptyPlaceholder = useMemo(
     () => `No chats with ${gezelDisplayName} yet — start one below.`,
@@ -552,6 +585,7 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
               recentReferences={recentReferences}
               onOpenReference={onOpenReference}
               placeholder={composerPlaceholder}
+              draftScope="gezel-all"
             />
           )}
         </>

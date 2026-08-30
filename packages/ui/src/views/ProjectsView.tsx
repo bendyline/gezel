@@ -556,12 +556,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const [selected, setSelected] = useState<ProjectDetail | null>(null);
   const [changingArchive, setChangingArchive] = useState(false);
   const [recentlyAddedGezelId, setRecentlyAddedGezelId] = useState<string | undefined>(undefined);
-  // Consume a pending "+" intent from the sidebar synchronously on first
-  // render (the event below covers the already-mounted case). Never in
-  // detail-only mode — a single project tab has no create UI.
-  const [createMode, setCreateMode] = useState<'crew' | null>(() =>
-    !detailOnly && consumeCreate('project') ? 'crew' : null,
-  );
+  const [createMode, setCreateMode] = useState<'crew' | null>(null);
   const [pkgName, setPkgName] = useState('');
   const [log, setLog] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -728,10 +723,16 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     return () => window.removeEventListener('gezel:project-updated', onUpdated);
   }, [refresh]);
 
-  // Already-mounted case: a "+" click while the listing is open arrives as
-  // an event (the lazy initializer above only runs on a fresh mount).
+  // Two ways in, one handler. A "+" click while the listing is already open
+  // arrives as the event; a click that had to open the listing first left
+  // the intent behind, because the event fired before this listener
+  // existed. Both are read here in the mount effect rather than in a render
+  // initializer — see `nav-intents.ts` for why that distinction is
+  // load-bearing. Never in detail-only mode: a single project tab has no
+  // create UI, and swallowing the intent there would strand it.
   useEffect(() => {
     if (detailOnly) return;
+    if (consumeCreate('project')) setCreateMode('crew');
     const onNew = () => {
       consumeCreate('project');
       setCreateMode('crew');

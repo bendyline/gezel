@@ -11,6 +11,7 @@ import { deriveThreadTitle } from '@bendyline/gezel';
  */
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
@@ -87,7 +88,7 @@ test('sessions — send a message, it persists, shows up after restart', async (
       await expect(reply).toBeVisible({ timeout: 90_000 });
       await page.screenshot({ path: join(screenshotDir, 'sessions-03-reply.png'), fullPage: true });
     } finally {
-      await app.close();
+      await closeApp(app);
     }
   }
 
@@ -117,7 +118,7 @@ test('sessions — send a message, it persists, shows up after restart', async (
         { timeout: 10_000 },
       );
     } finally {
-      await app.close();
+      await closeApp(app);
     }
   }
 });
@@ -139,6 +140,6 @@ test('sessions — + New session starts a fresh thread', async () => {
       fullPage: true,
     });
   } finally {
-    await app.close();
+    await closeApp(app);
   }
 });

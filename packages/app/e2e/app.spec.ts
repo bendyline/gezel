@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
@@ -46,12 +47,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  // `app.close()` exercises Electron's real before-quit path. The embedded
-  // service gets a 30-second graceful-shutdown window before the app forces
-  // the final quit, so Playwright's 30-second hook default races that safety
-  // wall and can report a teardown failure just as Electron is exiting.
-  test.setTimeout(HOOK_TIMEOUT_MS);
-  await app?.close();
+  await closeApp(app);
   await rm(gezelHome, { recursive: true, force: true }).catch(() => {});
 });
 

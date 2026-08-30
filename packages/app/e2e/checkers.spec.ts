@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 
 /**
@@ -68,10 +69,8 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  // Two MCP-backed reaction turns can make graceful embedded shutdown take
-  // longer than Playwright's 30s hook default while their bridges close.
-  test.setTimeout(60_000);
-  await app?.close();
+  // This spec leaves two MCP-backed reaction turns to drain.
+  await closeApp(app);
   await rm(gezelHome, { recursive: true, force: true }).catch(() => {});
 });
 
@@ -213,22 +212,38 @@ test('checkers: create from gallery, move on the board, the reaction summons the
   const previewFrame = page.locator('iframe.project-output-iframe');
   const previewSrcBeforeReload = await previewFrame.getAttribute('src');
   expect(previewSrcBeforeReload).toBeTruthy();
-  const reloadPreview = page.getByRole('button', { name: 'Reload the preview' });
-  if (await reloadPreview.isVisible()) {
-    await reloadPreview.click();
-  } else {
-    await page.getByRole('button', { name: 'More output actions' }).click();
-    await page.getByRole('menuitem', { name: 'Reload' }).click();
-  }
+  const inlineReload = page.getByRole('button', { name: 'Reload the preview' });
+  const moreActions = page.getByRole('button', { name: 'More output actions' });
+  // The click itself has to be retried, not just awaited. The output toolbar
+  // re-renders while the board streams preview logs, and a menu item that is
+  // reconciled between the pointer-down and the pointer-up takes the pair on
+  // two different nodes — the browser then fires no `click` at all, so React's
+  // handler never runs and the menu is left open with nothing reloaded. That
+  // is the same hazard the board-cell click below documents, one interaction
+  // earlier, and it is invisible to an un-verified `click()`. Retry until the
+  // old frame is provably gone; `src` is briefly absent while the replacement
+  // capability is minted, which counts.
+  await expect(async () => {
+    if (await inlineReload.isVisible()) {
+      await inlineReload.click();
+    } else {
+      // Open, never toggle: after a lost click the menu is still up, and a
+      // second press of the overflow button would close the very menu the
+      // retry needs.
+      if ((await moreActions.getAttribute('aria-expanded')) !== 'true') {
+        await moreActions.click();
+      }
+      await page.getByRole('menuitem', { name: 'Reload' }).click();
+    }
+    await expect
+      .poll(async () => await previewFrame.getAttribute('src'), { timeout: 2_000 })
+      .not.toBe(previewSrcBeforeReload);
+  }).toPass({ timeout: 20_000 });
+  // …and then that the replacement is actually serving before the board
+  // assertions below address it.
   await expect
-    .poll(
-      async () => {
-        const currentSrc = await previewFrame.getAttribute('src');
-        return Boolean(currentSrc && currentSrc !== previewSrcBeforeReload);
-      },
-      { timeout: 10_000 },
-    )
-    .toBe(true);
+    .poll(async () => await previewFrame.getAttribute('src'), { timeout: 15_000 })
+    .toBeTruthy();
   const seededOrigin = board.locator('[data-square="c3"]');
   await expect(seededOrigin.locator('.piece.red')).toBeVisible({ timeout: 10_000 });
   // The freshly remounted page can rebuild the board while Playwright's

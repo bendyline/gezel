@@ -1,6 +1,8 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, configure } from '@testing-library/react';
 import { afterEach } from 'vitest';
+import { resetChatThreadMemory } from '../components/chat-thread-memory.js';
+import { resetComposerDrafts } from '../components/composer-drafts.js';
 
 // View tests routinely wait on a chain of effects (load projects -> pick a
 // default -> load that project's scripts), each of which needs its own render
@@ -16,6 +18,11 @@ configure({ asyncUtilTimeout: 5000 });
 // for explicit imports, so unmount the previous render manually.
 afterEach(() => {
   cleanup();
+  // Chat drafts and thread selections outlive their component on purpose —
+  // that is the whole point of those stores. Both are module-level, so a
+  // half-typed draft from one test would seed the next test's composer.
+  resetComposerDrafts();
+  resetChatThreadMemory();
 });
 
 // jsdom implements getClientRects/getBoundingClientRect on Element but not on

@@ -18,6 +18,13 @@ import {
   resolveOpenChatTarget,
 } from './chat-open-command.js';
 import { publishOptimisticUserMessage } from './chat-optimistic-events.js';
+import {
+  clearComposerDraft,
+  composerDraftKey,
+  moveComposerDraft,
+  readComposerDraft,
+  writeComposerDraft,
+} from './composer-drafts.js';
 import { COMPOSER_PREFILL_EVENT, takeComposerPrefill } from './composer-prefill.js';
 import { type MentionToken, extractMentionTokens, extractMentions } from './mention-parse.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
@@ -175,6 +182,13 @@ export interface ChatComposerProps {
    * undefined and the chat composer never escapes.
    */
   onTerminalEscape?: (initialInput: string) => void;
+  /**
+   * Disambiguates this composer's remembered draft from another surface
+   * addressing the same (project, gezel) pair — Home's meester conversation
+   * versus that same gezel's own chat tab. Surfaces already separated by
+   * `taskRef` or `craftbookRef` don't need it. See `composer-drafts.ts`.
+   */
+  draftScope?: string;
 }
 
 /**
@@ -216,6 +230,7 @@ export function ChatComposer({
   passiveCcGezelIds,
   onPassiveCcConsumed,
   onTerminalEscape,
+  draftScope,
 }: ChatComposerProps) {
   const composerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -264,7 +279,33 @@ export function ChatComposer({
     elapsedMs: number;
     sessionId: string;
   } | null>(null);
-  const draftRef = useRef<string>('');
+  // The surface this composer's draft is filed under while it is unmounted.
+  // Session id is deliberately absent: a draft belongs to the conversation the
+  // user is addressing, and switching threads in the picker must not swap the
+  // message they are in the middle of writing out from under them.
+  const draftKey = useMemo(
+    () =>
+      composerDraftKey({
+        ...(draftScope ? { scope: draftScope } : {}),
+        projectId,
+        gezelId,
+        ...(taskRef ? { taskRef } : {}),
+        ...(craftbookRef ? { craftbookRef } : {}),
+      }),
+    [craftbookRef, draftScope, gezelId, projectId, taskRef],
+  );
+  const draftKeyRef = useRef(draftKey);
+  const draftRef = useRef<string>(readComposerDraft(draftKey));
+  // The address can move under a live composer — an @-mention pivot in project
+  // chat, a To-line recipient swap. The text stays with the instance in both
+  // cases, so the stored copy follows it rather than being replaced by
+  // whatever the destination address happened to hold.
+  useEffect(() => {
+    const previous = draftKeyRef.current;
+    if (previous === draftKey) return;
+    draftKeyRef.current = draftKey;
+    moveComposerDraft(previous, draftKey, draftRef.current);
+  }, [draftKey]);
   const draftEditVersionRef = useRef(0);
   // Tracks the length of the previous draft so we can detect "the
   // user just started typing a new draft" — the signal for the
@@ -272,15 +313,17 @@ export function ChatComposer({
   // empty draft (≤ 2 chars: empty, or a lone `>`) is a candidate.
   // After that, the user is mid-composition and a `> ` later in the
   // text is just a blockquote.
-  const prevDraftLenRef = useRef(0);
+  const prevDraftLenRef = useRef(draftRef.current.length);
   // Render-triggering shadow of `draftRef.current.trim().length > 0`.
   // The ref alone never re-renders, and the mid-turn button row (Nudge /
   // Interrupt appear only when there's text) needs to react to typing.
-  const [draftNonEmpty, setDraftNonEmpty] = useState(false);
+  const [draftNonEmpty, setDraftNonEmpty] = useState(() => draftRef.current.trim().length > 0);
   // A non-null value means the entire single-line draft is a local `/open`
   // command. Keeping the query in state lets the suggestion tray react to
   // every keystroke; draftNonEmpty alone only changes on empty/non-empty edges.
-  const [openCommandQuery, setOpenCommandQuery] = useState<string | null>(null);
+  const [openCommandQuery, setOpenCommandQuery] = useState<string | null>(() =>
+    parseOpenChatQuery(draftRef.current),
+  );
   // EditorShell reads initialMarkdown and configures its placeholder only
   // when it mounts. Bump this revision whenever the host needs to seed or
   // clear the editor; draftRef supplies the content for the fresh mount.
@@ -303,6 +346,7 @@ export function ChatComposer({
     const existing = draftRef.current.trim();
     const merged = existing ? `${existing}\n\n${queued}` : queued;
     draftRef.current = merged;
+    writeComposerDraft(draftKeyRef.current, merged);
     draftEditVersionRef.current += 1;
     prevDraftLenRef.current = merged.length;
     setDraftNonEmpty(merged.trim().length > 0);
@@ -322,7 +366,9 @@ export function ChatComposer({
   // the "To:" row so the user sees who the fan-out will reach before they
   // hit Send — previously the row was static on the primary and users had
   // no feedback that mentions were even being parsed.
-  const [mentioned, setMentioned] = useState<MentionToken[]>([]);
+  const [mentioned, setMentioned] = useState<MentionToken[]>(() =>
+    extractMentionTokens(draftRef.current),
+  );
   // Recipients chosen from the To-line picker are independent of inline
   // @-mentions. They use the same server fan-out field at send time, but stay
   // visible across turns until the user removes one or replaces the primary.
@@ -571,6 +617,7 @@ export function ChatComposer({
       prevDraftLenRef.current = source.length;
       const sourceChanged = draftRef.current !== source;
       draftRef.current = source;
+      writeComposerDraft(draftKeyRef.current, source);
       if (sourceChanged) draftEditVersionRef.current += 1;
       setDraftNonEmpty(source.trim().length > 0);
       setOpenCommandQuery(parseOpenChatQuery(source));
@@ -583,6 +630,10 @@ export function ChatComposer({
         const trimmed = source.trimStart();
         const m = trimmed.match(/^>\s+([^\n]*)/);
         if (m) {
+          // The keystrokes move to the terminal composer. Drop the stored
+          // draft too, or flipping back to chat later restores the `> ` sigil
+          // the user already spent on the handoff.
+          clearComposerDraft(draftKeyRef.current);
           onTerminalEscape((m[1] ?? '').trim());
           return;
         }
@@ -621,6 +672,7 @@ export function ChatComposer({
       return;
     }
     draftRef.current = '';
+    clearComposerDraft(draftKeyRef.current);
     prevDraftLenRef.current = 0;
     setDraftNonEmpty(false);
     setOpenCommandQuery(null);

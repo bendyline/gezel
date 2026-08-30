@@ -11,6 +11,12 @@ import { ProjectTimeline } from './ProjectTimeline.js';
 import { SessionSwitcher } from './SessionSwitcher.js';
 import { TerminalComposer } from './TerminalComposer.js';
 import { pickChatPlaceholder } from './chat-placeholder.js';
+import {
+  projectRecipientKey,
+  projectThreadKey,
+  readChatThreadSelection,
+  writeChatThreadSelection,
+} from './chat-thread-memory.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useShowAdvancedFeatures } from './useShowAdvancedFeatures.js';
 
@@ -145,6 +151,15 @@ export function ProjectChat({
   // gezel, and finally the first available gezel.
   useEffect(() => {
     if (selectedId) return;
+    // A recipient this session already addressed in this project outranks the
+    // ranking below — the user picked them, and coming back from another area
+    // is not a retraction of that pick.
+    const remembered = readChatThreadSelection(projectRecipientKey(project.id))?.gezelId;
+    if (remembered && gezels.some((gezel) => gezel.id === remembered)) {
+      setSelectedId(remembered);
+      setStartFreshFor(null);
+      return;
+    }
     if (lastThread === undefined) return;
     const resumable =
       isResumableThread(lastThread, Date.now()) &&
@@ -164,7 +179,12 @@ export function ProjectChat({
     // whatever this gezel last talked about days ago. Their older threads
     // stay in the switcher.
     setStartFreshFor(resumable ? null : next);
-  }, [selectedId, lastThread, gezels, project.voormanGezelId, project.gezelIds]);
+  }, [selectedId, lastThread, gezels, project.id, project.voormanGezelId, project.gezelIds]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    writeChatThreadSelection(projectRecipientKey(project.id), { gezelId: selectedId });
+  }, [project.id, selectedId]);
 
   const selected = gezels.find((g) => g.id === selectedId);
 
@@ -413,16 +433,26 @@ function ProjectChatBody({
   // across a project switch would send the next message to whichever
   // project the user just left — the bug that made "sends aren't showing
   // up in this chat" look like a timeline issue.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: (selectedGezel.id, project.id) is the reset trigger.
   useEffect(() => {
     const focused = focusedSessionRef.current;
     focusedSessionRef.current = null;
-    setSessionId(focused ?? '');
+    // Nothing was explicitly focused, so this is either a fresh mount or a
+    // recipient switch. Resume the thread this session last had open with
+    // that gezel here rather than falling back on the newest one.
+    setSessionId(
+      focused ??
+        readChatThreadSelection(projectThreadKey(project.id, selectedGezel.id))?.sessionId ??
+        '',
+    );
     // The task scope belongs to the thread we're leaving. A pill click that
     // switches gezel re-sets it right after, via `focusedTaskRef`.
     setActiveTask(focusedTaskRef.current);
     focusedTaskRef.current = null;
   }, [selectedGezel.id, project.id]);
+
+  useEffect(() => {
+    writeChatThreadSelection(projectThreadKey(project.id, selectedGezel.id), { sessionId });
+  }, [project.id, selectedGezel.id, sessionId]);
 
   // Pick a role-aware empty-composer prompt once per (gezel, project)
   // pairing. `isVoorman` is passed from the outer roster derivation —
@@ -618,6 +648,7 @@ function ProjectChatBody({
                   recentReferences={recentReferences}
                   onOpenReference={onOpenReference}
                   placeholder={placeholder}
+                  draftScope="project"
                   onPivotToMention={(mentionedGezelId) => {
                     // Project-chat pivot: when the user @-mentions another
                     // gezel from inside the active chat, switch the focus

@@ -1,11 +1,16 @@
 import { type GezelSummary, type Poppetje as PoppetjeStruct, displayName } from '@bendyline/gezel';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { ChatComposer } from '../../components/ChatComposer.js';
 import { ChatReferences } from '../../components/ChatReferences.js';
 import { GlobalTimeline } from '../../components/GlobalTimeline.js';
 import { SessionSwitcher } from '../../components/SessionSwitcher.js';
 import { pickChatPlaceholder } from '../../components/chat-placeholder.js';
+import {
+  MEESTER_THREAD_KEY,
+  readChatThreadSelection,
+  writeChatThreadSelection,
+} from '../../components/chat-thread-memory.js';
 import { useRoleBasedNameOnlyMode } from '../../components/useRoleBasedNameOnlyMode.js';
 import { MeesterGreeting } from './MeesterGreeting.js';
 
@@ -31,23 +36,42 @@ export function MeesterConversation({
   meesterIconOverride: boolean;
   emptyPlaceholder?: string;
 }) {
-  const [sessionId, setSessionId] = useState<string>('');
+  // Home is swapped out wholesale when the user opens any other area, so this
+  // component's local state cannot be the whole record of where they were.
+  // Seed from the session-scoped memory instead of always landing back on the
+  // meester's newest thread.
+  const remembered = readChatThreadSelection(MEESTER_THREAD_KEY);
+  const [sessionId, setSessionId] = useState<string>(remembered?.sessionId ?? '');
   const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
-  const [selectedGezelId, setSelectedGezelId] = useState(meesterGezelId);
-  const [projectId, setProjectId] = useState('default');
+  const [selectedGezelId, setSelectedGezelId] = useState(remembered?.gezelId || meesterGezelId);
+  const [projectId, setProjectId] = useState(remembered?.projectId || 'default');
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
 
-  // Reset the focused session if the meester changes (rare).
+  // Reset the focused session if the meester changes (rare). The remembered
+  // selection is only stale on an actual change of meester, so this skips its
+  // first run — otherwise it would wipe what we just restored on every mount.
+  const lastMeesterRef = useRef(meesterGezelId);
   useEffect(() => {
-    setSessionId('');
-    setSelectedGezelId(meesterGezelId);
-    setProjectId('default');
+    if (lastMeesterRef.current !== meesterGezelId) {
+      lastMeesterRef.current = meesterGezelId;
+      setSessionId('');
+      setSelectedGezelId(meesterGezelId);
+      setProjectId('default');
+    }
     api
       .listGezels()
       .then((response) => setGezels(response.gezels))
       .catch(() => setGezels([]));
   }, [meesterGezelId]);
+
+  useEffect(() => {
+    writeChatThreadSelection(MEESTER_THREAD_KEY, {
+      gezelId: selectedGezelId,
+      projectId,
+      sessionId,
+    });
+  }, [selectedGezelId, projectId, sessionId]);
 
   const selectedGezel = gezels.find((gezel) => gezel.id === selectedGezelId);
   const activeGezelId = selectedGezelId || meesterGezelId;
@@ -170,6 +194,7 @@ export function MeesterConversation({
               recentReferences={recentReferences}
               onOpenReference={onOpenReference}
               placeholder={composerPlaceholder}
+              draftScope="meester"
               belowAddressLine={
                 <SessionSwitcher
                   gezelId={activeGezelId}

@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
  */
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
@@ -67,11 +68,8 @@ test.describe('Security & Compliance — first run', () => {
   });
 
   test.afterAll(async () => {
-    // Switching security posture can leave first-run background work to
-    // drain during embedded-service shutdown. Preserve graceful cleanup,
-    // but give this Electron-specific hook more room than a UI assertion.
-    test.setTimeout(60_000);
-    await app?.close();
+    // Switching security posture leaves first-run background work to drain.
+    await closeApp(app);
     await rm(home, { recursive: true, force: true }).catch(() => {});
   });
 
@@ -119,7 +117,7 @@ test.describe('Security & Compliance — settings panel', () => {
   });
 
   test.afterAll(async () => {
-    await app?.close();
+    await closeApp(app);
     await rm(home, { recursive: true, force: true }).catch(() => {});
   });
 

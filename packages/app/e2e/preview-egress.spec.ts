@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 
 const appRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -75,7 +76,7 @@ setTimeout(function(){ location.href = ${JSON.stringify(`${sinkOrigin}/${mode}-n
   });
 
   test.afterAll(async () => {
-    await app?.close();
+    await closeApp(app);
     await new Promise<void>((resolve) => sink?.close(() => resolve()));
     await rm(home, { recursive: true, force: true }).catch(() => {});
   });
