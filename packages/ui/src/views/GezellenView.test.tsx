@@ -5,7 +5,9 @@ import { resolve } from 'node:path';
 import { type GezelDetail, type GezelSummary, pickRandomNameWithGender } from '@bendyline/gezel';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { consumeCreate, requestCreate, resetCreateIntents } from '../components/nav-intents.js';
 import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
 
@@ -277,5 +279,37 @@ describe('GezellenView', () => {
     await waitFor(() => {
       expect(api.listGezels).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+describe('GezellenView create intent', () => {
+  beforeEach(() => {
+    vi.mocked(api.listGezels).mockResolvedValue({ gezels: [] });
+    vi.mocked(api.getConfig).mockResolvedValue({} as never);
+    resetCreateIntents();
+  });
+
+  it('opens the create dialog for a "+" click that had to open this view first', async () => {
+    // The sidebar records the intent and dispatches `gezel:new-gezel` in the
+    // same tick, long before this view exists — so the intent, not the event,
+    // is what has to survive the trip.
+    requestCreate('gezel');
+    render(<GezellenView />);
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
+  });
+
+  it('does not spend the intent on a render that never commits', async () => {
+    // The area views are `lazy()`, so their first render happens under
+    // Suspense and React may throw it away and render again later. A
+    // `useState(() => consumeCreate(...))` burned the intent during that
+    // discarded pass and the committed render found nothing — the area
+    // opened with no dialog, on roughly two of every three cold opens.
+    // `renderToStaticMarkup` is a render with no commit, so it stands in for
+    // the discarded pass here.
+    requestCreate('gezel');
+    renderToStaticMarkup(<GezellenView />);
+    // The deferred clear rides a microtask; React's re-render lands later.
+    await Promise.resolve();
+    expect(consumeCreate('gezel')).toBe(true);
   });
 });

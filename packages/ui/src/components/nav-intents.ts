@@ -53,3 +53,9 @@ export function consumeCreate(kind: CreateKind): boolean {
   }
   return false;
 }
+
+/** Test seam. */
+export function resetCreateIntents(): void {
+  pending = null;
+  clearScheduled = false;
+}
