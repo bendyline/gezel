@@ -7923,6 +7923,16 @@ export class ChatManager {
               `session ${sessionId}: ${advanceOutcome.gateRejected.taskRef} step ` +
                 `"${advanceOutcome.gateRejected.stepId}" gate rejected — re-prompting with the verdict${stage > 0 ? ` (escalation stage ${stage})` : ''}`,
             );
+            // The verdict is about the step the TASK is on, which is not
+            // necessarily the step this session was pinned to. Re-pin
+            // before delivering it, or the model reads one step's
+            // procedure while being corrected about another's — see
+            // {@link repinSessionStep}.
+            await this.repinSessionStep(
+              state,
+              advanceOutcome.gateRejected.taskRef,
+              advanceOutcome.gateRejected.stepId,
+            );
             promptForTurn = correctivePromptForLiveRoster(
               stage >= 1
                 ? advanceOutcome.gateRejected.message
@@ -14046,6 +14056,82 @@ export class ChatManager {
    * Best-effort: failures here log + swallow so a malformed refresh
    * never breaks an otherwise-working session.
    */
+  /**
+   * Re-pin a task-scoped session onto the step the task is actually on,
+   * rebuilding the live system message in place.
+   *
+   * `record.stepId` is snapshotted when the session is created and wins
+   * over `task.activeStepId` in `buildSessionOpts`. That is right for a
+   * session that owns one step, and wrong the moment the gate or the
+   * observable-progress advancer re-prompts THIS session about a
+   * DIFFERENT step: the model then reads step X's procedure while being
+   * told to fix step Y's deliverable, and every instruction that would
+   * have prevented the failure lives in the step it cannot see.
+   *
+   * Wild-caught on gezel/49 (Pull Request Review). The session stayed
+   * pinned to `scope` while the `collect` gate rejected twice, so the
+   * model never read collect's "the ledger is runtime-owned — do not
+   * write it yourself" and spent 62 minutes trying to enumerate 580
+   * corpus paths into a 6144-token output cap.
+   *
+   * Rebuilding in place is required, not belt-and-braces: `ensureState`
+   * runs ONCE per send, before the continuation loop, so a warm session
+   * re-prompted via `continue` can never pick a new step up on its own.
+   *
+   * The rebuilt system message diverges from the cached prefix, so the
+   * next iteration pays a full prefill — minutes on a long local context.
+   * That is the correct trade: it happens only when the step genuinely
+   * changed (the normal case matches and returns immediately), and the
+   * alternative is every remaining iteration reasoning from the wrong
+   * procedure.
+   */
+  private async repinSessionStep(
+    state: LiveSessionState,
+    taskRef: string,
+    stepId: string,
+  ): Promise<void> {
+    const record = state.record;
+    if (record.stepId === stepId) return;
+    const previous = record.stepId ?? '(unpinned)';
+    record.stepId = stepId;
+    if (!record.taskRef) record.taskRef = taskRef;
+    await this.store.writeSession(record).catch((err) => {
+      log.warn(
+        `session ${record.id.slice(0, 8)}: persisting re-pinned step failed: ${err instanceof Error ? err.message : err}`,
+      );
+    });
+    log.info(
+      `session ${record.id.slice(0, 8)}: re-pinned ${taskRef} step "${previous}" → "${stepId}" and rebuilding the system prompt so the model reads the active step's procedure`,
+    );
+    const session = state.session;
+    if (!session?.setSystemMessage) return;
+    try {
+      const gezel = await this.store.getGezel(record.gezelId);
+      if (!gezel) return;
+      const liveToolNames = session.getRegisteredToolNames?.() ?? [];
+      const toolsOverride =
+        liveToolNames.length > 0
+          ? await this.buildToolsOverrideForLiveSession(record, liveToolNames)
+          : { availableTools: [], thirdPartyToolsetIds: [] };
+      const refreshed = await this.recomputeSystemMessage(
+        record,
+        gezel,
+        toolsOverride,
+        undefined,
+        undefined,
+        session,
+      );
+      if (refreshed) session.setSystemMessage(refreshed);
+    } catch (err) {
+      // Best-effort, same contract as the tools-block refresh: a failed
+      // rebuild leaves the stale-but-working prompt rather than killing
+      // a turn that still has a prescriptive gate verdict to deliver.
+      log.warn(
+        `session ${record.id.slice(0, 8)}: step re-pin prompt rebuild failed: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+
   private async refreshSystemPromptForLiveTools(
     session: LLMSession,
     record: ChatSession,

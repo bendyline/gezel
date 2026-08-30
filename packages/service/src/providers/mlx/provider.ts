@@ -52,6 +52,7 @@ import {
 } from '../constrained-turn.js';
 import { DeliverableReadPaceTracker } from '../deliverable-read-pacing.js';
 import {
+  appendCapTruncationHintToRejectedWrite,
   appendTruncationHintToToolResult,
   buildUnknownToolNudge,
   describeMalformation,
@@ -70,6 +71,7 @@ import {
   foldPostActionRumination,
   foldPreToolPreamble,
   formatToolMenu,
+  isPayloadMutationToolName,
   isWriteShapedToolName,
   parseGemmaNativeToolCall,
   parseGemmaToolCall,
@@ -158,6 +160,11 @@ const DEFAULT_NUM_CTX = 65_536;
 // matching llama.cpp's immediate-write path; user/model tuning may still grant
 // more. This is intentionally not a cap.
 const FILE_WRITE_MIN_TOKENS = 4_096;
+// Steers issued per send after a cap-truncated payload mutation was
+// refused. Two is enough to convert "re-emit the whole file" into
+// "make targeted edits"; beyond that the model is not reading the
+// steer and more attempts only burn engine time at full context.
+const MAX_CAP_TRUNCATION_STEERS = 2;
 // Max automatic append_to_file continuations after an immediate-write
 // truncation before we bail with the partial. Each continuation is one
 // bounded turn that writes the next chunk — comfortably above any
@@ -1522,6 +1529,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // happens before the SSE-body `finally`; keeping the active release here
     // lets the outer `finally` recover the slot from every exit path.
     let releaseActiveEngineRequest: (() => void) | null = null;
+    // Cap-truncation steers spent this send. Bounded because the steer is
+    // only worth issuing while the model can still act on it: past the
+    // budget the honest outcome is the warning banner and an ended turn,
+    // not another 6k-token attempt at the same over-cap payload.
+    let capTruncationSteers = 0;
 
     try {
       for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
@@ -2418,6 +2430,17 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // model knows the partial write_file landed and can issue a
         // follow-up with the remaining bytes.
         const truncatedCallIds = new Set<string>();
+        // Payload-mutation calls the cap cut mid-content that we refused
+        // to execute, because landing a prefix would destroy a whole-file
+        // target with no append path (see WRITE_SHAPED_TOOL_NAMES). The
+        // refusal is correct; ending the turn on it silently is not —
+        // nothing tells the model WHY, so the next attempt re-emits the
+        // same over-cap payload. Consumed below to steer toward
+        // incremental edits instead of falling through to a blank reply.
+        const droppedTruncatedPayloadCalls: Array<{
+          name: string;
+          args: Record<string, unknown>;
+        }> = [];
 
         // Try to repair any tool-call markers the stripper extracted
         // but mlx_vlm.server's parser missed. Repair only succeeds when
@@ -2621,6 +2644,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               this.emitWarning(
                 `The model's \`${parsed.name}\` call was cut off mid-stream and was skipped so a partial mutation could not land. Retry with a smaller payload.`,
               );
+              if (isPayloadMutationToolName(parsed.name)) {
+                droppedTruncatedPayloadCalls.push({ name: parsed.name, args: parsed.arguments });
+              }
               continue;
             }
             const id = `glm-repair-${seq}-${turn}-${idx}`;
@@ -2680,6 +2706,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               this.emitWarning(
                 `The model's \`${parsed.name}\` call was cut off mid-stream and was skipped so a partial mutation could not land. Retry with a smaller payload.`,
               );
+              if (isPayloadMutationToolName(parsed.name)) {
+                droppedTruncatedPayloadCalls.push({ name: parsed.name, args: parsed.arguments });
+              }
               continue;
             }
             const id = `hermes-repair-${seq}-${turn}-${idx}`;
@@ -3007,6 +3036,51 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               `The model wrote ${deliverable} in chat instead of calling ${salvageToolName} — promoting it to a real write. Ask the model to use the tool directly next time.`,
             );
           }
+        }
+        // Cap-truncated payload mutation with nothing left to run. The
+        // skip above is right — a partial `write_artifact` would replace
+        // a complete artifact with a prefix, and there is no
+        // `append_artifact` to finish it. But falling through from here
+        // ends the turn with zero tool calls and (after the rumination
+        // fold) zero visible text: the user gets a blank bubble and the
+        // MODEL gets nothing at all, so the next attempt re-emits the
+        // same over-cap payload. llama-cpp already steers this case via
+        // {@link appendCapTruncationHintToRejectedWrite} because its
+        // rejected write comes back as a tool result; on MLX the call
+        // never executes, so synthesize the same steer as a corrective
+        // and spend another loop iteration on it.
+        //
+        // Wild-caught on gezel/49: a `write_artifact` carrying a
+        // 580-path coverage ledger was cut at max_tokens=6144, dropped
+        // here, and the turn ended after 62 minutes with replyChars=0.
+        if (
+          toolCalls.length === 0 &&
+          droppedTruncatedPayloadCalls.length > 0 &&
+          capTruncationSteers < MAX_CAP_TRUNCATION_STEERS
+        ) {
+          capTruncationSteers++;
+          const dropped = droppedTruncatedPayloadCalls[0]!;
+          const liveToolNames = new Set(
+            (Array.isArray(body.tools) ? (body.tools as ChatCompletionTool[]) : [])
+              .map((tool) => chatCompletionToolName(tool))
+              .filter((name): name is string => typeof name === 'string'),
+          );
+          const requestMaxTokens = typeof body.max_tokens === 'number' ? body.max_tokens : null;
+          const steer = appendCapTruncationHintToRejectedWrite(
+            `ERROR: \`${dropped.name}\` was not executed because the call was cut off at the per-turn output token cap before its payload finished.`,
+            dropped.name,
+            dropped.args,
+            requestMaxTokens,
+            { availableToolNames: liveToolNames },
+          );
+          const noRemedy = steer.includes('No incremental edit tool is wired this turn');
+          log.info(
+            `turn#${seq}.${turn} cap-truncated ${dropped.name} dropped with no other call — ` +
+              `${noRemedy ? 'no incremental tool wired; escalation steer' : 'incremental-edit steer'} ` +
+              `injected (attempt ${capTruncationSteers}/${MAX_CAP_TRUNCATION_STEERS}, max_tokens=${requestMaxTokens ?? 'unset'})`,
+          );
+          this.messages.push({ role: 'user', content: `[system] ${steer}` });
+          continue;
         }
         // Auto-fold pre-tool preamble for verbose-family models. When
         // a tool call fired this turn, untagged visible text is

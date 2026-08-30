@@ -2929,6 +2929,55 @@ async def cache_warm(req: CacheWarmRequest) -> JSONResponse:
     )
     cache_state, _, _ = _resolve_cache_state(warm_request)
     prior_tokens = len(cache_state.token_ids or [])
+    warm_roster_fp = _roster_fp_of(req.tools)
+
+    # A warm must never race a live turn for the same cache_id. Both write
+    # the same entry, so whichever finishes last wins, and the warm's prompt
+    # is by construction the SHORT one. Observed: a 520-token warm landed on
+    # a session mid-turn and replaced its 121,508-token entry with 521
+    # tokens; the in-flight turn had already seeded so it survived, but the
+    # next turn on that session would have re-prefilled 121k tokens from
+    # scratch. The live turn owns the id — refuse, don't queue.
+    if _INFLIGHT_CACHE_IDS.get(req.cache_id, 0) > 0:
+        print(
+            f"[cache] warm skipped for cache_id={req.cache_id}: a request is already "
+            f"in flight on that cache (prior={prior_tokens})",
+            flush=True,
+        )
+        return JSONResponse(
+            {
+                "warmed": False,
+                "cache_id": req.cache_id,
+                "token_count": prior_tokens,
+                "persisted": False,
+                "skipped": "in-flight",
+            }
+        )
+
+    # The tool roster IS part of the prefix identity — it is rendered into
+    # the prompt ahead of everything else, so warming with a different
+    # roster diverges at token ~1 and the "warm" is a full prefill that
+    # then overwrites a good entry with a useless one. Refuse when the
+    # rosters disagree and there is a real entry to lose. An unknown saved
+    # roster is not a mismatch (nothing recorded yet).
+    saved_roster_fp = _LAST_SAVE_ROSTER.get(req.cache_id)
+    if prior_tokens > 0 and saved_roster_fp and saved_roster_fp != warm_roster_fp:
+        print(
+            f"[cache] warm skipped for cache_id={req.cache_id}: roster mismatch "
+            f"(warm={warm_roster_fp} saved={saved_roster_fp}, prior={prior_tokens}) — "
+            f"warming a different tool shape would churn the whole prefix",
+            flush=True,
+        )
+        return JSONResponse(
+            {
+                "warmed": False,
+                "cache_id": req.cache_id,
+                "token_count": prior_tokens,
+                "persisted": False,
+                "skipped": "roster-mismatch",
+            }
+        )
+
     sub = _Sub(
         request=warm_request,
         prompt_tokens=prompt_tokens,
@@ -2937,7 +2986,7 @@ async def cache_warm(req: CacheWarmRequest) -> JSONResponse:
         request_id=f"cachewarm-{uuid.uuid4()}",
         http_request=None,
         snapshot_target=snapshot_target,
-        roster_fp=_roster_fp_of(req.tools),
+        roster_fp=warm_roster_fp,
     )
     sub.pinned_cache_ids = _mark_inflight(req.cache_id)
     sub.prefill_total = len(prompt_tokens)

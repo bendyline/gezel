@@ -4235,6 +4235,36 @@ export class TaskManager {
   }
 
   /**
+   * Re-fire {@link onStepActivated} for the task's CURRENT active step
+   * without moving the step or touching its attempt bookkeeping.
+   *
+   * Exists for the fanout barrier. A post-fanout step's gate depends on
+   * files only the children can write, so `service.ts` declines to
+   * dispatch a worker turn into it while children are still active. That
+   * hold needs a release: nothing else pokes a spawn host when its last
+   * child settles, and without this the parent would sit active forever
+   * with a satisfiable gate and nobody to call it.
+   *
+   * Deliberately NOT `activateStep` — the step is already active, so that
+   * method early-returns and never reaches the hook, and re-entering it
+   * would re-run `onEnter` and re-stamp `lastActivatedAt` (which the task
+   * runner reads as superseding work).
+   */
+  async redispatchActiveStep(projectId: string, num: number, reason: string): Promise<void> {
+    if (!this.onStepActivated) return;
+    const task = await this.get(projectId, num);
+    if (!task || task.status !== 'active' || !task.activeStepId) return;
+    const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
+    if (!step) return;
+    log.info(`[tasks] ${task.ref}: re-dispatching active step "${step.id}" — ${reason}`);
+    try {
+      await this.onStepActivated({ projectId, task, newStep: step, completedStep: step });
+    } catch (err) {
+      log.error(`[tasks] re-dispatch hook failed for ${task.ref}:`, err);
+    }
+  }
+
+  /**
    * Clone the parent's spawn craftbook into a fresh child task. Child
    * starts at `status: 'active'` with the spawn craftbook's entry step
    * active, which fires the `onStepActivated` hook.

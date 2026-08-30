@@ -207,6 +207,43 @@ export function resolveTuning(input: ResolveTuningInput): ResolvedTuning {
     profileLayer,
     input.catalog,
   ]);
+  // A THINKING profile must not lower the output ceiling below what the
+  // model's own base tuning declares.
+  //
+  // A thinking profile spends part of its budget on reasoning BEFORE the
+  // answer, so its ceiling has to cover reasoning plus the payload. Every
+  // token the profile shaves off comes out of the deliverable. Yet 33
+  // shipped manifests author `thinking-precise` *below* their base
+  // (qwen3.8-27b: 6144 vs 12288; gemma4-26b: 4096 vs 8192) — and
+  // `thinking-precise` is exactly what the Reviewer and Meester roles
+  // select, the two that write the largest structured artifacts.
+  //
+  // Wild-caught on gezel/49: a Reviewer on qwen3.8-27b-q4 (262K context,
+  // provider default cap 16384) ran at 6144 because of the profile, was
+  // cut mid-`write_artifact`, and the turn ended after 62 minutes with an
+  // empty reply. Raising a ceiling costs nothing on turns that stop early
+  // — runaways are bounded by ramble detection and the tool-loop cap, not
+  // by this number.
+  //
+  // Instruct-kind profiles are left alone: for `terse` ("short replies;
+  // limited tokens") and `instruct`, a smaller ceiling IS the behavior
+  // being selected, not an accident. An explicit per-gezel override or
+  // install-wide preset is a deliberate user choice and still wins in
+  // both directions.
+  const explicitMaxTokens =
+    input.override?.sampling?.maxTokens ?? input.installDefault?.sampling?.maxTokens;
+  const catalogMaxTokens = input.catalog?.sampling?.maxTokens;
+  const profileMaxTokens = profileLayer?.sampling?.maxTokens;
+  if (
+    profileKind(resolvedProfileId) === 'thinking' &&
+    explicitMaxTokens === undefined &&
+    typeof catalogMaxTokens === 'number' &&
+    typeof profileMaxTokens === 'number' &&
+    profileMaxTokens < catalogMaxTokens &&
+    merged.sampling?.maxTokens === profileMaxTokens
+  ) {
+    merged.sampling = { ...merged.sampling, maxTokens: catalogMaxTokens };
+  }
   const baseSampling: SamplingBlock = merged.sampling ?? {};
   const thinking = isReasoningEngaged({
     tuning: merged,

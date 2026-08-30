@@ -705,6 +705,44 @@ describe('TaskManager', () => {
     });
   });
 
+  it('redispatchActiveStep re-fires the hook for the CURRENT step without moving it', async () => {
+    // The fanout barrier's release valve: `service.ts` declines to dispatch
+    // a post-fanout step while children are active, and this is what lifts
+    // the hold once the last child settles.
+    const t = await tasks.create('website', {
+      title: 'Fan out then collect',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Draft' }, { name: 'Collect' }],
+    });
+    await tasks.completeStep('website', t.num, t.craftbook.steps[0]!.id);
+    const collectId = t.craftbook.steps[1]!.id;
+
+    const calls: Array<{ newStepId: string; completedStepId: string }> = [];
+    tasks.setStepActivatedHook(async (ctx) => {
+      calls.push({ newStepId: ctx.newStep.id, completedStepId: ctx.completedStep.id });
+    });
+    await tasks.redispatchActiveStep('website', t.num, 'last fanout child settled');
+
+    expect(calls).toEqual([{ newStepId: collectId, completedStepId: collectId }]);
+    const after = await tasks.get('website', t.num);
+    expect(after?.activeStepId).toBe(collectId);
+  });
+
+  it('redispatchActiveStep is a no-op for a task that is not active', async () => {
+    const t = await tasks.create('website', {
+      title: 'Parked',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Draft' }, { name: 'Collect' }],
+    });
+    await tasks.setStatus('website', t.num, 'paused');
+    const calls: unknown[] = [];
+    tasks.setStepActivatedHook(async () => {
+      calls.push(true);
+    });
+    await tasks.redispatchActiveStep('website', t.num, 'child settled');
+    expect(calls).toHaveLength(0);
+  });
+
   it('onPhaseActivated failures do not break completePhase', async () => {
     tasks.setStepActivatedHook(async () => {
       throw new Error('handoff blew up');

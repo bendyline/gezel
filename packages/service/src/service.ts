@@ -1655,6 +1655,36 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       return;
     }
 
+    // ── Fanout barrier ──────────────────────────────────────────────────
+    // The step after a fanout is a barrier: its gate waits on shards the
+    // children have not written yet. Dispatching a worker turn into it
+    // while children are still active cannot possibly satisfy the gate —
+    // the model turn runs, the gate rejects, the attempt budget burns, and
+    // on a local engine every one of those cycles is engine time the
+    // children themselves are queued behind.
+    //
+    // Wild-caught on gezel/49: `collect` activated 0.5s after 24 children
+    // were spawned, none of which had produced a coverage shard. The gate
+    // (correctly) rejected an empty ledger, and the parent's assignee spent
+    // 62 minutes trying to hand-write 580 paths to close a gap only the
+    // children could close.
+    //
+    // The barrier lifts in the settle hook, which re-dispatches this step
+    // once the last active child settles. Held only while children are
+    // genuinely outstanding, so a re-activation after they finish proceeds
+    // normally, and a task whose children all failed still gets its turn.
+    if (task.spawnsCraftbook && !newStep.spawnFanout) {
+      const activeChildren = await tasks
+        .listChildren(task.ref, { status: 'active' })
+        .catch(() => []);
+      if (activeChildren.length > 0) {
+        log.info(
+          `[fanout] ${task.ref} step "${newStep.id}": holding dispatch — ${activeChildren.length} child(ren) still active; will re-dispatch when the last one settles`,
+        );
+        return;
+      }
+    }
+
     const assigneeGezelId =
       newStep.assignee?.kind === 'gezel' ? newStep.assignee.gezelId : newStep.suggestedGezelId;
     if (!assigneeGezelId) return;
@@ -1978,6 +2008,34 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       .catch((err) =>
         log.warn(`[service] report-action settle failed for ${task.ref}: ${String(err)}`),
       );
+    // Fanout barrier release. `onStepActivated` declines to dispatch a
+    // worker turn into a post-fanout step while children are still
+    // active, because that step's gate waits on files only the children
+    // can write. This is the other half: when the LAST active child
+    // settles, the gate has become satisfiable, so poke the parent's
+    // active step. Without it the hold would be permanent — nothing else
+    // notifies a spawn host that its crew finished.
+    if (task.parentTaskRef) {
+      const parsedParent = parseTaskRef(task.parentTaskRef);
+      if (parsedParent) {
+        const stillActive = await tasks
+          .listChildren(task.parentTaskRef, { status: 'active' })
+          .catch(() => []);
+        if (stillActive.length === 0) {
+          await tasks
+            .redispatchActiveStep(
+              parsedParent.projectId,
+              parsedParent.num,
+              `last fanout child ${task.ref} settled (${outcome})`,
+            )
+            .catch((err) =>
+              log.warn(
+                `[service] fanout barrier release failed for ${task.parentTaskRef}: ${String(err)}`,
+              ),
+            );
+        }
+      }
+    }
   });
   // Global search index (session transcripts + history mirror + documents):
   // change hooks enqueue into the single-writer manager; the read facade is
