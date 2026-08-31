@@ -387,7 +387,10 @@ function isSeededReadTool(name: string | undefined): boolean {
   return !!name && SEEDED_READ_TOOL_NAMES.has(bareToolName(name));
 }
 
-function sessionReadPaths(session: ChatSessionLike, seededPaths: readonly string[]): Set<string> {
+function sessionReadPaths(
+  session: Pick<ChatSessionLike, 'messages'>,
+  seededPaths: readonly string[],
+): Set<string> {
   const read = new Set<string>();
   for (const message of session.messages ?? []) {
     for (const call of message.toolCalls ?? []) {

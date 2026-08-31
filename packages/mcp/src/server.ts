@@ -3281,7 +3281,7 @@ server.tool(
  */
 function deriveVerifyRemedy(verifyError: string): string {
   if (/does not parse as a data table/i.test(verifyError)) {
-    return " The file WAS written — derive_file only accepts tabular output. Emit a JSON ARRAY of row objects (wrap a single summary object as `[ { … } ]`), delimited rows with a header, or a Markdown table. If the deliverable is genuinely a non-tabular JSON document or a report, write it with write_file instead.";
+    return ' The file WAS written — derive_file only accepts tabular output. Emit a JSON ARRAY of row objects (wrap a single summary object as `[ { … } ]`), delimited rows with a header, or a Markdown table. If the deliverable is genuinely a non-tabular JSON document or a report, write it with write_file instead.';
   }
   if (/is empty/i.test(verifyError)) {
     return ' The script wrote the file but left it blank — check that the rows you computed actually reach fs.writeFileSync.';
