@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { modelStorageRoots } from '../../models/storage-roots.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
+import { engineApiKey, withEngineApiKey } from '../native/engine-api-key.js';
 import { patientFetch } from '../patient-fetch.js';
 import { DEFAULT_RECOGNITION_MODEL_ID } from './catalog.js';
 import { LlamaVisionProvider } from './llama-vision.js';
@@ -97,7 +98,16 @@ export async function createRecognitionProvider(
             '8192',
             '--parallel',
             '1',
+            // Same lockdown as the chat path in llama-cpp/build-provider.ts —
+            // this spawns the SAME llama-server binary, which defaults to
+            // echoing any Origin back with credentials enabled. Without these
+            // a web page the user has open could drive the vision engine and
+            // read what it returns about their images.
+            '--cors-origins',
+            'localhost',
+            '--no-webui',
           ],
+          env: { LLAMA_API_KEY: engineApiKey() },
           baseUrl: `http://127.0.0.1:${port}`,
         };
       },
@@ -108,7 +118,7 @@ export async function createRecognitionProvider(
       storageRoots,
       modelId,
       supervisor,
-      fetchImpl: patientFetch(),
+      fetchImpl: withEngineApiKey(patientFetch(), engineApiKey()),
     });
   }
 
