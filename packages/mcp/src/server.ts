@@ -498,6 +498,9 @@ const excludedToolNames = new Set(
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+    // `GEZEL_MCP_SCHEMA_LINT` registers the whole corpus regardless of what
+    // this host can actually sandbox, so schema lints and tool-response
+    // tests see the same tools everywhere.
     ...(process.env.GEZEL_MCP_SCHEMA_LINT === '1'
       ? []
       : unavailableToolsForPlatform(process.platform)),

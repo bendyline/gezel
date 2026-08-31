@@ -63,6 +63,12 @@ describe('consolidated MCP tools', () => {
     vi.stubEnv('GEZEL_MAIL_ENABLED', '1');
     vi.stubEnv('GEZEL_SOCIAL_ENABLED', '1');
     vi.stubEnv('GEZEL_CONNECTORS_ENABLED', '1');
+    // These cases assert what a tool *says*, not whether the host can run
+    // it. Without this the deny-net tools (`run_nodejs_script`,
+    // `derive_file`) go unregistered on Windows and their assertions fail
+    // as "tool not found"; the gate itself is covered by
+    // platform-tool-availability.test.ts.
+    vi.stubEnv('GEZEL_MCP_SCHEMA_LINT', '1');
 
     const { server } = await import('./server.js');
     client = new Client(
