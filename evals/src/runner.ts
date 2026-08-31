@@ -56,6 +56,7 @@ import {
   noteHarnessInterventionDelivered,
 } from './sniff-feedback.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from './spawn.ts';
+import { bareToolName } from './tool-names.ts';
 import { writeTrialFacts } from './trial-facts.ts';
 import type {
   EvalRepairActionSnapshot,
@@ -75,7 +76,26 @@ export {
   isCoordinationOnlyRole,
 } from './handoff.ts';
 
-// Legacy camelCase spellings kept for scoring pre-rename run dirs.
+/**
+ * Tools whose successful call means the model actually changed something.
+ *
+ * Matched through `bareToolName`, so every spelling of the same capability
+ * lands here: the plain gezel-mcp name a local engine emits, the
+ * `mcp__gezel__` namespacing CLI providers apply, and the CLI providers'
+ * own built-in editors. Legacy camelCase spellings are kept for scoring
+ * pre-rename run dirs.
+ *
+ * Bare-name-only matching made this counter read ZERO for the whole of
+ * every anthropic-cli trial, which is the second arm of
+ * `advanceEscalationState`: with the failure text frozen too, the
+ * escalation ladder could never leave attempt 1, so the harness delivered
+ * exactly ONE repair message and then sat silent until the retry-loop
+ * killed the trial — reporting "(retry-loop nudge was sent and ignored)"
+ * for a ladder that never escalated. Wild-caught on
+ * craftbook-author-fanout x claude-sonnet-4-6: one nudge at 19:28:06,
+ * 17 minutes of real work (9 `mcp__gezel__append_to_file`, 5 `Write`),
+ * no second message, killed at 19:45:22.
+ */
 const COMPLETED_REPAIR_MUTATION_TOOLS = new Set([
   'write_file',
   'write_artifact',
@@ -85,12 +105,17 @@ const COMPLETED_REPAIR_MUTATION_TOOLS = new Set([
   'append_to_file',
   'insert_at_marker',
   'copy_artifact_to_workspace',
-  'writeFile',
-  'replaceInFile',
-  'replaceLines',
-  'applyPatch',
-  'appendToFile',
-  'insertAtMarker',
+  'writefile',
+  'replaceinfile',
+  'replacelines',
+  'applypatch',
+  'appendtofile',
+  'insertatmarker',
+  // CLI providers' built-in editors — Claude has no gezel-mcp `write_file`.
+  'write',
+  'edit',
+  'multiedit',
+  'notebookedit',
 ]);
 
 /**
@@ -115,7 +140,7 @@ export function completedRepairActionSnapshot(
       (message) =>
         message.role === 'assistant' &&
         message.toolCalls?.some(
-          (call) => call.success && COMPLETED_REPAIR_MUTATION_TOOLS.has(call.name),
+          (call) => call.success && COMPLETED_REPAIR_MUTATION_TOOLS.has(bareToolName(call.name)),
         ),
     ).length,
     inflight,
@@ -1716,6 +1741,7 @@ export async function pollUntilDone(
     repairFilePath?: string;
     runtimePassed?: number;
     runtimeFailed?: number;
+    milestones?: number;
   } | null;
   let latestSniff = null as SniffRef;
   const scoredSniffKeys = new Set<string>();
@@ -1727,6 +1753,7 @@ export async function pollUntilDone(
     repairFilePath?: string;
     runtimePassed?: number;
     runtimeFailed?: number;
+    milestones?: number;
   }): void => {
     latestSniff = state;
     if (state.score > 0) {
@@ -1916,6 +1943,9 @@ export async function pollUntilDone(
   // artifact-WRITE tool calls — the FAST retry-loop path gates on
   // re-write activity, not read-only research churn.
   let sniffPlateauStartingWriteCalls = 0;
+  // Workspace file total when the current sniff plateau began — the FAST
+  // path uses its growth to tell producing from re-emitting.
+  let sniffPlateauStartingFileCount = 0;
   let sniffPlateauStartingTurnStarts = 0;
 
   // One-shot re-engage nudge. When the soft window has used ~80% of its
@@ -2354,6 +2384,7 @@ export async function pollUntilDone(
       // "no artifact yet" case is the hard-progress watchdog).
       const currentToolCalls = fp.daemonActivity?.toolCalls ?? 0;
       const currentWriteCalls = fp.daemonActivity?.writeCalls ?? 0;
+      const currentFileCount = totalWorkspaceFileCount(fp.workspace);
       const currentTurnStarts = fp.daemonActivity?.turnStarts ?? 0;
       // Watchdog key tracks success-relevant movement only. Byte churn
       // with the same sniff score is exactly the stubborn-rewrite loop
@@ -2367,12 +2398,14 @@ export async function pollUntilDone(
         sniffPlateauStartingToolCalls = currentToolCalls;
         sniffPlateauStartingWriteCalls = currentWriteCalls;
         sniffPlateauStartingTurnStarts = currentTurnStarts;
+        sniffPlateauStartingFileCount = currentFileCount;
         retryLoopGrantedNudgeStages.clear();
       } else if (currentSniffKey !== 'none') {
         const plateauMs = Date.now() - sniffPlateauStartedAt;
         const toolCallsInPlateau = currentToolCalls - sniffPlateauStartingToolCalls;
         const writeCallsInPlateau = currentWriteCalls - sniffPlateauStartingWriteCalls;
         const turnStartsInPlateau = currentTurnStarts - sniffPlateauStartingTurnStarts;
+        const filesAddedInPlateau = currentFileCount - sniffPlateauStartingFileCount;
 
         // Pre-trigger direct-dispatch nudge. When the plateau is 80% of
         // the way to firing the fast-path retry-loop, pick the most-
@@ -2481,10 +2514,14 @@ export async function pollUntilDone(
         // FAST — stubborn rewriter: scored artifact re-emitted (≥N write
         // calls) without improving. Gated on writes so read-only research
         // doesn't trip it.
-        const fastPathTripped =
-          artifactHasScored &&
-          plateauMs >= RETRY_LOOP_FAST_WINDOW_MS &&
-          writeCallsInPlateau >= RETRY_LOOP_FAST_WRITE_THRESHOLD;
+        const fastPathTripped = retryLoopFastPathTripped({
+          artifactHasScored,
+          plateauMs,
+          writeCallsInPlateau,
+          filesAddedInPlateau,
+          windowMs: RETRY_LOOP_FAST_WINDOW_MS,
+          writeThreshold: RETRY_LOOP_FAST_WRITE_THRESHOLD,
+        });
         // LONG — idled team: went quiet regardless of artifact state.
         const longPathTripped =
           teamIdleInPlateau && !engineRecentlyActive && plateauMs >= RETRY_LOOP_LONG_WINDOW_MS;
@@ -2493,11 +2530,16 @@ export async function pollUntilDone(
         const stallPathTripped = artifactHasScored && plateauMs >= RETRY_LOOP_STALL_WINDOW_MS;
         // CHATTER — scored artifact not improving while the model keeps
         // taking turns without writing anything.
-        const chatterPathTripped =
-          artifactHasScored &&
-          plateauMs >= RETRY_LOOP_CHATTER_WINDOW_MS &&
-          writeCallsInPlateau === 0 &&
-          turnStartsInPlateau >= RETRY_LOOP_CHATTER_TURN_THRESHOLD;
+        const writeCounterHasEverMoved = currentWriteCalls > 0;
+        const chatterPathTripped = retryLoopChatterTripped({
+          artifactHasScored,
+          writeCounterHasEverMoved,
+          plateauMs,
+          writeCallsInPlateau,
+          turnStartsInPlateau,
+          windowMs: RETRY_LOOP_CHATTER_WINDOW_MS,
+          turnThreshold: RETRY_LOOP_CHATTER_TURN_THRESHOLD,
+        });
         if (
           imageGenerationActive &&
           (fastPathTripped || longPathTripped || stallPathTripped || chatterPathTripped) &&
@@ -2579,7 +2621,11 @@ export async function pollUntilDone(
               ? `${turnStartsInPlateau} turns without artifact writes (${toolCallsInPlateau} tool calls) after scoring artifact`
               : longPathTripped
                 ? `team idle (${toolCallsInPlateau} new tool calls) with no sniff movement for ${plateauMin}m`
-                : `artifact scored but stalled ${plateauMin}m despite ${toolCallsInPlateau} tool calls (${writeCallsInPlateau} re-writes)`;
+                : `artifact scored but stalled ${plateauMin}m despite ${toolCallsInPlateau} tool calls${
+                    writeCounterHasEverMoved
+                      ? ` (${writeCallsInPlateau} re-writes)`
+                      : ' (write counter blind for this provider — re-write count unknown)'
+                  }`;
           const nudgeNote = retryLoopNudgeDelivered
             ? ' (retry-loop nudge was sent and ignored)'
             : retryLoopNudgeAttempted
@@ -2660,11 +2706,21 @@ export async function captureFinalState(args: {
   // Dump every chat session via the API — gives us the same JSON the UI
   // would see, with all messages, tool calls, and provider state.
   await mkdir(join(runDir, 'sessions'), { recursive: true });
+  const persistedBySession: Array<{ id: string; gezelId?: string; toolCallsPersisted: number }> =
+    [];
   try {
     const { sessions } = await client.listChatSessions();
     for (const summary of sessions) {
       try {
         const full = await client.getChatSession(summary.id);
+        const persistedToolCalls = (
+          (full as { messages?: Array<{ toolCalls?: unknown[] }> }).messages ?? []
+        ).reduce((sum, m) => sum + (m.toolCalls?.length ?? 0), 0);
+        persistedBySession.push({
+          id: summary.id,
+          ...(summary.gezelId ? { gezelId: summary.gezelId } : {}),
+          toolCallsPersisted: persistedToolCalls,
+        });
         await writeFile(
           join(runDir, 'sessions', `${summary.gezelId}--${summary.id}.json`),
           JSON.stringify(full, null, 2),
@@ -2684,6 +2740,19 @@ export async function captureFinalState(args: {
     const telemetry = await client.listSessionTelemetry();
     await writeFile(join(runDir, 'session-telemetry.json'), JSON.stringify(telemetry, null, 2));
     log(`[capture] snapshotted telemetry for ${telemetry.sessions.length} session(s)`);
+    // A trial killed mid-turn persists the kickoff and nothing else, while
+    // the tool calls that turn already made stay invisible — and the files
+    // they wrote remain on disk. Say so, or the transcript reads as "the
+    // model did nothing".
+    const gaps = incompleteTranscripts(persistedBySession, telemetry.sessions);
+    if (gaps.length > 0) {
+      const detail = gaps
+        .map((g) => `${g.gezelId ?? g.id}: ${g.persisted} persisted vs ${g.recorded} recorded`)
+        .join('; ');
+      log(
+        `[capture] INCOMPLETE TRANSCRIPT for ${gaps.length} session(s) — ${detail}. Assistant turns commit at turn END, so a mid-turn termination loses them. Triage from session-telemetry.json and daemon.log, NOT from the empty transcript.`,
+      );
+    }
   } catch (err) {
     log(`[capture] session telemetry failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -3444,6 +3513,133 @@ export function sniffKeyToWorkspaceFilePath(key: string | null | undefined): str
   return /\.[A-Za-z0-9][A-Za-z0-9_-]{0,15}$/.test(firstSegment) ? firstSegment : null;
 }
 
+/**
+ * CHATTER path: a scored artifact stopped improving while the team kept
+ * taking turns and wrote nothing.
+ *
+ * `writeCounterHasEverMoved` is the load-bearing guard. The daemon
+ * classifies a file mutation by BARE tool name, so a provider that
+ * namespaces gezel-mcp (`mcp__gezel__append_to_file`) or edits with its
+ * own built-ins (`Write`/`Edit`) reports `fileMutations: 0` for the
+ * entire trial — every anthropic-cli trial across the first hard-suite
+ * runs did, at 3 to 273 tool calls apiece. Without the guard this
+ * watchdog is permanently armed against exactly the teams that ARE
+ * writing, and its evidence ("0 re-writes") is not evidence of anything:
+ * craftbook-author-fanout x claude-sonnet-4-6 shipped
+ * "stalled 18m despite 57 tool calls (0 re-writes)" over a trial with 9
+ * successful `mcp__gezel__append_to_file` calls and 5 `Write`s.
+ */
+/**
+ * Total workspace files the fingerprint can see, across every project.
+ *
+ * The retry loop's FAST path needs to tell a stubborn rewriter from a team
+ * working through a queue of deliverables, and the write counter alone
+ * cannot: `daemonActivity.writeCalls` is a bare sum over the six mutation
+ * tools with no path in it, so a write to a NEW file is indistinguishable
+ * from the fourth re-emission of a failing one.
+ */
+/**
+ * Sessions whose persisted transcript carries far fewer tool calls than the
+ * daemon's telemetry recorded for them.
+ *
+ * Assistant messages are committed at TURN END. A trial killed mid-turn —
+ * which is every watchdog termination — therefore persists the kickoff user
+ * message and nothing else, while the tool calls that turn already made are
+ * invisible. The workspace still holds the files they wrote, so the trial
+ * dir tells two contradictory stories.
+ *
+ * Wild-caught triaging the qwen3.8-27b-q4 re-baseline of
+ * `craftbook-author-linear`: telemetry recorded 15 and 7 tool calls across
+ * two sessions (3 file mutations, `notes/anomalies.md` on disk), and both
+ * dumped transcripts contained exactly one message — the kickoff. Read
+ * naively that says the model did nothing, which is the opposite of true.
+ *
+ * This does not recover the lost turns; it labels the gap, so a triager
+ * reaches for `session-telemetry.json` and `daemon.log` instead of
+ * concluding from an empty transcript.
+ */
+export function incompleteTranscripts(
+  sessions: ReadonlyArray<{ id: string; gezelId?: string; toolCallsPersisted: number }>,
+  telemetry: ReadonlyArray<{ sessionId: string; toolCalls?: number }>,
+): Array<{ id: string; gezelId?: string; persisted: number; recorded: number }> {
+  const recordedBy = new Map(telemetry.map((row) => [row.sessionId, row.toolCalls ?? 0]));
+  const gaps = [];
+  for (const s of sessions) {
+    const recorded = recordedBy.get(s.id) ?? 0;
+    if (recorded > s.toolCallsPersisted) {
+      gaps.push({
+        id: s.id,
+        ...(s.gezelId ? { gezelId: s.gezelId } : {}),
+        persisted: s.toolCallsPersisted,
+        recorded,
+      });
+    }
+  }
+  return gaps;
+}
+
+export function totalWorkspaceFileCount(
+  workspace: Record<string, { fileCount?: number }> | undefined,
+): number {
+  if (!workspace) return 0;
+  return Object.values(workspace).reduce((sum, entry) => sum + (entry?.fileCount ?? 0), 0);
+}
+
+/**
+ * FAST path — the stubborn rewriter: a scored artifact re-emitted without
+ * improving.
+ *
+ * `filesAddedInPlateau` is what makes that claim honest. The path fires on
+ * "N writes, no sniff movement", and its own comment names its target as
+ * "a stubborn rewriter re-emitting the same failing shape" — but writes to
+ * DIFFERENT files climb the same counter. On a multi-deliverable scenario
+ * that reads as looping while the team is in fact producing.
+ *
+ * Wild-caught on the qwen3.8-27b-q4 re-baseline of `craftbook-invoice-run`:
+ * killed at 8m on "4 re-writes ... without sniff movement", where the four
+ * writes were four DISTINCT paths — `invoices/2026-042.html`,
+ * `invoices/2026-043.html`, `tasks/eval/scope.md`, `tasks/eval/billables.json`.
+ * Nothing was rewritten even once. Two of the three required invoices were
+ * produced inside the very window being judged as a loop.
+ *
+ * A genuine rewriter leaves the file set flat, so requiring it costs that
+ * case nothing. Same failure family as the two documented squisq-review
+ * false kills this path was already narrowed once to avoid.
+ */
+export function retryLoopFastPathTripped(input: {
+  artifactHasScored: boolean;
+  plateauMs: number;
+  writeCallsInPlateau: number;
+  filesAddedInPlateau: number;
+  windowMs: number;
+  writeThreshold: number;
+}): boolean {
+  if (!input.artifactHasScored) return false;
+  if (input.plateauMs < input.windowMs) return false;
+  if (input.writeCallsInPlateau < input.writeThreshold) return false;
+  // New files appeared while the sniff held: that is a queue being worked,
+  // not one artifact being re-emitted.
+  return input.filesAddedInPlateau <= 0;
+}
+
+export function retryLoopChatterTripped(args: {
+  artifactHasScored: boolean;
+  writeCounterHasEverMoved: boolean;
+  plateauMs: number;
+  writeCallsInPlateau: number;
+  turnStartsInPlateau: number;
+  windowMs: number;
+  turnThreshold: number;
+}): boolean {
+  return (
+    args.artifactHasScored &&
+    args.writeCounterHasEverMoved &&
+    args.plateauMs >= args.windowMs &&
+    args.writeCallsInPlateau === 0 &&
+    args.turnStartsInPlateau >= args.turnThreshold
+  );
+}
+
 export function retryLoopSniffKey(
   sniff:
     | Pick<
@@ -3455,12 +3651,19 @@ export function retryLoopSniffKey(
         | 'repairFilePath'
         | 'runtimePassed'
         | 'runtimeFailed'
+        | 'milestones'
       >
     | null
     | undefined,
 ): string {
   if (!sniff) return 'none';
-  return `${sniff.key}:${sniff.score}:target${sniff.repairFilePath ?? 'none'}:fr${retryLoopFailReasonKey(sniff.failReason)}:rp${sniff.runtimePassed ?? 0}:rf${sniff.runtimeFailed ?? 0}`;
+  // `bytes` is deliberately absent: byte churn at a frozen score is the
+  // stubborn-rewrite loop this watchdog exists to catch. `milestones` is
+  // the opposite signal — a unit of work the scenario declares FINISHED —
+  // and is appended only when a scenario reports one, so every existing
+  // key string stays byte-identical.
+  const milestones = sniff.milestones === undefined ? '' : `:m${sniff.milestones}`;
+  return `${sniff.key}:${sniff.score}:target${sniff.repairFilePath ?? 'none'}:fr${retryLoopFailReasonKey(sniff.failReason)}:rp${sniff.runtimePassed ?? 0}:rf${sniff.runtimeFailed ?? 0}${milestones}`;
 }
 
 export function sniffArtifactHasScored(

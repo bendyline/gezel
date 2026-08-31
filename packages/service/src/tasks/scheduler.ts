@@ -271,7 +271,19 @@ export class TaskScheduler {
     if (!this.chat || !this.store) return;
     if (!task.activeStepId) return;
     const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
-    if (!step || step.terminal) return;
+    if (!step) return;
+    // A terminal step used to bail here, which left "active on the last step"
+    // with NO recovery at all: no idle auto-advance (a terminal step may not
+    // carry `advanceWhen` — the graph validator rejects it), no re-drive, no
+    // escalation. The only path to `complete` was the assignee choosing to
+    // call `advance_task_step`, and when it didn't the task was
+    // indistinguishable from abandoned — nothing in history, no needs-help
+    // event, no pause. Wild-caught on `craftbook-crossword-forge`
+    // (qwen3.6-35b): `verify-puzzle-html/1` sat on its terminal `finish` step
+    // for nine minutes past the stall bar while the sweep reached this task
+    // every 30s and returned. Terminal steps now get the ladder minus the
+    // auto-advance rung.
+    const terminalStep = step.terminal === true;
     // Only gezel-owned steps are driveable: step assignee → suggested → the
     // task-level assignee. A user-owned step waits for the user, not us.
     const assignee =
@@ -281,11 +293,23 @@ export class TaskScheduler {
           (task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined));
     if (!assignee) return;
 
-    // Never interfere with live work: someone mid-turn in this project, or
-    // the assignee mid-turn anywhere (a parked consultation counts — the
-    // asker's turn is still in flight, so we correctly wait it out).
-    if (this.chat.isProjectActive(task.projectId)) return;
+    // Never interfere with live work: the assignee mid-turn anywhere (a
+    // parked consultation counts — the asker's turn is still in flight, so we
+    // correctly wait it out).
     if (this.chat.isGezelActive(assignee)) return;
+    // Someone ELSE mid-turn in this project gates only the rungs that START a
+    // model turn (re-drive, escalate). It used to gate the whole ladder,
+    // including the pure-bookkeeping auto-advance below — and on a 1-slot
+    // local engine some session in the project is essentially always in
+    // flight, so the supervisor was dead for the life of a run. Wild-caught
+    // on `craftbook-author-linear` (qwen3.8-27b-q4): `order-intake-cleanup/1`
+    // step "verify" activated 15ms AFTER its deliverable (out/report.md,
+    // 1600 bytes) already cleared both `advanceWhen` and the completion
+    // gate's 150-byte floor, then sat active for fifteen minutes while this
+    // guard returned on all 85 ticks and the trial was booked as a model
+    // failure. Across 1041 recorded trial logs the auto-advance branch had
+    // never once fired.
+    const projectBusy = this.chat.isProjectActive(task.projectId);
 
     // Read-only / inactive projects pause all ambient work.
     if (!(await this.ambientAllowed(task.projectId, opts.ambientCache))) return;
@@ -326,9 +350,24 @@ export class TaskScheduler {
     //    through to the redrive branch with the gate-aware nudge instead
     //    of sweeping this damper forever (the second half of the
     //    silent-plateau gap).
-    const adv = await this.manager.tryIdleAutoAdvance(task.projectId, task.num);
+    // A terminal step has no `advanceWhen` to judge, so there is nothing to
+    // auto-advance ON — `tryIdleAutoAdvance` would return 'not-ready' anyway.
+    const adv = terminalStep
+      ? ('not-ready' as const)
+      : await this.manager.tryIdleAutoAdvance(task.projectId, task.num);
     if (adv === 'advanced' || adv === 'held') return;
     const gateFrozen = adv === 'held-frozen';
+
+    // Everything past this point messages a gezel, so it yields to live work.
+    if (projectBusy) {
+      // The recurring case is ordinary and would spam at 30s intervals; a
+      // DEFERRED escalation is the alarming one — a task that should have
+      // paused for a human is instead being held open by unrelated traffic.
+      const suppressed = `${task.ref} step "${step.id}": skip re-drive — a session in this project is mid-turn`;
+      if ((step.redriveCount ?? 0) >= opts.maxRedrives) log.info(`[scheduler] ${suppressed}`);
+      else log.debug(`[scheduler] ${suppressed}`);
+      return;
+    }
 
     // 2. Re-drive, bounded. Budget spent → Keurmeester escalation point:
     //    consult before pausing. An applied verdict earns the step ONE
@@ -414,9 +453,11 @@ export class TaskScheduler {
       fromGezelId: sender,
       toGezelIdOrName: assignee,
       projectId: task.projectId,
-      text: gateFrozen
-        ? stuckStepGateNudgeText(task, step)
-        : stuckStepNudgeText(task, step, deliverableExists),
+      text: terminalStep
+        ? stuckStepTerminalNudgeText(task, step)
+        : gateFrozen
+          ? stuckStepGateNudgeText(task, step)
+          : stuckStepNudgeText(task, step, deliverableExists),
       // Resume the exact task-step thread. Without these fields the nudge
       // falls into lobby chat and task tools lose their step-scoped env.
       taskRef: task.ref,
@@ -460,7 +501,12 @@ export class TaskScheduler {
             trail: step.gateAttemptHistory,
             lastMessage: step.lastGateReject?.message ?? '(no gate verdict recorded)',
           })
-        : `# Step stalled — paused for help\n\nStep "${step.name}" (\`${step.id}\`) was re-driven ${maxRedrives}× without producing its deliverable or advancing, and ${assignee} isn't making progress unattended. Pausing the task so you can look — re-assign, clarify the step, or advance it manually, then set it active again.`;
+        : // A terminal step's stall is a different problem, and saying so
+          // saves whoever picks it up from hunting for missing work: the
+          // procedure ran out, only the close is missing.
+          step.terminal
+          ? `# Task never closed — paused for help\n\nThe final step "${step.name}" (\`${step.id}\`) of this task stayed open: ${assignee} was re-driven ${maxRedrives}× and never called \`advance_task_step\` to complete it. The step's work may well be finished — check the deliverables, then complete the step yourself, or re-assign it.`
+          : `# Step stalled — paused for help\n\nStep "${step.name}" (\`${step.id}\`) was re-driven ${maxRedrives}× without producing its deliverable or advancing, and ${assignee} isn't making progress unattended. Pausing the task so you can look — re-assign, clarify the step, or advance it manually, then set it active again.`;
     await this.manager
       .appendNote(task.projectId, task.num, {
         text: noteText,
@@ -1067,6 +1113,16 @@ function stuckStepNudgeText(
     'Pick up where you left off: follow the step procedure in your prompt, write the deliverable with the tool it names, then call `advance_task_step` to hand off. ' +
     'If you are genuinely blocked, say exactly what you need (or ask the user with `ask_user_question`) instead of going quiet.';
   return `You're still assigned step \`${step.id}\` ("${step.name}") of task ${task.ref}, and it hasn't progressed.${deliverable} ${howTo}`;
+}
+
+/**
+ * Re-drive text for the LAST step of a task. There is no deliverable to
+ * chase here — the step carries no `advanceWhen` by construction — so the
+ * only thing missing is the close itself. Says so plainly rather than
+ * sending the assignee back to look for work that is already done.
+ */
+function stuckStepTerminalNudgeText(task: Task, step: TaskCraftbookStep): string {
+  return `You're on the FINAL step \`${step.id}\` ("${step.name}") of task ${task.ref}, and the task is still open. Nothing closes it but you: when the step's work is done, call \`advance_task_step({ ref: "${task.ref}", stepId: "${step.id}" })\` — that marks the task complete. If it should NOT close (the work is blocked, or something is still missing), say what is missing and use \`set_task_status\` or \`ask_user_question\` instead of going quiet.`;
 }
 
 /**

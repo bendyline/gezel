@@ -26,6 +26,7 @@
  * separate makes the call sites obvious and the dedup state simple.
  */
 
+import { tmpdir } from 'node:os';
 import {
   attachableDeliverable,
   describeSendFailure,
@@ -237,8 +238,12 @@ function normalizeFailReasonForSignature(failReason: string): string {
 }
 
 function coarseSniffSignature(filePath: string, sniff: SniffResult): string {
-  const missing = (sniff.missingRequiredSignals ?? []).slice().sort().join(',');
-  const failReason = normalizeFailReasonForSignature(sniff.failReason ?? '');
+  const missing = blindVolatileTempPaths(
+    (sniff.missingRequiredSignals ?? []).slice().sort().join(','),
+  );
+  const failReason = normalizeFailReasonForSignature(
+    blindVolatileTempPaths(sniff.failReason ?? ''),
+  );
   return `${filePath}::missing:${missing}::fail:${failReason}`;
 }
 
@@ -385,13 +390,33 @@ function exhaustedSniffFeedbackFailure(
   };
 }
 
+/**
+ * Blind throwaway temp-directory paths before they reach a ladder key.
+ *
+ * A failure that embeds a fresh `mkdtemp` root every evaluation is the
+ * SAME failure, but it hashes differently each poll, which resets the
+ * per-signature escalation counter forever and inflates the score-plateau
+ * counter by one "completed repair" per five-second poll. Only tmpdir-
+ * rooted paths are blinded: a real workspace path in a failure genuinely
+ * distinguishes one failure from another and must keep hashing apart.
+ */
+function blindVolatileTempPaths(text: string): string {
+  const temp = tmpdir().replace(/[/\\]+$/, '');
+  if (!temp) return text;
+  const escaped = temp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`(?:file://)?(?:/private)?${escaped}[^\\s'"\`]*`, 'g');
+  return text.replace(pattern, '<tmp>');
+}
+
 function hashSniffFailure(
   filePath: string,
   sniff: SniffResult,
   opts: SniffFeedbackOptions = {},
 ): string {
-  const missing = (sniff.missingRequiredSignals ?? []).slice().sort().join(',');
-  const failReason = sniff.failReason ?? '';
+  const missing = blindVolatileTempPaths(
+    (sniff.missingRequiredSignals ?? []).slice().sort().join(','),
+  );
+  const failReason = blindVolatileTempPaths(sniff.failReason ?? '');
   const imageSrcs = (opts.availableImageSrcs ?? []).slice().sort().join(',');
   const brokenImageSrcs = (opts.brokenImageSrcs ?? []).slice().sort().join(',');
   const repairDirective = opts.repairDirective ?? '';
@@ -694,7 +719,7 @@ function sniffPlateauEscalationLine(
   attempts: number,
 ): string {
   const score = typeof sniff.score === 'number' ? sniff.score : 0;
-  return `SCORE PLATEAU — ${attempts} completed repairs and the scenario score is still ${score}. Each repair fixed the previously named detail only for a DIFFERENT check to fail; you are patching symptoms one at a time from memory. First call \`read_file({ path: ${JSON.stringify(filePath)} })\` to see the current content, then re-read the scenario prompt and mission objectives, and fix EVERY remaining gap in \`${filePath}\` in one pass — not just the failure named below.`;
+  return `SCORE PLATEAU — ${attempts} completed repairs and the scenario score is still ${score}. Each repair fixed the previously named detail only for a DIFFERENT check to fail; you are patching symptoms one at a time from memory. First re-read \`${filePath}\` with your file-read tool (\`read_file({ path: ${JSON.stringify(filePath)} })\`, or your built-in \`Read\` when \`read_file\` is not in your tool list) to see the current content, then re-read the scenario prompt and mission objectives, and fix EVERY remaining gap in \`${filePath}\` in one pass — not just the failure named below.`;
 }
 
 /** Terminal reason for a plateau-driven exhaustion — names the shape honestly. */
@@ -724,7 +749,7 @@ function sniffEscalationLine(filePath: string, sniff: SniffResult, attempts: num
   // land the way it believes. Wild-caught on qwen3.5-9b × schema-migration
   // (0/5): three rewrites of the checked file without sniff movement, each
   // patching from memory of a file that no longer said what it thought.
-  return `REPEAT MISS — attempt ${attempts} on \`${filePath}\`: your completed repair left the exact same check failing${missing ? ` (${missing})` : ''}. Your last edit did not change what the check reads, so your mental copy of this file is stale — first call \`read_file({ path: ${JSON.stringify(filePath)} })\` and find the exact section the failure below names in the CURRENT content. Do not rewrite the whole file and do not reply that it is done. Then make the smallest targeted edit that fixes the FIRST failure named below, using \`replace_in_file\` or \`replace_lines\` on the exact section the check names.`;
+  return `REPEAT MISS — attempt ${attempts} on \`${filePath}\`: your completed repair left the exact same check failing${missing ? ` (${missing})` : ''}. Your last edit did not change what the check reads, so your mental copy of this file is stale — first re-read it with your file-read tool (\`read_file({ path: ${JSON.stringify(filePath)} })\`, or your built-in \`Read\` when \`read_file\` is not in your tool list) and find the exact section the failure below names in the CURRENT content. Do not rewrite the whole file and do not reply that it is done. Then make the smallest targeted edit that fixes the FIRST failure named below, using \`replace_in_file\` or \`replace_lines\` on the exact section the check names.`;
 }
 
 function hasAppendOnlyRepairDirective(directive: string | undefined): boolean {

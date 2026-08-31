@@ -350,6 +350,12 @@ export interface AuthoringPollArgs {
   failures: string[];
   /** Monotonic-ish progress proxy for the runner's fingerprint. */
   bytes: number;
+  /**
+   * Count of scenario-declared units of work actually completed. Unlike
+   * `bytes` this reaches the retry-loop plateau key, so a finished fanout
+   * run restarts the stall clock.
+   */
+  milestones?: number;
   /** Virtual surface named in the feedback message (not a real file). */
   repairPath: string;
   repairDirective: string;
@@ -372,6 +378,7 @@ export async function finishAuthoringPoll(
     key: args.scenarioId,
     score,
     bytes: args.bytes,
+    ...(args.milestones !== undefined ? { milestones: args.milestones } : {}),
     ...(args.failures[0] !== undefined ? { failReason: args.failures[0] } : {}),
   });
   ctx.logChanged(

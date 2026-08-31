@@ -556,6 +556,8 @@ function inlineStepsToCraftbook(
     /** Requirements the children inherit — see the `mainBook.spawn` call site. */
     toolsets?: CraftbookToolsetNeed[];
     connectors?: CraftbookConnectorNeed[];
+    /** Embedded script sources the children's `scope: 'craftbook'` refs resolve against. */
+    scripts?: Record<string, string>;
   },
 ): Craftbook {
   const resolved: CraftbookStep[] = expandStepDeliverables(steps);
@@ -570,6 +572,7 @@ function inlineStepsToCraftbook(
     ...(opts.defaultAssignee ? { defaultAssignee: opts.defaultAssignee } : {}),
     ...(opts.toolsets ? { toolsets: opts.toolsets } : {}),
     ...(opts.connectors ? { connectors: opts.connectors } : {}),
+    ...(opts.scripts ? { scripts: opts.scripts } : {}),
     steps: resolved,
     entryStepId: entry,
     createdAt: now,
@@ -1229,6 +1232,14 @@ export class TaskManager {
         // The host already proved these are installed and bound at launch.
         ...(mainBook.toolsets ? { toolsets: mainBook.toolsets } : {}),
         ...(mainBook.connectors ? { connectors: mainBook.connectors } : {}),
+        // And the parent's embedded script sources, for the same reason.
+        // `embeddedScriptSource` resolves a shard's `scope: 'craftbook'` gate
+        // ref against the SHARD's own snapshot, so a spawn template without
+        // the map sends every shard to the project-installed copy — which,
+        // for a book written straight onto a task, does not exist. Every
+        // shard then pauses with a gate_infrastructure_error naming a path
+        // the model cannot create.
+        ...(mainBook.scripts ? { scripts: mainBook.scripts } : {}),
       });
     }
 
@@ -2579,6 +2590,19 @@ export class TaskManager {
         const following = task.craftbook.steps[idx + 1];
         if (following) newActive = following.id;
       }
+    }
+
+    // A route that names no step used to be silently accepted here: the task
+    // was written with an `activeStepId` matching nothing, so no handoff
+    // fired, no gate ran, no auto-advance was possible, and the stuck-step
+    // sweep returned at its `if (!step)` guard. Write-time validation now
+    // rejects the shape (including inside `spawn.steps`, which was never
+    // graph-checked at all); this makes any survivor from an older snapshot
+    // loud instead of leaving a task that merely looks active forever.
+    if (newActive && !terminating && !stepExists(newActive)) {
+      log.error(
+        `[tasks] ${task.ref}: step "${stepId}" routes to "${newActive}", which is not a step on this task (steps: ${task.craftbook.steps.map((s) => s.id).join(', ')}). The task will sit active on a step that does not exist — fix the craftbook's routing.`,
+      );
     }
 
     // Stamp the activation onto the newly-active step so loops expose

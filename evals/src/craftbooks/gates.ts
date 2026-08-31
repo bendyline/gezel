@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, normalize } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize } from 'node:path';
 import { promisify } from 'node:util';
 import type { GateCheck, StepSniff } from '@bendyline/gezel';
 import { verifyBinaryDocumentBytes } from '@bendyline/gezel';
@@ -262,6 +262,7 @@ async function evaluateNodeScriptPasses(
   if (scriptContent === null) return `${script} not found`;
 
   const root = await mkdtemp(join(tmpdir(), 'gezel-craftbook-node-'));
+  const redact = sandboxRedactor(root);
   try {
     for (const filePath of await ws.list()) {
       const normalized = normalizeWorkspacePath(filePath);
@@ -283,11 +284,15 @@ async function evaluateNodeScriptPasses(
         ? null
         : nodeExecSuccessFailureDetail(output.stdout, output.stderr);
       if (failureOutput) {
-        return `${script} reported failure output despite exit 0: ${failureOutput}\nRepair hint: Let assertion failures throw out of the test process, or set process.exitCode = 1 when a test case fails. Do not catch assertion errors only to print them and continue.`;
+        return redact(
+          `${script} reported failure output despite exit 0: ${failureOutput}\nRepair hint: Let assertion failures throw out of the test process, or set process.exitCode = 1 when a test case fails. Do not catch assertion errors only to print them and continue.`,
+        );
       }
       const missingOutput = missingRequiredNodeOutput(check, output.stdout, output.stderr);
       if (missingOutput) {
-        return `${script} ${missingOutput}\nRepair hint: Make sure \`${script}\` executes the tests when run with \`node ${script}\`; do not only define or export test functions. Add explicit console output after each required assertion group passes, for example \`console.log("Pagination test passed")\`, \`console.log("Auth failure test passed")\`, and similar labels. Do not only leave these names in comments or assertion messages that print only on failure.`;
+        return redact(
+          `${script} ${missingOutput}\nRepair hint: Make sure \`${script}\` executes the tests when run with \`node ${script}\`; do not only define or export test functions. Add explicit console output after each required assertion group passes, for example \`console.log("Pagination test passed")\`, \`console.log("Auth failure test passed")\`, and similar labels. Do not only leave these names in comments or assertion messages that print only on failure.`,
+        );
       }
       return null;
     } catch (err) {
@@ -301,7 +306,7 @@ async function evaluateNodeScriptPasses(
       if (isNodeExecTimeout(err)) {
         return `${script} was killed after ${timeoutMs}ms without exiting. This is a timeout, not an assertion failure — do NOT rewrite your test logic. Two usual causes, both fixable: (1) a server that never closes — after the tests finish (in a \`finally\`), call \`server.close()\` so the process exits; (2) hanging on server lifecycle — resolve the assigned port inside \`server.listen(0, () => ...)\` with \`server.address().port\` and do not wait for a \`listening\` event after \`listen()\` already fired. If your logic is already correct and the host is simply slow, this passes on retry.`;
       }
-      const detail = nodeExecErrorDetail(err);
+      const detail = redact(nodeExecErrorDetail(err));
       const hint = nodeExecRepairHint(detail);
       return `${script} did not pass when run with node: ${detail}${hint ? `\nRepair hint: ${hint}` : ''}`;
     }
@@ -327,6 +332,31 @@ function isNodeExecTimeout(err: unknown): boolean {
   return record.killed === true || record.signal === 'SIGTERM';
 }
 
+/**
+ * Blind the throwaway sandbox root so the SAME logical failure always
+ * renders the same string.
+ *
+ * The oracle runs against a fresh `mkdtemp` copy of the workspace on every
+ * poll, and node stamps that root into every stack frame. The repair
+ * ladders in `sniff-feedback.ts` key their "has the model tried again?"
+ * counters off the failure text, and a root that changes every five
+ * seconds made a frozen failure look like a fresh revision each poll:
+ * the per-signature ladder reset to attempt 1 forever while the score-
+ * plateau ladder booked one "completed repair" per poll. Wild-caught on
+ * qwen3.8-27b x codemod-sweep, where attempts 3, 4 and 5 landed 5.1s
+ * apart while the target gezel had been mid-turn for four minutes and
+ * stayed mid-turn for fourteen more; the trial was terminated
+ * `repair-exhausted (score plateau): 6 completed repairs` and booked as a
+ * MODEL failure for a counter the model never touched.
+ */
+function sandboxRedactor(root: string): (text: string) => string {
+  const marker = basename(root).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Matches however a stack frame spells the root: the raw path, the
+  // /private-prefixed realpath macOS reports, and the file:// URL form.
+  const pattern = new RegExp(`(?:file://)?(?:[A-Za-z]:)?[^\\s'"\`]*${marker}`, 'g');
+  return (text) => text.replace(pattern, '<sandbox>');
+}
+
 function nodeExecErrorDetail(err: unknown): string {
   if (!err || typeof err !== 'object') return String(err);
   const record = err as {
@@ -336,15 +366,23 @@ function nodeExecErrorDetail(err: unknown): string {
     stdout?: string | Buffer;
     stderr?: string | Buffer;
   };
+  const message = record.message?.trim() ?? '';
+  // `execFile`'s rejection message is already `Command failed: <cmd>\n<stderr>`.
+  // Appending the captured streams again printed the whole assertion + stack
+  // twice, and `formatNudge` then renders the detail once as a missing signal
+  // and once as the specific failure — four copies of one 1.3 KB trace in a
+  // single repair message, with the 2000-char cap slicing the last one
+  // mid-token (`operator: 'deepS`). Keep whichever stream the message does
+  // not already carry.
+  const streams = [bufferishToString(record.stderr), bufferishToString(record.stdout)]
+    .map((part) => part?.trim() ?? '')
+    .filter((part) => part.length > 0 && !message.includes(part));
   const parts = [
     record.code !== undefined ? `exit=${record.code}` : null,
     record.signal ? `signal=${record.signal}` : null,
-    record.message,
-    bufferishToString(record.stderr),
-    bufferishToString(record.stdout),
-  ]
-    .filter((part): part is string => !!part && part.trim().length > 0)
-    .map((part) => part.trim());
+    message || null,
+    ...streams,
+  ].filter((part): part is string => !!part && part.length > 0);
   const joined = parts.join('\n').slice(0, 2000);
   return joined || 'unknown node execution failure';
 }

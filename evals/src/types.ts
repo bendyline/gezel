@@ -93,6 +93,16 @@ export interface EvalContext {
     repairFilePath?: string;
     runtimePassed?: number;
     runtimeFailed?: number;
+    /**
+     * Count of scenario-declared milestones the team has actually
+     * completed (fanout runs finished, shards landed, …). Monotone by
+     * construction and independent of bytes, so the retry-loop plateau
+     * key can honour it: raw byte churn at a frozen score IS the
+     * stubborn-rewrite loop the watchdog exists to catch, but a
+     * completed milestone is progress by the scenario's own definition
+     * and must restart the plateau clock.
+     */
+    milestones?: number;
   }) => void;
   /**
    * Request a terminal trial failure after the current success check. Used by
@@ -535,6 +545,8 @@ export interface TrialFinalSniff {
   repairFilePath?: string;
   runtimePassed?: number;
   runtimeFailed?: number;
+  /** Scenario-declared completed milestones; see `recordSniff`. */
+  milestones?: number;
 }
 
 /**

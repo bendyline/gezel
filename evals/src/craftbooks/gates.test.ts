@@ -405,6 +405,51 @@ describe('craftbook eval gate checks', () => {
     expect(result.failures[0]).toContain('expected');
   });
 
+  // INCIDENT: the oracle copies the workspace into a fresh `mkdtemp` root on
+  // every poll, and node stamps that root into every stack frame. The repair
+  // ladders in sniff-feedback.ts key their "did the model try again?"
+  // counters off the failure text, so a frozen failure looked like a brand
+  // new revision five seconds later: the score-plateau ladder booked one
+  // "completed repair" per poll and terminated qwen3.8-27b x codemod-sweep
+  // as `repair-exhausted (score plateau): 6 completed repairs` while the
+  // target gezel had been mid-turn the entire time. Booked as a MODEL
+  // failure for a counter the model never touched.
+  it('renders the same node failure identically across runs', async () => {
+    const ws = workspace({
+      'check.mjs':
+        "import assert from 'node:assert/strict';\nassert.equal('actual', 'expected');\n",
+    });
+    const check = { kind: 'nodeScriptPasses' as const, script: 'check.mjs', timeoutMs: 5000 };
+
+    const first = await evaluateCraftbookGateChecks([check], ws);
+    const second = await evaluateCraftbookGateChecks([check], ws);
+
+    expect(first.failures[0]).toBe(second.failures[0]);
+    expect(first.failures[0]).not.toMatch(/gezel-craftbook-node-/);
+    expect(first.failures[0]).toContain('<sandbox>');
+  });
+
+  // INCIDENT: `execFile`'s rejection message already ends with the captured
+  // stderr, and the detail appended it a second time. formatNudge then
+  // renders the detail once as a missing signal and once as the specific
+  // failure, so one 1.3 KB assertion trace reached the model FOUR times in a
+  // 5.4 KB repair message, and the 2000-char cap sliced the last copy
+  // mid-token (`operator: 'deepS`). On a 27B local model that message is the
+  // entire repair signal.
+  it('does not repeat the captured stderr the failure message already carries', async () => {
+    const result = await evaluateCraftbookGateChecks(
+      [{ kind: 'nodeScriptPasses', script: 'check.mjs', timeoutMs: 5000 }],
+      workspace({
+        'check.mjs':
+          "import assert from 'node:assert/strict';\nassert.ok(false, 'UNIQUE_MARKER_FOR_DEDUP');\n",
+      }),
+    );
+
+    expect(result.pass).toBe(false);
+    const occurrences = result.failures[0]!.split('UNIQUE_MARKER_FOR_DEDUP').length - 1;
+    expect(occurrences).toBe(1);
+  });
+
   it('reports a hung (unclosed) script as a timeout, not an assertion failure (E3)', async () => {
     const result = await evaluateCraftbookGateChecks(
       [{ kind: 'nodeScriptPasses', script: 'hang.mjs', timeoutMs: 500 }],

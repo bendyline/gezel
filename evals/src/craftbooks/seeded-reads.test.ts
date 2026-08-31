@@ -32,6 +32,7 @@ const ROOT = '/private/var/folders/wp/T/gezel-eval-x/projects/p/workspace';
 describe('seeded source reads', () => {
   it('counts gezel-mcp read_file with a workspace-relative path', () => {
     const session = {
+      id: 's1',
       messages: [{ toolCalls: [{ name: 'read_file', success: true, path: 'src/admin.ts' }] }],
     };
     expect([...sessionReadPaths(session, SEEDED)]).toEqual(['src/admin.ts']);
@@ -39,6 +40,7 @@ describe('seeded source reads', () => {
 
   it('counts the same tool namespaced by a CLI provider', () => {
     const session = {
+      id: 's1',
       messages: [
         { toolCalls: [{ name: 'mcp__gezel__read_file', success: true, path: 'src/profile.ts' }] },
       ],
@@ -48,6 +50,7 @@ describe('seeded source reads', () => {
 
   it("counts Claude's built-in Read, whose path is absolute and lives in argsFull", () => {
     const session = {
+      id: 's1',
       messages: [
         { toolCalls: [claudeRead(`${ROOT}/src/admin.ts`)] },
         { toolCalls: [claudeRead(`${ROOT}/docs/security.md`)] },
@@ -61,6 +64,7 @@ describe('seeded source reads', () => {
 
   it('ignores a failed read', () => {
     const session = {
+      id: 's1',
       messages: [{ toolCalls: [{ ...claudeRead(`${ROOT}/src/admin.ts`), success: false }] }],
     };
     expect([...sessionReadPaths(session, SEEDED)]).toEqual([]);
@@ -73,6 +77,7 @@ describe('seeded source reads', () => {
     'does not count %s as a read',
     (name) => {
       const session = {
+        id: 's1',
         messages: [
           { toolCalls: [{ name, success: true, argsFull: `path:\n${ROOT}/src/admin.ts` }] },
         ],

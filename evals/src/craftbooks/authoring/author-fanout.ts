@@ -236,6 +236,12 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       ) +
       1000 * perStoreRuns +
       500 * (await countCraftbookToolCalls(ctx, projectId)),
+    // A finished per-store run is a declared unit of work, not byte churn.
+    // It rides `milestones` (which the plateau key honours) as well as
+    // `bytes` (which it does not): the first hard-suite run completed three
+    // extra runs while the plateau key `…:2:targetnone:fr1tjwffw:rp0:rf0`
+    // never moved, and the stall path killed the trial as "stalled 18m".
+    milestones: perStoreRuns,
     repairPath: 'craftbook: store health sweep',
     repairDirective: [
       'CRAFTBOOK_FANOUT_REPAIR: this eval grades the craftbook document and the task graph, not a',

@@ -61,7 +61,83 @@ export function parseCraftbookDoc(
   if (!parsed.success) {
     return { ok: false, errors: zodIssuesToDocErrors(parsed.error.issues, raw) };
   }
+  // Runs on the RAW document, not `parsed.data`: the offending key is
+  // exactly the one Zod has already stripped by this point.
+  const inlined = inlineScriptBodyErrors(raw);
+  if (inlined.length > 0) return { ok: false, errors: inlined };
   return { ok: true, doc: parsed.data };
+}
+
+/**
+ * Keys an author reaches for when they try to write a script BODY onto the
+ * script REFERENCE instead of into the book's top-level `scripts` map.
+ * Only a string value counts — `hooks[].script` is itself a ref object and
+ * must not be mistaken for a body.
+ */
+const INLINE_SCRIPT_BODY_KEYS = ['source', 'code', 'body', 'script', 'contents'] as const;
+
+/**
+ * A script ref names a script; it never carries one. `GateScriptRefSchema`
+ * and `ScriptRefSchema` are plain `z.object`s, so an inline body is stripped
+ * silently and the ref degrades to the default `project` scope naming a file
+ * nobody installed.
+ *
+ * Wild-caught on the inaugural `craftbook-author-gate-script` run: the model
+ * wrote its 2.2 KB gate check as `gate.scripts: [{ name, source }]`, was told
+ * "Created craftbook \"Inventory Health Check\" — 1 of 3 steps are gated",
+ * and every `advance_task_step` afterwards came back
+ * `[gate_infrastructure_error] Gate script "verifyInventoryReport" could not
+ * run: ENOENT ... /projects/inventory-health-check/scripts/verifyInventoryReport.ts`
+ * — a path the model has no way to create. The gate could only ever fail.
+ * A dropped field is worse than a rejected one: the write reports success.
+ */
+function inlineScriptBodyErrors(raw: unknown): CraftbookDocError[] {
+  if (!raw || typeof raw !== 'object') return [];
+  const errors: CraftbookDocError[] = [];
+  const check = (where: string, ref: unknown): void => {
+    if (!ref || typeof ref !== 'object' || Array.isArray(ref)) return;
+    const rec = ref as Record<string, unknown>;
+    const key = INLINE_SCRIPT_BODY_KEYS.find((k) => typeof rec[k] === 'string');
+    if (!key) return;
+    const name = typeof rec.name === 'string' && rec.name ? rec.name : 'the script';
+    errors.push({
+      where,
+      message: `script reference "${name}" carries its body inline as \`${key}\` — a reference only NAMES a script, so the body is dropped and the gate resolves to a project file that does not exist.`,
+      fix: `put the body in the document's top-level \`scripts\` map (\`"scripts": { ${JSON.stringify(name)}: "<the source>" }\`) and leave only \`{ "name": ${JSON.stringify(name)}, "scope": "craftbook" }\` here.`,
+    });
+  };
+  const eachRef = (value: unknown): unknown[] =>
+    Array.isArray(value) ? value : value == null ? [] : [value];
+  const walkSteps = (steps: unknown, prefix: string): void => {
+    if (!Array.isArray(steps)) return;
+    for (const step of steps) {
+      if (!step || typeof step !== 'object') continue;
+      const s = step as Record<string, unknown>;
+      const id = typeof s.id === 'string' ? s.id : '?';
+      for (const moment of ['onEnter', 'onExit'] as const) {
+        for (const ref of eachRef(s[moment])) check(`${prefix} (id "${id}") → ${moment}`, ref);
+      }
+      const gate = s.gate;
+      if (gate && typeof gate === 'object') {
+        for (const ref of eachRef((gate as Record<string, unknown>).scripts)) {
+          check(`${prefix} (id "${id}") → gate.scripts`, ref);
+        }
+      }
+    }
+  };
+  const doc = raw as Record<string, unknown>;
+  walkSteps(doc.steps, 'steps');
+  const spawn = doc.spawn;
+  if (spawn && typeof spawn === 'object') {
+    walkSteps((spawn as Record<string, unknown>).steps, 'spawn.steps');
+  }
+  if (Array.isArray(doc.hooks)) {
+    doc.hooks.forEach((hook, index) => {
+      if (!hook || typeof hook !== 'object') return;
+      check(`hooks[${index}]`, (hook as Record<string, unknown>).script);
+    });
+  }
+  return errors;
 }
 
 export function serializeCraftbookDoc(doc: CraftbookDoc, format: CraftbookDocFormat): string {
@@ -157,11 +233,68 @@ export function craftbookFromDoc(
   for (const problem of validateCraftbookScriptRefs(candidate)) {
     errors.push({ where: 'steps', message: problem });
   }
+  for (const error of validateSpawnTemplate(candidate)) {
+    errors.push(error);
+  }
   for (const error of validateHookScriptRefs(doc)) {
     errors.push(error);
   }
   if (errors.length > 0) return { ok: false, errors };
   return { ok: true, craftbook: candidate };
+}
+
+/**
+ * Problem classes from {@link validateCraftbookGraph} that are enforced on a
+ * `spawn.steps` child template. Deliberately a SUBSET: the terminal-step
+ * rules ("terminal but also has advanceWhen"/"next/branches") are inert
+ * rather than wedging, and seven bundled book versions — every
+ * `pull-request-review` line plus `nightly-fix-sweep` — carry a terminal
+ * shard step with `advanceWhen`. Enforcing those here would reject shipped
+ * content to no benefit.
+ *
+ * What IS enforced is the class that silently wedges a shard: an edge that
+ * names no step. `completeStepInternal` trusts `completedStep.next`, so a
+ * dangling one writes the child with an `activeStepId` matching no step —
+ * no handoff fires, no gate runs, no auto-advance is possible, and
+ * `maybeDriveStuckStep` returns at its `if (!step)` guard. The shard is
+ * permanently, silently stuck and the host's collect barrier never lifts.
+ */
+const SPAWN_GRAPH_PROBLEMS = [/ missing from steps$/, /^duplicate step id/, /^entryStepId /];
+
+/**
+ * A craftbook's `spawn.steps` is a full step graph the runtime snapshots onto
+ * every shard, but `refineCraftbook` only ever walked `cb.steps` — so the
+ * dangling edges, duplicate ids and bogus `spawn.entryStepId` that are hard
+ * errors in the parent book saved cleanly inside the spawn block. Same
+ * field-list-loss shape as the dropped `spawn`/`commands` mappers, one level
+ * down.
+ */
+function validateSpawnTemplate(cb: Craftbook): CraftbookDocError[] {
+  const spawn = cb.spawn;
+  if (!spawn || spawn.steps.length === 0) return [];
+  const errors: CraftbookDocError[] = [];
+  const stepIds = spawn.steps.map((s) => s.id);
+  const graph = {
+    steps: spawn.steps,
+    entryStepId: spawn.entryStepId ?? spawn.steps[0]!.id,
+  };
+  for (const problem of validateCraftbookGraph(graph)) {
+    if (!SPAWN_GRAPH_PROBLEMS.some((re) => re.test(problem))) continue;
+    const quoted = [...problem.matchAll(/"([^"]+)"/g)].map((m) => m[1]!);
+    const near = nearestMatch(quoted.at(-1) ?? '', stepIds);
+    errors.push({
+      where: 'spawn.steps',
+      message: `the spawn (per-item) template ${problem}.`,
+      fix: `valid spawn step ids: ${stepIds.join(', ')}${near ? ` — did you mean "${near}"?` : ''}`,
+    });
+  }
+  for (const problem of validateCraftbookScriptRefs({
+    steps: spawn.steps,
+    ...(cb.scripts ? { scripts: cb.scripts } : {}),
+  })) {
+    errors.push({ where: 'spawn.steps', message: `the spawn (per-item) template: ${problem}.` });
+  }
+  return errors;
 }
 
 /**

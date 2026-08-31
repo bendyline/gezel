@@ -11,6 +11,7 @@ import {
   postMissingDeliverableFeedback,
   postSniffFeedback,
 } from '../sniff-feedback.ts';
+import { bareToolName } from '../tool-names.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
 import {
   type CraftbookEvalWorkspace,
@@ -376,12 +377,6 @@ function toolCallReferencesPath(call: ToolCallLike, path: string): boolean {
  * write, a move, or a mention as a read).
  */
 const SEEDED_READ_TOOL_NAMES = new Set(['read_file', 'read_files', 'read', 'view']);
-
-/** Strip an MCP namespace prefix: `mcp__gezel__read_file` -> `read_file`. */
-function bareToolName(name: string): string {
-  const match = /^mcp__[^_]+(?:_[^_]+)*?__(.+)$/.exec(name);
-  return (match?.[1] ?? name).toLowerCase();
-}
 
 function isSeededReadTool(name: string | undefined): boolean {
   return !!name && SEEDED_READ_TOOL_NAMES.has(bareToolName(name));
