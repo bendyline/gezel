@@ -1,29 +1,83 @@
 import type { RecentTab } from '@bendyline/gezel';
 import { lazy } from 'react';
-import { BenchmarksView } from '../views/BenchmarksView.js';
-import { CraftbookScriptEditorView } from '../views/CraftbookScriptEditorView.js';
-import { CraftbookTabContent } from '../views/CraftbookTabContent.js';
-import { CraftbooksView } from '../views/CraftbooksView.js';
-import { DocumentDetail } from '../views/DocumentDetail.js';
-import { DocumentsView } from '../views/DocumentsView.js';
-import { GezelDetail } from '../views/GezelDetail.js';
-import { GezellenView } from '../views/GezellenView.js';
-import { HistoryView } from '../views/HistoryView.js';
-import { ProjectDetailView, ProjectsView } from '../views/ProjectsView.js';
-import { ScriptEditorView } from '../views/ScriptEditorView.js';
-import { ScriptsView } from '../views/ScriptsView.js';
-import { SettingsView } from '../views/SettingsView.js';
-import { TaskTabContent } from '../views/TaskTabContent.js';
-import { TasksView } from '../views/TasksView.js';
+import {
+  loadBenchmarksViewModule,
+  loadCraftbookScriptEditorViewModule,
+  loadCraftbookTabContentModule,
+  loadCraftbooksViewModule,
+  loadDocumentDetailModule,
+  loadDocumentsViewModule,
+  loadGezelDetailModule,
+  loadGezellenViewModule,
+  loadHandboekViewModule,
+  loadHistoryViewModule,
+  loadKnowledgeViewModule,
+  loadProjectsViewModule,
+  loadScriptEditorViewModule,
+  loadScriptsViewModule,
+  loadSettingsViewModule,
+  loadTaskTabContentModule,
+  loadTasksViewModule,
+} from './tab-content-loaders.js';
 import { useDebugMode } from './useDebugMode.js';
 
-const HandboekView = lazy(() =>
-  import('../views/HandboekView.js').then(({ HandboekView }) => ({ default: HandboekView })),
+const BenchmarksView = lazy(() =>
+  loadBenchmarksViewModule().then(({ BenchmarksView }) => ({ default: BenchmarksView })),
 );
-
-// Lazy for the same reason as Handboek: the reader pane pulls in squisq.
+const CraftbookScriptEditorView = lazy(() =>
+  loadCraftbookScriptEditorViewModule().then(({ CraftbookScriptEditorView }) => ({
+    default: CraftbookScriptEditorView,
+  })),
+);
+const CraftbookTabContent = lazy(() =>
+  loadCraftbookTabContentModule().then(({ CraftbookTabContent }) => ({
+    default: CraftbookTabContent,
+  })),
+);
+const CraftbooksView = lazy(() =>
+  loadCraftbooksViewModule().then(({ CraftbooksView }) => ({ default: CraftbooksView })),
+);
+const DocumentDetail = lazy(() =>
+  loadDocumentDetailModule().then(({ DocumentDetail }) => ({ default: DocumentDetail })),
+);
+const DocumentsView = lazy(() =>
+  loadDocumentsViewModule().then(({ DocumentsView }) => ({ default: DocumentsView })),
+);
+const GezelDetail = lazy(() =>
+  loadGezelDetailModule().then(({ GezelDetail }) => ({ default: GezelDetail })),
+);
+const GezellenView = lazy(() =>
+  loadGezellenViewModule().then(({ GezellenView }) => ({ default: GezellenView })),
+);
+const HandboekView = lazy(() =>
+  loadHandboekViewModule().then(({ HandboekView }) => ({ default: HandboekView })),
+);
+const HistoryView = lazy(() =>
+  loadHistoryViewModule().then(({ HistoryView }) => ({ default: HistoryView })),
+);
 const KnowledgeView = lazy(() =>
-  import('../views/KnowledgeView.js').then(({ KnowledgeView }) => ({ default: KnowledgeView })),
+  loadKnowledgeViewModule().then(({ KnowledgeView }) => ({ default: KnowledgeView })),
+);
+const ProjectDetailView = lazy(() =>
+  loadProjectsViewModule().then(({ ProjectDetailView }) => ({ default: ProjectDetailView })),
+);
+const ProjectsView = lazy(() =>
+  loadProjectsViewModule().then(({ ProjectsView }) => ({ default: ProjectsView })),
+);
+const ScriptEditorView = lazy(() =>
+  loadScriptEditorViewModule().then(({ ScriptEditorView }) => ({ default: ScriptEditorView })),
+);
+const ScriptsView = lazy(() =>
+  loadScriptsViewModule().then(({ ScriptsView }) => ({ default: ScriptsView })),
+);
+const SettingsView = lazy(() =>
+  loadSettingsViewModule().then(({ SettingsView }) => ({ default: SettingsView })),
+);
+const TaskTabContent = lazy(() =>
+  loadTaskTabContentModule().then(({ TaskTabContent }) => ({ default: TaskTabContent })),
+);
+const TasksView = lazy(() =>
+  loadTasksViewModule().then(({ TasksView }) => ({ default: TasksView })),
 );
 
 interface TabContentProps {

@@ -126,6 +126,14 @@ cmake_flags=(
   # it ON forced us to bundle three different unpinned, build-host-
   # scavenged OpenSSL copies. See section 8 below.
   -DLLAMA_OPENSSL=OFF
+  # Upstream defaults LLAMA_BUILD_IS_DEV=ON, which stamps the binary
+  # `<version>-dev` and is what its own CMakeLists tells release builders to
+  # turn off: "set this to OFF when making a release from a release tag
+  # (vX.Y.Z)". Gezel always builds from a pinned release tag, so leaving the
+  # default would ship engines that self-identify as upstream nightlies —
+  # wrong in a crash report, and the string `assert-llama-version.mjs`
+  # cross-checks the pin against.
+  -DLLAMA_BUILD_IS_DEV=OFF
   -DLLAMA_BUILD_SERVER=ON
   -DLLAMA_BUILD_TESTS=OFF
   -DLLAMA_BUILD_EXAMPLES=OFF

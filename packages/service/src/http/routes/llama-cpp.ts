@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { nativeVisionEnabledFor } from '../../chat/vision-capability.js';
 import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
 import type { ServiceContext } from '../context.js';
 import { subscribeToInstallSse } from './install-sse.js';
@@ -26,11 +27,19 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
     // Override state rides the row even when the preview throws (a stale
     // resident engine yields restart-required, and the slider still needs
     // to show the custom setting it should return to).
-    const overrides = (await ctx.store.readConfig()).modelContextOverrides ?? {};
+    const cfg = await ctx.store.readConfig();
+    const overrides = cfg.modelContextOverrides ?? {};
     const models = await Promise.all(
       installed.map(async (model) => {
         const overrideContextTokens = overrides[`llama-cpp:${model.id}`];
         const overrideField = overrideContextTokens !== undefined ? { overrideContextTokens } : {};
+        // Report the EFFECTIVE state rather than leaving the client to
+        // re-derive "absent means on" — a default that lives in two places is
+        // a default that eventually disagrees with itself. Only meaningful
+        // for a model that actually has a projector on disk.
+        const visionField = model.mmprojPath
+          ? { nativeVisionEnabled: nativeVisionEnabledFor(cfg.nativeVision, model.id) }
+          : {};
         try {
           const plan = await ctx.chat.previewLocalEnginePlan('llama-cpp', model.id, {
             standalone: true,
@@ -58,6 +67,7 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
               ? { weightsResidentBytes: plan.weightsResidentBytes }
               : {}),
             ...overrideField,
+            ...visionField,
           };
         } catch (error) {
           // Two distinct denials, two distinct remedies: a model RESIDENT
@@ -76,6 +86,7 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
                 }
               : {}),
             ...overrideField,
+            ...visionField,
           };
         }
       }),
@@ -135,14 +146,12 @@ export function llamaCppRoutes(ctx: ServiceContext): Hono {
       skipCompanionRaw !== '' &&
       skipCompanionRaw !== '0' &&
       skipCompanionRaw !== 'false';
-    // Only fetch the vision projector when the user has opted this model into
-    // native image support. Re-running the install after flipping the toggle
-    // picks up just the missing file — completed files are skipped.
-    const config = await ctx.store.readConfig().catch(() => null);
-    const includeMmproj = config?.nativeVision?.[catalogId] === true;
+    // Always fetch the vision projector the catalog ships. Whether it is
+    // LOADED is a separate, per-model runtime decision (`config.nativeVision`)
+    // — gating the download on it meant flipping the toggle appeared to do
+    // nothing, because the file the toggle needs had never been fetched.
     ctx.chatInstalls.llamaCpp.start(catalogId, {
       skipSha,
-      includeMmproj,
       installCompanion: !skipCompanion,
     });
     return streamSSE(c, (stream) =>

@@ -4,7 +4,9 @@ import { type GezelSummary, displayName, parseTaskRef } from '@bendyline/gezel';
 import { streamChatEvents } from '@bendyline/gezel-client';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { SubmitArrow } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
+import { ChatNarrateButton } from './ChatNarrateButton.js';
 import { ChatRecipientPicker } from './ChatRecipientPicker.js';
 import { GezelIcon } from './GezelIcon.js';
 import { createGezelMediaProvider } from './GezelMediaProvider.js';
@@ -17,6 +19,14 @@ import {
   resolveOpenChatTarget,
 } from './chat-open-command.js';
 import { publishOptimisticUserMessage } from './chat-optimistic-events.js';
+import {
+  clearComposerDraft,
+  composerDraftKey,
+  moveComposerDraft,
+  readComposerDraft,
+  writeComposerDraft,
+} from './composer-drafts.js';
+import { COMPOSER_PREFILL_EVENT, takeComposerPrefill } from './composer-prefill.js';
 import { type MentionToken, extractMentionTokens, extractMentions } from './mention-parse.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
@@ -36,44 +46,11 @@ interface ComposerDraftSnapshot {
   editVersion: number;
 }
 
-/**
- * Module-level queue for prefill payloads. A view elsewhere in the
- * app (e.g. the "Complain about this" preview-error button) calls
- * `queueComposerPrefill(projectId, markdown)` BEFORE navigating to
- * the chat tab; the next ChatComposer that mounts for the matching
- * project consumes the entry, drops the markdown into its editor,
- * and leaves the user to review + hit Send themselves. Keyed by
- * projectId so prefills for a different project than the one the
- * user ends up on don't accidentally clobber an unrelated draft.
- *
- * The alternative — a custom `window` event — lost the payload when
- * dispatched before the listener mounted.
- */
-const pendingPrefills = new Map<string, string>();
-
-/**
- * Fired right after a prefill is queued so a composer that's ALREADY
- * mounted for the matching project drains it immediately. Without this,
- * delivery relied solely on a remount: the consume effect is keyed on
- * `projectId`, so when the queue is filled while a same-project composer
- * is already on screen (e.g. the Output pane's camera "debug frame"
- * button while the Chat tab is already active beside it), nothing ever
- * picked the entry up and the screenshot silently vanished.
- */
-const PREFILL_EVENT = 'gezel:composer-prefill';
-
 function newlineShortcutLabel(): string {
   const platform =
     window.__GEZEL__?.platform ??
     (typeof navigator === 'undefined' ? '' : navigator.platform || navigator.userAgent);
   return platform === 'darwin' || /Mac/i.test(platform) ? '⌘⏎' : 'Ctrl+Enter';
-}
-
-export function queueComposerPrefill(projectId: string, markdown: string): void {
-  pendingPrefills.set(projectId, markdown);
-  // Harmless when no composer is mounted yet — the mount-time drain in
-  // ChatComposer covers the navigate-then-mount case.
-  window.dispatchEvent(new CustomEvent(PREFILL_EVENT, { detail: { projectId } }));
 }
 
 export interface ChatComposerProps {
@@ -149,6 +126,12 @@ export interface ChatComposerProps {
    */
   belowAddressLine?: ReactNode;
   /**
+   * Optional trailing content for the "To:" line, rendered after the
+   * recipient picker. Project chat puts the chat/terminal mode tabs here
+   * so the compose-surface switch sits on the address line it fronts.
+   */
+  addressLineTrailing?: ReactNode;
+  /**
    * Project-chat pivot hook. Fires the first time a draft picks up
    * an `@<otherGezel>` mention (other than the current primary) so
    * the parent can switch the active gezel chip + the SessionSwitcher
@@ -200,6 +183,13 @@ export interface ChatComposerProps {
    * undefined and the chat composer never escapes.
    */
   onTerminalEscape?: (initialInput: string) => void;
+  /**
+   * Disambiguates this composer's remembered draft from another surface
+   * addressing the same (project, gezel) pair — Home's meester conversation
+   * versus that same gezel's own chat tab. Surfaces already separated by
+   * `taskRef` or `craftbookRef` don't need it. See `composer-drafts.ts`.
+   */
+  draftScope?: string;
 }
 
 /**
@@ -236,10 +226,12 @@ export function ChatComposer({
   taskRef,
   stepId,
   belowAddressLine,
+  addressLineTrailing,
   onPivotToMention,
   passiveCcGezelIds,
   onPassiveCcConsumed,
   onTerminalEscape,
+  draftScope,
 }: ChatComposerProps) {
   const composerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -288,7 +280,33 @@ export function ChatComposer({
     elapsedMs: number;
     sessionId: string;
   } | null>(null);
-  const draftRef = useRef<string>('');
+  // The surface this composer's draft is filed under while it is unmounted.
+  // Session id is deliberately absent: a draft belongs to the conversation the
+  // user is addressing, and switching threads in the picker must not swap the
+  // message they are in the middle of writing out from under them.
+  const draftKey = useMemo(
+    () =>
+      composerDraftKey({
+        ...(draftScope ? { scope: draftScope } : {}),
+        projectId,
+        gezelId,
+        ...(taskRef ? { taskRef } : {}),
+        ...(craftbookRef ? { craftbookRef } : {}),
+      }),
+    [craftbookRef, draftScope, gezelId, projectId, taskRef],
+  );
+  const draftKeyRef = useRef(draftKey);
+  const draftRef = useRef<string>(readComposerDraft(draftKey));
+  // The address can move under a live composer — an @-mention pivot in project
+  // chat, a To-line recipient swap. The text stays with the instance in both
+  // cases, so the stored copy follows it rather than being replaced by
+  // whatever the destination address happened to hold.
+  useEffect(() => {
+    const previous = draftKeyRef.current;
+    if (previous === draftKey) return;
+    draftKeyRef.current = draftKey;
+    moveComposerDraft(previous, draftKey, draftRef.current);
+  }, [draftKey]);
   const draftEditVersionRef = useRef(0);
   // Tracks the length of the previous draft so we can detect "the
   // user just started typing a new draft" — the signal for the
@@ -296,28 +314,29 @@ export function ChatComposer({
   // empty draft (≤ 2 chars: empty, or a lone `>`) is a candidate.
   // After that, the user is mid-composition and a `> ` later in the
   // text is just a blockquote.
-  const prevDraftLenRef = useRef(0);
+  const prevDraftLenRef = useRef(draftRef.current.length);
   // Render-triggering shadow of `draftRef.current.trim().length > 0`.
   // The ref alone never re-renders, and the mid-turn button row (Nudge /
   // Interrupt appear only when there's text) needs to react to typing.
-  const [draftNonEmpty, setDraftNonEmpty] = useState(false);
+  const [draftNonEmpty, setDraftNonEmpty] = useState(() => draftRef.current.trim().length > 0);
   // A non-null value means the entire single-line draft is a local `/open`
   // command. Keeping the query in state lets the suggestion tray react to
   // every keystroke; draftNonEmpty alone only changes on empty/non-empty edges.
-  const [openCommandQuery, setOpenCommandQuery] = useState<string | null>(null);
+  const [openCommandQuery, setOpenCommandQuery] = useState<string | null>(() =>
+    parseOpenChatQuery(draftRef.current),
+  );
   // EditorShell reads initialMarkdown and configures its placeholder only
   // when it mounts. Bump this revision whenever the host needs to seed or
   // clear the editor; draftRef supplies the content for the fresh mount.
   const [editorRevision, setEditorRevision] = useState(0);
   // Drain a queued prefill into the editor. Runs on mount (covers the
-  // navigate-to-chat-then-mount case) AND on `PREFILL_EVENT` (covers an
+  // navigate-to-chat-then-mount case) AND on `COMPOSER_PREFILL_EVENT` (covers an
   // already-mounted composer — the Output pane camera button while the
   // Chat tab is already active beside it). The key bump forces an
   // EditorShell remount so the new initial content shows.
   const consumePrefill = useCallback(() => {
-    const queued = pendingPrefills.get(projectId);
+    const queued = takeComposerPrefill(projectId);
     if (!queued) return;
-    pendingPrefills.delete(projectId);
     // Don't clobber an in-progress draft. The editor is a published
     // black-box (`@bendyline/squisq-editor-react`) with no host-facing
     // "insert at caret" handle, so we can't drop the payload at the
@@ -328,6 +347,7 @@ export function ChatComposer({
     const existing = draftRef.current.trim();
     const merged = existing ? `${existing}\n\n${queued}` : queued;
     draftRef.current = merged;
+    writeComposerDraft(draftKeyRef.current, merged);
     draftEditVersionRef.current += 1;
     prevDraftLenRef.current = merged.length;
     setDraftNonEmpty(merged.trim().length > 0);
@@ -340,14 +360,16 @@ export function ChatComposer({
       const detail = (e as CustomEvent).detail as { projectId?: string } | undefined;
       if (detail?.projectId === projectId) consumePrefill();
     };
-    window.addEventListener(PREFILL_EVENT, onPrefill);
-    return () => window.removeEventListener(PREFILL_EVENT, onPrefill);
+    window.addEventListener(COMPOSER_PREFILL_EVENT, onPrefill);
+    return () => window.removeEventListener(COMPOSER_PREFILL_EVENT, onPrefill);
   }, [consumePrefill, projectId]);
   // Gezels @-mentioned in the current draft. Rendered as extra chips in
   // the "To:" row so the user sees who the fan-out will reach before they
   // hit Send — previously the row was static on the primary and users had
   // no feedback that mentions were even being parsed.
-  const [mentioned, setMentioned] = useState<MentionToken[]>([]);
+  const [mentioned, setMentioned] = useState<MentionToken[]>(() =>
+    extractMentionTokens(draftRef.current),
+  );
   // Recipients chosen from the To-line picker are independent of inline
   // @-mentions. They use the same server fan-out field at send time, but stay
   // visible across turns until the user removes one or replaces the primary.
@@ -596,6 +618,7 @@ export function ChatComposer({
       prevDraftLenRef.current = source.length;
       const sourceChanged = draftRef.current !== source;
       draftRef.current = source;
+      writeComposerDraft(draftKeyRef.current, source);
       if (sourceChanged) draftEditVersionRef.current += 1;
       setDraftNonEmpty(source.trim().length > 0);
       setOpenCommandQuery(parseOpenChatQuery(source));
@@ -608,6 +631,10 @@ export function ChatComposer({
         const trimmed = source.trimStart();
         const m = trimmed.match(/^>\s+([^\n]*)/);
         if (m) {
+          // The keystrokes move to the terminal composer. Drop the stored
+          // draft too, or flipping back to chat later restores the `> ` sigil
+          // the user already spent on the handoff.
+          clearComposerDraft(draftKeyRef.current);
           onTerminalEscape((m[1] ?? '').trim());
           return;
         }
@@ -617,6 +644,28 @@ export function ChatComposer({
     },
     [onTerminalEscape],
   );
+
+  // Progressive STT returns one finalized fragment per self-contained audio
+  // segment. Append each fragment to whatever is currently in the editor so
+  // narration extends an existing prompt and never replaces typing that
+  // happened while the microphone was live.
+  const appendNarratedText = useCallback((text: string) => {
+    const spoken = text.trim();
+    if (!spoken) return;
+    const current = draftRef.current;
+    const merged = `${current}${current && !/\s$/.test(current) ? ' ' : ''}${spoken}`;
+    draftRef.current = merged;
+    writeComposerDraft(draftKeyRef.current, merged);
+    draftEditVersionRef.current += 1;
+    prevDraftLenRef.current = merged.length;
+    setDraftNonEmpty(true);
+    setOpenCommandQuery(parseOpenChatQuery(merged));
+    const next = extractMentionTokens(merged);
+    setMentioned((previous) => (sameMentionTokens(previous, next) ? previous : next));
+    // EditorShell intentionally treats its source as initial content. Remount
+    // from the lossless draft ref so the newly transcribed text is visible.
+    setEditorRevision((revision) => revision + 1);
+  }, []);
 
   const beginDraftSubmission = useCallback((): ComposerDraftSnapshot | null => {
     if (draftSubmissionPendingRef.current) return null;
@@ -646,6 +695,7 @@ export function ChatComposer({
       return;
     }
     draftRef.current = '';
+    clearComposerDraft(draftKeyRef.current);
     prevDraftLenRef.current = 0;
     setDraftNonEmpty(false);
     setOpenCommandQuery(null);
@@ -808,6 +858,7 @@ export function ChatComposer({
                 ...(event.diff !== undefined ? { diff: event.diff } : {}),
                 ...(event.addedLines !== undefined ? { addedLines: event.addedLines } : {}),
                 ...(event.removedLines !== undefined ? { removedLines: event.removedLines } : {}),
+                ...(event.card ? { card: event.card } : {}),
                 projectId,
               };
               onToolActivity?.(tool);
@@ -1205,6 +1256,7 @@ export function ChatComposer({
             }
           />
         )}
+        {addressLineTrailing}
       </div>
       {belowAddressLine}
       <div className="chat-editor-wrap">
@@ -1273,69 +1325,82 @@ export function ChatComposer({
           thinMargins
           submitOnEnter={() => submitRef.current()}
           toolbarSlotRight={
-            openCommandQuery !== null ? (
-              <button
-                type="button"
-                className="chat-send-btn"
-                data-testid="chat-open"
-                onClick={() => void executeOpenTarget()}
-                disabled={draftSubmissionPending}
-                title="Open this folder or recent file (Enter)"
-              >
-                {draftSubmissionPending ? 'Opening…' : 'Open'}
-              </button>
-            ) : turnActive ? (
-              <>
-                {draftNonEmpty && !engagementOff && (
-                  <>
-                    <button
-                      type="button"
-                      className="chat-send-btn chat-nudge-btn"
-                      data-testid="chat-nudge"
-                      onClick={() => void queueNudge()}
-                      disabled={draftSubmissionPending}
-                      title="Queue for after this turn (Enter)"
-                    >
-                      Nudge
-                    </button>
-                    <button
-                      type="button"
-                      className="chat-interrupt-btn"
-                      data-testid="chat-interrupt"
-                      onClick={() => void interruptWithDraft()}
-                      disabled={draftSubmissionPending}
-                      title="Stop this turn and send now"
-                    >
-                      Interrupt
-                    </button>
-                  </>
-                )}
+            <>
+              <ChatNarrateButton
+                projectId={projectId}
+                disabled={!gezelId || engagementOff || draftSubmissionPending}
+                onTranscript={appendNarratedText}
+                onError={setError}
+              />
+              {openCommandQuery !== null ? (
                 <button
                   type="button"
-                  className="chat-stop-btn"
-                  onClick={() => void stopActiveTurn()}
+                  className="chat-send-btn"
+                  data-testid="chat-open"
+                  onClick={() => void executeOpenTarget()}
                   disabled={draftSubmissionPending}
-                  title="Stop generating (Escape)"
+                  title="Open this folder or recent file (Enter)"
                 >
-                  ■ Stop
+                  {draftSubmissionPending ? 'Opening…' : 'Open'}
                 </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                className="chat-send-btn"
-                data-testid="chat-send"
-                onClick={send}
-                disabled={!gezelId || engagementOff || draftSubmissionPending}
-                title={
-                  engagementOff
-                    ? 'AI is disabled in Settings → General'
-                    : `Enter to send, ${newlineShortcutLabel()} for newline`
-                }
-              >
-                {draftSubmissionPending ? 'Sending…' : 'Send'}
-              </button>
-            )
+              ) : turnActive ? (
+                <>
+                  {draftNonEmpty && !engagementOff && (
+                    <>
+                      <button
+                        type="button"
+                        className="chat-send-btn chat-nudge-btn"
+                        data-testid="chat-nudge"
+                        onClick={() => void queueNudge()}
+                        disabled={draftSubmissionPending}
+                        title="Queue for after this turn (Enter)"
+                      >
+                        Nudge
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-interrupt-btn"
+                        data-testid="chat-interrupt"
+                        onClick={() => void interruptWithDraft()}
+                        disabled={draftSubmissionPending}
+                        title="Stop this turn and send now"
+                      >
+                        Interrupt
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    className="chat-stop-btn"
+                    onClick={() => void stopActiveTurn()}
+                    disabled={draftSubmissionPending}
+                    title="Stop generating (Escape)"
+                  >
+                    ■ Stop
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="chat-send-btn chat-send-btn-icon"
+                  data-testid="chat-send"
+                  onClick={send}
+                  disabled={!gezelId || engagementOff || draftSubmissionPending}
+                  // The glyph replaced the label, so the button's whole
+                  // accessible name lives here — including the pending state,
+                  // which used to be readable on its face as "Sending…".
+                  aria-label={draftSubmissionPending ? 'Sending…' : 'Send'}
+                  aria-busy={draftSubmissionPending}
+                  title={
+                    engagementOff
+                      ? 'AI is disabled in Settings → General'
+                      : `Enter to send, ${newlineShortcutLabel()} for newline`
+                  }
+                >
+                  <SubmitArrow />
+                </button>
+              )}
+            </>
           }
         />
       </div>

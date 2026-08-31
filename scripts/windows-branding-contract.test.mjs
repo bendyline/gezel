@@ -92,14 +92,31 @@ test('the Windows tray gives the shell the multi-resolution ICO path', async () 
   assert.equal(icon.readUInt16LE(0), 0, 'icon.ico must have the ICO reserved word');
   assert.equal(icon.readUInt16LE(2), 1, 'icon.ico must identify itself as an icon');
   const imageCount = icon.readUInt16LE(4);
-  const sizes = Array.from({ length: imageCount }, (_, index) => {
+  const frames = Array.from({ length: imageCount }, (_, index) => {
     const offset = 6 + index * 16;
     const width = icon.readUInt8(offset) || 256;
     const height = icon.readUInt8(offset + 1) || 256;
-    return `${width}x${height}`;
+    const byteLength = icon.readUInt32LE(offset + 8);
+    const imageOffset = icon.readUInt32LE(offset + 12);
+    return {
+      size: `${width}x${height}`,
+      bitDepth: icon.readUInt16LE(offset + 6),
+      signature: icon.subarray(imageOffset, imageOffset + Math.min(byteLength, 8)),
+    };
   });
-  for (const size of ['16x16', '20x20', '24x24']) {
-    assert.ok(sizes.includes(size), `icon.ico must include a ${size} tray frame`);
+
+  assert.deepEqual(
+    frames.map(({ size }) => size),
+    ['16x16', '20x20', '24x24', '32x32', '40x40', '48x48', '64x64', '128x128', '256x256'],
+    'the ICO must cover native taskbar scaling plus high-resolution Explorer surfaces',
+  );
+  for (const frame of frames) {
+    assert.equal(frame.bitDepth, 32, `${frame.size} must preserve RGBA transparency`);
+    assert.equal(
+      frame.signature.toString('hex'),
+      '89504e470d0a1a0a',
+      `${frame.size} must be a lossless PNG frame`,
+    );
   }
 });
 

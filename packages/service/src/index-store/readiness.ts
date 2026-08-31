@@ -45,6 +45,14 @@ export interface IndexReadinessDeps {
   resolveBoekwachter(projectId: string): Promise<unknown | null>;
   /** Install-wide indexing-job pause switch. */
   isPaused(): Promise<boolean> | boolean;
+  /**
+   * Whether the engagement mode currently permits the model-backed tiers.
+   * False under "Reactive only"/"Off", where the drive returns after the
+   * local embed tiers — so the AI counts can never drain and must be
+   * reported unachievable rather than awaited, exactly like an unstaffed
+   * crew. Absent (tests) means allowed.
+   */
+  aiTiersAllowed?(): Promise<boolean> | boolean;
   now?: () => Date;
 }
 
@@ -99,6 +107,8 @@ function buildReport(args: {
   status: WorkspaceIndexStatus;
   staffed: boolean;
   paused: boolean;
+  /** `paused` is set because of the engagement mode, not the job switch. */
+  pausedByEngagement?: boolean;
   wantReviews: boolean;
   budgetMs: number;
   waitedMs: number;
@@ -125,7 +135,9 @@ function buildReport(args: {
     }
     if (paused) {
       notes.push(
-        'The indexing job is paused install-wide; AI index coverage will not improve until it is resumed.',
+        args.pausedByEngagement
+          ? 'AI activity is set to "Reactive only" or "Off", so the AI indexing tiers are standing down; AI index coverage will not improve until task work is allowed again. Static index and search coverage below are still current.'
+          : 'The indexing job is paused install-wide; AI index coverage will not improve until it is resumed.',
       );
     }
     if (e?.vectorsAvailable === false) {
@@ -185,6 +197,19 @@ function buildReport(args: {
   };
 }
 
+/**
+ * The AI tiers stand down for two independent reasons — the nachtwacht job
+ * switch and the engagement mode — with the same consequence for the drain
+ * target. Resolved together so the report can name the right one.
+ */
+async function aiTierHold(
+  deps: IndexReadinessDeps,
+): Promise<{ paused: boolean; pausedByEngagement: boolean }> {
+  const jobPaused = await deps.isPaused();
+  const allowed = deps.aiTiersAllowed ? await deps.aiTiersAllowed() : true;
+  return { paused: jobPaused || !allowed, pausedByEngagement: !jobPaused && !allowed };
+}
+
 /** Read-only readiness snapshot — no refresh, no drive, no wait. */
 export async function indexReadinessSnapshot(
   deps: IndexReadinessDeps,
@@ -197,7 +222,7 @@ export async function indexReadinessSnapshot(
     projectId,
     status,
     staffed,
-    paused: await deps.isPaused(),
+    ...(await aiTierHold(deps)),
     wantReviews: true,
     budgetMs: 0,
     waitedMs: 0,
@@ -233,7 +258,7 @@ export async function ensureIndexFresh(
       projectId,
       status,
       staffed: false,
-      paused: await deps.isPaused(),
+      ...(await aiTierHold(deps)),
       wantReviews,
       budgetMs,
       waitedMs: 0,
@@ -251,7 +276,8 @@ export async function ensureIndexFresh(
   }
 
   const staffed = (await deps.resolveBoekwachter(projectId)) !== null;
-  const paused = await deps.isPaused();
+  const hold = await aiTierHold(deps);
+  const paused = hold.paused;
   const achievable = staffed && !paused;
 
   status = await deps.workspaceIndex.statusForUi(projectId);
@@ -294,6 +320,7 @@ export async function ensureIndexFresh(
     status,
     staffed,
     paused,
+    pausedByEngagement: hold.pausedByEngagement,
     wantReviews,
     budgetMs,
     waitedMs: waited(),

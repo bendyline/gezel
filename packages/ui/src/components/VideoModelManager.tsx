@@ -359,7 +359,11 @@ export function VideoModelManager({
             <table className="ollama-model-table">
               <thead>
                 <tr>
-                  {showActivePicker && <th scope="col">Active</th>}
+                  {showActivePicker && (
+                    <th scope="col" className="gz-active-model-column">
+                      Active
+                    </th>
+                  )}
                   <th>Name</th>
                   <th>Size</th>
                   <th>Added</th>
@@ -370,11 +374,11 @@ export function VideoModelManager({
                 {installed.map((m) => (
                   <tr key={m.id}>
                     {showActivePicker && (
-                      <td>
+                      <td className="gz-active-model-column">
                         <input
                           type="radio"
                           name="active-video-model"
-                          className="video-active-radio"
+                          className="gz-active-model-radio"
                           aria-label={`Use ${m.id} as the active video model`}
                           checked={activeModelId === m.id}
                           onChange={() => {
@@ -537,8 +541,10 @@ function VideoPullProgress({
   } else if (known) {
     const file = pull.fileLabel ? ` · ${pull.fileLabel}` : '';
     statusLine = `Downloading… (${formatSize(pull.bytesWritten)} of ${formatSize(pull.totalBytes)}, ${pct}%)${file}`;
-  } else {
+  } else if (pull.bytesWritten > 0) {
     statusLine = `Downloading… (${formatSize(pull.bytesWritten)})`;
+  } else {
+    statusLine = 'Preparing download…';
   }
   return (
     <div

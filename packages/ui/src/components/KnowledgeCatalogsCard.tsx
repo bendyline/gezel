@@ -31,6 +31,33 @@ interface InstallProgress {
   error: string | null;
 }
 
+type KnowledgeSourceKind = 'file' | 'url';
+
+/**
+ * The renderer cannot check whether a local file exists, but it can avoid
+ * presenting an install action for text that is not an absolute `.gezk`
+ * path or a well-formed HTTP(S) URL.
+ */
+function knowledgeSourceKind(source: string): KnowledgeSourceKind | null {
+  const trimmed = source.trim();
+  if (!trimmed) return null;
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const url = new URL(trimmed);
+      if ((url.protocol === 'http:' || url.protocol === 'https:') && url.hostname) return 'url';
+    } catch {
+      // Keep malformed URLs hidden while the user finishes typing.
+    }
+  }
+
+  if (!/\.gezk$/i.test(trimmed)) return null;
+  const isWindowsDrivePath = /^[a-z]:[\\/]/i.test(trimmed);
+  const isUncPath = /^(?:\\\\|\/\/)[^\\/]+[\\/][^\\/]+/.test(trimmed);
+  const isPosixPath = trimmed.startsWith('/');
+  return isWindowsDrivePath || isUncPath || isPosixPath ? 'file' : null;
+}
+
 export function KnowledgeCatalogsCard() {
   const [catalogs, setCatalogs] = useState<KnowledgeCatalogStatus[] | null>(null);
   const [sourceDraft, setSourceDraft] = useState('');
@@ -105,9 +132,10 @@ export function KnowledgeCatalogsCard() {
   const startInstall = useCallback(
     async (path: string) => {
       const trimmed = path.trim();
-      if (!trimmed) return;
+      const sourceKind = knowledgeSourceKind(trimmed);
+      if (!sourceKind) return;
       setError(null);
-      const isUrl = /^https?:\/\//i.test(trimmed);
+      const isUrl = sourceKind === 'url';
       const expectedSha256 = digestDraft.trim().toLowerCase();
       if (isUrl && !/^[a-f0-9]{64}$/.test(expectedSha256)) {
         setError('Paste the publisher-provided SHA-256 digest before installing a URL.');
@@ -166,6 +194,11 @@ export function KnowledgeCatalogsCard() {
   );
 
   const removing = catalogs?.find((c) => c.ref.catalogId === confirmRemove);
+  const sourceKind = knowledgeSourceKind(sourceDraft);
+  const isUrlSource = sourceKind === 'url';
+  const hasValidDigest = /^[a-fA-F0-9]{64}$/.test(digestDraft.trim());
+  const canInstall =
+    sourceKind !== null && (!isUrlSource || hasValidDigest) && !(install && !install.error);
 
   return (
     <section style={{ marginBottom: '2rem' }} data-testid="knowledge-settings">
@@ -187,7 +220,7 @@ export function KnowledgeCatalogsCard() {
             value={sourceDraft}
             onChange={(e) => setSourceDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void startInstall(sourceDraft);
+              if (e.key === 'Enter' && canInstall) void startInstall(sourceDraft);
             }}
           />
           {window.__GEZEL__?.selectKnowledgeArchive && (
@@ -195,20 +228,17 @@ export function KnowledgeCatalogsCard() {
               Browse…
             </button>
           )}
-          <button
-            type="button"
-            disabled={
-              !sourceDraft.trim() ||
-              (/^https?:\/\//i.test(sourceDraft.trim()) &&
-                !/^[a-fA-F0-9]{64}$/.test(digestDraft.trim())) ||
-              (install !== null && !install.error)
-            }
-            onClick={() => void startInstall(sourceDraft)}
-          >
-            Install
-          </button>
+          {sourceKind !== null && (
+            <button
+              type="button"
+              disabled={!canInstall}
+              onClick={() => void startInstall(sourceDraft)}
+            >
+              Install
+            </button>
+          )}
         </div>
-        {/^https?:\/\//i.test(sourceDraft.trim()) && (
+        {isUrlSource && (
           <div style={{ marginTop: '0.5rem' }}>
             <input
               type="text"
@@ -220,7 +250,7 @@ export function KnowledgeCatalogsCard() {
               autoCapitalize="none"
               onChange={(e) => setDigestDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') void startInstall(sourceDraft);
+                if (e.key === 'Enter' && canInstall) void startInstall(sourceDraft);
               }}
             />
             <p className="muted small" style={{ margin: '0.35rem 0 0' }}>

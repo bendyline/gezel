@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import collections
+import hashlib
 import json
 import os
 import re
@@ -46,6 +47,7 @@ import sys
 import threading
 import time
 import traceback
+import types
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -73,10 +75,27 @@ import cache_persist  # noqa: E402
 import think_budget  # noqa: E402
 import cache_seed  # noqa: E402
 import tool_grammar  # noqa: E402
+import spec_decode  # noqa: E402
 import tool_call_stream  # noqa: E402
 import template_stability  # noqa: E402
 from lfm2_compat import ensure_lfm2_config_compat  # noqa: E402
 from qwen3_5_text_compat import is_text_only_qwen3_5_checkpoint  # noqa: E402
+
+
+def log_contained_exception(tag: str) -> None:
+    """Print the current traceback for a failure the caller has CONTAINED.
+
+    Tagged line by line, and never `traceback.print_exc()`: the supervisor's
+    stdout classifier reads a bare `SomeError: <message>` leaf line as proof
+    the engine is dead and tears the process down. That is right during
+    startup, which is what it was written for, and wrong at every call site
+    here — each one has already answered the affected request and left the
+    engine serving everyone else on it. A speculative-decode wave that failed
+    one request this way SIGKILLed a 27B three minutes into serving and took
+    an unrelated session's turn down with it.
+    """
+    for line in traceback.format_exc().rstrip().splitlines():
+        print(f"[{tag}] | {line}", flush=True)
 
 
 # ───────── Leaked special-token scrub ─────────
@@ -260,6 +279,25 @@ parser.add_argument(
     type=int,
     default=2048,
     help="Tokens per prefill step. Lower = less peak memory, slower.",
+)
+parser.add_argument(
+    "--spec-draft-model",
+    type=str,
+    default=None,
+    help="Path to an MTP drafter directory; enables speculative decoding "
+    "for eligible (greedy, processor-free) requests. See spec_decode.py.",
+)
+parser.add_argument(
+    "--spec-draft-kind",
+    type=str,
+    default=None,
+    help="Drafter kind override (default: auto-detect from the drafter's model_type).",
+)
+parser.add_argument(
+    "--spec-block-size",
+    type=int,
+    default=None,
+    help="Draft block size override (default: the drafter's configured block_size).",
 )
 parser.add_argument(
     "--persist-dir",
@@ -480,8 +518,97 @@ if _QWEN3_5_TEXT_ONLY:
         "Detected text-only Qwen 3.5 checkpoint; allowing absent vision-tower weights.",
         flush=True,
     )
-MODEL, PROCESSOR = load(ARGS.model, strict=not _QWEN3_5_TEXT_ONLY)
+
+# ── Tower selection (2026-08-28) ──
+#
+# This server has always served TEXT ONLY ("Vision support is out of scope
+# for v1" — _build_prompt): mlx_vlm here is a loader, not a vision path.
+# Yet mlx_vlm's language towers pay a large context-growing decode tax
+# under the BatchGenerator this server runs on. Measured on
+# qwen3.8-27b-q4 (matched-thermal 2x2, ms per decoded token at
+# 10.9k/54.3k prompt tokens):
+#
+#     mlx_lm tower  x BatchGenerator : 32.1 / 41.2   (= bare serial)
+#     mlx_vlm tower x BatchGenerator : 44.7 / 86.7   (slope 0.97 vs 0.34 us/tok)
+#
+# The vlm tower runs 3-axis multimodal RoPE with per-layer array-offset
+# position ids + left-padding mask machinery per token; mlx_lm's text
+# tower is plain rope(offset) + fused SDPA. Same checkpoint, ~2x decode
+# at working context — so batch mode loads the mlx_lm tower when it can.
+#
+# Scope guards, deliberately conservative:
+#   - allow-listed architectures only (verified by the 2x2 above); other
+#     archs keep the vlm loader until they get their own measurement,
+#   - batch mode only (--max-concurrency >= 1, the default): the legacy
+#     serial path is mlx_vlm's stream_generate and keeps the vlm loader,
+#   - GEZEL_MLX_TEXT_TOWER=off restores the old behavior outright;
+#     =force skips the allowlist (measurement runs).
+# Every branch prints a `[tower]` fingerprint line — an A/B that cannot
+# prove which tower served it is how this class of defect stayed hidden.
+_TEXT_TOWER = None
+_TEXT_TOWER_ALLOWED_ARCHS = {"qwen3_5"}
+
+
+def _model_architecture(model_dir: str) -> str:
+    try:
+        with open(os.path.join(model_dir, "config.json"), "r") as fh:
+            return str(json.load(fh).get("model_type", ""))
+    except Exception:
+        return ""
+
+
+_tower_pref = os.environ.get("GEZEL_MLX_TEXT_TOWER", "auto").strip().lower()
+_arch = _model_architecture(ARGS.model)
+if (
+    _tower_pref not in ("0", "off", "false")
+    and int(getattr(ARGS, "max_concurrency", 1) or 0) >= 1
+    and (_tower_pref == "force" or _arch in _TEXT_TOWER_ALLOWED_ARCHS)
+    # A configured MTP drafter needs the vlm tower (rollback lives there);
+    # an explicit GEZEL_MLX_TEXT_TOWER=force still wins and spec turns off.
+    and not (getattr(ARGS, "spec_draft_model", None) and _tower_pref != "force")
+):
+    try:
+        from mlx_lm.utils import load as _mlx_lm_load
+
+        MODEL, PROCESSOR = _mlx_lm_load(ARGS.model)
+        _TEXT_TOWER = "mlx_lm"
+        print(
+            f"[tower] active=mlx_lm arch={_arch or 'unknown'} "
+            f"(text tower; vlm loader bypassed for batch serving)",
+            flush=True,
+        )
+    except Exception as exc:
+        print(
+            f"[tower] mlx_lm load failed for arch={_arch or 'unknown'}: {exc} "
+            f"— falling back to mlx_vlm",
+            flush=True,
+        )
+if _TEXT_TOWER is None:
+    MODEL, PROCESSOR = load(ARGS.model, strict=not _QWEN3_5_TEXT_ONLY)
+    _reason = (
+        "GEZEL_MLX_TEXT_TOWER=off"
+        if _tower_pref in ("0", "off", "false")
+        else "serial mode (--max-concurrency 0)"
+        if int(getattr(ARGS, "max_concurrency", 1) or 0) < 1
+        else "spec drafter configured (MTP runs on the vlm tower)"
+        if (getattr(ARGS, "spec_draft_model", None) and _tower_pref != "force")
+        else f"arch {_arch or 'unknown'} not in text-tower allowlist"
+        if _tower_pref != "force"
+        else "mlx_lm load failed"
+    )
+    print(f"[tower] active=mlx_vlm ({_reason})", flush=True)
 print("Model and processor loaded successfully.", flush=True)
+
+# ── MTP speculative decoding (2026-08-28) ──
+# Armed only when a drafter is configured AND the capability probe passes;
+# every failure logs one `[spec] off` line and the server serves normally.
+_SPEC = spec_decode.resolve_spec(ARGS, MODEL, _TEXT_TOWER)
+if _SPEC is not None:
+    print(
+        f"[spec] active drafter={_SPEC.drafter_dir} kind={_SPEC.kind} "
+        f"block={_SPEC.block_size or 'config-default'} tower=mlx_vlm",
+        flush=True,
+    )
 
 
 # Prefix-stability work (template relocation + reasoning-stable snapshot
@@ -840,6 +967,32 @@ class CacheEntry:
 # Module-level cache. Bounded by `--cache-budget-mb` via LRU eviction.
 _CACHE: Dict[str, CacheEntry] = {}
 
+# Diagnostic (temporary, Phase-0 churn census): tool-roster shape recorded
+# at save time per cache_id so a later churn event can print BOTH sides'
+# shapes. Process-lifetime only — entries loaded from disk report
+# saved_roster=unknown, and the cached-text preview covers those.
+_LAST_SAVE_ROSTER: Dict[str, str] = {}
+
+
+def _roster_fp_of(tools) -> str:
+    """Compact fingerprint of a request's tool roster: "sha8/count", or "0"
+    for an empty roster. Diagnostics only — must never raise."""
+    try:
+        names = []
+        for t in tools or []:
+            if isinstance(t, dict):
+                fn = t.get("function") or {}
+                names.append(str(fn.get("name") or t.get("name") or "?"))
+            else:
+                fn = getattr(t, "function", None)
+                names.append(str(getattr(fn, "name", None) or getattr(t, "name", "?")))
+        if not names:
+            return "0"
+        digest = hashlib.sha256("\n".join(sorted(names)).encode("utf-8")).hexdigest()[:8]
+        return f"{digest}/{len(names)}"
+    except Exception:  # noqa: BLE001 — diagnostics never break a turn
+        return "err"
+
 
 # Cache ids (session + its seed prefix) currently being SERVED — registered
 # at the top of a chat-completions request and cleared when its stream ends.
@@ -926,19 +1079,32 @@ def _budget_bytes() -> int:
     return ARGS.cache_budget_mb * 1024 * 1024
 
 
-# Per-token byte estimate. 100 KB is a reasonable mid-figure for
-# sliding-window-attention models (Gemma 3/4) where most layers are
-# windowed and don't grow linearly with token count. Higher estimates
-# (e.g. naive 2 × num_layers × hidden_size × 2 bytes for full KV)
-# overcommit memory and trigger spurious eviction. Used purely for
-# LRU + budget math; the underlying mlx_vlm cache state is what
-# actually consumes memory.
+# Fallback per-token byte estimate, used only when a state's layers don't
+# expose `nbytes` (every mlx_lm/mlx_vlm cache class does today, via
+# _BaseCache). The old blanket 100 KB/token figure measured ~55% high for
+# qwen3.8's 16 full-attention layers (64 KiB/token) and was blind to the
+# fixed ~147 MiB recurrent state of its 48 linear-attention layers; real
+# per-layer `nbytes` (shape math, no graph eval) prices both correctly.
 _BYTES_PER_TOKEN = 100 * 1024
 
 
 def _estimate_cache_bytes(state: PromptCacheState) -> int:
     if state.token_ids is None:
         return 0
+    layers = list(getattr(state, "cache", None) or [])
+    total = 0
+    complete = bool(layers)
+    try:
+        for layer in layers:
+            nb = getattr(layer, "nbytes", None)
+            if nb is None:
+                complete = False
+                break
+            total += int(nb)
+    except Exception:  # noqa: BLE001 — budget math must never break a turn
+        complete = False
+    if complete and total > 0:
+        return total
     return len(state.token_ids) * _BYTES_PER_TOKEN
 
 
@@ -1101,6 +1267,49 @@ def _request_prefix_ids(request) -> List[str]:
 _SEEDED_PREFIXES: set = set()
 
 
+def _band_snapshot_target(sub) -> Optional[int]:
+    """Token index of the shared band's end for this request, or None.
+
+    The TS side knows the band as a CHARACTER length inside the system
+    message (`stable_prefix_chars`); only the engine has the tokenizer, and
+    the rendered prompt carries template framing plus the tool block ahead
+    of the system content — so the offset is located by finding the first
+    token index whose decode contains the band's tail. See ADR 0010.
+    """
+    n_chars = getattr(sub.request, "stable_prefix_chars", None)
+    if not n_chars or int(n_chars) <= 0:
+        return None
+    system = next(
+        (m for m in (getattr(sub.request, "messages", None) or [])
+         if getattr(m, "role", None) == "system"),
+        None,
+    )
+    content = getattr(system, "content", None) if system is not None else None
+    if not isinstance(content, str):
+        return None
+    marker = content[: int(n_chars)][-_BAND_MARKER_CHARS:]
+    if len(marker) < _BAND_MARKER_MIN_CHARS:
+        return None
+    tok = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
+    toks = list(sub.prompt_tokens or [])
+    try:
+        target = cache_seed.token_boundary_for_marker(
+            lambda k: tok.decode(toks[:k]), len(toks), marker, _SNAPSHOT_BOUNDARY_MARGIN
+        )
+    except Exception as exc:  # noqa: BLE001 — best-effort; fall back to today
+        print(f"[cache] band-boundary probe failed: {exc}", flush=True)
+        return None
+    # One line naming the decision — the thing to grep when a sibling
+    # re-prefills instead of extending. `target=0` means the band's tail was
+    # not found in the render, which is a marker problem, not a cache one.
+    print(
+        f"[cache] band-boundary chars={int(n_chars)} target={target} "
+        f"prompt_tokens={len(toks)}",
+        flush=True,
+    )
+    return target or None
+
+
 def _seed_prefix_from_session(request, state: PromptCacheState) -> None:
     """Seed the most-specific (gp) prefix entry from a real session's saved
     state so a SIBLING session (same gezel+project, different volatile state)
@@ -1123,8 +1332,31 @@ def _seed_prefix_from_session(request, state: PromptCacheState) -> None:
     if gp in _SEEDED_PREFIXES:
         return
     try:
+        # INVARIANT: a prefix entry may never be replaced by a LONGER state.
+        # On this model family `seed_from_state` reuses an entry only when it
+        # is a strict prefix (`lcp == n` -> extension); an entry longer than
+        # the shared head cannot be trimmed (48 of 64 layers are
+        # linear-attention `ArraysCache`), so it degrades every sibling to a
+        # full re-prefill. Lengthening is therefore never an improvement, and
+        # a shorter entry that already works must survive a later process
+        # that would otherwise overwrite it with a whole session. Measured:
+        # a 7,202-token entry that delivered 89.8% reuse was overwritten by
+        # the same session's 8,008-token post-turn state moments later.
+        incoming = len(state.token_ids or [])
+        existing = cache_persist.load_cache(PERSIST_DIR, MODEL_FINGERPRINT, gp)
+        prior = len(getattr(existing, "token_ids", None) or []) if existing else 0
+        if prior and incoming > prior:
+            _SEEDED_PREFIXES.add(gp)
+            print(
+                f"[cache] prefix-keep {gp}: existing {prior} tokens is shorter "
+                f"than this session's {incoming} — a longer entry cannot be "
+                f"trimmed by a sibling",
+                flush=True,
+            )
+            return
         if cache_persist.save_cache(PERSIST_DIR, MODEL_FINGERPRINT, gp, state):  # type: ignore[arg-type]
             _SEEDED_PREFIXES.add(gp)
+            _LAST_SAVE_ROSTER[gp] = _roster_fp_of(getattr(request, "tools", None))
             _enforce_disk_budget()
             print(
                 f"[cache] prefix-seeded {gp} from cache_id={request.cache_id} "
@@ -1213,6 +1445,11 @@ _PREFILL_LIVENESS_INTERVAL_S = 4.0
 # wrapped rotating layers can't trim even that. 16 is generous; the cost
 # is at most 16 re-prefilled tokens per turn.
 _SNAPSHOT_BOUNDARY_MARGIN = 16
+# Tail of the shared band used to locate its token boundary. Long enough to
+# be unique in a 60k-char prompt, short enough that one BPE re-merge at the
+# cut cannot swallow it.
+_BAND_MARKER_CHARS = 256
+_BAND_MARKER_MIN_CHARS = 64
 
 
 class _Sub:
@@ -1225,7 +1462,7 @@ class _Sub:
         "pinned_cache_ids", "prefill_total", "first_token_seen",
         "reused_tokens", "seed_mode", "prompt_snapshot", "snapshot_target",
         "saved_cache_state", "prefill_started_at", "generation_started_at",
-        "prompt_tps", "generation_tps",
+        "prompt_tps", "generation_tps", "roster_fp",
     )
 
     def __init__(
@@ -1237,6 +1474,7 @@ class _Sub:
         request_id,
         http_request,
         snapshot_target=None,
+        roster_fp=None,
     ):
         self.request = request
         self.prompt_tokens = prompt_tokens   # List[int], full prompt
@@ -1244,6 +1482,14 @@ class _Sub:
         self.seed_state = seed_state         # PromptCacheState from the cascade
         self.request_id = request_id
         self.http_request = http_request
+        # Diagnostic (temporary, Phase-0 churn census): the tool-roster
+        # shape this sub's prompt was rendered with. The warm path passes
+        # it explicitly because its internal ChatRequest omits tools.
+        self.roster_fp = (
+            roster_fp
+            if roster_fp is not None
+            else _roster_fp_of(getattr(request, "tools", None))
+        )
         self.uid = None
         self.queue: asyncio.Queue = asyncio.Queue()
         self.cancelled = False
@@ -1312,6 +1558,7 @@ class BatchEngine:
         for e in tool_close:
             if e not in eos_list:
                 eos_list.append(e)
+        self._stop_ids = {int(e) for e in eos_list}
         stop_tokens = [[int(e)] for e in eos_list]
         self._gen = BatchGenerator(
             model,
@@ -1347,6 +1594,12 @@ class BatchEngine:
         # alive + prefilling N tokens, and the UI pill shows it.
         self._prefill_total = 0      # new tokens the active wave is prefilling
         self._prefill_done = {}      # uid → tokens prefilled so far (this wave)
+        # uid → (cache_id, that sub's own prefill total). The engine has ONE
+        # stdout, so an untagged `Prefill:` line is broadcast by the supervisor
+        # to every in-flight session — a session streaming its reply would draw
+        # a neighbour's prefill bar on its own row, at that neighbour's token
+        # count. This map is what makes each marker addressable.
+        self._prefill_meta = {}
         self._last_prefill_emit = 0.0
         self._memory_check_steps = 0
         print(
@@ -1403,10 +1656,35 @@ class BatchEngine:
         stamps the authoritative prefill/reuse counts on the sub so the
         liveness marker and usage frames report engine reality, and logs
         the decision — the line to grep when turns re-prefill."""
+        # Late prefix re-check. The lookup in the request handler runs when the
+        # HTTP request ARRIVES; a band is published when its pioneer's turn
+        # ENDS. Static-wave admission puts minutes between the two, so every
+        # sibling dispatched alongside the pioneer — which is the whole fanout
+        # case this exists for — resolved `fresh` before the entry existed.
+        # Measured: two real sibling sessions agreed on
+        # `prefix-band-8977c4fc5f74e5d9`, the pioneer published 16,576 tokens
+        # to it, and the sibling still cold-prefilled 71,346 because its
+        # lookup had run 55ms too early. Re-checking here, at the moment the
+        # wave actually starts, is the only point that sees the publish.
+        if sub.request.cache_id and not getattr(sub.seed_state, "token_ids", None):
+            for pid in _request_prefix_ids(sub.request):
+                seeded = _try_seed_from_prefix(sub.request.cache_id, pid)
+                if seeded is not None:
+                    sub.seed_state = seeded
+                    break
         plan = cache_seed.seed_from_state(sub.seed_state, sub.prompt_tokens)
         sub.prefill_total = len(plan.segment)
         sub.reused_tokens = plan.reused
         sub.seed_mode = plan.mode
+        # Publish the shared band ONLY from a session that reused nothing —
+        # the "pioneer" of this prefix. Its own saved entry is then the band
+        # rather than end-minus-margin, so its next turn re-prefills the
+        # tail; every sibling after it inherits the band and skips it. One
+        # session pays so N-1 do not. A session that already extended from
+        # the band keeps the normal boundary, which is what preserves the
+        # intra-session reuse that works today (`extension reused=91413`).
+        if sub.snapshot_target is None and str(plan.mode).startswith("fresh"):
+            sub.snapshot_target = _band_snapshot_target(sub)
         if sub.request.cache_id:
             print(
                 f"[batch] seed cache_id={sub.request.cache_id} mode={plan.mode} "
@@ -1448,6 +1726,14 @@ class BatchEngine:
                     f"had divergent untrimmable state (tokens={len(plan.segment)})",
                     flush=True,
                 )
+                print(
+                    f"[batch] churn-shape cache_id={sub.request.cache_id} "
+                    f"probe_roster={sub.roster_fp} "
+                    f"saved_roster={_LAST_SAVE_ROSTER.get(sub.request.cache_id, 'unknown')} "
+                    f"path={'warm' if str(sub.request_id).startswith('cachewarm-') else 'chat'} "
+                    f"prompt_len={len(sub.prompt_tokens)}",
+                    flush=True,
+                )
         return plan.segment, plan.caches, plan.all_tokens
 
     def _snapshot_segments(self, sub, segment):
@@ -1485,7 +1771,13 @@ class BatchEngine:
         Progress is real: the worker consumes `BatchGenerator.next()` per
         internal step, so each prompt chunk reports its (processed, total)
         and the marker carries an actual percentage instead of a constant
-        0%."""
+        0%.
+
+        Each marker names the sub it belongs to (`cache=<cache_id>`), and
+        carries THAT sub's own done/total rather than the wave aggregate —
+        see `_prefill_meta`. An untagged marker still parses, and the
+        supervisor still broadcasts it, so an engine without the tag degrades
+        to the old behaviour rather than going dark."""
         total = self._prefill_total
         if total < _PREFILL_LIVENESS_MIN_TOKENS:
             return
@@ -1493,11 +1785,24 @@ class BatchEngine:
         if now - self._last_prefill_emit < _PREFILL_LIVENESS_INTERVAL_S:
             return
         self._last_prefill_emit = now
-        done = min(total, sum(self._prefill_done.values()))
-        pct = min(99, (100 * done) // total) if total > 0 else 0
         # Format MUST match stdout-parser's Prefill regex:
-        #   Prefill:  42%|   | 8192/<total> [batched]
-        print(f"Prefill: {pct:3d}%|          | {done}/{total} [batched]", flush=True)
+        #   Prefill:  42%|   | 8192/<total> [batched] cache=<id>
+        if not self._prefill_meta:
+            done = min(total, sum(self._prefill_done.values()))
+            pct = min(99, (100 * done) // total) if total > 0 else 0
+            print(f"Prefill: {pct:3d}%|          | {done}/{total} [batched]", flush=True)
+            return
+        for key, (cache_id, sub_total) in self._prefill_meta.items():
+            sub_total = max(0, int(sub_total or 0))
+            if sub_total <= 0:
+                continue
+            done = min(sub_total, int(self._prefill_done.get(key, 0)))
+            pct = min(99, (100 * done) // sub_total)
+            tag = f" cache={cache_id}" if cache_id else ""
+            print(
+                f"Prefill: {pct:3d}%|          | {done}/{sub_total} [batched]{tag}",
+                flush=True,
+            )
 
     def _admit_count(self, pending: int) -> int:
         """How many of the `pending` co-arrived subs to start THIS wave.
@@ -1564,6 +1869,24 @@ class BatchEngine:
                         f"ceiling={_MEM_LIMIT_BYTES // (1024 * 1024)}MB)",
                         flush=True,
                     )
+                if len(batch) == 1 and _SPEC is not None:
+                    spec_sub = batch[0]
+                    mode, why = spec_decode.spec_mode(
+                        spec_sub.request, spec_sub.grammar
+                    )
+                    if mode is not None:
+                        admit, gate_why = spec_decode.draft_prefill_gate(
+                            _SPEC, len(spec_sub.prompt_tokens)
+                        )
+                        if not admit:
+                            mode, why = None, gate_why
+                    if mode is not None:
+                        await self._run_spec_wave(spec_sub, mode)
+                        continue
+                    print(
+                        f"[spec] off request={spec_sub.request_id} reason={why}",
+                        flush=True,
+                    )
                 segments, caches, alltoks, samplers, lps, maxtoks = [], [], [], [], [], []
                 for sub in batch:
                     seg, c, at = self._seed_args(sub)
@@ -1584,7 +1907,7 @@ class BatchEngine:
                     )
                 except Exception as exc:  # noqa: BLE001
                     print(f"[batch] insert failed: {exc}", flush=True)
-                    traceback.print_exc()
+                    log_contained_exception("batch")
                     for sub in batch:
                         sub.queue.put_nowait(("err", str(exc)))
                     continue
@@ -1600,6 +1923,13 @@ class BatchEngine:
                     max(0, int(getattr(s, "prefill_total", 0))) for s in batch
                 )
                 self._prefill_done = {}
+                self._prefill_meta = {
+                    uid: (
+                        getattr(s.request, "cache_id", None),
+                        max(0, int(getattr(s, "prefill_total", 0))),
+                    )
+                    for uid, s in self._subs.items()
+                }
                 self._last_prefill_emit = 0.0
 
             # One engine step across all active sequences. `next()` (not
@@ -1619,7 +1949,7 @@ class BatchEngine:
                     step_ended_at = time.perf_counter()
                 except Exception as exc:  # noqa: BLE001
                     print(f"[batch] step failed: {exc}", flush=True)
-                    traceback.print_exc()
+                    log_contained_exception("batch")
                     for sub in list(self._subs.values()):
                         sub.queue.put_nowait(("err", str(exc)))
                     self._subs.clear()
@@ -1658,6 +1988,7 @@ class BatchEngine:
                     # watchdog's tighter streaming-idle bound).
                     self._prefill_total = 0
                     self._prefill_done = {}
+                    self._prefill_meta = {}
                 for r in responses:
                     sub = self._subs.get(r.uid)
                     if sub is None:
@@ -1689,6 +2020,268 @@ class BatchEngine:
                         self._subs.pop(r.uid, None)
                 # Yield so SSE generators flush + new requests get admitted.
                 await asyncio.sleep(0)
+
+    async def _run_spec_wave(self, sub, mode="greedy"):
+        """Serve one eligible sub via MTP speculation (sidecar-owned wave).
+
+        Replaces BatchGenerator for this wave only: seed plan + direct
+        chunked prefill (with the planted boundary snapshot) + upstream's
+        serial _mtp_rounds. Emit, liveness, cancellation, stats, and the
+        finish-time save reuse the engine's existing machinery, so a spec
+        turn is indistinguishable downstream from a batch turn. Measured
+        basis + eligibility rationale live in spec_decode.py."""
+        sub.prefill_started_at = time.perf_counter()
+        try:
+            # SeedPlan's third field is the tokens ALREADY IN the seeded
+            # cache (the reused prefix — empty on fresh), mirroring what
+            # insert_segments' all_tokens means to mlx_lm.
+            seg, seeded, prefix_toks = self._seed_args(sub)
+            tower = getattr(MODEL, "language_model", MODEL)
+            cache_layers = seeded
+            if cache_layers is not None and not spec_decode.cache_matches_tower(
+                cache_layers, tower
+            ):
+                print(
+                    f"[spec] seed-guard: cached layer classes mismatch the "
+                    f"active tower for cache_id={sub.request.cache_id}; "
+                    f"treating as fresh",
+                    flush=True,
+                )
+                cache_layers = None
+                seg = list(sub.prompt_tokens)
+                prefix_toks = []
+                sub.reused_tokens = 0
+                sub.prefill_total = len(seg)
+                sub.seed_mode = "fresh"
+            if cache_layers is None:
+                cache_layers = tower.make_cache()
+            full_prompt = list(prefix_toks or []) + list(seg)
+            max_toks = (
+                int(sub.request.max_tokens) if sub.request.max_tokens else 2048
+            )
+
+            cut = None
+            if self._needs_snapshot and sub.request.cache_id:
+                plan = cache_seed.plan_snapshot_segments(
+                    seg,
+                    sub.reused_tokens,
+                    len(sub.prompt_tokens),
+                    sub.snapshot_target,
+                    _SNAPSHOT_BOUNDARY_MARGIN,
+                )
+                sub.snapshot_target = plan.target
+                if plan.target:
+                    rel = int(plan.target) - int(sub.reused_tokens)
+                    if 0 < rel < len(seg):
+                        cut = rel
+
+            self._prefill_total = max(0, int(sub.prefill_total or 0))
+            self._prefill_done = {}
+            self._prefill_meta = {
+                0: (
+                    getattr(sub.request, "cache_id", None),
+                    max(0, int(sub.prefill_total or 0)),
+                )
+            }
+            self._last_prefill_emit = 0.0
+
+            final_out = None
+            for kind, done, _total, maybe_out in spec_decode.chunked_prefill_steps(
+                tower, cache_layers, list(seg), ARGS.prefill_step_size, cut=cut
+            ):
+                if sub.cancelled:
+                    print(
+                        f"[spec] wave cancelled during prefill "
+                        f"request={sub.request_id}",
+                        flush=True,
+                    )
+                    return
+                self._prefill_done[0] = int(done)
+                self._emit_prefill_liveness()
+                if kind == "cut":
+                    self._capture_spec_snapshot(sub, cache_layers, full_prompt)
+                elif kind == "final":
+                    final_out = maybe_out
+                await asyncio.sleep(0)
+
+            self._prefill_total = 0
+            self._prefill_done = {}
+            self._prefill_meta = {}
+
+            # Assisted mode: positioned target sampling (temperature/top_p/
+            # top_k, per-(seed,position) keys) and/or the processed walk.
+            # The processor list is built by the SAME _processors_for the
+            # normal path uses, so constrained decoding is identical either
+            # route. Seed is logged for replay.
+            sampler = None
+            processors = None
+            history = None
+            wave_seed = None
+            if mode == "assisted":
+                processors = self._processors_for(sub.request, sub.grammar) or None
+                t = sub.request.temperature
+                if t not in (None, 0, 0.0):
+                    wave_seed = int.from_bytes(os.urandom(6), "big")
+                    sampler = spec_decode.PositionedSampler(
+                        temperature=float(t),
+                        top_p=float(sub.request.top_p)
+                        if sub.request.top_p is not None
+                        else 0.0,
+                        top_k=int(sub.request.top_k)
+                        if sub.request.top_k is not None
+                        else 0,
+                        seed=wave_seed,
+                    )
+                history = list(full_prompt)
+
+            def emit(tok):
+                now = time.perf_counter()
+                if sub.generation_started_at is None:
+                    # Mirror the batch worker: the step yielding the first
+                    # token counts with prefill/TTFT; decode is measured
+                    # from inter-token intervals after it.
+                    sub.generation_started_at = now
+                    prefill_seconds = max(
+                        now - (sub.prefill_started_at or now), 1e-9
+                    )
+                    if sub.prefill_total > 0:
+                        sub.prompt_tps = sub.prefill_total / prefill_seconds
+                sub.first_token_seen = True
+                sub.token_ids.append(int(tok))
+                intervals = len(sub.token_ids) - 1
+                gen_seconds = now - sub.generation_started_at
+                if intervals > 0 and gen_seconds > 0:
+                    sub.generation_tps = intervals / gen_seconds
+                self._emit_delta(sub)
+
+            finish_reason = None
+            if mode == "assisted":
+                first = spec_decode.processed_first_token(
+                    final_out, sampler, processors, history
+                )
+                history.append(first)
+            else:
+                first = spec_decode.first_token_from(final_out)
+            emit(first)
+            if first in self._stop_ids:
+                finish_reason = "stop"
+            elif len(sub.token_ids) >= max_toks:
+                finish_reason = "length"
+
+            if finish_reason is None:
+                if mode == "assisted":
+                    rounds = spec_decode.assisted_rounds(
+                        MODEL,
+                        _SPEC,
+                        cache_layers,
+                        list(seg),
+                        final_out,
+                        first,
+                        max_toks,
+                        sampler=sampler,
+                        processors=processors,
+                        history=history,
+                    )
+                else:
+                    rounds = spec_decode.make_rounds(
+                        MODEL,
+                        _SPEC,
+                        cache_layers,
+                        list(seg),
+                        final_out,
+                        first,
+                        max_toks,
+                    )
+                mem_steps = 0
+                for tok, _lp in rounds:
+                    if sub.cancelled:
+                        print(
+                            f"[spec] wave cancelled request={sub.request_id}",
+                            flush=True,
+                        )
+                        return
+                    emit(tok)
+                    if tok in self._stop_ids:
+                        finish_reason = "stop"
+                        break
+                    if len(sub.token_ids) >= max_toks:
+                        finish_reason = "length"
+                        break
+                    mem_steps += 1
+                    if mem_steps >= 32:
+                        mem_steps = 0
+                        _reclaim_mlx_buffer_cache("spec-pressure")
+                    await asyncio.sleep(0)
+                if finish_reason is None:
+                    finish_reason = (
+                        "length" if len(sub.token_ids) >= max_toks else "stop"
+                    )
+
+            line = spec_decode.stats_line(_SPEC)
+            if line:
+                print(
+                    f"[spec] stats request={sub.request_id} mode={mode} "
+                    + (f"seed={wave_seed} " if wave_seed is not None else "")
+                    + f"ctx={len(sub.prompt_tokens)} gen={len(sub.token_ids)} "
+                    f":: {line}",
+                    flush=True,
+                )
+            # Rounds can exit mid-round (stop token, budget) with verified-
+            # but-rejected tokens still in the KV. Hybrid stacks are immune —
+            # their save always uses the boundary snapshot — but a trimmable
+            # stack must be trimmed back to exactly the tokens we report, or
+            # the saved entry's offsets outrun its token list.
+            try:
+                reported = len(sub.prompt_tokens) + len(sub.token_ids)
+                offsets = [
+                    int(getattr(c, "offset", 0) or 0) for c in cache_layers
+                ]
+                excess = max(offsets) - reported if offsets else 0
+                if excess > 0:
+                    cache_seed.trim_layers(cache_layers, excess)
+            except Exception:  # noqa: BLE001 — snapshot path covers hybrids
+                pass
+            r = types.SimpleNamespace(
+                finish_reason=finish_reason,
+                prompt_cache=list(cache_layers),
+                all_tokens=full_prompt + [int(t) for t in sub.token_ids],
+                token=sub.token_ids[-1] if sub.token_ids else 0,
+            )
+            self._finish(sub, r)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[spec] wave failed request={sub.request_id}: {exc}", flush=True)
+            # Tag every traceback line. The supervisor's stdout classifier
+            # reads a bare `SomeError: ...` leaf line as proof the engine is
+            # dead and tears the process down — right during startup, wrong
+            # here, where this handler has already contained the failure and
+            # the engine is still serving other requests.
+            log_contained_exception("spec")
+            sub.queue.put_nowait(("err", str(exc)))
+
+    def _capture_spec_snapshot(self, sub, cache_layers, full_prompt):
+        """Boundary snapshot for the spec wave's direct prefill. The cache
+        is quiescent at the planted chunk edge; clone_layers reconstructs
+        standalone layers (MLX arrays are immutable, so sharing buffers is
+        safe), and the same token-prefix proof as _capture_prompt_snapshot
+        guards the boundary invariant."""
+        try:
+            boundary = int(sub.snapshot_target)
+            layers = spec_decode.clone_layers(cache_layers)
+            if cache_seed.snapshot_matches_prompt(
+                layers, full_prompt[:boundary], sub.prompt_tokens, boundary
+            ):
+                sub.prompt_snapshot = (layers, boundary)
+            elif not self._snapshot_warned:
+                self._snapshot_warned = True
+                print(
+                    f"[spec] prompt snapshot skipped: boundary={boundary} "
+                    f"(post-gen save fallback)",
+                    flush=True,
+                )
+        except Exception as exc:  # noqa: BLE001 — snapshot is best-effort
+            if not self._snapshot_warned:
+                self._snapshot_warned = True
+                print(f"[spec] prompt snapshot failed: {exc}", flush=True)
 
     def _capture_prompt_snapshot(self, sub, at_tokens):
         """Capture the KV state at a mid-prompt boundary of `at_tokens`.
@@ -1819,6 +2412,7 @@ class BatchEngine:
                         if state.token_ids:
                             _save_cache(sub.request.cache_id, state)
                             sub.saved_cache_state = state
+                            _LAST_SAVE_ROSTER[sub.request.cache_id] = sub.roster_fp
                             _seed_prefix_from_session(sub.request, state)
                             print(
                                 f"[batch] saved cache_id={sub.request.cache_id} "
@@ -2020,7 +2614,9 @@ def _get_batch_engine() -> "BatchEngine":
     if _BATCH_ENGINE is None:
         lm = getattr(MODEL, "language_model", MODEL)
         tok = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
-        _BATCH_ENGINE = BatchEngine(_UnwrapLM(lm), tok, ARGS.max_concurrency)
+        # mlx_lm models return raw logits — no LanguageModelOutput to unwrap.
+        engine_model = lm if _TEXT_TOWER == "mlx_lm" else _UnwrapLM(lm)
+        _BATCH_ENGINE = BatchEngine(engine_model, tok, ARGS.max_concurrency)
     return _BATCH_ENGINE
 
 
@@ -2088,6 +2684,19 @@ class ChatRequest(BaseModel):
     # session inherits the warmest matching layer (gezel+project > gezel).
     # When set, takes precedence over the singular `prefix_cache_id`.
     prefix_cache_ids: Optional[List[str]] = None
+    # Length in CHARACTERS of the shared band inside messages[0].content —
+    # the leading run sibling sessions of the same (gezel, project) render
+    # identically. When set, the engine plants its prompt-snapshot cut at
+    # that boundary and publishes the SHORT snapshot as the prefix entry
+    # instead of the session's full post-turn state.
+    #
+    # Why this matters here and not on llama.cpp: 48 of qwen3.8's 64 layers
+    # are linear-attention `ArraysCache` holding a fixed-size recurrent
+    # state with no `trim()`, so a prefix entry LONGER than the shared head
+    # is not a partial hit — `seed_from_state` falls to `fresh-untrimmable`
+    # and the whole prompt is re-prefilled. Short entries are the only
+    # reusable shape. See ADR 0010.
+    stable_prefix_chars: Optional[int] = None
     # Generation knobs (subset of mlx-vlm's). Not all are honored today —
     # we just need enough to run sensible defaults.
     max_tokens: Optional[int] = None
@@ -2320,6 +2929,55 @@ async def cache_warm(req: CacheWarmRequest) -> JSONResponse:
     )
     cache_state, _, _ = _resolve_cache_state(warm_request)
     prior_tokens = len(cache_state.token_ids or [])
+    warm_roster_fp = _roster_fp_of(req.tools)
+
+    # A warm must never race a live turn for the same cache_id. Both write
+    # the same entry, so whichever finishes last wins, and the warm's prompt
+    # is by construction the SHORT one. Observed: a 520-token warm landed on
+    # a session mid-turn and replaced its 121,508-token entry with 521
+    # tokens; the in-flight turn had already seeded so it survived, but the
+    # next turn on that session would have re-prefilled 121k tokens from
+    # scratch. The live turn owns the id — refuse, don't queue.
+    if _INFLIGHT_CACHE_IDS.get(req.cache_id, 0) > 0:
+        print(
+            f"[cache] warm skipped for cache_id={req.cache_id}: a request is already "
+            f"in flight on that cache (prior={prior_tokens})",
+            flush=True,
+        )
+        return JSONResponse(
+            {
+                "warmed": False,
+                "cache_id": req.cache_id,
+                "token_count": prior_tokens,
+                "persisted": False,
+                "skipped": "in-flight",
+            }
+        )
+
+    # The tool roster IS part of the prefix identity — it is rendered into
+    # the prompt ahead of everything else, so warming with a different
+    # roster diverges at token ~1 and the "warm" is a full prefill that
+    # then overwrites a good entry with a useless one. Refuse when the
+    # rosters disagree and there is a real entry to lose. An unknown saved
+    # roster is not a mismatch (nothing recorded yet).
+    saved_roster_fp = _LAST_SAVE_ROSTER.get(req.cache_id)
+    if prior_tokens > 0 and saved_roster_fp and saved_roster_fp != warm_roster_fp:
+        print(
+            f"[cache] warm skipped for cache_id={req.cache_id}: roster mismatch "
+            f"(warm={warm_roster_fp} saved={saved_roster_fp}, prior={prior_tokens}) — "
+            f"warming a different tool shape would churn the whole prefix",
+            flush=True,
+        )
+        return JSONResponse(
+            {
+                "warmed": False,
+                "cache_id": req.cache_id,
+                "token_count": prior_tokens,
+                "persisted": False,
+                "skipped": "roster-mismatch",
+            }
+        )
+
     sub = _Sub(
         request=warm_request,
         prompt_tokens=prompt_tokens,
@@ -2328,6 +2986,7 @@ async def cache_warm(req: CacheWarmRequest) -> JSONResponse:
         request_id=f"cachewarm-{uuid.uuid4()}",
         http_request=None,
         snapshot_target=snapshot_target,
+        roster_fp=warm_roster_fp,
     )
     sub.pinned_cache_ids = _mark_inflight(req.cache_id)
     sub.prefill_total = len(prompt_tokens)
@@ -2336,12 +2995,12 @@ async def cache_warm(req: CacheWarmRequest) -> JSONResponse:
     except Exception as exc:
         _unmark_inflight(sub.pinned_cache_ids)
         sub.pinned_cache_ids = []
-        traceback.print_exc()
+        log_contained_exception("http")
         raise HTTPException(status_code=500, detail=str(exc))
     try:
         await _await_batched_completion(sub)
     except Exception as exc:
-        traceback.print_exc()
+        log_contained_exception("http")
         raise HTTPException(status_code=500, detail=str(exc))
 
     cache_state = sub.saved_cache_state
@@ -2723,6 +3382,11 @@ def _build_prompt(
     # No tools + no override, no tokenizer template, or tools-render
     # failed: text-only path. apply_chat_template signature varies across
     # mlx-vlm versions; the (processor, config, messages) form is stable.
+    # The mlx_lm tower has no vlm processor/config pair — its tokenizer
+    # renders directly (same chat_template.jinja on disk either way).
+    if _TEXT_TOWER == "mlx_lm":
+        tok = getattr(PROCESSOR, "tokenizer", None) or PROCESSOR
+        return tok.apply_chat_template(raw, tokenize=False, add_generation_prompt=True)
     config = getattr(MODEL, "config", None) or {}
     return apply_chat_template(PROCESSOR, config, raw)
 
@@ -2874,6 +3538,21 @@ async def chat_completions(request: ChatRequest, http_request: Request):
             _batched_stream_iter(sub),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    # Defense in depth: the tower selector requires --max-concurrency >= 1
+    # for the mlx_lm text tower, so this serial branch (mlx_vlm
+    # stream_generate) should be unreachable in lm mode. If a future edit
+    # breaks that invariant, fail loudly instead of feeding an mlx_lm
+    # model into mlx_vlm's generate loop.
+    if _TEXT_TOWER == "mlx_lm":
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "serial generation path is unavailable with the mlx_lm text "
+                "tower; restart without GEZEL_MLX_TEXT_TOWER or with "
+                "--max-concurrency >= 1"
+            ),
         )
 
     # Serial-path guard: mlx_vlm's divergent-prefix branch trims by
@@ -3087,7 +3766,7 @@ async def chat_completions(request: ChatRequest, http_request: Request):
 
         except Exception as e:
             print(f"Error during stream generation: {e}", flush=True)
-            traceback.print_exc()
+            log_contained_exception("stream")
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
         finally:

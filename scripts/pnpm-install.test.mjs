@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import test from 'node:test';
@@ -18,6 +18,7 @@ import {
   runPnpmInstallChild,
   runPreparedFrozenInstall,
   runSerializedPnpmInstall,
+  staleWorkspaceDependencyLinks,
   withPnpmInstallLock,
   workspaceDependenciesReady,
 } from './pnpm-install.mjs';
@@ -251,11 +252,19 @@ test('installs a missing direct dependency link only in the affected workspace p
     ifMissing: true,
     dependencyLockProbeFn: () => [],
     spawnPnpmFn: (args) => {
-      childArgs = args;
       const child = new EventEmitter();
       child.pid = 2_147_483_647;
       child.killed = false;
       child.kill = () => true;
+      if (args[0] === 'install') {
+        childArgs = args;
+        // The post-install check reads the tree pnpm left behind, so a stub
+        // that claims success has to leave the link it was asked to create.
+        mkdir(join(root, 'packages', 'client', 'node_modules', 'undici'), {
+          recursive: true,
+        }).then(() => child.emit('close', 0, null));
+        return child;
+      }
       queueMicrotask(() => child.emit('close', 0, null));
       return child;
     },
@@ -270,6 +279,207 @@ test('installs a missing direct dependency link only in the affected workspace p
     '--offline',
     '--frozen-lockfile',
   ]);
+});
+
+/** A checkout whose markers and binaries are all present and healthy. */
+async function readyWorkspace(root, { lockfile = 'lockfileVersion: 9\n' } = {}) {
+  const binSuffix = process.platform === 'win32' ? '.cmd' : '';
+  await mkdir(join(root, 'node_modules', '.pnpm'), { recursive: true });
+  await writeFile(join(root, 'node_modules', '.modules.yaml'), 'layoutVersion: 5\n');
+  await writeFile(join(root, 'pnpm-lock.yaml'), lockfile);
+  await writeFile(join(root, 'node_modules', '.pnpm', 'lock.yaml'), lockfile);
+  await writeFile(
+    join(root, 'package.json'),
+    JSON.stringify({ name: 'fixture', version: '1.0.0' }),
+  );
+  for (const [pkg, bin] of [
+    ['ui', `vite${binSuffix}`],
+    ['app', `electron${binSuffix}`],
+  ]) {
+    await mkdir(join(root, 'packages', pkg, 'node_modules', '.bin'), { recursive: true });
+    await writeFile(join(root, 'packages', pkg, 'node_modules', '.bin', bin), '');
+  }
+}
+
+/**
+ * The state a pin bumped on another machine leaves behind after `git pull`:
+ * the symlink is replaced rather than removed, so it stays present while
+ * pointing into the previous version's virtual-store directory.
+ */
+async function stalePinnedDependency(root, { installed, wanted }) {
+  const lockfile = `lockfileVersion: '9.0'
+
+importers:
+
+  .: {}
+
+  packages/catalog:
+    dependencies:
+      '@bendyline/gilde':
+        specifier: ${wanted}
+        version: ${wanted}
+      '@bendyline/gezel':
+        specifier: workspace:*
+        version: link:../core
+`;
+  await readyWorkspace(root, { lockfile });
+  const store = join(
+    root,
+    'node_modules',
+    '.pnpm',
+    `@bendyline+gilde@${installed}`,
+    'node_modules',
+    '@bendyline',
+    'gilde',
+  );
+  await mkdir(store, { recursive: true });
+  await writeFile(
+    join(store, 'package.json'),
+    JSON.stringify({ name: '@bendyline/gilde', version: installed }),
+  );
+  await mkdir(join(root, 'packages', 'catalog', 'node_modules', '@bendyline'), {
+    recursive: true,
+  });
+  await writeFile(
+    join(root, 'packages', 'catalog', 'package.json'),
+    JSON.stringify({
+      name: '@bendyline/gezel-catalog',
+      dependencies: { '@bendyline/gilde': wanted, '@bendyline/gezel': 'workspace:*' },
+    }),
+  );
+  await symlink(store, join(root, 'packages', 'catalog', 'node_modules', '@bendyline', 'gilde'));
+  await mkdir(join(root, 'packages', 'core'), { recursive: true });
+  await writeFile(
+    join(root, 'packages', 'core', 'package.json'),
+    JSON.stringify({ name: '@bendyline/gezel', version: '1.0.0' }),
+  );
+  await symlink(
+    join(root, 'packages', 'core'),
+    join(root, 'packages', 'catalog', 'node_modules', '@bendyline', 'gezel'),
+  );
+  await writeFile(
+    join(root, 'node_modules', '.pnpm-workspace-state-v1.json'),
+    JSON.stringify({
+      lastValidatedTimestamp: Date.now() + 10_000,
+      projects: {
+        [root]: { name: 'fixture', version: '1.0.0' },
+        [join(root, 'packages', 'catalog')]: { name: '@bendyline/gezel-catalog', version: '0.0.0' },
+        [join(root, 'packages', 'core')]: { name: '@bendyline/gezel', version: '1.0.0' },
+        [join(root, 'packages', 'ui')]: { name: undefined, version: '0.0.0' },
+        [join(root, 'packages', 'app')]: { name: undefined, version: '0.0.0' },
+      },
+    }),
+  );
+}
+
+test('a link left on the previous version of a bumped pin reads as stale, not as present', async (t) => {
+  const root = await fixture(t);
+  await stalePinnedDependency(root, { installed: '0.1.41', wanted: '0.1.45' });
+
+  assert.deepEqual(
+    staleWorkspaceDependencyLinks(root).map(({ dependency, installed, expected }) => ({
+      dependency,
+      installed,
+      expected,
+    })),
+    [{ dependency: '@bendyline/gilde', installed: '0.1.41', expected: '0.1.45' }],
+    'the workspace link alongside it must not be mistaken for drift',
+  );
+});
+
+test('an installed version matching the lockfile is never reported as stale', async (t) => {
+  const root = await fixture(t);
+  await stalePinnedDependency(root, { installed: '0.1.45', wanted: '0.1.45' });
+  assert.deepEqual(staleWorkspaceDependencyLinks(root), []);
+});
+
+test('deps:install synchronizes a stale pin that byte-identical lockfiles call settled', async (t) => {
+  const root = await fixture(t);
+  await stalePinnedDependency(root, { installed: '0.1.41', wanted: '0.1.45' });
+  // The trap this closes: an earlier filtered install can leave the recorded
+  // lock matching the committed one while another importer keeps its old link,
+  // and every later run then short-circuits as "dependencies already present".
+  assert.equal(dependencyStatus(root).installedLockfileIssue, null);
+  assert.equal(dependencyStatus(root).synchronized, false);
+
+  let childArgs;
+  const code = await runSerializedPnpmInstall({
+    repoRoot: root,
+    dependencyLockProbeFn: () => [],
+    spawnPnpmFn: (args) => {
+      const child = new EventEmitter();
+      child.pid = 2_147_483_647;
+      child.killed = false;
+      child.kill = () => true;
+      if (args[0] !== 'install') {
+        queueMicrotask(() => child.emit('close', 0, null));
+        return child;
+      }
+      childArgs = args;
+      const store = join(
+        root,
+        'node_modules',
+        '.pnpm',
+        '@bendyline+gilde@0.1.45',
+        'node_modules',
+        '@bendyline',
+        'gilde',
+      );
+      const link = join(root, 'packages', 'catalog', 'node_modules', '@bendyline', 'gilde');
+      mkdir(store, { recursive: true })
+        .then(() =>
+          writeFile(
+            join(store, 'package.json'),
+            JSON.stringify({ name: '@bendyline/gilde', version: '0.1.45' }),
+          ),
+        )
+        .then(() => rm(link, { force: true }))
+        .then(() => symlink(store, link))
+        .then(() => child.emit('close', 0, null));
+      return child;
+    },
+  });
+
+  assert.equal(code, 0);
+  assert.ok(childArgs, 'pnpm must run rather than short-circuit as already present');
+  assert.deepEqual(childArgs.slice(-4), [
+    '--filter',
+    './packages/catalog',
+    '--offline',
+    '--frozen-lockfile',
+  ]);
+  assert.deepEqual(staleWorkspaceDependencyLinks(root), []);
+});
+
+test('deps:install refuses to report success while the tree still differs', async (t) => {
+  const root = await fixture(t);
+  await stalePinnedDependency(root, { installed: '0.1.41', wanted: '0.1.45' });
+  const errors = [];
+  const restore = console.error;
+  console.error = (message) => errors.push(message);
+  let code;
+  try {
+    code = await runSerializedPnpmInstall({
+      repoRoot: root,
+      dependencyLockProbeFn: () => [],
+      // A pnpm that exits 0 without reconciling the link — what a filtered
+      // install does to the importers outside its filter.
+      spawnPnpmFn: () => {
+        const child = new EventEmitter();
+        child.pid = 2_147_483_647;
+        child.killed = false;
+        child.kill = () => true;
+        queueMicrotask(() => child.emit('close', 0, null));
+        return child;
+      },
+    });
+  } finally {
+    console.error = restore;
+  }
+
+  assert.equal(code, 1);
+  assert.match(errors.join('\n'), /still differs/);
+  assert.match(errors.join('\n'), /@bendyline\/gilde.*0\.1\.41.*0\.1\.45/);
 });
 
 test('a failed fetch leaves node_modules untouched', async (t) => {

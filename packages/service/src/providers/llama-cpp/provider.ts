@@ -30,7 +30,6 @@ import {
   createLogger,
   leaksUntaggedReasoning,
 } from '@bendyline/gezel';
-import { Agent, fetch as undiciFetch } from 'undici';
 import type { TurnRambleDetectionConfig } from '../../model-profile/behaviors/turn-ramble-detection.js';
 import {
   extractReasoningWithProfile,
@@ -96,7 +95,9 @@ import type {
   NativeEngineSupervisor,
 } from '../native/supervisor.js';
 import { isSseComment, readSseEvents } from '../openai-compatible/sse.js';
+import { prepareSalvagedProseDocument } from '../prose-document-salvage.js';
 import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs, runInQueue } from '../queue.js';
+import { buildRambleAbortMessage } from '../ramble-abort-message.js';
 import { RambleDetector } from '../ramble-detector.js';
 
 // Re-exported: these moved to ../immediate-write-salvage.ts when MLX needed
@@ -413,24 +414,6 @@ const SCRIPTED_DIRECT_FILE_WORK_PROMPT_RE =
 const SCENARIO_FILE_REPAIR_NO_MUTATION_LIMIT = 2;
 
 /**
- * Fetch for local llama-server calls with undici's built-in 5-minute
- * headers/body timeouts disabled. llama-server can spend longer than
- * that in cold prefill before sending the first SSE byte; the provider
- * already owns the real turn deadlines via AbortController.
- */
-let cachedPatientFetch: typeof fetch | undefined;
-export function createLlamaCppPatientFetch(): typeof fetch {
-  if (!cachedPatientFetch) {
-    const dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
-    cachedPatientFetch = ((
-      url: Parameters<typeof undiciFetch>[0],
-      init?: Parameters<typeof undiciFetch>[1],
-    ) => undiciFetch(url, { ...init, dispatcher })) as unknown as typeof fetch;
-  }
-  return cachedPatientFetch;
-}
-
-/**
  * Default context window (tokens) for sessions handed out by this
  * provider when `opts.numCtx` is not passed. Bumped 32K → 49K → 65K
  * as the matrix-3 petshop ran into a
@@ -549,6 +532,27 @@ function hasJsonSchemaPatternsForLlamaCpp(tools: ChatCompletionTool[]): boolean 
 }
 
 type ToolGrammarFallback = 'none' | 'strip-patterns' | 'simplified' | 'permissive';
+
+/**
+ * The recovery ladder in ascending permissiveness. Index order is the
+ * comparison key for {@link LlamaCppProvider.noteToolGrammarFloor} — the
+ * remembered floor may only ever move toward more permissive.
+ */
+const TOOL_GRAMMAR_FALLBACK_ORDER: readonly ToolGrammarFallback[] = [
+  'none',
+  'strip-patterns',
+  'simplified',
+  'permissive',
+];
+
+/**
+ * Don't announce a physical-slot wait shorter than this — a background
+ * one-shot slipping between foreground iterations is normal, and flashing
+ * the queue badge for a frame reads as a glitch.
+ */
+const ENGINE_REQUEST_WAIT_NOTICE_DELAY_MS = 200;
+/** Re-assert cadence, matching `runInQueue`'s so the UI sees one rhythm. */
+const ENGINE_REQUEST_WAIT_NOTICE_MS = 5_000;
 
 function applyToolGrammarFallback(
   tools: ChatCompletionTool[],
@@ -1701,6 +1705,25 @@ export class LlamaCppProvider implements LLMProvider {
   readonly queue: ProviderQueue;
   readonly supportsExternalTools = true;
   readonly supportsPriorMessages = true;
+  /**
+   * What this engine build's aggregate tool-grammar converter has already
+   * proven it cannot take, remembered across sessions.
+   *
+   * The rejection is deterministic — a fixed build applied to a tool
+   * payload of a given size either compiles or doesn't — but the recovery
+   * ladder in `runSend` used to start from `'none'` on every turn, so a
+   * roster that fails re-paid two rejected round-trips *per turn*, forever.
+   * On one install that was 16 rejections in a single afternoon, every one
+   * of them re-deriving the same answer.
+   *
+   * Keyed on tool count rather than remembered flat, because the limit the
+   * failures actually hit is grammar SIZE ("number of repetitions exceeds
+   * sane defaults"): a 48-tool roster blowing up says nothing about a
+   * 5-tool one, and degrading the small roster's schemas would cost real
+   * tool-argument fidelity for no reason. A request at or above the
+   * smallest count known to fail starts at the tier that recovered it.
+   */
+  private toolGrammarFloor: { minToolCount: number; tier: ToolGrammarFallback } | null = null;
   private readonly supervisor?: NativeEngineSupervisor;
   /** Explicit base URL when no supervisor is managing the process. */
   private readonly externalBaseUrl?: string;
@@ -2121,6 +2144,32 @@ export class LlamaCppProvider implements LLMProvider {
   }
 
   /**
+   * Record that a tool payload of `toolCount` was rejected by the engine's
+   * grammar converter and needed `tier` to get through. See
+   * {@link toolGrammarFloor}.
+   *
+   * Both fields widen monotonically: the smallest failing count (so the
+   * floor covers every payload at least that large) and the most permissive
+   * tier we have had to reach (so a later turn never starts below a rung
+   * already known to be insufficient).
+   */
+  noteToolGrammarFloor(toolCount: number, tier: ToolGrammarFallback): void {
+    if (tier === 'none' || toolCount <= 0) return;
+    const prev = this.toolGrammarFloor;
+    const prevRank = prev ? TOOL_GRAMMAR_FALLBACK_ORDER.indexOf(prev.tier) : -1;
+    this.toolGrammarFloor = {
+      minToolCount: Math.min(prev?.minToolCount ?? toolCount, toolCount),
+      tier: TOOL_GRAMMAR_FALLBACK_ORDER.indexOf(tier) > prevRank ? tier : (prev?.tier ?? tier),
+    };
+  }
+
+  /** Tier a request carrying `toolCount` tools should START at. */
+  toolGrammarFloorFor(toolCount: number): ToolGrammarFallback {
+    const floor = this.toolGrammarFloor;
+    return floor && toolCount >= floor.minToolCount ? floor.tier : 'none';
+  }
+
+  /**
    * Batch capability — llama-server serves `--parallel N` concurrent KV
    * slots, so when batched inference is enabled `maxConcurrency` is that
    * slot count; otherwise 1 (we don't opt into co-batching). See
@@ -2183,31 +2232,62 @@ export class LlamaCppProvider implements LLMProvider {
    * slot 0 while another session was still generating on slot 0, leaving the
    * native prompt processor stuck forever.
    */
-  async acquireExclusiveEngineRequest(label: string, signal?: AbortSignal): Promise<() => void> {
+  async acquireExclusiveEngineRequest(
+    label: string,
+    signal?: AbortSignal,
+    onWait?: (info: { aheadOf: number }) => void,
+  ): Promise<() => void> {
     if (signal?.aborted) throw engineRequestAbortError(label);
 
     const waitStartedAt = Date.now();
     if (this.engineRequestsActive < this.engineRequestWidth) {
       this.engineRequestsActive++;
     } else {
-      await new Promise<void>((resolve, reject) => {
-        const waiter: (typeof this.engineRequestWaiters)[number] = {
-          resolve,
-          reject,
-          ...(signal ? { signal } : {}),
-        };
-        if (signal) {
-          waiter.onAbort = () => {
-            const idx = this.engineRequestWaiters.indexOf(waiter);
-            if (idx === -1) return;
-            this.engineRequestWaiters.splice(idx, 1);
-            signal.removeEventListener('abort', waiter.onAbort!);
-            reject(engineRequestAbortError(label));
+      let waitNotice: ReturnType<typeof setInterval> | null = null;
+      let waitNoticeDelay: ReturnType<typeof setTimeout> | null = null;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const waiter: (typeof this.engineRequestWaiters)[number] = {
+            resolve,
+            reject,
+            ...(signal ? { signal } : {}),
           };
-          signal.addEventListener('abort', waiter.onAbort, { once: true });
-        }
-        this.engineRequestWaiters.push(waiter);
-      });
+          if (signal) {
+            waiter.onAbort = () => {
+              const idx = this.engineRequestWaiters.indexOf(waiter);
+              if (idx === -1) return;
+              this.engineRequestWaiters.splice(idx, 1);
+              signal.removeEventListener('abort', waiter.onAbort!);
+              reject(engineRequestAbortError(label));
+            };
+            signal.addEventListener('abort', waiter.onAbort, { once: true });
+          }
+          this.engineRequestWaiters.push(waiter);
+          // This wait was invisible to everything above it. A logical turn
+          // holds its ProviderQueue lease across the whole tool loop, so a
+          // turn that already cleared that queue can still park HERE for the
+          // full length of another session's round-trip — on a one-slot
+          // launch, minutes — emitting nothing but a debug line. The user
+          // saw a turn with no queue badge and no tokens, which the silence
+          // banner then reported as a wedged model.
+          if (onWait) {
+            const publish = () => {
+              const idx = this.engineRequestWaiters.indexOf(waiter);
+              if (idx === -1) return;
+              onWait({ aheadOf: this.engineRequestsActive + idx });
+            };
+            waitNoticeDelay = setTimeout(() => {
+              publish();
+              waitNotice = setInterval(publish, ENGINE_REQUEST_WAIT_NOTICE_MS);
+              waitNotice.unref?.();
+            }, ENGINE_REQUEST_WAIT_NOTICE_DELAY_MS);
+            waitNoticeDelay.unref?.();
+          }
+        });
+      } finally {
+        if (waitNoticeDelay) clearTimeout(waitNoticeDelay);
+        if (waitNotice) clearInterval(waitNotice);
+      }
     }
 
     const waitedMs = Date.now() - waitStartedAt;
@@ -3353,6 +3433,10 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
           releaseEngineRequest = await this.deps.provider.acquireExclusiveEngineRequest(
             engineRequestLabel,
             engineWaitSignal,
+            // Same channel the ProviderQueue wait uses: to the user, "parked
+            // behind the queue" and "parked behind the engine's only slot"
+            // are one state — this turn has not started yet.
+            opts?.queue?.onQueueWait,
           );
         } catch (err) {
           if ((err as Error).name === 'AbortError') {
@@ -4116,6 +4200,12 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             body.tools = [...body.tools, APPEND_TO_FILE_CONTINUATION_TOOL];
           }
         }
+        // Start at whatever this engine build has already proven it needs
+        // for a payload this size, rather than re-deriving it through two
+        // rejected round-trips on every single turn.
+        if (toolGrammarFallback === 'none' && Array.isArray(body.tools)) {
+          toolGrammarFallback = this.deps.provider.toolGrammarFloorFor(body.tools.length);
+        }
         if (toolGrammarFallback !== 'none' && Array.isArray(body.tools)) {
           body.tools = applyToolGrammarFallback(
             body.tools as ChatCompletionTool[],
@@ -4607,6 +4697,14 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
             ? (body.tools as ChatCompletionTool[])
             : [];
           if (failedGrammarTools.length > 0 && isLlamaCppGrammarParseError(txt)) {
+            // Remember every rung this payload size needed, so the next
+            // turn (and every other session on this engine) starts here
+            // instead of replaying the rejection.
+            const rememberFloor = () =>
+              this.deps.provider.noteToolGrammarFloor(
+                failedGrammarTools.length,
+                toolGrammarFallback,
+              );
             if (toolGrammarFallback === 'none') {
               if (hasJsonSchemaPatternsForLlamaCpp(failedGrammarTools)) {
                 toolGrammarFallback = 'strip-patterns';
@@ -4619,6 +4717,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                   '[llama-cpp] tool grammar rejected by server; no pattern constraints to remove, retrying with structural tool schemas',
                 );
               }
+              rememberFloor();
               continue;
             }
             if (toolGrammarFallback === 'strip-patterns') {
@@ -4626,6 +4725,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               log.warn(
                 '[llama-cpp] pattern-free tool grammar still rejected; retrying with structural tool schemas',
               );
+              rememberFloor();
               continue;
             }
             if (toolGrammarFallback === 'simplified') {
@@ -4633,6 +4733,7 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
               log.warn(
                 '[llama-cpp] structural tool grammar still rejected; retrying with permissive object parameters',
               );
+              rememberFloor();
               continue;
             }
           }
@@ -5271,7 +5372,17 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 }
                 if (!recoveredFromRamble) {
                   throw new Error(
-                    `[llama-cpp] aborting — the gezel emitted ${turnContent.length} characters of prose this turn without calling any action tool. Stop planning. Your next message must START with a single tool call — or, if the work is genuinely finished and nothing is left to do, be ONE short sentence saying so and nothing else. If shipping source or project files and \`write_file\` is in your tool list, call it NOW with the full file contents — no preamble, no plan. If you lack workspace write access, start with a handoff tool or \`ask_user_question\` instead. Do not save source files with \`write_artifact\`; artifacts are for plans/scratch.`,
+                    buildRambleAbortMessage({
+                      providerLabel: '[llama-cpp]',
+                      charCount: turnContent.length,
+                      knownToolNames,
+                      ...(this.deps.activeCraftbookStep?.deliverableFile
+                        ? { deliverableFile: this.deps.activeCraftbookStep.deliverableFile }
+                        : {}),
+                      ...(this.deps.activeCraftbookStep?.deliverableIsArtifact
+                        ? { deliverableIsArtifact: true }
+                        : {}),
+                    }),
                   );
                 }
               }
@@ -5405,6 +5516,49 @@ class LlamaCppSession extends StreamingSessionBase implements LLMSession {
                 `The model wrote ${blocks.length === 1 ? 'a code block' : `${blocks.length} code blocks`} in chat instead of calling ${salvageToolName} — promoting them to actual file writes.`,
               );
             }
+          }
+        }
+        // Prose-document salvage — the unfenced sibling of the block
+        // above. A review/report deliverable is markdown all the way
+        // down, so the model never fences it and the whole buffer would
+        // otherwise stay in chat where the step's gate cannot see it.
+        // Only runs on a turn the model ended itself with a complete
+        // document; `finishReason === 'length'` is a truncation.
+        if (toolCalls.length === 0 && !rambleAborted && finishReason !== 'length') {
+          const knownToolNames = collectKnownToolNames();
+          const deliverable = this.deps.activeCraftbookStep?.deliverableFile;
+          const salvageToolName = this.deps.activeCraftbookStep?.deliverableIsArtifact
+            ? knownToolNames.has('write_artifact')
+              ? 'write_artifact'
+              : null
+            : knownToolNames.has('write_file')
+              ? 'write_file'
+              : null;
+          const document = salvageToolName
+            ? prepareSalvagedProseDocument({
+                text: turnContent,
+                deliverableFile: deliverable,
+                streamComplete: true,
+              })
+            : null;
+          if (document && salvageToolName && deliverable) {
+            toolCalls = [
+              {
+                id: `prose-doc-salvage-${turn}`,
+                type: 'function' as const,
+                function: {
+                  name: salvageToolName,
+                  arguments: JSON.stringify({ path: deliverable, content: document }),
+                },
+              },
+            ];
+            log.info(
+              `[llama-cpp] prose-document-salvage: promoted ${document.length}-char markdown ` +
+                `buffer to ${salvageToolName} path=${deliverable}`,
+            );
+            this.emitWarning(
+              `The model wrote ${deliverable} in chat instead of calling ${salvageToolName} — promoting it to a real write.`,
+            );
           }
         }
         let malformedStructuredCallIds = new Set<string>();

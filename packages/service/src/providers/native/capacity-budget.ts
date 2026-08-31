@@ -323,3 +323,34 @@ export function fastMemoryBudgetBytes(
 ): number {
   return computeCapacityBudget({ systemRamBytes, ...opts }).fastBytes;
 }
+
+/** Fast pool at or below which a host is treated as accelerator-constrained. */
+const CONSTRAINED_FAST_POOL_BYTES = 16 * GIB;
+
+/** Warm-retention grace for a pressured idle engine on a roomy host. */
+const PRESSURE_IDLE_GRACE_MS = 60_000;
+
+/** The same grace on a host where one model is most of the accelerator. */
+const CONSTRAINED_PRESSURE_IDLE_GRACE_MS = 15_000;
+
+/**
+ * How long a pressured but physically idle engine may stay resident before it
+ * flushes and stops.
+ *
+ * The grace exists so a model is not torn down between two turns of the same
+ * conversation. On a card where one model IS the accelerator, that reasoning
+ * inverts: the engine holding the memory is the reason nothing else can load,
+ * and a minute is long enough for the tenant waiting on it to fail. Two gezel
+ * installs sharing a 12 GB laptop card spent a captured night evicting each
+ * other on exactly this timer — each politely stopping its own idle engine
+ * inside the grace, the other reloading into the space, over and over.
+ *
+ * Sized off the FAST pool rather than total memory: what matters is how much
+ * of the accelerator a single model occupies, which is the same question on a
+ * 12 GB card and a 16 GB unified host.
+ */
+export function pressureIdleGraceMs(fastBytes: number = fastMemoryBudgetBytes()): number {
+  return fastBytes > 0 && fastBytes <= CONSTRAINED_FAST_POOL_BYTES
+    ? CONSTRAINED_PRESSURE_IDLE_GRACE_MS
+    : PRESSURE_IDLE_GRACE_MS;
+}

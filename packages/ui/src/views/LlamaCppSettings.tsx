@@ -1,7 +1,7 @@
 import type { HealthResponse, LlamaCppContextSizing } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import type { LlamaCppInstalledModel } from '@bendyline/gezel-client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { EngineBudgetStrip } from '../components/EngineBudgetStrip.js';
 import { EngineClonePicker } from '../components/EngineClonePicker.js';
@@ -143,6 +143,41 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [contextSizing, setContextSizing] = useState<LlamaCppContextSizing>('adaptive');
   const [contextSizingLoading, setContextSizingLoading] = useState(true);
+  const savingResetTimer = useRef<number | null>(null);
+  const mounted = useRef(true);
+
+  const clearSavingReset = useCallback(() => {
+    if (savingResetTimer.current === null) return;
+    window.clearTimeout(savingResetTimer.current);
+    savingResetTimer.current = null;
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      clearSavingReset();
+    };
+  }, [clearSavingReset]);
+
+  const showSavingState = useCallback(
+    (state: 'idle' | 'saving') => {
+      if (!mounted.current) return;
+      clearSavingReset();
+      setSaving(state);
+    },
+    [clearSavingReset],
+  );
+
+  const showSavedState = useCallback(() => {
+    if (!mounted.current) return;
+    clearSavingReset();
+    setSaving('saved');
+    savingResetTimer.current = window.setTimeout(() => {
+      savingResetTimer.current = null;
+      if (mounted.current) setSaving('idle');
+    }, 1200);
+  }, [clearSavingReset]);
 
   useEffect(() => {
     setBaseUrlDraft(config?.llamaCppBaseUrl ?? '');
@@ -184,22 +219,22 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
 
   const saveBaseUrl = useCallback(async () => {
     const trimmed = baseUrlDraft.trim();
-    setSaving('saving');
+    showSavingState('saving');
     try {
       const next = await api.updateConfig({
         llamaCppBaseUrl: trimmed === '' ? null : trimmed,
       });
+      if (!mounted.current) return;
       onConfigChanged(next);
-      setSaving('saved');
-      setTimeout(() => setSaving('idle'), 1200);
+      showSavedState();
     } catch {
-      setSaving('idle');
+      showSavingState('idle');
     }
-  }, [baseUrlDraft, onConfigChanged]);
+  }, [baseUrlDraft, onConfigChanged, showSavedState, showSavingState]);
 
   const saveBackendOverride = useCallback(
     async (value: BackendOverride) => {
-      setSaving('saving');
+      showSavingState('saving');
       try {
         const next = await api.updateConfig({
           // 'auto' clears the override (returns to auto-detect). Send null,
@@ -207,46 +242,49 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           // store only clears a field on explicit null.
           llamaCppBackendOverride: value === 'auto' ? null : value,
         });
+        if (!mounted.current) return;
         onConfigChanged(next);
-        setSaving('saved');
-        setTimeout(() => setSaving('idle'), 1200);
+        showSavedState();
       } catch {
-        setSaving('idle');
+        showSavingState('idle');
       }
     },
-    [onConfigChanged],
+    [onConfigChanged, showSavedState, showSavingState],
   );
 
-  const saveContextSizing = useCallback(async (policy: LlamaCppContextSizing) => {
-    setSaving('saving');
-    try {
-      const updated = await api.updateLlamaCppContextSizing(policy);
-      setContextSizing(updated.policy);
-      setSaving('saved');
-      setTimeout(() => setSaving('idle'), 1200);
-    } catch {
-      setSaving('idle');
-    }
-  }, []);
+  const saveContextSizing = useCallback(
+    async (policy: LlamaCppContextSizing) => {
+      showSavingState('saving');
+      try {
+        const updated = await api.updateLlamaCppContextSizing(policy);
+        if (!mounted.current) return;
+        setContextSizing(updated.policy);
+        showSavedState();
+      } catch {
+        showSavingState('idle');
+      }
+    },
+    [showSavedState, showSavingState],
+  );
 
   const saveModelPath = useCallback(async () => {
     const trimmed = modelPathDraft.trim();
-    setSaving('saving');
+    showSavingState('saving');
     try {
       const next = await api.updateConfig({
         llamaCppModelPath: trimmed === '' ? null : trimmed,
       });
+      if (!mounted.current) return;
       onConfigChanged(next);
-      setSaving('saved');
-      setTimeout(() => setSaving('idle'), 1200);
+      showSavedState();
     } catch {
-      setSaving('idle');
+      showSavingState('idle');
     }
-  }, [modelPathDraft, onConfigChanged]);
+  }, [modelPathDraft, onConfigChanged, showSavedState, showSavingState]);
 
   const saveKvCacheType = useCallback(
     async (value: KvCacheType) => {
-      setSaving('saving');
+      showSavingState('saving');
       try {
         const next = await api.updateConfig({
           // q8_0 is the default — clear the override when it's selected so
@@ -255,19 +293,19 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           // store only clears a field on explicit null.
           llamaCppKvCacheType: value === 'q8_0' ? null : value,
         });
+        if (!mounted.current) return;
         onConfigChanged(next);
-        setSaving('saved');
-        setTimeout(() => setSaving('idle'), 1200);
+        showSavedState();
       } catch {
-        setSaving('idle');
+        showSavingState('idle');
       }
     },
-    [onConfigChanged],
+    [onConfigChanged, showSavedState, showSavingState],
   );
 
   const saveFlashAttn = useCallback(
     async (value: FlashAttnMode) => {
-      setSaving('saving');
+      showSavingState('saving');
       try {
         const next = await api.updateConfig({
           // 'auto' is the server default — clear the override so we don't
@@ -275,19 +313,19 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           // undefined (see saveKvCacheType).
           llamaCppFlashAttn: value === 'auto' ? null : value,
         });
+        if (!mounted.current) return;
         onConfigChanged(next);
-        setSaving('saved');
-        setTimeout(() => setSaving('idle'), 1200);
+        showSavedState();
       } catch {
-        setSaving('idle');
+        showSavingState('idle');
       }
     },
-    [onConfigChanged],
+    [onConfigChanged, showSavedState, showSavingState],
   );
 
   const saveCpuMoe = useCallback(
     async (value: TriState) => {
-      setSaving('saving');
+      showSavingState('saving');
       try {
         // Auto (null) clears the override → the launch-time offload planner
         // decides. On (true) forces --cpu-moe; Off (false) forces experts
@@ -295,38 +333,38 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         const next = await api.updateConfig({
           llamaCppCpuMoe: value === 'auto' ? null : value === 'on',
         });
+        if (!mounted.current) return;
         onConfigChanged(next);
-        setSaving('saved');
-        setTimeout(() => setSaving('idle'), 1200);
+        showSavedState();
       } catch {
-        setSaving('idle');
+        showSavingState('idle');
       }
     },
-    [onConfigChanged],
+    [onConfigChanged, showSavedState, showSavingState],
   );
 
   const saveSwaFull = useCallback(
     async (value: TriState) => {
-      setSaving('saving');
+      showSavingState('saving');
       try {
         // Auto (null) clears the override → on for the Gemma family, off
         // otherwise. On/Off force the flag regardless of architecture.
         const next = await api.updateConfig({
           llamaCppSwaFull: value === 'auto' ? null : value === 'on',
         });
+        if (!mounted.current) return;
         onConfigChanged(next);
-        setSaving('saved');
-        setTimeout(() => setSaving('idle'), 1200);
+        showSavedState();
       } catch {
-        setSaving('idle');
+        showSavingState('idle');
       }
     },
-    [onConfigChanged],
+    [onConfigChanged, showSavedState, showSavingState],
   );
 
   const saveSpecType = useCallback(
     async (value: SpecType | 'none') => {
-      setSaving('saving');
+      showSavingState('saving');
       try {
         const next = await api.updateConfig({
           // Unset is the persisted off/default state. Catalog MTP capability
@@ -334,19 +372,19 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           // null, not undefined (see saveKvCacheType).
           llamaCppSpecType: value === 'none' ? null : value,
         });
+        if (!mounted.current) return;
         onConfigChanged(next);
-        setSaving('saved');
-        setTimeout(() => setSaving('idle'), 1200);
+        showSavedState();
       } catch {
-        setSaving('idle');
+        showSavingState('idle');
       }
     },
-    [onConfigChanged],
+    [onConfigChanged, showSavedState, showSavingState],
   );
 
   const saveDefaultModel = useCallback(
     async (value: string | undefined) => {
-      setSaving('saving');
+      showSavingState('saving');
       try {
         const next = await api.updateConfig({
           defaultModel: {
@@ -354,14 +392,14 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
             'llama-cpp': value ?? undefined,
           },
         });
+        if (!mounted.current) return;
         onConfigChanged(next);
-        setSaving('saved');
-        setTimeout(() => setSaving('idle'), 1200);
+        showSavedState();
       } catch {
-        setSaving('idle');
+        showSavingState('idle');
       }
     },
-    [config?.defaultModel, onConfigChanged],
+    [config?.defaultModel, onConfigChanged, showSavedState, showSavingState],
   );
 
   const currentDefault = config?.defaultModel?.['llama-cpp'];

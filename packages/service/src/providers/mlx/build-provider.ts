@@ -14,13 +14,16 @@ import {
   availableSystemRamBytes,
   formatContextCapacityDenial,
   minViableLocalContextTokens,
+  pressureIdleGraceMs,
   resolveLocalContextRequirement,
 } from '../native/capacity-broker.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
+import { patientFetch } from '../patient-fetch.js';
 import { readMlxModelGeometry } from './model-geometry.js';
 import { MlxProvider } from './provider.js';
 import { templateOpensReasoning } from './reasoning-stream.js';
+import { drafterDirFor, resolveSpecDrafter } from './spec-drafter.js';
 import { MLX_DEFAULT_PACKAGE_SPEC, MLX_VENV_NAME, mlxVenvPackages } from './venv.js';
 
 const log = createLogger('chat');
@@ -112,6 +115,13 @@ export async function buildMlxProvider(opts: {
     : undefined;
   const numCtx = perModelCtxOverride ?? config.mlxNumCtx;
   const baseProviderOpts = {
+    // Both the supervised subprocess and the external-baseUrl branch talk
+    // to an MLX server that can spend many minutes in prefill before its
+    // first byte. Node's global fetch cuts that at 5 minutes via undici's
+    // defaults — well inside the 595–900s pre-first-byte budgets this
+    // provider computes for large prompts, and surfaced as if the engine
+    // had died. See patient-fetch.ts.
+    fetchImpl: patientFetch(),
     ...(defaultModelId ? { defaultModel: defaultModelId } : {}),
     ...(concurrency ? { concurrency } : {}),
     ...(affinity !== undefined ? { affinity } : {}),
@@ -331,6 +341,44 @@ export async function buildMlxProvider(opts: {
   const kvQuantArgs: string[] =
     kvBits > 0 ? ['--kv-bits', String(kvBits), '--kv-quant-scheme', 'uniform'] : [];
 
+  // Speculative decoding is on whenever a drafter for this model exists
+  // (see spec-drafter.ts). Resolved before the memory figures because a
+  // drafter is a second resident model: leaving its ~0.8 GB out of the
+  // weights term is the over-commit that aborts the python process.
+  const specDrafter = resolveSpecDrafter({
+    ...(modelDir ? { modelDir } : {}),
+    configuredPath: config.mlxSpecDraftModelPath ?? null,
+    enabled: config.mlxSpeculativeDecoding ?? null,
+  });
+
+  // ── MTP speculative decoding ──
+  // Arms the sidecar's spec wave. Every safety lives sidecar-side — the
+  // capability probe, the mlx-vlm >= 0.6.17 exactness gate, per-request
+  // routing (greedy vs the processed/positioned assisted path), `[spec]`
+  // fingerprints — so an incompatible drafter degrades to normal serving
+  // with a logged reason, never a launch failure.
+  const specArgs: string[] = specDrafter
+    ? [
+        '--spec-draft-model',
+        specDrafter.dir,
+        ...(config.mlxSpecBlockSize ? ['--spec-block-size', String(config.mlxSpecBlockSize)] : []),
+      ]
+    : [];
+  if (specDrafter) {
+    log.info(
+      `[mlx] speculative decoding armed (${specDrafter.source}): ${specDrafter.dir} ` +
+        `(+${Math.round(specDrafter.bytes / 1024 ** 2)}MB resident, priced into the memory plan)`,
+    );
+  } else if (modelDir && config.mlxSpeculativeDecoding !== false) {
+    // Default-on makes silence the wrong answer: without this line a launch
+    // that quietly found no drafter is indistinguishable from one that armed,
+    // which is exactly how an entire 11-scenario eval measured speculation
+    // OFF while reporting a speculation gate.
+    log.info(
+      `[mlx] speculative decoding off — no drafter at ${drafterDirFor(modelDir)} (build one to enable; nothing else is required)`,
+    );
+  }
+
   // ── Memory-aware batch sizing ──
   // Size concurrent slots to what actually fits GPU memory, not just a tiered
   // default. This is the fix for the width-4-on-a-27B Metal abort: a Metal
@@ -347,7 +395,8 @@ export async function buildMlxProvider(opts: {
     localEngineKvBudgetBytes,
     fastMemoryBudgetBytes,
   } = await import('../native/capacity-broker.js');
-  const mlxWeightsBytes = modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3;
+  const mlxWeightsBytes =
+    (modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3) + (specDrafter?.bytes ?? 0);
   const mlxBrokerSnap = opts.broker?.committed();
   // Fast memory, not the admission budget — same reason as the llama path.
   // MLX only runs on unified-memory Macs today, where the two are equal.
@@ -572,7 +621,12 @@ export async function buildMlxProvider(opts: {
     idleTimeoutMs: mlxIdleMs,
     freezeTimeoutMs: mlxFreezeMs,
     isBusy: () => providerHolder.current?.isEngineBusy() ?? false,
-    ...(opts.arbiter ? { memoryPressure: () => opts.arbiter!.getMemoryPressureStatus() } : {}),
+    ...(opts.arbiter
+      ? {
+          memoryPressure: () => opts.arbiter!.getMemoryPressureStatus(),
+          pressureIdleTimeoutMs: pressureIdleGraceMs(),
+        }
+      : {}),
     onFreeze: async () => {
       await providerHolder.current?.getCacheAdapter()?.flushAll();
     },
@@ -648,6 +702,7 @@ export async function buildMlxProvider(opts: {
               ]
             : []),
           ...kvQuantArgs,
+          ...specArgs,
         ],
         env: {
           // Force the engine to operate purely off-disk. We've already

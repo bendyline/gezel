@@ -14,7 +14,7 @@
  * without per-svg edits.
  *
  * Third-party toolsets bring their own `manifest.logo`; this file
- * is only the source of truth for our 14 built-in groups. Add a new
+ * is only the source of truth for our built-in groups. Add a new
  * key here whenever a new entry is added to BUILTIN_TOOLSETS.
  */
 
@@ -54,6 +54,9 @@ export const BUILTIN_TOOLSET_ICONS: Record<string, string> = {
 
   // Three connected nodes — a small team.
   'team-management': `<svg ${SVG_ATTRS}><circle cx="12" cy="6" r="2.5"/><circle cx="6" cy="17" r="2.5"/><circle cx="18" cy="17" r="2.5"/><path d="M10.5 8L7.5 14.5M13.5 8l3 6.5M8.5 17h7"/></svg>`,
+
+  // A closed shipping box — a packaged app bundle.
+  'ai-apps': `<svg ${SVG_ATTRS}><path d="M21 8L12 3 3 8v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><path d="M7.5 5.5l9 5"/></svg>`,
 
   // Terminal-like frame with a prompt arrow.
   'code-execution': `<svg ${SVG_ATTRS}><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 10l3 2-3 2M13 14h4"/></svg>`,

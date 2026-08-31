@@ -1,7 +1,7 @@
 ---
 id: npm-packages
 title: "Gezel on npm: the package map"
-order: 7
+order: 8
 summary: Choose the command line, SDK, daemon, client, or lower-level package for your integration.
 subcategory:
   id: gezel-command-line
@@ -30,8 +30,8 @@ All eleven packages published from the Gezel repository require Node.js 24 or ne
 For example, the command-line install is:
 
 ```bash
-npm install -g @bendyline/gezel-cli
-gezel
+npm install @bendyline/gezel-cli
+npx gezel
 ```
 
 A library belongs in the application that uses it:

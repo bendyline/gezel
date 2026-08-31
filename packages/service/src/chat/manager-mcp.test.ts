@@ -674,7 +674,13 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
       'The PowerPoint recipe is running for the Battle of Ypres presentation.',
     );
 
+    const toolEvents: Extract<import('@bendyline/gezel').ChatEvent, { type: 'tool' }>[] = [];
+    const unsubscribe = events.subscribe(session.id, (event) => {
+      if (event.type === 'tool') toolEvents.push(event);
+    });
+
     await manager.send(session.id, 'Can you create a PowerPoint about the Battle of Ypres?');
+    unsubscribe();
 
     const sends = mock.calls.filter((call) => call.kind === 'send');
     const progressNudge = sends.find((call) =>
@@ -706,6 +712,27 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     const launched = (await store.listProjectTasks('default')).find(
       (task) => task.craftbook.id === 'powerpoint-deck',
     );
+
+    // The invoke_craftbook tool event carries the inline start card — the
+    // snapshot the transcript's craftbook card renders from — and the
+    // persisted assistant message's toolCalls entry carries the same card.
+    const invokeEvent = toolEvents.find((event) => event.name === 'invoke_craftbook');
+    expect(invokeEvent?.card).toMatchObject({
+      kind: 'craftbook-start',
+      craftbookId: 'powerpoint-deck',
+      taskRef: launched?.ref,
+      projectId: 'default',
+    });
+    if (invokeEvent?.card?.kind !== 'craftbook-start') throw new Error('missing start card');
+    expect(invokeEvent.card.steps.length).toBe(launched?.craftbook.steps.length);
+    expect(invokeEvent.card.steps.map((step) => step.id)).toEqual(
+      launched?.craftbook.steps.map((step) => step.id),
+    );
+    const persistedInvoke = (await store.getSession('ada', session.id))?.messages
+      .flatMap((message) => message.toolCalls ?? [])
+      .find((call) => call.name === 'invoke_craftbook');
+    expect(persistedInvoke?.card).toEqual(invokeEvent.card);
+
     expect(launched?.description).toBe('Can you create a PowerPoint about the Battle of Ypres?');
     expect(launched?.craftbookParams?.topic).toBe(
       'Can you create a PowerPoint about the Battle of Ypres?',
@@ -713,6 +740,48 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect(launched?.craftbook.steps[0]?.prompt).toContain(
       'Topic: `Can you create a PowerPoint about the Battle of Ypres?`',
     );
+  }, 30_000);
+
+  it('stamps a step-advance card on the advance_task_step tool call', async () => {
+    const task = await svc.context.tasks.create('default', {
+      title: 'Two-step march',
+      assignee: { kind: 'gezel', gezelId: 'ada' },
+      steps: [
+        { name: 'Draft', prompt: 'Write the draft.' },
+        { name: 'Evaluate', assignee: { kind: 'user' } },
+      ],
+    });
+    const session = await manager.createSession({
+      gezelId: 'ada',
+      projectId: 'default',
+      taskRef: task.ref,
+      stepId: task.activeStepId,
+    });
+
+    mock.scriptToolCalls([
+      { name: 'advance_task_step', arguments: { ref: task.ref, stepId: task.activeStepId } },
+    ]);
+    mock.script('', 'Draft done — handed to you for evaluation.');
+
+    const toolEvents: Extract<import('@bendyline/gezel').ChatEvent, { type: 'tool' }>[] = [];
+    const unsubscribe = events.subscribe(session.id, (event) => {
+      if (event.type === 'tool') toolEvents.push(event);
+    });
+    await manager.send(session.id, 'Continue the current step.');
+    unsubscribe();
+
+    const advanceEvent = toolEvents.find((event) => event.name === 'advance_task_step');
+    expect(advanceEvent?.card).toMatchObject({
+      kind: 'task-step-advance',
+      taskRef: task.ref,
+      projectId: 'default',
+      completedStepId: task.activeStepId,
+    });
+    if (advanceEvent?.card?.kind !== 'task-step-advance') throw new Error('missing advance card');
+    // The snapshot shows the walk moved: Draft done, Evaluate active.
+    expect(advanceEvent.card.steps.map((step) => step.status)).toEqual(['done', 'active']);
+    expect(advanceEvent.card.completedStepName).toBe('Draft');
+    expect(advanceEvent.card.activeStepName).toBe('Evaluate');
   }, 30_000);
 
   it('persists gate infrastructure diagnostics on the assistant message', async () => {

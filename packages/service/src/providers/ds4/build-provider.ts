@@ -6,10 +6,12 @@ import {
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { gezelPaths } from '@bendyline/gezel/paths';
-import { LlamaCppProvider, createLlamaCppPatientFetch } from '../llama-cpp/index.js';
-import { minViableLocalContextTokens } from '../native/capacity-broker.js';
+import { LlamaCppProvider } from '../llama-cpp/index.js';
+import { minViableLocalContextTokens, pressureIdleGraceMs } from '../native/capacity-broker.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
+import { patientFetch } from '../patient-fetch.js';
+import { type Ds4Backend, ds4DsparkArgs, resolveDs4Dspark } from './dspark.js';
 import { Ds4Provider } from './provider.js';
 
 const log = createLogger('chat');
@@ -103,7 +105,7 @@ export async function buildDs4Provider(opts: {
     return 600_000;
   })();
   const baseProviderOpts = {
-    fetchImpl: createLlamaCppPatientFetch(),
+    fetchImpl: patientFetch(),
     ...(defaultModelId ? { defaultModel: defaultModelId } : {}),
     ...(affinity !== undefined ? { affinity } : {}),
     // ds4-server emits per-turn token usage only when the request asks via
@@ -234,15 +236,17 @@ export async function buildDs4Provider(opts: {
     );
   }
 
-  // Streaming is the safe default. A stale/manual `false` is honored only
-  // when this exact model plus runtime/OS headroom fits the unified-memory
-  // machine. The old device-only 120 GiB threshold made a 153 GiB Q4 GGUF try
-  // full residency on a 128 GiB Mac and could lock up the whole system.
+  // Residency is the default wherever the model fits — streaming costs roughly
+  // an order of magnitude (1.85 vs 18.1 tok/s measured on the same IQ2_XXS
+  // build). `shouldUseDs4SsdStreaming` still refuses a model that cannot fit,
+  // which is what keeps the flip safe: overriding that on a 90.89 GiB build
+  // OOM-killed the engine mid-load on a 121.63 GiB host.
   const { planDs4ExpertCache, shouldUseDs4SsdStreaming } = await import('./residency.js');
+  const totalRamBytes = totalRamGb * 1024 ** 3;
   const ssdStreaming = shouldUseDs4SsdStreaming({
     configured: config.ds4SsdStreaming,
     modelSizeBytes,
-    totalRamBytes: totalRamGb * 1024 ** 3,
+    totalRamBytes,
   });
   if (config.ds4SsdStreaming === false && ssdStreaming) {
     log.warn(
@@ -250,6 +254,37 @@ export async function buildDs4Provider(opts: {
         `model=${modelSizeBytes ?? 'unknown'} bytes, system=${Math.round(totalRamGb)} GiB`,
     );
   }
+
+  // DSpark speculative decoding. Resolved here, beside the residency decision
+  // it depends on: ds4 aborts at startup if `--mtp` is combined with
+  // `--ssd-streaming`, so this can only ever draft on a fully resident launch.
+  const dsparkSupportPath = config.ds4DsparkModelPath ?? installedModel?.draftModelPath;
+  // Residency is decided on the weights alone, then the companion is priced
+  // against what is left. That precedence is deliberate and not symmetric:
+  // residency is worth ~9.5x and drafting ~1.05x, so a companion that would
+  // push the model out of memory loses its own flag rather than costing the
+  // launch its residency.
+  let companionFitsMemory = true;
+  if (dsparkSupportPath && !ssdStreaming) {
+    const { canUseDs4FullResidency } = await import('./residency.js');
+    const { stat: statCompanion } = await import('node:fs/promises');
+    const companionBytes = await statCompanion(dsparkSupportPath)
+      .then((st) => st.size)
+      .catch(() => undefined);
+    companionFitsMemory = canUseDs4FullResidency({
+      modelSizeBytes,
+      totalRamBytes,
+      ...(companionBytes !== undefined ? { companionBytes } : {}),
+    });
+  }
+  const dspark = resolveDs4Dspark({
+    mode: config.ds4Dspark,
+    backend: backendFlag.slice(2) as Ds4Backend,
+    ssdStreaming,
+    companionFitsMemory,
+    ...(dsparkSupportPath ? { supportModelPath: dsparkSupportPath } : {}),
+  });
+  if (dspark.unmetRequest) log.warn(`[ds4] ${dspark.unmetRequest}`);
 
   const cachePlan = planDs4ExpertCache({
     configuredGb: config.ds4CacheExpertsGb,
@@ -317,7 +352,12 @@ export async function buildDs4Provider(opts: {
     startupTimeoutMs,
     idleTimeoutMs: idleMs,
     isBusy: () => ds4ProviderHolder.current?.isEngineBusy() ?? false,
-    ...(opts.arbiter ? { memoryPressure: () => opts.arbiter!.getMemoryPressureStatus() } : {}),
+    ...(opts.arbiter
+      ? {
+          memoryPressure: () => opts.arbiter!.getMemoryPressureStatus(),
+          pressureIdleTimeoutMs: pressureIdleGraceMs(),
+        }
+      : {}),
     // ds4 exposes no /health — a 200 on /v1/models is the readiness signal.
     readinessPath: '/v1/models',
     onLog: (line) => {
@@ -365,6 +405,7 @@ export async function buildDs4Provider(opts: {
           args.push('--ssd-streaming-cache-experts', `${cacheExpertsGb}GB`);
         }
       }
+      args.push(...ds4DsparkArgs(dspark));
       // Record the effective safety policy before spawn. ds4-server's own
       // stdout does not reliably echo its argv, and a hard lockup/force-quit
       // otherwise leaves no way to tell whether streaming was actually on.
@@ -372,7 +413,8 @@ export async function buildDs4Provider(opts: {
         `[ds4-server] launch model=${effectiveModelId ?? basename(modelPath)} ` +
           `sizeGiB=${modelSizeBytes ? (modelSizeBytes / 1024 ** 3).toFixed(1) : 'unknown'} ` +
           `backend=${backendFlag.slice(2)} ctx=${numCtx} ` +
-          `ssdStreaming=${ssdStreaming} cacheExpertsGiB=${ssdStreaming ? cacheExpertsGb : 0}`,
+          `ssdStreaming=${ssdStreaming} cacheExpertsGiB=${ssdStreaming ? cacheExpertsGb : 0} ` +
+          `dspark=${dspark.enabled} (${dspark.reason})`,
       );
       return { command: binary, args, baseUrl: `http://127.0.0.1:${port}`, cwd: ds4BundleDir };
     },

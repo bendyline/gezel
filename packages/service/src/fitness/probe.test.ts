@@ -21,28 +21,65 @@ interface ScriptedTurn {
   calls?: ExternalToolCall[];
   fail?: string;
   hang?: boolean;
+  /**
+   * Stream these chunks — advancing the shared clock by `gapMs` between each,
+   * so the probe sees real elapsed time — then reject the way a native engine
+   * reports its own deadline. The healthy-but-slow model the probe used to
+   * call broken.
+   */
+  streamThenTimeout?: { chunks: string[]; gapMs: number };
+}
+
+/** Test clock the probe and the fake session share, so delta spans are real. */
+class FakeClock {
+  ms = 1_700_000_000_000;
+  readonly now = (): number => this.ms;
+  advance(by: number): void {
+    this.ms += by;
+  }
 }
 
 class FakeSession {
   disconnected = false;
   prompts: string[] = [];
+  /** Per-turn `timeoutMs` the probe asked for — the budget-scaling assertion. */
+  timeouts: Array<number | undefined> = [];
   private turnIdx = 0;
   private lastTurn: ScriptedTurn | undefined;
   private statsHandlers: Array<(ev: TurnStatsEvent) => void> = [];
+  private deltaHandlers: Array<(chunk: string) => void> = [];
 
-  constructor(private readonly turns: ScriptedTurn[]) {}
+  constructor(
+    private readonly turns: ScriptedTurn[],
+    private readonly clock?: FakeClock,
+  ) {}
 
   onTurnStats(handler: (ev: TurnStatsEvent) => void): () => void {
     this.statsHandlers.push(handler);
     return () => {};
   }
 
-  async sendAndWait(prompt: string): Promise<string> {
+  onDelta(handler: (chunk: string) => void): () => void {
+    this.deltaHandlers.push(handler);
+    return () => {
+      this.deltaHandlers = this.deltaHandlers.filter((h) => h !== handler);
+    };
+  }
+
+  async sendAndWait(prompt: string, opts?: { timeoutMs?: number }): Promise<string> {
     this.prompts.push(prompt);
+    this.timeouts.push(opts?.timeoutMs);
     const turn = this.turns[this.turnIdx++];
     if (!turn) throw new Error('unscripted turn');
     this.lastTurn = turn;
     if (turn.hang) return new Promise<string>(() => {});
+    if (turn.streamThenTimeout) {
+      for (const chunk of turn.streamThenTimeout.chunks) {
+        for (const h of this.deltaHandlers) h(chunk);
+        this.clock?.advance(turn.streamThenTimeout.gapMs);
+      }
+      throw new Error('[llama-cpp] timed out after 576s');
+    }
     if (turn.fail) throw new Error(turn.fail);
     if (turn.tokensPerSec != null) {
       for (const h of this.statsHandlers) {
@@ -395,5 +432,135 @@ describe('runFitnessProbe', () => {
     );
     expect(record.checks.contextFit.ok).toBe(false);
     expect(record.admitted).toBe(false);
+  });
+});
+
+describe('runFitnessProbe — a slow model that never finishes', () => {
+  it('reports a verdict, not a probe failure, when a turn runs out of budget mid-stream', async () => {
+    // Wild-caught on qwen3.8-27b-q2: a 4096-token thinking budget at ~8 t/s
+    // needs ~512s to finish THINKING, against a flat 360s turn. The engine
+    // decoded happily the whole time and the log proved it, but the probe
+    // filed the timeout as machinery breakage — so a working model reached
+    // its owner as "fitness check failed" with no reason and no numbers.
+    const clock = new FakeClock();
+    const session = new FakeSession(
+      [
+        {
+          streamThenTimeout: {
+            chunks: Array.from({ length: 40 }, () => 'x'.repeat(320)),
+            gapMs: 1_000,
+          },
+        },
+      ],
+      clock,
+    );
+
+    const record = await runFitnessProbe(
+      deps({ getProviderForModel: async () => fakeProvider(session), now: clock.now }),
+      { provider: 'llama-cpp', modelId: 'qwen3.8-27b-q2', trigger: 'manual' },
+    );
+
+    expect(record.status).toBe('probed');
+    expect(record.admitted).toBe(false);
+    // 40 × 320 chars ≈ 3,200 tokens over the 39s the deltas spanned.
+    expect(record.genTokensPerSec).toBeGreaterThan(50);
+    expect(record.genTokensPerSecSource).toBe('stream-estimate');
+    expect(record.checks.throughput.ok).toBe(false);
+    expect(record.checks.throughput.detail).toContain('still writing');
+    expect(record.checks.throughput.detail).toContain('~');
+    // The tool turn never ran, so it must not be mistaken for the reason.
+    expect(record.checks.toolRoundTrip.reached).toBe(false);
+  });
+
+  it('scales turn budgets by the reasoning allowance the model was licensed', async () => {
+    const session = new FakeSession([{ text: 'story', tokensPerSec: 8 }, { calls: [VALID_CALL] }]);
+    await runFitnessProbe(
+      deps({
+        getProviderForModel: async () => fakeProvider(session),
+        resolveReasoningBudget: async () => 4096,
+      }),
+      { provider: 'llama-cpp', modelId: 'qwen3.8-27b-q2', trigger: 'manual' },
+    );
+
+    // (4096 think + 512 answer) / 8 t/s = 576s — comfortably past the 360s
+    // floor that made this model's first turn unwinnable.
+    expect(session.timeouts[0]).toBe(576_000);
+  });
+
+  it('leaves the floor alone for a model with no reasoning budget', async () => {
+    const session = new FakeSession([{ text: 'story', tokensPerSec: 40 }, { calls: [VALID_CALL] }]);
+    await runFitnessProbe(
+      deps({
+        getProviderForModel: async () => fakeProvider(session),
+        resolveReasoningBudget: async () => undefined,
+      }),
+      { provider: 'llama-cpp', modelId: 'gemma4-e4b-q4', trigger: 'manual' },
+    );
+
+    expect(session.timeouts[0]).toBe(360_000);
+  });
+
+  it('keeps the engine-reported rate when a later turn is the one that overruns', async () => {
+    const clock = new FakeClock();
+    const session = new FakeSession(
+      [
+        { text: 'short story', tokensPerSec: 12 },
+        {
+          streamThenTimeout: {
+            chunks: Array.from({ length: 20 }, () => 'y'.repeat(400)),
+            gapMs: 1_000,
+          },
+        },
+      ],
+      clock,
+    );
+
+    const record = await runFitnessProbe(
+      deps({
+        getProviderForModel: async () => fakeProvider(session),
+        now: clock.now,
+        env: { GEZEL_FITNESS_REPRESENTATIVE_TOKENS: '64' },
+      }),
+      { provider: 'llama-cpp', modelId: 'qwen3.8-27b-q2', trigger: 'manual' },
+    );
+
+    expect(record.status).toBe('probed');
+    // A measured rate outranks an estimate — the estimate is the fallback for
+    // when nothing completed, not a replacement for engine truth.
+    expect(record.genTokensPerSec).toBe(12);
+    expect(record.genTokensPerSecSource).toBe('engine');
+    expect(record.checks.throughput.ok).toBe(false);
+  });
+});
+
+describe('runFitnessProbe — engine contention', () => {
+  it('records a busy engine as blocked even when it surfaces on the first turn', async () => {
+    // Native engines start lazily, so the pool's busy error arrives as a TURN
+    // failure. Only getProviderForModel tested for it, so a transient conflict
+    // was persisted as a failure of the MODEL — which is both wrong and
+    // sticky, since the routing gate reads a `probed`/`failed` record forever
+    // while it ignores `blocked`.
+    const session = new FakeSession([
+      {
+        fail: 'engine llama-cpp:gemma4-12b-q4:0 is busy serving requests and did not drain within 30s',
+      },
+    ]);
+
+    const record = await runFitnessProbe(
+      deps({ getProviderForModel: async () => fakeProvider(session) }),
+      { provider: 'llama-cpp', modelId: 'gemma4-12b-q4', trigger: 'manual' },
+    );
+
+    expect(record.status).toBe('blocked');
+    expect(record.admitted).toBe(false);
+  });
+
+  it('still calls a genuine engine fault a failure', async () => {
+    const session = new FakeSession([{ fail: 'llama-server exited with code 1' }]);
+    const record = await runFitnessProbe(
+      deps({ getProviderForModel: async () => fakeProvider(session) }),
+      { provider: 'llama-cpp', modelId: 'gemma4-12b-q4', trigger: 'manual' },
+    );
+    expect(record.status).toBe('failed');
   });
 });

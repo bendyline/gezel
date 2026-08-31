@@ -7,6 +7,7 @@ export const NativeEngineNameSchema = z.enum([
   'sd-server',
   'whisper-server',
   'uv',
+  'duckdb',
 ]);
 export type NativeEngineName = z.infer<typeof NativeEngineNameSchema>;
 

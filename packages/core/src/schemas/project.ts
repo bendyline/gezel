@@ -324,6 +324,17 @@ export const ProjectSchema = z.object({
    */
   nightlyFixesEnabled: z.boolean().optional(),
   /**
+   * Whether spreadsheets and large data files in the workspace are turned into
+   * queryable tables. Missing = on, deliberately: the capability already gates
+   * itself on a file being too big to simply read, so it only fires where
+   * reading is not an option anyway.
+   *
+   * It spends CPU and disk rather than model time, and it writes only into the
+   * reserved `artifacts/tabular/` cache — but a project full of data fixtures
+   * has no use for it, so the off switch has to exist and has to be findable.
+   */
+  workspaceTablesEnabled: z.boolean().optional(),
+  /**
    * Which knowledge catalogs are in scope for sessions here. Absent =
    * inherit the user's global enabled set. Unresolvable refs under
    * 'selected' are retained so a restored project regains its selection
@@ -340,6 +351,19 @@ export const ProjectSchema = z.object({
    * during adoption and the user can override them later from Project Settings.
    */
   tabVisibility: ProjectTabVisibilitySchema.optional(),
+  /**
+   * Whether the Output pane is shown for this project. Absent follows the
+   * capability default (a previewable workspace `index.html`, or a project
+   * type that pins a dashboard page); an explicit boolean is the user's own
+   * toggle and always wins.
+   *
+   * It lives on the project rather than only in the renderer's localStorage
+   * because the desktop shell's origin moves whenever the daemon falls back
+   * off the canonical port, which silently discards every localStorage
+   * preference. Same reasoning as `sidebarSide` and the theme preference,
+   * which mirror to the config for exactly this failure.
+   */
+  outputPaneVisible: z.boolean().optional(),
   /**
    * Policy for Gezel-managed workspace mutations. `auto` (and an absent
    * value) permits internal workspaces and denies external `workingDir`s;
@@ -508,6 +532,17 @@ export function projectAllowsNightlyFixes(project: {
   nightlyFixesEnabled?: boolean;
 }): boolean {
   return project.nightlyFixesEnabled !== false;
+}
+
+/**
+ * True when the project has not opted out of deriving tables from its own
+ * spreadsheets and data files. Missing = on; see `workspaceTablesEnabled`.
+ * The size threshold is the other half of the gate.
+ */
+export function projectAllowsWorkspaceTables(project: {
+  workspaceTablesEnabled?: boolean;
+}): boolean {
+  return project.workspaceTablesEnabled !== false;
 }
 
 export const InstalledPackageSchema = z.object({

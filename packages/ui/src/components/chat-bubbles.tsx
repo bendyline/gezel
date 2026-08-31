@@ -6,6 +6,7 @@ import type {
   ReferencedFile,
   SessionGpuTask,
   ToolCallAudio,
+  ToolCallCard,
   ToolCallImage,
   ToolCallVideo,
 } from '@bendyline/gezel';
@@ -19,6 +20,7 @@ import {
 } from '@bendyline/gezel';
 import type { MediaProvider, SurfaceScheme } from '@bendyline/squisq';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { queueNoticeIsFresh } from './chat-live-slot.js';
 
 // Chat-bubble light surface — shared with the Home intro's embedded
 // Handboek page; the scheme and its rationale live in
@@ -52,6 +54,7 @@ import { ImagePreview } from './ImagePreview.js';
 import { PendingQuestionCard } from './PendingQuestionCard.js';
 import { ReportErrorLink } from './ReportErrorLink.js';
 import { ToolArgsSummary } from './ToolArgsSummary.js';
+import { ToolCraftbookCard } from './ToolCraftbookCard.js';
 import { ToolDiffBlock } from './ToolDiffBlock.js';
 import type { OpenChatReference } from './chat-open-command.js';
 import { GEZEL_LIGHT_SURFACE, gezelChatTheme } from './chat-theme.js';
@@ -141,6 +144,13 @@ export interface ToolActivity {
   diff?: string;
   addedLines?: number;
   removedLines?: number;
+  /**
+   * Rich inline card payload for tools with special renderings
+   * (craftbook start, step advance). When set, a `<ToolCraftbookCard>`
+   * renders beneath the tool row — and, on completed bubbles, promoted
+   * above the collapsed step list like generated media.
+   */
+  card?: ToolCallCard;
 }
 
 export type InlineWarning = Extract<ChatEvent, { type: 'warning' }>;
@@ -280,6 +290,13 @@ export interface MessageBubbleProps {
    */
   onTaskReference?: (ref: string) => void;
   /**
+   * Opens a task BESIDE the chat (the rail's Task pane) — the inline
+   * craftbook cards' primary open verb, distinct from `onTaskReference`
+   * (which surfaces wire to the full task tab). Absent → the card falls
+   * back to the full-tab open itself.
+   */
+  onFocusTask?: (ref: string) => void;
+  /**
    * MCP tool invocations from the turn that produced this reply. When
    * present + non-empty, a collapsible "N steps" expando renders at the
    * top of the bubble. Assistant messages only — user/handoff bubbles
@@ -396,6 +413,26 @@ export interface MessageBubbleProps {
    * time cue.
    */
   timestampLabel?: string;
+  /**
+   * The persisted message's `synthetic` marker. Only `'turn-aborted'`
+   * changes rendering: a killed turn's salvage record carries whatever
+   * the model streamed before the kill, so an abort that never reached
+   * visible text is otherwise shaped exactly like a model that had
+   * nothing to say. Without this the empty-body placeholder guesses
+   * from `reasoning`/`toolCalls` and reports a four-hour timeout as
+   * "produced reasoning but no visible reply".
+   */
+  synthetic?: import('@bendyline/gezel').ChatMessage['synthetic'];
+  /**
+   * Warnings persisted on the message — on a `turn-aborted` record the
+   * first entry is the abort reason itself (`[llama-cpp] timed out
+   * after 14400s`), and provider degradation / context-pressure notices
+   * arrive here too. `StreamingBubble` renders these live; without the
+   * same banner on the persisted bubble they disappear the moment it
+   * replaces the streaming one, leaving the reason readable only in a
+   * session-debug bundle.
+   */
+  warnings?: WarningValue[];
 }
 
 /**
@@ -516,6 +553,7 @@ export function MessageBubble({
   onFileReference,
   onOpenReference,
   onTaskReference,
+  onFocusTask,
   toolCalls,
   reasoning,
   reasoningDurationMs,
@@ -534,6 +572,8 @@ export function MessageBubble({
   recoveredInNextTurn,
   suppressHeader,
   timestampLabel,
+  synthetic,
+  warnings,
 }: MessageBubbleProps) {
   // When the assistant reply referenced real files, pre-process the
   // markdown so code spans matching those filenames become clickable
@@ -822,6 +862,7 @@ export function MessageBubble({
           tools={toolCalls}
           projectId={projectId}
           onOpenReference={onOpenReference}
+          onFocusTask={onFocusTask}
         />
       )}
       {!isUser && reasoning && reasoning.trim().length > 0 && (
@@ -837,6 +878,13 @@ export function MessageBubble({
         // model was actually doing work:
         //   1. `recoveredInNextTurn` — continuation loop produced the
         //      follow-up; quiet stub.
+        //   1b. `synthetic: 'turn-aborted'` — the turn was killed (turn
+        //      timeout, guard abort, cancelled request) and this is its
+        //      salvage record. Ranked above the signal-sniffing branches
+        //      below because every one of them describes what the model
+        //      was DOING, and none can say that it was stopped; the
+        //      reason itself rides in `warnings`, banner-rendered under
+        //      the body.
         //   2. `attemptedToolCalls` — model tried to call a tool but
         //      the salvage layer dropped it; surface what they tried
         //      to do so the user sees intent, not "nothing happened."
@@ -850,13 +898,17 @@ export function MessageBubble({
           <em>
             {recoveredInNextTurn
               ? '(continued in the next turn)'
-              : attemptedToolCalls && attemptedToolCalls.length > 0
-                ? buildAttemptedCallSummary(attemptedToolCalls)
-                : reasoning && reasoning.trim().length > 0
-                  ? '(model produced reasoning but no visible reply — see Thinking above)'
-                  : toolCalls && toolCalls.length > 0
-                    ? `No written response — ${toolCalls.length} tool${toolCalls.length === 1 ? '' : 's'} ran but the model didn't produce a summary. Ask again or prompt for a recap.`
-                    : 'No response — the model finished its turn without producing any text. This is usually a small local model timing out mid-thought; try resending, a larger model, or a shorter prompt.'}
+              : synthetic === 'turn-aborted'
+                ? warnings && warnings.length > 0
+                  ? '(this turn was stopped before the model wrote a reply — see the notice below)'
+                  : '(this turn was stopped before the model wrote a reply)'
+                : attemptedToolCalls && attemptedToolCalls.length > 0
+                  ? buildAttemptedCallSummary(attemptedToolCalls)
+                  : reasoning && reasoning.trim().length > 0
+                    ? '(model produced reasoning but no visible reply — see Thinking above)'
+                    : toolCalls && toolCalls.length > 0
+                      ? `No written response — ${toolCalls.length} tool${toolCalls.length === 1 ? '' : 's'} ran but the model didn't produce a summary. Ask again or prompt for a recap.`
+                      : 'No response — the model finished its turn without producing any text. This is usually a small local model timing out mid-thought; try resending, a larger model, or a shorter prompt.'}
           </em>
         </div>
       ) : (
@@ -880,6 +932,13 @@ export function MessageBubble({
             ),
           )}
         </div>
+      )}
+      {!isUser && warnings && warnings.length > 0 && (
+        // The persisted twin of `StreamingBubble`'s banner. The live
+        // bubble showed these while the turn ran; re-rendering them here
+        // is what keeps an abort reason readable after the turn settles
+        // or the app reloads, instead of only inside a debug bundle.
+        <WarningBanner warnings={warnings} />
       )}
       {!isUser && question && (
         <PendingQuestionCard question={question} onAnswered={onQuestionAnswered} />
@@ -1317,6 +1376,8 @@ export interface StreamingBubbleProps {
   segments: StreamingSegment[];
   /** Opens a successful file-tool path in the conversation's References viewer. */
   onOpenReference?: (reference: OpenChatReference) => void;
+  /** See {@link MessageBubbleProps.onFocusTask} — the inline cards' rail-open verb. */
+  onFocusTask?: (ref: string) => void;
   startedAt: number | null;
   /** Extra classes applied to the wrapper (e.g. timeline grouping). */
   extraClass?: string;
@@ -1338,6 +1399,12 @@ export interface StreamingBubbleProps {
    */
   errorDetail?: ChatTurnErrorDetail;
   /**
+   * Contextual recovery controls supplied by the timeline (for example,
+   * Retry + Acknowledge). When absent, the bubble keeps its standalone
+   * report-error fallback used by tests and narrower embedding surfaces.
+   */
+  errorActions?: import('react').ReactNode;
+  /**
    * When set, the turn is sitting in the provider queue — waiting for
    * other turns to finish before it can start. The "thinking" label
    * is replaced with its numbered place in the model queue so the user
@@ -1345,6 +1412,15 @@ export interface StreamingBubbleProps {
    * delta.
    */
   queueAhead?: number;
+  /**
+   * When the queue position above was last reported. The daemon
+   * re-asserts an ongoing wait every few seconds, so this is what
+   * separates "still waiting" from "waited, then started" — see
+   * {@link queueNoticeIsFresh}. Without it the queued state had to be
+   * torn down by some other event, and the events available to do it
+   * (heartbeats, wire pulses) fire just as happily mid-wait.
+   */
+  queuedAt?: number;
   /**
    * Wall-clock timestamp of the last observable signal for this turn
    * (a delta token or a completed tool call). Drives the "Still
@@ -1595,6 +1671,14 @@ export function StreamingStatusLine({
   const progressTitle =
     thinkingDetail && thinkingDetail.trim().length > 0 ? thinkingDetail : statusLabel;
   const totalTokens = showProgress ? extractTotalTokenCount(thinkingDetail) : null;
+  const statusPathSeparator = Math.max(statusLabel.lastIndexOf('/'), statusLabel.lastIndexOf('\\'));
+  const statusPathParts =
+    statusPathSeparator > 0 && statusPathSeparator < statusLabel.length - 1
+      ? {
+          prefix: statusLabel.slice(0, statusPathSeparator + 1),
+          suffix: statusLabel.slice(statusPathSeparator + 1),
+        }
+      : undefined;
   return (
     <span className="msg-live-status">
       {!failed && !queued && awaiting && (
@@ -1644,7 +1728,16 @@ export function StreamingStatusLine({
           progress bar, and token/tool counts on either side stay
           visible as the load-bearing signals. See `msg-live-status-label`
           rule in styles/chat.css. */}
-      <span className="msg-live-status-label">{statusLabel}</span>
+      <span className="msg-live-status-label" title={statusLabel}>
+        {statusPathParts ? (
+          <>
+            <span className="msg-live-status-label-prefix">{statusPathParts.prefix}</span>
+            <span className="msg-live-status-label-suffix">{statusPathParts.suffix}</span>
+          </>
+        ) : (
+          statusLabel
+        )}
+      </span>
       {showProgress && (
         // Radix tooltip surfaces `thinkingDetail` (e.g. "4,096 / 7,880
         // tokens · 298 tok/s") on hover. The native `title` attribute
@@ -1762,13 +1855,16 @@ export function StreamingBubble({
   localEngine,
   segments,
   onOpenReference,
+  onFocusTask,
   startedAt,
   extraClass,
   fontFamily,
   fontScale,
   error,
   errorDetail,
+  errorActions,
   queueAhead,
+  queuedAt,
   lastActivityAt,
   hasProgress,
   onProbeOllama,
@@ -1927,6 +2023,12 @@ export function StreamingBubble({
   // streamed something and THEN went quiet. Until then, the reassuring
   // "still working / first load is slow" copy is the honest signal.
   const stalledSilence = isStalledSilence(silentFor, hasProgress === true);
+  // A turn that has produced no visible output cannot have "wedged
+  // mid-turn" — there was no mid-turn. It is either still waiting for the
+  // engine or still working up to its first token, and both are ordinary.
+  // Saying "wedged" here sent users to stop-and-retry a turn that was
+  // queued behind another gezel and would have run on its own.
+  const stalledBeforeAnyOutput = stalledSilence && !hasText;
   // Inline diagnostic state for the slow-banner's "Check Ollama"
   // button. `null` = idle (haven't probed); object = result of last
   // probe. Re-clicking the button re-probes and overwrites.
@@ -1949,7 +2051,11 @@ export function StreamingBubble({
     }
   }, [onProbeOllama]);
   const failed = Boolean(error);
-  const queued = queueAhead !== undefined && !hasText && !failed;
+  // Re-derived on every tick of `useElapsedSeconds` above, which is what
+  // lets the queued state expire on its own a few seconds after the daemon
+  // stops re-asserting it (i.e. the turn got its slot).
+  const queueNoticeFresh = queueNoticeIsFresh(queuedAt, Date.now());
+  const queued = queueAhead !== undefined && queueNoticeFresh && !hasText && !failed;
   // Parked inside a synchronous ask_gezel/ask_specialist consultation:
   // the model is idle, blocked on a peer's reply. Only honor it while
   // the turn hasn't failed — an errored turn's banner takes precedence.
@@ -2113,7 +2219,11 @@ export function StreamingBubble({
               return (
                 <div className="msg-stream-segment" key={key}>
                   {seg.kind === 'tools' ? (
-                    <ToolActivityList tools={seg.tools} onOpenReference={onOpenReference} />
+                    <ToolActivityList
+                      tools={seg.tools}
+                      onOpenReference={onOpenReference}
+                      onFocusTask={onFocusTask}
+                    />
                   ) : seg.kind === 'intent' ? (
                     <IntentDivider label={seg.label} />
                   ) : (
@@ -2219,7 +2329,14 @@ export function StreamingBubble({
             // doubly wrong (silent ≠ slow ≠ contended).
             <div className="msg-slow-banner">
               <div>
-                {stalledSilence ? (
+                {stalledBeforeAnyOutput ? (
+                  <>
+                    Nothing back yet — {formatElapsedLong(silentFor)}. This turn hasn't started
+                    producing output: it may still be waiting its turn on the engine behind another
+                    gezel, loading the model, or reading a long prompt. You can keep waiting, or
+                    stop it and start again.
+                  </>
+                ) : stalledSilence ? (
                   <>
                     This turn looks stalled — no signal for {formatElapsedLong(silentFor)}. The
                     model may have wedged mid-turn; you can stop it and ask it to pick up where it
@@ -2292,12 +2409,13 @@ export function StreamingBubble({
           )}
         {failed && (
           <div className="msg-failed-banner">
-            ✗ Turn stopped before finishing. {error}{' '}
-            {!isUserCancelledTurnError(error) && (
-              <ReportErrorLink
-                report={{ surface: 'chat-turn', message: error ?? '', detail: errorDetail }}
-              />
-            )}
+            <div>✗ Turn stopped before finishing. {error}</div>
+            {errorActions ??
+              (!isUserCancelledTurnError(error) && (
+                <ReportErrorLink
+                  report={{ surface: 'chat-turn', message: error ?? '', detail: errorDetail }}
+                />
+              ))}
           </div>
         )}
       </div>
@@ -2825,13 +2943,19 @@ function ToolDetailsBlock({
 function ToolActivityList({
   tools,
   suppressMedia = false,
+  suppressCards = false,
   onOpenReference,
+  onFocusTask,
 }: {
   tools: ToolActivity[];
   /** Skip inline image/video rows — used when a parent renders them in a
    *  visible strip above the (collapsed) step list to avoid duplication. */
   suppressMedia?: boolean;
+  /** Same contract for rich inline cards — the expando promotes them above the collapse. */
+  suppressCards?: boolean;
   onOpenReference?: (reference: OpenChatReference) => void;
+  /** Opens a task beside the chat (rail Task pane) from an inline card. */
+  onFocusTask?: (ref: string) => void;
 }) {
   return (
     <ul className="thinking-tools">
@@ -2851,6 +2975,9 @@ function ToolActivityList({
           </span>
           {!t.success && t.errorMessage && (
             <div className="thinking-tool-error">{toolErrorSummary(t.errorMessage)}</div>
+          )}
+          {!suppressCards && t.card && (
+            <ToolCraftbookCard card={t.card} onFocusTask={onFocusTask} />
           )}
           {!suppressMedia &&
             (t.videos && t.videos.length > 0 && t.projectId ? (
@@ -3247,10 +3374,13 @@ export function ToolHistoryExpando({
   tools,
   projectId,
   onOpenReference,
+  onFocusTask,
 }: {
   tools: ChatMessageToolCall[];
   projectId?: string;
   onOpenReference?: (reference: OpenChatReference) => void;
+  /** Opens a task beside the chat (rail Task pane) from a promoted inline card. */
+  onFocusTask?: (ref: string) => void;
 }) {
   if (tools.length === 0) return null;
   const total = tools.reduce((acc, t) => acc + t.durationMs, 0);
@@ -3269,9 +3399,21 @@ export function ToolHistoryExpando({
   const mediaActivities = activities.filter(
     (t) => t.projectId && ((t.images && t.images.length > 0) || (t.videos && t.videos.length > 0)),
   );
+  // Rich inline cards (craftbook start / step advance) get the same
+  // promotion as generated media: visible above the collapsed step list,
+  // suppressed inside it so the plain row still counts in "N steps" and
+  // keeps the args/result provenance.
+  const cardActivities = activities.filter((t) => t.card);
   const failures = unresolvedToolFailures(tools).slice(-VISIBLE_TOOL_FAILURES);
   return (
     <>
+      {cardActivities.map((t, i) =>
+        t.card ? (
+          <div className="msg-tool-card-promoted" key={`card-${t.name}-${i}`}>
+            <ToolCraftbookCard card={t.card} onFocusTask={onFocusTask} />
+          </div>
+        ) : null,
+      )}
       {mediaActivities.map((t, i) => (
         <div className="msg-tool-media" key={`media-${t.name}-${i}`}>
           {t.videos && t.videos.length > 0 && t.projectId ? (
@@ -3300,7 +3442,12 @@ export function ToolHistoryExpando({
           <span className="msg-tool-history-total muted">· {formatDurationShort(total)} total</span>
           {failed > 0 && <span className="msg-tool-history-failed">· {failed} failed</span>}
         </summary>
-        <ToolActivityList tools={activities} suppressMedia onOpenReference={onOpenReference} />
+        <ToolActivityList
+          tools={activities}
+          suppressMedia
+          suppressCards
+          onOpenReference={onOpenReference}
+        />
       </details>
     </>
   );

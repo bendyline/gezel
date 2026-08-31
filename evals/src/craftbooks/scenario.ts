@@ -230,19 +230,59 @@ function craftbookEvalKickoffPrompt(spec: CraftbookEvalSpec): string {
   return harnessLines.join('\n');
 }
 
-function craftbookMissingDeliverableRepairDirective(spec: CraftbookEvalSpec): string {
+/**
+ * Split a directive's deliverable paths into the ones the repair should
+ * name as WORK (currently failing a check, or never mentioned by any
+ * failure because they are missing entirely) and the ones it must fence
+ * off as DONE.
+ *
+ * The blanket form of this message named every deliverable path as a
+ * "must be written with ..." instruction. Wild-caught on the first
+ * post-citation-fix powerpoint-deck e2e run (gemma4-12b-q4, 2026-08-25):
+ * the reviewer gezel received the kick mid-publish, read the tool-routing
+ * reminder as a work order, and rewrote the completed `sources.md` /
+ * `outline.md` artifacts as 146/165-byte stubs — regressing four passed
+ * checks and killing the trial in the stale-no-write detector. A repair
+ * message may only prescribe writes for paths that are actually failing,
+ * and must explicitly fence the rest.
+ */
+function partitionRepairPaths(
+  paths: readonly string[],
+  failures: readonly string[],
+): { failing: string[]; passing: string[] } {
+  if (failures.length === 0) return { failing: [...paths], passing: [] };
+  const failing: string[] = [];
+  const passing: string[] = [];
+  for (const path of paths) {
+    (failures.some((failure) => failureReferencesPath(failure, path)) ? failing : passing).push(
+      path,
+    );
+  }
+  return { failing, passing };
+}
+
+function craftbookMissingDeliverableRepairDirective(
+  spec: CraftbookEvalSpec,
+  failures: readonly string[] = [],
+): string {
   const seededPaths = sourceWorkspaceFixturePaths(spec);
   const outputs = splitDeliverablePaths(spec);
+  const workspaceText = partitionRepairPaths(outputs.workspace.text, failures);
+  const artifactsText = partitionRepairPaths(outputs.artifacts.text, failures);
+  const passingText = [...workspaceText.passing, ...artifactsText.passing];
   const lines = [
     '[craftbook eval repair]',
     seededPaths.length > 0
       ? `The source fixture is already in this project workspace: ${seededPaths.map((path) => `\`${path}\``).join(', ')}. If you need source content, call workspace \`read_file\` on that exact path; do not ask the user for it and do not use artifact/document/library tools.`
       : null,
-    outputs.workspace.text.length > 0
-      ? `Text workspace deliverables must be written with \`write_file\`: ${outputs.workspace.text.map((path) => `\`${path}\``).join(', ')}. Do not substitute \`write_artifact\` or \`write_document\` for those workspace files.`
+    passingText.length > 0
+      ? `Already passing — do NOT rewrite, shorten, or re-create: ${passingText.map((path) => `\`${path}\``).join(', ')}. Those files are complete; touching them regresses checks that already pass.`
       : null,
-    outputs.artifacts.text.length > 0
-      ? `Text artifact deliverables must be written with \`write_artifact\`: ${outputs.artifacts.text.map((path) => `\`${path}\``).join(', ')}. Re-read them with \`read_artifact\` and do not substitute workspace files.`
+    workspaceText.failing.length > 0
+      ? `Text workspace deliverables must be written with \`write_file\`: ${workspaceText.failing.map((path) => `\`${path}\``).join(', ')}. Do not substitute \`write_artifact\` or \`write_document\` for those workspace files.`
+      : null,
+    artifactsText.failing.length > 0
+      ? `Text artifact deliverables must be written with \`write_artifact\`: ${artifactsText.failing.map((path) => `\`${path}\``).join(', ')}. Re-read them with \`read_artifact\` and do not substitute workspace files.`
       : null,
     binaryProductionInstruction(outputs.workspace.binary),
     artifactBinaryProductionInstruction(outputs.artifacts.binary),
@@ -253,8 +293,26 @@ function craftbookMissingDeliverableRepairDirective(spec: CraftbookEvalSpec): st
   return lines.join('\n');
 }
 
-function craftbookExistingDeliverableRepairDirective(filePath: string): string | undefined {
+async function craftbookExistingDeliverableRepairDirective(
+  client: GezelClient,
+  projectId: string,
+  filePath: string,
+): Promise<string | undefined> {
   if (!isBinaryDocumentDeliverablePath(filePath)) return undefined;
+  // State-aware: when the converted file ALREADY sits in the artifacts
+  // drawer, re-prescribing the whole five-step route reads as "start
+  // over" to a mid-tier model — the 2026-08-25 gemma4-12b e2e re-ran
+  // convert/preview/save four times and hand-wrote text at the workspace
+  // path six times while a real 2.9 KB PPTX sat in the drawer the entire
+  // time. Name the one remaining call instead.
+  const staged = await artifactNearMiss(client, projectId, filePath);
+  if (staged?.bytes !== undefined && staged.bytes >= 1000) {
+    return [
+      `BINARY_COPY_REQUIRED: the converted file already exists in the artifacts drawer at \`${filePath}\` (${staged.bytes} bytes). Do not convert, save, or write it again.`,
+      `Make exactly one call: \`copy_artifact_to_workspace({ source: "${filePath}", dest: "${filePath}" })\` so the real saved bytes land at the workspace path.`,
+      'Never use `write_file` on this path — text bytes produce a corrupt file.',
+    ].join(' ');
+  }
   return [
     'BINARY_PRODUCTION_REQUIRED: do not repair this path with `write_file`, prose, base64, HTML, or hand-built OOXML.',
     'Return to the active craftbook workflow: use the approved Markdown source, call DocBlocks `convert_document`, inspect it with `preview_document`, persist it with `save_artifact`, then call `copy_artifact_to_workspace` so the real saved bytes land at the exact requested workspace path.',
@@ -262,10 +320,16 @@ function craftbookExistingDeliverableRepairDirective(filePath: string): string |
 }
 
 function craftbookSourceReadRepairDirective(missingPaths: readonly string[]): string {
-  const calls = missingPaths.map((path) => `read_file({ path: "${path}" })`);
+  const files = missingPaths.map((path) => `\`${path}\``).join(', ');
+  const plural = missingPaths.length === 1 ? '' : 's';
+  // Names the FILES, not a tool. Which read tool exists depends on the
+  // provider — `read_file` is excluded outright on the Claude CLI, which
+  // has its own `Read` — and a directive that prescribes an absent tool is
+  // the cap-truncation-steer failure class: it forbids the one call the
+  // session can make and demands one it cannot.
   return [
     'SOURCE_READ_REQUIRED: the output is being repaired before the seeded input files have been opened.',
-    `Your next tool call${calls.length === 1 ? '' : 's'} MUST read the missing source file${calls.length === 1 ? '' : 's'}: ${calls.map((call) => `\`${call}\``).join(', ')}.`,
+    `Your next tool call${plural} MUST open the missing source file${plural} with whichever file-reading tool you have: ${files}.`,
     'Do not write or patch the deliverable again until those source files have been read in this project workspace.',
     'After reading them, rewrite the deliverable using only facts present in those files and the locked schema.',
   ].join(' ');
@@ -285,11 +349,52 @@ function toolCallReferencesPath(call: ToolCallLike, path: string): boolean {
   );
 }
 
-function sessionReadPaths(session: ChatSessionLike, seededPaths: readonly string[]): Set<string> {
+/**
+ * Tool names that count as opening a seeded source file.
+ *
+ * Not just `read_file`. Two providers reach the same bytes by other names,
+ * and matching only gezel-mcp's tool made every scenario with seeded source
+ * fixtures UNWINNABLE on them — the model read the files, the check could
+ * not see it, and the trial booked as a `model` failure, which is the worst
+ * possible outcome for a scorecard:
+ *
+ *   - CLI providers namespace gezel-mcp tools as `mcp__gezel__read_file`.
+ *   - The Claude CLI provider has `read_file` DELIBERATELY excluded
+ *     (`CLAUDE_CLI_EXCLUDED_MCP_TOOLS`) so the model uses its built-in
+ *     `Read` rather than flip-flopping between two equivalent surfaces.
+ *     That exclusion is correct product behaviour; this set is what makes
+ *     the grader agree with it.
+ *
+ * Wild-caught on the first frontier ceiling run of the `developer` suite:
+ * claude-sonnet-4-6 read all four seeded files with `Read`, produced a
+ * flawless review, and sat at 9/11 on "seeded workspace input(s) have not
+ * been read yet".
+ *
+ * Deliberately NOT included: `Grep`/`Glob` (they prove a file was matched,
+ * not that its contents were taken in) and shell `cat` (a shell tool's
+ * argument text is unbounded — matching a path inside it would count a
+ * write, a move, or a mention as a read).
+ */
+const SEEDED_READ_TOOL_NAMES = new Set(['read_file', 'read_files', 'read', 'view']);
+
+/** Strip an MCP namespace prefix: `mcp__gezel__read_file` -> `read_file`. */
+function bareToolName(name: string): string {
+  const match = /^mcp__[^_]+(?:_[^_]+)*?__(.+)$/.exec(name);
+  return (match?.[1] ?? name).toLowerCase();
+}
+
+function isSeededReadTool(name: string | undefined): boolean {
+  return !!name && SEEDED_READ_TOOL_NAMES.has(bareToolName(name));
+}
+
+function sessionReadPaths(
+  session: Pick<ChatSessionLike, 'messages'>,
+  seededPaths: readonly string[],
+): Set<string> {
   const read = new Set<string>();
   for (const message of session.messages ?? []) {
     for (const call of message.toolCalls ?? []) {
-      if (call.name !== 'read_file' || call.success === false) continue;
+      if (!isSeededReadTool(call.name) || call.success === false) continue;
       for (const path of seededPaths) {
         if (toolCallReferencesPath(call, path)) read.add(path);
       }
@@ -1687,7 +1792,7 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
           await postMissingDeliverableFeedback(ctx, repairDeliverable.path, {
             projectId,
             nearMiss,
-            repairDirective: craftbookMissingDeliverableRepairDirective(spec),
+            repairDirective: craftbookMissingDeliverableRepairDirective(spec, failures),
           });
           return { done: false };
         }
@@ -1707,7 +1812,11 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
         {
           projectId,
           repairDirective: repairDeliverable
-            ? craftbookExistingDeliverableRepairDirective(repairDeliverable.path)
+            ? await craftbookExistingDeliverableRepairDirective(
+                ctx.client,
+                projectId,
+                repairDeliverable.path,
+              )
             : undefined,
           expectedDeliverable: repairDeliverable
             ? { kind: 'file', filePath: repairDeliverable.path }
@@ -1772,3 +1881,6 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
     },
   };
 }
+
+/** Exposed for seeded-reads.test.ts — the provider-name matching is easy to regress silently. */
+export const __testing = { sessionReadPaths, isSeededReadTool, bareToolName };

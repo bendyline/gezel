@@ -60,7 +60,7 @@ describe('formatAnswerSeed', () => {
     );
   });
 
-  it('renders a "proceed with defaults" envelope when the user clicked Just do whatever', () => {
+  it('renders a "proceed with defaults" envelope for a declined answer', () => {
     const q = makeQuestion({
       answer: { declined: true, at: '2026-01-01T00:00:01Z' },
     });

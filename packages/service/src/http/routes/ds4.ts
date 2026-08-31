@@ -1,6 +1,7 @@
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { shouldUseDs4SsdStreaming } from '../../providers/ds4/residency.js';
 import { tailLatestEngineLog } from '../../providers/llama-cpp/log.js';
 import { CapacityDeniedError } from '../../providers/native/capacity-broker.js';
 import type { ServiceContext } from '../context.js';
@@ -96,6 +97,11 @@ export function ds4Routes(ctx: ServiceContext): Hono {
   app.get('/context-plans', async (c) => {
     const items = await ctx.catalog.list('chat-model');
     const plans: Record<string, unknown> = {};
+    // Residency is decided by the same function the launcher calls, on this
+    // machine's real memory. Recomputing it client-side would need the UI to
+    // duplicate the arm64/unified-memory test and the headroom constant, and a
+    // badge that disagrees with the launcher is worse than no badge.
+    const ds4Config = await ctx.store.readConfig();
     await Promise.all(
       items.map(async (item) => {
         const manifest = item.manifest;
@@ -128,6 +134,14 @@ export function ds4Routes(ctx: ServiceContext): Hono {
             ...(plan.weightsResidentBytes !== undefined
               ? { contextFreeResidentBytes: plan.weightsResidentBytes }
               : {}),
+            fullyResident: !shouldUseDs4SsdStreaming({
+              ...(ds4Config.ds4SsdStreaming !== undefined
+                ? { configured: ds4Config.ds4SsdStreaming }
+                : {}),
+              ...(manifest.ds4.approxSizeBytes !== undefined
+                ? { modelSizeBytes: manifest.ds4.approxSizeBytes }
+                : {}),
+            }),
           };
         } catch {
           // A model whose plan can't be resolved (capacity denial, missing

@@ -4,7 +4,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { captureScreenshot } from './helpers/screenshot.js';
 
 /**
  * End-to-end: the custom-project-type New Project gallery + the Output-pane
@@ -39,7 +41,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await app?.close();
+  await closeApp(app);
   await rm(gezelHome, { recursive: true, force: true }).catch(() => {});
 });
 
@@ -56,7 +58,7 @@ test('gallery lists the Language Trainer type and creates a project with a pinne
   // The gallery renders the bundled Language Trainer type as a selectable card.
   const card = page.getByRole('radio', { name: 'Language Trainer' });
   await expect(card).toBeVisible({ timeout: 10_000 });
-  await page.screenshot({ path: '/tmp/gezel-project-type-gallery.png', fullPage: false });
+  await captureScreenshot(page, { path: '/tmp/gezel-project-type-gallery.png', fullPage: false });
 
   // Selecting it hides the free-form About/Mission and shows the type's copy.
   await card.click();
@@ -86,7 +88,7 @@ test('gallery lists the Language Trainer type and creates a project with a pinne
   // project-created event fires before this gezel exists).
   await page.getByTestId('sidebar-group-toggle-gezels').click();
   await expect(page.locator('[data-testid="app-sidebar"]')).toContainText('Language Trainer');
-  await page.screenshot({ path: '/tmp/gezel-project-type-dashboard.png', fullPage: false });
+  await captureScreenshot(page, { path: '/tmp/gezel-project-type-dashboard.png', fullPage: false });
 });
 
 test('gallery creates a Job Hunt project: two-gezel crew and the pipeline board', async () => {
@@ -124,5 +126,5 @@ test('gallery creates a Job Hunt project: two-gezel crew and the pipeline board'
   // land on the sidebar roster.
   await expect(page.locator('[data-testid="app-sidebar"]')).toContainText('Loopbaancoach');
   await expect(page.locator('[data-testid="app-sidebar"]')).toContainText('Oefen-interviewer');
-  await page.screenshot({ path: '/tmp/gezel-job-hunt-dashboard.png', fullPage: false });
+  await captureScreenshot(page, { path: '/tmp/gezel-job-hunt-dashboard.png', fullPage: false });
 });

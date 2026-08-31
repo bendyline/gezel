@@ -761,13 +761,30 @@ export interface QueueWaitOpts {
   /** See {@link EnqueueRequest.job}. */
   job?: string;
   /**
-   * Fired once if the request ends up waiting longer than ~200ms.
-   * `aheadOf` is an approximate count of turns that will dispatch
-   * before this one. Under the threshold we stay silent — no need
-   * to flash "queued" on the happy path where the queue is empty.
+   * Fired if the request ends up waiting longer than ~200ms, and then
+   * re-fired every {@link QUEUE_WAIT_NOTICE_REPEAT_MS} for as long as the
+   * wait lasts. `aheadOf` is an approximate count of turns that will
+   * dispatch before this one. Under the threshold we stay silent — no
+   * need to flash "queued" on the happy path where the queue is empty.
+   *
+   * It repeats because a single edge-triggered notice is not enough to
+   * hold a UI state: any later liveness signal on the session clears the
+   * "queued" indicator, and a wait behind a long agentic turn can run for
+   * many minutes after that. The user was then shown a turn with no
+   * queue badge and no output, which the silence banner reported as a
+   * wedged model. Re-asserting also lets the position count down.
    */
   onQueueWait?: (info: { aheadOf: number }) => void;
 }
+
+/** Silence below this — most acquires resolve on the next microtask. */
+const QUEUE_WAIT_NOTICE_DELAY_MS = 200;
+/**
+ * Cadence for re-asserting an ongoing wait. Matches the UI's own status
+ * cadence: frequent enough that a reconnecting client recovers the badge
+ * quickly, cheap enough that a ten-minute wait is ~120 tiny SSE frames.
+ */
+const QUEUE_WAIT_NOTICE_REPEAT_MS = 5_000;
 
 /**
  * Common acquire-run-release pattern. The caller provides the queue
@@ -790,9 +807,10 @@ export async function runInQueue<T>(
 
   let acquired = false;
   let waitNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+  let waitNoticeRepeat: ReturnType<typeof setInterval> | null = null;
 
   if (opts.onQueueWait) {
-    waitNoticeTimer = setTimeout(() => {
+    const publishWait = () => {
       if (acquired) return;
       const snap = queue.snapshot();
       const rawAhead =
@@ -800,7 +818,14 @@ export async function runInQueue<T>(
           ? snap.running + snap.queuedInteractive - 1
           : snap.running + snap.queuedInteractive + snap.queuedBackground - 1;
       opts.onQueueWait?.({ aheadOf: Math.max(0, rawAhead) });
-    }, 200);
+    };
+    waitNoticeTimer = setTimeout(() => {
+      publishWait();
+      // Keep asserting for the length of the wait — see `onQueueWait`.
+      waitNoticeRepeat = setInterval(publishWait, QUEUE_WAIT_NOTICE_REPEAT_MS);
+      waitNoticeRepeat.unref?.();
+    }, QUEUE_WAIT_NOTICE_DELAY_MS);
+    waitNoticeTimer.unref?.();
   }
 
   const acquireOpts: EnqueueRequest = { lane: opts.lane };
@@ -819,6 +844,7 @@ export async function runInQueue<T>(
   } finally {
     acquired = true;
     if (waitNoticeTimer) clearTimeout(waitNoticeTimer);
+    if (waitNoticeRepeat) clearInterval(waitNoticeRepeat);
   }
   try {
     return await work();

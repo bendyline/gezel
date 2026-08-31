@@ -9,7 +9,12 @@ const log = createLogger('models');
 
 export interface GgufInstallOpts {
   skipSha: boolean;
-  includeMmproj: boolean;
+  /**
+   * Fetch the vision projector the catalog ships. Defaults to on when
+   * omitted; only ds4 (no sidecar path) passes `false`. Loading it is a
+   * separate per-model runtime decision — see `config.nativeVision`.
+   */
+  includeMmproj?: boolean;
   /** Whether a text-only chat install should also pull the default image reader. */
   installCompanion: boolean;
 }

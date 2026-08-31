@@ -214,3 +214,13 @@ packages/catalog/scripts/harvested-auth/
 /packages/app/.tmp-preview-debug
 .gezel/village.json
 /.gezel/quarantine
+
+# Project-local content index — the boekwachter sqlite cache under a
+# workspace's `.gezel/index/`. Gezel writes a self-ignoring `.gitignore` there
+# at refresh time (index-store/gitignore.ts), but that sentinel is itself
+# ignored, so `git clean -xfd` removes it and it only returns on the next
+# refresh tick. This repo is a gezel project (root + packages/cli), so the rule
+# is repeated here. Regenerable cache; never committed. `**/` is required:
+# a mid-pattern slash anchors to the repo root, which would miss
+# packages/cli (the same reason `.gezel/village.json` above is root-only).
+**/.gezel/index/

@@ -69,3 +69,74 @@ describe('citationsResolve — between-span capture', () => {
     expect(r.ok).toBe(true);
   });
 });
+
+describe('citationsResolve — knownPaths (task-supplied metadata)', () => {
+  const ws = (files: Record<string, string>) => ({
+    read: async (f: string) => files[f] ?? null,
+    list: async () => Object.keys(files),
+  });
+
+  // The powerpoint-deck wild catch: the procedure requires the packet to
+  // record the invocation inputs, and the backticked directory tokens /
+  // future output path read as fabricated citations.
+  it('forgives unresolvable cited paths the task itself supplied', async () => {
+    const packet = [
+      'Working folder: `tasks/8/` in the artifacts drawer.',
+      'Deck folder `powerpoint/task-8`; requested file `powerpoint/task-8/deck.pptx`.',
+      'Research status: skipped — no external tooling this session.',
+    ].join('\n');
+    const r = await citationsResolve(ws({ 'sources.md': packet }), 'sources.md', {
+      minCitations: 0,
+      knownPaths: ['tasks/8', 'powerpoint/task-8', 'powerpoint/task-8/deck.pptx'],
+    });
+    expect(r.ok).toBe(true);
+    expect(r.unresolved).toEqual([]);
+    expect(r.forgiven?.sort()).toEqual([
+      'powerpoint/task-8',
+      'powerpoint/task-8/deck.pptx',
+      'tasks/8/',
+    ]);
+  });
+
+  it('forgiven paths do not count toward minCitations', async () => {
+    const packet = 'Only metadata here: `tasks/8/` and `powerpoint/task-8/deck.pptx`.';
+    const r = await citationsResolve(ws({ 'sources.md': packet }), 'sources.md', {
+      minCitations: 1,
+      knownPaths: ['tasks/8', 'powerpoint/task-8/deck.pptx'],
+    });
+    expect(r.ok).toBe(false);
+    expect(r.detail).toContain('has 0 recognizable citation(s)');
+  });
+
+  it('a knownPath that resolves stays an ordinary counted citation', async () => {
+    const review = 'Verified against `tasks/8/sources.md`.';
+    const r = await citationsResolve(
+      ws({ 'review.md': review, 'tasks/8/sources.md': 'packet' }),
+      'review.md',
+      { minCitations: 1, knownPaths: ['tasks/8/sources.md'] },
+    );
+    expect(r.ok).toBe(true);
+    expect(r.resolved).toEqual(['tasks/8/sources.md']);
+    expect(r.forgiven).toBeUndefined();
+  });
+
+  it('genuinely fabricated citations are still caught alongside forgiven ones', async () => {
+    const packet = 'Metadata `tasks/8/`; evidence from `data/market-sizes.csv`.';
+    const r = await citationsResolve(ws({ 'sources.md': packet }), 'sources.md', {
+      minCitations: 0,
+      knownPaths: ['tasks/8'],
+    });
+    expect(r.ok).toBe(false);
+    expect(r.unresolved).toEqual(['data/market-sizes.csv']);
+    expect(r.forgiven).toEqual(['tasks/8/']);
+  });
+
+  it('marks a truncated unresolved list with an ellipsis', async () => {
+    const packet = Array.from({ length: 7 }, (_, i) => `See \`fake/path-${i}.md\`.`).join('\n');
+    const r = await citationsResolve(ws({ 'notes.md': packet }), 'notes.md', {});
+    expect(r.ok).toBe(false);
+    expect(r.unresolved).toHaveLength(7);
+    expect(r.detail).toContain('cites 7 source(s) that do not exist');
+    expect(r.detail).toContain(', …');
+  });
+});

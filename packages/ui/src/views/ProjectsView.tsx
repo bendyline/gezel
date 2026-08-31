@@ -30,12 +30,12 @@ import type {
   MouseEvent as ReactMouseEvent,
   ReactNode,
 } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
-import { queueComposerPrefill } from '../components/ChatComposer.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
+import { DocumentNarration } from '../components/DocumentNarration.js';
 import { FileFlatList } from '../components/FileFlatList.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
 import { FileHiddenKey, FileViewModeKeys } from '../components/FileViewModeKeys.js';
@@ -45,13 +45,10 @@ import { HtmlPreviewFrame, type HtmlPreviewLogEntry } from '../components/HtmlPr
 import { ProjectMemoriesEditor } from '../components/MemoriesTree.js';
 import { ProjectActionsMenu, ProjectContextMenu } from '../components/ProjectActionsMenu.js';
 import type { ProjectTemplateGezelOptions } from '../components/ProjectAddGezelDialog.js';
-import { ProjectChat } from '../components/ProjectChat.js';
-import { ProjectConnectionsTab } from '../components/ProjectConnectionsTab.js';
 import { ProjectCrewRoster } from '../components/ProjectCrewRoster.js';
 import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
 import { ProjectIcon } from '../components/ProjectIcon.js';
 import { ProjectKnowledgeRow } from '../components/ProjectKnowledgeRow.js';
-import { ProjectMailTab } from '../components/ProjectMailTab.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPropertiesEditor } from '../components/ProjectPropertiesEditor.js';
 import {
@@ -78,7 +75,7 @@ import {
   workspaceIndexLabel,
 } from '../components/WorkspaceIndexPane.js';
 import { WorkspaceIssueFixDialog } from '../components/WorkspaceIssueFixDialog.js';
-import { DiffpackReviewView } from '../components/diffpacks/DiffpackReviewView.js';
+import { queueComposerPrefill } from '../components/composer-prefill.js';
 import { useDiffpackCount } from '../components/diffpacks/useDiffpacks.js';
 import {
   BINARY_FILE,
@@ -126,12 +123,45 @@ import { crewLeadLabel, crewLeadLabelLower } from '../labels.js';
 import { Select, Tabs } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { useEffectiveTheme } from '../theme.js';
-import { FileMapView } from './FileMapView.js';
-import { HistoryView } from './HistoryView.js';
-import { ProjectGitHubView } from './ProjectGithubView.js';
-import { ProjectOverviewView } from './ProjectOverviewView.js';
-import { TasksView } from './TasksView.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
+
+const loadProjectChatModule = () => import('../components/ProjectChat.js');
+const loadProjectConnectionsModule = () => import('../components/ProjectConnectionsTab.js');
+const loadProjectMailModule = () => import('../components/ProjectMailTab.js');
+const loadDiffpackReviewModule = () => import('../components/diffpacks/DiffpackReviewView.js');
+const loadFileMapModule = () => import('./FileMapView.js');
+const loadHistoryModule = () => import('./HistoryView.js');
+const loadProjectGitHubModule = () => import('./ProjectGithubView.js');
+const loadProjectOverviewModule = () => import('./ProjectOverviewView.js');
+const loadTasksModule = () => import('./TasksView.js');
+
+const ProjectChat = lazy(() =>
+  loadProjectChatModule().then(({ ProjectChat }) => ({ default: ProjectChat })),
+);
+const ProjectConnectionsTab = lazy(() =>
+  loadProjectConnectionsModule().then(({ ProjectConnectionsTab }) => ({
+    default: ProjectConnectionsTab,
+  })),
+);
+const ProjectMailTab = lazy(() =>
+  loadProjectMailModule().then(({ ProjectMailTab }) => ({ default: ProjectMailTab })),
+);
+const DiffpackReviewView = lazy(() =>
+  loadDiffpackReviewModule().then(({ DiffpackReviewView }) => ({ default: DiffpackReviewView })),
+);
+const FileMapView = lazy(() =>
+  loadFileMapModule().then(({ FileMapView }) => ({ default: FileMapView })),
+);
+const HistoryView = lazy(() =>
+  loadHistoryModule().then(({ HistoryView }) => ({ default: HistoryView })),
+);
+const ProjectGitHubView = lazy(() =>
+  loadProjectGitHubModule().then(({ ProjectGitHubView }) => ({ default: ProjectGitHubView })),
+);
+const ProjectOverviewView = lazy(() =>
+  loadProjectOverviewModule().then(({ ProjectOverviewView }) => ({ default: ProjectOverviewView })),
+);
+const TasksView = lazy(() => loadTasksModule().then(({ TasksView }) => ({ default: TasksView })));
 
 const SELECTED_PROJECT_STORAGE_KEY = 'gezel:projects:selectedId';
 
@@ -199,6 +229,47 @@ type ProjectTab =
   // pane to sit beside the content, it becomes its own tab instead.
   | 'output';
 
+function preloadProjectTab(tab: ProjectTab): void {
+  let loading: Promise<unknown> | undefined;
+  switch (tab) {
+    case 'chat':
+      loading = loadProjectChatModule();
+      break;
+    case 'tasks':
+      loading = loadTasksModule();
+      break;
+    case 'proposals':
+      loading = loadDiffpackReviewModule();
+      break;
+    case 'github':
+      loading = loadProjectGitHubModule();
+      break;
+    case 'mail':
+      loading = loadProjectMailModule();
+      break;
+    case 'map':
+      loading = loadFileMapModule();
+      break;
+    case 'overview':
+      loading = loadProjectOverviewModule();
+      break;
+    case 'about':
+      loading = Promise.all([loadProjectConnectionsModule(), loadHistoryModule()]);
+      break;
+    default:
+      break;
+  }
+  void loading?.catch(() => {});
+}
+
+function ProjectPaneBoundary({ children }: { children: ReactNode }) {
+  return (
+    <Suspense fallback={<p className="placeholder project-pane-loading">Loading view…</p>}>
+      {children}
+    </Suspense>
+  );
+}
+
 type ConfigurableProjectTab = keyof ProjectTabVisibility;
 
 const PROJECT_TAB_VISIBILITY_OPTIONS: ReadonlyArray<{
@@ -247,6 +318,38 @@ function readStoredOutputFraction(): number {
     return clampOutputFraction(Number.parseFloat(raw));
   } catch {
     return DEFAULT_OUTPUT_FRACTION;
+  }
+}
+
+/**
+ * Output-pane visibility used to live only under this localStorage key. It
+ * now lives on `project.outputPaneVisible`; these two read and retire a
+ * value written by an older build so the user's existing choice isn't lost
+ * in the move. The key was per-project and never global.
+ *
+ * localStorage is the wrong home for it in the desktop shell at all: the
+ * renderer's origin is `https://127.0.0.1:<daemon port>`, and the daemon
+ * falls back off the canonical port whenever it is taken, silently handing
+ * the window an empty store. That is what made a closed pane reappear.
+ */
+function legacyOutputVisibleKey(projectId: string): string {
+  return `gezel.projectOutputVisible:${projectId}`;
+}
+
+function readLegacyOutputVisible(projectId: string): boolean | null {
+  try {
+    const raw = window.localStorage.getItem(legacyOutputVisibleKey(projectId));
+    return raw === null ? null : raw === '1';
+  } catch {
+    return null;
+  }
+}
+
+function forgetLegacyOutputVisible(projectId: string): void {
+  try {
+    window.localStorage.removeItem(legacyOutputVisibleKey(projectId));
+  } catch {
+    /* unavailable — nothing to retire */
   }
 }
 
@@ -486,12 +589,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const [selected, setSelected] = useState<ProjectDetail | null>(null);
   const [changingArchive, setChangingArchive] = useState(false);
   const [recentlyAddedGezelId, setRecentlyAddedGezelId] = useState<string | undefined>(undefined);
-  // Consume a pending "+" intent from the sidebar synchronously on first
-  // render (the event below covers the already-mounted case). Never in
-  // detail-only mode — a single project tab has no create UI.
-  const [createMode, setCreateMode] = useState<'crew' | null>(() =>
-    !detailOnly && consumeCreate('project') ? 'crew' : null,
-  );
+  const [createMode, setCreateMode] = useState<'crew' | null>(null);
   const [pkgName, setPkgName] = useState('');
   const [log, setLog] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -565,12 +663,20 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   } | null>(null);
   const [workspaceSourceReveal, setWorkspaceSourceReveal] =
     useState<WorkspaceSourceRevealRequest | null>(null);
-  // Output-pane visibility override. `null` = follow the auto default
-  // (visible when the workspace has a previewable index.html); an
-  // explicit boolean is the user's toggle choice, persisted per project
-  // so it survives reloads and project switches. See the toggle in the
-  // entity-tabs-row and [ProjectOutputPane](../components/ProjectOutputPane.tsx).
-  const [outputOverride, setOutputOverride] = useState<boolean | null>(null);
+  // In-session output-pane choice, held only until the write to
+  // `project.outputPaneVisible` lands (and, for a pre-server-side install,
+  // until the localStorage value is migrated). The PROJECT is the source of
+  // truth for visibility — never mirror it into state and read the mirror,
+  // or the pane flashes open for a frame on every project whose stored
+  // answer is "hidden", because an effect cannot run before the first
+  // commit that has the project. Carries its project id so a choice made on
+  // one project can never resolve the pane for the next one. See the toggle
+  // in the entity-tabs-row and
+  // [ProjectOutputPane](../components/ProjectOutputPane.tsx).
+  const [outputOverride, setOutputOverride] = useState<{
+    projectId: string;
+    visible: boolean;
+  } | null>(null);
   // When the selected project has an applied custom project type that pins an
   // Output page (its dashboard), this holds that page so the output pane can
   // show it ahead of the workspace auto-ranker. See docs/project-types.md.
@@ -658,10 +764,16 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     return () => window.removeEventListener('gezel:project-updated', onUpdated);
   }, [refresh]);
 
-  // Already-mounted case: a "+" click while the listing is open arrives as
-  // an event (the lazy initializer above only runs on a fresh mount).
+  // Two ways in, one handler. A "+" click while the listing is already open
+  // arrives as the event; a click that had to open the listing first left
+  // the intent behind, because the event fired before this listener
+  // existed. Both are read here in the mount effect rather than in a render
+  // initializer — see `nav-intents.ts` for why that distinction is
+  // load-bearing. Never in detail-only mode: a single project tab has no
+  // create UI, and swallowing the intent there would strand it.
   useEffect(() => {
     if (detailOnly) return;
+    if (consumeCreate('project')) setCreateMode('crew');
     const onNew = () => {
       consumeCreate('project');
       setCreateMode('crew');
@@ -1970,24 +2082,39 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // Output pane: the set of previewable workspace HTML files, whether a
   // previewable index.html exists (drives the auto-on default), and the
   // resolved visibility (per-project user override wins over the auto
-  // default). The toggle persists the override to localStorage.
+  // default). The toggle persists the override onto the project, so it
+  // survives reloads, project switches, and the daemon changing ports.
   const hasIndexHtml = useMemo(
     () => workspaceHtmlFiles.some((p) => /(^|\/)index\.html?$/i.test(p)),
     [workspaceHtmlFiles],
   );
-  // Load the persisted per-project override whenever the project changes.
+  // Retire a leftover localStorage value from before the choice moved
+  // server-side: adopt it once, then drop it, so the two can never
+  // disagree afterwards. A project that already carries the flag needs
+  // nothing here — it is read straight off `selected` below.
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the selected project id.
   useEffect(() => {
     if (!selected) {
       setOutputOverride(null);
       return;
     }
-    try {
-      const raw = window.localStorage.getItem(`gezel.projectOutputVisible:${selected.id}`);
-      setOutputOverride(raw === null ? null : raw === '1');
-    } catch {
-      setOutputOverride(null);
+    if (typeof selected.outputPaneVisible === 'boolean') {
+      forgetLegacyOutputVisible(selected.id);
+      return;
     }
+    const legacy = readLegacyOutputVisible(selected.id);
+    if (legacy === null) return;
+    const projectId = selected.id;
+    setOutputOverride({ projectId, visible: legacy });
+    void api
+      .updateProject(projectId, { outputPaneVisible: legacy })
+      .then((updated) => {
+        forgetLegacyOutputVisible(projectId);
+        setSelected((current) => (current?.id === projectId ? updated : current));
+      })
+      .catch(() => {
+        /* keep the cached value; the next load retries the migration */
+      });
   }, [selected?.id]);
   // Resolve the pinned type page (if any) whenever the selected project's
   // applied project type changes. The provenance on project.json carries the
@@ -2037,17 +2164,24 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
   // A pinned type page makes the pane worth showing even without a workspace
   // index.html — the user's explicit toggle still wins.
+  const pendingOutputChoice =
+    outputOverride && outputOverride.projectId === selected?.id ? outputOverride.visible : null;
   const outputVisible =
-    Boolean(selected) && (outputOverride ?? (hasIndexHtml || Boolean(typePage)));
+    Boolean(selected) &&
+    (pendingOutputChoice ?? selected?.outputPaneVisible ?? (hasIndexHtml || Boolean(typePage)));
   const toggleOutput = useCallback(() => {
     if (!selected) return;
     const next = !outputVisible;
-    setOutputOverride(next);
-    try {
-      window.localStorage.setItem(`gezel.projectOutputVisible:${selected.id}`, next ? '1' : '0');
-    } catch {
-      /* quota / private mode — state still lives in memory */
-    }
+    const projectId = selected.id;
+    setOutputOverride({ projectId, visible: next });
+    void api
+      .updateProject(projectId, { outputPaneVisible: next })
+      .then((updated) => {
+        setSelected((current) => (current?.id === projectId ? updated : current));
+      })
+      .catch((err) => {
+        setError((err as Error).message);
+      });
   }, [selected, outputVisible]);
 
   // Resizable splitter between the output pane and the tab content. The
@@ -2433,6 +2567,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           className="gz-tab-icon"
                           aria-label={t.label}
                           title={t.label}
+                          onPointerEnter={() => preloadProjectTab(t.value)}
+                          onFocus={() => preloadProjectTab(t.value)}
+                          onPointerDown={() => preloadProjectTab(t.value)}
                         >
                           <ProjectTabIcon tab={t.value} />
                         </Tabs.Trigger>
@@ -2441,6 +2578,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           key={t.value}
                           value={t.value}
                           data-testid={`project-tab-${t.value}`}
+                          onPointerEnter={() => preloadProjectTab(t.value)}
+                          onFocus={() => preloadProjectTab(t.value)}
+                          onPointerDown={() => preloadProjectTab(t.value)}
                         >
                           {t.label}
                         </Tabs.Trigger>
@@ -2505,6 +2645,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
                       <ProjectDocEditor
                         key={`${selected.id}:about`}
+                        projectId={selected.id}
                         resourceKey={`project:${selected.id}:about`}
                         id="project-about-overview"
                         label="About this project"
@@ -2523,6 +2664,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
                       <ProjectDocEditor
                         key={`${selected.id}:mission`}
+                        projectId={selected.id}
                         resourceKey={`project:${selected.id}:mission`}
                         id="project-about-mission"
                         label="Mission objectives"
@@ -2552,7 +2694,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           id="project-about-connections"
                           className="project-about-section project-about-anchor"
                         >
-                          <ProjectConnectionsTab project={selected} onProjectChange={setSelected} />
+                          <ProjectPaneBoundary>
+                            <ProjectConnectionsTab
+                              project={selected}
+                              onProjectChange={setSelected}
+                            />
+                          </ProjectPaneBoundary>
                         </section>
                       )}
 
@@ -2998,7 +3145,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                       >
                         <h3 className="project-about-section-title">History</h3>
                         <div className="project-about-history">
-                          <HistoryView projectId={selected.id} />
+                          <ProjectPaneBoundary>
+                            <HistoryView projectId={selected.id} />
+                          </ProjectPaneBoundary>
                         </div>
                       </section>
 
@@ -3415,24 +3564,48 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   )}
 
                   {tab === 'chat' && (
-                    <ProjectChat key={selected.id} project={selected} compact={effectiveCompact} />
+                    <ProjectPaneBoundary>
+                      <ProjectChat
+                        key={selected.id}
+                        project={selected}
+                        compact={effectiveCompact}
+                      />
+                    </ProjectPaneBoundary>
                   )}
 
-                  {tab === 'tasks' && <TasksView projectId={selected.id} />}
+                  {tab === 'tasks' && (
+                    <ProjectPaneBoundary>
+                      <TasksView projectId={selected.id} />
+                    </ProjectPaneBoundary>
+                  )}
 
-                  {tab === 'proposals' && <DiffpackReviewView projectId={selected.id} />}
+                  {tab === 'proposals' && (
+                    <ProjectPaneBoundary>
+                      <DiffpackReviewView projectId={selected.id} />
+                    </ProjectPaneBoundary>
+                  )}
 
                   {tab === 'github' && selected.github?.url && (
-                    <ProjectGitHubView project={selected} onProjectChange={setSelected} />
+                    <ProjectPaneBoundary>
+                      <ProjectGitHubView project={selected} onProjectChange={setSelected} />
+                    </ProjectPaneBoundary>
                   )}
 
                   {showWorkInProgressFeatures && tab === 'mail' && (
-                    <ProjectMailTab project={selected} onProjectChange={setSelected} />
+                    <ProjectPaneBoundary>
+                      <ProjectMailTab project={selected} onProjectChange={setSelected} />
+                    </ProjectPaneBoundary>
                   )}
 
-                  {tab === 'map' && <FileMapView projectId={selected.id} />}
+                  {tab === 'map' && (
+                    <ProjectPaneBoundary>
+                      <FileMapView projectId={selected.id} />
+                    </ProjectPaneBoundary>
+                  )}
                   {tab === 'overview' && (
-                    <ProjectOverviewView projectId={selected.id} project={selected} />
+                    <ProjectPaneBoundary>
+                      <ProjectOverviewView projectId={selected.id} project={selected} />
+                    </ProjectPaneBoundary>
                   )}
                 </div>
               )}
@@ -3589,7 +3762,10 @@ function ProjectOutsideInEditor({
         versionBasename={basenameOf(sourcePath)}
         outline
         toolbarSlotAfterActions={
-          !isReadOnly ? <TransformToolbarButton context="generic" /> : undefined
+          <>
+            {!isReadOnly && <TransformToolbarButton context="generic" />}
+            <DocumentNarration fileName={file.path} projectId={projectId} />
+          </>
         }
         toolbarSlotRight={
           <>
@@ -3717,7 +3893,12 @@ function ProjectFileEditor({
         versionBasename={primaryDocumentFilename}
         outline={markdown}
         toolbarSlotAfterActions={
-          markdown && !isReadOnly ? <TransformToolbarButton context="generic" /> : undefined
+          markdown ? (
+            <>
+              {!isReadOnly && <TransformToolbarButton context="generic" />}
+              <DocumentNarration fileName={file.path} projectId={projectId} />
+            </>
+          ) : undefined
         }
         toolbarSlotRight={
           <>
@@ -4052,6 +4233,7 @@ function formatPreviewComplaint(
  * same debounced auto-save pattern as the gezel about.md flow.
  */
 function ProjectDocEditor({
+  projectId,
   resourceKey,
   id,
   label,
@@ -4059,6 +4241,7 @@ function ProjectDocEditor({
   initial,
   onSave,
 }: {
+  projectId: string;
   resourceKey: string;
   id: string;
   label: string;
@@ -4099,7 +4282,12 @@ function ProjectDocEditor({
           colorScheme={editorTheme}
           showPlayTab={false}
           fullWidth
-          toolbarSlotAfterActions={<TransformToolbarButton context="generic" />}
+          toolbarSlotAfterActions={
+            <>
+              <TransformToolbarButton context="generic" />
+              <DocumentNarration fileName={`${label}.md`} projectId={projectId} />
+            </>
+          }
           statusBarSlotRight={<AutosaveStatus autosave={autosave} />}
         />
       </div>

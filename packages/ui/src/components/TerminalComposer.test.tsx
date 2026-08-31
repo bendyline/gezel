@@ -59,15 +59,20 @@ describe('TerminalComposer', () => {
     vi.mocked(api.runTerminalCommand).mockResolvedValue({} as never);
   });
 
-  it('fires the current command from the right side of the toolbar', async () => {
+  it('fires the current command from its own row over the entry', async () => {
     const { container } = render(
       <TerminalComposer projectId="project-1" workingDir="/work/project" />,
     );
     const editor = await screen.findByLabelText('Terminal command');
+    // The key is glyph-only, so `aria-label` is the whole accessible name —
+    // finding it by role here is also what guards that label from going away.
     const fire = screen.getByRole('button', { name: 'Fire' });
 
-    expect(fire).toBe(container.querySelector('.terminal-composer-toolbar')?.lastElementChild);
-    expect(fire).toHaveClass('terminal-toolbar-fire-btn');
+    // Fire belongs in the row above the entry (where chat puts Send), not back
+    // in the toolbar beside the galleries.
+    expect(container.querySelector('.terminal-composer-fire-row')).toContainElement(fire);
+    expect(fire).toHaveClass('terminal-fire-btn');
+    expect(container.querySelector('.terminal-composer-toolbar')).not.toContainElement(fire);
 
     fireEvent.change(editor, { target: { value: '  pnpm test  ' } });
     fireEvent.click(fire);

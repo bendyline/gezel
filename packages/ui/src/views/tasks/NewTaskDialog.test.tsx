@@ -164,7 +164,7 @@ describe('NewTaskDialog', () => {
     expect(await screen.findByRole('radio', { name: 'Social Digest' })).toBeInTheDocument();
   });
 
-  it('shelves craftbooks by subject category, grouped code / non-code', async () => {
+  it('shelves craftbooks by subject category, grouped into subject families', async () => {
     vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
       items: [
         bookItem('branding-website', 'Branding Website', {
@@ -191,7 +191,7 @@ describe('NewTaskDialog', () => {
     expect(screen.getByRole('button', { name: /Research & analysis/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /General work/ })).not.toBeInTheDocument();
     expect(screen.getByText('Code')).toBeInTheDocument();
-    expect(screen.getByText('Non-code')).toBeInTheDocument();
+    expect(screen.getByText('Business')).toBeInTheDocument();
 
     await user.click(starters);
     expect(screen.getByRole('radio', { name: 'Branding Website' })).toBeInTheDocument();
@@ -243,6 +243,30 @@ describe('NewTaskDialog', () => {
     ]);
   });
 
+  it('walks the wizard: the gallery hands off to the recipe, and back again', async () => {
+    renderDialog();
+    await waitFor(() => {
+      expect(screen.getByText('Recommended for Web App')).toBeInTheDocument();
+    });
+    // Step 1 has no properties form at all — the whole dialog is the catalog.
+    expect(screen.queryByText('Title')).not.toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: 'Code Review' }));
+
+    // Step 2: the recipe in full, and the gallery is gone.
+    expect(await screen.findByText('Code Review description')).toBeInTheDocument();
+    expect(screen.getByText('Title')).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'Code Review' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('searchbox', { name: 'Search craftbooks' })).not.toBeInTheDocument();
+
+    // Back returns to the catalog with the choice still lit.
+    await user.click(screen.getByRole('button', { name: /Craftbooks/ }));
+    const card = await screen.findByRole('radio', { name: 'Code Review' });
+    expect(card).toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByText('Title')).not.toBeInTheDocument();
+  });
+
   it('creates a general task as a ready-to-fire draft', async () => {
     vi.mocked(api.createTask).mockResolvedValue({
       ref: 'pj-alpha/1',
@@ -255,6 +279,7 @@ describe('NewTaskDialog', () => {
     });
 
     const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: 'General task' }));
     const titleLabel = screen.getByText('Title');
     await user.type(
       titleLabel.parentElement?.querySelector('input') as HTMLInputElement,
@@ -289,6 +314,7 @@ describe('NewTaskDialog', () => {
     });
 
     const user = userEvent.setup();
+    await user.click(screen.getByRole('radio', { name: 'General task' }));
     const titleLabel = screen.getByText('Title');
     await user.type(titleLabel.parentElement?.querySelector('input') as HTMLInputElement, 'Tiny');
     const descLabel = screen.getByText(/^Description/);
@@ -438,9 +464,10 @@ describe('NewTaskDialog', () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('radio', { name: 'Code Review' }));
-    // [0] is the project picker; [1] is "Assign to".
+    // The project picker lives on the picker step; "Assign to" is the only
+    // select on the configure step.
     await user.selectOptions(
-      screen.getAllByTestId('mock-select')[1] as HTMLSelectElement,
+      screen.getAllByTestId('mock-select')[0] as HTMLSelectElement,
       'gz-maya',
     );
     await user.click(screen.getByRole('button', { name: 'Create & start' }));

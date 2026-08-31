@@ -10,6 +10,50 @@ Status: **integrated**. The pinned source is built by the native release
 matrix, selected by the desktop supervisor, and served through the local-model
 provider. `VERSION` is the source of truth for the upstream revision.
 
+## Upstream versioning
+
+Upstream runs two tag lines off one history:
+
+| Tag line | What it is | GitHub release |
+| --- | --- | --- |
+| `vX.Y.Z` | semver **stable** releases, introduced with `v0.3.0` | latest |
+| `b####` | rolling build tags, several a day | prerelease |
+
+A stable release also carries a `b####` tag on the identical commit
+(`v0.3.0` == `b10621`), so the two lines never diverge — they label the
+same history at different rates. **We pin the semver line.**
+
+`VERSION` therefore carries a `build=` line. llama.cpp derives the version
+its binary reports from `git rev-list --count HEAD`
+(`cmake/build-info.cmake`), which used to be readable straight off a
+`b####` tag. On a semver tag it is not, and it stays load-bearing: it is
+how `native/scripts/fetch-upstream.sh` catches a truncated fetch and how
+`scripts/assert-llama-version.mjs` proves in CI that each built artifact
+is the pin it claims to be. Both refuse a pin they cannot verify rather
+than skipping the check, so a bump must move `tag`, `build`, and `commit`
+together.
+
+v0.3.0 also changed what the **binary** prints, which is a separate break from
+the tag change and is only visible once you actually build:
+
+```
+b10353   version: 10353 (f8def7f)
+v0.3.0   version: 0.3.0 (build 10621, commit c1d0e7a)
+```
+
+`scripts/assert-llama-version.mjs` parses both. It additionally checks the
+reported semver against a `vX.Y.Z` pin, which catches the other half of the
+change: upstream defaults `LLAMA_BUILD_IS_DEV=ON`, stamping the binary
+`0.3.0-dev`, and its CMakeLists says to set it OFF "when making a release from
+a release tag (vX.Y.Z)". Both build scripts pass `-DLLAMA_BUILD_IS_DEV=OFF`, so
+gezel's engines identify as the release they were built from rather than as an
+upstream nightly.
+
+Bumping the pin also means updating `LLAMA_ENGINE_VERSION`
+(`packages/core/src/native/llama-engine-version.ts`), the
+`native/licenses/manifest.json` entry, and the NOTICE row — the last two
+are reconciled against this file by `scripts/check-notice.mjs`.
+
 ## Produced binary
 
 `llama-server` — the HTTP server upstream ships. It speaks:

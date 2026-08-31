@@ -153,7 +153,7 @@ export class WhisperCppProvider implements SpeechToTextProvider {
     } else {
       bytes = input.audio.data;
       mime = input.audio.mimeType || 'audio/wav';
-      filename = `audio.${mime.split('/')[1] ?? 'wav'}`;
+      filename = inlineAudioFilename(mime);
     }
 
     const form = new FormData();
@@ -340,6 +340,13 @@ export class WhisperCppProvider implements SpeechToTextProvider {
   async shutdown(): Promise<void> {
     await this.supervisor?.stop();
   }
+}
+
+/** MediaRecorder MIME values often carry codec parameters; filenames cannot. */
+export function inlineAudioFilename(mimeType: string): string {
+  const subtype = mimeType.split(';', 1)[0]?.split('/', 2)[1]?.trim().toLowerCase();
+  const extension = subtype?.replace(/[^a-z0-9.+_-]/g, '') || 'wav';
+  return `audio.${extension}`;
 }
 
 /**

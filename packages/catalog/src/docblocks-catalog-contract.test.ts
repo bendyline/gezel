@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { compareSemver } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import { gildeDataDir } from './gilde-data.js';
 
@@ -53,12 +54,12 @@ describe('DocBlocks catalog contract', () => {
     expect(docblocks, 'the bundled DocBlocks toolset should exist').toBeDefined();
     if (!docblocks) return;
 
-    expect(docblocks.version).toBe('2.4.0');
+    expect(docblocks.version).toBe('2.5.0');
     expect(docblocks.runtime).toEqual(
       expect.objectContaining({
         package: '@bendyline/docblocks-cli',
-        version: '2.4.0',
-        sha256: '93ce7e3bbfe323911ef9398327259b8f41d28c030e9bd3ae1db8f4c398fc388e',
+        version: '2.5.0',
+        sha256: '58261b9f28195618f59fc39e6429c55ca8bdff9f213f97f3e183b09839f2f8e5',
         entry: 'dist/bin.js',
         args: ['mcp'],
       }),
@@ -96,13 +97,13 @@ describe('DocBlocks catalog contract', () => {
   it('routes PDF, DOCX, PPTX, MP4, and GIF craftbooks through Markdown and DocBlocks', async () => {
     const entries = await loadIndex('craftbook-templates');
     const expected = new Map([
-      ['report-pdf', { version: '1.1.2', artifacts: ['{{workPath}}/report.pdf'] }],
-      ['research-to-document', { version: '1.2.2', artifacts: ['{{workPath}}/report.docx'] }],
-      ['powerpoint-deck', { version: '1.7.4', artifacts: [], workspace: ['{{outputPath}}'] }],
+      ['report-pdf', { minVersion: '1.1.2', artifacts: ['{{workPath}}/report.pdf'] }],
+      ['research-to-document', { minVersion: '1.2.2', artifacts: ['{{workPath}}/report.docx'] }],
+      ['powerpoint-deck', { minVersion: '1.7.7', artifacts: [], workspace: ['{{outputPath}}'] }],
       [
         'narrated-slideshow',
         {
-          version: '1.1.2',
+          minVersion: '1.1.2',
           artifacts: ['{{workPath}}/slideshow.gif', '{{workPath}}/slideshow.mp4'],
         },
       ],
@@ -113,7 +114,14 @@ describe('DocBlocks catalog contract', () => {
       expect(craftbook, `${id} should be bundled`).toBeDefined();
       if (!craftbook) continue;
 
-      expect(craftbook.version).toBe(contract.version);
+      // A floor, not a pin: the checks below re-verify the routing contract
+      // against whatever content is bundled, so equality here would only fail
+      // for content moving forward — while still catching an index that
+      // resolved a stale older version.
+      expect(
+        compareSemver(craftbook.version ?? '0.0.0', contract.minVersion),
+        `${id} resolved ${craftbook.version}, older than the verified ${contract.minVersion}`,
+      ).toBeGreaterThanOrEqual(0);
       expect(craftbook.toolsets).toContainEqual({
         toolsetId: 'docblocks',
         sourceId: 'bundled',

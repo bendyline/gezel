@@ -652,3 +652,67 @@ describe('RambleDetector', () => {
     });
   });
 });
+
+describe('RambleDetector — opensInReasoning (template-emitted <think>)', () => {
+  // The chat template emits the opening `<think>` itself, so the model's
+  // chain-of-thought reaches the detector with no open marker in front
+  // of it. Wild-caught on qwen3.8-27b-q4 MLX: 12003 chars of thinking
+  // scored as cold prose, turn killed ~2 KB before the tool call.
+  const THINKING = 'Verifying the cross-file claims for record 251. '.repeat(400);
+
+  it('guillotines template-opened reasoning without the flag (the bug)', () => {
+    const d = new RambleDetector({ threshold: 6000, enabled: true });
+    expect(THINKING.length).toBeGreaterThan(6000);
+    expect(d.observeContent(THINKING)).toBe(true);
+  });
+
+  it('grants the loose inside-call budget with the flag set', () => {
+    const d = new RambleDetector({ threshold: 6000, enabled: true, opensInReasoning: true });
+    expect(d.observeContent(THINKING)).toBe(false);
+    expect(d.isInsideReasoning).toBe(true);
+    expect(d.activeThreshold).toBe(32_000);
+  });
+
+  it('still bounds a genuinely runaway unclosed reasoning span', () => {
+    const d = new RambleDetector({
+      threshold: 6000,
+      enabled: true,
+      opensInReasoning: true,
+      insideCallThreshold: 20_000,
+    });
+    expect(d.observeContent('t'.repeat(19_999))).toBe(false);
+    expect(d.observeContent('t'.repeat(20_000))).toBe(true);
+  });
+
+  it("the model's own </think> anchors the prose counter and re-arms the cold cap", () => {
+    const d = new RambleDetector({ threshold: 6000, enabled: true, opensInReasoning: true });
+    const reasoned = `${'r'.repeat(20_000)}</think>`;
+    expect(d.observeContent(reasoned)).toBe(false);
+    expect(d.isInsideReasoning).toBe(false);
+    // Visible answer is measured fresh from the close, not from 0.
+    expect(d.observeContent(`${reasoned}${'v'.repeat(5999)}`)).toBe(false);
+    expect(d.observeContent(`${reasoned}${'v'.repeat(6000)}`)).toBe(true);
+  });
+
+  it('lets a tool call inside the template-opened span disarm the cold cap', () => {
+    const d = new RambleDetector({ threshold: 6000, enabled: true, opensInReasoning: true });
+    const withCall = `${'r'.repeat(9000)}</think><tool_call><function=write_artifact>`;
+    expect(d.observeContent(withCall)).toBe(false);
+    expect(d.isInsideReasoning).toBe(false);
+  });
+
+  it('exempts the repetition guard while the template-opened span is live', () => {
+    // A chain-of-thought legitimately revisits an idea; the guard is
+    // exempted inside reasoning spans, and a template-opened one is a
+    // reasoning span.
+    const circling = 'Did the user see it? Is the workspace stale? '.repeat(200);
+    const d = new RambleDetector({
+      threshold: 200_000,
+      enabled: true,
+      repetitionGuardEnabled: true,
+      opensInReasoning: true,
+    });
+    expect(d.observeContent(circling)).toBe(false);
+    expect(d.hasAborted).toBe(false);
+  });
+});

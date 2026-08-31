@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { dependencyLeasePath, withDependencyMutationLease } from './dependency-lease.mjs';
@@ -143,6 +143,137 @@ export function missingWorkspaceDependencyLinks(repoRoot) {
   return missing;
 }
 
+const LOCKFILE_IMPORTER_SECTIONS = new Set([
+  'dependencies',
+  'devDependencies',
+  'optionalDependencies',
+]);
+
+function yamlKey(line) {
+  const key = /^(.*):\s*(?:\{\}|\[\])?\s*$/.exec(line.trim())?.[1] ?? line.trim();
+  return /^(['"]).*\1$/.test(key) ? key.slice(1, -1) : key;
+}
+
+/**
+ * Direct dependency versions the committed lockfile expects, keyed by importer
+ * directory (repo-relative, `.` for the root) then dependency name.
+ *
+ * Line-oriented rather than a real YAML parse: `scripts/` runs on bare node
+ * before any install has happened, so it has no YAML dependency to reach for,
+ * and the `importers:` block has had a fixed indentation shape since lockfile
+ * v9. Anything it cannot read confidently is simply absent from the map, which
+ * callers treat as "no opinion" rather than as drift.
+ */
+export function lockfileDirectDependencies(repoRoot) {
+  const lockfilePath = join(repoRoot, 'pnpm-lock.yaml');
+  if (!existsSync(lockfilePath)) return null;
+  const byImporter = new Map();
+  let inImporters = false;
+  let importer = null;
+  let section = null;
+  let dependency = null;
+  for (const line of readFileSync(lockfilePath, 'utf8').split('\n')) {
+    if (line.trim() === '' || line.trimStart().startsWith('#')) continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent === 0) {
+      inImporters = line.startsWith('importers:');
+      importer = section = dependency = null;
+      continue;
+    }
+    if (!inImporters) continue;
+    if (indent === 2) {
+      importer = yamlKey(line);
+      section = dependency = null;
+      if (!byImporter.has(importer)) byImporter.set(importer, new Map());
+      continue;
+    }
+    if (indent === 4) {
+      section = LOCKFILE_IMPORTER_SECTIONS.has(yamlKey(line)) ? yamlKey(line) : null;
+      dependency = null;
+      continue;
+    }
+    if (indent === 6) {
+      dependency = section ? yamlKey(line) : null;
+      continue;
+    }
+    if (indent === 8 && importer && dependency) {
+      const version = /^version:\s*(.+?)\s*$/.exec(line.trim())?.[1];
+      if (version) byImporter.get(importer).set(dependency, version);
+    }
+  }
+  return byImporter;
+}
+
+/** The version pnpm actually materialized for a link, or null if unreadable. */
+function installedLinkVersion(linkPath) {
+  try {
+    return JSON.parse(readFileSync(join(linkPath, 'package.json'), 'utf8')).version ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Direct dependency links that exist but resolve to a version the committed
+ * lockfile does not ask for — what a pin bump pulled from another machine
+ * leaves behind, since the symlink is replaced rather than removed and so
+ * stays invisible to an existence check.
+ *
+ * Only links resolving into this checkout's virtual store are judged. A link
+ * pointing anywhere else is a workspace package or a deliberate local override
+ * (`pnpm link:gilde`, `link:squisq`), and the documented linked-checkout
+ * workflow must not read as drift.
+ */
+export function staleWorkspaceDependencyLinks(repoRoot) {
+  const expectedByImporter = lockfileDirectDependencies(repoRoot);
+  if (!expectedByImporter) return [];
+  // Both sides are realpath'd before comparison: the link resolves through the
+  // store's real location, so a checkout reached by a symlinked path (macOS
+  // /var, a mounted volume) would otherwise never match its own store.
+  const virtualStoreRoot = join(repoRoot, 'node_modules', '.pnpm');
+  if (!existsSync(virtualStoreRoot)) return [];
+  const virtualStore = `${normalizedPath(realpathSync(virtualStoreRoot))}${sep}`;
+  const stale = [];
+  for (const packageDir of workspacePackageDirs(repoRoot)) {
+    const manifestPath = join(packageDir, 'package.json');
+    if (!existsSync(manifestPath)) continue;
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const importer = relative(repoRoot, packageDir).replaceAll('\\', '/') || '.';
+    const expectedVersions = expectedByImporter.get(importer);
+    if (!expectedVersions) continue;
+    const dependencies = {
+      ...(manifest.dependencies ?? {}),
+      ...(manifest.devDependencies ?? {}),
+    };
+    for (const dependency of Object.keys(dependencies)) {
+      const locked = expectedVersions.get(dependency);
+      if (!locked) continue;
+      const linkPath = dependencyLinkPath(packageDir, dependency);
+      if (!existsSync(linkPath)) continue;
+      let resolved;
+      try {
+        resolved = normalizedPath(realpathSync(linkPath));
+      } catch {
+        continue;
+      }
+      if (!resolved.startsWith(virtualStore)) continue;
+      // Peer-disambiguated versions carry a `(peer@x)` suffix the package's own
+      // manifest never does.
+      const expected = locked.split('(')[0].trim();
+      const installed = installedLinkVersion(linkPath);
+      if (installed === null || installed === expected) continue;
+      stale.push({
+        packageDir,
+        packageName: manifest.name ?? importer,
+        dependency,
+        expected,
+        installed,
+      });
+    }
+  }
+  return stale;
+}
+
 function workspaceDependencyMarkersReady(repoRoot) {
   const binSuffix = process.platform === 'win32' ? '.cmd' : '';
   return (
@@ -163,14 +294,16 @@ export function workspaceDependenciesReady(repoRoot) {
 export function dependencyStatus(repoRoot) {
   const markersReady = workspaceDependencyMarkersReady(repoRoot);
   const missingLinks = missingWorkspaceDependencyLinks(repoRoot);
+  const staleLinks = staleWorkspaceDependencyLinks(repoRoot);
   const installedIssue = installedLockfileIssue(repoRoot);
   const workspaceIssue = workspaceStructureIssue(repoRoot);
   const usable = markersReady && missingLinks.length === 0;
   return {
     usable,
-    synchronized: usable && !installedIssue && !workspaceIssue,
+    synchronized: usable && staleLinks.length === 0 && !installedIssue && !workspaceIssue,
     markersReady,
     missingLinks,
+    staleLinks,
     installedLockfileIssue: installedIssue,
     lockfileValidationIssue: lockfileValidationIssue(repoRoot),
     workspaceStructureIssue: workspaceIssue,
@@ -185,6 +318,11 @@ export function reportDependencyStatus(repoRoot, options = {}) {
     write('[deps:status] required workspace markers or binaries are missing');
   for (const missing of status.missingLinks) {
     write(`[deps:status] missing ${missing.dependency} for ${missing.packageName}`);
+  }
+  for (const stale of status.staleLinks ?? []) {
+    write(
+      `[deps:status] stale ${stale.dependency} for ${stale.packageName}: installed ${stale.installed}, lockfile wants ${stale.expected}`,
+    );
   }
   if (status.installedLockfileIssue) {
     write(`[deps:status] synchronization required: ${status.installedLockfileIssue}`);
@@ -223,6 +361,11 @@ export async function dependencyInputsFingerprint(repoRoot) {
   return hash.digest('hex');
 }
 
+/** Direct dependency links that are absent or resolve to the wrong version. */
+export function unsynchronizedWorkspaceDependencyLinks(repoRoot) {
+  return [...missingWorkspaceDependencyLinks(repoRoot), ...staleWorkspaceDependencyLinks(repoRoot)];
+}
+
 function missingInstallArgs(repoRoot, args) {
   const repairedArgs = [...args];
   if (!repairedArgs.includes('--config.optimistic-repeat-install=false')) {
@@ -230,12 +373,12 @@ function missingInstallArgs(repoRoot, args) {
   }
 
   // A missing root marker means the whole generated tree is incomplete. When
-  // the markers are intact, constrain reconciliation to packages with missing
-  // direct links so one damaged symlink does not trigger a full workspace
-  // reinstall.
+  // the markers are intact, constrain reconciliation to packages whose direct
+  // links are absent or point at the wrong version, so one damaged symlink or
+  // one bumped pin does not trigger a full workspace reinstall.
   if (!workspaceDependencyMarkersReady(repoRoot)) return repairedArgs;
   const filters = new Set(
-    missingWorkspaceDependencyLinks(repoRoot).map(({ packageDir }) => {
+    unsynchronizedWorkspaceDependencyLinks(repoRoot).map(({ packageDir }) => {
       const packagePath = relative(repoRoot, packageDir).replaceAll('\\', '/');
       return packagePath ? `./${packagePath}` : '.';
     }),
@@ -422,7 +565,7 @@ export async function runSerializedPnpmInstall(options = {}) {
         return 1;
       }
 
-      return runPreparedFrozenInstall({
+      const installCode = await runPreparedFrozenInstall({
         repoRoot,
         args: installArgs,
         allowPurge: repair,
@@ -432,6 +575,27 @@ export async function runSerializedPnpmInstall(options = {}) {
         spawnPnpmFn: options.spawnPnpmFn,
         setChildPid,
       });
+      if (installCode !== 0) return installCode;
+
+      // pnpm reports success per the importers it was asked to touch, so a
+      // filtered reconciliation can exit 0 while another importer still holds
+      // a link the lockfile has moved off. Callers treat a 0 here as "the tree
+      // now matches the lockfile" and go straight on to build and test, so
+      // that claim is verified rather than assumed.
+      const unsynchronized = unsynchronizedWorkspaceDependencyLinks(repoRoot);
+      if (unsynchronized.length > 0) {
+        console.error(`[pnpm-install] ${command} finished but the tree still differs:`);
+        for (const entry of unsynchronized) {
+          console.error(
+            entry.installed
+              ? `  ${entry.dependency} for ${entry.packageName}: installed ${entry.installed}, lockfile wants ${entry.expected}`
+              : `  ${entry.dependency} for ${entry.packageName}: link is missing`,
+          );
+        }
+        console.error('[pnpm-install] run `pnpm deps:repair` to rebuild the affected packages');
+        return 1;
+      }
+      return 0;
     },
     {
       command,

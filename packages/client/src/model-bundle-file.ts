@@ -1,3 +1,10 @@
+/**
+ * Save a streaming `.gezmodel` export to disk and prove it arrived intact.
+ *
+ * Shared by every client that turns `GezelClient.exportModelBundle` into a
+ * file — the desktop save dialog and `gezel model export` alike. It lives on
+ * the node-only subpath because it needs `fs` and a ZIP reader.
+ */
 import { createHash } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
 import { Readable as NodeReadable, Transform } from 'node:stream';
@@ -7,6 +14,11 @@ import * as yauzl from 'yauzl';
 
 const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
 const PROGRESS_REPORT_BYTES = 8 * 1024 * 1024;
+
+/** The default, filesystem-safe export name for a catalog model id. */
+export function portableGezmodelFilename(id: string): string {
+  return `${id.replace(/[^a-z0-9._-]+/gi, '-').replace(/^[.-]+/, '') || 'model'}.gezmodel`;
+}
 
 export interface ModelBundleByteProgress {
   bytesCompleted: number;

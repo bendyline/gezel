@@ -6,9 +6,23 @@ import { createMockApi } from '../test-utils/mockApi.js';
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 
 vi.mock('../components/ImageModelManager.js', () => ({
-  ImageModelManager: ({ disabledReason }: { disabledReason?: string }) => (
-    <div data-testid="image-model-manager" data-disabled-reason={disabledReason ?? ''}>
-      mock
+  ImageModelManager: ({
+    disabledReason,
+    configuredDefaultModelId,
+    onSetActiveModel,
+  }: {
+    disabledReason?: string;
+    configuredDefaultModelId?: string;
+    onSetActiveModel?: (id: string) => void;
+  }) => (
+    <div
+      data-testid="image-model-manager"
+      data-disabled-reason={disabledReason ?? ''}
+      data-configured-default={configuredDefaultModelId ?? ''}
+    >
+      <button type="button" onClick={() => onSetActiveModel?.('krea-2-turbo-q4')}>
+        pick krea
+      </button>
     </div>
   ),
 }));
@@ -32,6 +46,31 @@ describe('ImageEngineSettings', () => {
     vi.mocked(api.updateConfig).mockImplementation(
       async (patch) => ({ provider: 'llama-cpp', imageProvider: 'sd-cpp', ...patch }) as never,
     );
+  });
+
+  it('patches only the sd-cpp slot, keeping a configured cloud default', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'llama-cpp',
+      imageProvider: 'sd-cpp',
+      defaultImageModel: { openai: 'gpt-image-2', 'sd-cpp': 'flux-2-klein-4b-q4' },
+    } as never);
+
+    render(<ImageEngineSettings />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('image-model-manager')).toHaveAttribute(
+        'data-configured-default',
+        'flux-2-klein-4b-q4',
+      );
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: 'pick krea' }));
+
+    await waitFor(() => {
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        defaultImageModel: { openai: 'gpt-image-2', 'sd-cpp': 'krea-2-turbo-q4' },
+      });
+    });
   });
 
   it('renders Ready status and the local engine description', async () => {

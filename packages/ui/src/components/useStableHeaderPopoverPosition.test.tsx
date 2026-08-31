@@ -21,17 +21,32 @@ describe('useStableHeaderPopoverPosition', () => {
       { initialProps: { open: true } },
     );
 
-    expect(result.current).toEqual({ position: 'fixed', top: 48, right: 180 });
+    const maxHeight = window.innerHeight - 48 - 8;
+    expect(result.current).toEqual({ position: 'fixed', top: 48, right: 180, maxHeight });
 
     // A live label/neighbor update shifts the pill, but an already-open
     // dropdown must not follow it horizontally.
     rect = anchorRect(window.innerWidth - 40, 40);
     rerender({ open: true });
-    expect(result.current).toEqual({ position: 'fixed', top: 48, right: 180 });
+    expect(result.current).toEqual({ position: 'fixed', top: 48, right: 180, maxHeight });
 
     // Resizing the actual viewport is the one time the open dropdown should
     // attach itself to the trigger's new window geometry.
     act(() => window.dispatchEvent(new Event('resize')));
-    expect(result.current).toEqual({ position: 'fixed', top: 48, right: 40 });
+    expect(result.current).toEqual({ position: 'fixed', top: 48, right: 40, maxHeight });
+  });
+
+  // Without a height bound the slab is not a scroll container, so a wheel
+  // gesture over it scrolls the page behind it instead.
+  it('bounds the surface to the space left below the trigger', () => {
+    const anchorRef = {
+      current: {
+        getBoundingClientRect: () => anchorRect(window.innerWidth - 180, window.innerHeight - 100),
+      } as HTMLElement,
+    } as RefObject<HTMLElement>;
+
+    const { result } = renderHook(() => useStableHeaderPopoverPosition(anchorRef, true, 8));
+
+    expect(result.current?.maxHeight).toBe(100 - 8 - 8);
   });
 });

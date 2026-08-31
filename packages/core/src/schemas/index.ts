@@ -42,6 +42,7 @@ export * from './channels.js';
 export * from './toolsets.js';
 export * from './question.js';
 export * from './diffpack.js';
+export * from './observations.js';
 export * from './report-action.js';
 export * from './suggested-work.js';
 export * from './page-bridge.js';

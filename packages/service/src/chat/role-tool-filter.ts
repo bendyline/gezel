@@ -204,6 +204,57 @@ const VOORMAN_STRIPPED_MEESTER_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Craftbook step surgery. Split out of {@link MEESTER_STRIPPED_TOOLS} so an
+ * explicit Craftbook-editor session can hand them back at the same grant
+ * site that loads `craftbook_update_step`.
+ */
+export const MEESTER_STRIPPED_CRAFTBOOK_TOOLS: readonly string[] = [
+  'craftbook_add_step',
+  'set_step_deliverable',
+  'craftbook_remove_step',
+  'craftbook_reorder_steps',
+  'craftbook_set_entry',
+  'craftbook_update',
+  'export_task_craftbook',
+];
+
+/**
+ * Tools stripped from a default-roster Meester. The Meester routes and
+ * team-builds; her about.md says plainly that she does not build files or
+ * do the work herself. These ride along inside groups she must keep
+ * (`team-management`, `craftbooks`, `documents`), so they are stripped by
+ * NAME — the same surgical move {@link VOORMAN_STRIPPED_MEESTER_TOOLS}
+ * makes for the Voorman.
+ *
+ * They were already the tools the coordinator tool diet trimmed first (they
+ * are absent from `MEESTER_TOOL_CAP_PRIORITY` by deliberate curation), so
+ * every turn was paying to register schemas the cap then dropped — and the
+ * user-facing "tool cap trimmed this session" warning made routine bloat
+ * look like a degraded session. Removing them from the roster means the
+ * default Meester now fits under her own cap, and a trim warning again
+ * means something real: an installed toolset pushed her over.
+ *
+ *   - `list_suggested_work` / `enable_suggested_work` /
+ *     `disable_suggested_work` — a settings-shaped side surface, per the
+ *     same reasoning that kept them off the cap priority list.
+ *   - the craftbook surgery tools — redundant with the curated
+ *     `craftbook_read` + `craftbook_write` whole-document path, which is the
+ *     edit route the Meester is actually taught.
+ *   - `write_document` / `delete_document` — the shared library is the
+ *     user's. A router that does not build files has no business writing
+ *     into it, and less still deleting from it; `list_documents` /
+ *     `read_document` / `search_documents` stay.
+ */
+const MEESTER_STRIPPED_TOOLS: ReadonlySet<string> = new Set([
+  'list_suggested_work',
+  'enable_suggested_work',
+  'disable_suggested_work',
+  ...MEESTER_STRIPPED_CRAFTBOOK_TOOLS,
+  'write_document',
+  'delete_document',
+]);
+
+/**
  * Image-generation delegation tools stripped from a default-roster Voorman
  * The Voorman keeps the full `role-delegation` group — handing
  * structured work to a developer / designer / reviewer / etc. is HOW she gets
@@ -776,6 +827,13 @@ export function computeToolAllowlist(opts: {
     for (const name of CONSULTATION_STRIPPED_TOOLS) next.delete(name);
     resolved = next;
   }
+  // Trim the build-and-configure tail from a default-roster Meester (see
+  // MEESTER_STRIPPED_TOOLS). Same override rule as the Voorman strip below.
+  if (!hasToolsetOverride && canonicalRoleKey(opts.role) === 'meester') {
+    const next = new Set(resolved);
+    for (const name of MEESTER_STRIPPED_TOOLS) next.delete(name);
+    resolved = next;
+  }
   // Trim the Meester-only kickoff tools from a default-roster Voorman (see
   // VOORMAN_STRIPPED_MEESTER_TOOLS). Skipped when the user hand-picked the
   // toolsets (`toolsetsGroupOverride`) — that's an explicit choice we honor.
@@ -1244,7 +1302,14 @@ function applySearchToolGates(
   if (!gates.stripWebSearch && !gates.stripWikipediaSearch) return allow;
   const next = new Set(allow);
   if (gates.stripWebSearch) next.delete('web_search');
-  if (gates.stripWikipediaSearch) next.delete('wikipedia_search');
+  if (gates.stripWikipediaSearch) {
+    next.delete('wikipedia_search');
+    // `wikipedia_read` rides the same gate. It is only reachable via an
+    // exact title from a search result, so leaving it behind a stripped
+    // search tool would expose a tool the model has no way to call
+    // correctly.
+    next.delete('wikipedia_read');
+  }
   return next;
 }
 
@@ -1272,6 +1337,7 @@ function applyGitToolGates(
 export const EXTERNAL_SERVICE_TOOLS: ReadonlySet<string> = new Set([
   'web_search',
   'wikipedia_search',
+  'wikipedia_read',
   'fetch_url',
   // Email send/draft are external-service agency: a no-services posture
   // (lockdown / super-lockdown) strips them so a mail-enabled project's agent

@@ -80,10 +80,21 @@ describe('health', () => {
     // Semantic-search health rides the daemon health check (F1 surfacing).
     expect((data.embeddings as { status?: string })?.status).toBeDefined();
     expect(data.version).toBeDefined();
+    // Cross-origin isolation stays OFF. It was only ever here for
+    // ffmpeg.wasm's SharedArrayBuffer, which left with the browser encoder;
+    // the proofing engine below is single-threaded and does not want it back.
     expect(res.headers.get('cross-origin-opener-policy')).toBeNull();
     expect(res.headers.get('cross-origin-embedder-policy')).toBeNull();
     expect(res.headers.get('content-security-policy')).toContain("script-src 'self'");
-    expect(res.headers.get('content-security-policy')).not.toContain("'wasm-unsafe-eval'");
+    // 'wasm-unsafe-eval' is present for exactly one consumer: the harper.js
+    // proofing engine the UI loads from /harper/. It unblocks WebAssembly
+    // compilation only — not eval() and not inline script. Kept as a named
+    // assertion rather than a blanket ban so the permission cannot drift
+    // back in for some other reason unnoticed, the way it drifted out when
+    // the browser ffmpeg fallback was dropped.
+    expect(res.headers.get('content-security-policy')).toContain(
+      "script-src 'self' 'wasm-unsafe-eval'",
+    );
   });
 });
 
@@ -151,6 +162,24 @@ describe('operational API surface', () => {
     } finally {
       resetClient.mockRestore();
     }
+  });
+
+  it('round-trips the per-engine default media models through PUT and GET', async () => {
+    // Same whitelist bug class as the Codex case above: the video panel's
+    // active-model radio and confirmation tray were saved to config.json but
+    // never echoed, so both snapped back to their defaults on the next read.
+    const overrides = {
+      defaultImageModel: { 'sd-cpp': 'krea-2-turbo-q4' },
+      defaultVideoModel: 'ltx-2.3-22b-fp8',
+      videoGenerationConfirmation: 'always-allow',
+      defaultSttModel: 'whisper-small.en',
+    };
+    const update = await api('PUT', '/api/config', overrides);
+    expect(update.status).toBe(200);
+    expect((await update.json()) as Record<string, unknown>).toMatchObject(overrides);
+
+    const read = await api('GET', '/api/config');
+    expect((await read.json()) as Record<string, unknown>).toMatchObject(overrides);
   });
 
   it('round-trips llama-cpp Advanced overrides through PUT and GET, and clears on null', async () => {

@@ -351,4 +351,40 @@ _past = cs.seed_from_state(
 check("state saved one token past the boundary reuses NOTHING", _past.reused == 0)
 check("...and reports why", _past.mode == "fresh-untrimmable")
 
+# ── token_boundary_for_marker ──
+# Stand-in tokenizer: one character per token, so decode(k) == text[:k] and
+# the expected boundaries are readable by hand.
+_TEXT = "STABLE-BAND-HEAD||session tail that differs per sibling"
+_decode = lambda k: _TEXT[:k]
+
+check(
+    "finds the first token index whose decode contains the marker",
+    cs.token_boundary_for_marker(_decode, len(_TEXT), "BAND-HEAD||", 0)
+    == _TEXT.index("BAND-HEAD||") + len("BAND-HEAD||"),
+)
+check(
+    "backs off by the margin (BPE re-merges across the cut)",
+    cs.token_boundary_for_marker(_decode, len(_TEXT), "BAND-HEAD||", 4)
+    == _TEXT.index("BAND-HEAD||") + len("BAND-HEAD||") - 4,
+)
+check(
+    "absent marker disables capture rather than guessing",
+    cs.token_boundary_for_marker(_decode, len(_TEXT), "not-in-the-prompt", 0) == 0,
+)
+check("empty marker disables capture", cs.token_boundary_for_marker(_decode, 10, "", 0) == 0)
+check("empty prompt disables capture", cs.token_boundary_for_marker(_decode, 0, "x", 0) == 0)
+check(
+    "margin can never push the boundary negative",
+    cs.token_boundary_for_marker(_decode, len(_TEXT), "STABLE", 10_000) == 0,
+)
+
+# The boundary is only useful if a state saved there EXTENDS for a sibling —
+# that is the whole point, and the untrimmable case above is what it avoids.
+_b = cs.token_boundary_for_marker(_decode, len(_TEXT), "STABLE-BAND-HEAD||", 0)
+_sib = cs.seed_from_state(
+    _State(list(range(_b)), [_Untrimmable(offset=_b)]), list(range(_b)) + [77, 78]
+)
+check("a sibling seeded from the band boundary extends", _sib.mode == "extension")
+check("...reusing the whole band", _sib.reused == _b)
+
 print("all cache_seed tests passed")

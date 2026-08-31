@@ -23,10 +23,7 @@ export function GezellenView({
   const [meesterId, setMeesterId] = useState<string | undefined>(undefined);
   const [boringMode, setBoringMode] = useState(false);
   const [selectedGezelId, setSelectedGezelId] = useState<string | undefined>(undefined);
-  // Consume a pending "+" intent from the sidebar synchronously on first
-  // render (covers the just-opened case; the event below covers the
-  // already-mounted case).
-  const [showCreate, setShowCreate] = useState(() => consumeCreate('gezel'));
+  const [showCreate, setShowCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generatingIcons, setGeneratingIcons] = useState<Set<string>>(new Set());
 
@@ -113,9 +110,14 @@ export function GezellenView({
     };
   }, [refresh, refreshMeester]);
 
-  // Already-mounted case: a "+" click while this view is open arrives as
-  // an event (the lazy initializer above only runs on a fresh mount).
+  // Two ways in, one handler. A "+" click while this view is already open
+  // arrives as the event; a click that had to open the view first left the
+  // intent behind, because the event fired before this listener existed.
+  // Both are read here in the mount effect rather than in a render
+  // initializer — see `nav-intents.ts` for why that distinction is
+  // load-bearing.
   useEffect(() => {
+    if (consumeCreate('gezel')) setShowCreate(true);
     const onNew = () => {
       consumeCreate('gezel');
       setShowCreate(true);

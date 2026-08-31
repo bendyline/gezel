@@ -228,6 +228,23 @@ describe('FileMapView code context', () => {
     });
   });
 
+  it('translates indexer language names before passing them to Monaco', async () => {
+    const tsxBlock = { ...block('src/Panel.tsx'), lang: 'tsx' };
+    vi.mocked(api.toolFileMap).mockResolvedValue({
+      ...MODEL,
+      blocks: [tsxBlock],
+      buildings: [],
+      roads: [],
+    });
+
+    await openBlock('src/Panel.tsx');
+
+    expect(shellProps.at(-1)).toMatchObject({
+      fileName: 'src/Panel.tsx',
+      language: 'typescript',
+    });
+  });
+
   it('reveals the declaration line when a symbol building is selected', async () => {
     render(<FileMapView projectId="p1" />);
     await screen.findByTestId('building-src/a.ts#run');

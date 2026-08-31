@@ -106,6 +106,13 @@ export interface Ds4MemoryCopyInput {
   contextFreeBytes?: number | undefined;
   /** Granted per-turn window the figure was evaluated at. */
   effectiveContextWindow?: number | undefined;
+  /**
+   * Whether this device holds the whole model in memory instead of streaming
+   * routed experts from SSD. When true the catalog's `residentBytes` — a
+   * STREAMING working set — describes a mode this device will not use, and
+   * quoting it understates the real cost by tens of gigabytes.
+   */
+  fullyResident?: boolean | undefined;
 }
 
 function ds4ContextBytes(input: Ds4MemoryCopyInput): number | null {
@@ -123,12 +130,21 @@ function ds4ContextBytes(input: Ds4MemoryCopyInput): number | null {
  * earned — a flat authored footprint that does not move with the window.
  */
 export function ds4MemoryHeadline(input: Ds4MemoryCopyInput): string | null {
+  // Fully resident: the whole GGUF is in memory, so the download size IS the
+  // weights figure. The catalog's streaming `residentBytes` (an expert-cache
+  // budget) describes a different launch and would understate this one.
+  if (input.fullyResident) return `${formatMemoryBytes(input.approxSizeBytes)} in memory`;
   if (!input.residentBytes) return null;
   const projected = ds4ContextBytes(input) !== null;
   return `${projected ? '' : '~'}${formatMemoryBytes(input.residentBytes)} in memory`;
 }
 
 export function ds4SizeTitle(input: Ds4MemoryCopyInput): string {
+  if (input.fullyResident) {
+    // The streaming sentence below is false in this mode, and it was the
+    // unconditional opening of this tooltip.
+    return `${formatBytes(input.approxSizeBytes)} on disk, and this device has the memory to hold all of it — nothing streams from SSD. That generates roughly ten times faster than the streaming fallback, and the memory stays occupied for as long as the model is loaded.`;
+  }
   const onDisk = `${formatBytes(input.approxSizeBytes)} on disk — routed experts stream from it instead of loading, so the download size is not what the model occupies.`;
   if (!input.residentBytes) return onDisk;
 

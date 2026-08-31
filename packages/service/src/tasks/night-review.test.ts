@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_NIGHT_SHIFT_WINDOW } from '@bendyline/gezel';
+import { DEFAULT_NIGHT_SHIFT_WINDOW, type Question } from '@bendyline/gezel';
 import { BundledSource, CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ChatManager } from '../chat/manager.js';
@@ -9,7 +9,11 @@ import { DiffpackManager } from '../diffpack/manager.js';
 import { Store } from '../fs/store.js';
 import { ReportActionManager } from '../report-actions/report-action-manager.js';
 import { TaskManager } from './manager.js';
-import { buildNightShiftReview, nightShiftReportAttachmentPath } from './night-review.js';
+import {
+  buildNightShiftReview,
+  nightShiftReportAttachmentPath,
+  normalizeNightShiftReportAttachment,
+} from './night-review.js';
 import type { TaskRunner } from './runner.js';
 
 let home: string;
@@ -110,6 +114,31 @@ describe('buildNightShiftReview', () => {
     });
   });
 
+  it('does not count a declared data deliverable as a report', async () => {
+    const project = await store.createProject({ name: 'Coverage' });
+    const created = await tasks.create(project.id, {
+      title: 'Coverage sweep',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Sweep', advanceWhen: { file: 'coverage-18.json', artifact: true } }],
+      nightShift: { enabled: true, onceADay: true },
+    });
+    const record = await store.readTask(project.id, created.num);
+    await store.writeTask({
+      ...record!,
+      status: 'complete',
+      nightShift: { enabled: true, onceADay: true, lastRunDay: '2026-06-20' },
+    });
+    await store.writeProjectArtifact(project.id, 'coverage-18.json', '{"batchNumber": 18}\n');
+
+    const review = await buildNightShiftReview(
+      { store, tasks, reportActions, diffpacks },
+      DEFAULT_NIGHT_SHIFT_WINDOW,
+      NOW,
+    );
+    expect(review.tasksCompleted).toHaveLength(1);
+    expect(review.reports).toEqual([]);
+  });
+
   it('finds reports via the mtime sweep even without declared deliverables', async () => {
     const project = await store.createProject({ name: 'Docs' });
     await store.writeProjectArtifact(project.id, 'reports/digest-2026-W25.md', '# Weekly digest\n');
@@ -204,5 +233,45 @@ describe('change proposals in the morning review', () => {
       NOW,
     );
     expect(review.diffpacks[0]?.drifted).toBe(true);
+  });
+});
+
+describe('normalizeNightShiftReportAttachment', () => {
+  const card = (paths: string[], documentPath?: string): Question =>
+    ({
+      id: 'q1',
+      projectId: 'default',
+      gezelId: 'g1',
+      sessionId: '',
+      prompt: 'The night shift finished 1 task.',
+      choices: ['Dismiss'],
+      allowWriteIn: false,
+      multiSelect: false,
+      createdAt: '2026-06-21T07:00:00.000Z',
+      ...(documentPath ? { documentPath } : {}),
+      intent: {
+        kind: 'night-shift-review',
+        windowKey: '2026-06-20',
+        tasksCompleted: 1,
+        reports: paths.map((path) => ({ projectId: 'default', path, actionCount: 0 })),
+      },
+    }) as Question;
+
+  it('points the attachment at the first report', () => {
+    const out = normalizeNightShiftReportAttachment(card(['reports/night.md']));
+    expect(out.documentPath).toBe('projects/default/artifacts/reports/night.md');
+  });
+
+  it('heals a legacy card that attached a data deliverable', () => {
+    const out = normalizeNightShiftReportAttachment(
+      card(['coverage-18.json'], 'projects/default/artifacts/coverage-18.json'),
+    );
+    expect(out.documentPath).toBeUndefined();
+    expect(out.intent?.kind === 'night-shift-review' && out.intent.reports).toEqual([]);
+  });
+
+  it('skips past a data deliverable to the real report', () => {
+    const out = normalizeNightShiftReportAttachment(card(['coverage-18.json', 'reports/night.md']));
+    expect(out.documentPath).toBe('projects/default/artifacts/reports/night.md');
   });
 });

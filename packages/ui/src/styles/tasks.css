@@ -555,6 +555,22 @@
   flex: 1;
 }
 
+/* Chat tab: the transcript is the only thing that moves. The detail pane is
+   normally the scroller (`.task-detail-panel`), which would carry the identity
+   header, the workflow bench and the composer up out of view as the
+   conversation grows. Hand the height budget to the pane instead and let
+   `.chat-timeline` inside do the scrolling. */
+.task-detail-panel:has(.task-detail-chat-mode) {
+  display: flex;
+  flex-direction: column;
+  overflow-y: hidden;
+}
+
+.task-detail-chat-mode > .task-detail-header,
+.task-detail-chat-mode > .task-bench-row {
+  flex: none;
+}
+
 .task-detail-chat-empty {
   padding: 1rem;
   font-size: 0.9rem;
@@ -947,9 +963,11 @@
   position: relative;
   z-index: 1;
   /* Equal widths when they fit; a firm min-width so the caption + dropdown
-     never crush into the neighbour — past that the bench scrolls. */
+     never crush into the neighbour — past that the bench scrolls. Keep this
+     wider than the dropdown's own bounds: the caption is out of flow, so a
+     select that outgrows its column lands on top of the next one. */
   flex: 1 1 0;
-  min-width: 10rem;
+  min-width: 11.5rem;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -963,7 +981,9 @@
   left: 50%;
   transform: translateX(-50%);
   width: max-content;
-  max-width: 100%;
+  /* Leave a gutter either side of the column so neighbouring captions read
+     as separate, never touching. */
+  max-width: calc(100% - 0.5rem);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1003,7 +1023,11 @@
   appearance: none;
   -webkit-appearance: none;
   pointer-events: auto;
-  max-width: 11rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-family: Georgia, "Times New Roman", serif;
   font-style: italic;
   font-size: 0.84rem;

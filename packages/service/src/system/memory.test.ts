@@ -378,7 +378,7 @@ describe('sampleMachineMemoryUsage', () => {
     });
   });
 
-  it('attributes Windows dedicated VRAM to actual Gezel engine processes', () => {
+  it('reconciles Windows resident-local VRAM and makes the desktop the remainder', () => {
     const usage = sampleMachineMemoryUsage({
       profile: profile({ source: 'gpu-vulkan', gpuVendor: 'amd', gpuVramBytes: 32 * GiB }),
       engineCommittedBytes: 21 * GiB,
@@ -386,7 +386,7 @@ describe('sampleMachineMemoryUsage', () => {
         state: 'healthy',
         mode: 'observe',
         sampledAt: 'driver-now',
-        sources: ['amd-adl', 'windows-gpu-process-memory'],
+        sources: ['amd-adl', 'windows-gpu-process-local-memory'],
         readings: [
           {
             vendor: 'amd',
@@ -400,19 +400,31 @@ describe('sampleMachineMemoryUsage', () => {
           {
             pid: 101,
             name: 'gezel-llama-server.exe',
+            adapterLuid: '0x00000000_0x025a7706',
             dedicatedBytes: 13 * GiB,
             owner: 'machine-engine',
           },
           {
             pid: 202,
             name: 'gezel-llama-server.exe',
+            adapterLuid: '0x00000000_0x025a7706',
             dedicatedBytes: 13 * GiB,
             owner: 'development-engine',
           },
           {
             pid: 303,
             name: 'game.exe',
+            adapterLuid: '0x00000000_0x025a7706',
             dedicatedBytes: 3 * GiB,
+            owner: 'external',
+          },
+          {
+            pid: 404,
+            name: 'dwm.exe',
+            adapterLuid: '0x00000000_0x025a7706',
+            // The desktop's raw process claim overlaps app surfaces and is
+            // intentionally replaced by the physical pool remainder.
+            dedicatedBytes: 13 * GiB,
             owner: 'external',
           },
         ],
@@ -424,11 +436,81 @@ describe('sampleMachineMemoryUsage', () => {
     expect(usage).toMatchObject({
       usedBytes: 30 * GiB,
       gezelBytesObserved: 26 * GiB,
+      processAttributionKind: 'estimated',
       engineReservedBytes: 21 * GiB,
       otherBytes: 4 * GiB,
       gezelEngineProcessCount: 2,
     });
-    expect(usage.gpuProcesses).toHaveLength(3);
+    expect(usage.gpuProcesses).toHaveLength(4);
+    expect(usage.gpuProcesses).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          pid: 303,
+          name: 'game.exe',
+          adapterLuid: '0x00000000_0x025a7706',
+          dedicatedBytes: 3 * GiB,
+        }),
+        expect.objectContaining({
+          pid: 404,
+          name: 'Windows Desktop',
+          adapterLuid: '0x00000000_0x025a7706',
+          dedicatedBytes: 1 * GiB,
+        }),
+      ]),
+    );
+  });
+
+  it('omits an irreconcilable Windows app breakdown instead of scaling it into precision', () => {
+    const usage = sampleMachineMemoryUsage({
+      profile: profile({ source: 'gpu-vulkan', gpuVendor: 'amd', gpuVramBytes: 16 * GiB }),
+      deviceHealth: {
+        state: 'healthy',
+        mode: 'observe',
+        sampledAt: 'driver-now',
+        sources: ['amd-adl', 'windows-gpu-process-local-memory'],
+        readings: [
+          {
+            vendor: 'amd',
+            deviceId: '0',
+            name: 'Radeon',
+            memoryUsedMb: 10 * 1024,
+            memoryTotalMb: 16 * 1024,
+          },
+        ],
+        processes: [
+          {
+            pid: 101,
+            name: 'gezel-llama-server.exe',
+            dedicatedBytes: 6 * GiB,
+            owner: 'machine-engine',
+          },
+          {
+            pid: 303,
+            name: 'game.exe',
+            dedicatedBytes: 9 * GiB,
+            owner: 'external',
+          },
+          {
+            pid: 404,
+            name: 'dwm.exe',
+            dedicatedBytes: 20 * GiB,
+            owner: 'external',
+          },
+        ],
+        reasons: [],
+        summary: 'healthy',
+      },
+    });
+
+    expect(usage).toMatchObject({
+      usedBytes: 10 * GiB,
+      gezelBytesObserved: 6 * GiB,
+      processAttributionKind: 'estimated',
+      otherBytes: 4 * GiB,
+    });
+    expect(usage.gpuProcesses).toEqual([
+      expect.objectContaining({ pid: 101, owner: 'machine-engine' }),
+    ]);
   });
 
   it('attributes nothing to the pool when a driver exposes capacity but not use', () => {

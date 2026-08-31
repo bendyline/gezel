@@ -44,6 +44,7 @@ export const ModelFamilySchema = z.enum([
   'qwq',
   'phi',
   'nemotron',
+  'granite',
   'glm',
   // Meta Superintelligence Labs' Muse line (Muse Spark, and Muse Glimmer
   // distilled from it). Deliberately NOT folded into `llama`: it is a

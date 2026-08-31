@@ -25,6 +25,7 @@
  * models recover much better.
  */
 import { looksLikeFlattenedStructuralArg } from '../tool-arg-schema-coercion.js';
+import { describeAcceptedShapes, describeClosestShape } from './schema-shape-hint.js';
 import type { McpToolWrapper } from './types.js';
 
 interface ZodIssue {
@@ -61,6 +62,17 @@ function tryParseIssues(blob: string): ZodIssue[] | null {
 function pathLabel(path: ReadonlyArray<string | number> | undefined): string {
   if (!path || path.length === 0) return '(root)';
   return path.map((p) => String(p)).join('.');
+}
+
+/**
+ * Zod 3 reports a failed discriminated union as `invalid_union_discriminator`;
+ * Zod 4 folds it into `invalid_union` and moves the detail into `note` /
+ * `message`. Both land here, so match on either code plus the message the
+ * two versions share rather than pinning one library major.
+ */
+function isDiscriminatorIssue(issue: ZodIssue): boolean {
+  if (issue.code === 'invalid_union_discriminator') return true;
+  return issue.code === 'invalid_union' && /discriminator/i.test(issue.message ?? '');
 }
 
 function isDraftStatusIssue(toolName: string, issue: ZodIssue): boolean {
@@ -111,10 +123,20 @@ function flattenedStructuralGuidance(toolName: string, fields: string[]): string
   ].join(' ');
 }
 
+function valueAt(args: Record<string, unknown>, path: ReadonlyArray<string | number>): unknown {
+  let node: unknown = args;
+  for (const seg of path) {
+    if (typeof node !== 'object' || node === null) return undefined;
+    node = (node as Record<string, unknown>)[String(seg)];
+  }
+  return node;
+}
+
 function translateIssues(
   toolName: string,
   issues: ZodIssue[],
   args: Record<string, unknown>,
+  schema?: Record<string, unknown>,
 ): string {
   if (issues.some((issue) => isDraftStatusIssue(toolName, issue))) {
     return draftStatusGuidance();
@@ -134,6 +156,10 @@ function translateIssues(
   const wrongType: string[] = [];
   const tooShort: string[] = [];
   const other: string[] = [];
+  // Schema-derived shape guidance, deduped: two issues on the same
+  // position (a discriminator miss and a wrong type) must not print the
+  // same sentence twice.
+  const shapeHints = new Set<string>();
 
   for (const issue of issues) {
     const label = pathLabel(issue.path);
@@ -143,10 +169,24 @@ function translateIssues(
       wrongType.push(
         `\`${label}\` (got ${issue.received ?? 'unknown'}, expected ${issue.expected ?? '?'})`,
       );
+      // `expected object` names the type and nothing else. The schema
+      // knows the field names, and without them a small model guesses —
+      // which is how a bare artifact URI became three failed calls.
+      if (issue.expected === 'object' && issue.path) {
+        const hint = describeAcceptedShapes(schema, issue.path, valueAt(args, issue.path));
+        if (hint) shapeHints.add(hint);
+      }
     } else if (issue.code === 'too_small') {
       tooShort.push(`\`${label}\` (${issue.message ?? 'too short'})`);
     } else {
       other.push(`\`${label}\` — ${issue.message ?? issue.code ?? 'invalid'}`);
+      // The validator prints the legal discriminator values but never
+      // what each branch requires alongside them, so a model that picks
+      // the right branch still fails on the fields it had to invent.
+      if (isDiscriminatorIssue(issue) && issue.path) {
+        const hint = describeClosestShape(schema, issue.path, args);
+        if (hint) shapeHints.add(hint);
+      }
     }
   }
 
@@ -163,8 +203,12 @@ function translateIssues(
   if (other.length > 0) {
     parts.push(`Other: ${other.join('; ')}.`);
   }
+  for (const hint of shapeHints) parts.push(hint);
+  // Never promise a list this message did not give: the old blanket
+  // "retry with all listed fields supplied" was printed even when the
+  // only content was `expected object`, which lists nothing.
   parts.push(
-    `Retry the call with all listed fields supplied. Do not narrate success — call \`${toolName}\` again with corrected args.`,
+    `Retry \`${toolName}\` with the corrections named above. Do not narrate success — call \`${toolName}\` again with corrected args.`,
   );
   return parts.join(' ');
 }
@@ -176,6 +220,8 @@ export const ZodErrorTranslator: McpToolWrapper = {
     _toolName: string,
     args: Record<string, unknown>,
     errorText: string,
+    _ctx,
+    inputSchema?: Record<string, unknown>,
   ): Promise<string> {
     const m = errorText.match(VALIDATION_PREFIX_RE);
     if (!m) return errorText;
@@ -184,6 +230,6 @@ export const ZodErrorTranslator: McpToolWrapper = {
     if (!upstreamToolName || !blob) return errorText;
     const issues = tryParseIssues(blob);
     if (!issues || issues.length === 0) return errorText;
-    return translateIssues(upstreamToolName, issues, args);
+    return translateIssues(upstreamToolName, issues, args, inputSchema);
   },
 };

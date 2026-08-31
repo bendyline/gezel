@@ -20,6 +20,7 @@ vi.mock('./GezelIcon.js', () => ({
 }));
 
 const { ChatTimelineView } = await import('./ChatTimelineView.js');
+const { api } = await import('../api.js');
 const { publishOptimisticUserMessage } = await import('./chat-optimistic-events.js');
 const { queueFocusSessionError } = await import('./pending-focus-session-error.js');
 
@@ -70,6 +71,7 @@ function renderTimeline(onFocusSession = vi.fn(), timelineMessages = MESSAGES) {
 
 describe('ChatTimelineView — jumping to a failed turn', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     // jsdom implements neither scroll API the timeline drives.
     Element.prototype.scrollTo = vi.fn() as unknown as Element['scrollTo'];
     Element.prototype.scrollIntoView = vi.fn();
@@ -199,7 +201,7 @@ describe('ChatTimelineView — jumping to a failed turn', () => {
 
     await screen.findByText('Partial answer preserved before I stopped.');
     expect(screen.queryByText(/Last turn failed:/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Continue' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Acknowledge' })).not.toBeInTheDocument();
   });
 
   it('does not offer a GitHub report for a caller-cancelled turn', async () => {
@@ -210,8 +212,57 @@ describe('ChatTimelineView — jumping to a failed turn', () => {
     ]);
 
     await screen.findByText(/turn cancelled by caller/);
-    expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     expect(screen.queryByRole('button', { name: /report error on github/i })).toBeNull();
+  });
+
+  it('offers a real Retry plus Acknowledge for a recoverable engine failure', async () => {
+    vi.mocked(api.retryChatSessionTurn).mockResolvedValue({
+      accepted: true,
+      sessionId: 's1',
+    } as never);
+    renderTimeline(vi.fn(), [
+      message({
+        sessionLastTurnError:
+          '[Mac AI] the on-device engine dropped the connection mid-turn. Retry the turn.',
+        sessionLastTurnErrorDetail: {
+          code: 'native-engine-crash',
+          engine: 'mlx',
+        },
+      }),
+    ]);
+
+    const retry = await screen.findByRole('button', { name: 'Retry' });
+    expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeVisible();
+    fireEvent.click(retry);
+
+    await waitFor(() => expect(api.retryChatSessionTurn).toHaveBeenCalledWith('s1'));
+    expect(screen.getByRole('button', { name: 'Retrying…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeDisabled();
+  });
+
+  it('acknowledges the alert without retrying the turn', async () => {
+    vi.mocked(api.clearProjectErrors).mockResolvedValue({ cleared: 1 } as never);
+    renderTimeline();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Acknowledge' }));
+
+    await waitFor(() => expect(api.clearProjectErrors).toHaveBeenCalledWith('p1'));
+    expect(api.retryChatSessionTurn).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText(/Last turn failed/)).toBeNull());
+  });
+
+  it('keeps a failed acknowledge visible and explains that the click failed', async () => {
+    vi.mocked(api.clearProjectErrors).mockRejectedValue(new Error('offline'));
+    renderTimeline();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Acknowledge' }));
+
+    expect(
+      await screen.findByText('Could not clear the alert. Check the connection and try again.'),
+    ).toBeVisible();
+    expect(screen.getByText(/Last turn failed/)).toBeVisible();
   });
 
   it('keeps the scrollbar visible briefly while the timeline is scrolling', async () => {

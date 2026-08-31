@@ -21,5 +21,20 @@ export * from './reader/validate.js';
 export * from './profiles/registry.js';
 export * from './embedding/profile-embedder.js';
 export * from './markdown-adapter/load.js';
+export * from './registry-client/fetch.js';
+export * from './signatures/anchors.js';
 export * from './signatures/jcs.js';
 export * from './signatures/signing.js';
+
+// The wire/disk contract types, re-exported so external consumers (the
+// Qualla pipeline) get the whole toolchain surface from ONE package instead
+// of also depending on @bendyline/gezel for the schemas.
+export type {
+  CatalogDocument,
+  KnowledgeCatalogManifest,
+  KnowledgeCatalogRef,
+  KnowledgeChunkingProfile,
+  KnowledgeEmbeddingProfile,
+  KnowledgeRegistryEntry,
+  KnowledgeRegistryIndex,
+} from '@bendyline/gezel';

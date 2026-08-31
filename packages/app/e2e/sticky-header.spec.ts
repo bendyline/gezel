@@ -17,7 +17,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { captureScreenshot } from './helpers/screenshot.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const screenshotDir = join(_dirname, '..', 'screenshots');
@@ -96,7 +98,7 @@ test.beforeEach(async () => {
 });
 
 test.afterAll(async () => {
-  await app?.close();
+  await closeApp(app);
   await rm(gezelHome, { recursive: true, force: true }).catch(() => {});
 });
 
@@ -155,7 +157,7 @@ test('sticky header does NOT show while the bubble header is visible', async () 
     .toBeCloseTo(25, 0);
 
   await expect(page.locator('.chat-sticky-header')).toBeHidden();
-  await page.screenshot({
+  await captureScreenshot(page, {
     path: join(screenshotDir, 'sticky-02-no-trigger.png'),
     fullPage: true,
   });
@@ -188,7 +190,7 @@ test('sticky header aligns with chat bubbles', async () => {
     );
   }
 
-  await page.screenshot({
+  await captureScreenshot(page, {
     path: join(screenshotDir, 'sticky-00-before-scroll.png'),
     fullPage: true,
   });
@@ -220,7 +222,7 @@ test('sticky header aligns with chat bubbles', async () => {
   });
   await page.waitForTimeout(700);
 
-  await page.screenshot({
+  await captureScreenshot(page, {
     path: join(screenshotDir, 'sticky-01-scrolled.png'),
     fullPage: true,
   });

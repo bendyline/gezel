@@ -76,6 +76,9 @@ export type DeviceGpuProcessOwner =
 export interface DeviceGpuProcess {
   pid: number;
   name?: string;
+  /** Windows adapter identity parsed from the PDH instance, when available. */
+  adapterLuid?: string;
+  /** Historical wire name; Windows reports resident local bytes in this field. */
   dedicatedBytes: number;
   owner: DeviceGpuProcessOwner;
 }
@@ -84,7 +87,7 @@ export interface DeviceHealthSample {
   sampledAt: string;
   sources: string[];
   readings: DeviceHealthReading[];
-  /** Dedicated GPU-memory owners when the platform exposes process counters. */
+  /** GPU-memory process samples when the platform exposes trustworthy counters. */
   processes?: DeviceGpuProcess[];
   errors: string[];
 }
@@ -460,6 +463,9 @@ export function parseDeviceHealthHelperJson(stdout: string): DeviceHealthHelperP
       processes.push({
         pid,
         ...(typeof process.name === 'string' ? { name: process.name } : {}),
+        ...(typeof process.adapterLuid === 'string' && process.adapterLuid.length > 0
+          ? { adapterLuid: process.adapterLuid }
+          : {}),
         dedicatedBytes,
         owner: owner as DeviceGpuProcessOwner,
       });

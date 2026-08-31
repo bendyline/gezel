@@ -628,7 +628,12 @@ describe('craftbook generic scenario adapter', () => {
       }),
     );
     const body = client.messageGezel.mock.calls[0]?.[1];
-    expect(body?.text).toContain('read_file({ path: "source/input.md" })');
+    // Names the FILE, never a tool. Which read tool exists is provider-
+    // dependent — `read_file` is excluded outright on the Claude CLI, which
+    // has its own `Read` — and a directive prescribing an absent tool
+    // forbids the one call the session can make.
+    expect(body?.text).toContain('source/input.md');
+    expect(body?.text).not.toContain('read_file(');
     expect(body?.expectedDeliverable).toBeUndefined();
   });
 

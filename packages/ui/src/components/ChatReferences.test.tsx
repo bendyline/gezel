@@ -769,13 +769,13 @@ describe('ChatReferences reference picker', () => {
             onClick={() => {
               onToolActivity({
                 name: 'read_artifact',
-                path: 'outline.md',
+                path: 'outline.pptx',
                 success: true,
                 durationMs: 1,
               });
               onToolActivity({
                 name: 'read_artifact',
-                path: 'design.md',
+                path: 'design.docx',
                 success: true,
                 durationMs: 1,
               });
@@ -794,12 +794,18 @@ describe('ChatReferences reference picker', () => {
     expect(container.querySelector('nav[aria-label="References"]')).toBeNull();
 
     await user.click(referencesTab);
-    await user.click(await screen.findByRole('menuitem', { name: 'design.md' }));
+    const wordItem = await screen.findByRole('menuitem', { name: 'design.docx' });
+    const powerpointItem = screen.getByRole('menuitem', { name: 'outline.pptx' });
+    expect(wordItem.querySelector('.chat-rail-reference-menu-icon')).toHaveClass('fa-file-word');
+    expect(powerpointItem.querySelector('.chat-rail-reference-menu-icon')).toHaveClass(
+      'fa-file-powerpoint',
+    );
+    await user.click(wordItem);
 
     await waitFor(() => {
       expect(apiMocks.previewReference).toHaveBeenLastCalledWith('project-1', {
         kind: 'artifact',
-        path: 'design.md',
+        path: 'design.docx',
       });
     });
   });

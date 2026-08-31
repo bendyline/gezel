@@ -1,5 +1,5 @@
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import type {
   CodeReviewKind,
   GitCommitDetailResponse,
@@ -100,6 +100,8 @@ export interface GitStatus {
   conflictedCount?: number;
   mergeInProgress?: boolean;
   hasUpstream?: boolean;
+  syncStale?: boolean;
+  syncStaleReason?: 'never-synced' | 'branch-changed' | 'no-upstream' | 'git-activity';
   hasPat: boolean;
   credentialSource: GitHubCredentialSource;
 }
@@ -537,7 +539,9 @@ export class GitManager {
       const resolved = await this.resolveCheckout(project);
       if (resolved.exists && resolved.originMatches) {
         const branch = await this.currentBranch(resolved.dir);
-        await this.persistCheckoutDir(project, resolved.dir);
+        // Adoption proves where the checkout is, not that its current
+        // branch has completed a fetch/integrate/push cycle through Gezel.
+        await this.persistCheckoutState(project, resolved.dir, { branch });
         return { checkoutDir: resolved.dir, branch, adopted: true };
       }
       if (resolved.exists && !resolved.originMatches) {
@@ -557,7 +561,7 @@ export class GitManager {
       args.push(parsed.cloneUrl, resolved.dir);
       await runGit(args, { redact });
       const branch = await this.currentBranch(resolved.dir);
-      await this.persistCheckoutDir(project, resolved.dir, branch);
+      await this.persistCheckoutState(project, resolved.dir, { branch, synced: true });
       return { checkoutDir: resolved.dir, branch, adopted: false };
     });
   }
@@ -582,7 +586,9 @@ export class GitManager {
       });
       const after = await this.headSha(resolved.dir);
       const branch = await this.currentBranch(resolved.dir);
-      await this.persistCheckoutDir(project, resolved.dir, branch);
+      // Pull only handles the incoming half of Sync. Preserve the last full
+      // sync timestamp so status can keep prompting when local work remains.
+      await this.persistCheckoutState(project, resolved.dir, { branch });
       return { branch, updated: before !== after };
     });
   }
@@ -604,7 +610,7 @@ export class GitManager {
       if (opts.create) {
         await runGit(['checkout', '-b', branch], { cwd: resolved.dir });
         const current = (await this.currentBranch(resolved.dir)) ?? branch;
-        await this.persistCheckoutDir(project, resolved.dir, current);
+        await this.persistCheckoutState(project, resolved.dir, { branch: current });
         return { branch: current };
       }
       const { baseArgs, redact } = await this.patArgs();
@@ -624,7 +630,7 @@ export class GitManager {
         }
       }
       const current = (await this.currentBranch(resolved.dir)) ?? branch;
-      await this.persistCheckoutDir(project, resolved.dir, current);
+      await this.persistCheckoutState(project, resolved.dir, { branch: current });
       return { branch: current };
     });
   }
@@ -698,7 +704,9 @@ export class GitManager {
       // `git fetch` reports advanced refs on stderr; empty means
       // already-up-to-date. Stdout is usually empty either way.
       const fetched = stderr.trim().length > 0 || stdout.trim().length > 0;
-      await this.persistCheckoutDir(project, resolved.dir);
+      // Fetch updates our knowledge of GitHub but does not integrate or send
+      // anything. It must not masquerade as a completed Sync.
+      await this.persistCheckoutState(project, resolved.dir);
       return { fetched };
     });
   }
@@ -1438,7 +1446,7 @@ export class GitManager {
           const res = await this.pushDir(dir);
           if (!res.pushed) return this.pushFailureToSync(res, { pulled, pushed, branch });
           pushed += toPush;
-          await this.persistCheckoutDir(project, dir, branch);
+          await this.persistCheckoutState(project, dir, { branch, synced: true });
           return { state: 'synced', pulled, pushed, branch };
         }
         const counts = (await this.aheadBehindRefs(dir, upstream)) ?? { ahead: 0, behind: 0 };
@@ -1490,7 +1498,7 @@ export class GitManager {
           }
           pushed += counts.ahead + (merged ? 1 : 0);
         }
-        await this.persistCheckoutDir(project, dir, branch);
+        await this.persistCheckoutState(project, dir, { branch, synced: true });
         return { state: 'synced', pulled, pushed, branch, ...(merged ? { merged } : {}) };
       }
       return {
@@ -1692,6 +1700,7 @@ export class GitManager {
     const upstreamRef = branch ? await this.resolveUpstreamRef(resolved.dir, branch) : undefined;
     const hasUpstream = upstreamRef !== undefined;
     const counts = upstreamRef ? await this.aheadBehindRefs(resolved.dir, upstreamRef) : undefined;
+    const freshness = await this.syncFreshness(project, resolved.dir, branch, hasUpstream);
     return {
       github: project.github,
       exists: true,
@@ -1704,6 +1713,7 @@ export class GitManager {
       conflictedCount: working?.conflictedCount,
       mergeInProgress,
       hasUpstream,
+      ...freshness,
       hasPat,
       credentialSource,
     };
@@ -1980,17 +1990,71 @@ export class GitManager {
     };
   }
 
-  private async persistCheckoutDir(
+  /**
+   * Persist checkout metadata without conflating every git operation with a
+   * completed Sync. Only clone and the fetch/integrate/push state machine set
+   * `synced`; branch switches, pull-only, fetch-only, and adoption do not.
+   */
+  private async persistCheckoutState(
     project: ProjectDetail,
     checkoutDir: string,
-    branch?: string,
+    opts: { branch?: string; synced?: boolean } = {},
   ): Promise<void> {
-    const next: Partial<ProjectGitHub> = {
-      checkoutDir,
-      lastSyncedAt: new Date().toISOString(),
-    };
-    if (branch) next.branch = branch;
+    const next: Partial<ProjectGitHub> = { checkoutDir };
+    if (opts.branch) next.branch = opts.branch;
+    if (opts.synced) next.lastSyncedAt = new Date().toISOString();
     await this.store.updateProjectGitHub(project.id, next);
+  }
+
+  /**
+   * Decide whether `lastSyncedAt` still applies to the checkout we are
+   * looking at. Git may be changed outside Gezel, so combine persisted
+   * metadata with Git's own durable activity markers.
+   */
+  private async syncFreshness(
+    project: ProjectDetail,
+    dir: string,
+    branch: string | undefined,
+    hasUpstream: boolean,
+  ): Promise<Pick<GitStatus, 'syncStale' | 'syncStaleReason'>> {
+    const lastSyncedAt = Date.parse(project.github?.lastSyncedAt ?? '');
+    if (!Number.isFinite(lastSyncedAt)) {
+      return { syncStale: true, syncStaleReason: 'never-synced' };
+    }
+    if (branch !== project.github?.branch) {
+      return { syncStale: true, syncStaleReason: 'branch-changed' };
+    }
+    if (!hasUpstream) {
+      return { syncStale: true, syncStaleReason: 'no-upstream' };
+    }
+    const activityAt = await this.latestGitActivityAt(dir);
+    if (activityAt !== undefined && activityAt > lastSyncedAt) {
+      return { syncStale: true, syncStaleReason: 'git-activity' };
+    }
+    return { syncStale: false };
+  }
+
+  /** Latest local HEAD-reflog or fetch activity, without any network call. */
+  private async latestGitActivityAt(dir: string): Promise<number | undefined> {
+    const candidates: number[] = [];
+    try {
+      const { stdout } = await runGit(['reflog', '-1', '--format=%ct', 'HEAD'], { cwd: dir });
+      const seconds = Number.parseInt(stdout.trim(), 10);
+      if (Number.isFinite(seconds)) candidates.push(seconds * 1_000);
+    } catch {
+      // Reflogs can be disabled; FETCH_HEAD still gives us a useful signal.
+    }
+    try {
+      const { stdout } = await runGit(['rev-parse', '--git-path', 'FETCH_HEAD'], { cwd: dir });
+      const rawPath = stdout.trim();
+      if (rawPath) {
+        const fetchHead = isAbsolute(rawPath) ? rawPath : resolve(dir, rawPath);
+        candidates.push((await stat(fetchHead)).mtimeMs);
+      }
+    } catch {
+      // A repository that has never fetched has no FETCH_HEAD yet.
+    }
+    return candidates.length > 0 ? Math.max(...candidates) : undefined;
   }
 
   private async withLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {

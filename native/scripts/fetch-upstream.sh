@@ -74,7 +74,7 @@ if [[ ! -f "$version_file" ]]; then
 fi
 
 # shellcheck disable=SC2046
-eval "$(grep -E '^(upstream|tag|commit)=' "$version_file" | sed 's/^/declare /')"
+eval "$(grep -E '^(upstream|tag|build|commit)=' "$version_file" | sed 's/^/declare /')"
 
 if [[ -z "${upstream:-}" || -z "${commit:-}" ]]; then
   echo "error: $version_file missing upstream or commit" >&2
@@ -138,8 +138,30 @@ if [[ "$head_commit" != "$commit" ]]; then
   exit 1
 fi
 
-if [[ "$engine" == "llama-cpp" && "$tag" =~ ^b([0-9]+)$ ]]; then
-  expected_build_number="${BASH_REMATCH[1]}"
+# llama.cpp embeds `git rev-list --count HEAD` as its reported version, so a
+# truncated fetch produces a binary that lies about which upstream it is. The
+# expected count came free from a `b####` tag until upstream added semver
+# stable tags (v0.3.0); those declare `build=` instead. Resolve from either,
+# and refuse to continue when neither is available — an unverifiable pin has
+# to fail here rather than silently skip the only check that catches this.
+if [[ "$engine" == "llama-cpp" ]]; then
+  if [[ -n "${build:-}" ]]; then
+    if [[ ! "$build" =~ ^[0-9]+$ ]]; then
+      echo "error: build number in $version_file is not an integer: $build" >&2
+      exit 1
+    fi
+    expected_build_number="$build"
+    if [[ "$tag" =~ ^b([0-9]+)$ && "${BASH_REMATCH[1]}" != "$expected_build_number" ]]; then
+      echo "error: $version_file declares build=$expected_build_number but tag $tag implies ${BASH_REMATCH[1]}" >&2
+      exit 1
+    fi
+  elif [[ "$tag" =~ ^b([0-9]+)$ ]]; then
+    expected_build_number="${BASH_REMATCH[1]}"
+  else
+    echo "error: llama.cpp tag $tag is not a b<number> tag, so $version_file must declare build=<number>" >&2
+    exit 1
+  fi
+
   actual_build_number="$("$git_bin" -C "$target" rev-list --count HEAD)"
   if [[ "$actual_build_number" != "$expected_build_number" ]]; then
     echo "error: llama.cpp tag $tag requires build number $expected_build_number, but git ancestry reports $actual_build_number" >&2

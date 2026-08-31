@@ -2,6 +2,7 @@
  * Knowledge catalogs (docs/knowledge-catalogs.md route table):
  *
  *   GET    /api/knowledge/catalogs                     installed refs + health + enabled state
+ *   GET    /api/knowledge/updates                      newer versions in the signed registry
  *   POST   /api/knowledge/install                      { source } → { jobId }
  *   GET    /api/knowledge/jobs/:jobId                  job snapshot
  *   GET    /api/knowledge/jobs/:jobId/events           SSE progress stream
@@ -18,14 +19,18 @@
  * legitimately contain slashes.
  */
 
+import type { KnowledgeUpdateCandidate, KnowledgeUpdatesResponse } from '@bendyline/gezel';
 import {
   KnowledgeInstallRequestSchema,
   KnowledgeSearchRequestSchema,
   UpdateKnowledgeCatalogRequestSchema,
+  resolveSecurityPolicy,
 } from '@bendyline/gezel';
+import { fetchKnowledgeRegistry, newerRegistryEntries } from '@bendyline/gezel-knowledge';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { KnowledgeNotFoundError } from '../../knowledge/manager.js';
+import { loadKnowledgeTrustAnchors } from '../../knowledge/trust-anchors.js';
 import { embedQuery } from '../../memory/embeddings.js';
 import type { ServiceContext } from '../context.js';
 
@@ -42,6 +47,62 @@ export function knowledgeRoutes(ctx: ServiceContext): Hono {
   });
 
   app.get('/catalogs', async (c) => c.json({ catalogs: await manager().list() }));
+
+  /**
+   * Compare installed catalogs against the publisher's SIGNED registry and
+   * report strictly-newer versions. Read-only: nothing installs from here —
+   * the response carries exactly the coordinates (url + contentDigest) the
+   * hardened install endpoint requires. Honors `allowAppNetwork` like every
+   * other registry check, and refuses to consult an unverifiable registry.
+   */
+  app.get('/updates', async (c) => {
+    const respond = (body: KnowledgeUpdatesResponse) => c.json(body);
+    const config = await ctx.store.readConfig();
+    const registryUrl = config.knowledge?.registryUrl?.trim();
+    if (!registryUrl) return respond({ available: false, reason: 'no-registry-url' });
+    if (!resolveSecurityPolicy(config).allowAppNetwork) {
+      return respond({ available: false, reason: 'network-blocked' });
+    }
+    const anchors = loadKnowledgeTrustAnchors();
+    if (anchors.length === 0) return respond({ available: false, reason: 'no-trust-anchors' });
+    let registry: Awaited<ReturnType<typeof fetchKnowledgeRegistry>>['registry'];
+    try {
+      registry = (await fetchKnowledgeRegistry(registryUrl, { anchors })).registry;
+    } catch (err) {
+      return respond({
+        available: false,
+        reason: 'fetch-failed',
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+    const updates: KnowledgeUpdateCandidate[] = [];
+    for (const installed of await manager().list()) {
+      if (installed.ref.publisherId !== registry.publisher.id) continue;
+      const newer = newerRegistryEntries(registry, {
+        catalogId: installed.ref.catalogId,
+        version: installed.ref.version,
+      });
+      const best = newer[0];
+      if (!best) continue;
+      updates.push({
+        publisherId: registry.publisher.id,
+        catalogId: best.catalogId,
+        name: best.name,
+        installedVersion: installed.ref.version,
+        availableVersion: best.version,
+        archiveBytes: best.archiveBytes,
+        contentDigest: best.contentDigest,
+        url: best.url,
+      });
+    }
+    return respond({
+      available: true,
+      registryUrl,
+      publisher: { id: registry.publisher.id, name: registry.publisher.name },
+      checkedAt: new Date().toISOString(),
+      updates,
+    });
+  });
 
   app.post('/install', async (c) => {
     const body = KnowledgeInstallRequestSchema.parse(await c.req.json());

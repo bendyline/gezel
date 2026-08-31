@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ProjectIconIdSchema } from '../project-icons.js';
+import { resolveProjectTypeId } from '../schemas/project.js';
 
 /**
  * Project-type taxonomy — a broad, deliberately expandable catalog of the
@@ -657,6 +658,38 @@ export const PROJECT_TYPES: ProjectType[] = [
     },
   },
 ];
+
+/**
+ * Taxonomy ids whose projects are codebases — a workspace of source files the
+ * user (or a developer gezel) builds and runs, typically with a package
+ * manifest and a toolchain. Developer-facing surfaces gate on this: the
+ * chat/terminal compose switch in the project chat only appears for these
+ * types (and only with "Show advanced features" on), so a writing or media
+ * project never grows a shell prompt.
+ */
+export const CODING_PROJECT_TYPE_IDS: ReadonlySet<string> = new Set([
+  'browser-game',
+  'web-app',
+  'static-site',
+  'data-analysis',
+  'api-service',
+  'cli-tool',
+  'library',
+]);
+
+/**
+ * True when the project's effective type (explicit override first, then the
+ * file-mix auto-detection) is one of the coding types. Unclassified projects
+ * are NOT coding projects — the terminal and similar developer surfaces stay
+ * hidden until a content-index scan actually sees code in the workspace.
+ */
+export function isCodingProject(p: {
+  projectTypeId?: string;
+  detectedProjectType?: { id: string };
+}): boolean {
+  const typeId = resolveProjectTypeId(p);
+  return typeId !== undefined && CODING_PROJECT_TYPE_IDS.has(typeId);
+}
 
 /** Look up a project type by id. */
 export function getProjectType(id: string | undefined | null): ProjectType | undefined {

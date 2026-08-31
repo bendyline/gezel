@@ -93,6 +93,44 @@ def stable_snapshot_boundary(
     return max(0, common - max(0, int(margin)))
 
 
+def token_boundary_for_marker(
+    decode, total_tokens: int, marker: str, margin: int
+) -> int:
+    """Smallest token count whose decoded text already contains `marker`,
+    backed off by `margin`. Zero when the marker never appears.
+
+    Used to turn a CHARACTER offset the TS side knows (the shared band's
+    length inside the system message) into the TOKEN index the snapshot
+    machinery needs. Only the engine has the tokenizer, and the rendered
+    prompt carries template framing and the tool block ahead of the system
+    content, so a character offset cannot be mapped arithmetically — but the
+    band text itself appears verbatim in the render, so "first token index
+    whose decode contains the band's tail" locates it exactly.
+
+    `decode(k)` must return the text of the first k tokens; containment is
+    monotone in k, which is what makes the bisection valid. Callers pay
+    ~log2(total) decodes, once per turn, against a prefill measured in
+    minutes.
+
+    The margin is the same defence `stable_snapshot_boundary` applies: BPE
+    re-merges across the cut, so back away from it. An imprecise result is
+    safe — `_capture_prompt_snapshot` verifies the token prefix and drops a
+    snapshot that does not match.
+    """
+    if total_tokens <= 0 or not marker:
+        return 0
+    lo, hi = 1, int(total_tokens)
+    if marker not in decode(hi):
+        return 0
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if marker in decode(mid):
+            hi = mid
+        else:
+            lo = mid + 1
+    return max(0, lo - max(0, int(margin)))
+
+
 def plan_snapshot_segments(
     segment: Sequence[int],
     reused: int,

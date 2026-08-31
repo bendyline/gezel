@@ -574,6 +574,13 @@ export const TimelineMessageSchema = z.object({
    * on every message that shares the session.
    */
   sessionLastTurnError: z.string().optional(),
+  /**
+   * Structured twin of {@link sessionLastTurnError}. The failed-turn banner
+   * uses this to offer recovery actions only when the daemon classified the
+   * failure as recoverable (for example, a native engine crash), instead of
+   * scraping every new provider's prose forever.
+   */
+  sessionLastTurnErrorDetail: ChatTurnErrorDetailSchema.optional(),
   taskRef: z.string().optional(),
   stepId: z.string().optional(),
   handoffFrom: z.object({ gezelId: z.string(), sessionId: z.string() }).optional(),
@@ -675,6 +682,26 @@ export const TimelineMessageSchema = z.object({
    */
   attemptedToolCalls: z
     .array(z.object({ body: z.string(), reason: z.string().optional() }))
+    .optional(),
+  /**
+   * Mirrors `ChatMessage.synthetic` — this turn was authored by the
+   * runtime, not the model. Only `'turn-aborted'` currently changes how
+   * the bubble renders: a killed turn's salvage record keeps whatever
+   * the model streamed before the kill, so an abort that never reached
+   * visible text is shaped exactly like a model with nothing to say.
+   * Without this on the wire the bubble guessed from
+   * `reasoning`/`toolCalls` and reported a four-hour engine timeout as
+   * "produced reasoning but no visible reply". Keep the enum in sync
+   * with `ChatMessage.synthetic` in gezel.ts.
+   */
+  synthetic: z
+    .enum([
+      'compaction-summary',
+      'context-loop-halt',
+      'turn-aborted',
+      'growth-announcement',
+      'keurmeester-notice',
+    ])
     .optional(),
 });
 export type TimelineMessage = z.infer<typeof TimelineMessageSchema>;

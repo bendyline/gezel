@@ -180,10 +180,16 @@ Rules:
   those surfaces, move it to the `gz-*` classes and delete its alias.
 - **Keys with a description line** follow the `.gz-key--stacked` shape:
   label on top, a smaller muted hint beneath, left-aligned, wrapping
-  allowed. `.pending-question-choice-described` (Claude CLI AskUserQuestion
-  options, where each choice carries an explanation) is the current
-  example. The hint is `--text-xs` in `--text-muted` — it must never
-  compete with the label.
+  allowed. Put the two lines in `.gz-key-label` and `.gz-key-hint` — the
+  recipe styles both, so a new surface never needs its own pair (the
+  night-shift menu's `app-engagement-menu-label`/`-hint` predates them and
+  is the case that motivated generalizing). The hint is `--text-xs` in
+  `--text-muted` and must never compete with the label; on a latched key it
+  inherits the pressed ink and separates by opacity instead, because muted
+  grey on the accent fill loses contrast. `.pending-question-choice-described`
+  (Claude CLI AskUserQuestion options) is the other example.
+  The ds4 Settings "Memory use" tray is the reference for a stacked
+  two-option preference.
 - **No new fully-rounded controls.** If you're reaching for
   `border-radius: 999px` on anything with a text label, it should almost
   certainly be a key or a small-radius chip instead.
@@ -324,6 +330,24 @@ Ollama, engagement modes, tempo, a task's status), use **keys in a tray** — se
 [Controls: keys in trays](#controls-keys-in-trays). The Home + Settings
 provider switches are this pattern.
 
+**Connected tabs, for a switch that fronts the surface below it.** The
+default tab bar (`gz-tabs-trigger`) marks the current tab with an accent
+underline and is right for a row of peer destinations. When the choice
+instead swaps the *surface directly beneath the tab* — the project
+composer's `@ Chat` / `> Terminal` switch, which replaces the whole compose
+stack under it — use the connected treatment: top-rounded corners only, the
+tab hanging off the bottom edge of its host row onto a seam, and the
+selected tab erasing the pixel of seam it stands on so tab and panel read as
+one surface. Selection is carried by that break plus a 2px accent bar on the
+tab's top edge; a latched key fill defeats the whole effect, because the
+panel the tab merges into is not tinted. Unselected tabs stay recessed
+(`--tray-bg`) and keep all four edges. The seam is not optional — fill alone
+cannot join anything when the tab's own row and the band below share a
+background, which is how the first attempt read as a chip parked in the
+address line. Reach for this only when the tab genuinely sits on the seam of
+what it switches; a tab floating above unrelated content has nothing to
+connect to and should be an underline tab or keys instead.
+
 **Split buttons.** Use a split button when one creation action is the clear,
 frequent default and two or three closely-related variants should remain
 available without crowding the toolbar. The wide left key performs the default
@@ -331,6 +355,15 @@ immediately; the narrow attached right key opens a `DropdownMenu`. Join the
 halves on one straight seam and keep `--radius-md` only on the outside corners.
 Menu items should name the variant and may carry one short hint line. The Tasks
 screen's New task / scheduled / Night Shift control is the reference.
+
+**A menu never runs off the window.** Radix flips a panel to the other side
+when it doesn't fit, but a list taller than *either* side — the chat rail's
+References menu grows with every file a gezel touches — still spills past the
+edge, because Radix measures the room and leaves the clamping to CSS. The
+shared `.app-nav-menu` panel takes
+`max-height: calc(var(--radix-popper-available-height, 100vh) - 0.75rem)` and
+scrolls; a menu that opts out of that class owes itself the same pair. Vertical
+scrollers keep the native bar, so nothing else is needed.
 
 **Resizable splits.** A two-pane split that a user might want to rebalance
 gets a grip, not a fixed track: a full-height `role="separator"` element with
@@ -450,6 +483,27 @@ skeleton the same way — extend it rather than fork it. Lead the gallery
 with the curated, context-relevant subset (e.g. craftbooks recommended
 for the project's type) and keep the full catalog one rail-click away.
 
+**A gallery dialog splits in two when the choice is worth reading.** The
+right-hand pane is fine for a starting point you pick by name (project
+types), but a craftbook is a page: a paragraph of description, four to a
+dozen named steps with their own one-liners, and a parameter form. Clamped
+into a 19rem column, the description lost its tail to a five-line clamp and
+the params stacked below the fold — so New Task is now a **two-step wizard**
+(`gz-ntd-step-pick` / `gz-ntd-step-configure` in
+[styles/project-surfaces.css](../packages/ui/src/styles/project-surfaces.css)).
+Step 1 is the catalog alone: rail + gallery across the full dialog, with the
+*project* picker in the header, because that choice decides which craftbooks
+are applicable and recommended. Choosing a card — the blank card included —
+advances to step 2: the recipe in full on the left, the properties form on
+the right, and one back key returning to the gallery with the choice still
+lit. Three rules keep it from reading as two different dialogs: the dialog
+keeps its size and its footer bar across both steps so the frame never
+jumps, the selection survives going back, and nothing is created until the
+second screen (the picker's footnote says so, and Enter in the search field
+must not submit the form). Reach for the split when the selection carries
+substantial detail or configuration; a catalog of one-line choices should
+stay a single screen with the pane.
+
 **Shelve a big catalog by subject, not by lifecycle.** A rail whose shelves
 answer "where in a project's life does this fit?" collapses on a large
 catalog — New Task's 255 craftbooks landed in two piles, the larger one
@@ -487,6 +541,18 @@ column with `min-height: 0` down every level to the body). A long question that
 pushes Submit under the bottom edge reads as a broken dialog, not as a
 scrollable one, because nothing on screen says there is more below. The
 drawer's own scrollbar remains as the fallback for a very short window.
+
+**One submit key per composer, and it is a glyph.** Chat's Send and the
+terminal's Fire are the same act — *this draft goes now* — so they share one
+recipe (`.chat-send-btn` / `.terminal-fire-btn` in
+[styles/shared-content.css](../packages/ui/src/styles/shared-content.css)): the
+terracotta bevel, near-square, carrying the up-arrow `SubmitArrow` primitive
+instead of a word. Two words that mean the same thing drift apart; one mark
+does not. They also sit in the same place — their own row between the context
+strip and the typing surface — so flipping compose mode never moves the primary
+key out from under the cursor. Being glyph-only, each carries `title` and
+`aria-label`, and Send's label (not a hidden `aria-busy` alone) is what
+announces the pending turn now that "Sending…" is no longer on its face.
 
 **Mid-turn composer actions.** While a gezel is working, the composer keeps
 accepting text. With an empty draft the toolbar shows only the quiet
@@ -555,6 +621,45 @@ task another hour of the user's patience. And it disappears the instant that
 task streams a turn: the live bubble is its representation, and a "waiting"
 card beside it contradicts what the reader can see. Batches collapse past a
 few cards into one counted line rather than burying the conversation.
+
+**Waiting is not wedged, and silence alone cannot tell them apart.** A turn
+that has produced no tokens may be parked behind another gezel — Gezel's
+provider queue and, separately, the engine's own physical slot, which on a
+single-slot launch serialises every session on the machine. Both look
+identical from the transcript: no badge, no output. Two rules follow. The
+queued state is **re-asserted for the length of the wait** and expires on
+freshness ([`queueNoticeIsFresh`](../packages/ui/src/components/chat-live-slot.ts)),
+never torn down by whatever unrelated liveness event happens to arrive next
+— a heartbeat means the daemon is holding the turn, which is equally true
+while it waits, and clearing on it dropped the badge minutes into a wait. And
+the silence banner may only say a turn "looks stalled … may have wedged
+mid-turn" once it has actually streamed something: *mid*-turn presumes a turn
+in progress. With no output the honest copy names the ordinary causes —
+waiting behind another gezel, loading the model, reading a long prompt — and
+offers waiting as a real option beside stopping. The old copy sent users to
+cancel and retry turns that were queued and would have run on their own,
+which on a one-slot engine put them back at the end of the same queue.
+
+**A craftbook run gets a receipt card, not just a pill.** When a tool call
+starts a craftbook (`invoke_craftbook`) or moves a task a step
+(`advance_task_step`), the transcript renders an inline card under the tool
+row ([`ToolCraftbookCard`](../packages/ui/src/components/ToolCraftbookCard.tsx),
+`msg-tool-card-*` block in [styles/chat.css](../packages/ui/src/styles/chat.css)):
+the craftbook's workshop-mark artwork in a small `--radius-md` tile, an
+uppercase eyebrow (Craftbook started / Step complete), **one sentence**, the
+compact step tracker, and the task chip. The generic pill row stays — it is
+the factual record with duration and provenance — and on completed bubbles
+the card is promoted above the collapsed "N steps" disclosure exactly like
+generated media, while the plain row stays inside the collapse. Two rules
+keep the card honest. Everything on it is a **snapshot of the moment the
+tool returned** (the service stamps the step statuses into the event) — it
+never pretends to be live, and the task chip opens the live view: the chat
+rail's Task pane where the surface has one, the full task tab otherwise.
+And the one live element, the External-services nudge on start cards
+("works better with External services — it still runs without it"), reflects
+the *current* security policy: it hides the moment the capability is on,
+and its action **deep-links to Settings → Security & Compliance** — a
+security switch is never flipped from inside chat.
 
 **Machine syntax never reaches a summary line.** A message body is not
 prose. It is markdown; it may carry reasoning the bubble hides; and when the
@@ -755,6 +860,19 @@ command provides the keyboard-first version of the same action.
 use toasts for errors. If the operation is dismissable, show the error
 until the next user action; if it blocks something, show it until the user
 fixes it.
+
+**A red error names both exits.** A persistent red alert never uses an
+ambiguous verb such as “Continue” for dismissal. When the user can remove the
+alert without fixing its cause, label that action **Acknowledge** and say in
+its tooltip what scope it clears. When the failure is genuinely recoverable,
+offer a separate, primary **Retry** (or a more specific repair verb) that
+actually performs the recovery. Retry is contextual: prefer structured error
+classification, with a narrow compatibility fallback for older errors whose
+own copy explicitly recommends retrying; deterministic failures and “do not
+retry” conditions do not get it. Keep both actions in a distinct row beneath
+the explanation, disable them while one is running, and surface a failed
+action inline instead of swallowing it. The failed-turn banner and its live
+streaming twin are the reference.
 
 **A failed tool says why, in the thread.** A red ✗ on a tool row is a
 status, not an explanation, and burying the reason in a tooltip or behind

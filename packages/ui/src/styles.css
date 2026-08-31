@@ -20,3 +20,5 @@
 @import "./styles/scripts-and-craftbooks.css";
 @import "./styles/village-and-overview.css";
 @import "./styles/controls-handbook-and-admin.css";
+/* Last: rebinds the vendored Squisq chrome palette onto gezel's tokens. */
+@import "./styles/squisq-theme.css";

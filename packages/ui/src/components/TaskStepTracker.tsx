@@ -1,6 +1,13 @@
-import type { GezelSummary, TaskAssignee, TaskCraftbookStep, TaskStatus } from '@bendyline/gezel';
+import {
+  type GezelSummary,
+  type TaskAssignee,
+  type TaskCraftbookStep,
+  type TaskStatus,
+  displayName,
+} from '@bendyline/gezel';
 import { Poppetje } from '../poppetje/index.js';
 import { type StepMeta, type StepStatus, StepTracker } from './StepTracker.js';
+import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useShowPoppetjes } from './useShowPoppetjes.js';
 
 interface TaskStepTrackerProps {
@@ -71,6 +78,7 @@ export function TaskStepTracker({
   onAssign,
 }: TaskStepTrackerProps) {
   const showFigures = useShowPoppetjes();
+  const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
   const terminal = taskStatus === 'complete' || taskStatus === 'canceled';
 
   // Who applies when a step sets no assignee of its own: the gezel its
@@ -85,7 +93,10 @@ export function TaskStepTracker({
       taskAssignee ??
       null;
     if (inh?.kind === 'user') return 'you';
-    if (inh?.kind === 'gezel') return gezels.find((g) => g.id === inh.gezelId)?.name;
+    if (inh?.kind === 'gezel') {
+      const g = gezels.find((x) => x.id === inh.gezelId);
+      return g ? displayName(g, roleBasedNameOnlyMode) : undefined;
+    }
     return undefined;
   };
 
@@ -104,8 +115,10 @@ export function TaskStepTracker({
       name = 'You';
     } else if (assignee?.kind === 'gezel') {
       gezel = gezels.find((g) => g.id === assignee.gezelId);
-      name = gezel?.name;
-      role = gezel?.role;
+      name = gezel ? displayName(gezel, roleBasedNameOnlyMode) : undefined;
+      // In boring mode the name IS the role — a role subtitle under it would
+      // just say the same thing twice.
+      role = roleBasedNameOnlyMode ? undefined : gezel?.role;
     }
 
     // The active step reads as "<role> · with the task"; others just show role.
@@ -158,7 +171,9 @@ export function TaskStepTracker({
         <option value="__user">you</option>
         {gezels.map((g) => (
           <option key={g.id} value={g.id}>
-            {g.role ? `${g.name} · ${g.role}` : g.name}
+            {!roleBasedNameOnlyMode && g.role
+              ? `${g.name} · ${g.role}`
+              : displayName(g, roleBasedNameOnlyMode)}
           </option>
         ))}
       </select>

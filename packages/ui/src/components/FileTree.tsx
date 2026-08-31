@@ -1,5 +1,6 @@
 import { type ReactNode, useMemo, useState } from 'react';
 import { ContextMenu, DropdownMenu } from '../primitives/index.js';
+import { FileTypeIcon } from './FileTypeIcon.js';
 import { sortTreeNodes } from './file-view-modes.js';
 
 export interface FileEntry {
@@ -28,6 +29,8 @@ export interface FileTreeProps {
   entries: FileEntry[];
   selectedPath?: string;
   onSelect: (entry: FileEntry) => void;
+  /** Warm an expensive destination after hover/focus/pointer-down. */
+  onIntent?: (entry: FileEntry) => void;
   /** Optional per-row rename action, exposed through ⋯ and right-click menus. */
   onRename?: (entry: FileEntry) => void;
   /** Optional per-row delete action, exposed through ⋯ and right-click menus. */
@@ -102,12 +105,7 @@ export function defaultIconFor(entry: FileEntry): ReactNode {
       <i className="tree-icon tree-icon-folder fa-regular fa-folder fa-fw" aria-hidden="true" />
     );
   }
-  if (/\.(png|jpe?g|gif|svg|webp|bmp)$/i.test(entry.name)) {
-    // biome-ignore lint/a11y/noAriaHiddenOnFocusable: decorative icon, not focusable
-    return <i className="tree-icon fa-regular fa-file-image fa-fw" aria-hidden="true" />;
-  }
-  // biome-ignore lint/a11y/noAriaHiddenOnFocusable: decorative icon, not focusable
-  return <i className="tree-icon fa-regular fa-file-lines fa-fw" aria-hidden="true" />;
+  return <FileTypeIcon name={entry.name} className="tree-icon" />;
 }
 
 function defaultLabelFor(entry: FileEntry): string {
@@ -118,6 +116,7 @@ export function FileTree({
   entries,
   selectedPath,
   onSelect,
+  onIntent,
   onRename,
   onDelete,
   actionsForEntry,
@@ -141,6 +140,7 @@ export function FileTree({
           depth={0}
           selectedPath={selectedPath}
           onSelect={onSelect}
+          onIntent={onIntent}
           onRename={onRename}
           onDelete={onDelete}
           actionsForEntry={actionsForEntry}
@@ -160,6 +160,7 @@ interface TreeItemProps {
   depth: number;
   selectedPath?: string;
   onSelect: (entry: FileEntry) => void;
+  onIntent?: (entry: FileEntry) => void;
   onRename?: (entry: FileEntry) => void;
   onDelete?: (entry: FileEntry) => void;
   actionsForEntry?: (entry: FileEntry) => readonly FileTreeAction[];
@@ -175,6 +176,7 @@ function TreeItem({
   depth,
   selectedPath,
   onSelect,
+  onIntent,
   onRename,
   onDelete,
   actionsForEntry,
@@ -201,6 +203,9 @@ function TreeItem({
     <div
       className={`tree-row${selectedPath === node.path ? ' tree-row-selected' : ''}`}
       style={{ paddingLeft: `${depth * 12 + 2}px` }}
+      onPointerEnter={() => onIntent?.(entry)}
+      onFocus={() => onIntent?.(entry)}
+      onPointerDown={() => onIntent?.(entry)}
     >
       {canExpand ? (
         <button
@@ -347,6 +352,7 @@ function TreeItem({
               depth={depth + 1}
               selectedPath={selectedPath}
               onSelect={onSelect}
+              onIntent={onIntent}
               onRename={onRename}
               onDelete={onDelete}
               actionsForEntry={actionsForEntry}

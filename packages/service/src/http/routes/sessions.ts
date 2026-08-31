@@ -255,6 +255,26 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
     return c.json({ accepted: true, sessionId: id }, 202);
   });
 
+  app.post('/:id/retry', async (c) => {
+    const id = c.req.param('id');
+    const target = await ctx.chat.getSessionRecord(id);
+    if (!target) return c.json({ error: 'not found' }, 404);
+    if (target.source?.kind === 'external' && target.source.readOnly) {
+      return c.json(externalReadOnlyError(target.source), 409);
+    }
+    const cfg = await ctx.store.readConfig();
+    if (!isEngagementAllowed(cfg)) {
+      return c.json({ error: `engagement mode is ${getEngagementMode(cfg)}; AI is disabled` }, 403);
+    }
+    try {
+      const result = await ctx.chat.retryLastTurn(id);
+      return c.json(result, 202);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 409);
+    }
+  });
+
   app.post('/:id/reset', async (c) => {
     const id = c.req.param('id');
     const source = await externalReadOnlySource(ctx, id);

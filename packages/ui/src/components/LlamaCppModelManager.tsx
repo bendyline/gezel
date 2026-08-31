@@ -84,6 +84,27 @@ function fitKvBytes(
 }
 
 /**
+ * The fit verdict for one catalog row. The browse filter and the pill that
+ * row shows must read the SAME footprint: they were computed separately and
+ * diverged over the projector term, so a vision model could be hidden as
+ * unrunnable while the pill beside it — priced without its mmproj — claimed a
+ * better tier.
+ */
+function catalogFit(
+  m: ChatModelManifest & { llamaCpp: NonNullable<ChatModelManifest['llamaCpp']> },
+  memory: MemoryProfile,
+) {
+  return computeModelFit({
+    residentBytes:
+      estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes, {
+        mmprojBytes: m.llamaCpp.mmproj?.sizeBytes,
+      }) + fitKvBytes(m, memory),
+    isMoE: isMoEFromTags(m.tags),
+    ...fitMachine(memory),
+  });
+}
+
+/**
  * Adapt the /api/system/memory profile to the recommendation module's
  * device shape. `darwin-unified` is the only source that implies
  * macOS; the unified-pool GB10 case is caught by the vram-vs-ram
@@ -208,6 +229,10 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
   const [showAll, setShowAll] = useState(false);
   // Which model row has the context-size editor expanded beneath it.
   const [contextEditorFor, setContextEditorFor] = useState<string | null>(null);
+  // Which model's vision toggle is mid-save. The toggle's *state* comes from
+  // the row (`m.nativeVisionEnabled`), server-resolved — the client must not
+  // re-derive "absent config means on" or the two will drift.
+  const [visionSaving, setVisionSaving] = useState<string | null>(null);
   // False until the override endpoint answers — an older daemon or machine
   // broker 404s and the affordance hides rather than erroring per row.
   const [contextOverridesSupported, setContextOverridesSupported] = useState(false);
@@ -226,6 +251,23 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
       probingRef.current = res.probing;
     } catch {
       /* fitness surface is advisory — a blip just keeps the last state */
+    }
+  }, []);
+
+  // Writes only. The row carries the resolved state, so after a flip we
+  // re-read the list rather than second-guessing the server's default.
+  const toggleVision = useCallback(async (modelId: string, next: boolean) => {
+    setVisionSaving(modelId);
+    try {
+      const cfg = await api.getConfig();
+      await api.updateConfig({
+        nativeVision: { ...(cfg.nativeVision ?? {}), [modelId]: next },
+      });
+      await refresh();
+    } catch {
+      /* leave the previous state visible rather than lying about the flip */
+    } finally {
+      setVisionSaving(null);
     }
   }, []);
 
@@ -832,6 +874,16 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
                                   onToggleContextEditor={() =>
                                     setContextEditorFor((prev) => (prev === m.id ? null : m.id))
                                   }
+                                  {...(m.nativeVisionEnabled !== undefined
+                                    ? {
+                                        visionAction: {
+                                          enabled: m.nativeVisionEnabled,
+                                          busy: visionSaving === m.id,
+                                          onToggle: () =>
+                                            void toggleVision(m.id, !m.nativeVisionEnabled),
+                                        },
+                                      }
+                                    : {})}
                                   fitnessAction={fitnessMenuAction(
                                     entry,
                                     probing.includes(fitnessKey),
@@ -916,15 +968,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
               // fits only via expert-offload to RAM) — hide only the truly
               // too-big. Replaces the old dense-naive `size > budget` hide,
               // which wrongly buried offloadable MoE models.
-              const fit = computeModelFit({
-                residentBytes:
-                  estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes, {
-                    mmprojBytes: m.llamaCpp.mmproj?.sizeBytes,
-                  }) + fitKvBytes(m, memory),
-                isMoE: isMoEFromTags(item.manifest.tags),
-                ...fitMachine(memory),
-              });
-              if (!fit.runnable) return false;
+              if (!catalogFit(m, memory).runnable) return false;
             }
             return true;
           }}
@@ -938,15 +982,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false }: Props
               inflight && inflight.totalBytes > 0
                 ? Math.min(100, Math.round((inflight.bytesWritten / inflight.totalBytes) * 100))
                 : null;
-            const fit = memory
-              ? computeModelFit({
-                  residentBytes:
-                    estimateLlamaCppResidentBytes(m.llamaCpp.approxSizeBytes) +
-                    fitKvBytes(m, memory),
-                  isMoE: isMoEFromTags(item.manifest.tags),
-                  ...fitMachine(memory),
-                })
-              : null;
+            const fit = memory ? catalogFit(m, memory) : null;
             return (
               <div className="catalog-ollama-action">
                 <div className="catalog-ollama-meta">
@@ -1068,7 +1104,9 @@ function InstallProgress({
   } else if (inst.phase === 'downloading') {
     phaseLabel = known
       ? `Downloading ${formatBytes(inst.bytesWritten)} of ${formatBytes(inst.totalBytes)} (${pct}%)`
-      : `Downloading ${formatBytes(inst.bytesWritten)}…`;
+      : inst.bytesWritten > 0
+        ? `Downloading ${formatBytes(inst.bytesWritten)}…`
+        : 'Preparing download…';
   } else if (inst.phase === 'verifying') {
     phaseLabel = 'Checking download…';
   } else {

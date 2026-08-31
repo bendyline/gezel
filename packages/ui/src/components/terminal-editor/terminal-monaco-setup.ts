@@ -90,7 +90,14 @@ async function registerTerminalMonaco(): Promise<void> {
       { token: 'attribute.name', foreground: 'd6b07a' },
     ],
     colors: {
-      'editor.background': '#111111',
+      // Both backgrounds track the squisq editor the chat composer types
+      // into (#f6f1e7 light, #111827 dark) — the two compose modes share one
+      // frame, so a terminal surface on its own colour reads as a different
+      // panel bolted into the same box. Note the dark value is squisq's, read
+      // off the rendered editor: gezel's stylesheet tries to force #242424
+      // there via `.squisq-editor-shell[data-theme="dark"]`, but that selector
+      // does not match the shell squisq actually renders, so it never applies.
+      'editor.background': '#111827',
       'editor.lineHighlightBackground': '#00000000',
       'editor.lineHighlightBorder': '#00000000',
     },

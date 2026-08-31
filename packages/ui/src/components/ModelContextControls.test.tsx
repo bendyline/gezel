@@ -57,6 +57,51 @@ describe('ModelActionsMenu', () => {
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
   });
 
+  it('offers a vision toggle only for a model whose projector is on disk', () => {
+    const onToggle = vi.fn();
+    render(
+      <ModelActionsMenu
+        engine="llama-cpp"
+        model={{ ...MODEL, mmprojSizeBytes: 927_607_488 }}
+        contextSupported
+        contextEditorOpen={false}
+        onToggleContextEditor={() => {}}
+        visionAction={{ enabled: false, onToggle }}
+      />,
+    );
+    const item = screen.getByRole('menuitem', { name: 'Turn on vision' });
+    fireEvent.click(item);
+    expect(onToggle).toHaveBeenCalledOnce();
+  });
+
+  it('reads "Turn off vision" once the model is already using its projector', () => {
+    render(
+      <ModelActionsMenu
+        engine="llama-cpp"
+        model={{ ...MODEL, mmprojSizeBytes: 927_607_488 }}
+        contextSupported
+        contextEditorOpen={false}
+        onToggleContextEditor={() => {}}
+        visionAction={{ enabled: true, onToggle: () => {} }}
+      />,
+    );
+    expect(screen.getByRole('menuitem', { name: 'Turn off vision' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Turn on vision' })).not.toBeInTheDocument();
+  });
+
+  it('shows no vision item at all for a text-only model', () => {
+    render(
+      <ModelActionsMenu
+        engine="llama-cpp"
+        model={MODEL}
+        contextSupported
+        contextEditorOpen={false}
+        onToggleContextEditor={() => {}}
+      />,
+    );
+    expect(screen.queryByRole('menuitem', { name: /vision/i })).not.toBeInTheDocument();
+  });
+
   it('hides Delete for machine models and Context size when unsupported', () => {
     render(
       <ModelActionsMenu

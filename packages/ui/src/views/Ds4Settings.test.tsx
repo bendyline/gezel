@@ -41,7 +41,7 @@ vi.mock('../api.js', () => ({
 const { Ds4Settings } = await import('./Ds4Settings.js');
 
 describe('Ds4Settings', () => {
-  it('describes the safe streaming behavior without exposing residency controls', () => {
+  it('surfaces the memory-use choice and names the cost of streaming', () => {
     render(
       <Ds4Settings config={{ provider: 'ds4' } as ConfigResponse} onConfigChanged={vi.fn()} />,
     );
@@ -49,14 +49,59 @@ describe('Ds4Settings', () => {
     expect(screen.getByRole('heading', { name: 'This PC (DwarfStar - DS4)' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'DwarfStar models' })).toBeInTheDocument();
     expect(screen.getByText(/engine available · metal/i)).toBeInTheDocument();
-    expect(screen.getByText(/SSD streaming stays on automatically/i)).toBeInTheDocument();
     expect(screen.getByText(/Lower quantizations \(Q2\) start faster/i)).toBeInTheDocument();
     // The panel names every family the engine runs, not just the first one it
     // shipped with — ds4 also runs GLM 5.2.
     expect(screen.getByText(/DeepSeek V4 and GLM 5\.2/i)).toBeInTheDocument();
-    expect(screen.queryByText(/^Advanced/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
-    expect(screen.queryByText(/under ~96 GB/i)).not.toBeInTheDocument();
+
+    // Residency used to be a config-file-only key with no UI, which made the
+    // ~10x it is worth unreachable in the product.
+    expect(screen.getByRole('heading', { name: 'Memory use' })).toBeInTheDocument();
+    const tray = screen.getByRole('radiogroup', { name: 'Memory use' });
+    expect(tray).toBeInTheDocument();
+    // Unset config is the automatic policy, so the in-memory key is latched.
+    expect(screen.getByRole('radio', { name: /Keep in memory when it fits/i })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(screen.getByRole('radio', { name: /Always stream from SSD/i })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+    // The speed difference is the whole reason this control exists; a tray
+    // that does not say it just asks the user to guess.
+    expect(screen.getByText(/roughly ten times faster/i)).toBeInTheDocument();
+  });
+
+  it('latches the streaming key when the user has opted into it', () => {
+    render(
+      <Ds4Settings
+        config={{ provider: 'ds4', ds4SsdStreaming: true } as ConfigResponse}
+        onConfigChanged={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('radio', { name: /Always stream from SSD/i })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+  });
+
+  it('clears ds4SsdStreaming rather than writing false when choosing in-memory', async () => {
+    const { api } = await import('../api.js');
+    const onConfigChanged = vi.fn();
+    render(
+      <Ds4Settings
+        config={{ provider: 'ds4', ds4SsdStreaming: true } as ConfigResponse}
+        onConfigChanged={onConfigChanged}
+      />,
+    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole('radio', { name: /Keep in memory when it fits/i }));
+    // `undefined` is the automatic policy. Writing `false` would persist a
+    // value that only exists to mean "not true" and would read as an override
+    // the user never expressed.
+    expect(api.updateConfig).toHaveBeenCalledWith({ ds4SsdStreaming: undefined });
   });
 
   it('loads the retained DwarfStar engine log from Diagnostics', async () => {

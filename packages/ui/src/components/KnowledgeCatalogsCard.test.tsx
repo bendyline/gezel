@@ -37,6 +37,22 @@ beforeEach(() => {
 });
 
 describe('KnowledgeCatalogsCard', () => {
+  it('hides Install until the source is a valid catalog path or URL', async () => {
+    render(<KnowledgeCatalogsCard />);
+    const input = await screen.findByLabelText('Catalog file path or URL');
+
+    expect(screen.queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'notes.txt' } });
+    expect(screen.queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: 'https:/example.test/notes.gezk' } });
+    expect(screen.queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: '/catalogs/notes.gezk' } });
+    expect(screen.getByRole('button', { name: 'Install' })).toBeVisible();
+  });
+
   it('lists installed catalogs with their state', async () => {
     render(<KnowledgeCatalogsCard />);
     expect(await screen.findByText('Shop Notes')).toBeInTheDocument();

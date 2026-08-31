@@ -157,6 +157,41 @@ export interface GateEvalDeps {
       stdoutTail?: string;
     }>;
   }>;
+  /**
+   * Paths the TASK ITSELF handed the assignee — invocation parameter
+   * values, the step prompt's own backticked path tokens, the artifact
+   * working folder. Fed to `citationsResolve` as its `knownPaths`
+   * forgiveness set: a deliverable transcribing the run's own metadata
+   * (a sources packet recording `tasks/8` or the future
+   * `powerpoint/task-8/deck.pptx`) is bookkeeping, not a fabricated
+   * citation. Build with {@link taskSuppliedCitationPaths}.
+   */
+  knownCitationPaths?: readonly string[];
+}
+
+/**
+ * Collect the path strings a task/step hands its assignee, for
+ * {@link GateEvalDeps.knownCitationPaths}. Two sources: every invocation
+ * parameter value (non-path params are inert — forgiveness requires exact
+ * match against a slash-containing citation), and every backticked
+ * slash-containing token in the interpolated step prompt (the procedure's
+ * own boundary examples, e.g. "do not reuse an earlier `notes/outline.md`").
+ */
+export function taskSuppliedCitationPaths(opts: {
+  stepPrompt?: string;
+  params?: Record<string, string>;
+  artifactDir?: string;
+}): string[] {
+  const out = new Set<string>();
+  for (const value of Object.values(opts.params ?? {})) {
+    const v = value.trim();
+    if (v) out.add(v);
+  }
+  if (opts.artifactDir?.trim()) out.add(opts.artifactDir.trim());
+  for (const m of (opts.stepPrompt ?? '').matchAll(/`([^`\s]*\/[^`\s]+)`/g)) {
+    if (m[1]) out.add(m[1]);
+  }
+  return [...out];
 }
 
 /**
@@ -550,6 +585,7 @@ async function evalCheckInner(
         ...(c.minRows !== undefined ? { minRows: c.minRows } : {}),
         ...(c.uniqueBy ? { uniqueBy: c.uniqueBy } : {}),
         ...(c.format ? { format: c.format } : {}),
+        ...(c.allowExtraFields !== undefined ? { allowExtraFields: c.allowExtraFields } : {}),
       });
       const rowCount = (r as { rowCount?: number }).rowCount;
       return {
@@ -621,6 +657,7 @@ async function evalCheckInner(
         ...(c.flags ? { flags: c.flags } : {}),
         ...(c.minCitations !== undefined ? { minCitations: c.minCitations } : {}),
         ...(c.corpus ? { corpus: c.corpus } : {}),
+        ...(deps?.knownCitationPaths ? { knownPaths: deps.knownCitationPaths } : {}),
       });
       return {
         ok: r.ok,
@@ -629,6 +666,7 @@ async function evalCheckInner(
           resolved: capList(r.resolved),
           unresolved: capList(r.unresolved),
           urls: capList(r.urls),
+          ...(r.forgiven && r.forgiven.length > 0 ? { forgiven: capList(r.forgiven) } : {}),
         },
       };
     }

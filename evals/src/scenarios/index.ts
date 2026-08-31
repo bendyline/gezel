@@ -165,6 +165,11 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   // turn that must persist an application into the workspace pipeline.
   [jobHuntScenario.id]: jobHuntScenario,
   ...CRAFTBOOK_SCENARIOS,
+  // Craftbook SELECTION + AUTHORING probes. These were opt-in (runnable by
+  // name only) until they became members of the `complex-work` suite —
+  // suites.test.ts resolves membership through SCENARIOS, so an opt-in map
+  // cannot supply a suite member. They now grow `pnpm eval:all` by design.
+  ...CRAFTBOOK_AUTHORING_SCENARIOS,
 };
 
 /**
@@ -180,10 +185,8 @@ export const SCENARIOS: Record<string, EvalScenario> = {
 export const ANCHORED_SCENARIOS = ['tictactoe', 'petshop', 'tankcombat'] as const;
 
 export function getScenario(id: string): EvalScenario {
-  // Opt-in maps are consulted AFTER the main registry: the craftbook
-  // authoring scenarios are runnable by name (and by the
-  // ab-craftbook-format bin) without growing `pnpm eval:all` /
-  // `listScenarios()` output.
+  // The authoring scenarios are spread into SCENARIOS above; the second
+  // lookup is kept so a future opt-in entry stays runnable by name.
   const scenario = SCENARIOS[id] ?? CRAFTBOOK_AUTHORING_SCENARIOS[id];
   if (!scenario) {
     const known =

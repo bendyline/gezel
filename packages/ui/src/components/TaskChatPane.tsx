@@ -1,8 +1,9 @@
-import type { GezelSummary, Task } from '@bendyline/gezel';
+import { type GezelSummary, type Task, displayName } from '@bendyline/gezel';
 import { useEffect, useMemo, useState } from 'react';
 import { ChatComposer } from './ChatComposer.js';
 import { ProjectTimeline } from './ProjectTimeline.js';
 import { SessionSwitcher } from './SessionSwitcher.js';
+import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 /**
  * Inline chat surface for TaskDetail's Chat tab. One-on-one with the task's
@@ -20,6 +21,7 @@ import { SessionSwitcher } from './SessionSwitcher.js';
  * task.
  */
 export function TaskChatPane({ task, gezels }: { task: Task; gezels: GezelSummary[] }) {
+  const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
   const assigneeGezelId = task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined;
   const targetGezel = useMemo(() => {
     if (assigneeGezelId) {
@@ -55,6 +57,7 @@ export function TaskChatPane({ task, gezels }: { task: Task; gezels: GezelSummar
       </div>
     );
   }
+  const targetGezelName = displayName(targetGezel, roleBasedNameOnlyMode);
 
   return (
     <div className="task-detail-chat">
@@ -83,7 +86,7 @@ export function TaskChatPane({ task, gezels }: { task: Task; gezels: GezelSummar
         }}
         taskRef={task.ref}
         {...(task.activeStepId ? { stepId: task.activeStepId } : {})}
-        placeholder={`Talk to ${targetGezel.name} about ${task.ref}.`}
+        placeholder={`Talk to ${targetGezelName} about ${task.ref}.`}
         belowAddressLine={
           <SessionSwitcher
             gezelId={targetGezel.id}

@@ -129,6 +129,71 @@ export type NormalizedAttachment =
     };
 
 /**
+ * The second corpus shape: a page of rows, not a document.
+ *
+ * A document corpus writes one markdown file per record, which is right for
+ * mail, issues, calendar entries — corpora in the 10^3-10^4 range where each
+ * record is prose a human reads. It is wrong by four to six orders of
+ * magnitude for telemetry (Azure Monitor, CDN logs, billing exports), and it
+ * fails three separate ways: a million inodes per binding per day; retrieval
+ * that cannot express `GROUP BY`; and near-identical log text collapsing the
+ * vector space, which degrades retrieval for the corpora that need it.
+ *
+ * So observation corpora land as partitioned columnar files and are read
+ * back through SQL. The gezel never sees a row — it writes a query and reads
+ * a result set. That is what decouples corpus size from context size, and it
+ * is why a 500M-row table has no equivalent of the document corpus's
+ * `MAX_ARTIFACT_FILES` ceiling.
+ *
+ * ONE `RecordRef` IS ONE PAGE, NOT ONE ROW. The engine's `backfillLimit`
+ * (default 500, capped at 5,000) and `MAX_PARTIAL_ROUNDS` then bound pages
+ * per pass rather than rows, so a 10k-row page yields a 200M-row-per-pass
+ * ceiling without touching a single existing constant.
+ */
+export interface ObservationBatch {
+  /** Table slug within the binding's corpus. One adapter may feed several. */
+  table: string;
+  /**
+   * Partition this page belongs to (conventionally an ISO date, `2026-08-28`).
+   * Omitted means the writer derives it from the table manifest's time column,
+   * falling back to a single `unpartitioned` bucket.
+   */
+  partition?: string;
+  /** The page's rows, pre-normalization. The writer coerces them to the
+   *  table manifest's declared columns before they touch disk. */
+  rows: Record<string, unknown>[];
+  /**
+   * Adapter-side row count, when the source reports one. Compared against the
+   * rows actually written so a silently truncated page fails the pass instead
+   * of quietly shrinking the corpus.
+   */
+  expectedRows?: number;
+}
+
+/**
+ * What an adapter's `fetchRecord` returns. The two shapes are deliberately a
+ * discriminated union rather than two adapter interfaces: the sync engine's
+ * scope iteration, cursor envelope, paging, retry, and rate-limit handling
+ * are identical for both, and only the terminal write differs.
+ */
+export type ConnectorRecord =
+  | { kind: 'document'; record: NormalizedRecord }
+  /**
+   * Plural because one fetched page can legitimately span several tables — a
+   * query API that returns "here are your metrics AND your errors" is common,
+   * and splitting that into separate refs is impossible before the fetch. The
+   * writer takes them in order; each is partitioned and sealed on its own.
+   */
+  | { kind: 'observations'; batches: ObservationBatch[] };
+
+/** Narrowing helper — an adapter that emits rows rather than documents. */
+export function isObservationRecord(
+  rec: NormalizedRecord | ConnectorRecord,
+): rec is { kind: 'observations'; batches: ObservationBatch[] } {
+  return (rec as ConnectorRecord).kind === 'observations';
+}
+
+/**
  * The adapter contract. Constructed per sync pass (connect on first call,
  * `close()` when done), exactly like the mail providers. Generalizes
  * `MailProvider`; the `scope` axis carries mail's per-folder partitioning —
@@ -190,4 +255,4 @@ export interface AdapterDeps {
 export type AdapterFactory = (
   binding: ConnectorBindingRef,
   deps: AdapterDeps,
-) => Promise<ConnectorAdapter<NormalizedRecord, unknown>>;
+) => Promise<ConnectorAdapter<NormalizedRecord | ConnectorRecord, unknown>>;

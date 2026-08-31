@@ -381,6 +381,85 @@ describe('StableDiffusionCppProvider.generate', () => {
   });
 });
 
+describe('StableDiffusionCppProvider default model', () => {
+  async function installModel(id: string, name: string) {
+    await mkdir(join(modelsRoot, id), { recursive: true });
+    await writeFile(
+      join(modelsRoot, id, 'manifest.json'),
+      JSON.stringify({
+        id,
+        name,
+        approxSizeBytes: 1,
+        installedAt: new Date().toISOString(),
+      }),
+      'utf8',
+    );
+  }
+
+  function okFetch(): typeof fetch {
+    const pngB64 = Buffer.concat([PNG_SIGNATURE, Buffer.alloc(4, 0)]).toString('base64');
+    return async () =>
+      new Response(JSON.stringify({ images: [pngB64] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+  }
+
+  it('falls back to the first installed model when nothing is configured', async () => {
+    await installModel('bbb-model', 'Bbb');
+    await installModel('zzz-model', 'Zzz');
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl: okFetch(),
+    });
+
+    const out = await provider.generate({ prompt: 'x' });
+    expect(out.meta.model).toBe('bbb-model');
+  });
+
+  it('uses the configured default for a request that names no model', async () => {
+    await installModel('bbb-model', 'Bbb');
+    await installModel('zzz-model', 'Zzz');
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl: okFetch(),
+      defaultModelId: 'zzz-model',
+    });
+
+    const out = await provider.generate({ prompt: 'x' });
+    expect(out.meta.model).toBe('zzz-model');
+  });
+
+  it('still lets a per-request model win over the configured default', async () => {
+    await installModel('bbb-model', 'Bbb');
+    await installModel('zzz-model', 'Zzz');
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl: okFetch(),
+      defaultModelId: 'zzz-model',
+    });
+
+    const out = await provider.generate({ prompt: 'x', model: 'bbb-model' });
+    expect(out.meta.model).toBe('bbb-model');
+  });
+
+  it('falls back when the configured default is no longer installed', async () => {
+    await installModel('bbb-model', 'Bbb');
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl: okFetch(),
+      defaultModelId: 'deleted-model',
+    });
+
+    const out = await provider.generate({ prompt: 'x' });
+    expect(out.meta.model).toBe('bbb-model');
+  });
+});
+
 describe('StableDiffusionCppProvider.pullModel', () => {
   it('downloads, verifies sha256, persists the manifest', async () => {
     const weights = Buffer.from('fake-weights-data');

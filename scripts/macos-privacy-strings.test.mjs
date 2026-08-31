@@ -109,8 +109,21 @@ test('macOS usage strings match what Gezel actually does', async () => {
     files.map(async (f) => ({ f, text: await readFile(f, 'utf8') })),
   );
 
+  const captureByKey = new Map();
   for (const { pattern, key, api } of CAPTURE_APIS) {
     const users = sources.filter(({ text }) => pattern.test(text)).map(({ f }) => f);
+    const group = captureByKey.get(key) ?? { apis: [], users: [] };
+    group.apis.push(api);
+    group.users.push(...users);
+    captureByKey.set(key, group);
+  }
+
+  // Several APIs can require the same plist key (getUserMedia,
+  // MediaRecorder, and askForMediaAccess all map to microphone usage). The
+  // declaration is justified when ANY API in that group is used; evaluating
+  // each pattern independently would demand that the same key be both present
+  // and absent as soon as one of its sibling APIs is introduced.
+  for (const [key, { apis, users }] of captureByKey) {
     const declared = extendInfo[key];
     if (users.length === 0) {
       // Nothing uses it, so the key must stay removed rather than claim reach
@@ -118,13 +131,13 @@ test('macOS usage strings match what Gezel actually does', async () => {
       assert.equal(
         declared,
         null,
-        `${key} is declared but nothing calls ${api}. Remove it (set it to null) or a privacy reviewer will see a claim the app cannot justify.`,
+        `${key} is declared but nothing calls ${apis.join(', ')}. Remove it (set it to null) or a privacy reviewer will see a claim the app cannot justify.`,
       );
       continue;
     }
     assert.ok(
       typeof declared === 'string' && declared.length > 0,
-      `${api} is used in ${users[0]} but ${key} is not set. macOS terminates an app that touches this without a usage string — add real copy to mac.extendInfo.`,
+      `${apis.join('/')} is used in ${users[0]} but ${key} is not set. macOS terminates an app that touches this without a usage string — add real copy to mac.extendInfo.`,
     );
     for (const placeholder of PLACEHOLDERS) {
       assert.ok(

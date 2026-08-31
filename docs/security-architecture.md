@@ -270,8 +270,14 @@ off-preset combination (`classifySecurityLevel` re-labels the slider).
    pruned tools are absent from the bridge's callable name set, and its wrapper
    rejects non-preview navigation before dispatch.
 3. **Sink checks** — the action handlers re-check the policy independently:
-   - `web_search` / `wikipedia_search` → `providers/search/factory.ts` (no provider when
+   - `web_search` → `providers/search/factory.ts` (no provider when
      `!allowExternalServices`).
+   - `wikipedia_search` / `wikipedia_read` → `http/routes/tools.ts` checks
+     `allowExternalServices` at the route. These build their provider directly rather than
+     through `createSearchProvider`, so they do **not** inherit the factory's ceiling and
+     must carry their own — a zero-key lookup is still egress, since it reveals what is
+     being researched. Both exempt `GEZEL_MOCK_PROVIDER=1` in the same order the factory
+     does, because the mock issues no request at all.
    - `fetch_url` → `http/routes/tools.ts` checks `allowExternalServices` **and** SSRF (§11).
    - external chat → `chat/manager.ts` (`!allowExternalChat` → refused).
    - script execution → `scripts/runner.ts` (gates the run; strips `network`/`credential:*`

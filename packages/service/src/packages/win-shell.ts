@@ -28,6 +28,24 @@
  * directly (spawn returns EINVAL since the Node 18.20+ CVE mitigation).
  */
 
+/**
+ * A command cmd.exe must itself resolve through PATH, safe to leave bare.
+ *
+ * Quoting one is not merely unnecessary, it is wrong: cmd stores the literal
+ * token in `%0`, so a resolved `.cmd` shim's `%~dp0` expands to the *caller's
+ * current directory* instead of the shim's own. corepack's `pnpm.CMD` is
+ * built on `%~dp0`, so `"pnpm"` sends it looking for
+ * `<cwd>\node_modules\corepack\dist\pnpm.js` and it dies with
+ * MODULE_NOT_FOUND — every pnpm launch that fell back to PATH (package
+ * installs, Playwright runs, Copilot login) failed this way on Windows.
+ *
+ * The character class is deliberately narrower than "has no space": it admits
+ * nothing cmd treats as a separator, a metacharacter, or a path component, so
+ * a matching token cannot change how the command line parses. Anything
+ * path-like — and every argument, always — still gets quoted.
+ */
+const BARE_COMMAND_NAME = /^[A-Za-z0-9._+-]+$/;
+
 export class UnquotableShellTokenError extends Error {
   constructor(token: string) {
     super(`cannot safely quote for the Windows shell: ${JSON.stringify(token)}`);
@@ -68,6 +86,10 @@ export function quoteWinShellToken(token: string): string {
  * Use at every `shell: true` spawn site so command and arguments cannot
  * drift apart again; quoting one without the other is the bug this
  * module exists to prevent.
+ *
+ * The single exception is a bare command name left for cmd to resolve
+ * through PATH — see {@link BARE_COMMAND_NAME}, where quoting breaks the
+ * shim it resolves to. Arguments are quoted unconditionally.
  */
 export function winShellSafe(
   command: string,
@@ -75,7 +97,8 @@ export function winShellSafe(
   shell: boolean,
 ): { command: string; args: string[] } {
   if (!shell) return { command, args: [...args] };
-  const tokens = [quoteWinShellToken(command), ...args.map(quoteWinShellToken)];
+  const head = BARE_COMMAND_NAME.test(command) ? command : quoteWinShellToken(command);
+  const tokens = [head, ...args.map(quoteWinShellToken)];
   return {
     command: tokens.join(' '),
     args: [],

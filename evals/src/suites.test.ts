@@ -39,6 +39,31 @@ const PRODUCTIVITY_SCENARIO_IDS = [
   'wikipedia-research-brief',
 ] as const;
 
+const DEVELOPER_SCENARIO_IDS = [
+  'fix-squisq-bugs',
+  'dev-craftbook-routing',
+  'interface-contract',
+  'craftbook-code-review',
+  'craftbook-api-contract-review',
+  'craftbook-codemod-sweep',
+  'large-pr-review',
+  'craftbook-bug-fix-tdd',
+  'craftbook-deep-security-review',
+  'craftbook-refactor-module',
+] as const;
+
+const COMPLEX_WORK_SCENARIO_IDS = [
+  'craftbook-find-vs-create',
+  'craftbook-route-multi',
+  'craftbook-invoice-run',
+  'craftbook-author-params',
+  'craftbook-export-generalize',
+  'craftbook-author-linear',
+  'craftbook-author-gate-script',
+  'craftbook-edit-midtask',
+  'craftbook-author-fanout',
+] as const;
+
 /**
  * Suites whose members must each declare an explicit max duration.
  *
@@ -48,7 +73,16 @@ const PRODUCTIVITY_SCENARIO_IDS = [
  * multi-day job, and nothing in `--list` warns you first. Suites people
  * are told to run end-to-end have to be predictable.
  */
-const BUDGETED_SUITE_IDS = ['core', 'smoke', 'productivity', 'productivity-smoke'] as const;
+const BUDGETED_SUITE_IDS = [
+  'core',
+  'smoke',
+  'productivity',
+  'productivity-smoke',
+  'developer',
+  'developer-smoke',
+  'complex-work',
+  'complex-work-smoke',
+] as const;
 
 /**
  * Suites that additionally hold to a wall-clock ceiling.
@@ -58,7 +92,14 @@ const BUDGETED_SUITE_IDS = ['core', 'smoke', 'productivity', 'productivity-smoke
  * break the longitudinal comparability those anchors exist for. New suites
  * do not get to inherit that.
  */
-const CEILINGED_SUITE_IDS = ['productivity', 'productivity-smoke'] as const;
+const CEILINGED_SUITE_IDS = [
+  'productivity',
+  'productivity-smoke',
+  'developer',
+  'developer-smoke',
+  'complex-work',
+  'complex-work-smoke',
+] as const;
 
 /** Per-scenario and whole-suite worst-case ceilings for new suites. */
 const MAX_SUITE_SCENARIO_MS = 45 * 60_000;
@@ -131,6 +172,62 @@ describe('eval suites', () => {
   it('orders the productivity suite cheapest-first so a cut-short run still says something', () => {
     const budgets = suiteScenarios('productivity').map((s) => s.timeoutMs ?? 0);
     expect(budgets).toEqual([...budgets].sort((a, b) => a - b));
+  });
+
+  it('pins the developer scorecard membership and run order', () => {
+    expect(SUITES.developer!.scenarios).toEqual(DEVELOPER_SCENARIO_IDS);
+  });
+
+  it('pins the complex-work scorecard membership and run order', () => {
+    expect(SUITES['complex-work']!.scenarios).toEqual(COMPLEX_WORK_SCENARIO_IDS);
+  });
+
+  // Both new suites are deliberately hard, which makes cheapest-first
+  // ordering matter MORE than it does for productivity: a run that gets cut
+  // short mid-sweep should still have spent its time on the members most
+  // likely to have produced a verdict.
+  it.each(['developer', 'complex-work'])(
+    'orders the %s suite cheapest-first so a cut-short run still says something',
+    (suiteId) => {
+      const budgets = suiteScenarios(suiteId).map((s) => s.timeoutMs ?? 0);
+      expect(budgets).toEqual([...budgets].sort((a, b) => a - b));
+    },
+  );
+
+  it.each([
+    ['developer-smoke', 'developer'],
+    ['complex-work-smoke', 'complex-work'],
+  ])('keeps %s a strict subset of %s', (smokeId, fullId) => {
+    const full = new Set(SUITES[fullId]!.scenarios);
+    for (const sid of SUITES[smokeId]!.scenarios) {
+      expect(full.has(sid), `${smokeId} member "${sid}" is not in ${fullId}`).toBe(true);
+    }
+    expect(SUITES[smokeId]!.scenarios.length).toBeLessThan(full.size);
+  });
+
+  // The two hard suites exist to rank models that saturate core, so they
+  // must not be re-billing trials core already pays for. Sharing across
+  // suites is legitimate in general (productivity shares six on purpose),
+  // but a suite whose value proposition is HEADROOM has to be measuring
+  // something core is not.
+  it('shares no members with core', () => {
+    const core = new Set(SUITES.core!.scenarios);
+    for (const suiteId of ['developer', 'complex-work'] as const) {
+      for (const sid of SUITES[suiteId]!.scenarios) {
+        expect(core.has(sid), `${suiteId} member "${sid}" is already billed by core`).toBe(false);
+      }
+    }
+  });
+
+  // Authoring is the axis complex-work uniquely buys, and the majority
+  // share is the design commitment — not an accident of which scenarios
+  // happened to exist. Dropping below half means the suite has drifted into
+  // being a second execution suite.
+  it('keeps complex-work majority-authoring', () => {
+    const authoring = SUITES['complex-work']!.scenarios.filter((sid) =>
+      /^craftbook-(author-|edit-midtask|export-generalize)/.test(sid),
+    );
+    expect(authoring.length * 2).toBeGreaterThan(SUITES['complex-work']!.scenarios.length);
   });
 
   it('the default suite exists and resolves', () => {

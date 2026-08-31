@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
-import { extname, join } from 'node:path';
+import { join } from 'node:path';
 import { GEZEL_VERSION, createLogger, isSafeEntityId } from '@bendyline/gezel';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { ZodError } from 'zod';
@@ -16,6 +16,7 @@ import type { ServiceContext } from './context.js';
 import { v1Cors } from './cors.js';
 import { hostGuard } from './host-guard.js';
 import { mountMachineEngineHints } from './machine-engine-hints.js';
+import { mimeTypeForPath } from './mime.js';
 import { openAiErrorEnvelope } from './openai-compat/error-envelope.js';
 import { requireOpenAiEndpointsEnabled } from './openai-endpoints-gate.js';
 import { PreviewCapabilityStore } from './preview-capability.js';
@@ -247,7 +248,12 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
         'content-security-policy',
         [
           "default-src 'self'",
-          "script-src 'self'",
+          // 'wasm-unsafe-eval' is required to compile WebAssembly at all.
+          // The UI's proofing engine (harper.js) is served same-origin from
+          // /harper/ and instantiated inside a blob: worker; without this
+          // Chromium refuses the compile and proofing hangs on "Proofing...".
+          // It permits WASM compilation only, NOT eval() of JavaScript.
+          "script-src 'self' 'wasm-unsafe-eval'",
           "style-src 'self' 'unsafe-inline'",
           "img-src 'self' data: blob:",
           "font-src 'self' data:",
@@ -542,6 +548,9 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     app.all('/v1/remote/manage/video-gen/generate', (c) => c.json({ error: 'not_found' }, 404));
     app.all('/v1/remote/manage/audio/transcribe', (c) => c.json({ error: 'not_found' }, 404));
     app.all('/v1/remote/manage/audio/synthesize', (c) => c.json({ error: 'not_found' }, 404));
+    app.all('/v1/remote/manage/audio/synthesize-stream', (c) =>
+      c.json({ error: 'not_found' }, 404),
+    );
     app.route('/v1/remote/manage/image-gen', imageGenRoutes(ctx));
     app.route('/v1/remote/manage/video-gen', videoGenRoutes(ctx));
     app.route('/v1/remote/manage/audio', audioRoutes(ctx));
@@ -811,7 +820,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
         }
         const content = await readFile(file);
         return c.body(content, 200, {
-          'content-type': contentType(extname(file)),
+          'content-type': mimeTypeForPath(file),
           'cache-control': staticUiCacheControl(rel),
         });
       } catch {
@@ -872,30 +881,4 @@ export function buildPreviewApp(
   app.get('/*', (c) => c.json({ error: 'not found' }, 404));
 
   return app;
-}
-
-function contentType(ext: string): string {
-  switch (ext) {
-    case '.html':
-      return 'text/html; charset=utf-8';
-    case '.js':
-      return 'application/javascript; charset=utf-8';
-    case '.mjs':
-      return 'application/javascript; charset=utf-8';
-    case '.css':
-      return 'text/css; charset=utf-8';
-    case '.json':
-      return 'application/json; charset=utf-8';
-    case '.svg':
-      return 'image/svg+xml';
-    case '.png':
-      return 'image/png';
-    case '.jpg':
-    case '.jpeg':
-      return 'image/jpeg';
-    case '.woff2':
-      return 'font/woff2';
-    default:
-      return 'application/octet-stream';
-  }
 }

@@ -1,6 +1,9 @@
 import type {
   AudioEngineStatusResponse,
   AudioModelPullEvent,
+  AudioSynthesizeChunk,
+  AudioSynthesizeEvent,
+  AudioSynthesizeProgress,
   AudioSynthesizeRequest,
   AudioSynthesizeResponse,
   AudioTranscribeRequest,
@@ -12,6 +15,7 @@ import type {
   KnowledgeCatalogRef,
   KnowledgeInstallRequest,
   KnowledgeSearchRequest,
+  KnowledgeUpdatesResponse,
   ListActiveImagePullsResponse,
   ListActiveVideoPullsResponse,
   ListAudioCatalogResponse,
@@ -92,6 +96,8 @@ import type {
   DelegateSecurityFindingResponse,
   DescribeFolderRequest,
   DescribeFolderResponse,
+  DescribeTableRequest,
+  DescribeTableResponse,
   DeviceSafetyPolicyConfig,
   DiffFilesRequest,
   DiffFilesResponse,
@@ -223,6 +229,7 @@ import type {
   ListScriptsResponse,
   ListSessionQueueResponse,
   ListSessionToolsResponse,
+  ListTablesResponse,
   ListTaskNotesResponse,
   ListTasksResponse,
   ListTerminalThreadsResponse,
@@ -267,6 +274,8 @@ import type {
   ProjectTypeApplyPlan,
   ProjectTypeStatusResponse,
   ProviderName,
+  QueryTableRequest,
+  QueryTableResponse,
   Question,
   ReadArtifactSliceOpts,
   ReadArtifactSliceResponse,
@@ -386,6 +395,8 @@ import type {
   VSCodeSetupStatusResponse,
   WebSearchRequest,
   WebSearchResponse,
+  WikipediaReadRequest,
+  WikipediaReadResponse,
   WikipediaSearchRequest,
   WipeFaceDataResponse,
   WorkspaceCommandIndex,
@@ -398,6 +409,7 @@ import { parseTaskRef } from '@bendyline/gezel';
 import type { DeviceHealthStatusSnapshot } from '@bendyline/gezel/native';
 import {
   AudioModelPullEventSchema,
+  AudioSynthesizeEventSchema,
   ImageModelPullEventSchema,
   type ImageRecognition,
   type ImageStaticMeta,
@@ -425,6 +437,11 @@ export interface ScanModelBundleOptions {
   totalBytes?: number;
   signal?: AbortSignal;
   onProgress?: (progress: GezmodelImportProgress) => void;
+}
+
+export interface SpeechSynthesisStreamCallbacks {
+  onProgress: (progress: AudioSynthesizeProgress) => void;
+  onChunk?: (chunk: AudioSynthesizeChunk) => void | Promise<void>;
 }
 
 class ModelBundleScanError extends Error {}
@@ -1222,6 +1239,8 @@ export interface ConfigResponse {
    * speaking gezel's per-character voice. Opt-in; default `false`.
    */
   narrateAssistantReplies?: boolean;
+  /** Catalog id of the whisper.cpp model transcription runs on. */
+  defaultSttModel?: string;
   /**
    * Global AI engagement mode — panic-button control over proactive
    * behavior. Materialized on GET so the Settings UI can bind directly.
@@ -1435,8 +1454,9 @@ export interface ConfigResponse {
   };
   /** Active image-generation provider; undefined → 'sd-cpp'. */
   imageProvider?: 'sd-cpp' | 'google-ai' | 'openai' | 'mock';
-  /** Per-cloud-provider default image model id. */
+  /** Per-provider default image model id. `'sd-cpp'` names a locally installed model. */
   defaultImageModel?: {
+    'sd-cpp'?: string;
     'google-ai'?: string;
     openai?: string;
   };
@@ -1764,6 +1784,13 @@ export interface LlamaCppInstalledModel {
    * explicitly via `estimateLlamaCppResidentBytes`'s `mmprojBytes`.
    */
   mmprojSizeBytes?: number;
+  /**
+   * Whether this model will be launched with `--mmproj` — i.e. images go
+   * straight to it rather than through the image reader. Present only when a
+   * projector is installed. Server-resolved: the "absent config means on"
+   * rule lives in the daemon, not in each client.
+   */
+  nativeVisionEnabled?: boolean;
   installedAt: string;
   weightsPath: string;
   /** Context capacity advertised by the GGUF metadata. */
@@ -1879,6 +1906,16 @@ export interface Ds4ContextPlan {
   kvBytesPerToken?: number;
   /** Footprint at a zero-token window: everything the context doesn't move. */
   contextFreeResidentBytes?: number;
+  /**
+   * Whether this device would hold the model fully in memory rather than
+   * streaming its routed experts from SSD. Streaming costs roughly an order of
+   * magnitude (measured 1.85 vs 18.1 tok/s on the same IQ2_XXS build), so this
+   * is the single most decision-relevant fact when picking between quants.
+   *
+   * Computed by the daemon with the launcher's own residency function, not
+   * re-derived client-side.
+   */
+  fullyResident?: boolean;
 }
 
 /**
@@ -2771,6 +2808,11 @@ export class GezelClient {
   /** Installed catalogs: refs, enabled state, health, counts, sizes. */
   listKnowledgeCatalogs(): Promise<{ catalogs: KnowledgeCatalogStatus[] }> {
     return this.request('GET', '/api/knowledge/catalogs');
+  }
+
+  /** Newer versions available in the publisher's signed registry. */
+  knowledgeUpdates(): Promise<KnowledgeUpdatesResponse> {
+    return this.request('GET', '/api/knowledge/updates');
   }
 
   /** Kick off a catalog install (file path or URL); poll or stream the job. */
@@ -4358,8 +4400,11 @@ export class GezelClient {
 
   // ── Audio (whisper.cpp STT + Kokoro TTS) ──
 
-  transcribeAudio(body: AudioTranscribeRequest): Promise<AudioTranscribeResponse> {
-    return this.request('POST', '/api/audio/transcribe', body);
+  transcribeAudio(
+    body: AudioTranscribeRequest & { signal?: AbortSignal },
+  ): Promise<AudioTranscribeResponse> {
+    const { signal, ...payload } = body;
+    return this.request('POST', '/api/audio/transcribe', payload, undefined, signal);
   }
 
   synthesizeSpeech(
@@ -4367,6 +4412,44 @@ export class GezelClient {
   ): Promise<AudioSynthesizeResponse> {
     const { signal, ...payload } = body;
     return this.request('POST', '/api/audio/synthesize', payload, undefined, signal);
+  }
+
+  /** Synthesize speech while reporting sentence-level engine progress. */
+  async synthesizeSpeechWithProgress(
+    body: AudioSynthesizeRequest,
+    callbacks: SpeechSynthesisStreamCallbacks,
+    signal?: AbortSignal,
+  ): Promise<AudioSynthesizeResponse> {
+    let result: AudioSynthesizeResponse | undefined;
+    let streamError: string | undefined;
+    let chunkWork = Promise.resolve();
+    await consumeApiSseJson<AudioSynthesizeEvent>({
+      url: `${this.baseUrl}/api/audio/synthesize-stream`,
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal,
+      fetch: this.fetchImpl,
+      schema: AudioSynthesizeEventSchema,
+      onEvent: (event) => {
+        if (event.type === 'progress') callbacks.onProgress(event.progress);
+        if (event.type === 'chunk' && callbacks.onChunk) {
+          chunkWork = chunkWork.then(() => callbacks.onChunk?.(event.chunk));
+        }
+        if (event.type === 'done') result = event.result;
+        if (event.type === 'error') streamError = event.error;
+      },
+      isTerminal: (event) => event.type === 'done' || event.type === 'error',
+      label: 'Speech synthesis stream',
+      keepaliveTimeoutMs: 10 * 60_000,
+    });
+    await chunkWork;
+    if (streamError) throw new GezelApiError(streamError, 500);
+    if (!result) throw new GezelApiError('Speech synthesis ended without audio.', 500);
+    return result;
   }
 
   /**
@@ -4957,13 +5040,23 @@ export class GezelClient {
   }
 
   /**
-   * Clear the poisoned state on every session in a project (the chat banner's
-   * Continue button). One engine crash poisons several sessions, so a
-   * project-wide reset is what gets the project working again. Returns the
-   * number of sessions cleared.
+   * Clear the poisoned state on every session in a project (the failed-turn
+   * banner's Acknowledge action). One engine crash poisons several sessions,
+   * so a project-wide reset is what gets the project working again. Returns
+   * the number of sessions cleared.
    */
   clearProjectErrors(projectId: string): Promise<{ cleared: number }> {
     return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/clear-errors`);
+  }
+
+  /**
+   * Re-run the input behind a session's most recent failed turn. The service
+   * appends a hidden retry seed, so the provider receives the original input
+   * again without duplicating the person's message in the visible transcript.
+   * The live result arrives over the ordinary chat event stream.
+   */
+  retryChatSessionTurn(sessionId: string): Promise<{ accepted: true; sessionId: string }> {
+    return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/retry`);
   }
 
   /**
@@ -5515,6 +5608,23 @@ export class GezelClient {
       disabled?: boolean;
       /** Rate-limit backoff expiry (ISO); autonomous sync skips until then. */
       backoffUntil?: string;
+      /**
+       * Present only for an observation corpus — data mirrored as columnar
+       * tables rather than readable records. Its absence means a document
+       * corpus, so it is never an empty array.
+       */
+      tables?: {
+        table: string;
+        rows: number;
+        partitions: number;
+        earliestPartition?: string;
+        latestPartition?: string;
+        schemaInferred: boolean;
+        /** Sealed parts still awaiting the night shift's compaction. */
+        pendingParts: number;
+        lastCompactionAt?: string;
+        retentionDays?: number;
+      }[];
     }[];
   }> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/connectors`);
@@ -6172,8 +6282,41 @@ export class GezelClient {
     );
   }
 
+  toolWikipediaRead(id: string, body: WikipediaReadRequest): Promise<WikipediaReadResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/tools/wikipedia-read`,
+      body,
+    );
+  }
+
   toolSearchFiles(id: string, body: SearchFilesRequest): Promise<SearchFilesResponse> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/search-files`, body);
+  }
+
+  // ── observation tables (the tabular connector corpus) ────────────────────
+
+  /** Every observation table in the project, with row counts and time span. */
+  toolListTables(id: string): Promise<ListTablesResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/list-tables`, {});
+  }
+
+  /** One table's semantic layer, rendered as markdown for a model to read. */
+  toolDescribeTable(id: string, body: DescribeTableRequest): Promise<DescribeTableResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/tools/describe-table`,
+      body,
+    );
+  }
+
+  /**
+   * Run one read-only SQL statement against the project's observation tables.
+   * The statement is validated by DuckDB's own parser service-side before it
+   * runs; a rejected statement comes back as a 400 carrying the reason.
+   */
+  toolQueryTable(id: string, body: QueryTableRequest): Promise<QueryTableResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/tools/query-table`, body);
   }
 
   toolReadWorkspaceFiles(

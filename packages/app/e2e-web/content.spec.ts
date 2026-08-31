@@ -66,6 +66,19 @@ test.describe('documents', () => {
     await gotoHome(page);
     await openAreaView(page, 'documents');
     await expect(page.getByTestId('documents-view')).toBeVisible();
+
+    const search = page.getByRole('searchbox', { name: 'Search document contents' });
+    const createTray = page.locator('.file-create-tray');
+    const [searchBox, createTrayBox] = await Promise.all([
+      search.boundingBox(),
+      createTray.boundingBox(),
+    ]);
+    expect(searchBox).not.toBeNull();
+    expect(createTrayBox).not.toBeNull();
+    // The input is the header's shrinkable cell. Its right border must remain
+    // visible instead of extending underneath the fixed-width create tray.
+    expect(searchBox!.x + searchBox!.width).toBeLessThan(createTrayBox!.x);
+
     await shot(page, 'tree', {
       area: 'documents',
       description: 'Documents listing — the seeded document tree',

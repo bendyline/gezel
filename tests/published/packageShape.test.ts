@@ -41,7 +41,7 @@ interface PackResult {
 const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // Roughly 1.5x the measured size at the time of writing, so ordinary
   // feature work has room without a ratchet.        measured (packed)
-  '@bendyline/gezel': 1_100_000, //                    734 KB
+  '@bendyline/gezel': 1_700_000, //                    1.08 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB
   '@bendyline/gezel-app-sdk': 100_000, //               12 KB
@@ -54,8 +54,12 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   '@bendyline/gezel-cli': 150_000, //                   31 KB
   // Carries the bundled web UI (`dist/ui`) and the handboek content so a
   // Node-only CLI install can serve `gezel start --web` with nothing else
-  // to fetch. That is essentially all of this budget.
-  '@bendyline/gezel-service': 25_000_000, //          18.1 MB
+  // to fetch. That is essentially all of this budget. About 16 MB of it is
+  // harper's two WASM binaries under `dist/ui/harper/` — a pinned, fixed
+  // floor the proofing feature cannot ship without (both binaries are
+  // load-bearing; see the proofing gotcha in CLAUDE.md), so the headroom
+  // here covers the ~21 MB that actually grows with feature work.
+  '@bendyline/gezel-service': 45_000_000, //          36.7 MB
 };
 
 const ROOT_LICENSE = readFileSync(resolve(REPO_ROOT, 'LICENSE'), 'utf8');
@@ -180,6 +184,48 @@ describe('published package payloads', () => {
     expect(budget, `no size budget declared for ${name}`).toBeDefined();
     expect(packed.get(name)!.size).toBeLessThanOrEqual(budget);
   });
+
+  it.each(packages.filter((p) => p.typed))(
+    '$name ships no dangling relative imports in its declarations',
+    ({ name, path }) => {
+      // A dts rollup that inlines another package's chunk-split declarations
+      // hoists that package's relative `./chunk-<hash>.js` imports into this
+      // package's dist, where nothing resolves them: the packed tarball then
+      // fails skipLibCheck=false typechecks and the editor type server loses
+      // the surface. The SDK hit exactly this when core's dts grew a shared
+      // chunk. Its public wire types now stay self-contained, and this pins
+      // the invariant for every typed package against what npm actually packs.
+      const files = packed.get(name)!.files.map((file) => file.path.replace(/\\/g, '/'));
+      const declarations = files.filter((file) => file.endsWith('.d.ts'));
+      const shipped = new Set(files);
+      const dangling: string[] = [];
+      for (const declaration of declarations) {
+        // Comments hold JSDoc example imports and {@link import(...)} tags
+        // that TypeScript never resolves as modules — scan only real code.
+        const source = readFileSync(resolve(path, declaration), 'utf8')
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .replace(/^[\t ]*\/\/.*$/gm, '');
+        const parent = declaration.split('/').slice(0, -1).join('/');
+        const specifiers = [
+          ...source.matchAll(/\b(?:from\s+|import\s*\()\s*['"](\.\.?\/[^'"]+\.js)['"]/g),
+          // Bare side-effect imports resolve too (TS2882 when missing).
+          ...source.matchAll(/^\s*import\s*['"](\.\.?\/[^'"]+\.js)['"]/gm),
+        ].map((match) => match[1] as string);
+        for (const specifier of specifiers) {
+          const segments = [...(parent ? parent.split('/') : []), ...specifier.split('/')];
+          const normalized: string[] = [];
+          for (const segment of segments) {
+            if (segment === '.' || segment === '') continue;
+            if (segment === '..') normalized.pop();
+            else normalized.push(segment);
+          }
+          const target = normalized.join('/').replace(/\.js$/, '.d.ts');
+          if (!shipped.has(target)) dangling.push(`${declaration} -> ${specifier}`);
+        }
+      }
+      expect(dangling).toEqual([]);
+    },
+  );
 
   it.each(packages)('$name ships a README for its npm page', ({ name }) => {
     const files = packed.get(name)!.files.map((f) => f.path.toLowerCase());

@@ -23,6 +23,7 @@ import {
   type ArchiveListResponse,
   DelegateSecurityFindingRequestSchema,
   DescribeFolderRequestSchema,
+  DescribeTableRequestSchema,
   DiffFilesRequestSchema,
   type DiffFilesResponse,
   FetchUrlRequestSchema,
@@ -44,6 +45,7 @@ import {
   MapRepoRequestSchema,
   OutlineFileRequestSchema,
   ProjectSearchRequestSchema,
+  QueryTableRequestSchema,
   ReadDocAsMarkdownRequestSchema,
   ReadImageBase64RequestSchema,
   type ReadImageBase64Response,
@@ -62,7 +64,10 @@ import {
   UpdateBoekwachterIssueRequestSchema,
   WebSearchRequestSchema,
   type WebSearchResponse,
+  WikipediaReadRequestSchema,
+  type WikipediaReadResponse,
   WikipediaSearchRequestSchema,
+  projectManagedWorkspaceWritable,
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
@@ -72,10 +77,23 @@ import { suggestCraftbooks, usefulCraftbooksForSearch } from '../../craftbook/su
 import { buildPrOverlay } from '../../filemap/pr-overlay.js';
 import { PathSafetyError, resolveInside, safeJoin } from '../../fs/safe-paths.js';
 import { ensureGezel } from '../../gezels/ensure.js';
+import { DuckQueryError, DuckUnavailableError } from '../../observations/duck.js';
+import {
+  NoTablesError,
+  findTable,
+  listProjectTables,
+  renderTableDescription,
+  runQuery,
+  summarizeTable,
+} from '../../observations/query.js';
+import { SqlRejectedError } from '../../observations/statement-guard.js';
 import { createSearchProvider } from '../../providers/search/factory.js';
-import { MockSearchProvider } from '../../providers/search/mock.js';
+import { MockSearchProvider, mockWikipediaArticle } from '../../providers/search/mock.js';
 import type { SearchProvider } from '../../providers/search/types.js';
-import { WikipediaSearchProvider } from '../../providers/search/wikipedia.js';
+import {
+  WikipediaSearchProvider,
+  fetchWikipediaArticle,
+} from '../../providers/search/wikipedia.js';
 import { DEFAULT_ARCHIVE_LIMITS, guardZipArchive } from '../../safety/archive-guard.js';
 import { collectProviderSecretValues } from '../../secrets/registry.js';
 import { dispatchTaskEntry } from '../../tasks/entry-dispatch.js';
@@ -306,10 +324,31 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     // Always Wikipedia in production. Mock-provider mode (used by
     // E2E and CI) substitutes the deterministic mock so we don't
     // hit wikipedia.org in tests.
-    const provider: SearchProvider =
-      process.env.GEZEL_MOCK_PROVIDER === '1'
-        ? new MockSearchProvider()
-        : new WikipediaSearchProvider();
+    const mocked = process.env.GEZEL_MOCK_PROVIDER === '1';
+
+    // Same sink-level posture check as fetch-url. This route builds its
+    // provider directly instead of going through `createSearchProvider`,
+    // so it does NOT inherit the factory's `allowExternalServices`
+    // ceiling — and a zero-key lookup is still egress, since it reveals
+    // what is being researched. Stripping the tool from the model's
+    // roster (role-tool-filter's EXTERNAL_SERVICE_TOOLS) is not
+    // sufficient on its own: any direct API caller, or any path that
+    // re-surfaces the tool, would otherwise reach the network.
+    //
+    // Mock mode is exempt in the same order `createSearchProvider` uses:
+    // the mock provider performs no request at all, so there is no
+    // egress for the ceiling to prevent, and gating it would only force
+    // every hermetic test to configure a policy it never exercises.
+    if (!mocked && !resolveSecurityPolicy(config).allowExternalServices) {
+      return c.json(
+        { error: 'request denied: external services are disabled by the current security level.' },
+        403,
+      );
+    }
+
+    const provider: SearchProvider = mocked
+      ? new MockSearchProvider()
+      : new WikipediaSearchProvider();
     const limit = body.limit ?? config.webSearch?.defaultLimit ?? DEFAULT_WEB_SEARCH_LIMIT;
     const controller = new AbortController();
     const timeout = setTimeout(
@@ -341,6 +380,71 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     }
   });
 
+  app.post('/:id/tools/wikipedia-read', async (c) => {
+    const body = WikipediaReadRequestSchema.parse(await c.req.json());
+    const config = await ctx.store.readConfig();
+
+    // A title is the outbound payload here, so it gets the same
+    // allow/deny screen a query does — the policy's intent is "what can
+    // leave this install," not "which request shape."
+    const policyDenial = checkQueryPolicy(body.title, config.webSearch);
+    if (policyDenial) return c.json({ error: policyDenial }, 403);
+
+    const storedSecrets = await collectProviderSecretValues(ctx.secrets);
+    if (stringsContainingAnySecret([body.title], storedSecrets)) {
+      return c.json(
+        {
+          error: 'request denied: outbound payload contains a value matching a stored credential.',
+        },
+        403,
+      );
+    }
+
+    // Mock-provider mode keeps this route off the network, exactly as
+    // wikipedia-search does above — without it every E2E/CI run would
+    // reach live wikipedia.org — and is exempt from the posture check
+    // for the same reason: it issues no request.
+    const mocked = process.env.GEZEL_MOCK_PROVIDER === '1';
+    if (!mocked && !resolveSecurityPolicy(config).allowExternalServices) {
+      return c.json(
+        { error: 'request denied: external services are disabled by the current security level.' },
+        403,
+      );
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new Error('wikipedia_read timeout')),
+      DEFAULT_WEB_SEARCH_TIMEOUT_MS,
+    );
+    const start = Date.now();
+    try {
+      const article = mocked
+        ? mockWikipediaArticle({
+            title: body.title,
+            ...(body.maxChars !== undefined ? { maxChars: body.maxChars } : {}),
+          })
+        : await fetchWikipediaArticle(
+            {
+              title: body.title,
+              ...(body.language ? { language: body.language } : {}),
+              ...(body.maxChars !== undefined ? { maxChars: body.maxChars } : {}),
+            },
+            controller.signal,
+          );
+      const response: WikipediaReadResponse = {
+        ...article,
+        durationMs: Date.now() - start,
+      };
+      return c.json(response);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ error: msg }, 502);
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
   app.post('/:id/tools/search-files', async (c) => {
     const id = c.req.param('id');
     const project = await ctx.store.getProject(id);
@@ -355,6 +459,78 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       }
       return c.json(
         { error: `grep failed: ${err instanceof Error ? err.message : String(err)}` },
+        500,
+      );
+    }
+  });
+
+  // ── observation tables ─────────────────────────────────────────────────
+  //
+  // The read side of a tabular connector corpus. `query-table` is the only
+  // route in this file that runs caller-supplied SQL, and it never does so
+  // unvalidated: `runQuery` puts every statement through DuckDB's own parser
+  // first. See observations/statement-guard.ts for why a leading-keyword
+  // check would not be enough.
+
+  app.post('/:id/tools/list-tables', async (c) => {
+    const id = c.req.param('id');
+    const project = await ctx.store.getProject(id);
+    if (!project) return c.json({ error: 'project not found' }, 404);
+    const tables = await listProjectTables(ctx.store, project);
+    return c.json({ tables: tables.map(summarizeTable) });
+  });
+
+  app.post('/:id/tools/describe-table', async (c) => {
+    const id = c.req.param('id');
+    const project = await ctx.store.getProject(id);
+    if (!project) return c.json({ error: 'project not found' }, 404);
+    const body = DescribeTableRequestSchema.parse(await c.req.json());
+    const tables = await listProjectTables(ctx.store, project);
+    const ref = findTable(tables, body.table);
+    if (!ref) {
+      // Naming what IS there turns a dead end into the next call.
+      const available = tables.map((t) => t.queryName);
+      return c.json(
+        {
+          error:
+            available.length > 0
+              ? `no table named '${body.table}'; available: ${available.join(', ')}`
+              : `no table named '${body.table}'; this project has no observation tables yet`,
+          code: 'table-not-found',
+        },
+        404,
+      );
+    }
+    return c.json({
+      table: ref.queryName,
+      markdown: renderTableDescription(ref),
+      summary: summarizeTable(ref),
+    });
+  });
+
+  app.post('/:id/tools/query-table', async (c) => {
+    const id = c.req.param('id');
+    const project = await ctx.store.getProject(id);
+    if (!project) return c.json({ error: 'project not found' }, 404);
+    const body = QueryTableRequestSchema.parse(await c.req.json());
+    try {
+      return c.json(await runQuery({ store: ctx.store, duck: ctx.duck }, project, body));
+    } catch (err) {
+      // A rejected statement is the caller's mistake to fix, so it comes back
+      // as a 400 carrying the reason verbatim; a missing engine or an absent
+      // corpus is a 409 the caller cannot repair by rewriting the SQL.
+      if (err instanceof SqlRejectedError) {
+        return c.json({ error: err.message, code: err.code }, 400);
+      }
+      if (err instanceof NoTablesError || err instanceof DuckUnavailableError) {
+        return c.json({ error: err.message, code: err.code }, 409);
+      }
+      if (err instanceof DuckQueryError) {
+        // DuckDB's own text, forwarded so the model can repair its SQL.
+        return c.json({ error: err.message, code: err.code }, 400);
+      }
+      return c.json(
+        { error: `query failed: ${err instanceof Error ? err.message : String(err)}` },
         500,
       );
     }
@@ -686,7 +862,8 @@ export function toolRoutes(ctx: ServiceContext): Hono {
 
   app.post('/:id/tools/delegate-finding', async (c) => {
     const id = c.req.param('id');
-    if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
+    const project = await ctx.store.getProject(id);
+    if (!project) return c.json({ error: 'project not found' }, 404);
     const body = DelegateSecurityFindingRequestSchema.parse(await c.req.json());
     const finding = await ctx.contentIndex.findingByFingerprint(id, body.fingerprint);
     if (!finding) return c.json({ error: 'finding not found' }, 404);
@@ -730,10 +907,10 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       null,
       2,
     );
-    const task = await ctx.tasks.create(id, {
+    const createInput = {
       title: `Resolve ${finding.severity} finding in ${finding.path.split('/').pop() ?? finding.path}`,
       description: `Investigate, safely fix, and verify the indexed ${finding.severity} finding “${finding.title}” at ${at}.`,
-      assignee: { kind: 'gezel', gezelId: developer.gezelId },
+      assignee: { kind: 'gezel' as const, gezelId: developer.gezelId },
       steps: [
         {
           id: 'resolve-finding',
@@ -751,7 +928,13 @@ export function toolRoutes(ctx: ServiceContext): Hono {
           ].join('\n'),
         },
       ],
-    });
+    };
+    // A targeted finding remains actionable when the user has not granted
+    // managed writes to the checkout: give the worker the ordinary edit tools,
+    // but re-root them into a reviewable diffpack instead of the workspace.
+    const task = projectManagedWorkspaceWritable(project)
+      ? await ctx.tasks.create(id, createInput)
+      : await ctx.tasks.create(id, createInput, { draftsDiffpack: true });
     await ctx.contentIndex.setFindingStatus(id, finding.fingerprint, 'in_progress', task.ref);
     const dispatch = await dispatchTaskEntry(
       { store: ctx.store, taskRunner: ctx.taskRunner, history: ctx.history },

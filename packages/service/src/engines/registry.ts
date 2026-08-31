@@ -18,6 +18,7 @@ export const KNOWN_ENGINES: readonly NativeEngineName[] = [
   'sd-server',
   'whisper-server',
   'uv',
+  'duckdb',
 ];
 
 export function isKnownEngine(name: string): name is NativeEngineName {

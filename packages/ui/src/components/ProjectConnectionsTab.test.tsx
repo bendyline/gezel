@@ -438,3 +438,96 @@ describe('ProjectConnectionsTab bring-your-own OAuth app', () => {
     await waitFor(() => expect(mailOAuthListen).toHaveBeenCalledWith(undefined));
   });
 });
+
+describe('ProjectConnectionsTab data-table stats', () => {
+  beforeEach(() => {
+    vi.mocked(api.listConnectors).mockReset();
+    vi.mocked(api.listConnectorActions).mockReset();
+    vi.mocked(api.listConnectorTypes).mockReset();
+    vi.mocked(api.listConnectorActions).mockResolvedValue({ pending: [] } as never);
+    vi.mocked(api.listConnectorTypes).mockResolvedValue({ items: [] } as never);
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reports what arrived and how current it is, in plain language', async () => {
+    vi.mocked(api.listConnectors).mockResolvedValue({
+      configured: true,
+      bindings: [
+        {
+          id: 'b1',
+          type: 'azure-monitor-logs',
+          displayName: 'Front Door logs',
+          lastSyncedAt: '2026-08-04T00:00:00.000Z',
+          tables: [
+            {
+              table: 'requests',
+              rows: 4312889,
+              partitions: 30,
+              earliestPartition: '2026-07-06',
+              latestPartition: '2026-08-04',
+              schemaInferred: false,
+              pendingParts: 0,
+            },
+          ],
+        },
+      ],
+    } as never);
+
+    render(<ProjectConnectionsTab project={PROJECT} />);
+
+    // Someone reading this wants to know their data arrived and is current.
+    expect(await screen.findByText(/requests/)).toBeTruthy();
+    expect(screen.getByText(/4,312,889 rows/)).toBeTruthy();
+    expect(screen.getByText(/2026-07-06 → 2026-08-04/)).toBeTruthy();
+  });
+
+  it('says a schema was guessed, and that pending work is handled overnight', async () => {
+    vi.mocked(api.listConnectors).mockResolvedValue({
+      configured: true,
+      bindings: [
+        {
+          id: 'b1',
+          type: 'http-json-rows',
+          displayName: 'Exports',
+          tables: [
+            {
+              table: 'rows',
+              rows: 12,
+              partitions: 1,
+              earliestPartition: '2026-08-04',
+              latestPartition: '2026-08-04',
+              schemaInferred: true,
+              pendingParts: 3,
+              retentionDays: 30,
+            },
+          ],
+        },
+      ],
+    } as never);
+
+    render(<ProjectConnectionsTab project={PROJECT} />);
+
+    const line = await screen.findByText(/schema inferred/);
+    // A single-day span reads as one date, not an arrow pointing at itself.
+    expect(line.textContent).toContain('2026-08-04');
+    expect(line.textContent).not.toContain('→');
+    expect(line.textContent).toContain('keeps 30 days');
+    // Compaction is an internal detail; the user is told it is handled, not
+    // how many parts are outstanding.
+    expect(line.textContent).toContain('tidying up tonight');
+  });
+
+  it('shows nothing extra for a document corpus', async () => {
+    vi.mocked(api.listConnectors).mockResolvedValue({
+      configured: true,
+      bindings: [{ id: 'b1', type: 'mail-gmail', displayName: 'Work mail' }],
+    } as never);
+
+    render(<ProjectConnectionsTab project={PROJECT} />);
+
+    expect(await screen.findByText('Work mail')).toBeTruthy();
+    expect(screen.queryByText(/rows/)).toBeNull();
+  });
+});

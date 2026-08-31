@@ -12,7 +12,7 @@
  * succeeds, the tarball still publishes, and the failure only shows up as a
  * blank page for a user who installed from npm.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -40,9 +40,47 @@ describe('service bundled assets', () => {
     expect(existsSync(resolve(service.dist, 'handboek-content'))).toBe(true);
   });
 
+  it('stages BOTH harper proofing binaries beside the UI', () => {
+    // Spelling/grammar is local-first like everything else here: squisq
+    // reaches harper.js only through a dynamic import and there is no CDN
+    // fallback, so the engine has to be on disk or the feature silently
+    // hangs on "Proofing...". Both binaries are required — the full engine
+    // finds its slim sibling by substituting the filename in its own URL,
+    // so shipping one without the other 404s inside the worker.
+    for (const f of ['harper_wasm_bg.wasm', 'harper_wasm_slim_bg.wasm', 'LICENSE.txt']) {
+      expect(existsSync(resolve(service.dist, 'ui/harper', f)), f).toBe(true);
+    }
+  });
+
+  it('does not ship harper twice', () => {
+    // `harper.js/binary` locates the engine with `new URL(..., import.meta.url)`,
+    // which Vite would emit as a second, content-hashed 15.8 MB copy under
+    // assets/ — one that cannot even work, since the slim-sibling filename
+    // substitution finds no match in a hashed name. The UI build stubs that
+    // entry out (packages/ui/scripts/vite-harper-wasm.ts); this guards it.
+    const assets = resolve(service.dist, 'ui/assets');
+    const strays = existsSync(assets) ? readdirSync(assets).filter((f) => f.endsWith('.wasm')) : [];
+    expect(strays).toEqual([]);
+  });
+
   it('does not ship the browser ffmpeg runtime', () => {
     expect(existsSync(resolve(service.dist, 'ui/ffmpeg-core/ffmpeg-core.js'))).toBe(false);
     expect(existsSync(resolve(service.dist, 'ui/ffmpeg-core/ffmpeg-core.wasm'))).toBe(false);
+  });
+
+  it('stages the MLX sidecar python tree, including its hard imports', () => {
+    // gezel_mlx_server.py does `import spec_decode` (and cache_seed etc.)
+    // at module top, so a dropped sibling kills the whole MLX engine at
+    // boot — but only for people who installed from npm, the same silent
+    // failure mode as the handboek hook.
+    for (const f of [
+      'gezel_mlx_server.py',
+      'spec_decode.py',
+      'cache_seed.py',
+      'cache_persist.py',
+    ]) {
+      expect(existsSync(resolve(service.dist, 'providers/mlx/python', f)), f).toBe(true);
+    }
   });
 });
 

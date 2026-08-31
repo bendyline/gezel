@@ -68,6 +68,55 @@ function bigSource(opts: { greatCircle?: boolean; graceful?: boolean } = {}): st
   ].join('\n');
 }
 
+describe('SourceWriteGuard — binary-container paths refuse text writes', () => {
+  it('rejects write_file to a .pptx path and steers to the artifact copy when available', async () => {
+    const context = { ...ctx(), hasTool: (name: string) => name === 'copy_artifact_to_workspace' };
+    const verdict = await SourceWriteGuard.preProcess?.(
+      'write_file',
+      { path: 'deliverables/d-day.pptx', content: '# Boreal Desk Returns Pilot' },
+      context,
+    );
+    expect(verdict?.kind).toBe('reject');
+    const error = verdict?.kind === 'reject' ? verdict.error : '';
+    expect(error).toContain('binary container');
+    expect(error).toContain('copy_artifact_to_workspace');
+    expect(error).toContain('deliverables/d-day.pptx');
+  });
+
+  it('rejects replace_lines and append_to_file at container paths too', async () => {
+    for (const tool of ['replace_lines', 'append_to_file'] as const) {
+      const verdict = await SourceWriteGuard.preProcess?.(
+        tool,
+        { path: 'out/report.docx', content: 'placeholder' },
+        ctx(),
+      );
+      expect(verdict?.kind).toBe('reject');
+    }
+  });
+
+  it('does not name copy_artifact_to_workspace when the roster lacks it', async () => {
+    const verdict = await SourceWriteGuard.preProcess?.(
+      'write_file',
+      { path: 'deck.pptx', content: 'text' },
+      ctx(),
+    );
+    expect(verdict?.kind).toBe('reject');
+    const error = verdict?.kind === 'reject' ? verdict.error : '';
+    expect(error).not.toContain('copy_artifact_to_workspace');
+  });
+
+  it('leaves ordinary source and unknown extensions alone', async () => {
+    for (const path of ['src/app.ts', 'notes/plan.md', 'data/rows.csv', 'no-extension']) {
+      const verdict = await SourceWriteGuard.preProcess?.(
+        'write_file',
+        { path, content: 'hello' },
+        ctx(),
+      );
+      expect(verdict?.kind).toBe('allow');
+    }
+  });
+});
+
 describe('SourceWriteGuard — same-file clobber guard (flag-gated, off by default)', () => {
   // The guard ships disabled (it backfired on e4b — see the source comment).
   // Enable it for the behavior tests; verify the default-off path separately.

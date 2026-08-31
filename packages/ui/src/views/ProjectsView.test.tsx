@@ -9,7 +9,7 @@ vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
 
 const chatComposerMocks = vi.hoisted(() => ({ queueComposerPrefill: vi.fn() }));
-vi.mock('../components/ChatComposer.js', () => ({
+vi.mock('../components/composer-prefill.js', () => ({
   queueComposerPrefill: chatComposerMocks.queueComposerPrefill,
 }));
 
@@ -120,6 +120,9 @@ vi.mock('../components/SquisqIntegration/index.js', () => ({
 vi.mock('../components/transform/TransformToolbarButton.js', () => ({
   TransformToolbarButton: () => null,
 }));
+vi.mock('../components/DocumentNarration.js', () => ({
+  DocumentNarration: () => null,
+}));
 vi.mock('../components/CatalogBrowser.js', () => ({
   CatalogBrowser: () => <div data-testid="catalog-browser" />,
 }));
@@ -204,6 +207,7 @@ describe('ProjectsView', () => {
     window.localStorage.removeItem('gezel.projectsSidebarCollapsed');
     window.localStorage.removeItem('gezel:project-output-fraction');
     window.localStorage.removeItem('gezel:project-output-fraction:v2');
+    window.localStorage.removeItem('gezel.projectOutputVisible:pj-alpha');
     window.localStorage.removeItem('gezel.projectFilesView:pj-alpha:workspace');
     window.localStorage.removeItem('gezel.projectFilesView:pj-alpha:artifacts');
     window.localStorage.removeItem('gezel:project-file-tree-width:v1');
@@ -744,6 +748,80 @@ describe('ProjectsView', () => {
     expect(window.localStorage.getItem('gezel:project-output-fraction:v2')).toBe('0.5200');
 
     fireEvent.mouseUp(window);
+  });
+
+  // The pane's own close button, not the identically-labelled toggle in the
+  // tab row — both fire the same handler, but the X is the one the user
+  // reaches for. Its toolbar collapses to an overflow menu when it can't
+  // measure a width, which can happen in jsdom.
+  async function clickHideOutput(container: HTMLElement): Promise<void> {
+    const pane = container.querySelector('.project-output-pane');
+    if (!pane) throw new Error('output pane is not rendered');
+    const scope = within(pane as HTMLElement);
+    const inline = scope.queryByRole('button', { name: 'Hide output pane' });
+    if (inline) {
+      fireEvent.click(inline);
+      return;
+    }
+    fireEvent.click(await scope.findByRole('button', { name: 'More output actions' }));
+    fireEvent.click(await scope.findByRole('menuitem', { name: 'Hide output' }));
+  }
+
+  it('persists hiding the output pane onto the project, not just localStorage', async () => {
+    vi.mocked(api.listProjectWorkspaceHtmlPages).mockResolvedValue({
+      files: [{ name: 'index.html', path: 'index.html', isDirectory: false }],
+    });
+    vi.mocked(api.updateProject).mockImplementation(
+      async (id, patch) => ({ id, name: 'Alpha', packages: [], ...patch }) as never,
+    );
+
+    const { container } = render(<ProjectsView forceProjectId="pj-alpha" />);
+
+    await within(container).findByRole('separator', { name: 'Resize output pane' });
+    await clickHideOutput(container);
+
+    await waitFor(() =>
+      expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', { outputPaneVisible: false }),
+    );
+    expect(container.querySelector('.project-output-pane')).toBeNull();
+  });
+
+  it('keeps the output pane hidden when the project says so, index.html or not', async () => {
+    vi.mocked(api.listProjectWorkspaceHtmlPages).mockResolvedValue({
+      files: [{ name: 'index.html', path: 'index.html', isDirectory: false }],
+    });
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      name: 'Alpha',
+      packages: [],
+      outputPaneVisible: false,
+    } as never);
+
+    const { container } = render(<ProjectsView forceProjectId="pj-alpha" />);
+
+    await within(container).findByTestId('project-chat');
+    expect(container.querySelector('.project-output-pane')).toBeNull();
+    expect(api.updateProject).not.toHaveBeenCalled();
+  });
+
+  it('adopts a pre-existing localStorage output choice onto the project once', async () => {
+    window.localStorage.setItem('gezel.projectOutputVisible:pj-alpha', '0');
+    vi.mocked(api.listProjectWorkspaceHtmlPages).mockResolvedValue({
+      files: [{ name: 'index.html', path: 'index.html', isDirectory: false }],
+    });
+    vi.mocked(api.updateProject).mockImplementation(
+      async (id, patch) => ({ id, name: 'Alpha', packages: [], ...patch }) as never,
+    );
+
+    const { container } = render(<ProjectsView forceProjectId="pj-alpha" />);
+
+    await waitFor(() =>
+      expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', { outputPaneVisible: false }),
+    );
+    expect(container.querySelector('.project-output-pane')).toBeNull();
+    await waitFor(() =>
+      expect(window.localStorage.getItem('gezel.projectOutputVisible:pj-alpha')).toBeNull(),
+    );
   });
 
   it('orders and indexes every section of the project Settings page', async () => {

@@ -87,6 +87,11 @@ $cmakeFlags = @(
   '-DGGML_NATIVE=OFF',
   '-DGGML_BACKEND_DL=ON',
   '-DGGML_CPU_ALL_VARIANTS=ON',
+  # Upstream defaults LLAMA_BUILD_IS_DEV=ON, which stamps the binary
+  # `<version>-dev`; its CMakeLists says to set it OFF "when making a release
+  # from a release tag (vX.Y.Z)", which is always what gezel pins. Mirrors
+  # build.sh.
+  '-DLLAMA_BUILD_IS_DEV=OFF',
   '-DLLAMA_BUILD_SERVER=ON',
   '-DLLAMA_BUILD_TESTS=OFF',
   '-DLLAMA_BUILD_EXAMPLES=OFF',

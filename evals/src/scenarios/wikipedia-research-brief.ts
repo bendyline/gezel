@@ -56,9 +56,17 @@ export const WIKIPEDIA_DECOY_SOURCE_ID = 'WIKI-ENGINE-BAND';
  * Matched on canonical MCP tool names plus the Copilot-native built-ins,
  * so a provider that runs its own tool loop is covered where its calls are
  * visible at all.
+ *
+ * `wikipedia_search` / `wikipedia_read` are the builtins that hit the live,
+ * keyless Wikipedia API — the exact source layer 2 pins away. They are
+ * registered separately from `web_search`, so pinning `webSearch.provider`
+ * to `mock` does NOT cover them and this assertion is the only layer that
+ * fails loudly if they reach the roster. Note the underscore order: the
+ * hermetic mock's `search_wikipedia` / `read_wikipedia_sources` are
+ * deliberately NOT matched here — those are the tools the brief must use.
  */
 const LIVE_RETRIEVAL_TOOLS =
-  /^(?:web_search|web_fetch|fetch_url|open_url|http_request|browser_navigate|browser_[a-z_]+|playwright_[a-z_]+)$/i;
+  /^(?:web_search|web_fetch|wikipedia_search|wikipedia_read|fetch_url|open_url|http_request|browser_navigate|browser_[a-z_]+|playwright_[a-z_]+)$/i;
 
 export const WIKIPEDIA_RESEARCH_MISSION = [
   'Research Ada Lovelace and the Analytical Engine using only the local Wikipedia MCP',

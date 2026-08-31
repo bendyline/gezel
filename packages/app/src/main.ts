@@ -31,7 +31,11 @@ import {
 import {
   GezelClient,
   createTrustingFetch,
+  modelBytesFromResponse,
+  portableGezmodelFilename,
   streamAllChatEvents,
+  verifyModelBundleArchive,
+  writeModelBundleResponse,
 } from '@bendyline/gezel-client/node';
 import { ambientDir } from '@bendyline/gezel/paths';
 import { ambientDashboardDisplayTarget } from './ambient-display/display-target.js';
@@ -45,9 +49,11 @@ import {
 } from './ambient-display/runtime.js';
 import { autostart } from './autostart/index.js';
 import { resolveAutostartNodePath, resolveAutostartPnpmPath } from './autostart/runtime.js';
+import { buildEditableContextMenuTemplate } from './editable-context-menu.js';
 import {
   PREVIEW_FRAME_INDETERMINATE,
   daemonEntrypointArgument,
+  isAllowedMicrophoneCapture,
   isAllowedPreviewNavigation,
   isAllowedPreviewResourceRequest,
   isAllowedTopLevelNavigation,
@@ -58,12 +64,7 @@ import {
   previewExternalServicesForFrame,
 } from './electron-boundaries.js';
 import { mainProcessIssueUrl } from './main-process-errors.js';
-import {
-  modelBytesFromResponse,
-  verifyModelBundleArchive,
-  writeModelBundleResponse,
-} from './model-bundle-export.js';
-import { findGezmodelArguments, portableGezmodelFilename } from './model-bundle-files.js';
+import { findGezmodelArguments } from './model-bundle-files.js';
 import { QuitCoordinator } from './quit-coordinator.js';
 import { rendererConnectionSnapshot } from './renderer-connection.js';
 import { resolveRendererNetworkPermission } from './renderer-network-policy.js';
@@ -473,8 +474,11 @@ function rememberPreviewDocument(candidate: string, allowExternalServices: boole
  * safe — and it is the real backstop against injected markup (e.g. a
  * model-authored inline SVG icon): with `script-src 'self'` an injected
  * <script> or on*= handler cannot execute even if it slips past the SVG
- * sanitizer. Styles keep 'unsafe-inline' (React inline styles); images
- * allow only self/data:/blob:. Remote passive resources are deliberately
+ * sanitizer. `'wasm-unsafe-eval'` rides alongside it for the proofing
+ * engine and does not weaken that: it unblocks WebAssembly compilation
+ * only, and injected markup has no way to reach it. Styles keep
+ * 'unsafe-inline' (React inline styles); images allow only
+ * self/data:/blob:. Remote passive resources are deliberately
  * excluded: images and media can still disclose user state through URLs even
  * when they cannot execute. connect-src is 'self' (the API is same-origin).
  *
@@ -487,7 +491,11 @@ function rememberPreviewDocument(candidate: string, allowExternalServices: boole
  */
 const GEZEL_CSP = [
   "default-src 'self'",
-  "script-src 'self'",
+  // 'wasm-unsafe-eval' permits WebAssembly compilation and nothing else —
+  // it is NOT a relaxation toward eval() or inline script. The renderer needs
+  // it for the proofing engine (harper.js), whose WASM the daemon serves
+  // same-origin under /harper/ and which compiles inside a blob: worker.
+  "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
@@ -578,6 +586,63 @@ async function createWindow(): Promise<void> {
   // Make the E2E window visible-but-inactive so it composites for screenshots
   // without ever becoming key or jumping to the foreground.
   if (e2e) mainWindow.showInactive();
+
+  // Electron supplies spellcheck results to the main process but does not
+  // render a context menu for them. Install one at the window boundary so
+  // every editable surface (including Squisq's Tiptap editor) gets native
+  // replacements, a persistent dictionary action, and the standard edit
+  // commands without coupling browser-only editor code to Electron.
+  const contextMenuWindow = mainWindow;
+  const contextMenuWebContents = contextMenuWindow.webContents;
+  contextMenuWebContents.on('context-menu', (_event, params) => {
+    const template = buildEditableContextMenuTemplate(params, {
+      replaceMisspelling: (suggestion) => {
+        contextMenuWebContents.replaceMisspelling(suggestion);
+      },
+      addToDictionary: (word) => {
+        contextMenuWebContents.session.addWordToSpellCheckerDictionary(word);
+      },
+    });
+    if (template.length === 0) return;
+    Menu.buildFromTemplate(template).popup({ window: contextMenuWindow });
+  });
+
+  // Electron otherwise approves renderer permission requests by default.
+  // Preserve its existing behavior for unrelated APIs, but bind microphone
+  // capture to this exact top-level daemon UI and reject camera/subframe
+  // requests. The main-frame clause keeps model-authored preview documents
+  // from borrowing the app's same-origin microphone permission.
+  const rendererSession = contextMenuWebContents.session;
+  rendererSession.setPermissionCheckHandler(
+    (webContents, permission, requestingOrigin, details) => {
+      if (permission !== 'media') return true;
+      if (webContents !== contextMenuWebContents) return false;
+      return isAllowedMicrophoneCapture(
+        permission,
+        details.requestingUrl ?? requestingOrigin,
+        connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null,
+        details.isMainFrame,
+        details.mediaType ? [details.mediaType] : undefined,
+      );
+    },
+  );
+  rendererSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    if (permission !== 'media') {
+      callback(true);
+      return;
+    }
+    const media = details as Electron.MediaAccessPermissionRequest;
+    callback(
+      webContents === contextMenuWebContents &&
+        isAllowedMicrophoneCapture(
+          permission,
+          media.requestingUrl,
+          connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null,
+          media.isMainFrame,
+          media.mediaTypes,
+        ),
+    );
+  });
 
   // Only ever hand a vetted scheme to the OS. `openExternal` will launch
   // handlers for file://, smb://, custom app schemes, javascript:, etc. —

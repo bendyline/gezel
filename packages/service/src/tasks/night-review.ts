@@ -23,9 +23,9 @@ import type { TaskManager } from '../tasks/manager.js';
  *   - tasks whose `nightShift.lastRunDay` equals the window key (the
  *     stamp both workable night tasks and spawn hosts carry), plus any
  *     task that COMPLETED inside the window;
- *   - report artifacts: declared step deliverables (`advanceWhen` with
- *     `artifact: true`) of those tasks, plus a bounded mtime sweep for
- *     markdown written during the window (`reports/**`, `*report*.md`);
+ *   - report artifacts: the MARKDOWN step deliverables (`advanceWhen`
+ *     with `artifact: true`) of those tasks, plus a bounded mtime sweep
+ *     for markdown written during the window (`reports/**`, `*report*.md`);
  *   - each report parsed for gezel-action blocks + the lifecycle overlay
  *     for the action tally.
  *
@@ -182,20 +182,54 @@ export function nightShiftReportAttachmentPath(
 }
 
 export function normalizeNightShiftReportAttachment(question: Question): Question {
-  const report = question.intent?.kind === 'night-shift-review' ? question.intent.reports[0] : null;
-  if (!report) return question;
+  const intent = question.intent;
+  if (intent?.kind !== 'night-shift-review') return question;
+  // Cards written before reports were markdown-gated still name a data
+  // deliverable on disk. Drop those on read so an old card heals into
+  // the same shape a fresh one has, rather than dumping JSON at the user
+  // until the window rolls.
+  const reports = intent.reports.filter((r) => isProseArtifact(r.path));
+  const healed =
+    reports.length === intent.reports.length
+      ? question
+      : { ...question, intent: { ...intent, reports } };
+  const report = reports[0];
+  if (!report) {
+    if (healed.documentPath === undefined) return healed;
+    const { documentPath: _dropped, ...rest } = healed;
+    return rest;
+  }
   const documentPath = nightShiftReportAttachmentPath(report);
-  return question.documentPath === documentPath ? question : { ...question, documentPath };
+  return healed.documentPath === documentPath ? healed : { ...healed, documentPath };
 }
 
-/** Artifact paths a task's embedded craftbook declares as deliverables. */
+/**
+ * Report-shaped artifact paths a task's embedded craftbook declares as
+ * deliverables.
+ *
+ * Markdown only. A step declares every kind of deliverable — a coverage
+ * JSON, a batch manifest, a rendered deck — but a *report* is prose a
+ * person reads, and every surface that consumes one (the morning card,
+ * Home's "Last night" panel, the action-fence parser) renders it as
+ * markdown. Counting a step's `coverage-18.json` as "1 report written"
+ * and then attaching it to the morning card put a raw JSON literal in
+ * front of the user where the night's write-up belonged.
+ */
 function declaredArtifacts(task: Task): string[] {
   const out: string[] = [];
   for (const step of task.craftbook.steps) {
     const aw = step.advanceWhen;
-    if (aw?.artifact && aw.file && !aw.file.includes('{{')) out.push(aw.file);
+    if (!aw?.artifact || !aw.file || aw.file.includes('{{')) continue;
+    if (!isProseArtifact(aw.file)) continue;
+    out.push(aw.file);
   }
   return out;
+}
+
+/** Markdown — the only shape a night report is ever read in. */
+function isProseArtifact(path: string): boolean {
+  const lower = path.toLowerCase();
+  return lower.endsWith('.md') || lower.endsWith('.markdown');
 }
 
 /** Markdown that reads as a report: under reports/, or *report*.md, or digest. */

@@ -1416,10 +1416,16 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
       taskRef: string | undefined;
       stepId: string | undefined;
     }> = [];
+    // Every `messageGezel` call, recorded BEFORE the identity check can
+    // throw. `delivered` only sees calls that succeeded, so a guard that
+    // lets a doomed self-message through and relies on the sweep's
+    // catch-and-warn is indistinguishable from a clean skip without this.
+    const attempts: Array<{ fromGezelId: string; toGezelIdOrName: string }> = [];
     let activeGezels = new Set<string>();
     let projectActive = false;
     return {
       delivered,
+      attempts,
       setActiveGezels(ids: string[]) {
         activeGezels = new Set(ids);
       },
@@ -1430,6 +1436,9 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
       isGezelActive: (gezelId: string) => activeGezels.has(gezelId),
       providerForGezel: async (_gezelId: string) => 'ollama' as const,
       getProviderIfReady: (_name: string) => null,
+      // Mirrors the real resolver's case-folding: a display name
+      // ("Alejandro") and the slug id ("alejandro") are the same gezel.
+      resolveGezelIdRef: async (idOrName: string) => idOrName.trim().toLowerCase(),
       messageGezel: async (args: {
         fromGezelId: string;
         toGezelIdOrName: string;
@@ -1439,6 +1448,16 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
         taskRef?: string;
         stepId?: string;
       }) => {
+        attempts.push({
+          fromGezelId: args.fromGezelId,
+          toGezelIdOrName: args.toGezelIdOrName,
+        });
+        // The real `messageGezel` resolves the target BEFORE the identity
+        // check, so a name/id mismatch that slipped past the caller's
+        // guard surfaces here — permanently, on every retry.
+        if (args.fromGezelId.toLowerCase() === args.toGezelIdOrName.trim().toLowerCase()) {
+          throw new Error('cannot message yourself');
+        }
         delivered.push({
           toGezelIdOrName: args.toGezelIdOrName,
           projectId: args.projectId,
@@ -1536,6 +1555,27 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     // Re-drive bookkeeping bumped.
     const rec = await store.readTask('cron', num);
     expect(rec!.craftbook.steps[0]!.redriveCount).toBe(1);
+  });
+
+  it('skips the re-drive when the voorman IS the assignee under a different spelling', async () => {
+    const now = new Date('2026-05-01T12:00:00Z');
+    // Wild-caught on `space-invaders-clone/2`: the project's voorman was
+    // stored as the slug `alejandro` while the task's assignee kept the
+    // display name `Alejandro`. The old guard compared the two raw
+    // strings, saw "different gezels", and called `messageGezel` — which
+    // resolves the name and threw `cannot message yourself`. Nothing
+    // about that is transient, so the sweep re-threw every 30s forever.
+    await setProjectVoorman('alejandro');
+    const { num } = await makeStalledTask({ now, agoMs: 30 * 60_000, gezel: 'Alejandro' });
+    const chat = fakeChat();
+    await makeScheduler(chat, now).sweepStuckSteps();
+    // Skipped cleanly — the self-message is never even ATTEMPTED. Asserting
+    // on `delivered` alone would pass against the old guard too, since the
+    // throw was swallowed by the sweep's per-task catch.
+    expect(chat.attempts).toHaveLength(0);
+    expect(chat.delivered).toHaveLength(0);
+    const rec = await store.readTask('cron', num);
+    expect(rec!.craftbook.steps[0]!.redriveCount ?? 0).toBe(0);
   });
 
   it('skips the re-drive when the project has an unanswered user question', async () => {

@@ -58,6 +58,7 @@ import {
   formatReviewProvenance,
   inferDeliverableKind,
   isReservedShadowArtifactPath,
+  isSafeEntityId,
   isTrustedConstrainedToolset,
   parseKnowledgeUri,
   pickRandomNameWithGender,
@@ -138,6 +139,8 @@ import {
   MemorySaveToolOutputSchema,
   SearchToolOutputSchema,
   StatToolOutputSchema,
+  TableDescribeToolOutputSchema,
+  TableQueryToolOutputSchema,
   TaskToolOutputSchema,
   annotationsForTool,
   errorResult,
@@ -158,6 +161,7 @@ import {
   runtimePageCheckToValidateCheck,
   validateFile,
 } from './validate.js';
+import { formatWebSearchResponse } from './web-search-format.js';
 import { normalizeWorkspaceWriteContent } from './workspace-write-normalization.js';
 import {
   rejectHtmlWithScriptOutsideScriptTag,
@@ -600,6 +604,36 @@ function installAliasDispatchOnce(): void {
   });
 }
 
+/**
+ * Convert an escaped handler throw into a model-facing tool error.
+ *
+ * The MCP SDK's own catch stringifies an uncaught throw to `error.message`
+ * and nothing else. For a `GezelApiError` that message is the bare HTTP
+ * status line — `Gezel API error 403 on GET /api/projects?rollup=1` — while
+ * the daemon's actual sentence rides along in `details.hint`, which
+ * `unwrapApiError` knows how to recover. Roughly a third of the tool
+ * handlers in this file call `api.*` without a catch, so the hint fix landed
+ * for the tools that already caught and was silently bypassed by the rest.
+ *
+ * Wild-caught on the inaugural frontier run of `craftbook-author-fanout`:
+ * `list_projects` came back to the model as that bare status line, with
+ * `project collection requires a coordinator session` — the one fact that
+ * would have redirected it — discarded on the way through. Guarding at the
+ * registration seam means a new tool cannot forget it.
+ */
+function guardToolHandler(
+  name: string,
+  handler: (...args: unknown[]) => unknown,
+): (...args: unknown[]) => Promise<unknown> {
+  return async (...args: unknown[]) => {
+    try {
+      return await handler(...args);
+    } catch (err) {
+      return errorResult(`${name} failed: ${unwrapApiError(err)}`);
+    }
+  };
+}
+
 const originalRegister = server.tool.bind(server) as (name: string, ...rest: unknown[]) => unknown;
 (server as unknown as { tool: (name: string, ...rest: unknown[]) => unknown }).tool = (
   name: string,
@@ -609,7 +643,19 @@ const originalRegister = server.tool.bind(server) as (name: string, ...rest: unk
     return { enable: () => {}, disable: () => {}, update: () => {}, remove: () => {} };
   }
   const advertised = legacyNamingMode ? (LEGACY_SPELLING_BY_CANONICAL[name] ?? name) : name;
-  const registered = originalRegister(advertised, ...rest);
+  const handlerIndex = rest.reduce<number>(
+    (found, entry, idx) => (typeof entry === 'function' ? idx : found),
+    -1,
+  );
+  const guardedRest =
+    handlerIndex >= 0
+      ? rest.map((entry, idx) =>
+          idx === handlerIndex
+            ? guardToolHandler(name, entry as (...args: unknown[]) => unknown)
+            : entry,
+        )
+      : rest;
+  const registered = originalRegister(advertised, ...guardedRest);
   const stored = registeredToolRegistry()[advertised]!;
   stored.annotations = annotationsForTool(name);
   stored.outputSchema = outputSchemaForTool(name);
@@ -1207,6 +1253,191 @@ function registerConnectorTools() {
 
 if (process.env.GEZEL_CONNECTORS_ENABLED === '1') {
   registerConnectorTools();
+}
+
+// ── Observation tables (the tabular connector corpus) ───────────────────────
+//
+// A document corpus is read as files: `list_artifacts` then `read_artifact`.
+// That does not work past a few thousand records, and it is the wrong shape
+// entirely for telemetry — a million rows will not fit a context window and
+// no amount of reading them produces `p95 by route`.
+//
+// So these three tools invert the access pattern: the gezel reads a SCHEMA
+// and then an ANSWER, never the rows. That is what lets a table be far larger
+// than the model's context. Registered only for projects that actually hold a
+// tabular corpus (GEZEL_TABLES_ENABLED).
+function registerObservationTableTools(): void {
+  server.tool(
+    'list_tables',
+    "List this project's mirrored data tables — the tabular corpora connectors sync (web traffic, logs, exports). These hold far too many rows to read as files; query them with `query_table` instead. Start here when a question is about counts, totals, rates, or trends over time rather than about a document's contents.",
+    {},
+    async () => {
+      try {
+        const res = await api.toolListTables(projectId);
+        if (res.tables.length === 0) {
+          return okResult(ListToolOutputSchema, {
+            summary:
+              'This project has no data tables. They appear once a data connector has been synced, or once a spreadsheet or large data file in the workspace has been indexed.',
+            items: [],
+            count: 0,
+          });
+        }
+        const lines = res.tables.map((t) => {
+          const span =
+            t.earliestPartition && t.latestPartition
+              ? `, ${t.earliestPartition}→${t.latestPartition}`
+              : '';
+          const inferred = t.schemaInferred ? ', schema inferred' : '';
+          // Naming the source matters most for a workspace table: "which
+          // spreadsheet is this?" is the question a user actually asks, and
+          // the file path is the answer.
+          const from = t.origin === 'workspace' ? ` · from ${t.source}` : ` · ${t.source}`;
+          return `📊 ${t.table} — ${t.rows.toLocaleString('en-US')} rows, ${t.columns} columns${span}${inferred}${from}${t.grain ? ` · ${t.grain}` : ''}`;
+        });
+        return okResult(
+          ListToolOutputSchema,
+          {
+            summary: `${res.tables.length} data table(s). Call describe_table before writing SQL — it gives you the columns, their units, and worked example queries.`,
+            items: res.tables as unknown as Record<string, unknown>[],
+            count: res.tables.length,
+          },
+          { text: `${lines.join('\n')}\n\nCall \`describe_table\` on one before querying it.` },
+        );
+      } catch (err) {
+        return errorResult(`list_tables failed: ${unwrapApiError(err)}`);
+      }
+    },
+  );
+
+  server.tool(
+    'describe_table',
+    'Explain one data table before you query it: every column with its type, role and unit, what one row represents, which column to filter on for speed, and worked example queries. Always call this before `query_table` on a table you have not queried this session — guessing column names wastes a turn, and the units are how you avoid answering in the wrong magnitude.',
+    {
+      table: z.string().min(1).max(200).describe('Table name as reported by `list_tables`.'),
+    },
+    async ({ table }) => {
+      try {
+        const res = await api.toolDescribeTable(projectId, { table });
+        return okResult(
+          TableDescribeToolOutputSchema,
+          {
+            summary: `Schema for ${res.table}: ${res.summary.columns} columns over ${res.summary.rows.toLocaleString('en-US')} rows.`,
+            table: res.table,
+            markdown: res.markdown,
+            rows: res.summary.rows,
+            columns: res.summary.columns,
+            ...(res.summary.schemaInferred ? { schemaInferred: true } : {}),
+          },
+          { text: res.markdown },
+        );
+      } catch (err) {
+        return errorResult(`describe_table failed: ${unwrapApiError(err)}`, {
+          hint: 'call list_tables to see which tables exist',
+        });
+      }
+    },
+  );
+
+  server.tool(
+    'query_table',
+    "Run ONE read-only SQL query against this project's data tables and get the answer back. Aggregate in SQL — GROUP BY, counts, sums, percentiles — rather than selecting raw rows and reasoning over them; the tables are far too large for that and the point of this tool is that you never handle the rows. Filter on the partition column named by `describe_table` whenever the question allows, since that skips whole files. DuckDB SQL. Only SELECT/WITH/FROM/DESCRIBE/SUMMARIZE are accepted; the corpus mirrors an external source and cannot be modified.",
+    {
+      sql: z
+        .string()
+        .min(1)
+        .max(20_000)
+        .describe(
+          'One read-only SQL statement. Reference tables by the names `list_tables` reported.',
+        ),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(10_000)
+        .optional()
+        .describe('Maximum rows to return (default 100). Aggregate rather than raising this.'),
+      tables: coerceStringArray(
+        z
+          .array(z.string().min(1).max(200))
+          .max(32)
+          .optional()
+          .describe('Restrict which tables are in scope. Default: all of them.'),
+      ),
+      timeoutMs: z
+        .number()
+        .int()
+        .min(1_000)
+        .max(300_000)
+        .optional()
+        .describe('Query deadline in milliseconds (default 60000).'),
+    },
+    async ({ sql, limit, tables, timeoutMs }) => {
+      try {
+        const res = await api.toolQueryTable(projectId, {
+          sql,
+          ...(limit !== undefined ? { limit } : {}),
+          ...(tables !== undefined ? { tables } : {}),
+          ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        });
+        const summary = res.rows.length
+          ? `${res.rows.length} row(s)${res.truncated ? ` (capped at ${res.limit}; more matched)` : ''}.`
+          : 'The query matched no rows.';
+        const truncation = res.truncated
+          ? `\n\nOnly the first ${res.limit} row(s) are shown and more matched. Aggregate further, add a WHERE clause, or raise \`limit\`.`
+          : '';
+        return okResult(
+          TableQueryToolOutputSchema,
+          {
+            summary,
+            rows: res.rows,
+            columns: res.columns,
+            count: res.rows.length,
+            truncated: res.truncated,
+            limit: res.limit,
+            tablesInScope: res.tablesInScope,
+          },
+          { text: `${summary}\n\n${renderResultTable(res.columns, res.rows)}${truncation}` },
+        );
+      } catch (err) {
+        // The daemon forwards DuckDB's own message — including its "did you
+        // mean" column suggestions — which is far more repairable than
+        // anything this layer could invent.
+        return errorResult(`query_table failed: ${unwrapApiError(err)}`, {
+          hint: 'call describe_table for the exact column names and types',
+        });
+      }
+    },
+  );
+}
+
+/**
+ * Render a result set as a markdown table. Cells are truncated and newlines
+ * flattened so one wide value cannot blow the turn's output cap — the caller
+ * already bounded the row count, this bounds the width.
+ */
+function renderResultTable(
+  columns: readonly string[],
+  rows: readonly Record<string, unknown>[],
+): string {
+  if (rows.length === 0 || columns.length === 0) return '(no rows)';
+  const cell = (value: unknown): string => {
+    const text =
+      value === null || value === undefined
+        ? ''
+        : typeof value === 'object'
+          ? JSON.stringify(value)
+          : String(value);
+    const flat = text.replace(/\s*\n\s*/g, ' ').replace(/\|/g, '\\|');
+    return flat.length > 200 ? `${flat.slice(0, 197)}…` : flat;
+  };
+  const head = `| ${columns.join(' | ')} |`;
+  const rule = `| ${columns.map(() => '---').join(' | ')} |`;
+  const body = rows.map((row) => `| ${columns.map((c) => cell(row[c])).join(' | ')} |`);
+  return [head, rule, ...body].join('\n');
+}
+
+if (process.env.GEZEL_TABLES_ENABLED === '1') {
+  registerObservationTableTools();
 }
 
 // ── Project file tools (operate on the default surface: the workspace) ──
@@ -3035,9 +3266,32 @@ server.tool(
   },
 );
 
+/**
+ * Follow-up steer for a `derive_file` verification failure.
+ *
+ * The three `verifyError` sentences describe three different problems, and
+ * the handler used to append the same remedy — "The script must
+ * fs.writeFileSync the output itself." — to all of them. For the
+ * data-table rejection that sentence is simply false: the script exited 0
+ * and the file IS on disk, it is just not a table. Wild-caught on the
+ * inaugural `craftbook-author-gate-script` run, where three separate
+ * developer gezels each wrote a valid JSON summary object, were told to do
+ * the one thing they had already done, and never called the tool again —
+ * one of them abandoning it for a raw file write.
+ */
+function deriveVerifyRemedy(verifyError: string): string {
+  if (/does not parse as a data table/i.test(verifyError)) {
+    return ' The file WAS written — derive_file only accepts tabular output. Emit a JSON ARRAY of row objects (wrap a single summary object as `[ { … } ]`), delimited rows with a header, or a Markdown table. If the deliverable is genuinely a non-tabular JSON document or a report, write it with write_file instead.';
+  }
+  if (/is empty/i.test(verifyError)) {
+    return ' The script wrote the file but left it blank — check that the rows you computed actually reach fs.writeFileSync.';
+  }
+  return ' The script must fs.writeFileSync the output itself.';
+}
+
 server.tool(
   'derive_file',
-  'Derive a data file by EXECUTING a script — the reliable way to produce json/csv/tsv outputs computed from other files (transform, normalize, dedup, convert, aggregate). Hand-typing derived rows via write_file loses data; this tool runs your Node script in the sandbox and verifies the output landed and parses. Provide the complete script source; it executes from a scratch location (never saved into your workspace) with fs access to the project — read inputs with fs.readFileSync and write the output with fs.writeFileSync, paths relative to the workspace root. NOT for prose/reports/HTML — write those directly with write_file. On failure you get stderr; fix the script and call again.',
+  'Derive a data file by EXECUTING a script — the reliable way to produce json/csv/tsv outputs computed from other files (transform, normalize, dedup, convert, aggregate). Hand-typing derived rows via write_file loses data; this tool runs your Node script in the sandbox and verifies the output landed and parses. The output must be TABULAR — a JSON array of row objects, delimited rows with a header, or a Markdown table; a single summary object has to be wrapped as `[ { … } ]`. For a non-tabular JSON document, a report, or prose, use write_file instead. Provide the complete script source; it executes from a scratch location (never saved into your workspace) with fs access to the project — read inputs with fs.readFileSync and write the output with fs.writeFileSync, paths relative to the workspace root. NOT for prose/reports/HTML — write those directly with write_file. On failure you get stderr; fix the script and call again.',
   {
     script: z
       .string()
@@ -3048,7 +3302,9 @@ server.tool(
     outputPath: z
       .string()
       .min(1)
-      .describe('Workspace-relative file the script must produce (e.g. "out/customers.json").'),
+      .describe(
+        'Workspace-relative file the script must produce (e.g. "out/customers.json"). Its contents must be tabular: a JSON ARRAY of row objects, delimited rows with a header, or a Markdown table.',
+      ),
     timeoutMs: z
       .number()
       .int()
@@ -3072,7 +3328,7 @@ server.tool(
         parts.push(`✗ derive_file timed out${res.error ? `: ${res.error}` : ''}`);
       } else if (res.verifyError) {
         parts.push(
-          `✗ derive_file: the script ran (exit ${res.code}) but ${res.verifyError} The script must fs.writeFileSync the output itself.`,
+          `✗ derive_file: the script ran (exit ${res.code}) but ${res.verifyError}${deriveVerifyRemedy(res.verifyError)}`,
         );
       } else if (res.error) {
         parts.push(`✗ derive_file failed: ${res.error}`);
@@ -3133,14 +3389,38 @@ server.tool(
  * non-API failures (timeouts, network errors) surfacing their own
  * messages unchanged.
  */
+/**
+ * Join a daemon error body's machine code with its human explanation.
+ *
+ * The daemon answers a refusal as `{ error, hint }` — `error` is a code
+ * (`forbidden`, `job-in-progress`, `invalid_model`) and `hint` is the
+ * sentence saying WHY and what to do. Both readers below used to take
+ * `error` alone, so every one of those sentences was written by the
+ * service and then discarded before it reached the model.
+ *
+ * Wild-caught on the inaugural frontier run of `craftbook-author-fanout`:
+ * a gezel's `invoke_craftbook` and two `create_task` calls came back as
+ * the bare word "forbidden", with no way to tell a scope mismatch from a
+ * missing project membership. `scope-guard.ts` had put the real reason in
+ * `hint` on the way out.
+ */
+function joinErrorAndHint(details: unknown): string | null {
+  if (!details || typeof details !== 'object') return null;
+  const record = details as { error?: unknown; hint?: unknown; message?: unknown };
+  const code = typeof record.error === 'string' && record.error ? record.error : null;
+  const hint = typeof record.hint === 'string' && record.hint ? record.hint : null;
+  const message = typeof record.message === 'string' && record.message ? record.message : null;
+  const head = code ?? message;
+  if (!head) return null;
+  // A hint that merely restates the code adds nothing but noise.
+  if (!hint || hint.toLowerCase() === head.toLowerCase()) return head;
+  return `${head}: ${hint}`;
+}
+
 function unwrapApiError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
-  const details = (err as { details?: unknown }).details;
-  if (details && typeof details === 'object' && 'error' in details) {
-    const inner = (details as { error?: unknown }).error;
-    if (typeof inner === 'string' && inner.length > 0) return inner;
-  }
-  return message;
+  const joined = joinErrorAndHint((err as { details?: unknown }).details);
+  return joined ?? message;
 }
 
 /** Recover a concise daemon error from a non-2xx fetch response. */
@@ -3150,6 +3430,7 @@ async function responseErrorMessage(res: Response): Promise<string> {
     try {
       const parsed = JSON.parse(body) as {
         error?: unknown;
+        hint?: unknown;
         message?: unknown;
         requestId?: unknown;
       };
@@ -3157,12 +3438,8 @@ async function responseErrorMessage(res: Response): Promise<string> {
         typeof parsed.requestId === 'string' && parsed.requestId
           ? ` (request id: ${parsed.requestId})`
           : '';
-      if (typeof parsed.error === 'string' && parsed.error) {
-        return `${parsed.error}${requestSuffix}`;
-      }
-      if (typeof parsed.message === 'string' && parsed.message) {
-        return `${parsed.message}${requestSuffix}`;
-      }
+      const joined = joinErrorAndHint(parsed);
+      if (joined) return `${joined}${requestSuffix}`;
     } catch {
       // Plain-text errors are already useful to a model; clamp noisy bodies.
     }
@@ -3308,45 +3585,6 @@ function extractApiErrorMessage(err: unknown): string | undefined {
   if (!details || typeof details !== 'object') return undefined;
   const errorField = (details as Record<string, unknown>).error;
   return typeof errorField === 'string' ? errorField : undefined;
-}
-
-/**
- * Format a `web_search` API response as a numbered markdown list. Each
- * entry surfaces title, domain, optional date, snippet, and URL on its
- * own line — domain on the header so the model can scan for credibility,
- * URL last so it's trivially copy-pasteable into `fetch_url`. The
- * footer states which backend answered so the model can weight snippets
- * accordingly (Wikipedia → encyclopedic, Brave → current).
- */
-function formatWebSearchResponse(res: {
-  results: Array<{
-    title: string;
-    url: string;
-    snippet: string;
-    domain: string;
-    publishedAt?: string;
-    source: string;
-  }>;
-  source: string;
-  query: string;
-  durationMs: number;
-}): string {
-  const SNIPPET_CAP = 280;
-  const count = res.results.length;
-  const header =
-    count === 0
-      ? `0 results from ${res.source} (query: ${JSON.stringify(res.query)}). Try broader terms.`
-      : `${count} result${count === 1 ? '' : 's'} from ${res.source} (query: ${JSON.stringify(res.query)}) · ${res.durationMs}ms`;
-  if (count === 0) return header;
-
-  const entries = res.results.map((r, idx) => {
-    const date = r.publishedAt ? `  ·  ${r.publishedAt.slice(0, 10)}` : '';
-    const snippet =
-      r.snippet.length > SNIPPET_CAP ? `${r.snippet.slice(0, SNIPPET_CAP - 1)}…` : r.snippet;
-    const snippetLine = snippet ? `   ${snippet}\n` : '';
-    return `${idx + 1}. **${r.title}**  ·  ${r.domain}${date}\n${snippetLine}   ${r.url}`;
-  });
-  return `${header}\n\n${entries.join('\n\n')}`;
 }
 
 /**
@@ -5383,14 +5621,28 @@ server.tool(
       const idempotentText = launched.reused
         ? ' This identical craftbook invocation already succeeded in the current root turn; reused its task instead of creating a duplicate.'
         : '';
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step ${created.activeStepId ?? '(none)'} was dispatched to the recipe-selected specialist.${installedText}${idempotentText}`,
+      // Structured contract: the full task rides in structuredContent so the
+      // chat runtime can derive the inline craftbook start card. The text is
+      // kept byte-identical to the pre-migration template — it is what the
+      // model reads, and manager-mcp assertions pin it.
+      return okResult(
+        TaskToolOutputSchema,
+        {
+          summary: `Invoked craftbook "${craftbookId}" — task ${created.ref}.`,
+          operation: 'invoke_craftbook',
+          ref: created.ref,
+          status: created.status,
+          ...(created.activeStepId ? { stepId: created.activeStepId } : {}),
+          task: created,
+          details: {
+            reused: launched.reused,
+            ...(launch.installed.length > 0 ? { installed: launch.installed } : {}),
           },
-        ],
-      };
+        },
+        {
+          text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step ${created.activeStepId ?? '(none)'} was dispatched to the recipe-selected specialist.${installedText}${idempotentText}`,
+        },
+      );
     } catch (err) {
       return {
         content: [
@@ -5422,12 +5674,12 @@ async function resolveCraftbookTarget(args: {
 }): Promise<CraftbookTarget> {
   if (args.craftbook) return { kind: 'craftbook', id: args.craftbook };
   if (args.task) {
-    const parsed = parseRef(args.task);
+    const parsed = await parseRef(args.task);
     return { kind: 'task', projectId: parsed.projectId, num: parsed.num, ref: args.task };
   }
   if (sessionCraftbookId) return { kind: 'craftbook', id: sessionCraftbookId };
   if (sessionTaskRef) {
-    const parsed = parseRef(sessionTaskRef);
+    const parsed = await parseRef(sessionTaskRef);
     return { kind: 'task', projectId: parsed.projectId, num: parsed.num, ref: sessionTaskRef };
   }
   throw new Error(
@@ -5632,8 +5884,19 @@ server.tool(
           ? (err.details as { formatted?: string } | undefined)?.formatted
           : undefined;
       if (formatted) {
-        return cbResult(
-          `The document was NOT saved. Fix these problems and call craftbook_write again with the corrected FULL document:\n${formatted}`,
+        // A rejection is a FAILURE, not a result. Returning it through
+        // `cbResult` booked it as `success: true` in the transcript and in
+        // history — and, because `UnresolvedToolFailureLedger.record` treats
+        // any non-error as "the model found a shape that works", every
+        // craftbook_write rejection cleared the ledger entry for the tool
+        // instead of accumulating one. Observed on the inaugural
+        // `craftbook-author-gate-script` run: three consecutive rejections
+        // ("scripts: expected record, got array", then two more), all three
+        // recorded as successful calls. The `invalid arguments for tool`
+        // wording is what makes the text legible to `isValidationFailure`.
+        return errorResult(
+          `craftbook_write: invalid arguments for tool craftbook_write — the document was NOT saved. Fix these problems and call craftbook_write again with the corrected FULL document:\n${formatted}`,
+          { code: 'craftbook_invalid', retryable: true },
         );
       }
       throw err;
@@ -5987,7 +6250,7 @@ server.tool(
   async ({ task, id, name }) => {
     const ref = task ?? sessionTaskRef;
     if (!ref) throw new Error('no task: pass `task` (a ref) or run inside a task session.');
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const { craftbook } = await api.exportTaskCraftbook(parsed.projectId, parsed.num, {
       ...(id ? { id } : {}),
       ...(name ? { name } : {}),
@@ -8428,7 +8691,13 @@ server.tool(
   'Get one task by ref (format: `projectId/num`). Returns full detail: status, assignee, every phase, active phase, any cron schedule, parent task.',
   { ref: z.string().describe('Task ref, e.g. "marketing/7"') },
   async ({ ref }) => {
-    const t = await api.getTaskByRef(ref);
+    // `getTaskByRef` splits the ref literally, so it saw neither the
+    // small-model mangle recovery in `resolveTaskRef` nor the display-name
+    // resolution its sibling tools get. Same session that could
+    // `list_tasks({ project: "PowerPoint Grounding Eval" })` got a bare
+    // `Gezel API error 400` from `get_task({ ref: "PowerPoint Grounding Eval/1" })`.
+    const parsed = await parseRef(ref);
+    const t = await api.getTask(parsed.projectId, parsed.num);
     return okResult(
       TaskToolOutputSchema,
       {
@@ -8736,7 +9005,7 @@ server.tool(
     fanout: fanoutArg,
   },
   async ({ ref, title, description, plan, assignee, cron, cronOverlap, fanout }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const body: Record<string, unknown> = {};
     if (title !== undefined) body.title = title;
     if (description !== undefined) body.description = description;
@@ -8788,7 +9057,7 @@ server.tool(
     ),
   },
   async ({ task, outcomes }) => {
-    const parsed = parseRef(task || sessionTaskRef);
+    const parsed = await parseRef(task || sessionTaskRef);
     const list: Outcome[] = (outcomes ?? []).map((text, i) => ({ id: `o${i + 1}`, text }));
     const updated = await api.updateTask(parsed.projectId, parsed.num, { outcomes: list } as never);
     const ref = `${parsed.projectId}/${parsed.num}`;
@@ -8827,7 +9096,7 @@ server.tool(
   async ({ ref, id, met, evidence }) => {
     const draftBlock = partialEdits.blockReason('verify_outcome');
     if (draftBlock) return errorResult(draftBlock);
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const t = await api.getTask(parsed.projectId, parsed.num);
     const existing = t.outcomes ?? [];
     if (!existing.some((o) => o.id === id)) {
@@ -8869,7 +9138,7 @@ server.tool(
     prompt: z.string().optional().describe('Override the default verification prompt.'),
   },
   async ({ task, name, prompt }) => {
-    const parsed = parseRef(task || sessionTaskRef);
+    const parsed = await parseRef(task || sessionTaskRef);
     const before = await api.getTask(parsed.projectId, parsed.num);
     const beforeIds = new Set(before.craftbook.steps.map((s) => s.id));
     const stepName = name ?? 'Verify outcomes';
@@ -8930,7 +9199,7 @@ server.tool(
     ),
   },
   async ({ ref, count, variations }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const result = await api.spawnTaskInstances(parsed.projectId, parsed.num, {
       count,
       ...(variations ? { variations } : {}),
@@ -8960,7 +9229,7 @@ server.tool(
     limit: z.number().int().positive().optional(),
   },
   async ({ ref, status, limit }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const res = await api.listTaskChildren(parsed.projectId, parsed.num, {
       ...(status ? { status } : {}),
       ...(limit ? { limit } : {}),
@@ -9000,7 +9269,7 @@ server.tool(
       ),
   },
   async ({ ref, status, verification }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const current = await api.getTask(parsed.projectId, parsed.num);
     if (current.status === 'draft') {
       const ungatedBuildSteps = current.craftbook.steps.filter(
@@ -9127,7 +9396,7 @@ server.tool(
     force: z.boolean().optional().describe('Run even if the plan is not fully formed.'),
   },
   async ({ ref, force }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const t = await api.activateTask(parsed.projectId, parsed.num, force === true);
     const summary = `Activated ${ref} — now running at step "${t.activeStepId}".`;
     return okResult(
@@ -9153,7 +9422,7 @@ server.tool(
     assignee: assigneeArg(),
   },
   async ({ ref, assignee }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const updated = await api.setTaskAssignee(
       parsed.projectId,
       parsed.num,
@@ -9201,7 +9470,7 @@ server.tool(
     after,
     before,
   }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const beforeTask = await api.getTask(parsed.projectId, parsed.num);
     const beforeIds = new Set(beforeTask.craftbook.steps.map((step) => step.id));
     const d = coerceBlueprintDeliverable(deliverable);
@@ -9241,6 +9510,46 @@ server.tool(
   },
 );
 
+/**
+ * Turn a `completeTaskStep` rejection into something the model can act on.
+ *
+ * The daemon raises `no step "extract" to activate` for a `next` that does
+ * not exist, but that sentence never leaves the service: the unhandled-error
+ * middleware answers `{ error: 'internal_error', requestId }`, so the model
+ * reads a bare `Gezel API error 500 on POST …/steps/scope/complete` and has
+ * nothing to change. Wild-caught on `conflict-synthesis` (qwen3.6-35b): three
+ * consecutive `advance_task_step` calls with byte-identical arguments, the
+ * same 500 each time, and the turn died there. Re-reading the task costs one
+ * request on a path that has already failed and yields the one fact the model
+ * is missing — the step ids that actually exist.
+ */
+async function explainAdvanceFailure(
+  err: unknown,
+  parsed: { projectId: string; num: number },
+  stepId: string,
+  next: string | undefined,
+): Promise<string> {
+  const base = `advance_task_step failed: ${unwrapApiError(err)}`;
+  let steps: Array<{ id: string; name?: string }>;
+  try {
+    const task = await api.getTask(parsed.projectId, parsed.num);
+    steps = task.craftbook?.steps ?? [];
+  } catch {
+    // The follow-up read failed too — the original message is all there is.
+    return base;
+  }
+  if (steps.length === 0) return base;
+  const ids = steps.map((s) => s.id);
+  const roster = steps.map((s) => (s.name ? `"${s.id}" (${s.name})` : `"${s.id}"`)).join(', ');
+  if (next && next !== 'next' && !ids.includes(next)) {
+    return `${base}\nThis task has no step "${next}". Its steps are: ${roster}. Pass one of those ids as \`next\`, or omit \`next\` to advance to the following step in order.`;
+  }
+  if (!ids.includes(stepId)) {
+    return `${base}\nThis task has no step "${stepId}". Its steps are: ${roster}. Pass one of those ids as \`stepId\`.`;
+  }
+  return `${base}\nThe task's steps are: ${roster}.`;
+}
+
 server.tool(
   'advance_task_step',
   'Mark the named step complete and activate the next one (or a specifically-named step). THIS is how you hand off to another gezel — calling this tool automatically opens a fresh session with the new step\'s assignee (or `suggestedGezelId`) and kicks them off on the work. Do NOT just say "ready to hand off" in chat; that does nothing. Call this tool.',
@@ -9257,13 +9566,21 @@ server.tool(
   async ({ ref, stepId, next }) => {
     const draftBlock = partialEdits.blockReason('advance_task_step');
     if (draftBlock) return errorResult(draftBlock);
-    const parsed = parseRef(ref);
-    const { task, gate } = await api.completeTaskStep(
-      parsed.projectId,
-      parsed.num,
-      stepId,
-      next ? { next } : {},
-    );
+    const parsed = await parseRef(ref);
+    let advanced: Awaited<ReturnType<typeof api.completeTaskStep>>;
+    try {
+      advanced = await api.completeTaskStep(
+        parsed.projectId,
+        parsed.num,
+        stepId,
+        next ? { next } : {},
+      );
+    } catch (err) {
+      return errorResult(await explainAdvanceFailure(err, parsed, stepId, next), {
+        retryable: true,
+      });
+    }
+    const { task, gate } = advanced;
     if (gate) {
       // The step's completion gate judged the work and rejected it. The
       // message is prescriptive — surfacing it as the tool result lets
@@ -9315,7 +9632,7 @@ server.tool(
     stepId: z.string().optional(),
   },
   async ({ ref, stepId }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const effectiveStep = stepId?.trim() || undefined;
     const { notes } = await api.listTaskNotes(parsed.projectId, parsed.num, effectiveStep);
     const summary = `Loaded ${notes.length} ${notes.length === 1 ? 'note' : 'notes'} for ${ref}${effectiveStep ? `/${effectiveStep}` : ''}.`;
@@ -9343,7 +9660,7 @@ server.tool(
     stepId: z.string().optional(),
   },
   async ({ ref, text, stepId }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const effectiveStep = stepId ?? (sessionStepId || undefined);
     const { note } = await api.appendTaskNote(
       parsed.projectId,
@@ -9441,8 +9758,20 @@ async function resolveGezelId(input: string): Promise<string> {
 // backticks, a truncated projectId) by falling back to the session's
 // own task. See `task-ref.ts` for the resolution order and the
 // wild-caught failures that motivated it.
-function parseRef(ref: string): { projectId: string; num: number } {
-  return resolveTaskRef(ref, sessionTaskRef);
+async function parseRef(ref: string): Promise<{ projectId: string; num: number }> {
+  const parsed = resolveTaskRef(ref, sessionTaskRef);
+  // The projectId half of a ref gets the same tolerance every `project`
+  // argument already gets. `resolveProjectId` exists because models reach
+  // for the display name they see in chat instead of the slug, and ~40
+  // tools honor that — but a ref went through verbatim, so
+  // `list_tasks({ project: "PowerPoint Grounding Eval" })` worked while
+  // `read_task_notes({ ref: "PowerPoint Grounding Eval/1" })` 400'd on
+  // `invalid entity id` with no remedy in the message. Observed in 11
+  // distinct eval sessions; each one stopped using the task tools
+  // entirely afterwards. Only refs whose project half cannot be an id at
+  // all pay the extra lookup.
+  if (isSafeEntityId(parsed.projectId)) return parsed;
+  return { ...parsed, projectId: await resolveProjectId(parsed.projectId) };
 }
 
 // ── History (audit log search) ──
@@ -10175,7 +10504,7 @@ server.tool(
 
 server.tool(
   'wikipedia_search',
-  'Search Wikipedia (the English encyclopedia by default; pass `language` for other corpora) for articles matching a query. Returns a numbered list of {title, domain, snippet, url}; pick a result and pass its `url` to `fetch_url` to read the article. Use for factual, encyclopedic, or historical lookups. For current events, news, or open-web pages use `web_search` if available — Wikipedia is timeless and lags real-world events. Default 10 results.',
+  'Search Wikipedia (the English encyclopedia by default; pass `language` for other corpora) for articles matching a query. The top results come back WITH their article lead text already included, so you can usually cite them directly from this one call — do NOT pass a Wikipedia url to `fetch_url`, which returns the rendered page (megabytes of scripts and navigation chrome) and gets truncated before any article prose. When you need more than the lead section of one article, call `wikipedia_read` with its exact title. Use for factual, encyclopedic, or historical lookups. For current events, news, or open-web pages use `web_search` if available — Wikipedia is timeless and lags real-world events. Default 10 results.',
   {
     query: z.string().min(1).max(400).describe('Plain-language search query.'),
     limit: z
@@ -10202,6 +10531,55 @@ server.tool(
       const msg = unwrapApiError(err);
       return {
         content: [{ type: 'text' as const, text: `wikipedia_search failed: ${msg}` }],
+        isError: true,
+      };
+    }
+  },
+);
+
+server.tool(
+  'wikipedia_read',
+  'Read one Wikipedia article as plain text, by its exact title. Use this only when `wikipedia_search` already gave you the article lead text and you need MORE of that article — the search results carry the lead section already, so a read is a second call you often do not need. Get the exact title from a `wikipedia_search` result; a guessed or approximate title fails. Long articles are truncated to `maxChars` and say so. Never use `fetch_url` on a wikipedia.org url instead of this — that returns the rendered page, which is mostly scripts and navigation and is cut off before the article text begins.',
+  {
+    title: z
+      .string()
+      .min(1)
+      .max(400)
+      .describe('Exact article title, copied from a `wikipedia_search` result.'),
+    language: z
+      .string()
+      .min(2)
+      .max(8)
+      .optional()
+      .describe(
+        'BCP-47 language code (e.g. "en", "de", "ja"). Selects the Wikipedia corpus. Defaults to English.',
+      ),
+    maxChars: z
+      .number()
+      .int()
+      .min(500)
+      .max(60_000)
+      .optional()
+      .describe('Character ceiling for the returned text (default 24000).'),
+  },
+  async (args) => {
+    try {
+      const res = await api.toolWikipediaRead(projectId, args);
+      const note = res.truncated
+        ? `\n\n[truncated at ${res.content.length} chars — raise maxChars for more]`
+        : '';
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: `# ${res.title}\n${res.url}\n\n${res.content}${note}`,
+          },
+        ],
+      };
+    } catch (err) {
+      const msg = unwrapApiError(err);
+      return {
+        content: [{ type: 'text' as const, text: `wikipedia_read failed: ${msg}` }],
         isError: true,
       };
     }

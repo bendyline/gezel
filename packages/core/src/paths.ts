@@ -508,6 +508,62 @@ export function projectShadowDir(
 }
 
 /**
+ * Reserved artifacts subtree holding tables derived from tabular files that
+ * live in the project *workspace* — a CSV too large to read, a spreadsheet a
+ * gezel cannot open at all. Sibling to `shadow/`, and derived the same way:
+ * regenerable from the source file, write-denied to gezels and users, safe to
+ * delete.
+ *
+ * Distinct from a connector corpus under `data/`, because the two have
+ * different lifecycles. A connector corpus is an append-only stream that grows
+ * forever and needs sealing, compaction and retention; a workspace table is a
+ * *snapshot of one file*, rebuilt wholesale when the file's content hash moves
+ * and swept when the file goes.
+ *
+ * Companion directories keep the source's full basename (`sales.xlsx_tables`),
+ * so `X_tables` → source `X` is a lossless reverse map for orphan collection
+ * and `a.csv` cannot collide with `a.xlsx` — the same reasoning as the shadow
+ * tree's `_files` convention.
+ */
+export const PROJECT_TABULAR_DIR_NAME = 'tabular';
+
+/** Suffix marking one source file's companion directory under `tabular/`. */
+export const TABULAR_COMPANION_SUFFIX = '_tables';
+
+/** Per-project `artifacts/tabular/` root. */
+export function projectTabularDir(
+  root: string,
+  projectId: string,
+  external?: ExternalFolders,
+): string {
+  return join(projectArtifactsDir(root, projectId, external), PROJECT_TABULAR_DIR_NAME);
+}
+
+/**
+ * Directory level inside a connector corpus that holds observation tables:
+ * `artifacts/data/<corpus>/tables/<table>/`. Deliberately NOT underscore-
+ * prefixed. Inside a corpus the underscore prefix marks the *mutable* surface
+ * (`_meta.json`, `_actions/`), and `isProtectedConnectorCorpusPath` denies
+ * gezel writes to everything else under `data/`. Keeping `tables` bare
+ * therefore inherits the existing read-only guard rather than needing a
+ * second one.
+ */
+export const CONNECTOR_TABLES_DIR_NAME = 'tables';
+
+/**
+ * Where a table's materialized rollups live, under its own directory. Kept
+ * separate from the raw partitions because retention deletes raw data and
+ * never deletes rollups.
+ */
+export const CONNECTOR_ROLLUPS_DIR_NAME = 'rollups';
+
+/** Filename of a table's semantic layer, beside its data. */
+export const OBSERVATION_TABLE_MANIFEST_FILE = 'manifest.json';
+
+/** Filename of a table's writer/compaction/rollup bookkeeping. */
+export const OBSERVATION_TABLE_STATE_FILE = 'state.json';
+
+/**
  * Reserved artifacts subtree holding diffpacks: proposed change sets a gezel
  * drafted but never applied. Each pack owns `after/` (the copy-on-write draft
  * tree), `files/` (the sealed single-file unified diffs), `notes.md` and

@@ -8,8 +8,10 @@ import {
   type GezelConfig,
   type ServiceRole,
   createLogger,
+  formatNightShiftSummary,
   formatSuspension,
   isEngagementAllowed,
+  isTaskWorkAllowed,
   normalizeStepGate,
   nowIso,
   onSuspension,
@@ -44,6 +46,7 @@ import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
 import { createCodexSetupManager } from './codex-setup/manager.js';
 import { ConnectorActionManager } from './connectors/actions.js';
 import { ConnectorManager, corpusDirFor } from './connectors/manager.js';
+import { registerAzureMonitorLogsAdapters } from './connectors/natives/azure-monitor-logs.js';
 import { registerBlueskyAdapters } from './connectors/natives/bluesky-posts.js';
 import { registerCalendarAdapters } from './connectors/natives/calendar-google.js';
 import { registerGitHubPullsAdapters } from './connectors/natives/github-pulls.js';
@@ -131,10 +134,16 @@ import { MemoryManager } from './memory/manager.js';
 import { createEnsureModelOrchestrator } from './models/ensure.js';
 import { buildChatModelInstallRegistries } from './models/install-jobs.js';
 import {
+  migrateLegacyQuantSuffixIds,
+  remapEngineScopedKeys,
+} from './models/legacy-quant-suffix.js';
+import {
   migrateLegacySystemModels,
   modelStorageRoots,
   reclaimAbandonedModelDownloads,
 } from './models/storage-roots.js';
+import { DuckRunner } from './observations/duck.js';
+import { runObservationNightly } from './observations/nightly.js';
 import { createOpenCodeSetupManager } from './opencode-setup/manager.js';
 import { discoverManagedScriptRuntimes } from './packages/managed-runtimes.js';
 import { normalizeBundledPnpmPath } from './packages/pnpm.js';
@@ -1350,7 +1359,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // Audio (STT + TTS) provider managers. Same lazy-build / reset
   // shape as `imageProvider`; lifecycle hangs off this same scope so
   // shutdown() is awaited below alongside the other managers.
-  const stt = new SpeechToTextProviderManager({ home });
+  const stt = new SpeechToTextProviderManager({ home, store });
   const tts = new TextToSpeechProviderManager({ home });
   // Remote model execution: route `remote:<id>/…` multimodal models to the
   // hosting paired server (GPU-heavy generation runs there; the artifact still
@@ -1646,6 +1655,36 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       return;
     }
 
+    // ── Fanout barrier ──────────────────────────────────────────────────
+    // The step after a fanout is a barrier: its gate waits on shards the
+    // children have not written yet. Dispatching a worker turn into it
+    // while children are still active cannot possibly satisfy the gate —
+    // the model turn runs, the gate rejects, the attempt budget burns, and
+    // on a local engine every one of those cycles is engine time the
+    // children themselves are queued behind.
+    //
+    // Wild-caught on gezel/49: `collect` activated 0.5s after 24 children
+    // were spawned, none of which had produced a coverage shard. The gate
+    // (correctly) rejected an empty ledger, and the parent's assignee spent
+    // 62 minutes trying to hand-write 580 paths to close a gap only the
+    // children could close.
+    //
+    // The barrier lifts in the settle hook, which re-dispatches this step
+    // once the last active child settles. Held only while children are
+    // genuinely outstanding, so a re-activation after they finish proceeds
+    // normally, and a task whose children all failed still gets its turn.
+    if (task.spawnsCraftbook && !newStep.spawnFanout) {
+      const activeChildren = await tasks
+        .listChildren(task.ref, { status: 'active' })
+        .catch(() => []);
+      if (activeChildren.length > 0) {
+        log.info(
+          `[fanout] ${task.ref} step "${newStep.id}": holding dispatch — ${activeChildren.length} child(ren) still active; will re-dispatch when the last one settles`,
+        );
+        return;
+      }
+    }
+
     const assigneeGezelId =
       newStep.assignee?.kind === 'gezel' ? newStep.assignee.gezelId : newStep.suggestedGezelId;
     if (!assigneeGezelId) return;
@@ -1866,14 +1905,22 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     if (review.windowKey !== windowKey) return;
     if (review.tasksCompleted.length === 0 && review.reports.length === 0) return;
     const config = await store.readConfig().catch(() => ({}) as GezelConfig);
-    const actionTotal = review.reports.reduce((n, r) => n + r.actionCounts.total, 0);
+    // `suggested`, not `total`: the tally is a call to action, and an
+    // action already fired or dismissed is not one the user still owes
+    // a look. Same count Home's "Last night" panel names.
+    const actionTotal = review.reports.reduce((n, r) => n + r.actionCounts.suggested, 0);
     await store.writeQuestion({
       id: randomUUID(),
       projectId: 'default',
       gezelId: config.meesterGezelId ?? '',
       // No live session — the answer route early-returns for this intent.
       sessionId: '',
-      prompt: `The night shift finished: ${review.tasksCompleted.length} task(s) completed, ${review.reports.length} report(s) written${actionTotal > 0 ? `, ${actionTotal} suggested action(s) to review` : ''}.`,
+      prompt: formatNightShiftSummary({
+        tasks: review.tasksCompleted.length,
+        reports: review.reports.length,
+        proposals: review.diffpacks.length,
+        actions: actionTotal,
+      }),
       choices: ['Dismiss'],
       allowWriteIn: false,
       multiSelect: false,
@@ -1961,6 +2008,34 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       .catch((err) =>
         log.warn(`[service] report-action settle failed for ${task.ref}: ${String(err)}`),
       );
+    // Fanout barrier release. `onStepActivated` declines to dispatch a
+    // worker turn into a post-fanout step while children are still
+    // active, because that step's gate waits on files only the children
+    // can write. This is the other half: when the LAST active child
+    // settles, the gate has become satisfiable, so poke the parent's
+    // active step. Without it the hold would be permanent — nothing else
+    // notifies a spawn host that its crew finished.
+    if (task.parentTaskRef) {
+      const parsedParent = parseTaskRef(task.parentTaskRef);
+      if (parsedParent) {
+        const stillActive = await tasks
+          .listChildren(task.parentTaskRef, { status: 'active' })
+          .catch(() => []);
+        if (stillActive.length === 0) {
+          await tasks
+            .redispatchActiveStep(
+              parsedParent.projectId,
+              parsedParent.num,
+              `last fanout child ${task.ref} settled (${outcome})`,
+            )
+            .catch((err) =>
+              log.warn(
+                `[service] fanout barrier release failed for ${task.parentTaskRef}: ${String(err)}`,
+              ),
+            );
+        }
+      }
+    }
   });
   // Global search index (session transcripts + history mirror + documents):
   // change hooks enqueue into the single-writer manager; the read facade is
@@ -2092,6 +2167,15 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     },
   });
   indexEnrichmentRef = indexEnrichment;
+  // Stateless: one short-lived child per statement, so there is nothing to
+  // start or stop. Constructing it when no binary is installed is deliberate —
+  // the query routes then return an actionable "engine not installed" rather
+  // than the daemon refusing to boot over a feature most projects never use.
+  const duck = new DuckRunner();
+  // The index's derived-table drain needs the engine, but the index is
+  // constructed far earlier in boot order — hand it over once both exist.
+  contentIndex.setDuckRunner(duck);
+
   // Night bug fixing: once the shift's index sweep drains, hand every
   // qualifying project's open Boekwachter issues to its developer, who drafts
   // change proposals into artifacts. Runs here rather than on activation so
@@ -2110,6 +2194,20 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
       history,
       nightShiftWindow: () => nightShift.currentWindow(),
     }).catch((err) => log.warn(`[diffpack] night fix planning failed: ${String(err)}`));
+
+    // Observation-corpus maintenance rides the same edge: compact the
+    // NDJSON that daytime syncs left sealed, materialize declared rollups
+    // for the partitions that changed, then apply retention. Deliberately
+    // NOT done inline at sync time — compaction is minutes of CPU on a large
+    // pass, and the rows are already queryable before it runs.
+    await runObservationNightly({
+      store,
+      duck,
+      // Picks up tabular workspace files the interactive index pass deferred
+      // for being too large to convert while a user was waiting.
+      drainWorkspaceTables: (projectId) => contentIndex.drainWorkspaceTablesAtNight(projectId),
+      nightShiftWindow: () => nightShift.currentWindow(),
+    }).catch((err) => log.warn(`[observations] nightly maintenance failed: ${String(err)}`));
   });
   // Scan-complete → immediate embed drain: the moment a workspace scan
   // enrolls files, the always-on local embed tiers start filling vectors —
@@ -2138,6 +2236,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
           },
           resolveBoekwachter: (id) => resolveProjectBoekwachter(store, id).catch(() => null),
           isPaused: () => indexingJob.isPaused(),
+          aiTiersAllowed: async () => isTaskWorkAllowed(await store.readConfig().catch(() => ({}))),
         },
         projectId,
         opts,
@@ -2167,6 +2266,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   registerLinkedInAdapters();
   registerGitHubReleasesAdapters();
   registerGitHubWikiAdapters();
+  registerAzureMonitorLogsAdapters();
   // Sync passes, binding mutations, and action commits all read-modify-write
   // the same project state (project.json bindings, the corpus, the `_actions`
   // staging dirs), so the sync manager and the action manager share ONE lock —
@@ -2569,6 +2669,7 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
     diffpacks,
     connectors,
     connectorActions,
+    duck,
     renderer,
     imageProvider,
     imagePulls,
@@ -2978,6 +3079,37 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
         error: err instanceof Error ? err.message : String(err),
       });
     });
+  }
+
+  // Give pre-convention installs the quantization in their name. The model
+  // table prints the install id, so `gemma4-e4b` (Q8_0) sat one row below
+  // `gemma4-e4b-q4` with nothing on either row to tell them apart. Awaited
+  // rather than backgrounded: it is a handful of directory renames, and a
+  // listing that raced it would show a model under neither name.
+  try {
+    const renames = (
+      await Promise.all(
+        (['llama-cpp', 'ds4', 'mlx'] as const).map((engine) =>
+          migrateLegacyQuantSuffixIds({ roots: modelStorageRoots({ home, engine }), engine }),
+        ),
+      )
+    ).flat();
+    if (renames.length > 0) {
+      const config = await store.readConfig();
+      const modelFitness = remapEngineScopedKeys(config.modelFitness, renames);
+      const modelContextOverrides = remapEngineScopedKeys(config.modelContextOverrides, renames);
+      if (
+        modelFitness !== config.modelFitness ||
+        modelContextOverrides !== config.modelContextOverrides
+      ) {
+        await store.writeConfig({
+          ...(modelFitness ? { modelFitness } : {}),
+          ...(modelContextOverrides ? { modelContextOverrides } : {}),
+        });
+      }
+    }
+  } catch (err) {
+    log.warn('[models] legacy quant-suffix migration failed:', err);
   }
 
   // Reclaim abandoned chat-model downloads: directories with `.partial`

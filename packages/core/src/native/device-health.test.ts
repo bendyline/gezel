@@ -92,6 +92,7 @@ describe('device health telemetry parsers', () => {
           {
             pid: 4242,
             name: 'gezel-llama-server.exe',
+            adapterLuid: '0x00000000_0x025a7706',
             dedicatedBytes: 12_884_901_888,
             owner: 'machine-engine',
           },
@@ -117,6 +118,7 @@ describe('device health telemetry parsers', () => {
           {
             pid: 4242,
             name: 'gezel-llama-server.exe',
+            adapterLuid: '0x00000000_0x025a7706',
             dedicatedBytes: 12_884_901_888,
             owner: 'machine-engine',
           },

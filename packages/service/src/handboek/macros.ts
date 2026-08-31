@@ -8,17 +8,27 @@ import type {
   HandboekRenderMode,
   ProjectTypeManifest,
 } from '@bendyline/gezel';
-import type { ModelTier, RoleId, ScorecardDataset } from '@bendyline/gezel';
+import type {
+  ModelScore,
+  ModelTier,
+  RoleId,
+  ScorecardDataset,
+  ScorecardRun,
+} from '@bendyline/gezel';
 import {
   MODEL_TIER_ORDER,
   ROLES,
   SCORECARD,
+  SCORECARD_DATA_ATTRS,
   buildSuiteScoreboard,
   createLogger,
   describeProvenance,
   provenanceDifferences,
   resolveRoleId,
   scoreModel,
+  scorecardHardwareKey,
+  scorecardHardwareLabel,
+  scorecardModelFamilyId,
   toolsetGroupsForRole,
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
@@ -522,7 +532,7 @@ async function whatsNewList(attrs: Record<string, string>, ctx: MacroContext): P
 /** `::handboek-device-hardware` — this device's local-model capacity. */
 async function deviceHardware(_attrs: Record<string, string>, ctx: MacroContext): Promise<string> {
   if (ctx.mode === 'site') {
-    return 'Gezel classifies each device as tiny, small, medium, or large from the memory available to local models. Open this page in the app to see the current device.';
+    return 'Gezel classifies each device as tiny, small, medium, or large from the memory available to local models.';
   }
   const hardware = await ctx.device.currentHardware();
   if (!hardware) return 'Hardware details are not available for this device.';
@@ -572,8 +582,14 @@ async function modelScorecard(attrs: Record<string, string>, ctx: MacroContext):
     .map((value) => value.trim())
     .filter(Boolean);
   if (suiteIds && suiteIds.length > 0) {
+    // The site is the only surface with somewhere to put controls and a URL
+    // to carry them, so only it gets the filterable stack. App and agent
+    // readers keep the fixed markdown rounds below.
+    if (ctx.mode === 'site') {
+      return renderScorecardFilterHtml(SCORECARD, suiteIds, { includeTaskCount: false });
+    }
     return renderScorecardRunsMarkdown(SCORECARD, suiteIds, {
-      includeTaskCount: ctx.mode !== 'site',
+      includeTaskCount: true,
       breakLabels: ctx.mode !== 'agent',
     });
   }
@@ -670,27 +686,35 @@ export function renderScorecardMarkdown(
 const SCORECARD_SUITE_HEADINGS: Record<string, string> = {
   core: 'General capability',
   productivity: 'Office and knowledge work',
+  developer: 'Engineering work',
+  'complex-work': 'Complex workflows',
 };
 
+interface ScorecardRound {
+  run: ScorecardRun;
+  suites: Array<{ suiteId: string; scores: ModelScore[] }>;
+}
+
 /**
- * Render several suites run-first rather than suite-first.
+ * Every round that measured at least one of `suiteIds`, newest first, with
+ * each suite's models ranked inside it.
  *
- * A run's machine, engines, date, and builds apply to every suite it covered,
- * so printing that stamp once and keeping its tables together makes the real
- * comparison boundary visible. Results from different runs remain separated.
+ * Ranking is by successes-per-attributable-trial with the raw success count
+ * as the tiebreak, matching `buildSuiteScoreboard` — a model that ran fewer
+ * attributable trials must not outrank one that ran the whole set on the
+ * same ratio. Shared by the markdown and the filterable HTML renderers so
+ * the two surfaces can never disagree about the order they publish.
  */
-export function renderScorecardRunsMarkdown(
+function collectScorecardRounds(
   dataset: ScorecardDataset,
   suiteIds: readonly string[],
-  opts: { includeTaskCount: boolean; breakLabels?: boolean },
-): string {
-  const wanted = [...new Set(suiteIds.filter(Boolean))];
-  const runs = [...dataset.runs]
-    .filter((run) => wanted.some((suiteId) => run.suites.includes(suiteId)))
+): ScorecardRound[] {
+  return [...dataset.runs]
+    .filter((run) => suiteIds.some((suiteId) => run.suites.includes(suiteId)))
     .sort((a, b) => b.provenance.startedAt.localeCompare(a.provenance.startedAt))
     .map((run) => ({
       run,
-      suites: wanted
+      suites: suiteIds
         .map((suiteId) => {
           const scores = dataset.results
             .filter((result) => result.runId === run.id && result.suiteId === suiteId)
@@ -708,8 +732,23 @@ export function renderScorecardRunsMarkdown(
         })
         .filter((suite) => suite.scores.length > 0),
     }))
-    .filter((entry) => entry.suites.length > 0)
-    .slice(0, PRIOR_ROUNDS_SHOWN + 1);
+    .filter((entry) => entry.suites.length > 0);
+}
+
+/**
+ * Render several suites run-first rather than suite-first.
+ *
+ * A run's machine, engines, date, and builds apply to every suite it covered,
+ * so printing that stamp once and keeping its tables together makes the real
+ * comparison boundary visible. Results from different runs remain separated.
+ */
+export function renderScorecardRunsMarkdown(
+  dataset: ScorecardDataset,
+  suiteIds: readonly string[],
+  opts: { includeTaskCount: boolean; breakLabels?: boolean },
+): string {
+  const wanted = [...new Set(suiteIds.filter(Boolean))];
+  const runs = collectScorecardRounds(dataset, wanted).slice(0, PRIOR_ROUNDS_SHOWN + 1);
 
   if (runs.length === 0) {
     return [
@@ -762,6 +801,217 @@ export function renderScorecardRunsMarkdown(
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Pure renderer behind `::handboek-model-scorecard` in **site** mode: every
+ * recorded round as one HTML block, stamped so a browser script can narrow
+ * the page down to the machine, model, class, or day a reader asked for.
+ *
+ * Three things about this shape are deliberate.
+ *
+ * **It is HTML, not markdown, because a round has to be a container.** The
+ * filter hides and shows whole rounds and whole suite tables; markdown
+ * emits a flat run of siblings with nothing to grab. The markdown pipeline
+ * this passes through keeps `div`/`table` and every `data-` attribute, and
+ * drops `select`/`script` — so the *content* is stamped here and the
+ * *controls* are built by the script at the controls placeholder.
+ *
+ * **It carries every round, not the three the markdown surface shows.**
+ * Elision is a reading aid when the page is a fixed stack; once a reader
+ * can ask for a specific machine or date, a missing round is a control that
+ * silently matches nothing.
+ *
+ * **It degrades to the full stack.** Without the script the reader gets
+ * every round in date order — more than they asked for, never less, and
+ * never a page whose controls do nothing.
+ */
+export function renderScorecardFilterHtml(
+  dataset: ScorecardDataset,
+  suiteIds: readonly string[],
+  opts: { includeTaskCount: boolean },
+): string {
+  const wanted = [...new Set(suiteIds.filter(Boolean))];
+  const rounds = collectScorecardRounds(dataset, wanted);
+  if (rounds.length === 0) {
+    return [
+      `No ${wanted.join(' or ')} results have been recorded yet.`,
+      '',
+      'Results appear here once a scorecard sweep has been run and checked in.',
+    ].join('\n');
+  }
+
+  const attr = SCORECARD_DATA_ATTRS;
+  const headline = rounds[0]!.run;
+  const labels = roundLabels(rounds.map((entry) => entry.run));
+  const parts: string[] = [
+    `<div class="hb-scorecard" ${attr.root}="1">`,
+    `<div class="hb-scorecard-controls" ${attr.controls}="1"></div>`,
+  ];
+
+  for (const [index, entry] of rounds.entries()) {
+    const { run } = entry;
+    const date = run.provenance.startedAt.slice(0, 10);
+    const engines = entry.suites.flatMap((suite) =>
+      suite.scores.map((score) => score.result.engine),
+    );
+    const why = index === 0 ? [] : provenanceDifferences(headline, run);
+    const models = [
+      ...new Set(
+        entry.suites.flatMap((suite) =>
+          suite.scores.map((score) => scorecardModelFamilyId(score.result.modelId)),
+        ),
+      ),
+    ].sort();
+    const tiers = [
+      ...new Set(entry.suites.flatMap((suite) => suite.scores.map((score) => score.result.tier))),
+    ];
+
+    parts.push(
+      `${[
+        '<div class="hb-scorecard-round"',
+        `${attr.round}="${esc(run.id)}"`,
+        `${attr.roundLabel}="${esc(labels.get(run.id) ?? date)}"`,
+        `${attr.date}="${esc(date)}"`,
+        `${attr.hardware}="${esc(scorecardHardwareKey(run.provenance.device))}"`,
+        `${attr.hardwareLabel}="${esc(scorecardHardwareLabel(run.provenance.device))}"`,
+        `${attr.models}="${esc(models.join(' '))}"`,
+        `${attr.tiers}="${esc(tiers.join(' '))}"`,
+        ...(index === 0 ? [`${attr.latest}="1"`] : []),
+      ].join(' ')}>`,
+      `<h4 class="hb-scorecard-round-title">${index === 0 ? 'Latest round' : 'Earlier round'} — ${esc(date)}</h4>`,
+      `<p class="hb-scorecard-stamp"><strong>${esc(describeProvenance(run, engines))}</strong>${
+        why.length > 0 ? ` — ${esc(why.join(', '))}` : ''
+      }</p>`,
+    );
+
+    for (const suite of entry.suites) {
+      const publishable = suite.scores.filter((score) => score.unmeasuredScenarios.length === 0);
+      const withheld = suite.scores.filter((score) => score.unmeasuredScenarios.length > 0);
+      parts.push(`<div class="hb-scorecard-suite" ${attr.suite}="${esc(suite.suiteId)}">`);
+      parts.push(
+        `<h5 class="hb-scorecard-suite-title">${esc(
+          SCORECARD_SUITE_HEADINGS[suite.suiteId] ?? suite.suiteId,
+        )}</h5>`,
+      );
+      parts.push(scoreTableHtml(publishable));
+      if (withheld.length > 0) {
+        const names = withheld
+          .map(
+            (score) =>
+              `${score.result.label} (${score.unmeasuredScenarios.length} task(s) unmeasured)`,
+          )
+          .join('; ');
+        parts.push(
+          `<p class="hb-scorecard-withheld">Not published — some tasks could not be measured on this round: ${esc(names)}</p>`,
+        );
+      }
+      if (opts.includeTaskCount) {
+        const count = run.scenariosBySuite[suite.suiteId]?.length ?? 0;
+        parts.push(`<p class="hb-scorecard-taskcount">Tasks in this set: ${count}.</p>`);
+      }
+      parts.push('</div>');
+    }
+    parts.push('</div>');
+  }
+
+  parts.push('</div>');
+  // One HTML block, so no blank lines: a blank line ends the block and
+  // leaves the closing tags orphaned, which the markdown parser drops.
+  return parts.join('\n');
+}
+
+/**
+ * A short, unique name per round for the date picker.
+ *
+ * Dates are not unique — 2026-08-20 carries both a Mac and a DGX Spark
+ * sweep — so a bare date would offer the reader two entries they cannot
+ * tell apart. Machine disambiguates those; the run id is the last resort,
+ * since the schema already guarantees it is unique.
+ */
+function roundLabels(runs: readonly ScorecardRun[]): Map<string, string> {
+  const byDate = new Map<string, ScorecardRun[]>();
+  for (const run of runs) {
+    const date = run.provenance.startedAt.slice(0, 10);
+    byDate.set(date, [...(byDate.get(date) ?? []), run]);
+  }
+  const out = new Map<string, string>();
+  for (const [date, sharing] of byDate) {
+    for (const run of sharing) {
+      if (sharing.length === 1) {
+        out.set(run.id, date);
+        continue;
+      }
+      const machine = scorecardHardwareLabel(run.provenance.device);
+      const sameMachine = sharing.filter(
+        (other) => scorecardHardwareLabel(other.provenance.device) === machine,
+      );
+      out.set(run.id, sameMachine.length === 1 ? `${date} · ${machine}` : `${date} · ${run.id}`);
+    }
+  }
+  return out;
+}
+
+/**
+ * The HTML twin of `scoreTable`. Same columns and the same omissions, plus
+ * a model-family and tier stamp on every row, so the filter can hide a row
+ * without knowing anything about what it says.
+ */
+function scoreTableHtml(scores: ModelScore[]): string {
+  const attr = SCORECARD_DATA_ATTRS;
+  const anyRuntime = scores.some((score) => !!score.result.runtime);
+  const anyJudge = scores.some((score) => !!score.result.judge);
+
+  const cols = ['Model', 'Size', 'Tasks passed'];
+  if (anyJudge) cols.push('Quality');
+  cols.push('Performance');
+  if (anyRuntime) cols.push('Context', 'Memory used');
+
+  const rows = scores.map((score) => {
+    const kvCacheType = score.result.runtime?.kvCacheType;
+    const cells = [
+      esc(`${score.result.label}${kvCacheType ? ` (kv: ${kvCacheType})` : ''}`),
+      esc(score.result.parameterSize ?? score.result.tier),
+      esc(score.claim),
+    ];
+    if (anyJudge) {
+      const judge = score.result.judge;
+      cells.push(judge ? esc(`${judge.meanScore}/10 (${judge.artifacts}${NB}pieces)`) : '—');
+    }
+    const perf = score.result.performance;
+    cells.push(
+      perf
+        ? `${esc(`${perf.decodeTokensPerSec}${NB}tok/s output`)}<br />${esc(
+            `${perf.prefillTokensPerSec.toLocaleString()}${NB}tok/s prefill`,
+          )}`
+        : '—',
+    );
+    if (anyRuntime) {
+      const runtime = score.result.runtime;
+      cells.push(
+        runtime ? `${Math.round(runtime.contextTokens / 1024)}K` : '—',
+        runtime ? esc(`${(runtime.peakMemoryMb / 1024).toFixed(1)}${NB}GB`) : '—',
+      );
+    }
+    const stamp = `${attr.model}="${esc(scorecardModelFamilyId(score.result.modelId))}" ${attr.tier}="${esc(score.result.tier)}"`;
+    return `<tr ${stamp}>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>`;
+  });
+
+  return [
+    '<table>',
+    `<thead><tr>${cols.map((col) => `<th>${esc(col)}</th>`).join('')}</tr></thead>`,
+    `<tbody>${rows.join('')}</tbody>`,
+    '</table>',
+  ].join('');
+}
+
+/** Escape for HTML text and double-quoted attribute values alike. */
+function esc(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 /** How many previous rounds a published table shows before history is elided. */

@@ -171,14 +171,17 @@ export function describeCatalogPayload(
       sizeBytes: src.approxSizeBytes,
     });
   }
-  const llamaCpp = engine === 'llama-cpp' ? manifest.llamaCpp : undefined;
-  if (llamaCpp?.draftModel) {
+  // Draft companions exist on both engine sources and are fetched
+  // unconditionally by `buildDownloadPlan`, so read them off the already
+  // engine-selected `src` rather than re-narrowing to one engine.
+  if (src.draftModel) {
     files.push({
-      name: basename(llamaCpp.draftModel.filename),
-      sha256: llamaCpp.draftModel.sha256,
-      sizeBytes: llamaCpp.draftModel.sizeBytes,
+      name: basename(src.draftModel.filename),
+      sha256: src.draftModel.sha256,
+      sizeBytes: src.draftModel.sizeBytes,
     });
   }
+  const llamaCpp = engine === 'llama-cpp' ? manifest.llamaCpp : undefined;
   if (llamaCpp?.mmproj) {
     // Only fetched when the user opts into vision — its absence says nothing
     // about whether the weights are current.

@@ -14,7 +14,6 @@ import {
   MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   type NewCraftbookStep,
   type NormalizedStepGate,
-  type ScriptOutputPredicate,
   type ScriptRef,
   type ScriptRun,
   type StepPosition,
@@ -78,9 +77,23 @@ import {
   plateauScore,
   stageForPlateau,
 } from './gate-escalation.js';
-import { type GateCheckOutcome, type GateWorkspaceReader, gateCheckLabel } from './gate-eval.js';
+import {
+  type GateCheckOutcome,
+  type GateWorkspaceReader,
+  gateCheckLabel,
+  taskSuppliedCitationPaths,
+} from './gate-eval.js';
 import { execNodeRunsInSandbox } from './node-runs-exec.js';
 import { type StepGateOutcome, evaluateStepGate, gateMessageFingerprint } from './step-gate.js';
+import {
+  bumpStepActivation,
+  findBranchGoto,
+  mainBookSource,
+  shouldAutoAdvance,
+  stepOwnerGezelId,
+} from './step-runtime.js';
+
+export { mainBookSource, stepOwnerGezelId };
 
 const log = createLogger('tasks');
 
@@ -209,6 +222,9 @@ function snapshotCraftbookForTask(book: Craftbook, now: string): TaskCraftbook {
     // Snapshot toolsets so ChatManager can derive the auto-allow tool set
     // from `task.craftbook.toolsets` without re-resolving the catalog book.
     ...(book.toolsets ? { toolsets: book.toolsets } : {}),
+    // Snapshot recommendation hints so the chat's craftbook start card can
+    // read them off the tool result's task without a catalog lookup.
+    ...(book.recommends ? { recommends: book.recommends } : {}),
     // Snapshot connector needs so a running task records the corpus it was
     // launched against without re-resolving the catalog book.
     ...(book.connectors ? { connectors: book.connectors } : {}),
@@ -505,15 +521,21 @@ function taskInterpolationContext(task: Task): Record<string, string> {
  * declaring an `advanceWhen` deliverable, and reading only `advanceWhen`
  * classified every one of those as 'workspace' — which is how a task-note
  * script gate came to demand `replace_in_file`.
+ *
+ * `failedChecks` is this attempt's failing-check labels when the caller
+ * has them — a step whose declarative deliverable passes while only a
+ * script rejects must not be told to rewrite that deliverable.
  */
 function stepDeliverableSurface(
   step: Pick<TaskCraftbookStep, 'advanceWhen' | 'gate'>,
+  failedChecks?: readonly string[],
 ): DeliverableSurface {
   const gate = step.gate ? normalizeStepGate(step.gate) : undefined;
   return deliverableSurface({
     advanceWhen: step.advanceWhen,
     checks: gate?.checks as ReadonlyArray<Record<string, unknown>> | undefined,
     scripts: gate?.scripts,
+    ...(failedChecks ? { failedChecks } : {}),
   });
 }
 
@@ -2135,6 +2157,7 @@ export class TaskManager {
       ...(book.triggers ? { triggers: book.triggers } : {}),
       ...(book.hooks ? { hooks: book.hooks } : {}),
       ...(book.toolsets ? { toolsets: book.toolsets } : {}),
+      ...(book.recommends ? { recommends: book.recommends } : {}),
       ...(book.connectors ? { connectors: book.connectors } : {}),
       ...(book.scripts ? { scripts: book.scripts } : {}),
       createdAt: task.craftbook.createdAt,
@@ -2878,8 +2901,22 @@ export class TaskManager {
     // verified gap). Model-driven frozen resubmits now climb
     // the escalation ladder instead: fresh stage directive, fresh
     // fingerprint, so the nudge actually delivers.
+    //
+    // The hash covers ONE input: the `advanceWhen` deliverable. A gate
+    // script reads whatever it likes — `checkTaskNoteContains` reads the
+    // task NOTES — so for a scripted gate "byte-identical deliverable"
+    // does not imply "same verdict", and damping on it caches a verdict
+    // the model has already earned its way out of. Pull Request Review's
+    // `scope` gate is the wild-caught case: its deliverable is the batch
+    // file the runtime publishes onEnter and the prompt forbids touching,
+    // so the hash was immutable by construction while the note the script
+    // actually judges was rewritten twice. Three of four recorded
+    // "failures" never ran the check, and the ladder paused the task with
+    // a verdict that was false when it was replayed. Scripted gates
+    // re-evaluate; the plateau ladder in the rejection path below still
+    // terminates the loop, on verdicts that came from a real run.
     let contentHash: string | undefined;
-    if (step.advanceWhen?.file) {
+    if (step.advanceWhen?.file && gate.scripts.length === 0) {
       const content = await (step.advanceWhen.artifact
         ? this.store.readProjectArtifact(projectId, step.advanceWhen.file)
         : this.store.readProjectWorkspaceFile(projectId, step.advanceWhen.file)
@@ -2911,7 +2948,11 @@ export class TaskManager {
       const signature = lastEntry?.signatureHash ?? step.lastGateReject.messageFingerprint;
       const score = plateauScore(trail, signature);
       let stage = stageForPlateau(score);
-      const deliverableFile = step.advanceWhen?.file;
+      const frozenSurface = stepDeliverableSurface(step, lastEntry?.failedChecks);
+      // A note-surface rejection has nothing on disk to replace whole,
+      // and its declarative deliverable is passing — naming that file in
+      // a stage directive sends the repair at the wrong artifact.
+      const deliverableFile = frozenSurface === 'note' ? undefined : step.advanceWhen?.file;
       if (stage === 2 && !deliverableFile) stage = 1;
       const frozenEntry: GateAttemptRecord = {
         at: nowIso(),
@@ -3030,7 +3071,6 @@ export class TaskManager {
         };
       }
 
-      const frozenSurface = stepDeliverableSurface(step);
       const nudge =
         stage === 2 && deliverableFile
           ? buildStageTwoNudge({
@@ -3073,6 +3113,15 @@ export class TaskManager {
       ws,
       runScript: (ref) => this.runGateScript(projectId, task, step, ref),
       deps: {
+        // Paths the task itself handed the assignee (invocation params,
+        // the step prompt's own path tokens). `citationsResolve` forgives
+        // these when unresolvable — a sources packet transcribing its own
+        // work folder or future output path is not fabricating a citation.
+        knownCitationPaths: taskSuppliedCitationPaths({
+          ...(step.prompt !== undefined ? { stepPrompt: step.prompt } : {}),
+          ...(task.craftbookParams !== undefined ? { params: task.craftbookParams } : {}),
+          artifactDir: task.artifactDir ?? `tasks/${task.num}`,
+        }),
         // The nodeRuns executor — same security fence as user scripts:
         // when the policy disables script execution, the check rejects
         // with the policy message (fail-closed) instead of running.
@@ -3354,15 +3403,25 @@ export class TaskManager {
     // the model gets a strategy CHANGE, not the same bullets again.
     const signature = gateFailureSignature(outcome.checkResults, outcome.runs);
     const score = plateauScore(step.gateAttemptHistory, signature);
-    let stage: EscalationStage = modelDriven ? stageForPlateau(score) : 0;
-    const deliverableFile = step.advanceWhen?.file;
-    if (stage === 2 && !deliverableFile) stage = 1;
-    const rejectSurface = stepDeliverableSurface(step);
     const failedLabels = (outcome.checkResults ?? [])
       .filter((c) => !c.ok)
       .map((c) => c.label)
       .slice(0, 8);
     const rejectingScript = outcome.runs.find((r) => r.decision === 'reject' || r.error);
+    // Surface classification needs the WHOLE failing set — declarative
+    // and scripted — because the trail entry below records only the
+    // declarative half when both exist.
+    const rejectSurface = stepDeliverableSurface(step, [
+      ...failedLabels,
+      ...outcome.runs
+        .filter((r) => r.decision === 'reject' || r.error)
+        .map((r) => `script:${r.scriptName}`),
+    ]);
+    let stage: EscalationStage = modelDriven ? stageForPlateau(score) : 0;
+    // See the frozen path: a passing deliverable is not the thing to
+    // rewrite, and a note surface has no file to name at all.
+    const deliverableFile = rejectSurface === 'note' ? undefined : step.advanceWhen?.file;
+    if (stage === 2 && !deliverableFile) stage = 1;
     // Converging-loop rejection: the same checks fail, but on fewer
     // outstanding items than last attempt. `signature` already carries the
     // count so the ladder is at stage 0 here; this only replaces the
@@ -4184,6 +4243,36 @@ export class TaskManager {
   }
 
   /**
+   * Re-fire {@link onStepActivated} for the task's CURRENT active step
+   * without moving the step or touching its attempt bookkeeping.
+   *
+   * Exists for the fanout barrier. A post-fanout step's gate depends on
+   * files only the children can write, so `service.ts` declines to
+   * dispatch a worker turn into it while children are still active. That
+   * hold needs a release: nothing else pokes a spawn host when its last
+   * child settles, and without this the parent would sit active forever
+   * with a satisfiable gate and nobody to call it.
+   *
+   * Deliberately NOT `activateStep` — the step is already active, so that
+   * method early-returns and never reaches the hook, and re-entering it
+   * would re-run `onEnter` and re-stamp `lastActivatedAt` (which the task
+   * runner reads as superseding work).
+   */
+  async redispatchActiveStep(projectId: string, num: number, reason: string): Promise<void> {
+    if (!this.onStepActivated) return;
+    const task = await this.get(projectId, num);
+    if (!task || task.status !== 'active' || !task.activeStepId) return;
+    const step = task.craftbook.steps.find((s) => s.id === task.activeStepId);
+    if (!step) return;
+    log.info(`[tasks] ${task.ref}: re-dispatching active step "${step.id}" — ${reason}`);
+    try {
+      await this.onStepActivated({ projectId, task, newStep: step, completedStep: step });
+    } catch (err) {
+      log.error(`[tasks] re-dispatch hook failed for ${task.ref}:`, err);
+    }
+  }
+
+  /**
    * Clone the parent's spawn craftbook into a fresh child task. Child
    * starts at `status: 'active'` with the spawn craftbook's entry step
    * active, which fires the `onStepActivated` hook.
@@ -4499,175 +4588,4 @@ export class TaskManager {
     if (!task) throw new Error(`task ${buildTaskRef(projectId, num)} not found`);
     return task;
   }
-}
-
-/**
- * Walk a step's branches in order, evaluating each predicate against
- * the supplied output. Returns the first matching `goto`, or undefined
- * when no branch matches (caller falls through to `next`).
- */
-function findBranchGoto(
-  branches: { when: ScriptOutputPredicate; goto: string }[],
-  output: unknown,
-): string | undefined {
-  for (const b of branches) {
-    if (evaluatePredicate(b.when, output)) return b.goto;
-  }
-  return undefined;
-}
-
-/**
- * Stamp an activation onto a step: bump `attemptCount` and set
- * `lastActivatedAt`. Called every time a step becomes the active step —
- * the entry step at create/spawn, manual `activateStep`, and each
- * advancement, INCLUDING loop-backs (build-loop's `evaluate → build`
- * cycle re-activates `build`, so its count climbs). The count is what
- * surfaces "we've poked the dev step 3 times" to the voorman and lets
- * the eval harness confirm a model iterated rather than one-shotting.
- */
-function bumpStepActivation(
-  steps: TaskCraftbookStep[],
-  stepId: string,
-  at: string,
-  opts?: { preserveGateBudget?: boolean },
-): TaskCraftbookStep[] {
-  return steps.map((s) => {
-    if (s.id !== stepId) return s;
-    // A re-activated step (loop-back) is active again, not done — drop any
-    // stale `completedAt` from its previous pass so the phase state reads
-    // truthfully — and bump the attempt counter. Gate state resets too:
-    // a fresh activation grants a fresh rejection budget, and the damper
-    // must not replay a rejection from a previous pass. The anti-stall
-    // re-drive budget resets on the same principle — a fresh activation is
-    // a clean start, not a continuation of the prior pass's silence.
-    //
-    // `gateAttemptHistory` deliberately SURVIVES this reset: `onReject:
-    // <self>` loop gates re-activate on every rejection, so stripping the
-    // trail here would blind the plateau ladder exactly where it matters.
-    // The trail self-heals — real progress changes the failing-check
-    // signature and the trailing-run score resets to 1.
-    const {
-      completedAt: _done,
-      onEnterCompletedAt: _entered,
-      gateAttempts: _ga,
-      gateProgressAttempts: _gpa,
-      lastGateReject: _lgr,
-      redriveCount: _rc,
-      lastRedriveAt: _lra,
-      ...rest
-    } = s;
-    void _done;
-    void _entered;
-    void _ga;
-    void _gpa;
-    void _lgr;
-    void _rc;
-    void _lra;
-    const bumped = { ...rest, attemptCount: (s.attemptCount ?? 0) + 1, lastActivatedAt: at };
-    if (!opts?.preserveGateBudget) return bumped;
-    // Self-loop carve-out. A gate with `onReject: <self>` re-activates the
-    // step it just rejected, so the reset above handed it a brand-new
-    // budget on every rejection and `maxAttempts` became unreachable —
-    // the pause-for-help that budget exists to trigger could never fire.
-    // Wild-caught on Pull Request Review: the step logged attemptCount 3
-    // while every trail entry (and every message the model saw) read
-    // "attempt 1/3", so nothing ever escalated and the loop could have run
-    // forever. Only a gate rejection routing back to ITSELF takes this
-    // branch; a loop through another step is real upstream rework and
-    // still earns a clean budget, as do create/manual activation and the
-    // deliberate `resetStepRecoveryBudget` second chance.
-    return {
-      ...bumped,
-      ...(s.gateAttempts !== undefined ? { gateAttempts: s.gateAttempts } : {}),
-      // Same reasoning for the progress budget: a self-loop that re-earned
-      // it every pass would make GATE_MAX_PROGRESS_ATTEMPTS unreachable,
-      // which is the exact bug this carve-out exists to prevent.
-      ...(s.gateProgressAttempts !== undefined
-        ? { gateProgressAttempts: s.gateProgressAttempts }
-        : {}),
-      ...(s.lastGateReject !== undefined ? { lastGateReject: s.lastGateReject } : {}),
-    };
-  });
-}
-
-/**
- * Decide whether a step should auto-advance based on its onEnter ref
- * and the stamped output. `autoAdvanceOnSuccess: true` is sugar for
- * `{op: 'ok'}`. If both flags are set, `autoAdvanceWhen` wins.
- */
-function shouldAutoAdvance(ref: ScriptRef, output: unknown): boolean {
-  const predicate: ScriptOutputPredicate | undefined =
-    ref.autoAdvanceWhen ?? (ref.autoAdvanceOnSuccess ? { op: 'ok' } : undefined);
-  if (!predicate) return false;
-  return evaluatePredicate(predicate, output);
-}
-
-function evaluatePredicate(predicate: ScriptOutputPredicate, output: unknown): boolean {
-  switch (predicate.op) {
-    case 'always':
-      return true;
-    case 'never':
-      return false;
-    case 'ok': {
-      if (!isRecord(output)) return true;
-      return output.ok !== false;
-    }
-    case 'equals': {
-      const v = readFieldPath(output, predicate.field);
-      return v === predicate.value;
-    }
-    case 'exists': {
-      const v = readFieldPath(output, predicate.field);
-      const exists = v !== undefined && v !== null;
-      return predicate.negate ? !exists : exists;
-    }
-    case 'gt': {
-      const v = readFieldPath(output, predicate.field);
-      return typeof v === 'number' && v > predicate.value;
-    }
-  }
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-function readFieldPath(output: unknown, path: string): unknown {
-  if (output === null || output === undefined) return undefined;
-  const segments = path.split('.');
-  let cur: unknown = output;
-  for (const seg of segments) {
-    if (cur === null || cur === undefined) return undefined;
-    if (Array.isArray(cur) && seg === 'length') {
-      cur = cur.length;
-      continue;
-    }
-    if (typeof cur !== 'object') return undefined;
-    cur = (cur as Record<string, unknown>)[seg];
-  }
-  return cur;
-}
-
-/**
- * The gezel accountable for a step right now: explicit step assignee →
- * the step's resolved suggested gezel → the task-level assignee. Same
- * triple the scheduler and the gate's keurmeester consult use.
- */
-export function stepOwnerGezelId(task: Task, step: TaskCraftbookStep): string | undefined {
-  if (step.assignee?.kind === 'gezel') return step.assignee.gezelId;
-  if (step.suggestedGezelId) return step.suggestedGezelId;
-  return task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined;
-}
-
-/**
- * The catalog identity of the recipe this task walks — the per-book join
- * key gate telemetry aggregates on. `role: 'main'` is the walked book;
- * the embedded snapshot id is the fallback for older/inline tasks.
- */
-export function mainBookSource(task: Task): { catalogId: string; version?: string } {
-  const main = task.sourceCraftbookIds?.find((s) => s.role === 'main');
-  if (main) {
-    return { catalogId: main.catalogId, ...(main.version ? { version: main.version } : {}) };
-  }
-  return { catalogId: task.craftbook.id };
 }

@@ -96,6 +96,14 @@ export interface StableDiffusionCppProviderOptions {
    * of always serving whichever model sorts first.
    */
   launchState?: { modelId: string | undefined };
+  /**
+   * The user's configured default model (`config.defaultImageModel['sd-cpp']`,
+   * Settings -> Image generation). Read on every generate that names no model
+   * of its own. A configured id that is no longer installed falls through to
+   * the first installed model, which is what every install did before this
+   * setting existed.
+   */
+  defaultModelId?: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
@@ -175,6 +183,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
   private readonly configured: boolean;
   private readonly arbiter?: GpuArbiter;
   private readonly launchState?: { modelId: string | undefined };
+  private readonly defaultModelId?: string;
 
   constructor(opts: StableDiffusionCppProviderOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
@@ -191,6 +200,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
     // supervisor. The factory's loopback fallback flips this off.
     this.configured = opts.configured ?? true;
     this.launchState = opts.launchState;
+    this.defaultModelId = opts.defaultModelId;
     // Only register an evictor when we own a supervisor. External-URL
     // mode targets an sd-server the user runs themselves; we don't
     // get to stop their process.
@@ -661,6 +671,9 @@ export class StableDiffusionCppProvider implements ImageProvider {
    */
   private async currentDefaultModelId(): Promise<string | undefined> {
     const models = await this.listInstalledModels();
+    if (this.defaultModelId && models.some((m) => m.id === this.defaultModelId)) {
+      return this.defaultModelId;
+    }
     return models[0]?.id;
   }
 

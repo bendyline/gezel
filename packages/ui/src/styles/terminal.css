@@ -533,43 +533,49 @@
   font-size: 0.78rem;
 }
 
-/* Composer mode toggle (AI chat ⇄ Terminal). A quiet one-pixel frame owns
- * the complete compose surface; the active `@` / `>` tab cuts through its
- * right edge to read as part of that frame. The glyphs mirror the escape
- * syntax users can type (`@florian …` → chat, `> ls` → terminal), while
- * aria-label carries the longer human text. */
+/* A quiet one-pixel frame owns the complete compose surface for both modes
+ * (AI chat ⇄ Terminal). The mode tabs live inside it, in the address line of
+ * whichever composer is mounted — see `.compose-mode-tabs` below. */
 .project-chat-compose-shell {
+  --chat-composer-action-inset: 0.6rem;
   display: flex;
   align-items: stretch;
   gap: 0;
   /* Follow the roster + timeline content gutter instead of letting the
    * composer frame sit flush against the project pane's left edge. */
   margin-left: 0.75rem;
-  /* The @/> mode tabs hang off the right edge with 2px of clearance, and the
-   * scroll container they sit in has no padding and ends at the window frame.
-   * Anything painted outside their border box was therefore clipped — most
-   * visibly the 4px :focus-visible ring, so keyboard focus drew a half ring.
-   * A small gutter gives the tabs and their ring somewhere to land. */
-  margin-right: 0.5rem;
+  /* Clear the timeline's scrollbar and then some. The gutter used to be
+   * exactly the 8px scrollbar width, which put the composer's right border
+   * flush against the track's left edge — two 1px lines touching, which reads
+   * as the scrollbar overlapping the composer. The extra 4px also gives a
+   * right-edge control's :focus-visible ring somewhere to land: this sits in a
+   * container with no padding that ends at the window frame, so anything
+   * painted outside the composer's border box is clipped. */
+  margin-right: calc(8px + 4px);
   /* Keep the framed control from sitting directly on the project pane's
    * bottom edge. This belongs to the shell so it clears both the composer
    * and its attached chat/terminal tabs without adding space inside them. */
   padding-bottom: 4px;
-  --compose-frame-bg: color-mix(in srgb, var(--panel) 88%, var(--surface));
-  --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
-  --compose-toolbar-bg: color-mix(in srgb, var(--panel) 97%, var(--chat-bubble-bg));
-  /* Height of chat's recipient band. Terminal has no recipient row, so this
-   * same budget is transferred to its command-entry window below. Sharing one
-   * variable keeps the two compose modes the same overall height while giving
-   * terminal typing — rather than empty chrome — the extra room. */
-  --compose-header-offset: calc(2.1875rem + 8px);
-}
-
-/* Chat mode gets the same deeper header band as Home. Terminal mode keeps its
- * existing frame and toolbar treatment when `.chat-composer` is absent. */
-.project-chat-compose-shell:has(.chat-composer) {
+  /* One palette for both modes. These used to fork — terminal took a
+   * panel/surface mix while a `:has(.chat-composer)` override gave chat the
+   * deeper Home header band — so flipping modes changed the fill behind an
+   * unchanged frame, and the same border read as two different borders. */
   --compose-frame-bg: var(--chat-compose-header-bg);
+  --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
   --compose-toolbar-bg: var(--chat-compose-header-bg);
+  /* The rule under each band. Quieter than the frame's accent-tinted edge:
+   * these are seams inside one surface, not the surface's boundary. */
+  --compose-band-rule: color-mix(in srgb, var(--border) 82%, transparent);
+  /* Height of the top band — chat's recipient line and terminal's toolbar
+   * both. They are the same row to the eye, so they are the same row in the
+   * geometry, and the mode tabs that sit in them fill it exactly. */
+  --compose-top-row-height: 2.1875rem;
+  /* What chat spends below its own second row: squisq's editor toolbar
+   * (~35px, where Send lives) plus the editor itself (~85px). Terminal now
+   * spends it the same way — a Fire row of `--compose-top-row-height` over
+   * the command entry — so the two modes settle at the same overall height.
+   * Measured rather than derived, because squisq owns both numbers. */
+  --compose-entry-height: 120px;
 }
 
 .project-chat-compose-main {
@@ -581,11 +587,18 @@
   border: 1px solid var(--compose-frame-border);
   border-radius: var(--radius-md);
   background: var(--compose-frame-bg);
-  /* Sit above inactive mode tabs in their 1px overlap so those tabs read as
-   * tucked behind the composer instead of drawing a stray left border over
-   * its edge. The active tab is raised back above this surface below. */
   position: relative;
-  z-index: 1;
+  /* The content inset, owned here so both modes get it from the same place.
+   * It used to be spelled twice — as terminal's `padding-left` and as the
+   * chat "To:" line's side margin — which is why the two modes' top bands
+   * started at different x.
+   *
+   * It has to be on BOTH sides. Children paint over their parent's border, so
+   * a square-cornered opaque band running to the frame's inner edge covers the
+   * rounded corner there: with the inset on the left only, the frame read as
+   * rounded on the left and square on the right. 4px clears a 6px arc (at 1px
+   * down from the top the curve has only eaten 2.7px of the edge). */
+  padding-inline: 0.25rem;
   /* Chat mode is intentionally floorless: the composer sizes to its
    * content (TO row + thread picker + toolbar + Squisq editor) so the
    * timeline above claims ALL remaining height. A fixed floor here used
@@ -603,11 +616,49 @@
  * keeps those three surfaces flush. */
 .project-chat-compose-main-terminal {
   gap: 0;
-  /* 4px left inset matching the chat composer (`.chat-composer`
-   * padding-left), so the `/` dropdown + toolbar + input align with the
-   * chat editor's left edge instead of running full-bleed. The right
-   * edge stays flush for the @/> tab attachment. */
-  padding-left: 0.25rem;
+}
+
+/* The top band, identical in both modes — chat's recipient line and
+ * terminal's toolbar. They read as the same row and host the same mode tabs,
+ * so they get one set of metrics rather than the two that had drifted apart:
+ * chat sat 8px lower (the composer's own top padding), ran 3px shorter, was
+ * inset on BOTH sides as a rounded chip while terminal ran full-bleed to the
+ * right, and carried a translucent black wash where terminal carried the
+ * toolbar fill. Height is a floor, not a fixture — a fan-out with several
+ * recipients wraps the chat line onto a second row, and clipping the
+ * addressees to keep a pixel would be the wrong trade. */
+.project-chat-compose-main .chat-composer-to,
+.project-chat-compose-main .terminal-composer-toolbar {
+  height: auto;
+  min-height: var(--compose-top-row-height);
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0 var(--chat-composer-action-inset) 0 0.4rem;
+  border: 0;
+  border-bottom: 1px solid var(--compose-band-rule);
+  border-radius: 0;
+  /* `!important` because the light-theme sage wash on `.terminal-composer-
+   * toolbar` further down matches this selector's specificity and wins on
+   * source order. That wash is for the standalone terminal surface; in the
+   * compose frame the band belongs to the frame's palette. */
+  background: var(--compose-toolbar-bg) !important;
+}
+
+/* The address line's own content reads one pixel high against the mode tabs.
+ * The tabs hang from the top of the band (their 2px offset is measured off the
+ * frame border), so nudging the band's padding would drag them along with it —
+ * shift only the addressees and the recipient picker, and leave layout alone. */
+.project-chat-compose-main .chat-composer-to > *:not(.compose-mode-tabs) {
+  position: relative;
+  top: 1px;
+}
+
+/* `.chat-composer` pads itself for the standalone surfaces (Home, per-gezel
+ * chat). Here the frame owns the inset and the bands run edge to edge, so its
+ * padding is what put chat's top band 8px below terminal's and left a 4px
+ * ledge under the editor that terminal did not have. */
+.project-chat-compose-main .chat-composer {
+  padding: 0;
 }
 
 /* Stack toolbar → folder context → command entry. The command-entry band
@@ -622,14 +673,72 @@
   gap: 0;
 }
 
+/* In the compose frame the row is a band like the ones above it: full height
+ * of a top row so the Fire key lands where chat's Send does. The 1px inset is
+ * measured, not chosen — it mirrors the `margin-inline` squisq's
+ * `.squisq-editor-header` spends on the band that carries Send, down to being
+ * a margin rather than padding, so the two rows and the two keys inside them
+ * land on the same pixels. */
+.project-chat-compose-main .terminal-composer-fire-row {
+  /* A top row plus the seam under it. Chat's equivalent band is squisq's
+   * `.squisq-editor-header`: a 35px toolbar with a 1px rule below it, which is
+   * why chat's typing surface is 84px where an unseamed terminal's was 85 —
+   * the one place the two modes still disagreed by a pixel, and the last
+   * "the terminal box is taller" to survive measurement. */
+  height: calc(var(--compose-top-row-height) + 1px);
+  border-bottom: 1px solid var(--compose-band-rule);
+  margin: 0 1px;
+  padding-inline-end: calc(var(--chat-composer-action-inset) - 3px);
+}
+
+/* Chat's toolbar is content-sized, so it used to be exactly as tall as the
+ * Send key inside it plus its vertical margins — shorter than the
+ * terminal's Fire row, which left the key looking wedged against the draft
+ * below it and put every row after it at a different y across a mode flip.
+ * The two modes' totals always matched (the editor body simply absorbed the
+ * 5px); what did not match was where the rows sat. Floor it at a top row and
+ * both bands, both keys, and both typing surfaces line up. */
+.project-chat-compose-main .squisq-toolbar {
+  min-height: var(--compose-top-row-height);
+}
+
+/* The typing surface, matched to the squisq editor chat types into: one
+ * full-bleed slab under the seam, no card of its own. The standalone terminal
+ * wraps its input in a bordered, rounded, generously padded box; the light
+ * theme already stripped that here, but dark never did, so after dark the two
+ * modes disagreed — chat's flush panel against a black `#111` card floating
+ * inside the same frame. Strip it in both themes and let only the fill vary.
+ * The fills are squisq's own editor colours, kept in step with the matching
+ * `editor.background` in terminal-monaco-setup.ts. */
 .project-chat-compose-main .terminal-composer-input-wrap {
-  /* Border-box height: the 90px entry floor that matches the current Squisq
-   * chat surface, plus the space reclaimed from terminal's removed empty
-   * recipient band. */
-  height: calc(90px + var(--compose-header-offset));
-  flex: 1 1 calc(90px + var(--compose-header-offset));
-  min-height: 90px;
+  /* Border-box, so this lands the frame bottom exactly where chat's does.
+   * The Fire row above takes its cut of the budget the way squisq's toolbar
+   * takes chat's — one top row, plus the 1px seam under it. */
+  height: calc(var(--compose-entry-height) - var(--compose-top-row-height) - 1px);
+  flex: 1 1 calc(var(--compose-entry-height) - var(--compose-top-row-height) - 1px);
+  min-height: 72px;
   align-items: stretch;
+  border: 0;
+  border-radius: 0;
+  padding: 0.4rem 0 0.4rem 0.1rem;
+  background: #111827;
+}
+
+/* Specificity, not source order: the standalone light-theme rule for this
+ * element sits further down the file and would otherwise win. It also paints a
+ * terracotta rule along the bottom of the slab — right on top of the frame's
+ * own border here, so the terminal's bottom edge read as a thicker line than
+ * chat's, which carries none. Same size, more weight. */
+[data-theme="light"] .project-chat-compose-main .terminal-composer-input-wrap {
+  background: #f6f1e7;
+  border-bottom: 0;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .project-chat-compose-main .terminal-composer-input-wrap {
+    background: #f6f1e7;
+    border-bottom: 0;
+  }
 }
 
 .project-chat-compose-main .terminal-composer-input-wrap .terminal-prompt-sigil {
@@ -652,39 +761,6 @@
   outline: none;
 }
 
-.project-chat-compose-mode-bar {
-  display: flex;
-  /* The mode bar stretches to the full compose-shell height. Bottom-align
-   * the tabs with the stable input band so both sit below the Send / terminal
-   * toolbar instead of following the variable recipient + context rows. */
-  align-items: flex-end;
-  /* Keep the tabs just clear of the window's right edge. Their bottom
-   * alignment is owned by the mode-specific toggle margin below. */
-  padding-right: 2px;
-  /* Negative margin lets the active tab's left edge overlap the
-   * composer's right border by 1px, giving the "tab attached to
-   * panel" look. */
-  margin-left: -1px;
-  position: relative;
-  /* Keep this wrapper out of its own stacking context: the active button
-   * needs to rise above compose-main while its inactive sibling stays
-   * underneath it. */
-  z-index: auto;
-}
-
-/* Right edge of the composer is flush so the tabs attached on
- * the right visually merge into the panel — no rounded gap
- * between the tab and the composer border. Both composer flavors
- * get this: our own `.terminal-composer` and Squisq's
- * `.squisq-editor-shell` on the chat side. Scoped to the
- * project-chat compose area so other places that embed these
- * components keep their full rounding. */
-.project-chat-compose-main .terminal-composer,
-.project-chat-compose-main .squisq-editor-shell {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
 /* Drop the outer rounded box around `.terminal-composer` so it
  * matches the chat side, which doesn't paint its own panel frame
  * (the user's mental model: the composer IS the row of inputs,
@@ -699,65 +775,111 @@
   background: transparent;
 }
 
-/* Match the terminal rail to the restrained chat toolbar so switching modes
- * changes the toolset, not the visual weight of the compose frame. */
-.project-chat-compose-main .terminal-composer-toolbar {
-  background: var(--compose-toolbar-bg) !important;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-}
-
-/* `.chat-composer` ships with 4px of horizontal padding outside Squisq.
- * Remove it here so the editor reaches the compose frame; the toolbar header
- * then owns the precise one-pixel inset above. Other chat embeds keep their
- * usual breathing room. */
-.project-chat-compose-main .chat-composer {
-  padding-inline: 0;
-}
-
-.project-chat-compose-toggle {
+/* The compose-surface tabs (@ Chat / > Terminal) ride in the top row of
+ * whichever composer is mounted — the chat "To:" line or the terminal
+ * toolbar — which are the same height, so the switch keeps its position
+ * across a mode flip.
+ *
+ * These are connected tabs, not keys: each one hangs off the bottom edge of
+ * its host row onto a seam, and the selected tab erases the 1px of seam it
+ * stands on so the thread picker and the draft area read as the panel that
+ * tab fronts. The seam is what does the work — fill alone cannot: in chat the
+ * band under the tabs and the "To:" line they sit in are both
+ * `--compose-frame-bg`, so a fill-matched tab has nothing to join to and reads
+ * as a chip parked in the address line, which is exactly how the first attempt
+ * at this landed.
+ * Selection is carried by that break — a latched key fill would defeat the
+ * point, since the panel it merges into is not tinted. */
+.compose-mode-tabs {
   display: inline-flex;
-  flex-direction: column;
+  align-items: stretch;
+  /* Fill the host band top to bottom. A tab that reaches the seam but not the
+   * top of its row reads as a control sitting in the row; one that fills it
+   * reads as the row's leading edge. The 2px at the top keeps the tab off the
+   * frame's own border — flush, the two edges merged into one thick line. */
+  align-self: stretch;
+  margin-top: 2px;
   gap: 2px;
-  /* The tabs belong to the outer one-pixel frame, not the nested editor
-   * surface. Lift the stack clear of the composer's rounded bottom corner
-   * while preserving its one-pixel attachment to the right edge. */
-  margin-bottom: 8px;
+  flex: 0 0 auto;
 }
 
-.project-chat-compose-toggle button {
-  /* `--surface` sits 3/255 from `--panel` in dark, so an inactive tab was
-   * drawn only by its 1px border and read as a clipped fragment rather than a
-   * key. `--key-bg` is the token the rest of the app's keys already use and
-   * separates from the pane in both themes. */
-  background: var(--key-bg, var(--surface));
+/* The recipient picker's `margin-left: auto` already pushes the tail of the
+ * "To:" row right, and the tabs follow it. Without a picker there is nothing
+ * to do that, so the tabs claim the free space themselves. */
+.chat-composer-to:not(:has(.chat-composer-recipient-trigger)) .compose-mode-tabs {
+  margin-left: auto;
+}
+
+.compose-mode-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.55rem;
+  /* Top-rounded only. A tab with four round corners is a chip. */
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  /* Same weight as the seam below, so tab edge and baseline read as one line
+   * rather than two rules that happen to meet. */
+  border: 1px solid var(--border);
+  background: var(--tray-bg);
   color: var(--text-muted);
-  border: 1px solid var(--compose-frame-border);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  padding: 0.35rem 0.4rem;
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  line-height: 1.35;
   cursor: pointer;
-  font-size: 0.85rem;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  line-height: 1;
-  min-width: 1.6rem;
-  text-align: center;
-  transition: background 120ms ease, color 120ms ease;
+  /* Raise the strip over the host row's own background and, in terminal mode,
+   * over the toolbar's bottom rule — the selected tab has to erase the 1px of
+   * that rule it stands on. */
+  position: relative;
+  z-index: 1;
+  transition: background 140ms ease-out, color 140ms ease-out;
 }
 
-.project-chat-compose-toggle button.active {
+.compose-mode-tab:hover:not([aria-selected="true"]) {
+  background: color-mix(in srgb, var(--tray-bg) 60%, var(--compose-frame-bg));
+  color: var(--text);
+}
+
+.compose-mode-tab[aria-selected="true"] {
   background: var(--compose-frame-bg);
   color: var(--text);
-  position: relative;
-  z-index: 2;
-  /* Left border of the active tab matches the composer's
-   * background, hiding the composer's right border directly behind
-   * it so the tab visually merges with the panel. */
-  border-left-color: var(--compose-frame-bg);
   font-weight: 600;
+  /* The join: no bottom edge, so the tab and the band below are one surface. */
+  border-bottom-color: transparent;
 }
 
-.project-chat-compose-toggle button:not(.active):hover {
-  background: color-mix(in srgb, var(--surface) 76%, var(--compose-frame-bg));
-  color: var(--text);
+.compose-mode-tab:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.compose-mode-tab[aria-selected="true"]:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+.compose-mode-tab-glyph {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  opacity: 0.75;
+}
+
+.compose-mode-tab[aria-selected="true"] .compose-mode-tab-glyph {
+  opacity: 1;
+}
+
+/* Both host bands now carry their own 1px bottom rule, so one declaration
+ * puts the tabs on the seam in either mode: stretch to the band's full height
+ * (the tab IS the top line, not a control floating inside it), then reach 1px
+ * past it so the selected tab erases the rule it stands on. */
+.chat-composer-to .compose-mode-tabs,
+.terminal-composer-toolbar .compose-mode-tabs {
+  margin-bottom: -1px;
+}
+
+/* Fire used to be the toolbar's `margin-left: auto` element and the tabs rode
+ * the space it opened. With Fire moved to its own row the tabs have to claim
+ * that space themselves, or they sit against the gallery keys. */
+.terminal-composer-toolbar .compose-mode-tabs {
+  margin-left: auto;
 }
 
 /* Terminal composer + folder tree (per-project terminal mode) */
@@ -815,18 +937,18 @@
 .terminal-toolbar-btn svg {
   flex: 0 0 auto;
 }
-.terminal-toolbar-fire-btn {
-  margin-left: auto;
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
-  color: var(--text);
-  font-weight: 600;
+
+/* Fire's own row — the terminal's twin of the squisq toolbar that carries
+ * chat's Send, so the primary key keeps its place across a mode flip. The key
+ * itself takes the shared `.terminal-fire-btn` / `.chat-send-btn` recipe in
+ * shared-content.css; this only places it. */
+.terminal-composer-fire-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-shrink: 0;
 }
-.terminal-toolbar-fire-btn:hover {
-  background: color-mix(in srgb, var(--accent) 24%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 54%, transparent);
-  color: var(--text);
-}
+
 [data-theme="light"] .terminal-toolbar-btn:hover,
 [data-theme="light"] .terminal-toolbar-btn[data-state="open"] {
   background: rgba(88, 138, 63, 0.24);
@@ -994,6 +1116,9 @@
 .folder-tree-trigger {
   display: inline-flex;
   align-items: center;
+  /* Same floor, same reason, as `.gezel-chat-session-select` — an empty path
+     must not shrink the band it sits in. */
+  min-height: calc(1.3em + 0.6rem + 2px);
   gap: 0.4rem;
   padding: 0.2rem 0.5rem;
   border: 1px solid var(--color-border, #333);
@@ -1025,7 +1150,11 @@
    * the same breathing room as the thread dropdown, and the equal block
    * padding keeps both context rows the same height across a mode switch. */
   padding: 0.4rem 0.6rem 0.4rem 0.25rem;
-  border-bottom: 1px solid var(--color-border, #333);
+  /* The same quiet seam every other band in the frame carries, including
+   * chat's thread-picker row. It used to be `var(--color-border, #333)` — a
+   * variable this app never defines, so the fallback painted a hard near-black
+   * rule across the parchment where chat has a soft one. */
+  border-bottom: 1px solid var(--compose-band-rule);
   background: rgba(255, 255, 255, 0.02);
   font-size: 0.8rem;
 }
@@ -1135,10 +1264,6 @@
 [data-theme="light"] .folder-tree-node:hover {
   background: #ece3cf;
 }
-[data-theme="light"] .project-chat-compose-main .folder-tree-switcher {
-  border-top-color: rgba(176, 114, 76, 0.2);
-  background: transparent;
-}
 /* Sigil + muted helper text in light mode — the dark-bg cyan accent
  * (`#6cf`) and pale `#999` muted both clash with the warm cream
  * palette. Warm sigil + slightly darker muted reads naturally. */
@@ -1184,10 +1309,6 @@
   :root:not([data-theme="dark"]) .folder-tree-node:hover {
     background: #ece3cf;
   }
-  :root:not([data-theme="dark"]) .project-chat-compose-main .folder-tree-switcher {
-    border-top-color: rgba(176, 114, 76, 0.2);
-    background: transparent;
-  }
   :root:not([data-theme="dark"]) .terminal-prompt-sigil {
     color: var(--accent, #b0724c);
   }
@@ -1199,4 +1320,22 @@
   :root:not([data-theme="dark"]) .folder-tree-trigger-caret {
     color: var(--text-muted, #666);
   }
+}
+
+/* Same control in both modes, so the same chrome. The light-theme terminal
+ * rules above dress the STANDALONE terminal surface — a terracotta-outlined
+ * box on a brighter fill, from when that surface was a dark slab — and inside
+ * the compose frame they made a dropdown of exactly chat's size (30.3px, both
+ * measured) read as the heavier, and therefore taller, of the two. A visible
+ * outline adds apparent height at both edges; that difference in weight is
+ * what several "the terminal is a couple of pixels bigger" readings were,
+ * because the geometry has been identical throughout.
+ *
+ * This has to come last in the file AND out-specify `[data-theme="light"]
+ * .folder-tree-trigger` and its `prefers-color-scheme` twin, hence the extra
+ * class in the selector. */
+.project-chat-compose-main .folder-tree-switcher .folder-tree-trigger {
+  background: var(--chat-thread-bg, var(--bg));
+  border-color: var(--border);
+  color: var(--text);
 }

@@ -1,8 +1,9 @@
-import type { GezelSummary } from '@bendyline/gezel';
+import { type GezelSummary, displayName } from '@bendyline/gezel';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { ChatComposer } from './ChatComposer.js';
 import { ProjectTimeline } from './ProjectTimeline.js';
+import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 interface CraftbookChatPaneProps {
   craftbookId: string;
@@ -27,6 +28,7 @@ export function CraftbookChatPane({
   craftbookName,
   readOnly,
 }: CraftbookChatPaneProps) {
+  const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
   const [sessionId, setSessionId] = useState('');
 
@@ -72,6 +74,7 @@ export function CraftbookChatPane({
       </div>
     );
   }
+  const gezelDisplayName = displayName(gezel, roleBasedNameOnlyMode);
 
   return (
     <div className="craftbook-chat-pane task-detail-chat">
@@ -96,7 +99,7 @@ export function CraftbookChatPane({
         onSessionCreated={(sid) => setSessionId(sid)}
         onToolActivity={(tool) => onCraftbookTool(tool.name)}
         craftbookRef={craftbookId}
-        placeholder={`Ask ${gezel.name} to shape “${craftbookName}” — add steps, set roles, wire gates…`}
+        placeholder={`Ask ${gezelDisplayName} to shape “${craftbookName}” — add steps, set roles, wire gates…`}
       />
     </div>
   );

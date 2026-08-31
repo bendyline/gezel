@@ -1,7 +1,7 @@
 ---
 id: model-scorecard
 title: "Model scorecard"
-order: 11
+order: 13
 summary: Measured results for every model we have tested, on both task sets.
 subcategory:
   id: models-and-testing
@@ -28,7 +28,7 @@ customer notice under a hard word limit, a meeting turned into an action
 register, a cited research brief, an experiment read-out, a spreadsheet model,
 a slide deck, and a Word document.
 
-::handboek-model-scorecard{suites=core,productivity}
+::handboek-model-scorecard{suites=core,productivity,developer,complex-work}
 
 ## Reading the table
 

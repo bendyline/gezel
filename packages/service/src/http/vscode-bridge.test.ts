@@ -132,7 +132,8 @@ describe('buildVSCodeBridgeApp', () => {
       'Starting the implementation.',
     );
     const send = provider.calls.find((call) => call.kind === 'send');
-    expect(send?.sendOpts?.timeoutMs).toBe(8 * 60 * 60 * 1000);
+    // Local-provider turn ceiling, lowered from 8h — see OLLAMA_TURN_TIMEOUT_MS.
+    expect(send?.sendOpts?.timeoutMs).toBe(4 * 60 * 60 * 1000);
     expect(resolveExternalConversationId).toHaveBeenCalledWith({
       sourceId: 'vscode',
       gezelId: 'sipho',

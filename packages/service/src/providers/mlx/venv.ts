@@ -53,16 +53,24 @@
  *     tictactoe   8.4 min -> 15.9 min      tankcombat  12.7 min -> 23.3 min
  *     probe throughput 55.8 -> 40.7 gen tok/s
  *
- * So the line stays at 0.6.6 until there is a reason that survives
- * measurement. The real cause of the re-prefill is still open — the leading
- * suspect is qwen3.8's hybrid stack, whose `linear_attention` layers hold
- * recurrent state and cannot be rewound, failing `trim_layers`'
- * all-or-nothing check regardless of what the batched cache supports. See
- * docs/kv-prompt-caching-strategy.md §12b.
+ * The re-prefill cause that bump chased was later found and fixed
+ * gezel-side (roster-shaped cache identity + the §12b snapshot machinery
+ * — docs/kv-prompt-caching-strategy.md).
+ *
+ * 0.6.17 (2026-08-28): bumped for MTP speculative decoding, and the bump
+ * is correctness-forced — 0.6.6's MTP verify is measured-INEXACT (greedy
+ * spec diverged from greedy no-spec; reports/mlx-mtp-rig-20260828.md),
+ * and spec_decode.py refuses to arm speculation below 0.6.17. The line
+ * also carries 0.6.15's batch-row isolation fix and 0.6.16's ArraysCache
+ * per-token Metal buffer leak fix (measured: that leak fix does NOT cure
+ * the vlm-tower decode slope under mlx_lm's BatchGenerator — 1.01 → 0.83
+ * ms/tok per 10k ctx — so the text-tower split stays). Exactness and the
+ * ~1.4x speedup are verified on-device for this list's resolved set
+ * (mlx-lm 0.31.3 with mlx 0.32.0; the rig also verified mlx 0.32.2).
  *
  * Keep upgrades explicit and re-sweep the MLX catalog whenever this pin
  * moves. */
-export const MLX_DEFAULT_PACKAGE_SPEC = 'mlx-vlm==0.6.6';
+export const MLX_DEFAULT_PACKAGE_SPEC = 'mlx-vlm==0.6.17';
 
 /** Venv name passed to `UvRuntime.ensureVenv` (and its dir basename). */
 export const MLX_VENV_NAME = 'mlx';
@@ -77,5 +85,18 @@ export function mlxVenvPackages(packageSpec?: string): string[] {
   // providers/mlx/python/tool_grammar.py). It ships today as a transitive
   // mlx-vlm dependency, but pin it explicitly so the grammar safety net
   // can't silently vanish under a future mlx-vlm that drops it.
-  return [packageSpec ?? MLX_DEFAULT_PACKAGE_SPEC, 'torch', 'torchvision', 'llguidance'];
+  //
+  // `mlx-lm` is load-bearing twice over — the sidecar's batch engine
+  // (`from mlx_lm.generate import BatchGenerator`) and the qwen3_5 text
+  // tower both live there — and mlx-vlm 0.6.17 no longer declares it as
+  // a dependency (0.6.6 did, which is the only reason the old list
+  // worked). Dropping this pin kills the batch engine at import time.
+  // 0.31.3 is the combination every 2026-08-28 measurement ran on.
+  return [
+    packageSpec ?? MLX_DEFAULT_PACKAGE_SPEC,
+    'mlx-lm==0.31.3',
+    'torch',
+    'torchvision',
+    'llguidance',
+  ];
 }

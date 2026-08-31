@@ -166,6 +166,22 @@ export interface CitationsResult extends CheckResult {
   unresolved: string[];
   /** Cited URLs (not checked offline unless a corpus allowlist is given). */
   urls: string[];
+  /** Unresolvable cited paths forgiven as task metadata (see `knownPaths`). */
+  forgiven?: string[];
+}
+
+/** Comparison form for `knownPaths` matching — tolerant of the same
+ *  leading-prefix variants the cited-path checker accepts, plus trailing
+ *  slashes (directory tokens like `tasks/8/`). */
+function normalizeForKnownMatch(p: string): string {
+  return p
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    .replace(/^\//, '')
+    .replace(/^workspace\//i, '')
+    .replace(/\/+$/, '')
+    .toLowerCase();
 }
 
 /**
@@ -176,11 +192,29 @@ export interface CitationsResult extends CheckResult {
  * `createCitedPathChecker`. URLs cannot be fetched offline, so
  * they pass unless `corpus` is supplied, in which case every cited path
  * AND URL must be a member of the allowlist. The anti-fabrication gate.
+ *
+ * `knownPaths` are paths the surrounding task itself supplied — invocation
+ * parameters, the step prompt's own path tokens, the artifact working
+ * folder. A cited path matching one of these that does NOT resolve is
+ * FORGIVEN (dropped from the citation set — it counts toward neither the
+ * minimum nor the fabrication verdict): transcribing the run's own
+ * metadata into a packet is bookkeeping, not sourcing. A knownPath that
+ * DOES resolve stays an ordinary resolved citation. Wild-caught: the
+ * powerpoint-deck research step requires sources.md to record the
+ * invocation inputs, and the backticked `tasks/8` / `powerpoint/task-8/
+ * deck.pptx` tokens — directory handles and a future output — read as six
+ * fabricated citations, failing the gate's honest no-research path.
  */
 export async function citationsResolve(
   ws: WorkspaceLike,
   file: string,
-  opts: { pattern?: string; flags?: string; minCitations?: number; corpus?: string[] } = {},
+  opts: {
+    pattern?: string;
+    flags?: string;
+    minCitations?: number;
+    corpus?: string[];
+    knownPaths?: readonly string[];
+  } = {},
 ): Promise<CitationsResult> {
   const content = await ws.read(file);
   if (content === null) {
@@ -210,10 +244,12 @@ export async function citationsResolve(
   const min = opts.minCitations ?? 1;
   const citedPathExists = createCitedPathChecker(ws);
   const corpus = opts.corpus ? new Set(opts.corpus.map((c) => c.toLowerCase())) : null;
+  const known = new Set((opts.knownPaths ?? []).map(normalizeForKnownMatch).filter(Boolean));
 
   const resolved: string[] = [];
   const unresolved: string[] = [];
   const urls: string[] = [];
+  const forgiven: string[] = [];
 
   for (const c of cites) {
     if (/^[a-z][\w+.-]*:\/\//i.test(c) || c.startsWith('mailto:')) {
@@ -222,10 +258,11 @@ export async function citationsResolve(
       continue;
     }
     if (corpus?.has(c.toLowerCase()) || (await citedPathExists(c))) resolved.push(c);
+    else if (known.has(normalizeForKnownMatch(c))) forgiven.push(c);
     else unresolved.push(c);
   }
 
-  if (cites.length < min) {
+  if (cites.length - forgiven.length < min) {
     return {
       ok: false,
       // Name the accepted FORMS, not just the rule: a model that wrote the
@@ -233,19 +270,21 @@ export async function citationsResolve(
       // "cite the source" as already satisfied and rewrites content instead
       // of adding markup, looping to gate exhaustion (wild-caught:
       // deepseek-v4 with a flawless diagnosis, three identical rejections).
-      detail: `${file} has ${cites.length} recognizable citation(s), need ≥ ${min}. Only these forms count as citations: a backticked path like \`src/file.js\`, a markdown link like [name](src/file.js), or (source: src/file.js). Plain prose paths are not counted — wrap each cited file path in backticks.`,
+      detail: `${file} has ${cites.length - forgiven.length} recognizable citation(s), need ≥ ${min}. Only these forms count as citations: a backticked path like \`src/file.js\`, a markdown link like [name](src/file.js), or (source: src/file.js). Plain prose paths are not counted — wrap each cited file path in backticks.`,
       resolved,
       unresolved,
       urls,
+      ...(forgiven.length > 0 ? { forgiven } : {}),
     };
   }
   if (unresolved.length > 0) {
     return {
       ok: false,
-      detail: `${file} cites ${unresolved.length} source(s) that do not exist: ${unresolved.slice(0, 5).join(', ')} — every cited path must resolve to a real file in the workspace${corpus ? '/corpus' : ''} (no fabricated citations).`,
+      detail: `${file} cites ${unresolved.length} source(s) that do not exist: ${unresolved.slice(0, 5).join(', ')}${unresolved.length > 5 ? ', …' : ''} — every cited path must resolve to a real file in the workspace${corpus ? '/corpus' : ''} (no fabricated citations).`,
       resolved,
       unresolved,
       urls,
+      ...(forgiven.length > 0 ? { forgiven } : {}),
     };
   }
   return {
@@ -254,6 +293,7 @@ export async function citationsResolve(
     resolved,
     unresolved,
     urls,
+    ...(forgiven.length > 0 ? { forgiven } : {}),
   };
 }
 

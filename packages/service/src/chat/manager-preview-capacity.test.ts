@@ -5,6 +5,7 @@ import { CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
+import { writeSyntheticGguf } from '../providers/llama-cpp/gguf-test-fixture.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { ChatEventBus } from './events.js';
 import { ChatManager } from './manager.js';
@@ -31,9 +32,14 @@ const GIB = 1024 ** 3;
 const BUDGET_BYTES = 96 * GIB;
 /** Weights + 2 slots of KV, as the broker would hold them for this model. */
 const RESERVED_BYTES = 68 * GIB;
+/** Usable VRAM on the ~12 GB card, after the broker's 0.95 fraction. */
+const DISCRETE_VRAM_BYTES = Math.floor(11.3 * GIB);
+/** What the broker admits against once the card and the RAM share are summed. */
+const DISCRETE_BUDGET_BYTES = 30 * GIB;
 
 let home: string;
 let modelDir: string;
+let ggufPath: string;
 let manager: ChatManager;
 
 /**
@@ -85,6 +91,10 @@ beforeEach(async () => {
       max_position_embeddings: 262_144,
     }),
   );
+  // Header-only: the geometry keys are absent on purpose, so admission
+  // prices KV with the weights-scaled heuristic rather than exact geometry.
+  ggufPath = join(modelDir, 'model.gguf');
+  writeSyntheticGguf(ggufPath, { architecture: 'qwen3moe' });
   const store = new Store({ home });
   await store.ensureLayout();
   manager = new ChatManager({
@@ -173,5 +183,73 @@ describe('previewLocalEnginePlan — reservation ownership', () => {
     await expect(
       manager.previewContextWindowForModel('mlx', 'local-mlx', { standalone: true }),
     ).resolves.toBeGreaterThanOrEqual(65_536);
+  });
+});
+
+/**
+ * A discrete-GPU host shaped like the reporting machine: ~31 GB RAM and a
+ * ~12 GB card, which the broker combines into a 30 GB admission budget.
+ */
+function discreteGpuRouter() {
+  return {
+    broker: {
+      committed: () => ({
+        budgetBytes: DISCRETE_BUDGET_BYTES,
+        committedBytes: 0,
+        enforced: true,
+        systemRamBytes: 31 * GIB,
+        autoBudgetBytes: DISCRETE_BUDGET_BYTES,
+        overridden: false,
+        pools: {
+          kind: 'discrete-gpu' as const,
+          vramBytes: DISCRETE_VRAM_BYTES,
+          ramShareBytes: DISCRETE_BUDGET_BYTES - DISCRETE_VRAM_BYTES,
+          fastBytes: DISCRETE_VRAM_BYTES,
+          concurrencySizingBytes: DISCRETE_VRAM_BYTES,
+        },
+        ramSpillover: {
+          allowed: true,
+          auto: true,
+          overridden: false,
+          coResidencyBytes: DISCRETE_BUDGET_BYTES,
+        },
+        byKey: [],
+      }),
+      fastBudgetBytes: () => DISCRETE_VRAM_BYTES,
+    },
+    pool: { peekProvidersForModel: () => [] },
+  };
+}
+
+describe('previewLocalEnginePlan — RAM-spillover models on a discrete GPU', () => {
+  it('admits a MoE larger than VRAM but well inside the budget', async () => {
+    // The bug: the preview capped its admission clamp at usable VRAM (it
+    // passed a literal 0 free RAM), so weights alone overran the cap and no
+    // slot count could hold the 64K floor. A 21 GB MoE against a 30 GB budget
+    // reported "Won't fit" in Settings while the catalog row beside it read
+    // "good match for this machine" — and the broker would in fact have
+    // admitted it, spilling experts to RAM exactly as the badge promised.
+    // A 4.7 GB model on the same host was denied the same way.
+    Object.defineProperty(manager, 'engineRouter', {
+      configurable: true,
+      value: discreteGpuRouter(),
+    });
+    Object.defineProperty(manager, 'llamaCppModels', {
+      configurable: true,
+      value: {
+        resolveModel: async () => ({
+          id: 'local-moe',
+          name: 'Local MoE',
+          approxSizeBytes: 21 * GIB,
+          contextWindow: 262_144,
+          weightsPath: ggufPath,
+          architecture: 'qwen3moe',
+        }),
+      },
+    });
+
+    const plan = await manager.previewLocalEnginePlan('llama-cpp', 'local-moe');
+
+    expect(plan.contextWindow).toBeGreaterThanOrEqual(65_536);
   });
 });

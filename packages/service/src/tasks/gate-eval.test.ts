@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type GateWorkspaceReader, evaluateGate } from './gate-eval.js';
+import { type GateWorkspaceReader, evaluateGate, taskSuppliedCitationPaths } from './gate-eval.js';
 
 const reader = (files: Record<string, string>): GateWorkspaceReader => ({
   read: async (f) => (f in files ? files[f]! : null),
@@ -977,6 +977,56 @@ describe('evaluateGate — hardened kinds', () => {
     );
     expect(optionalStillRejectsFabrication.pass).toBe(false);
     expect(optionalStillRejectsFabrication.failures.join('\n')).toContain('invented/source.md');
+  });
+
+  it('citationsResolve forgives task-supplied metadata paths via deps.knownCitationPaths', async () => {
+    // The powerpoint-deck wild catch: the research packet records its
+    // invocation inputs (`tasks/8`, the future deck path) as the procedure
+    // requires, and those tokens must not read as fabricated citations.
+    const packet =
+      'Working folder `tasks/8/`; deck lands at `powerpoint/task-8/deck.pptx`. Research skipped.';
+    const forgiven = await evaluateGate(
+      [{ kind: 'citationsResolve', file: 'sources.md', minCitations: 0 }],
+      reader({ 'sources.md': packet }),
+      { knownCitationPaths: ['tasks/8', 'powerpoint/task-8/deck.pptx'] },
+    );
+    expect(forgiven.pass).toBe(true);
+    expect(forgiven.checks[0]!.evidence).toMatchObject({
+      forgiven: ['tasks/8/', 'powerpoint/task-8/deck.pptx'],
+    });
+
+    // A path outside the supplied set is still fabrication.
+    const stillCaught = await evaluateGate(
+      [{ kind: 'citationsResolve', file: 'sources.md', minCitations: 0 }],
+      reader({ 'sources.md': `${packet} Evidence in \`data/market.csv\`.` }),
+      { knownCitationPaths: ['tasks/8', 'powerpoint/task-8/deck.pptx'] },
+    );
+    expect(stillCaught.pass).toBe(false);
+    expect(stillCaught.failures.join('\n')).toContain('data/market.csv');
+  });
+
+  it('taskSuppliedCitationPaths collects param values and prompt path tokens', () => {
+    const paths = taskSuppliedCitationPaths({
+      stepPrompt:
+        'Files outside it—including an earlier `notes/outline.md`, root `deck.md`—are not inputs. Write `tasks/8/sources.md` with the boundary.',
+      params: {
+        topic: 'AI startup ideas',
+        outputDir: 'powerpoint/task-8',
+        outputPath: 'powerpoint/task-8/deck.pptx',
+        sourcePath: '',
+      },
+      artifactDir: 'tasks/8',
+    });
+    expect(paths).toContain('powerpoint/task-8');
+    expect(paths).toContain('powerpoint/task-8/deck.pptx');
+    expect(paths).toContain('tasks/8');
+    expect(paths).toContain('notes/outline.md');
+    expect(paths).toContain('tasks/8/sources.md');
+    expect(paths).toContain('AI startup ideas');
+    expect(paths).not.toContain('');
+    // `deck.md` carries no slash — the citation extractor would never
+    // count it either, so it need not be collected.
+    expect(paths).not.toContain('deck.md');
   });
 
   it('researchEvidence fails closed without observable successful source retrieval', async () => {

@@ -115,4 +115,28 @@ describe('finding lifecycle tool routes', () => {
       enqueued: true,
     });
   });
+
+  it('drafts the targeted fix as a diffpack when managed workspace writes are off', async () => {
+    getProject.mockResolvedValue({
+      id: 'p1',
+      workingDir: 'D:/readonly-checkout',
+      managedWorkspaceWritePolicy: 'deny',
+    });
+
+    const response = await app().request('/p1/tools/delegate-finding', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ fingerprint: finding.fingerprint }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(create).toHaveBeenCalledWith(
+      'p1',
+      expect.objectContaining({
+        title: 'Resolve high finding in a.ts',
+        assignee: { kind: 'gezel', gezelId: 'dev-1' },
+      }),
+      { draftsDiffpack: true },
+    );
+  });
 });

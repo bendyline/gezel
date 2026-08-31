@@ -52,6 +52,7 @@ import {
 } from '../constrained-turn.js';
 import { DeliverableReadPaceTracker } from '../deliverable-read-pacing.js';
 import {
+  appendCapTruncationHintToRejectedWrite,
   appendTruncationHintToToolResult,
   buildUnknownToolNudge,
   describeMalformation,
@@ -70,6 +71,7 @@ import {
   foldPostActionRumination,
   foldPreToolPreamble,
   formatToolMenu,
+  isPayloadMutationToolName,
   isWriteShapedToolName,
   parseGemmaNativeToolCall,
   parseGemmaToolCall,
@@ -96,7 +98,9 @@ import {
   PROJECT_MACRO_INTERCEPT_CAP,
   deriveProjectMacroClosing,
 } from '../project-macro-loop-bail.js';
+import { prepareSalvagedProseDocument } from '../prose-document-salvage.js';
 import { ProviderQueue, backgroundLaneCap, defaultAmbientQuietMs, runInQueue } from '../queue.js';
+import { buildRambleAbortMessage } from '../ramble-abort-message.js';
 import { RambleDetector } from '../ramble-detector.js';
 import { downgradeReasoningDepthKwargs } from '../reasoning-depth.js';
 import {
@@ -121,13 +125,32 @@ import type {
   SessionOpts,
   TurnUsage,
 } from '../types.js';
+import { EngineLogRouter } from './engine-log-router.js';
 import { StreamingReasoningSplit } from './reasoning-stream.js';
+import {
+  PRE_FIRST_BYTE_BASE_MS,
+  buildMidStreamDropMessage,
+  buildPreFirstByteAbortMessage,
+  computePreFirstByteBudgetMs,
+  estimatePromptTokens,
+  formatTps,
+  isMidStreamConnectionDrop,
+  readProcessRssBytes,
+  translateMlxHttpError,
+} from './runtime-diagnostics.js';
 import {
   type MlxFatalError,
   classifyMlxFatalErrorLine,
   classifyMlxStartupLine,
 } from './stdout-parser.js';
 import { LeakyToolCallStripper } from './tool-call-stripper.js';
+
+export {
+  buildMidStreamDropMessage,
+  computePreFirstByteBudgetMs,
+  estimatePromptTokens,
+  isMidStreamConnectionDrop,
+};
 
 const MAX_TOOL_LOOP_TURNS = 96;
 // Hard per-turn ceiling when the caller doesn't pass `opts.timeoutMs`.
@@ -137,6 +160,14 @@ const MAX_TOOL_LOOP_TURNS = 96;
 // this with `OLLAMA_TURN_TIMEOUT_MS` (30 min); the constant here is
 // only the fallback for one-shot / test paths.
 const DEFAULT_TIMEOUT_MS = 600_000;
+
+/**
+ * Don't announce an engine-gate wait shorter than this — a brief handoff
+ * between iterations is normal and would flash the queue badge for a frame.
+ */
+const ENGINE_GATE_WAIT_NOTICE_DELAY_MS = 200;
+/** Re-assert cadence, matching `runInQueue`'s so the UI sees one rhythm. */
+const ENGINE_GATE_WAIT_NOTICE_MS = 5_000;
 // Fallback for direct/external provider construction where no catalog model
 // metadata is available. Supervised catalog models pass their native context
 // window explicitly from buildMlxProvider.
@@ -147,6 +178,11 @@ const DEFAULT_NUM_CTX = 65_536;
 // matching llama.cpp's immediate-write path; user/model tuning may still grant
 // more. This is intentionally not a cap.
 const FILE_WRITE_MIN_TOKENS = 4_096;
+// Steers issued per send after a cap-truncated payload mutation was
+// refused. Two is enough to convert "re-emit the whole file" into
+// "make targeted edits"; beyond that the model is not reading the
+// steer and more attempts only burn engine time at full context.
+const MAX_CAP_TRUNCATION_STEERS = 2;
 // Max automatic append_to_file continuations after an immediate-write
 // truncation before we bail with the partial. Each continuation is one
 // bounded turn that writes the next chunk — comfortably above any
@@ -358,7 +394,35 @@ export class MlxProvider implements LLMProvider {
   /** See the constructor option of the same name. */
   private readonly templateOpensReasoning: boolean = false;
   private readonly activeSessions = new Set<MlxSession>();
-  private lastStartupPhase: EnginePhaseEvent | null = null;
+  /**
+   * Engine stdout → per-session phase events, plus the "is this line fatal?"
+   * state machine. See {@link EngineLogRouter}; the rules there are load-bearing.
+   */
+  private readonly logRouter = new EngineLogRouter({
+    modelDisplayName: () => this.modelDisplayName,
+    // A tagged phase belongs to exactly one session; anything untagged is an
+    // engine-wide signal every session should see. Without this, a session
+    // streaming its reply picks up a neighbour's prefill bar — at the
+    // neighbour's token total — because one engine has one stdout.
+    deliver: (phase) => {
+      for (const s of this.activeSessions) {
+        if (phase.cacheId && !s.ownsCacheId(phase.cacheId)) continue;
+        s.publishEnginePhase(phase);
+      }
+    },
+    onFatal: (fatal) => {
+      // If a session is blocked inside `supervisor.ensureRunning()` waiting on
+      // `/health`, abortStartup rejects that wait with the real error now
+      // instead of letting it burn the full startup budget (up to 5 minutes);
+      // the session-level catch turns it into the red bubble in chat.
+      const hintSuffix = fatal.hint ? `\n\n${fatal.hint}` : '';
+      const err = new Error(`[mlx] engine failed to start: ${fatal.message}${hintSuffix}`);
+      this.supervisor?.abortStartup(err);
+      // Tear the child down so the next `ensureRunning()` respawns fresh.
+      void this.supervisor?.stop().catch(() => {});
+    },
+    onReady: () => this.scheduleEngineStatsSample(),
+  });
   // Replayed to sessions that register after the engine finishes
   // loading — same pattern as llama-cpp's `lastEngineStats` — so a
   // chat started mid-run can surface the memory footprint in the
@@ -368,12 +432,6 @@ export class MlxProvider implements LLMProvider {
   // (e.g. when uvicorn logs both "Application startup complete" and
   // "Uvicorn running" — both classify as `ready`).
   private engineStatsPending = false;
-  // Latest fatal error seen on mlx_lm.server's stderr — the server's
-  // httpd keeps accepting connections after `_generate` dies, so we
-  // can't trust /health. When this is non-null, `sendAndWait` short-
-  // circuits with this error instead of letting requests hang on an
-  // unresponsive completions endpoint. Cleared on supervisor restart.
-  private fatalError: MlxFatalError | null = null;
   /**
    * Width-N gate over actual engine requests. The width is the engine's
    * batch capability ({@link batchMaxConcurrency}). At width 1 this is strict
@@ -512,7 +570,11 @@ export class MlxProvider implements LLMProvider {
     return this.supervisor?.lifecycleSnapshot();
   }
 
-  async acquireExclusiveEngineRequest(label: string, signal?: AbortSignal): Promise<() => void> {
+  async acquireExclusiveEngineRequest(
+    label: string,
+    signal?: AbortSignal,
+    onWait?: (info: { aheadOf: number }) => void,
+  ): Promise<() => void> {
     if (signal?.aborted)
       throw new DOMException(`MLX engine request ${label} aborted`, 'AbortError');
 
@@ -525,24 +587,48 @@ export class MlxProvider implements LLMProvider {
       // stays at `width` across the handoff, so we never exceed it — at
       // Width 1 is a strict provider-side FIFO; the sidecar still uses its
       // singleton BatchGenerator path for cache snapshots.
-      await new Promise<void>((resolve, reject) => {
-        const waiter: (typeof this.engineGateWaiters)[number] = {
-          resolve,
-          reject,
-          ...(signal ? { signal } : {}),
-        };
-        if (signal) {
-          waiter.onAbort = () => {
-            const idx = this.engineGateWaiters.indexOf(waiter);
-            if (idx === -1) return;
-            this.engineGateWaiters.splice(idx, 1);
-            signal.removeEventListener('abort', waiter.onAbort!);
-            reject(new DOMException(`MLX engine request ${label} aborted`, 'AbortError'));
+      let waitNotice: ReturnType<typeof setInterval> | null = null;
+      let waitNoticeDelay: ReturnType<typeof setTimeout> | null = null;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const waiter: (typeof this.engineGateWaiters)[number] = {
+            resolve,
+            reject,
+            ...(signal ? { signal } : {}),
           };
-          signal.addEventListener('abort', waiter.onAbort, { once: true });
-        }
-        this.engineGateWaiters.push(waiter);
-      });
+          if (signal) {
+            waiter.onAbort = () => {
+              const idx = this.engineGateWaiters.indexOf(waiter);
+              if (idx === -1) return;
+              this.engineGateWaiters.splice(idx, 1);
+              signal.removeEventListener('abort', waiter.onAbort!);
+              reject(new DOMException(`MLX engine request ${label} aborted`, 'AbortError'));
+            };
+            signal.addEventListener('abort', waiter.onAbort, { once: true });
+          }
+          this.engineGateWaiters.push(waiter);
+          // Announce the park. Same reasoning as the llama.cpp gate: a turn
+          // that already cleared the ProviderQueue can still wait here for
+          // the length of another session's round-trip, and a wait with no
+          // signal reads to the user as a wedged model.
+          if (onWait) {
+            const publish = () => {
+              const idx = this.engineGateWaiters.indexOf(waiter);
+              if (idx === -1) return;
+              onWait({ aheadOf: this.engineGateActive + idx });
+            };
+            waitNoticeDelay = setTimeout(() => {
+              publish();
+              waitNotice = setInterval(publish, ENGINE_GATE_WAIT_NOTICE_MS);
+              waitNotice.unref?.();
+            }, ENGINE_GATE_WAIT_NOTICE_DELAY_MS);
+            waitNoticeDelay.unref?.();
+          }
+        });
+      } finally {
+        if (waitNoticeDelay) clearTimeout(waitNoticeDelay);
+        if (waitNotice) clearInterval(waitNotice);
+      }
     }
     const waitedMs = Date.now() - waitStartedAt;
     if (waitedMs > 1_000) {
@@ -620,6 +706,7 @@ export class MlxProvider implements LLMProvider {
       numCtx: this.numCtx,
       systemMessage: opts.systemMessage,
       ...(opts.systemPromptLayers ? { systemPromptLayers: opts.systemPromptLayers } : {}),
+      ...(opts.systemSharedPrefix ? { systemSharedPrefix: opts.systemSharedPrefix } : {}),
       ...(opts.volatileContext ? { volatileContext: opts.volatileContext } : {}),
       // Pass widened priorMessages through — the session translates
       // tool-role entries into ChatMessage tool_calls / role:'tool'
@@ -644,87 +731,17 @@ export class MlxProvider implements LLMProvider {
 
   /** Classifier hook wired into the supervisor's `onRawLine`. */
   onStdoutLine(line: string): void {
-    // Fatal error takes precedence over phase classification — one
-    // `ValueError: ...` leaf line in a traceback is enough to mark
-    // the engine broken. We kill the supervisor so a subsequent
-    // `ensureRunning()` respawns fresh (and hits the same error if
-    // nothing's changed, but at least surfaces it immediately rather
-    // than hanging for the full turn-timeout window).
-    const fatal = classifyMlxFatalErrorLine(line);
-    if (fatal) {
-      this.handleFatalError(fatal);
-      return;
-    }
-    const phase = classifyMlxStartupLine(line);
-    if (!phase) return;
-    // Surface the model name in the engine pill during the long
-    // weight-load window so the user sees "Loading model — Qwen 3.5"
-    // instead of a bare "Loading weights". Only augments when we
-    // actually know the friendly name — otherwise the classifier's
-    // generic "Loading weights" stands.
-    if (phase.phase === 'loading_model' && this.modelDisplayName) {
-      phase.detail = `Loading model — ${this.modelDisplayName}`;
-    }
-    // A fresh child — clear any stale fatal error from the previous
-    // lifecycle so this spawn gets a clean slate. If it errors again
-    // during boot, handleFatalError will capture the new one.
-    if (phase.phase === 'starting') this.fatalError = null;
-    if (
-      this.lastStartupPhase &&
-      this.lastStartupPhase.phase === phase.phase &&
-      this.lastStartupPhase.detail === phase.detail
-    ) {
-      return;
-    }
-    this.lastStartupPhase = phase.phase === 'ready' ? null : phase;
-    for (const s of this.activeSessions) s.publishEnginePhase(phase);
-    if (phase.phase === 'ready') this.scheduleEngineStatsSample();
+    this.logRouter.onLine(line);
   }
 
-  /**
-   * Called by MlxSession before each send so it fails fast when the
-   * supervised engine is known-broken instead of queuing a request
-   * that will hang on the dead httpd. Returns the error to throw, or
-   * null when the engine looks healthy.
-   *
-   * Consumes on read — the caller still throws the returned error, so
-   * the *current* send fails fast, but subsequent sends get a fresh
-   * shot at respawning the engine. Without this, a fix the user made
-   * out-of-process (reinstalled missing Python deps, swapped to a
-   * working model in Settings, ran a Reset venv) wouldn't take effect
-   * until the whole gezeld process restarted — every send would keep
-   * replaying the cached error from the failed startup. The next
-   * `starting` phase from a successful respawn re-clears via
-   * `onStdoutLine`; this is the bridge for the in-between window.
-   */
+  /** See {@link EngineLogRouter.takeFatalError}. */
   takeFatalError(): MlxFatalError | null {
-    const fatal = this.fatalError;
-    this.fatalError = null;
-    return fatal;
+    return this.logRouter.takeFatalError();
   }
 
-  private handleFatalError(fatal: MlxFatalError): void {
-    // First-seen wins — subsequent traceback frames shouldn't
-    // overwrite the leaf exception with something further up the
-    // stack. Also avoids thrashing the supervisor if the server
-    // spams the same error repeatedly before we kill it.
-    if (this.fatalError) return;
-    this.fatalError = fatal;
-    log.error(`fatal engine error detected: ${fatal.message}`);
-    // If a session is blocked inside `supervisor.ensureRunning()`
-    // waiting on `/health`, abortStartup rejects that wait with the
-    // real error right now instead of letting it run the full
-    // startup-timeout budget (up to 5 minutes). The subsequent
-    // session-level catch turns this into the red error bubble in
-    // chat. If we're not currently starting, abortStartup is a
-    // no-op and the next send hits `takeFatalError()` on entry.
-    const hintSuffix = fatal.hint ? `\n\n${fatal.hint}` : '';
-    const err = new Error(`[mlx] engine failed to start: ${fatal.message}${hintSuffix}`);
-    this.supervisor?.abortStartup(err);
-    // Tear the child down so the next `ensureRunning()` respawns
-    // fresh. abortStartup handles in-flight startups; this cleans
-    // up the already-running-but-broken case.
-    void this.supervisor?.stop().catch(() => {});
+  /** See {@link EngineLogRouter.takeRuntimeError}. */
+  takeRuntimeError(): MlxFatalError | null {
+    return this.logRouter.takeRuntimeError();
   }
 
   /**
@@ -765,7 +782,11 @@ export class MlxProvider implements LLMProvider {
 
   _registerActiveSession(session: MlxSession): void {
     this.activeSessions.add(session);
-    if (this.lastStartupPhase) session.publishEnginePhase(this.lastStartupPhase);
+    // Catch a late joiner up on the engine-wide phase only. A tagged phase
+    // belongs to one session's prefill; replaying it here is how a fresh chat
+    // would inherit a neighbour's progress bar.
+    const pending = this.logRouter.lastPhase();
+    if (pending && !pending.cacheId) session.publishEnginePhase(pending);
     if (this.lastEngineStats) session.publishEngineStats(this.lastEngineStats);
   }
 
@@ -827,6 +848,8 @@ interface MlxSessionDeps {
   systemMessage: string;
   /** Layered prefix-cache keys (flag ON only). See {@link SystemPromptLayers}. */
   systemPromptLayers?: import('../../cache/adapter.js').SystemPromptLayers;
+  /** See {@link SessionOpts.systemSharedPrefix}. */
+  systemSharedPrefix?: string;
   /** Volatile band seeded as a frozen system message after messages[0] (flag ON only). */
   volatileContext?: string;
   priorMessages: Array<
@@ -942,6 +965,13 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
    */
   private lastPrefillEvent: { progress: number; detail: string; at: number } | null = null;
 
+  /**
+   * The `cache_id` this session sends to the engine. Set on every send, and
+   * the key the provider routes per-sub engine phases by — see
+   * {@link MlxSession.ownsCacheId}.
+   */
+  private currentCacheId: string | null = null;
+
   private readonly externalToolNames: Set<string>;
   private capturedCalls: ExternalToolCall[] = [];
 
@@ -1015,6 +1045,30 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // startup; warming only accelerates an already-resident server.
     const baseUrl = this.deps.provider.currentBaseUrl();
     if (!baseUrl) return;
+    // A warm whose roster differs from the real turn's is worse than no warm
+    // at all. Qwen-family templates render the tool block at the TOP of the
+    // system message, so a no-tools render shares 3 tokens with a 44-tool
+    // turn — the shared prefix it saves then forces a full re-prefill on
+    // every session that seeds from it, and the next warm overwrites the
+    // corrected prefix right back.
+    //
+    // Wild-caught (koray PR-review fanout): `prefix-0b60345fcefa9ffd`
+    // oscillated between a 15,563-token no-tools render and a 24,796-token
+    // real one, ~9.2k tokens apart, producing `lcp=3 lcp_frac=0.00` and
+    // `mode=fresh reused=0` on turn after turn — 40 full re-prefills and
+    // 1.58M tokens re-prefilled against 238k of new work.
+    //
+    // The bridges spawn lazily, so an early warm sees an empty roster. A
+    // cold prefix costs one slow turn; a WRONG one costs every turn. An
+    // genuinely tool-less session also reads as empty here and is skipped
+    // too — its prompt is small, so the warm it loses is worth little,
+    // and that is the safe direction to be wrong in.
+    if (this.deps.bridges.isEmpty() && (this.deps.externalTools ?? []).length === 0) {
+      log.debug(
+        'turn#warm skipped — no tool roster registered yet; warming now would save a no-tools prefix that cannot match a real turn',
+      );
+      return;
+    }
     const bridgeTools = this.deps.bridges.isEmpty()
       ? []
       : toChatCompletionsTools(this.deps.bridges);
@@ -1058,6 +1112,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           opts.sessionId,
           this.deps.systemMessage,
           this.deps.systemPromptLayers,
+          // Same roster the body above will actually send. Omitting it made
+          // this warm register a prefix identity that could not distinguish
+          // a no-tools render from the real turn's — the send path at the
+          // bottom of `send()` has always passed it; this one did not.
+          body.tools as readonly unknown[] | undefined,
+          this.deps.systemSharedPrefix,
         );
         Object.assign(body, adapter.buildRequestExtras(opts.sessionId));
       }
@@ -1090,6 +1150,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
 
   getLastTurnAttemptedToolCalls(): Array<{ body: string; reason?: string }> | undefined {
     return this.lastTurnAttemptedToolCalls.length > 0 ? this.lastTurnAttemptedToolCalls : undefined;
+  }
+
+  /**
+   * Whether a phase tagged with this engine cache id belongs to this session.
+   * The id is the one sent as `cache_id` on every request, so it is exactly
+   * what the sidecar stamps onto its per-sub prefill markers.
+   */
+  ownsCacheId(cacheId: string): boolean {
+    return this.currentCacheId === cacheId;
   }
 
   publishEnginePhase(ev: EnginePhaseEvent): void {
@@ -1446,9 +1515,22 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // and NOT `publishEnginePhase`, so it does NOT reset the stall watchdog — a
     // genuinely hung engine still trips the idle abort.
     let prepLabel = 'Preparing…';
+    this.lastPrefillEvent = null;
     const emitPrep = (): void => {
       if (firstTokenAt !== null) return;
-      this.emitEnginePhase({ provider: 'mlx', phase: 'prefill', detail: prepLabel });
+      // Carry the last observed prefill progress forward. A phase event
+      // WITHOUT `progress` tells the UI the bar is over (the timeline's
+      // engine_phase handler deletes `thinkingProgress` and its detail), so
+      // a bare heartbeat landing between two `Prefill:` lines blinked the
+      // bar and its token count out every 4s for the whole prefill — which
+      // on a 61K-token prompt is minutes of flicker.
+      const last = this.lastPrefillEvent;
+      this.emitEnginePhase({
+        provider: 'mlx',
+        phase: 'prefill',
+        detail: last?.detail || prepLabel,
+        ...(last ? { progress: last.progress } : {}),
+      });
     };
     const statusHeartbeat = setInterval(emitPrep, 4_000);
     emitPrep();
@@ -1465,6 +1547,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // happens before the SSE-body `finally`; keeping the active release here
     // lets the outer `finally` recover the slot from every exit path.
     let releaseActiveEngineRequest: (() => void) | null = null;
+    // Cap-truncation steers spent this send. Bounded because the steer is
+    // only worth issuing while the model can still act on it: past the
+    // budget the honest outcome is the warning banner and an ended turn,
+    // not another 6k-token attempt at the same over-cap payload.
+    let capTruncationSteers = 0;
 
     try {
       for (let turn = 0; turn < MAX_TOOL_LOOP_TURNS; turn++) {
@@ -1615,6 +1702,12 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         const adapter = this.deps.provider.getCacheAdapter();
         const durableCacheId = opts?.queue?.sessionId;
         const cacheId = durableCacheId ?? this.fallbackCacheId;
+        // The sidecar stamps per-sub prefill markers with the request's
+        // `cache_id`, so this is the key the provider routes them by. With no
+        // adapter the id never reaches the engine and its markers arrive
+        // untagged — which the fanout treats as engine-wide and broadcasts,
+        // exactly as before.
+        this.currentCacheId = cacheId;
         if (adapter) {
           if (!durableCacheId) this.fallbackCacheUsed = true;
           await adapter.prepareForSend(
@@ -1625,6 +1718,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             // them renders a prompt through a different template branch,
             // which on Qwen shares 3 tokens with the real turn.
             body.tools as readonly unknown[] | undefined,
+            this.deps.systemSharedPrefix,
           );
           const extras = adapter.buildRequestExtras(cacheId);
           Object.assign(body, extras);
@@ -1667,6 +1761,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           releaseEngineRequest = await this.deps.provider.acquireExclusiveEngineRequest(
             `turn#${seq}.${turn}`,
             engineWaitSignal,
+            // To the user, waiting for the queue and waiting for the engine
+            // gate are one state: this turn has not started yet.
+            opts?.queue?.onQueueWait,
           );
         } catch (err) {
           if ((err as Error).name === 'AbortError') {
@@ -1893,7 +1990,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           // heartbeat label and emit once immediately so the pill updates
           // without waiting for the next heartbeat tick.
           prepLabel = 'Processing prompt';
-          this.emitEnginePhase({ provider: 'mlx', phase: 'prefill', detail: prepLabel });
+          emitPrep();
         }
 
         let turnContent = '';
@@ -1949,11 +2046,24 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               leakyReasoning:
                 profileHasBehavior(this.deps.profile, 'turn.preamble-folding') ||
                 leaksUntaggedReasoning(this.deps.model),
+              // MLX inlines chain-of-thought in the content deltas, and
+              // a template that opens `<think>` itself never shows the
+              // detector an open marker — so without this the whole
+              // reasoning block is scored as cold prose. Same flag the
+              // StreamingReasoningSplit below is seeded with.
+              opensInReasoning: this.deps.templateOpensReasoning === true,
             })
           : // Repetition guard is safe on any local model (fires only on
             // degenerate low-novelty loops); arm it even without the
-            // length-cap opt-in. See RambleDetector.
-            new RambleDetector({ threshold: 6000, enabled: false, repetitionGuardEnabled: true });
+            // length-cap opt-in. See RambleDetector. Still needs the
+            // reasoning-open seed: the guard exempts reasoning spans, and
+            // a template-opened `<think>` is one.
+            new RambleDetector({
+              threshold: 6000,
+              enabled: false,
+              repetitionGuardEnabled: true,
+              opensInReasoning: this.deps.templateOpensReasoning === true,
+            });
         let rambleAborted = false;
         // Tool name for the live tool-args channel — only the first
         // fragment of a streamed tool call carries `function.name`.
@@ -2239,7 +2349,17 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
                     `turn#${seq}.${turn} ramble-no-salvage preview head=${JSON.stringify(head)} tail=${JSON.stringify(tail)}`,
                   );
                   throw new Error(
-                    `[Mac AI] aborting — the gezel emitted ${turnContent.length} characters of prose this turn without calling any action tool. Stop planning. Your next message must START with a single tool call — or, if the work is genuinely finished and nothing is left to do, be ONE short sentence saying so and nothing else. If shipping source or project files and \`write_file\` is in your tool list, call it NOW with the full file contents — no preamble, no plan. If you lack workspace write access, start with a handoff tool or \`ask_user_question\` instead. Do not save source files with \`write_artifact\`; artifacts are for plans/scratch.`,
+                    buildRambleAbortMessage({
+                      providerLabel: '[Mac AI]',
+                      charCount: turnContent.length,
+                      knownToolNames,
+                      ...(this.deps.activeCraftbookStep?.deliverableFile
+                        ? { deliverableFile: this.deps.activeCraftbookStep.deliverableFile }
+                        : {}),
+                      ...(this.deps.activeCraftbookStep?.deliverableIsArtifact
+                        ? { deliverableIsArtifact: true }
+                        : {}),
+                    }),
                   );
                 }
               }
@@ -2276,7 +2396,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           // the original text still rides along in the persisted warning.
           if (!recoveredFromRamble && isMidStreamConnectionDrop(err)) {
             throw new Error(
-              buildMidStreamDropMessage(turnContent.length, this.deps.provider.isDisposed),
+              buildMidStreamDropMessage(
+                turnContent.length,
+                this.deps.provider.isDisposed,
+                this.deps.provider.engineLifecycleSnapshot()?.running,
+              ),
             );
           }
           if (!recoveredFromRamble) throw err;
@@ -2324,6 +2448,17 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // model knows the partial write_file landed and can issue a
         // follow-up with the remaining bytes.
         const truncatedCallIds = new Set<string>();
+        // Payload-mutation calls the cap cut mid-content that we refused
+        // to execute, because landing a prefix would destroy a whole-file
+        // target with no append path (see WRITE_SHAPED_TOOL_NAMES). The
+        // refusal is correct; ending the turn on it silently is not —
+        // nothing tells the model WHY, so the next attempt re-emits the
+        // same over-cap payload. Consumed below to steer toward
+        // incremental edits instead of falling through to a blank reply.
+        const droppedTruncatedPayloadCalls: Array<{
+          name: string;
+          args: Record<string, unknown>;
+        }> = [];
 
         // Try to repair any tool-call markers the stripper extracted
         // but mlx_vlm.server's parser missed. Repair only succeeds when
@@ -2527,6 +2662,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               this.emitWarning(
                 `The model's \`${parsed.name}\` call was cut off mid-stream and was skipped so a partial mutation could not land. Retry with a smaller payload.`,
               );
+              if (isPayloadMutationToolName(parsed.name)) {
+                droppedTruncatedPayloadCalls.push({ name: parsed.name, args: parsed.arguments });
+              }
               continue;
             }
             const id = `glm-repair-${seq}-${turn}-${idx}`;
@@ -2586,6 +2724,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               this.emitWarning(
                 `The model's \`${parsed.name}\` call was cut off mid-stream and was skipped so a partial mutation could not land. Retry with a smaller payload.`,
               );
+              if (isPayloadMutationToolName(parsed.name)) {
+                droppedTruncatedPayloadCalls.push({ name: parsed.name, args: parsed.arguments });
+              }
               continue;
             }
             const id = `hermes-repair-${seq}-${turn}-${idx}`;
@@ -2840,7 +2981,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             `turn#${seq}.${turn} repaired flattened arg(s) on ${r.name}: ${r.paths.join(', ')}`,
           );
         }
-        const toolCalls = coerced.calls as typeof mergedCalls;
+        let toolCalls = coerced.calls as typeof mergedCalls;
         if (rambleAborted && toolCalls.length === 0) {
           // If ctrl.abort() races with mlx-vlm closing the SSE stream,
           // the for-await loop can exit cleanly instead of throwing an
@@ -2857,8 +2998,107 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             `turn#${seq}.${turn} ramble-clean-exit-no-salvage preview head=${JSON.stringify(head)} tail=${JSON.stringify(tail)}`,
           );
           throw new Error(
-            `[Mac AI] aborting — the gezel emitted ${rawTurnContentBeforeReasoning.length} characters of prose this turn without calling any action tool. Stop planning. Your next message must START with a single tool call — or, if the work is genuinely finished and nothing is left to do, be ONE short sentence saying so and nothing else. If shipping source or project files and \`write_file\` is in your tool list, call it NOW with the full file contents — no preamble, no plan. If you lack workspace write access, start with a handoff tool or \`ask_user_question\` instead. Do not save source files with \`write_artifact\`; artifacts are for plans/scratch.`,
+            buildRambleAbortMessage({
+              providerLabel: '[Mac AI]',
+              charCount: rawTurnContentBeforeReasoning.length,
+              knownToolNames,
+              ...(this.deps.activeCraftbookStep?.deliverableFile
+                ? { deliverableFile: this.deps.activeCraftbookStep.deliverableFile }
+                : {}),
+              ...(this.deps.activeCraftbookStep?.deliverableIsArtifact
+                ? { deliverableIsArtifact: true }
+                : {}),
+            }),
           );
+        }
+        // Prose-document salvage. Past the guard above, zero tool calls
+        // means the model ENDED ITS OWN TURN — the one condition under
+        // which the buffer is a finished document rather than a cut-off
+        // one. A craftbook step whose deliverable is markdown gets it
+        // promoted to the write tool instead of leaving the text in chat
+        // where the gate will never see it. `turnContent` is already
+        // reasoning-stripped here; `finishReason === 'length'` means the
+        // token cap cut it, which is a truncation like any other.
+        if (toolCalls.length === 0 && finishReason !== 'length') {
+          const deliverable = this.deps.activeCraftbookStep?.deliverableFile;
+          const salvageToolName = this.deps.activeCraftbookStep?.deliverableIsArtifact
+            ? knownToolNames.has('write_artifact')
+              ? 'write_artifact'
+              : null
+            : knownToolNames.has('write_file')
+              ? 'write_file'
+              : null;
+          const document = salvageToolName
+            ? prepareSalvagedProseDocument({
+                text: turnContent,
+                deliverableFile: deliverable,
+                streamComplete: true,
+              })
+            : null;
+          if (document && salvageToolName && deliverable) {
+            toolCalls = [
+              {
+                id: `prose-doc-salvage-${seq}-${turn}`,
+                type: 'function' as const,
+                function: {
+                  name: salvageToolName,
+                  arguments: JSON.stringify({ path: deliverable, content: document }),
+                },
+              },
+            ] as typeof toolCalls;
+            log.info(
+              `turn#${seq}.${turn} prose-document-salvage: promoted ${document.length}-char ` +
+                `markdown buffer to ${salvageToolName} path=${deliverable}`,
+            );
+            this.emitWarning(
+              `The model wrote ${deliverable} in chat instead of calling ${salvageToolName} — promoting it to a real write. Ask the model to use the tool directly next time.`,
+            );
+          }
+        }
+        // Cap-truncated payload mutation with nothing left to run. The
+        // skip above is right — a partial `write_artifact` would replace
+        // a complete artifact with a prefix, and there is no
+        // `append_artifact` to finish it. But falling through from here
+        // ends the turn with zero tool calls and (after the rumination
+        // fold) zero visible text: the user gets a blank bubble and the
+        // MODEL gets nothing at all, so the next attempt re-emits the
+        // same over-cap payload. llama-cpp already steers this case via
+        // {@link appendCapTruncationHintToRejectedWrite} because its
+        // rejected write comes back as a tool result; on MLX the call
+        // never executes, so synthesize the same steer as a corrective
+        // and spend another loop iteration on it.
+        //
+        // Wild-caught on gezel/49: a `write_artifact` carrying a
+        // 580-path coverage ledger was cut at max_tokens=6144, dropped
+        // here, and the turn ended after 62 minutes with replyChars=0.
+        if (
+          toolCalls.length === 0 &&
+          droppedTruncatedPayloadCalls.length > 0 &&
+          capTruncationSteers < MAX_CAP_TRUNCATION_STEERS
+        ) {
+          capTruncationSteers++;
+          const dropped = droppedTruncatedPayloadCalls[0]!;
+          const liveToolNames = new Set(
+            (Array.isArray(body.tools) ? (body.tools as ChatCompletionTool[]) : [])
+              .map((tool) => chatCompletionToolName(tool))
+              .filter((name): name is string => typeof name === 'string'),
+          );
+          const requestMaxTokens = typeof body.max_tokens === 'number' ? body.max_tokens : null;
+          const steer = appendCapTruncationHintToRejectedWrite(
+            `ERROR: \`${dropped.name}\` was not executed because the call was cut off at the per-turn output token cap before its payload finished.`,
+            dropped.name,
+            dropped.args,
+            requestMaxTokens,
+            { availableToolNames: liveToolNames },
+          );
+          const noRemedy = steer.includes('No incremental edit tool is wired this turn');
+          log.info(
+            `turn#${seq}.${turn} cap-truncated ${dropped.name} dropped with no other call — ` +
+              `${noRemedy ? 'no incremental tool wired; escalation steer' : 'incremental-edit steer'} ` +
+              `injected (attempt ${capTruncationSteers}/${MAX_CAP_TRUNCATION_STEERS}, max_tokens=${requestMaxTokens ?? 'unset'})`,
+          );
+          this.messages.push({ role: 'user', content: `[system] ${steer}` });
+          continue;
         }
         // Auto-fold pre-tool preamble for verbose-family models. When
         // a tool call fired this turn, untagged visible text is
@@ -3572,248 +3812,4 @@ function toChatCompletionsTools(bridges: McpBridgePool): ChatCompletionTool[] {
       parameters: t.parameters,
     },
   }));
-}
-
-/**
- * Read a process's resident-set size (bytes) via `ps`. mlx_lm.server's
- * logs don't include a memory-footprint summary, so we sample the
- * child's RSS after it reports ready and use that as the engine
- * memory readout.
- *
- * Returns `null` on any failure (pid gone, ps missing, unparsable
- * output) — the caller treats RSS as an enrichment, not a
- * requirement, and silently skips the telemetry event when we
- * can't get a number.
- *
- * `ps -o rss= -p <pid>` works identically on macOS and Linux and
- * prints the RSS in kilobytes with no header. Windows doesn't have
- * `ps` — MLX is Mac-only today, so we don't try to support it.
- */
-async function readProcessRssBytes(pid: number): Promise<number | null> {
-  const { spawn } = await import('node:child_process');
-  return await new Promise<number | null>((resolve) => {
-    try {
-      const proc = spawn('ps', ['-o', 'rss=', '-p', String(pid)], {
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-      let stdout = '';
-      proc.stdout.on('data', (chunk: Buffer) => {
-        stdout += chunk.toString('utf8');
-      });
-      proc.on('error', () => resolve(null));
-      proc.on('close', (code) => {
-        if (code !== 0) return resolve(null);
-        const kb = Number.parseInt(stdout.trim(), 10);
-        if (!Number.isFinite(kb) || kb <= 0) return resolve(null);
-        resolve(kb * 1024);
-      });
-    } catch {
-      resolve(null);
-    }
-  });
-}
-
-/**
- * Map known `mlx_vlm.server` error-response shapes to user-actionable
- * messages so the chat bubble reads like a helpful hint instead of a
- * wall of JSON + request IDs.
- *
- * The engine surfaces a lot of its internal hugging-face + transformers
- * errors verbatim in the 500 body; most of them translate to "your
- * install is stale, reinstall it" — the only bit the user can act on.
- */
-function translateMlxHttpError(status: number, statusText: string, body: string): string {
-  // "Repository Not Found for url: …" — the engine fell back to a
-  // network fetch (it shouldn't, with HF_HUB_OFFLINE=1; if you still
-  // see this the offline gate didn't take, or a different code path
-  // bypassed it). Either way the actionable advice is the same:
-  // confirm the install is current, then reset the venv if mlx-vlm
-  // is too old for the model's architecture.
-  if (/Repository Not Found for url/i.test(body) || /401 Client Error/i.test(body)) {
-    return (
-      "[Mac AI] The engine couldn't load this model. Try, in order:\n" +
-      '  1. Settings → This Mac → Delete the local model, then download it again (in case the on-disk files are incomplete).\n' +
-      '  2. Settings → This Mac → Advanced → Reset venv (in case mlx-vlm is too old for this architecture).\n' +
-      '  3. Restart gezel and retry.'
-    );
-  }
-  // Architecture / weights mismatch — mlx-vlm doesn't recognize the
-  // model class this install was saved for.
-  if (/Received \d+ parameters not in model/i.test(body)) {
-    return (
-      "[Mac AI] The on-device runtime doesn't recognize this model's architecture.\n" +
-      'Settings → This Mac → Advanced → Reset venv, then retry. If it still fails, the catalog entry may need a newer mlx-vlm.'
-    );
-  }
-  // Out of memory — mlx_vlm propagates the Metal / MPS error.
-  if (/out of memory|mps backend|allocation failed/i.test(body)) {
-    return (
-      '[Mac AI] Not enough unified memory to load this model.\n' +
-      'Try the E2B variant, close other memory-heavy apps, or restart this Mac to release cached memory.'
-    );
-  }
-  // Local-disk file missing (now visible because of the offline gate).
-  if (/FileNotFoundError|No such file or directory/i.test(body)) {
-    const filename = body.match(/['"]?([^'"\s]+\.(?:json|safetensors|jinja|model))['"]?/)?.[1];
-    return `[Mac AI] The local model is missing a file the engine needs${filename ? ` (\`${filename}\`)` : ''}.\nSettings → This Mac → Delete the local model, then download it again.`;
-  }
-  // Fallback: keep the shape but trim the noise.
-  const parsed = tryParseJsonDetail(body);
-  const detail = parsed ?? body.slice(0, 200);
-  return `[Mac AI] engine returned ${status} ${statusText}: ${detail}`;
-}
-
-/**
- * Did this error come from the engine dropping the HTTP response stream
- * mid-flight (vs. one of our own aborts)? Node's `fetch`/undici reports
- * a premature socket close while reading a streamed body as a bare
- * `TypeError: terminated` — sometimes with a `cause` like a socket
- * error (`UND_ERR_SOCKET`) or "other side closed". We match those shapes
- * so the SSE catch can replace the cryptic one-word message with an
- * actionable one. AbortErrors are handled separately upstream and never
- * reach here.
- */
-export function isMidStreamConnectionDrop(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  if (err.name === 'AbortError') return false;
-  const haystacks: string[] = [err.message];
-  const cause = (err as { cause?: unknown }).cause;
-  if (cause instanceof Error) haystacks.push(cause.message);
-  const causeCode =
-    cause && typeof cause === 'object' && 'code' in cause
-      ? String((cause as { code: unknown }).code)
-      : '';
-  if (causeCode) haystacks.push(causeCode);
-  const blob = haystacks.join(' ').toLowerCase();
-  return (
-    /\bterminated\b/.test(blob) ||
-    blob.includes('other side closed') ||
-    blob.includes('premature close') ||
-    blob.includes('und_err_socket') ||
-    blob.includes('econnreset')
-  );
-}
-
-/**
- * Format a tokens-per-second number for the in-chat status line.
- * Mirrors the UI's `formatTokensPerSec` helper (one decimal under 10
- * tok/s, integer otherwise) so the live chat detail matches what the
- * pill displays at turn end.
- */
-function formatTps(rate: number): string {
-  if (rate >= 10) return rate.toFixed(0);
-  return rate.toFixed(1);
-}
-
-/**
- * Build the user-facing message for a pre-first-byte abort. When we
- * observed prefill progress before the abort, fold the percentage and
- * the chunk-detail into the message so the user sees "stalled at
- * prefill 75% (22,528 / 29,930 tokens)" instead of a generic "no first
- * byte" — much more diagnostic, and it tells them the model was
- * actually working, not stuck. Without prefill events, fall back to
- * the cold-load message.
- */
-function buildPreFirstByteAbortMessage(
-  lastPrefill: { progress: number; detail: string; at: number } | null,
-): string {
-  if (lastPrefill && lastPrefill.progress > 0) {
-    const pct = Math.round(lastPrefill.progress * 100);
-    const detail = lastPrefill.detail ? ` (${lastPrefill.detail})` : '';
-    return `[Mac AI] aborting — prefill stalled at ${pct}%${detail}. The prompt may be too large for this model's effective speed. Try a shorter prompt, retry, or restart the engine in Settings → On-device.`;
-  }
-  // progress === 0 but a prefill marker DID arrive — the batched path
-  // (BatchGenerator) prefills the whole prompt in one event-loop-blocking
-  // call and emits only a "prefilling N tokens" start marker (no tqdm
-  // chunks), so we never see a >0% line even when the engine is genuinely
-  // grinding through a large prompt. Surface that as "stalled while
-  // prefilling …" rather than the misleading "model unhealthy" message.
-  if (lastPrefill?.detail) {
-    return `[Mac AI] aborting — still prefilling ${lastPrefill.detail} when the budget ran out. The prompt is large for this model's prefill speed; retry (the cache is warm now) or pick a faster/smaller model.`;
-  }
-  return '[Mac AI] no first byte from the engine; aborting (model is loading slowly or mlx_vlm.server is unhealthy). Retry the turn; if it keeps happening, restart the engine in Settings → On-device.';
-}
-
-/**
- * Build the user-facing message for a stream that died mid-turn.
- *
- * A planned teardown and a crash are indistinguishable on the wire — both
- * arrive as undici's bare `TypeError: terminated` — so the message has to
- * come from our own knowledge of whether we stopped the engine
- * (`plannedStop`, i.e. the provider was disposed by the pool). Getting this
- * wrong is expensive in user time: the crash wording sends someone hunting
- * for an out-of-memory event that never happened, when what actually
- * occurred is that their own settings change restarted the session.
- */
-export function buildMidStreamDropMessage(charsReceived: number, plannedStop: boolean): string {
-  const got = charsReceived > 0 ? `after ${charsReceived} chars` : 'before any output';
-  if (plannedStop) {
-    return `[Mac AI] this turn stopped ${got} because Gezel unloaded the on-device engine while it was answering. Changing your settings restarts chat sessions so the new settings apply, and unloading a model in Settings → On-device or quitting the app does the same. The model didn't crash — send the message again to redo this turn.`;
-  }
-  return `[Mac AI] the on-device engine dropped the connection mid-turn (${got}). This usually means the mlx server crashed, ran out of memory, or was restarted while the turn was streaming — this turn's work was lost. Retry the turn; if it keeps happening, restart the engine in Settings → On-device.`;
-}
-
-/**
- * Rough token estimate for the outbound request — message bodies plus the
- * serialized tool schemas. Chars/4 is the standard cheap proxy; we only
- * need order-of-magnitude to size the watchdog, not exactness. The tool
- * block dominates for coordinator roles (the qwen3.6-27b voorman repro
- * carried ~30K tokens of tool schemas alone), so it MUST be included —
- * estimating from messages-only would badly under-size the budget on the
- * exact turns that need it most.
- */
-export function estimatePromptTokens(messages: unknown, tools: unknown): number {
-  let chars = 0;
-  try {
-    chars += JSON.stringify(messages)?.length ?? 0;
-  } catch {
-    /* circular / unstringifiable — ignore, the tools term still sizes it */
-  }
-  if (tools) {
-    try {
-      chars += JSON.stringify(tools)?.length ?? 0;
-    } catch {
-      /* ignore */
-    }
-  }
-  return Math.ceil(chars / 4);
-}
-
-// Pre-first-byte watchdog sizing. A 27B-q8 model on MLX produces its first
-// token only after prefilling the WHOLE prompt; on a 37K-token turn that
-// can legitimately exceed the old flat 300s budget (the qwen3.6-27b voorman
-// stall — aborted at 343s with the engine still grinding). Scale the budget
-// with prompt size so big-context turns get the time they actually need,
-// while small turns keep a tight bound.
-const PRE_FIRST_BYTE_BASE_MS = 300_000; // floor — matches the prior flat value
-const PRE_FIRST_BYTE_BASELINE_TOKENS = 8_000; // budget starts growing past this
-const PRE_FIRST_BYTE_MS_PER_1K_TOKENS = 12_000; // +12s of headroom per 1K tokens
-const PRE_FIRST_BYTE_CAP_MS = 900_000; // 15 min ceiling (< the 30-min hard turn deadline)
-
-/**
- * Pre-first-byte idle budget for a prompt of `approxPromptTokens`. Floors at
- * {@link PRE_FIRST_BYTE_BASE_MS}, grows linearly past
- * {@link PRE_FIRST_BYTE_BASELINE_TOKENS}, and caps at
- * {@link PRE_FIRST_BYTE_CAP_MS}. Used for BOTH the cold-start timer and the
- * post-prefill-event re-arm: pre-first-byte we only know "no token yet," so a
- * single generous size-scaled bound beats a tight per-chunk one that
- * false-aborts a slow-but-healthy batched prefill (which emits no tqdm
- * chunks to re-arm a tighter timer).
- */
-export function computePreFirstByteBudgetMs(approxPromptTokens: number): number {
-  const over = Math.max(0, approxPromptTokens - PRE_FIRST_BYTE_BASELINE_TOKENS);
-  const scaled = PRE_FIRST_BYTE_BASE_MS + (over / 1000) * PRE_FIRST_BYTE_MS_PER_1K_TOKENS;
-  return Math.min(PRE_FIRST_BYTE_CAP_MS, Math.round(scaled));
-}
-
-function tryParseJsonDetail(body: string): string | null {
-  try {
-    const obj = JSON.parse(body) as unknown;
-    if (obj && typeof obj === 'object' && 'detail' in obj && typeof obj.detail === 'string') {
-      return obj.detail.slice(0, 200);
-    }
-  } catch {
-    /* not JSON, fall through */
-  }
-  return null;
 }

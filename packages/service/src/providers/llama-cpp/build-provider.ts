@@ -9,6 +9,7 @@ import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { LlamaBackend } from '@bendyline/gezel/native';
 import { recordLlamaQuarantine } from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
+import { mmprojBudgetBytes, nativeVisionEnabledFor } from '../../chat/vision-capability.js';
 import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
 import { noModelYetMessage } from '../active-install-message.js';
 import {
@@ -21,11 +22,13 @@ import {
   formatContextCapacityDenial,
   minViableLocalContextTokens,
   planAdaptiveContextGrowth,
+  pressureIdleGraceMs,
   resolveLlamaCppContextRequirement,
 } from '../native/capacity-broker.js';
 import { makeEngineKey } from '../native/engine-key.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
+import { patientFetch } from '../patient-fetch.js';
 import { lastArgValue, readLlamaCppBuildMetadata } from './build-metadata.js';
 import {
   matchNvidiaRuntimeDevice,
@@ -51,7 +54,7 @@ import {
   fitsSwaFullInFastMemory,
   planMoeOffload,
 } from './offload-planner.js';
-import { LlamaCppProvider, createLlamaCppPatientFetch } from './provider.js';
+import { LlamaCppProvider } from './provider.js';
 import { reasoningLaunchOverridesFromEnv } from './reasoning-launch.js';
 import { resolveSpecDraft } from './spec-draft.js';
 
@@ -188,7 +191,7 @@ export async function buildLlamaCppProvider(opts: {
     ? config.modelContextOverrides?.[`llama-cpp:${defaultModelId}`]
     : undefined;
   const baseProviderOpts = {
-    fetchImpl: createLlamaCppPatientFetch(),
+    fetchImpl: patientFetch(),
     ...(defaultModelId ? { defaultModel: defaultModelId } : {}),
     // llama-server only sends its final `usage` chunk (and the `timings`
     // block that rides with it, carrying decode/prefill rate + cache_n) when
@@ -284,6 +287,20 @@ export async function buildLlamaCppProvider(opts: {
     }
     if (modelCatalogInfo) modelPath = modelCatalogInfo.weightsPath;
   }
+
+  // Resolved HERE, above the memory planning, because the two must agree: if
+  // the launch will pass `--mmproj` the projector is resident and has to be
+  // budgeted, and if it will not, budgeting for it silently shrinks the
+  // context window this model could otherwise have been granted. Turning
+  // vision off is a deliberate trade of modality for context — a night-shift
+  // model that will never see a screenshot should get the memory back.
+  const nativeVisionEnabled =
+    !!modelCatalogInfo?.mmprojPath &&
+    nativeVisionEnabledFor(config.nativeVision, modelCatalogInfo.id);
+  const visionBudgetBytes = mmprojBudgetBytes(
+    modelCatalogInfo?.mmprojSizeBytes,
+    nativeVisionEnabled,
+  );
 
   // KV-cache precision. Gemma 3/4 are unusually sensitive to a quantized
   // KV cache: large attention head dims (key/value_length = 512), a final
@@ -477,41 +494,129 @@ export async function buildLlamaCppProvider(opts: {
         effectiveNumCtx,
       )
     : undefined;
-  const ceilingFor = (kv: LlamaCppKvCacheType) =>
+  // Context-aware so the KV plan can probe "does f16 fit at 64k" without
+  // committing the launch to it. The exact header-derived per-slot bytes
+  // were measured at the plan-time window; scale linearly for other
+  // windows — right for full-attention layers, conservative for the fixed
+  // SSM/SWA component (over-reserving is the safe direction, and Gemma
+  // never takes the cap ladder anyway).
+  const planTimeCtx = effectiveNumCtx;
+  const ceilingFor = (kv: LlamaCppKvCacheType, ctxTokens: number) =>
     llamaCppSlotCeiling({
       budgetBytes,
       sizingBudgetBytes: brokerSnap?.enforced
         ? brokerSnap.pools.concurrencySizingBytes
         : computeCapacityBudget().concurrencySizingBytes,
       weightsBytes: modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3,
-      perTurnCtxTokens: effectiveNumCtx,
+      perTurnCtxTokens: ctxTokens,
       kvCacheType: kv,
       committedOtherBytes,
-      ...(exactPerSlotKvF16 !== undefined ? { exactPerSlotKvBytesF16: exactPerSlotKvF16 } : {}),
+      ...(exactPerSlotKvF16 !== undefined
+        ? { exactPerSlotKvBytesF16: (exactPerSlotKvF16 * ctxTokens) / planTimeCtx }
+        : {}),
     });
+  // The admission this launch is held to further down, asked here at plan
+  // time so the ladder can tell "does not fit at all" from "fits in exactly
+  // one slot" — `ceilingFor` is floored at 1 and cannot. See the `fitsAt`
+  // contract in planLlamaCppKv. Priced from the header read above; the
+  // fuller GGUF walk has not happened yet, so this uses the same catalog
+  // weights figure `ceilingFor` already trusts.
+  const PLAN_REFERENCE_CTX = 4096;
+  const planWeightsBytes = modelCatalogInfo?.approxSizeBytes ?? 8 * 1024 ** 3;
+  const planResidentBytes = estimateLlamaCppResidentBytes(planWeightsBytes, {
+    mmprojBytes: visionBudgetBytes,
+  });
+  const planCapacity = computeCapacityBudget();
+  const planKvBytesPerToken = (kv: LlamaCppKvCacheType) => {
+    const exact = headerSummary
+      ? estimateKvReserveBytes({
+          blockCount: headerSummary.blockCount,
+          embeddingLength: headerSummary.embeddingLength,
+          headCount: headerSummary.headCount,
+          headCountKv: headerSummary.headCountKv,
+          headCountKvPerLayer: headerSummary.headCountKvPerLayer,
+          slidingWindowPattern: headerSummary.slidingWindowPattern,
+          sharedKvLayers: headerSummary.sharedKvLayers,
+          keyLength: headerSummary.keyLength,
+          valueLength: headerSummary.valueLength,
+          keyLengthSwa: headerSummary.keyLengthSwa,
+          valueLengthSwa: headerSummary.valueLengthSwa,
+          fullAttentionInterval: headerSummary.fullAttentionInterval,
+          ssmInnerSize: headerSummary.ssmInnerSize,
+          ssmStateSize: headerSummary.ssmStateSize,
+          ssmConvKernel: headerSummary.ssmConvKernel,
+          ctxTokens: PLAN_REFERENCE_CTX,
+          kvCacheType: kv,
+        })
+      : undefined;
+    return exact !== undefined
+      ? exact / PLAN_REFERENCE_CTX
+      : estimatePerSlotKvBytes({
+          perTurnCtxTokens: PLAN_REFERENCE_CTX,
+          weightsBytes: planWeightsBytes,
+          kvCacheType: kv,
+        }) / PLAN_REFERENCE_CTX;
+  };
+  const planFitsAt = (kv: LlamaCppKvCacheType, ctxTokens: number, slotCount: number) => {
+    // Asking for the whole window as the minimum: a plan admission would
+    // only accept by clamping is not a fit, and clamping is precisely what
+    // the q8_0 rung exists to avoid.
+    const probe = planCtxTokensForMemory({
+      requestedPerTurnCtxTokens: ctxTokens,
+      slots: slotCount,
+      minimumPerTurnCtxTokens: ctxTokens,
+      kvBytesPerToken: planKvBytesPerToken(kv),
+      weightsResidentBytes: planResidentBytes,
+      budgetBytes: brokerSnap?.enforced ? brokerSnap.budgetBytes : planCapacity.budgetBytes,
+      committedOtherBytes,
+      freeSystemRamBytes: availableSystemRamBytes(),
+      vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : planCapacity.vramBytes,
+    });
+    return probe.minimumSatisfied && probe.slots >= slotCount;
+  };
   const kvPlan = planLlamaCppKv({
     architecture: modelCatalogInfo?.architecture,
     modelId: defaultModelId ?? undefined,
     override: config.llamaCppKvCacheType,
     slotsConfigured: configuredSlots !== undefined,
+    ...(configuredSlots !== undefined ? { configuredSlots } : {}),
+    requestedCtxTokens: effectiveNumCtx,
+    minimumCtxTokens: contextRequirement.minimumPerTurnCtxTokens,
+    ctxConfigured:
+      explicitCtx !== undefined || (config.llamaCppContextSizing ?? 'adaptive') === 'model-max',
     ceilingFor,
+    fitsAt: planFitsAt,
     maxSlots: defaultLocalEngineSlots(budgetBytes),
   });
+  kvCacheType = kvPlan.kvCacheType;
   if (kvPlan.upgraded) {
-    kvCacheType = kvPlan.kvCacheType;
     log.info(
       `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: trading f16 KV for q8_0 to fit a second engine slot (single-slot SWA session alternation re-prefills wholesale; KV A/B 2026-08-03 showed no measurable q8_0 fidelity cost)`,
+    );
+  } else if (kvPlan.ctxCapTokens !== undefined && kvPlan.ctxCapTokens < effectiveNumCtx) {
+    log.info(
+      `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: keeping f16 KV by capping context ${effectiveNumCtx} -> ${kvPlan.ctxCapTokens} (f16 prefill is up to ~17% faster at long context than q8_0; reports/llama-kv-q8-longctx-20260828.md)`,
+    );
+    effectiveNumCtx = kvPlan.ctxCapTokens;
+  } else if (kvCacheType === 'f16' || kvCacheType === 'q8_0') {
+    log.info(
+      `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: kv=${kvCacheType} (${kvPlan.reason})`,
     );
   }
   let slots = plannedLocalEngineSlots({
     configuredSlots,
-    ceiling: ceilingFor(kvCacheType),
+    ceiling: ceilingFor(kvCacheType, effectiveNumCtx),
     tierDefault: defaultLocalEngineSlots(budgetBytes),
   });
-  // The bundled llama.cpp line still has known multi-slot MTP allocation
-  // failures. Keep an explicitly selected MTP mode on one slot so its first
-  // decode is reliable; `spec.mtp` alone is capability metadata, not an
-  // auto-enable policy.
+  // The bundled llama.cpp line had known multi-slot MTP allocation failures,
+  // so an explicitly selected MTP mode is clamped to one slot.
+  //
+  // Deliberately NOT extended to the default-on path (engine-flags.ts): this
+  // runs BEFORE the GGUF is read, so `ggufHasMtp` is not yet known here.
+  // Measured on build 10621, `--parallel 2 --spec-type draft-mtp` served two
+  // concurrent requests correctly with zero engine errors, so the failure this
+  // clamp guards against looks stale — but one probe is not grounds for
+  // deleting a safety measure, so it stays for anyone who opted in explicitly.
   const selectedSpecType = config.llamaCppSpecType ?? manifestEngineConfig?.spec?.type;
   if (selectedSpecType === 'draft-mtp' && slots > 1) {
     log.info(
@@ -657,7 +762,7 @@ export async function buildLlamaCppProvider(opts: {
       }
       const approxBytes = modelCatalogInfo?.approxSizeBytes ?? summary.fileSizeBytes;
       const residentBytes = estimateLlamaCppResidentBytes(approxBytes, {
-        mmprojBytes: modelCatalogInfo?.mmprojSizeBytes ?? 0,
+        mmprojBytes: visionBudgetBytes,
       });
       const vramBytes = maxGpuVramBytes(llamaDevices);
       const split =
@@ -1041,9 +1146,13 @@ export async function buildLlamaCppProvider(opts: {
       // draft-mtp` on a model llama.cpp can't build an MTP context for is a
       // fatal launch error, and current model/backend pairs still need A/B
       // qualification before default-on.
-      if (ggufHasMtp && !manifestEngineConfig?.spec?.mtp && !manifestEngineConfig?.spec?.type) {
+      if (ggufHasMtp) {
         log.info(
-          `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'} ships an MTP head (nextn_predict_layers=${mtpLayerCount}); select MTP speculative decoding in Advanced llama.cpp settings to test it.`,
+          `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'} ships an MTP head (nextn_predict_layers=${mtpLayerCount}); speculative decoding ${
+            config.llamaCppSpecType || manifestEngineConfig?.spec?.type
+              ? 'follows the explicit setting'
+              : 'is ON by default (+4-19% decode; disable with llamaCppSpecType: "none")'
+          }.`,
         );
       }
     } catch (err) {
@@ -1073,10 +1182,6 @@ export async function buildLlamaCppProvider(opts: {
   // a tool loop parked between requests can release the GPU normally.
   const llamaIdleMs = config.localEngineIdleTimeoutMs ?? DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS;
   const llamaFreezeMs = Math.floor(llamaIdleMs / 2);
-  // Per-model native-vision opt-in. Absent means off — see the `--mmproj`
-  // block below for why this isn't simply "the projector is on disk".
-  const nativeVisionEnabled =
-    !!modelCatalogInfo?.mmprojPath && config.nativeVision?.[modelCatalogInfo.id] === true;
   // Startup timeout: 180s covers a 7B–30B model's CUDA warmup on
   // typical hardware. Frontier-tier 100B+ MoE models on unified-memory
   // boxes (DGX Spark, M-series Macs) routinely take 4–6 minutes for
@@ -1096,7 +1201,12 @@ export async function buildLlamaCppProvider(opts: {
     idleTimeoutMs: llamaIdleMs,
     freezeTimeoutMs: llamaFreezeMs,
     isBusy: () => providerHolder.current?.isEngineBusy() ?? false,
-    ...(opts.arbiter ? { memoryPressure: () => opts.arbiter!.getMemoryPressureStatus() } : {}),
+    ...(opts.arbiter
+      ? {
+          memoryPressure: () => opts.arbiter!.getMemoryPressureStatus(),
+          pressureIdleTimeoutMs: pressureIdleGraceMs(),
+        }
+      : {}),
     onFreeze: async () => {
       // flushAll is best-effort and handles its own try/catch — but
       // we await so the supervisor's freeze log line aligns with

@@ -87,6 +87,10 @@ describe('piBridgePortForHome', () => {
     }
   });
 
+  // Sized past vitest's 5s default on purpose: this sweep canonicalizes a
+  // non-existent home 15k times, and on Windows each of those is a failed
+  // syscall plus a thrown exception. It fits in ~1.4s alone but rode the
+  // default timeout into failure whenever the full suite loaded the box.
   it('never collides with either older bridge for the same home', () => {
     // Three-way: stepping off a Codex collision must not land on OpenCode's
     // port, which a single `+1` nudge would eventually do.
@@ -100,7 +104,7 @@ describe('piBridgePortForHome', () => {
 
       expect(ports.size).toBe(3);
     }
-  });
+  }, 30_000);
 
   it('selects different ports for different user homes', () => {
     const alice = piBridgePortForHome(resolve('test-homes', 'alice', '.gezel'));
@@ -140,5 +144,5 @@ describe('vscodeBridgePortForHome', () => {
     }
 
     expect(collisions).toEqual([]);
-  }, 15_000);
+  }, 30_000);
 });

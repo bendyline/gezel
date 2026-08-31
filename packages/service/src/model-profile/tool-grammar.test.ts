@@ -31,6 +31,13 @@ describe('familyToToolGrammarHint', () => {
     });
   });
 
+  it('maps granite → hermes tier-2 (Granite 4.2 uses the nested qwen3_coder XML template)', () => {
+    expect(familyToToolGrammarHint(style('granite'))).toEqual({
+      format: 'hermes',
+      mode: 'name-and-params',
+    });
+  });
+
   it('maps gemma → gemma tier-1 (name-only; <|tool_call>call:NAME{…}<tool_call|>, token-verified)', () => {
     expect(familyToToolGrammarHint(style('gemma'))).toEqual({
       format: 'gemma',

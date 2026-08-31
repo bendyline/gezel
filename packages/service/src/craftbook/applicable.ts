@@ -272,6 +272,7 @@ export function craftbookTemplateManifestFromRuntime(
     ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
     ...(book.command ? { command: book.command } : {}),
     ...(book.requirements ? { requirements: book.requirements } : {}),
+    ...(book.recommends ? { recommends: book.recommends } : {}),
     ...(book.runModes ? { runModes: book.runModes } : {}),
     ...(book.toolsets ? { toolsets: book.toolsets } : {}),
     ...(book.connectors ? { connectors: book.connectors } : {}),

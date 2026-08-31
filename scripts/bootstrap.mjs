@@ -13,7 +13,11 @@ export function runBootstrap(options = {}) {
   const error = options.error ?? console.error;
   const status = (options.statusFn ?? dependencyStatus)(root);
   if (status.usable) {
+    const staleLinks = status.staleLinks ?? [];
     const metadataIssues = [
+      staleLinks.length > 0
+        ? `${staleLinks.length} dependency link(s) resolve to a version the lockfile has moved off, including ${staleLinks[0].dependency} for ${staleLinks[0].packageName} (installed ${staleLinks[0].installed}, lockfile wants ${staleLinks[0].expected}); run \`pnpm deps:install\``
+        : null,
       status.installedLockfileIssue,
       status.workspaceStructureIssue,
       status.lockfileValidationIssue,

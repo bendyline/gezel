@@ -23,7 +23,13 @@
 
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type ImageRecognition, createLogger, nowIso } from '@bendyline/gezel';
+import {
+  type ImageRecognition,
+  awakeNow,
+  createAwakeTimeout,
+  createLogger,
+  nowIso,
+} from '@bendyline/gezel';
 import type { RecognitionHealth } from '@bendyline/gezel';
 import { readImageStaticMeta } from '../../index-store/image-meta.js';
 import { resolveModelDirectory } from '../../models/model-id.js';
@@ -40,6 +46,7 @@ import {
 } from '../../models/storage-roots.js';
 import { downloadWithSha256 } from '../audio/whisper-cpp.js';
 import type { NativeEngineSupervisor } from '../native/supervisor.js';
+import { readSseEvents } from '../openai-compatible/sse.js';
 import { MODE_PROMPTS } from './prompts.js';
 import type {
   InstalledRecognitionModelInfo,
@@ -50,6 +57,18 @@ import type {
 } from './types.js';
 
 const log = createLogger('recognition');
+
+/**
+ * Longest the reader may go without producing a token before we call the
+ * engine wedged.
+ *
+ * This — not the wall-clock ceiling — is the real liveness check. A vision
+ * model that is streaming, however slowly, is working; one that has emitted
+ * nothing for this long is not going to recover. Deliberately shorter than
+ * the old flat 45s cap, so a genuinely broken server is caught FASTER than
+ * before while a slow-but-healthy one is left alone.
+ */
+const RECOGNITION_STREAM_IDLE_MS = 30_000;
 
 const DEFAULT_TIMEOUT_MS = 90_000;
 
@@ -110,12 +129,24 @@ export class LlamaVisionProvider implements RecognitionProvider {
 
     try {
       const launch = await this.supervisor?.ensureRunning();
-      const text = await this.complete(input, launch?.baseUrl ?? this.baseUrl);
+      const { text, truncated, truncationReason } = await this.complete(
+        input,
+        launch?.baseUrl ?? this.baseUrl,
+      );
       const done: ImageRecognition = {
         ...base,
-        status: 'ok',
+        // A cut-off transcription is still worth most of what a complete
+        // one is worth — and infinitely more than the nothing the caller
+        // used to get. `partial` is the schema's word for exactly this.
+        status: truncated ? 'partial' : 'ok',
+        ...(truncated ? { failureReason: `transcription incomplete — ${truncationReason}` } : {}),
         durationMs: Date.now() - started,
       };
+      if (truncated) {
+        log.warn(
+          `recognition truncated (${input.mode}): ${truncationReason}, kept ${text.length} chars`,
+        );
+      }
       if (input.mode === 'ocr') done.ocrText = text;
       else if (input.mode === 'extract') {
         try {
@@ -144,7 +175,33 @@ export class LlamaVisionProvider implements RecognitionProvider {
     }
   }
 
-  private async complete(input: RecognizeInput, baseUrl: string): Promise<string> {
+  /**
+   * One recognition round-trip, streamed.
+   *
+   * Streaming is what makes the budget survivable. The old shape was a
+   * single non-streaming POST under a flat 45s `AbortSignal.timeout`, which
+   * had two failure modes that both read to the user as "the reader is
+   * broken":
+   *
+   *   - The wall was shorter than the work. `ocr`/`ui` allow 1600 tokens;
+   *     at the ~26 tok/s a 4B vision model does on a mid GPU that needs
+   *     ~61s, so any *dense* image was guaranteed to be cut off. It only
+   *     ever succeeded on images sparse enough to stop early.
+   *   - Everything was discarded on the cut. Wild-caught at 953 tokens of
+   *     perfectly good transcription thrown away, and the turn went to the
+   *     chat model with no description at all.
+   *
+   * So the wall-clock cap is no longer the thing that catches a bad engine
+   * — {@link RECOGNITION_STREAM_IDLE_MS} of NO tokens is, which fires
+   * sooner than the old 45s on a genuinely wedged server while never
+   * interrupting one that is merely slow. The ceiling remains only to bound
+   * a looping model, and whatever streamed by then is returned as a partial
+   * rather than dropped.
+   */
+  private async complete(
+    input: RecognizeInput,
+    baseUrl: string,
+  ): Promise<{ text: string; truncated: boolean; truncationReason?: string }> {
     const prompt = MODE_PROMPTS[input.mode];
     const body: Record<string, unknown> = {
       messages: [
@@ -166,7 +223,7 @@ export class LlamaVisionProvider implements RecognitionProvider {
       // Description and transcription are both recall tasks; sampling
       // creativity here shows up as invented UI labels.
       temperature: 0.1,
-      stream: false,
+      stream: true,
     };
     if (input.mode === 'extract' && input.schema) {
       // llama-server compiles this into a decode-time grammar, so output
@@ -174,21 +231,101 @@ export class LlamaVisionProvider implements RecognitionProvider {
       body.response_format = { type: 'json_schema', json_schema: { schema: input.schema } };
     }
 
-    const res = await this.fetchImpl(`${baseUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(input.timeoutMsOverride ?? this.timeoutMs),
-    });
-    if (!res.ok) {
-      throw new Error(`vision engine returned ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    }
-    const json = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
+    const ceilingMs = input.timeoutMsOverride ?? this.timeoutMs;
+    // Awake-time, not wall clock: a host that sleeps mid-transcription has
+    // not spent any of the engine's budget, and charging it produces a
+    // "timed out after 180s" on work that ran for twenty seconds.
+    const ceiling = createAwakeTimeout(ceilingMs);
+    const ctrl = new AbortController();
+    let truncationReason: string | undefined;
+    // Held so a cut can tear the read down directly.
+    //
+    // Aborting the fetch signal is not enough once the response has been
+    // handed back: the loop is parked on a pending `reader.read()` that
+    // nothing wakes, so a model that stops mid-stream without closing its
+    // response would hang the turn for as long as the socket stayed open —
+    // precisely the failure the ceiling exists to prevent. Cancelling the
+    // BODY doesn't work either, because the SSE decoder has already taken a
+    // reader and a locked stream refuses `cancel()`. The reader is the only
+    // handle that ends the read, so we capture it on the way past.
+    let activeReader: { cancel(): Promise<void> } | null = null;
+    const cut = (reason: string) => {
+      if (truncationReason) return;
+      truncationReason = reason;
+      ctrl.abort();
+      activeReader?.cancel().catch(() => {});
     };
-    const text = json.choices?.[0]?.message?.content?.trim();
-    if (!text) throw new Error('vision engine returned an empty response');
-    return text;
+    const onCeiling = () => cut(`stopped at the ${Math.round(ceilingMs / 1000)}s ceiling`);
+    ceiling.signal.addEventListener('abort', onCeiling, { once: true });
+
+    // No-progress watchdog. Polled rather than armed, so a wake-up burst
+    // after a suspend can't fire it, and disposed below so a finished call
+    // leaves no timer ticking.
+    let lastProgressAt = awakeNow();
+    const idlePoll = setInterval(() => {
+      if (awakeNow() - lastProgressAt >= RECOGNITION_STREAM_IDLE_MS) {
+        cut(`no output for ${Math.round(RECOGNITION_STREAM_IDLE_MS / 1000)}s`);
+      }
+    }, 1_000);
+    idlePoll.unref?.();
+
+    let text = '';
+    try {
+      const res = await this.fetchImpl(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) {
+        throw new Error(
+          `vision engine returned ${res.status}: ${(await res.text()).slice(0, 200)}`,
+        );
+      }
+      if (!res.body) throw new Error('vision engine returned no response body');
+      const rawBody = res.body as unknown as {
+        getReader(): { read(): Promise<{ value: Uint8Array | undefined; done: boolean }> };
+      };
+      const observed = {
+        getReader() {
+          const reader = rawBody.getReader();
+          activeReader = reader as unknown as { cancel(): Promise<void> };
+          // A cut that landed while the request was still in flight must not
+          // be answered by settling in to read a body we already abandoned.
+          if (truncationReason) activeReader.cancel().catch(() => {});
+          return reader;
+        },
+      };
+      for await (const event of readSseEvents(observed as Parameters<typeof readSseEvents>[0])) {
+        const delta = (event as { choices?: Array<{ delta?: { content?: string } }> } | undefined)
+          ?.choices?.[0]?.delta?.content;
+        if (typeof delta !== 'string' || delta.length === 0) continue;
+        text += delta;
+        lastProgressAt = awakeNow();
+      }
+    } catch (err) {
+      // A cut we asked for is not a failure — it is the end of a partial.
+      // Anything else (transport fault, non-200) still throws.
+      if (!truncationReason) throw err;
+    } finally {
+      clearInterval(idlePoll);
+      ceiling.signal.removeEventListener('abort', onCeiling);
+      ceiling.dispose();
+    }
+
+    const trimmed = text.trim();
+    if (!trimmed) {
+      throw new Error(
+        truncationReason
+          ? `vision engine produced nothing before it was ${truncationReason}`
+          : 'vision engine returned an empty response',
+      );
+    }
+    return {
+      text: trimmed,
+      truncated: truncationReason !== undefined,
+      ...(truncationReason ? { truncationReason } : {}),
+    };
   }
 
   async listInstalledModels(): Promise<InstalledRecognitionModelInfo[]> {

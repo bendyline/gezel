@@ -1122,6 +1122,17 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
       opts.logger?.info?.(`[supervisor] bundled uv: ${bin}`);
     }
   }
+  if (!process.env.GEZEL_DUCKDB_BIN) {
+    // DuckDB is the query engine for observation corpora — the tabular
+    // connector shape. The service spawns it as a short-lived child per
+    // query; without this the corpus is still on disk and still readable,
+    // the query tools just report the engine as unavailable.
+    const bin = resolveNativeBinaryPath('duckdb', import.meta.url);
+    if (bin) {
+      process.env.GEZEL_DUCKDB_BIN = bin;
+      opts.logger?.info?.(`[supervisor] bundled duckdb: ${bin}`);
+    }
+  }
 
   const mode = await resolveMode({
     home: opts.home,

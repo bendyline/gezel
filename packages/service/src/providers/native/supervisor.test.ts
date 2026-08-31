@@ -1462,3 +1462,79 @@ describe('NativeEngineSupervisor — startup recovery (recoverStartup)', () => {
     expect(recoverCalled).toBe(false);
   });
 });
+
+describe('NativeEngineSupervisor — pressure it cannot act on', () => {
+  it('says so when the engine is busy instead of falling silent', async () => {
+    // The only lever is "stop MY engine once MY engine is idle". A four-hour
+    // turn on an oversubscribed card ran this probe about 960 times and logged
+    // nothing at all, so the one machine condition that explained every other
+    // tenant's collapse left no trace.
+    const fakeSpawn = (() =>
+      makeFakeChild(4244) as unknown as ReturnType<
+        typeof import('node:child_process').spawn
+      >) as unknown as typeof import('node:child_process').spawn;
+    const lines: string[] = [];
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: 'fake-engine',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9996',
+      }),
+      spawn: fakeSpawn,
+      fetchImpl: async () => new Response('ok', { status: 200 }),
+      startupTimeoutMs: 2_000,
+      healthIntervalMs: 20,
+      idleTimeoutMs: 10_000,
+      pressureIdleTimeoutMs: 10,
+      isBusy: () => true,
+      memoryPressure: async () => ({ pressured: true, detail: '0.3 GB free of 12.4 GB VRAM' }),
+      onLog: (line) => lines.push(line),
+    });
+
+    await sup.ensureRunning();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    try {
+      expect(
+        lines.some((l) => /memory pressure .* held \d+s — engine is serving a turn/.test(l)),
+      ).toBe(true);
+      // Reported, not acted on: a busy engine is never torn down under it.
+      expect(sup.currentBaseUrl()).toBe('http://127.0.0.1:9996');
+      expect(sup.memoryPressureHeld()).not.toBeNull();
+    } finally {
+      await sup.stop('stop');
+    }
+  });
+
+  it('reports no held pressure when the accelerator is fine', async () => {
+    const fakeSpawn = (() =>
+      makeFakeChild(4245) as unknown as ReturnType<
+        typeof import('node:child_process').spawn
+      >) as unknown as typeof import('node:child_process').spawn;
+    const lines: string[] = [];
+    const sup = new NativeEngineSupervisor({
+      resolveLaunch: async () => ({
+        command: 'fake-engine',
+        args: [],
+        baseUrl: 'http://127.0.0.1:9995',
+      }),
+      spawn: fakeSpawn,
+      fetchImpl: async () => new Response('ok', { status: 200 }),
+      startupTimeoutMs: 2_000,
+      healthIntervalMs: 20,
+      idleTimeoutMs: 10_000,
+      pressureIdleTimeoutMs: 10,
+      isBusy: () => true,
+      memoryPressure: async () => ({ pressured: false }),
+      onLog: (line) => lines.push(line),
+    });
+
+    await sup.ensureRunning();
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    try {
+      expect(lines.some((l) => /memory pressure/.test(l))).toBe(false);
+      expect(sup.memoryPressureHeld()).toBeNull();
+    } finally {
+      await sup.stop('stop');
+    }
+  });
+});

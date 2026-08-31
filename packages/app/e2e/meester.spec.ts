@@ -10,7 +10,9 @@ import { fileURLToPath } from 'node:url';
  */
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { captureScreenshot } from './helpers/screenshot.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const screenshotDir = join(_dirname, '..', 'screenshots');
@@ -36,7 +38,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await app?.close();
+  await closeApp(app);
   await rm(gezelHome, { recursive: true, force: true }).catch(() => {});
 });
 
@@ -59,7 +61,10 @@ test('first-run auto-provisions a Meester gezel', async () => {
   const rows = page.locator('.app-sidebar-gezel');
   await expect(rows.first()).toBeVisible({ timeout: 10_000 });
 
-  await page.screenshot({ path: join(screenshotDir, 'meester-01-gezels.png'), fullPage: true });
+  await captureScreenshot(page, {
+    path: join(screenshotDir, 'meester-01-gezels.png'),
+    fullPage: true,
+  });
 
   // At least one gezel exists (the auto-provisioned Meester; Klerk is
   // also created for utility work, hence not asserting an exact count).
@@ -73,7 +78,10 @@ test('Settings shows the meester with the dropdown pre-selected', async () => {
   // opens on "General" by default, so click into the team section.
   await page.locator('.settings-nav button:has-text("Your Team")').click();
   await page.waitForTimeout(400);
-  await page.screenshot({ path: join(screenshotDir, 'meester-02-settings.png'), fullPage: true });
+  await captureScreenshot(page, {
+    path: join(screenshotDir, 'meester-02-settings.png'),
+    fullPage: true,
+  });
 
   const body = await page.textContent('body');
   expect(body).toContain('Meester');

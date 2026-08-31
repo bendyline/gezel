@@ -125,6 +125,42 @@ pnpm eval:all --suite productivity --scenarios meeting-followup,wikipedia-resear
   --count 3 --model gemma4-e4b-q4
 ```
 
+## The two hard suites
+
+`developer` and `complex-work` are written to a difficulty TARGET, not to a coverage
+gap: a frontier cloud model should pass most of each, the best local model around
+4/10, a small local model 1-2/10. Low numbers are the point. Read them as headroom
+for a scorecard whose top half had saturated, never as a regression.
+
+```bash
+# Pulse checks first — one member per gate kind, ~1h40m each.
+pnpm eval:all --suite developer-smoke --count 1 --model qwen3.8-27b-q4
+pnpm eval:all --suite complex-work-smoke --count 1 --model qwen3.8-27b-q4
+
+# The full suites. Budget 5h40m each at --count 1.
+pnpm eval:all --suite developer --count 3 --model qwen3.8-27b-q4
+pnpm eval:all --suite complex-work --count 3 --model qwen3.8-27b-q4
+```
+
+Two operational notes that do not apply to `core`:
+
+**Budget for 2x the authored ceiling, not 1x.** The runner extends a trial's deadline
+in 15-minute steps whenever hard progress moved within the last 10 minutes, capped at
+`maxDurationMs * 2` (`hardCeilingCapMs`, runner.ts). That rule exists so a converging
+trial is never guillotined, and it almost never fires on `core`, where trials either
+pass early or stall outright. A hard suite is precisely where it DOES fire: a model
+that keeps making tool calls without converging looks like progress every ten minutes
+and runs to the cap. Wild-caught on the inaugural frontier run, where
+`craftbook-author-gate-script` sailed past its 45-minute ceiling still grinding.
+
+So the honest planning number for these two suites is **up to 11h20m each at
+`--count 1`**, not the 5h40m of authored ceilings. `eval:scorecard --list` sums the
+authored ceilings and is therefore also a 2x understatement in the worst case.
+
+**Probe before committing a model to a full run.** A model far below the floor books
+six hours of zeros. Run the smoke subset at `--count 1` first and skip the full suite
+on 0/3, recording it as unmeasured. That is honest and it is cheap.
+
 ## The published scorecard
 
 `core` and `productivity` results ship inside the product: the handboek's

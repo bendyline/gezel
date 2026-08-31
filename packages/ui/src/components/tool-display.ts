@@ -180,6 +180,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   fetch_url: 'Open a web page',
   web_search: 'Search the web',
   wikipedia_search: 'Search Wikipedia',
+  wikipedia_read: 'Read a Wikipedia article',
 
   // Archives
   list_archive: 'List archive contents',

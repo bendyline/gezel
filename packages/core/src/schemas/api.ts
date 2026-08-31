@@ -310,10 +310,13 @@ export const GpuProcessOwnerSchema = z.enum([
 ]);
 export type GpuProcessOwner = z.infer<typeof GpuProcessOwnerSchema>;
 
-/** Driver accounting for one process holding dedicated GPU memory. */
+/** Driver accounting for one process holding GPU-local memory. */
 export const GpuProcessMemorySchema = z.object({
   pid: z.number().int().positive(),
   name: z.string().optional(),
+  /** Windows adapter identity parsed from the process-counter instance. */
+  adapterLuid: z.string().optional(),
+  /** Historical wire name; Windows resident-local samples also use this field. */
   dedicatedBytes: z.number().nonnegative(),
   owner: GpuProcessOwnerSchema,
 });
@@ -356,6 +359,8 @@ export const MachineMemoryUsageSchema = z.object({
   gezelBytesEstimated: z.number().nonnegative(),
   /** Observed Gezel process footprint when the platform exposes it. */
   gezelBytesObserved: z.number().nonnegative().nullable(),
+  /** Windows process attribution is reconciled to the pool and remains approximate. */
+  processAttributionKind: z.enum(['measured', 'estimated']).optional(),
   /** Gezel daemon + local-engine runtime overhead within the attributed total. */
   gezelInfraBytes: z.number().nonnegative(),
   /** Loaded model parameters, estimated from the installed model payloads. */
@@ -404,7 +409,7 @@ export const MachineMemoryUsageSchema = z.object({
   residentModels: z.array(ResidentEngineModelSchema),
   /** Running supervised replicas and their next policy deadline. */
   engineLifecycles: z.array(LocalEngineLifecycleSchema).optional(),
-  /** Actual dedicated-VRAM owners, when the OS exposes them. */
+  /** GPU-local process attribution, when the OS exposes trustworthy counters. */
   gpuProcesses: z.array(GpuProcessMemorySchema).optional(),
   gezelEngineProcessCount: z.number().int().nonnegative(),
   orphanedGezelEngineProcessCount: z.number().int().nonnegative(),
@@ -875,6 +880,13 @@ export const GezelConfigSchema = z.object({
    * with audio output the first time they open a chat.
    */
   narrateAssistantReplies: z.boolean().optional(),
+  /**
+   * Catalog id of the whisper.cpp model transcription runs on. whisper-server
+   * binds one model per process, so this is the model the engine launches
+   * with. Unset (or naming a model that is no longer installed) falls back to
+   * the first installed model by id.
+   */
+  defaultSttModel: z.string().optional(),
   githubToken: z.string().optional(),
   /** Non-secret companion to `githubToken`. See {@link GitHubAuthMetaSchema}. */
   githubAuth: GitHubAuthMetaSchema.optional(),
@@ -907,11 +919,14 @@ export const GezelConfigSchema = z.object({
    */
   imageProvider: z.enum(['sd-cpp', 'google-ai', 'openai', 'mock']).optional(),
   /**
-   * Default model id per cloud image provider. sd-cpp's default comes
-   * from the on-disk install layout, not config, so it isn't here.
+   * Default model id per image provider. `'sd-cpp'` names one of the
+   * locally installed models; when unset (or naming a model that is no
+   * longer installed) the engine falls back to the first installed model
+   * by id, which is what every install used before this setting existed.
    */
   defaultImageModel: z
     .object({
+      'sd-cpp': z.string().optional(),
       'google-ai': z.string().optional(),
       openai: z.string().optional(),
     })
@@ -1017,15 +1032,32 @@ export const GezelConfigSchema = z.object({
     })
     .optional(),
   /**
-   * Per-model opt-in for native vision (`--mmproj` at launch), keyed by
-   * catalog id. Absent means off.
+   * Per-model native vision (`--mmproj` at launch), keyed by catalog id.
    *
-   * Off by default because loading a projector makes llama-server 501 on slot
-   * save/restore, which latches disk-KV prefix caching off for that model
-   * process-wide — costing cached session resume on *every* text turn, image
-   * or not. Users who want image fidelity more than resume latency opt in per
-   * model; everyone else gets the recognition pre-step, which is uniform
-   * across engines including ds4.
+   * **Absent means ON**; `false` is an explicit opt-out. The projector now
+   * ships with the model and memory planning prices it in, so a model that
+   * can see does, without the user first finding a switch. Resolve it only
+   * through `nativeVisionEnabledFor` — three layers read this and a default
+   * spelled out in three places drifts.
+   *
+   * Turning it off is a real trade, not just a modality toggle: the
+   * projector's bytes leave the memory budget, so a text-only model can be
+   * granted a larger context window. Worth it for, say, a night-shift model
+   * that will never be handed a screenshot.
+   *
+   * Off by default because an mmproj-backed llama-server 501s on slot
+   * save/restore, so gezel cannot persist that model's KV to disk. Scope
+   * that precisely, because it is narrower than it first reads: llama-server's
+   * own in-request prefix reuse (`cache_prompt` + `id_slot`, which
+   * `LlamaCppCacheAdapter.buildRequestExtras` sends unconditionally) is NOT
+   * affected, so turn-to-turn speed inside a live conversation is unchanged.
+   * What is lost is the *disk* layer — resuming a session's KV after slot
+   * recycle or an engine restart, and the `prefix-<hash>.bin` seed that lets
+   * a fresh session for the same gezel skip the system-prompt prefill. The
+   * cost lands on cold starts, not on every turn.
+   *
+   * llama.cpp only. MLX has no slot save/restore to lose (and no vision path
+   * yet — see `MLX_VISION_SUPPORTED`).
    */
   nativeVision: z.record(z.string(), z.boolean()).optional(),
   /** Optional bearer token used by the webhook channel. Never stored in config.json —
@@ -1371,6 +1403,31 @@ export const GezelConfigSchema = z.object({
    */
   ds4CacheExpertsGb: z.number().positive().optional(),
   /**
+   * ds4-only: DSpark speculative decoding (`--dspark --mtp <support.gguf>`).
+   *
+   * - `off`  — never draft.
+   * - `on`   — draft whenever a support model resolves and the engine allows it.
+   * - `auto` — draft only where it has been shown to pay: a CUDA host running
+   *            a fully resident model. Default.
+   *
+   * `auto` deliberately excludes Metal. Measured 2026-08-26 on an M5 Max
+   * (DeepSeek V4 Flash IQ2_XXS, full residency, seed-pinned A/B/C/A): baseline
+   * 38.4 tok/s, opportunistic 38.5, exact 36.7, and ds4's own
+   * `DS4_DSPARK_STATS` accounting reported net_saved of -1301 ms and -1038 ms
+   * respectively. Verification of a 5-token block through a 284B MoE costs more
+   * than the single-token decodes it skips. Apple Silicon reports
+   * `gpuMemoryKind: 'unified'` exactly like GB10 does, so residency/unified
+   * memory is NOT a sufficient predicate — the backend is.
+   */
+  ds4Dspark: z.enum(['off', 'on', 'auto']).optional(),
+  /**
+   * ds4-only: absolute path to a DSpark support GGUF, overriding whatever the
+   * installed model carries. The escape hatch for evaluating DSpark on hardware
+   * before any catalog entry declares a `draftModel` (which would make it a
+   * mandatory download for every install of that entry).
+   */
+  ds4DsparkModelPath: z.string().optional(),
+  /**
    * llama-cpp-only: mid-stream idle cap (seconds). After this many
    * seconds with no SSE chunk arriving, the in-flight chat completion
    * is aborted with an idle-stall error so the runtime publishes
@@ -1640,6 +1697,36 @@ export const GezelConfigSchema = z.object({
    */
   mlxKvBits: z.number().int().min(0).max(8).optional(),
   /**
+   * MLX-only: absolute path to an MTP drafter directory (built from an
+   * MTP-preserving source checkpoint via mlx_vlm's qwen3_5_mtp split).
+   * When set, the wrapped server arms speculative decoding for eligible
+   * (greedy, processor-free) requests — measured +34% decode on
+   * qwen3.8-27b at 11k and 73k context, token-exact under greedy. The
+   * sidecar owns every safety: capability probe, an mlx-vlm >= 0.6.17
+   * exactness gate (older MTP verify is measured-inexact), per-request
+   * eligibility, and `[spec]` log fingerprints; any failure degrades to
+   * normal serving with a logged reason. Default unset (off).
+   */
+  mlxSpecDraftModelPath: z.string().optional(),
+  /**
+   * MLX-only: master switch for MTP speculative decoding. **Unset = on**,
+   * which means "on for any model that has a drafter beside it" (see
+   * providers/mlx/spec-drafter.ts) — a model without one serves normally.
+   * Set false to keep every turn on the ordinary decode path regardless.
+   * Measured +34% decode on qwen3.8-27b; greedy output is token-exact and
+   * sampled output is drawn from the same (processor-shaped) distribution
+   * as the ordinary path, though from a different RNG stream — so sampled
+   * text differs token-for-token from a non-speculative run.
+   */
+  mlxSpeculativeDecoding: z.boolean().optional(),
+  /**
+   * MLX-only: draft block size override for speculative decoding.
+   * Default unset = the drafter's configured block_size, which measured
+   * optimal — deeper drafting measured net-negative (acceptance per
+   * draft collapses past the MTP head's depth).
+   */
+  mlxSpecBlockSize: z.number().int().positive().optional(),
+  /**
    * MLX-only: tokens per prefill chunk. Smaller values reduce peak
    * memory during prefill (useful on tight unified-memory machines)
    * at the cost of throughput; larger values can speed up prefill
@@ -1829,6 +1916,27 @@ export const GezelConfigSchema = z.object({
    * toggle.
    */
   layeredPrefixCache: z
+    .object({
+      enabled: z.boolean().optional(),
+    })
+    .optional(),
+  /**
+   * Shared-band prompt-prefix reuse on MLX (ADR 0010). Keys the engine's
+   * prefix entry on the leading run of the system prompt that sibling
+   * sessions of the same (gezel, project) render identically — everything
+   * before the task band — instead of the whole prompt, and publishes that
+   * entry from a real turn's boundary snapshot so it stays a strict token
+   * prefix. **Default ON for mlx** (matched A/B: 43% less prefill from one
+   * sibling); set `enabled: false` to opt out.
+   * `GEZEL_MLX_SHARED_BAND_PREFIX` (`1`/`true`/`0`/`false`) overrides config
+   * as the eval A/B toggle.
+   *
+   * Distinct from `layeredPrefixCache`, which restructures the prompt into
+   * two system messages — a layout the Qwen chat template rejects outright
+   * (`System message must be at the beginning.`). This flag changes only
+   * cache KEYING; the rendered prompt is byte-identical either way.
+   */
+  mlxSharedBandPrefix: z
     .object({
       enabled: z.boolean().optional(),
     })
@@ -2210,6 +2318,16 @@ export const GezelConfigSchema = z.object({
    *     finish; the pending-sends queue is canceled on transition.
    * Degrading to scheduled/reactive does NOT kill the in-flight
    * queue — it drains normally. Only `off` stops the drain.
+   *
+   * Background indexing splits across this line rather than sitting on
+   * one side of it. The model-backed tiers — Boekwachter summaries,
+   * per-file reviews, AI media shadows, area rollups — are task work and
+   * stand down below `scheduled` (`isTaskWorkAllowed`, checked at the
+   * roster boundary in IndexEnrichmentManager). The local tiers —
+   * structural scan, text/image embeddings, faces — keep running in every
+   * mode but `off`: they make no model call, and the retrieval that
+   * reactive-mode chat still depends on would decay silently without
+   * them.
    */
   aiEngagementMode: z.enum(['proactive', 'scheduled', 'reactive', 'off']).optional(),
   /**
@@ -2787,6 +2905,9 @@ export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
   mlxModelPath: z.string().nullable().optional(),
   mlxPackageSpec: z.string().nullable().optional(),
   mlxKvBits: z.number().int().min(0).max(8).nullable().optional(),
+  mlxSpecDraftModelPath: z.string().nullable().optional(),
+  mlxSpeculativeDecoding: z.boolean().nullable().optional(),
+  mlxSpecBlockSize: z.number().int().positive().nullable().optional(),
   /**
    * Direct mutation is rejected by the route — the move worker is the
    * only writer, immediately before triggering a service restart. The
@@ -3920,6 +4041,11 @@ export const UpdateProjectRequestSchema = z.object({
   /** Replace the project's optional-tab visibility overrides. */
   tabVisibility: ProjectTabVisibilitySchema.optional(),
   /**
+   * Show or hide the Output pane for this project. `null` clears the choice
+   * and returns the pane to its capability-driven default.
+   */
+  outputPaneVisible: z.boolean().nullable().optional(),
+  /**
    * Enable or disable structural and content indexing for this workspace.
    * Chat history, memories, and shared-document indexing are unaffected.
    */
@@ -4462,6 +4588,18 @@ export const SearchResultSchema = z.object({
   /** ISO 8601 when the backend supplies it. */
   publishedAt: z.string().optional(),
   source: z.enum(['brave', 'wikipedia', 'tavily', 'mock']),
+  /**
+   * Substantive body text the backend returned alongside the hit, already
+   * plain text (no HTML). Optional because most backends only supply a
+   * snippet; Wikipedia hydrates its top results because a single API call
+   * can join search + article extract, and the alternative — telling the
+   * model to `fetch_url` the article — returns megabytes of page chrome
+   * that is truncated away before any prose is reached.
+   *
+   * Never a substitute for `snippet`: callers that only want a compact
+   * result list keep reading `snippet` and stay unaffected.
+   */
+  content: z.string().optional(),
 });
 export type SearchResult = z.infer<typeof SearchResultSchema>;
 
@@ -4488,6 +4626,39 @@ export const WebSearchResponseSchema = z.object({
   durationMs: z.number().int().nonnegative(),
 });
 export type WebSearchResponse = z.infer<typeof WebSearchResponseSchema>;
+
+/**
+ * `wikipedia_read` request — fetch one article's full plain-text body by
+ * exact title. Separate from {@link WikipediaSearchRequestSchema} because a
+ * full article does not fit the search response budget: the English "Italy"
+ * extract alone is ~96 KB, over the MCP bridge's whole-result cap, so
+ * hydrating every search hit to full text is not an option and a per-title
+ * read is.
+ */
+export const WikipediaReadRequestSchema = z.object({
+  /** Exact article title, as returned in a `wikipedia_search` result. */
+  title: z.string().min(1).max(400),
+  /** BCP-47 language code; selects the Wikipedia corpus. */
+  language: z.string().min(2).max(8).optional(),
+  /**
+   * Character ceiling for the returned body. Bounded well under the bridge's
+   * cap so a long article can never consume a whole context window.
+   */
+  maxChars: z.number().int().min(500).max(60_000).optional(),
+});
+export type WikipediaReadRequest = z.infer<typeof WikipediaReadRequestSchema>;
+
+export const WikipediaReadResponseSchema = z.object({
+  /** Wikipedia's canonical title, which may differ from the request after a redirect. */
+  title: z.string(),
+  url: z.string(),
+  /** Plain-text article body (no wiki markup, no HTML). */
+  content: z.string(),
+  /** True when `maxChars` clipped the body. */
+  truncated: z.boolean(),
+  durationMs: z.number().int().nonnegative(),
+});
+export type WikipediaReadResponse = z.infer<typeof WikipediaReadResponseSchema>;
 
 /**
  * Bounds for the model-facing workspace read tools. The ordinary project
@@ -4644,6 +4815,71 @@ export const SearchFilesResponseSchema = z.object({
   engine: z.enum(['ripgrep', 'javascript']),
 });
 export type SearchFilesResponse = z.infer<typeof SearchFilesResponseSchema>;
+
+// ── observation tables (the tabular connector corpus) ───────────────────────
+
+export const ListTablesRequestSchema = z.object({});
+export type ListTablesRequest = z.infer<typeof ListTablesRequestSchema>;
+
+export const ObservationTableSummarySchema = z.object({
+  /** The name a query uses. Qualified only when two corpora collide. */
+  table: z.string(),
+  title: z.string().optional(),
+  /** What one row is. Prevents double-counting more effectively than prose. */
+  grain: z.string().optional(),
+  rows: z.number().int().nonnegative(),
+  columns: z.number().int().nonnegative(),
+  partitions: z.number().int().nonnegative(),
+  earliestPartition: z.string().optional(),
+  latestPartition: z.string().optional(),
+  /** Whether this table mirrors an external system or a file in the project. */
+  origin: z.enum(['connector', 'workspace']).default('connector'),
+  /** The connector's display name, or the workspace file the table came from. */
+  source: z.string(),
+  /** True when the schema was probed from the data rather than authored. */
+  schemaInferred: z.boolean(),
+});
+export type ObservationTableSummary = z.infer<typeof ObservationTableSummarySchema>;
+
+export const ListTablesResponseSchema = z.object({
+  tables: z.array(ObservationTableSummarySchema),
+});
+export type ListTablesResponse = z.infer<typeof ListTablesResponseSchema>;
+
+export const DescribeTableRequestSchema = z.object({
+  table: z.string().min(1).max(200),
+});
+export type DescribeTableRequest = z.infer<typeof DescribeTableRequestSchema>;
+
+export const DescribeTableResponseSchema = z.object({
+  table: z.string(),
+  /** The semantic layer rendered as markdown, for a model to read. */
+  markdown: z.string(),
+  summary: ObservationTableSummarySchema,
+});
+export type DescribeTableResponse = z.infer<typeof DescribeTableResponseSchema>;
+
+export const QueryTableRequestSchema = z.object({
+  /** A single read-only SQL statement. Validated by DuckDB's own parser. */
+  sql: z.string().min(1).max(20_000),
+  /** Rows to return. Clamped server-side; one extra is fetched to detect more. */
+  limit: z.number().int().positive().max(10_000).optional(),
+  /** Restrict which table views are in scope. Default: every table. */
+  tables: z.array(z.string().min(1).max(200)).max(32).optional(),
+  timeoutMs: z.number().int().min(1_000).max(300_000).optional(),
+});
+export type QueryTableRequest = z.infer<typeof QueryTableRequestSchema>;
+
+export const QueryTableResponseSchema = z.object({
+  /** Result rows. Cell values are whatever the engine returned. */
+  rows: z.array(z.record(z.string(), z.unknown())),
+  columns: z.array(z.string()),
+  /** More rows matched than were returned. */
+  truncated: z.boolean(),
+  limit: z.number().int().positive(),
+  tablesInScope: z.array(z.string()),
+});
+export type QueryTableResponse = z.infer<typeof QueryTableResponseSchema>;
 
 export const FindFilesRequestSchema = z.object({
   glob: z.string().min(1),

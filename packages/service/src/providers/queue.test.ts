@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { AbortedWhileQueuedError, ProviderQueue, backgroundLaneCap } from './queue.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AbortedWhileQueuedError, ProviderQueue, backgroundLaneCap, runInQueue } from './queue.js';
 
 /**
  * Fake clock: each `advance(ms)` also flushes any microtask
@@ -1106,5 +1106,62 @@ describe('backgroundLaneCap', () => {
     // third without waiting for either to finish.
     expect(chatStarted).toBe(true);
     for (const rel of bg) rel();
+  });
+});
+
+describe('runInQueue — queue-wait notices', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('re-asserts an ongoing wait, and stops the moment the slot is acquired', async () => {
+    vi.useFakeTimers();
+    const q = new ProviderQueue({ concurrency: 1 });
+    // Occupy the only slot, the way another gezel's long agentic turn does.
+    const holder = await q.acquire({ lane: 'interactive' });
+
+    const seen: number[] = [];
+    const ran = runInQueue(
+      q,
+      { lane: 'interactive', onQueueWait: ({ aheadOf }) => seen.push(aheadOf) },
+      async () => 'done',
+    );
+
+    // Nothing below the threshold — an uncontended acquire must not flash.
+    await vi.advanceTimersByTimeAsync(150);
+    expect(seen).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(seen).toHaveLength(1);
+
+    // The wait is the part that used to go dark: one edge-triggered notice
+    // could be cleared by any later liveness event, leaving a turn with no
+    // queue badge and no output for the rest of a multi-minute wait.
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(seen.length).toBeGreaterThanOrEqual(3);
+
+    holder();
+    await expect(ran).resolves.toBe('done');
+
+    // Acquired — the notices stop, which is what lets the UI's freshness
+    // window expire the badge without needing an explicit "acquired" event.
+    const atAcquire = seen.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(seen).toHaveLength(atAcquire);
+  });
+
+  it('stays silent when the queue is empty', async () => {
+    vi.useFakeTimers();
+    const q = new ProviderQueue({ concurrency: 1 });
+    const seen: number[] = [];
+    await expect(
+      runInQueue(
+        q,
+        { lane: 'interactive', onQueueWait: ({ aheadOf }) => seen.push(aheadOf) },
+        async () => 'immediate',
+      ),
+    ).resolves.toBe('immediate');
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(seen).toEqual([]);
   });
 });

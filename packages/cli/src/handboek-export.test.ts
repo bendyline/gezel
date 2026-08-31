@@ -2,10 +2,12 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { SCORECARD_DATA_ATTRS, SCORECARD_QUERY_PARAMS } from '@bendyline/gezel';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   type HandboekExportResult,
   extractBody,
+  pageScripts,
   resolveCssHref,
   rewriteSiteLinks,
   runHandboekExport,
@@ -13,6 +15,7 @@ import {
   withHeadingIds,
   wrapTables,
 } from './handboek-export.js';
+import { SCORECARD_FILTER_JS } from './handboek-site-scorecard.js';
 
 describe('rewriteSiteLinks', () => {
   const ids = new Set(['welcome', 'the-crew', 'role/meester', 'craftbook/status-report']);
@@ -140,6 +143,37 @@ describe('runHandboekExport', () => {
     expect(existsSync(join(out, 'role', 'meester', 'index.html'))).toBe(true);
     expect(existsSync(join(out, 'assets', 'squisq-player.js'))).toBe(true);
     expect(existsSync(join(out, 'assets', 'handboek.css'))).toBe(true);
+    expect(existsSync(join(out, 'assets', 'scorecard.js'))).toBe(true);
+  });
+
+  it('ships the scorecard as every round, stamped, with its filter attached', async () => {
+    const page = await readFile(join(out, 'model-scorecard', 'index.html'), 'utf8');
+    expect(page).toContain('<script defer src="../assets/scorecard.js"></script>');
+    expect(page).toContain(`${SCORECARD_DATA_ATTRS.root}="1"`);
+    expect(page).toContain(`${SCORECARD_DATA_ATTRS.controls}="1"`);
+    // Real containers, not a flat run of headings: the markdown pipeline must
+    // have kept the wrapper divs and their stamps, or there is nothing for the
+    // filter to hide. Rows carry the family id, so one pick covers every
+    // quantization of a model.
+    expect(page).toMatch(new RegExp(`${SCORECARD_DATA_ATTRS.round}="[^"]+"`));
+    expect(page).toMatch(new RegExp(`${SCORECARD_DATA_ATTRS.model}="[^"]+"`));
+    expect(page).toContain(`${SCORECARD_DATA_ATTRS.latest}="1"`);
+    expect(page).toContain('class="hb-table-scroll"');
+  });
+
+  it('leaves the scorecard filter off pages that have no scorecard', async () => {
+    const page = await readFile(join(out, 'the-crew', 'index.html'), 'utf8');
+    expect(page).not.toContain('scorecard.js');
+  });
+
+  it('keeps the round headings out of the on-this-page list', async () => {
+    // Nine rounds under "Results by test round" would bury the article's own
+    // three sections, and eight of them are hidden the moment the filter runs.
+    const page = await readFile(join(out, 'model-scorecard', 'index.html'), 'utf8');
+    const nav = page.slice(page.indexOf('hb-onthispage'));
+    expect(nav).toContain('Results by test round');
+    expect(nav).not.toContain('Latest round');
+    expect(nav).not.toContain('Earlier round');
   });
 
   it('renders readable pages as semantic HTML, with no player dependency', async () => {
@@ -264,5 +298,34 @@ describe('runHandboekExport', () => {
     const crew = await readFile(join(out, 'the-crew', 'index.html'), 'utf8');
     expect(crew).not.toContain('Your Meester is');
     expect(crew).not.toContain('poppetje/');
+  });
+});
+
+describe('pageScripts', () => {
+  it('links the scorecard filter only where a scorecard rendered', () => {
+    expect(pageScripts(`<div ${SCORECARD_DATA_ATTRS.root}="1"></div>`)).toEqual(['scorecard.js']);
+    expect(pageScripts('<p>No scorecard here.</p>')).toEqual([]);
+  });
+});
+
+describe('SCORECARD_FILTER_JS', () => {
+  it('is valid JavaScript with nothing left to interpolate', () => {
+    // The script is a template literal in a TypeScript module: an unescaped
+    // backtick truncates it and a stray `${` silently swallows a chunk of the
+    // program. Both survive tsup and only surface as a dead page.
+    expect(SCORECARD_FILTER_JS).not.toContain('${');
+    expect(() => new Function(SCORECARD_FILTER_JS)).not.toThrow();
+  });
+
+  it('reads back exactly the stamps the renderer writes', () => {
+    // Interpolated from the same constants, so this asserts the wiring rather
+    // than a copy: a stamp the script never mentions is a filter that would
+    // match nothing, with no error anywhere to say why.
+    for (const attr of Object.values(SCORECARD_DATA_ATTRS)) {
+      expect(SCORECARD_FILTER_JS, attr).toContain(`"${attr}"`);
+    }
+    for (const param of Object.values(SCORECARD_QUERY_PARAMS)) {
+      expect(SCORECARD_FILTER_JS, param).toContain(`"${param}"`);
+    }
   });
 });

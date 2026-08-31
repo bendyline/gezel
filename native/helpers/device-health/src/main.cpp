@@ -50,6 +50,7 @@ struct GpuProcessMemory {
   std::optional<std::string> name;
   double dedicated_bytes;
   std::string owner;
+  std::optional<std::string> adapter_luid;
 };
 
 struct ProbeReport {
@@ -150,6 +151,9 @@ std::string serialize_report(const ProbeReport& report,
     const GpuProcessMemory& process = report.processes[index];
     out << "{\"pid\":" << process.pid;
     if (process.name) out << ",\"name\":\"" << json_escape(*process.name) << '"';
+    if (process.adapter_luid) {
+      out << ",\"adapterLuid\":\"" << json_escape(*process.adapter_luid) << '"';
+    }
     out << ",\"dedicatedBytes\":" << std::fixed << std::setprecision(0)
         << process.dedicated_bytes << ",\"owner\":\""
         << json_escape(process.owner) << "\"}";
@@ -496,19 +500,35 @@ std::string classify_gpu_owner(
   return "gezel-engine";
 }
 
-std::optional<std::uint32_t> pid_from_gpu_instance(const wchar_t* instance) {
+struct WindowsGpuProcessInstance {
+  std::uint32_t pid;
+  std::string adapter_luid;
+};
+
+std::optional<WindowsGpuProcessInstance> process_from_gpu_instance(const wchar_t* instance) {
   if (!instance) return std::nullopt;
   const std::wstring value(instance);
-  const std::wstring marker = L"pid_";
-  const std::size_t start = value.find(marker);
-  if (start == std::wstring::npos) return std::nullopt;
-  std::size_t end = start + marker.size();
+  const std::wstring pid_marker = L"pid_";
+  const std::size_t pid_start = value.find(pid_marker);
+  if (pid_start == std::wstring::npos) return std::nullopt;
+  const std::size_t pid_value_start = pid_start + pid_marker.size();
+  std::size_t end = pid_value_start;
   while (end < value.size() && std::iswdigit(value[end])) ++end;
-  if (end == start + marker.size()) return std::nullopt;
+  if (end == pid_value_start) return std::nullopt;
+
+  const std::wstring luid_marker = L"_luid_";
+  const std::size_t luid_start = value.find(luid_marker, end);
+  if (luid_start == std::wstring::npos) return std::nullopt;
+  const std::size_t luid_value_start = luid_start + luid_marker.size();
+  const std::size_t luid_end = value.find(L"_phys_", luid_value_start);
+  if (luid_end == std::wstring::npos || luid_end == luid_value_start) return std::nullopt;
   try {
-    const unsigned long parsed = std::stoul(value.substr(start + marker.size(), end));
+    const unsigned long parsed = std::stoul(value.substr(pid_value_start, end - pid_value_start));
     if (parsed == 0 || parsed > UINT32_MAX) return std::nullopt;
-    return static_cast<std::uint32_t>(parsed);
+    const std::wstring luid = value.substr(luid_value_start, luid_end - luid_value_start);
+    const std::string adapter_luid = utf8_from_wide(luid.c_str());
+    if (adapter_luid.empty()) return std::nullopt;
+    return WindowsGpuProcessInstance{static_cast<std::uint32_t>(parsed), adapter_luid};
   } catch (...) {
     return std::nullopt;
   }
@@ -522,10 +542,10 @@ void probe_windows_gpu_process_memory(ProbeReport& report) {
     return;
   }
   const PDH_STATUS add_status = PdhAddEnglishCounterW(
-      query, L"\\GPU Process Memory(*)\\Dedicated Usage", 0, &counter);
+      query, L"\\GPU Process Memory(*)\\Local Usage", 0, &counter);
   if (add_status != ERROR_SUCCESS || !counter ||
       PdhCollectQueryData(query) != ERROR_SUCCESS) {
-    report.diagnostics.push_back("windows-gpu-process-memory: dedicated counter unavailable");
+    report.diagnostics.push_back("windows-gpu-process-memory: local counter unavailable");
     PdhCloseQuery(query);
     return;
   }
@@ -549,33 +569,47 @@ void probe_windows_gpu_process_memory(ProbeReport& report) {
     return;
   }
 
-  std::unordered_map<std::uint32_t, double> bytes_by_pid;
+  struct ProcessAccumulator {
+    std::uint32_t pid;
+    std::string adapter_luid;
+    double bytes = 0;
+  };
+  std::unordered_map<std::string, ProcessAccumulator> bytes_by_process_adapter;
   for (DWORD index = 0; index < item_count; ++index) {
-    const auto pid = pid_from_gpu_instance(items[index].szName);
+    const auto process_instance = process_from_gpu_instance(items[index].szName);
     const PDH_FMT_COUNTERVALUE& value = items[index].FmtValue;
-    if (!pid ||
+    if (!process_instance ||
         (value.CStatus != PDH_CSTATUS_VALID_DATA && value.CStatus != PDH_CSTATUS_NEW_DATA) ||
         value.largeValue <= 0) {
       continue;
     }
-    bytes_by_pid[*pid] += static_cast<double>(value.largeValue);
+    const std::string key = std::to_string(process_instance->pid) + ':' +
+                            process_instance->adapter_luid;
+    auto [found, inserted] = bytes_by_process_adapter.try_emplace(
+        key, ProcessAccumulator{process_instance->pid, process_instance->adapter_luid, 0});
+    found->second.bytes += static_cast<double>(value.largeValue);
   }
   const auto processes = windows_processes();
-  for (const auto& [pid, bytes] : bytes_by_pid) {
+  for (const auto& [key, sample] : bytes_by_process_adapter) {
+    (void)key;
+    const std::uint32_t pid = sample.pid;
     const auto process = processes.find(pid);
     report.processes.push_back(GpuProcessMemory{
         pid,
         process == processes.end() ? std::nullopt
                                    : std::optional<std::string>(process->second.name),
-        bytes,
-        classify_gpu_owner(pid, processes)});
+        sample.bytes,
+        classify_gpu_owner(pid, processes),
+        sample.adapter_luid});
   }
   std::sort(report.processes.begin(), report.processes.end(),
             [](const GpuProcessMemory& left, const GpuProcessMemory& right) {
               return left.dedicated_bytes > right.dedicated_bytes;
             });
   if (report.processes.size() > 64) report.processes.resize(64);
-  if (!report.processes.empty()) report.sources.push_back("windows-gpu-process-memory");
+  if (!report.processes.empty()) {
+    report.sources.push_back("windows-gpu-process-local-memory");
+  }
 }
 
 // Minimal AMD ADL ABI declarations. The corresponding SDK definitions are
@@ -879,13 +913,14 @@ int self_test() {
   report.readings.push_back(reading);
   report.processes.push_back(
       GpuProcessMemory{4242, std::string("gezel-llama-server.exe"), 1073741824,
-                       "development-engine"});
+                       "development-engine", std::string("0x00000000_0x025A7706")});
   report.diagnostics.push_back("line one\nline two");
   const std::string json = serialize_report(report, "2026-07-13T00:00:00.000Z");
   const std::vector<std::string> required = {
       "\"schemaVersion\":1", "\"vendor\":\"amd\"", "\"temperatureC\":72.5",
       "\"powerBrake\":true", "GPU \\\"A\\\"", "line one\\nline two",
-      "\"pid\":4242", "\"dedicatedBytes\":1073741824",
+      "\"pid\":4242", "\"adapterLuid\":\"0x00000000_0x025A7706\"",
+      "\"dedicatedBytes\":1073741824",
       "\"owner\":\"development-engine\""};
   for (const std::string& fragment : required) {
     if (json.find(fragment) == std::string::npos) {
@@ -898,6 +933,15 @@ int self_test() {
     std::cerr << "self-test failed: numeric parser\n";
     return 1;
   }
+#ifdef _WIN32
+  const auto process_instance = process_from_gpu_instance(
+      L"pid_4242_luid_0x00000000_0x025A7706_phys_0");
+  if (!process_instance || process_instance->pid != 4242 ||
+      process_instance->adapter_luid != "0x00000000_0x025A7706") {
+    std::cerr << "self-test failed: Windows GPU process instance parser\n";
+    return 1;
+  }
+#endif
   std::unordered_map<std::uint32_t, double> nvml_processes;
   merge_nvml_processes(
       {{101, 3ULL * 1024 * 1024, 0, 0},

@@ -128,6 +128,39 @@ export interface StepGateOutcome {
 /** How the caller executes one gate script (policy decisions live there). */
 export type GateScriptExecutor = (ref: GateScriptRef) => Promise<ScriptRun | 'skipped'>;
 
+/**
+ * Symbols a script author reliably reaches for from the wrong SDK subpath,
+ * mapped to where they actually live.
+ *
+ * A gate script legitimately needs two imports — `defineScript`/`gezel`
+ * from the package root and the check predicates plus `gateResult` from
+ * `/checks` — and the runtime's bare
+ * "does not provide an export named X" names the problem without naming
+ * the fix. Wild-caught on the first frontier run of craftbook-author-gate-script:
+ * claude-sonnet-4-6 imported `defineScript` from `/checks`, hit the identical
+ * SyntaxError three times, and paused the task rather than moving the import.
+ * A message that says where the symbol lives is the difference between a
+ * one-line correction and an abandoned run.
+ */
+const SDK_SYMBOL_HOMES: ReadonlyArray<{ symbols: readonly string[]; from: string }> = [
+  { symbols: ['defineScript', 'gezel', 'InferredInput'], from: '@bendyline/gezel-sdk' },
+  { symbols: ['gateResult', 'workspaceFromGezel'], from: '@bendyline/gezel-sdk/checks' },
+];
+
+/**
+ * Append the correct import when a script failed on a missing export we
+ * recognize. Returns the error unchanged when nothing matches, so an
+ * unrelated failure is never dressed up as an import problem.
+ */
+export function withSdkImportHint(error: string): string {
+  const missing = /does not provide an export named ['"`]?([A-Za-z0-9_]+)/.exec(error);
+  const symbol = missing?.[1];
+  if (!symbol) return error;
+  const home = SDK_SYMBOL_HOMES.find((entry) => entry.symbols.includes(symbol));
+  if (!home) return error;
+  return `${error} \`${symbol}\` is exported from "${home.from}" — import it from there. A gate script normally needs both: \`import { defineScript, gezel } from '@bendyline/gezel-sdk'\` and \`import { gateResult, workspaceFromGezel } from '@bendyline/gezel-sdk/checks'\`.`;
+}
+
 export async function evaluateStepGate(opts: {
   gate: NormalizedStepGate;
   ws: GateWorkspaceReader;
@@ -205,7 +238,7 @@ export async function evaluateStepGate(opts: {
       });
       return {
         decision: 'reject',
-        message: `Gate script "${ref.name}" failed: ${run.error ?? 'unknown error'}.`,
+        message: `Gate script "${ref.name}" failed: ${withSdkImportHint(run.error ?? 'unknown error')}.`,
         infrastructureError: true,
         skipped,
         runs,

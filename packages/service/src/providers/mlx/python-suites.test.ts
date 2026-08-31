@@ -39,6 +39,7 @@ const STDLIB_SUITES: ReadonlyArray<{ file: string; ranMarker: RegExp }> = [
   // MLX python sidecar". It is pure stdlib, so it can simply gate.
   { file: 'cache_seed_test.py', ranMarker: /all cache_seed tests passed/ },
   { file: 'template_stability_test.py', ranMarker: /PASS / },
+  { file: 'spec_decode_test.py', ranMarker: /all spec_decode tests passed/ },
 ];
 
 function python3(): string | null {
@@ -70,6 +71,12 @@ describe('MLX sidecar python suites', () => {
           cwd: PYTHON_DIR,
           encoding: 'utf8',
           timeout: 120_000,
+          // The suites print non-ASCII case names (cache_seed_test.py uses
+          // "→"), and CPython picks its stdout encoding from the console
+          // codepage when it is not a tty — cp1252 on a Windows workstation,
+          // which raises UnicodeEncodeError *inside the suite* and reports a
+          // passing suite as a failure. We decode as utf8 above, so say so.
+          env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
         });
       } catch (err) {
         const e = err as { stdout?: string; stderr?: string };

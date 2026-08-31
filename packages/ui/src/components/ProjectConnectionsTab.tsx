@@ -16,6 +16,7 @@ import { connectOAuth } from './connector-link.js';
 import { isOAuthNotConfiguredError, parseOAuthAppRequirement } from './oauth-app-setup.js';
 
 type ConnStatus = Awaited<ReturnType<typeof api.listConnectors>>;
+type ConnBinding = ConnStatus['bindings'][number];
 
 interface ConnManifest extends ConnectorFormManifest {
   id: string;
@@ -59,6 +60,39 @@ function connectorCredentialLabel(connector: ConnManifest): string {
   if (kind === 'imap') return 'Mail login';
   if (!connector.secretShape?.required) return 'Optional token';
   return connector.secretShape?.label ?? 'API token';
+}
+
+/**
+ * One line per data table under a binding.
+ *
+ * Deliberately plain sentences rather than a stat grid. Someone reading this
+ * wants to know their data arrived and is current — "4.3 million rows,
+ * 6 Jul → 4 Aug" answers that; a dashboard of counters does not. The
+ * compaction note only appears while there is something pending, so a healthy
+ * corpus says nothing about internals the user never has to think about.
+ */
+function TableStats({ tables }: { tables: NonNullable<ConnBinding['tables']> }) {
+  return (
+    <ul className="gz-connector-tables">
+      {tables.map((t) => {
+        const span =
+          t.earliestPartition && t.latestPartition
+            ? t.earliestPartition === t.latestPartition
+              ? t.earliestPartition
+              : `${t.earliestPartition} → ${t.latestPartition}`
+            : null;
+        return (
+          <li key={t.table} className="small muted">
+            <strong>{t.table}</strong> · {t.rows.toLocaleString()} {t.rows === 1 ? 'row' : 'rows'}
+            {span ? ` · ${span}` : ''}
+            {t.retentionDays ? ` · keeps ${t.retentionDays} days` : ''}
+            {t.schemaInferred ? ' · schema inferred' : ''}
+            {t.pendingParts > 0 ? ' · tidying up tonight' : ''}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 function connectorCoverageLabel(connector: ConnManifest): string {
@@ -454,6 +488,7 @@ export function ProjectConnectionsTab({
                     <span className="muted">Not synced yet</span>
                   )}
                 </div>
+                {b.tables && b.tables.length > 0 ? <TableStats tables={b.tables} /> : null}
               </div>
               <div className="gz-mail-link-actions">
                 <button

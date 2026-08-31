@@ -14,25 +14,17 @@ import type {
   QuotaBucket,
   UsageResponse,
 } from '@bendyline/gezel-client';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { AmbientDashboardCard } from '../components/AmbientDashboardCard.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
-import { ConnectedAppsPanel } from '../components/ConnectedAppsPanel.js';
 import { CopilotInstallCard } from '../components/CopilotInstallCard.js';
 import { CopilotLoginCommand } from '../components/CopilotLoginCommand.js';
-import { FaceRecognitionCard } from '../components/FaceRecognitionCard.js';
 import { GezelIcon } from '../components/GezelIcon.js';
-import { GildeUpdatesCard } from '../components/GildeUpdatesCard.js';
 import { HealthStrip } from '../components/HealthStrip.js';
 import { InstallModelTuningEditor } from '../components/InstallModelTuningEditor.js';
-import { KnowledgeCatalogsCard } from '../components/KnowledgeCatalogsCard.js';
 import { requestMacUninstall } from '../components/MacUninstallDialog.js';
 import { EffortPicker, EffortTray, ModelPicker } from '../components/ModelPicker.js';
-import { RemoteServersPanel } from '../components/RemoteServersPanel.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
-import { StorageUsageCard } from '../components/StorageUsageCard.js';
-import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
 import { shortModelName } from '../components/model-display-name.js';
 import { providerLabel } from '../components/provider-label.js';
 import { useCopilotAvailability } from '../components/useCopilotAvailability.js';
@@ -45,18 +37,7 @@ import { type SidebarSide, getSidebarSide, setSidebarSide } from '../sidebar-sid
 import { type SystemNotice, serviceNotice, updateNotice } from '../system-notices.js';
 import { type ThemePref, getThemePref, setThemePref } from '../theme.js';
 import { useUpdateState } from '../update-state.js';
-import { AudioEngineSettings } from './AudioEngineSettings.js';
-import { BenchmarksView } from './BenchmarksView.js';
-import { ChannelsSettings } from './ChannelsSettings.js';
-import { Ds4Settings } from './Ds4Settings.js';
-import { FoldersSettings } from './FoldersSettings.js';
-import { ImageEngineSettings } from './ImageEngineSettings.js';
-import { ImageRecognitionSettings } from './ImageRecognitionSettings.js';
-import { LlamaCppSettings } from './LlamaCppSettings.js';
-import { MlxSettings } from './MlxSettings.js';
-import { OllamaSettings, TimeoutRow } from './OllamaSettings.js';
-import { SecurityComplianceSettings } from './SecurityComplianceSettings.js';
-import { VideoEngineSettings } from './VideoEngineSettings.js';
+import { TimeoutRow } from './TimeoutRow.js';
 import { detectDs4Availability } from './ds4-availability.js';
 import { localEngineSettingsLabel } from './local-engine-label.js';
 import {
@@ -64,6 +45,102 @@ import {
   visibleWebSearchProviderSetting,
   webSearchProviderOptions,
 } from './web-search-provider-options.js';
+
+const loadAmbientDashboardModule = () => import('../components/AmbientDashboardCard.js');
+const loadConnectedAppsModule = () => import('../components/ConnectedAppsPanel.js');
+const loadFaceRecognitionModule = () => import('../components/FaceRecognitionCard.js');
+const loadGildeUpdatesModule = () => import('../components/GildeUpdatesCard.js');
+const loadKnowledgeCatalogsModule = () => import('../components/KnowledgeCatalogsCard.js');
+const loadRemoteServersModule = () => import('../components/RemoteServersPanel.js');
+const loadStorageUsageModule = () => import('../components/StorageUsageCard.js');
+const loadToolsetsEditorModule = () => import('../components/ToolsetsEditor.js');
+const loadAudioEngineSettingsModule = () => import('./AudioEngineSettings.js');
+const loadBenchmarksModule = () => import('./BenchmarksView.js');
+const loadChannelsSettingsModule = () => import('./ChannelsSettings.js');
+const loadDs4SettingsModule = () => import('./Ds4Settings.js');
+const loadFoldersSettingsModule = () => import('./FoldersSettings.js');
+const loadImageEngineSettingsModule = () => import('./ImageEngineSettings.js');
+const loadImageRecognitionSettingsModule = () => import('./ImageRecognitionSettings.js');
+const loadLlamaCppSettingsModule = () => import('./LlamaCppSettings.js');
+const loadMlxSettingsModule = () => import('./MlxSettings.js');
+const loadOllamaSettingsModule = () => import('./OllamaSettings.js');
+const loadSecurityComplianceSettingsModule = () => import('./SecurityComplianceSettings.js');
+const loadVideoEngineSettingsModule = () => import('./VideoEngineSettings.js');
+
+const AmbientDashboardCard = lazy(() =>
+  loadAmbientDashboardModule().then(({ AmbientDashboardCard }) => ({
+    default: AmbientDashboardCard,
+  })),
+);
+const ConnectedAppsPanel = lazy(() =>
+  loadConnectedAppsModule().then(({ ConnectedAppsPanel }) => ({ default: ConnectedAppsPanel })),
+);
+const FaceRecognitionCard = lazy(() =>
+  loadFaceRecognitionModule().then(({ FaceRecognitionCard }) => ({ default: FaceRecognitionCard })),
+);
+const GildeUpdatesCard = lazy(() =>
+  loadGildeUpdatesModule().then(({ GildeUpdatesCard }) => ({ default: GildeUpdatesCard })),
+);
+const KnowledgeCatalogsCard = lazy(() =>
+  loadKnowledgeCatalogsModule().then(({ KnowledgeCatalogsCard }) => ({
+    default: KnowledgeCatalogsCard,
+  })),
+);
+const RemoteServersPanel = lazy(() =>
+  loadRemoteServersModule().then(({ RemoteServersPanel }) => ({ default: RemoteServersPanel })),
+);
+const StorageUsageCard = lazy(() =>
+  loadStorageUsageModule().then(({ StorageUsageCard }) => ({ default: StorageUsageCard })),
+);
+const ToolsetsEditor = lazy(() =>
+  loadToolsetsEditorModule().then(({ ToolsetsEditor }) => ({ default: ToolsetsEditor })),
+);
+const AudioEngineSettings = lazy(() =>
+  loadAudioEngineSettingsModule().then(({ AudioEngineSettings }) => ({
+    default: AudioEngineSettings,
+  })),
+);
+const BenchmarksView = lazy(() =>
+  loadBenchmarksModule().then(({ BenchmarksView }) => ({ default: BenchmarksView })),
+);
+const ChannelsSettings = lazy(() =>
+  loadChannelsSettingsModule().then(({ ChannelsSettings }) => ({ default: ChannelsSettings })),
+);
+const Ds4Settings = lazy(() =>
+  loadDs4SettingsModule().then(({ Ds4Settings }) => ({ default: Ds4Settings })),
+);
+const FoldersSettings = lazy(() =>
+  loadFoldersSettingsModule().then(({ FoldersSettings }) => ({ default: FoldersSettings })),
+);
+const ImageEngineSettings = lazy(() =>
+  loadImageEngineSettingsModule().then(({ ImageEngineSettings }) => ({
+    default: ImageEngineSettings,
+  })),
+);
+const ImageRecognitionSettings = lazy(() =>
+  loadImageRecognitionSettingsModule().then(({ ImageRecognitionSettings }) => ({
+    default: ImageRecognitionSettings,
+  })),
+);
+const LlamaCppSettings = lazy(() =>
+  loadLlamaCppSettingsModule().then(({ LlamaCppSettings }) => ({ default: LlamaCppSettings })),
+);
+const MlxSettings = lazy(() =>
+  loadMlxSettingsModule().then(({ MlxSettings }) => ({ default: MlxSettings })),
+);
+const OllamaSettings = lazy(() =>
+  loadOllamaSettingsModule().then(({ OllamaSettings }) => ({ default: OllamaSettings })),
+);
+const SecurityComplianceSettings = lazy(() =>
+  loadSecurityComplianceSettingsModule().then(({ SecurityComplianceSettings }) => ({
+    default: SecurityComplianceSettings,
+  })),
+);
+const VideoEngineSettings = lazy(() =>
+  loadVideoEngineSettingsModule().then(({ VideoEngineSettings }) => ({
+    default: VideoEngineSettings,
+  })),
+);
 
 type CodexCliReasoningEffort = NonNullable<
   NonNullable<ConfigResponse['codexCli']>['defaultReasoningEffort']
@@ -130,6 +207,69 @@ type SectionId =
   | 'securityCompliance'
   | 'about'
   | 'benchmarks';
+
+function preloadSettingsSection(section: SectionId): void {
+  let loading: Promise<unknown> | undefined;
+  switch (section) {
+    case 'deviceIntegration':
+      loading = loadAmbientDashboardModule();
+      break;
+    case 'folders':
+      loading = loadFoldersSettingsModule();
+      break;
+    case 'ollama':
+      loading = loadOllamaSettingsModule();
+      break;
+    case 'llamaCpp':
+      loading = loadLlamaCppSettingsModule();
+      break;
+    case 'ds4':
+      loading = loadDs4SettingsModule();
+      break;
+    case 'mlx':
+      loading = loadMlxSettingsModule();
+      break;
+    case 'imageEngine':
+      loading = loadImageEngineSettingsModule();
+      break;
+    case 'videoEngine':
+      loading = loadVideoEngineSettingsModule();
+      break;
+    case 'imageRecognition':
+      loading = Promise.all([loadImageRecognitionSettingsModule(), loadFaceRecognitionModule()]);
+      break;
+    case 'audio':
+      loading = loadAudioEngineSettingsModule();
+      break;
+    case 'channels':
+      loading = loadChannelsSettingsModule();
+      break;
+    case 'connectedApps':
+      loading = loadConnectedAppsModule();
+      break;
+    case 'remoteServers':
+      loading = loadRemoteServersModule();
+      break;
+    case 'knowledge':
+      loading = loadKnowledgeCatalogsModule();
+      break;
+    case 'toolsets':
+      loading = loadToolsetsEditorModule();
+      break;
+    case 'securityCompliance':
+      loading = loadSecurityComplianceSettingsModule();
+      break;
+    case 'about':
+      loading = Promise.all([loadGildeUpdatesModule(), loadStorageUsageModule()]);
+      break;
+    case 'benchmarks':
+      loading = loadBenchmarksModule();
+      break;
+    default:
+      break;
+  }
+  void loading?.catch(() => {});
+}
 
 // A visual/collapsible nav group. `group` marks a child item (drawn with a
 // small vertical rail on the left so it reads as nested); `groupHeader` marks
@@ -1367,6 +1507,9 @@ export function SettingsView() {
                     data-testid={`settings-nav-${s.id}`}
                     className={`settings-nav-item settings-nav-group-label${section === s.id ? ' settings-nav-item-active' : ''}`}
                     title={s.groupHeader === 'ai' ? aiDefaultSubline : undefined}
+                    onPointerEnter={() => preloadSettingsSection(s.id)}
+                    onFocus={() => preloadSettingsSection(s.id)}
+                    onPointerDown={() => preloadSettingsSection(s.id)}
                     onClick={() =>
                       navigates ? setSection(s.id) : toggleGroup(s.groupHeader as SettingsGroup)
                     }
@@ -1389,6 +1532,9 @@ export function SettingsView() {
                   type="button"
                   data-testid={`settings-nav-${s.id}`}
                   className={`settings-nav-item${s.group ? ' settings-nav-item-child' : ''}${section === s.id ? ' settings-nav-item-active' : ''}`}
+                  onPointerEnter={() => preloadSettingsSection(s.id)}
+                  onFocus={() => preloadSettingsSection(s.id)}
+                  onPointerDown={() => preloadSettingsSection(s.id)}
                   onClick={() => setSection(s.id)}
                 >
                   {s.label}
@@ -1403,1462 +1549,1737 @@ export function SettingsView() {
         className={`settings-panel${flatPanel ? ' settings-panel-flat' : ''}`}
         data-testid={`settings-section-${section}`}
       >
-        {section === 'general' && (
-          <>
-            <section style={{ marginBottom: '2rem' }}>
-              <h3>System Health</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                What's running under the hood — the local daemon, your Node runtime, the OS, and the
-                system browser toolset used for web actions.
-              </p>
-              <HealthStrip />
-            </section>
-            <section style={{ marginBottom: '2rem' }}>
-              <h3>Appearance</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Light or dark mode, or follow the OS.
-              </p>
-              <ThemePicker />
-            </section>
-            <section style={{ marginBottom: '2rem' }}>
-              <h3>Sidebar position</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Which side the navigation rail (projects, gezellen, documents…) sits on.
-              </p>
-              <SidebarSidePicker />
-            </section>
-            <section style={{ marginBottom: '2rem' }}>
-              <h3>Boring mode</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Hide friendly names everywhere. Each gezel shows only their role-based name (e.g.{' '}
-                <code>visual-designer</code> instead of "Mira"), and titles like "Meester" are
-                dropped from headers. The same name flows into system prompts and chat handoffs, so
-                the model addresses itself by role.
-              </p>
-              <label className="debug-toggle">
-                <input
-                  type="checkbox"
-                  checked={config?.roleBasedNameOnlyMode === true}
-                  onChange={(e) => void saveRoleBasedNameOnlyMode(e.target.checked)}
-                />
-                <span>Use role-based names only</span>
-              </label>
-              <p className="muted" style={{ marginBottom: 0 }}>
-                Poppetjes are the little character figures shown beside each gezel — like your
-                meester's here. Turn them off to fall back to a plain letter avatar everywhere.
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                {/* UI-level inversion only: the persisted flag stays
-                    `showPoppetjes` (true = shown). The checkbox reads/writes
-                    its negation so the label can be the more natural "Hide". */}
-                <label className="debug-toggle" style={{ marginTop: 0 }}>
+        <Suspense
+          fallback={<p className="placeholder settings-section-loading">Loading settings…</p>}
+        >
+          {section === 'general' && (
+            <>
+              <section style={{ marginBottom: '2rem' }}>
+                <h3>System Health</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  What's running under the hood — the local daemon, your Node runtime, the OS, and
+                  the system browser toolset used for web actions.
+                </p>
+                <HealthStrip />
+              </section>
+              <section style={{ marginBottom: '2rem' }}>
+                <h3>Appearance</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Light or dark mode, or follow the OS.
+                </p>
+                <ThemePicker />
+              </section>
+              <section style={{ marginBottom: '2rem' }}>
+                <h3>Sidebar position</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Which side the navigation rail (projects, gezellen, documents…) sits on.
+                </p>
+                <SidebarSidePicker />
+              </section>
+              <section style={{ marginBottom: '2rem' }}>
+                <h3>Boring mode</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Hide friendly names everywhere. Each gezel shows only their role-based name (e.g.{' '}
+                  <code>visual-designer</code> instead of "Mira"), and titles like "Meester" are
+                  dropped from headers. The same name flows into system prompts and chat handoffs,
+                  so the model addresses itself by role.
+                </p>
+                <label className="debug-toggle">
                   <input
                     type="checkbox"
-                    checked={config?.showPoppetjes === false}
-                    onChange={(e) => void saveShowPoppetjes(!e.target.checked)}
+                    checked={config?.roleBasedNameOnlyMode === true}
+                    onChange={(e) => void saveRoleBasedNameOnlyMode(e.target.checked)}
                   />
-                  <span>Hide poppetjes</span>
+                  <span>Use role-based names only</span>
                 </label>
-                {(() => {
-                  const meester = gezels.find((g) => g.id === config?.meesterGezelId);
-                  return meester?.poppetje ? (
-                    // Wrap in `.gezel-icon` so the figure is clipped to a small
-                    // box — a bare <Poppetje> paints its full body because the
-                    // SVG is overflow:visible.
-                    <div
-                      className="gezel-icon"
-                      style={{ width: 40, height: 40 }}
-                      title={`example poppetje — ${meester.name}`}
-                    >
-                      <div className="gezel-icon-poppetje">
-                        <Poppetje poppetje={meester.poppetje} variant="headshot" size={40} />
+                <p className="muted" style={{ marginBottom: 0 }}>
+                  Poppetjes are the little character figures shown beside each gezel — like your
+                  meester's here. Turn them off to fall back to a plain letter avatar everywhere.
+                </p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  {/* UI-level inversion only: the persisted flag stays
+                    `showPoppetjes` (true = shown). The checkbox reads/writes
+                    its negation so the label can be the more natural "Hide". */}
+                  <label className="debug-toggle" style={{ marginTop: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={config?.showPoppetjes === false}
+                      onChange={(e) => void saveShowPoppetjes(!e.target.checked)}
+                    />
+                    <span>Hide poppetjes</span>
+                  </label>
+                  {(() => {
+                    const meester = gezels.find((g) => g.id === config?.meesterGezelId);
+                    return meester?.poppetje ? (
+                      // Wrap in `.gezel-icon` so the figure is clipped to a small
+                      // box — a bare <Poppetje> paints its full body because the
+                      // SVG is overflow:visible.
+                      <div
+                        className="gezel-icon"
+                        style={{ width: 40, height: 40 }}
+                        title={`example poppetje — ${meester.name}`}
+                      >
+                        <div className="gezel-icon-poppetje">
+                          <Poppetje poppetje={meester.poppetje} variant="headshot" size={40} />
+                        </div>
                       </div>
-                    </div>
-                  ) : null;
-                })()}
-              </div>
-            </section>
-            <section style={{ marginTop: '2rem' }}>
-              <h3>Night Shift</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                During a nightly window, Gezel runs deferred batch work — content indexing and a
-                daily Meester review of every active project (with suggestions waiting for you in
-                the morning). Interactive and scheduled work always takes priority.
-              </p>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <input
-                  type="checkbox"
-                  checked={config?.nightShift?.enabled !== false}
-                  onChange={(e) => void saveNightShift({ enabled: e.target.checked })}
-                />
-                <span>Enable Night Shift</span>
-              </label>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  marginTop: '0.6rem',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <span className="muted" style={{ fontSize: '0.9rem' }}>
-                  Window
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  max={23}
-                  value={config?.nightShift?.window?.startHour ?? 22}
-                  onChange={(e) =>
-                    void saveNightShift({
-                      window: {
-                        startHour: clampHour(e.target.value, 22),
-                        endHour: config?.nightShift?.window?.endHour ?? 6,
-                      },
-                    })
-                  }
-                  style={{ width: '4rem' }}
-                  aria-label="Night Shift start hour"
-                />
-                <span className="muted" style={{ fontSize: '0.9rem' }}>
-                  to
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  max={23}
-                  value={config?.nightShift?.window?.endHour ?? 6}
-                  onChange={(e) =>
-                    void saveNightShift({
-                      window: {
-                        startHour: config?.nightShift?.window?.startHour ?? 22,
-                        endHour: clampHour(e.target.value, 6),
-                      },
-                    })
-                  }
-                  style={{ width: '4rem' }}
-                  aria-label="Night Shift end hour"
-                />
-                <span className="muted" style={{ fontSize: '0.8rem' }}>
-                  (local 24-hour; wraps past midnight)
-                </span>
-              </div>
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  marginTop: '0.6rem',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={config?.nightShift?.keepAwakeWhileRunning === true}
-                  onChange={(e) => void saveNightShift({ keepAwakeWhileRunning: e.target.checked })}
-                />
-                <span>Keep this machine awake while night-shift work is running</span>
-              </label>
-              {isDarwin && (
+                    ) : null;
+                  })()}
+                </div>
+              </section>
+              <section style={{ marginTop: '2rem' }}>
+                <h3>Night Shift</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  During a nightly window, Gezel runs deferred batch work — content indexing and a
+                  daily Meester review of every active project (with suggestions waiting for you in
+                  the morning). Interactive and scheduled work always takes priority.
+                </p>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={config?.nightShift?.enabled !== false}
+                    onChange={(e) => void saveNightShift({ enabled: e.target.checked })}
+                  />
+                  <span>Enable Night Shift</span>
+                </label>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    marginTop: '0.6rem',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <span className="muted" style={{ fontSize: '0.9rem' }}>
+                    Window
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={config?.nightShift?.window?.startHour ?? 22}
+                    onChange={(e) =>
+                      void saveNightShift({
+                        window: {
+                          startHour: clampHour(e.target.value, 22),
+                          endHour: config?.nightShift?.window?.endHour ?? 6,
+                        },
+                      })
+                    }
+                    style={{ width: '4rem' }}
+                    aria-label="Night Shift start hour"
+                  />
+                  <span className="muted" style={{ fontSize: '0.9rem' }}>
+                    to
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={config?.nightShift?.window?.endHour ?? 6}
+                    onChange={(e) =>
+                      void saveNightShift({
+                        window: {
+                          startHour: config?.nightShift?.window?.startHour ?? 22,
+                          endHour: clampHour(e.target.value, 6),
+                        },
+                      })
+                    }
+                    style={{ width: '4rem' }}
+                    aria-label="Night Shift end hour"
+                  />
+                  <span className="muted" style={{ fontSize: '0.8rem' }}>
+                    (local 24-hour; wraps past midnight)
+                  </span>
+                </div>
                 <label
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: '0.5rem',
+                    marginTop: '0.6rem',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={config?.nightShift?.keepAwakeWhileRunning === true}
+                    onChange={(e) =>
+                      void saveNightShift({ keepAwakeWhileRunning: e.target.checked })
+                    }
+                  />
+                  <span>Keep this machine awake while night-shift work is running</span>
+                </label>
+                {isDarwin && (
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      marginTop: '0.4rem',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={config?.nightShift?.wakeOnStart === true}
+                      onChange={(e) => void saveNightShift({ wakeOnStart: e.target.checked })}
+                    />
+                    <span>Wake this machine when the window opens</span>
+                  </label>
+                )}
+              </section>
+              <section style={{ marginTop: '2rem' }}>
+                <h3>Night shift cloud quota reserve</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  For Claude, Codex, and Copilot subscriptions, run the night shift only until:
+                </p>
+                <label
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={config?.nightShift?.quotaReserve?.overall?.enabled !== false}
+                    onChange={(e) =>
+                      void saveNightShiftQuotaReserve('overall', { enabled: e.target.checked })
+                    }
+                    aria-label="Stop night work near my overall quota"
+                  />
+                  <span>I’m within</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={config?.nightShift?.quotaReserve?.overall?.percent ?? 20}
+                    onChange={(e) =>
+                      void saveNightShiftQuotaReserve('overall', {
+                        percent: clampPercent(e.target.value, 20),
+                      })
+                    }
+                    style={{ width: '2.5rem' }}
+                    disabled={config?.nightShift?.quotaReserve?.overall?.enabled === false}
+                    aria-label="Overall quota floor percent"
+                  />
+                  <span>% of my overall quota</span>
+                </label>
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    flexWrap: 'wrap',
                     marginTop: '0.4rem',
                   }}
                 >
                   <input
                     type="checkbox"
-                    checked={config?.nightShift?.wakeOnStart === true}
-                    onChange={(e) => void saveNightShift({ wakeOnStart: e.target.checked })}
+                    checked={config?.nightShift?.quotaReserve?.perDay?.enabled === true}
+                    onChange={(e) =>
+                      void saveNightShiftQuotaReserve('perDay', { enabled: e.target.checked })
+                    }
+                    aria-label="Reserve a share of my quota per day until reset"
                   />
-                  <span>Wake this machine when the window opens</span>
+                  <span>It would dip into a reserve of</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={config?.nightShift?.quotaReserve?.perDay?.percent ?? 10}
+                    onChange={(e) =>
+                      void saveNightShiftQuotaReserve('perDay', {
+                        percent: clampPercent(e.target.value, 10),
+                      })
+                    }
+                    style={{ width: '2.5rem' }}
+                    disabled={config?.nightShift?.quotaReserve?.perDay?.enabled !== true}
+                    aria-label="Daily quota reserve percent"
+                  />
+                  <span>% of my quota per day until it resets</span>
                 </label>
-              )}
-            </section>
-            <section style={{ marginTop: '2rem' }}>
-              <h3>Night shift cloud quota reserve</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                For Claude, Codex, and Copilot subscriptions, run the night shift only until:
-              </p>
-              <label
-                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}
-              >
-                <input
-                  type="checkbox"
-                  checked={config?.nightShift?.quotaReserve?.overall?.enabled !== false}
-                  onChange={(e) =>
-                    void saveNightShiftQuotaReserve('overall', { enabled: e.target.checked })
-                  }
-                  aria-label="Stop night work near my overall quota"
-                />
-                <span>I’m within</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={config?.nightShift?.quotaReserve?.overall?.percent ?? 20}
-                  onChange={(e) =>
-                    void saveNightShiftQuotaReserve('overall', {
-                      percent: clampPercent(e.target.value, 20),
-                    })
-                  }
-                  style={{ width: '2.5rem' }}
-                  disabled={config?.nightShift?.quotaReserve?.overall?.enabled === false}
-                  aria-label="Overall quota floor percent"
-                />
-                <span>% of my overall quota</span>
-              </label>
-              <label
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  flexWrap: 'wrap',
-                  marginTop: '0.4rem',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={config?.nightShift?.quotaReserve?.perDay?.enabled === true}
-                  onChange={(e) =>
-                    void saveNightShiftQuotaReserve('perDay', { enabled: e.target.checked })
-                  }
-                  aria-label="Reserve a share of my quota per day until reset"
-                />
-                <span>It would dip into a reserve of</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={config?.nightShift?.quotaReserve?.perDay?.percent ?? 10}
-                  onChange={(e) =>
-                    void saveNightShiftQuotaReserve('perDay', {
-                      percent: clampPercent(e.target.value, 10),
-                    })
-                  }
-                  style={{ width: '2.5rem' }}
-                  disabled={config?.nightShift?.quotaReserve?.perDay?.enabled !== true}
-                  aria-label="Daily quota reserve percent"
-                />
-                <span>% of my quota per day until it resets</span>
-              </label>
-              <p className="muted small" style={{ margin: '0.35rem 0 0 1.5rem' }}>
-                The daily reserve scales with the time left: 10% a day with 4 days until reset keeps
-                the last 40% for you. Work already running finishes; held work resumes when your
-                quota frees up. Gezels on local models are never held.
-              </p>
-            </section>
-            <section style={{ marginTop: '2rem' }}>
-              <h3>Gezel templates</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Restore every gezel created from a template back to the <code>about.md</code> their
-                template ships, discarding any edits you’ve made to their instructions. Bespoke
-                gezels (written from scratch) are left untouched.
-              </p>
-              <button type="button" className="subtle" onClick={() => void resetTemplatesNow()}>
-                Reset to defaults
-              </button>
-            </section>
-          </>
-        )}
+                <p className="muted small" style={{ margin: '0.35rem 0 0 1.5rem' }}>
+                  The daily reserve scales with the time left: 10% a day with 4 days until reset
+                  keeps the last 40% for you. Work already running finishes; held work resumes when
+                  your quota frees up. Gezels on local models are never held.
+                </p>
+              </section>
+              <section style={{ marginTop: '2rem' }}>
+                <h3>Gezel templates</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Restore every gezel created from a template back to the <code>about.md</code>{' '}
+                  their template ships, discarding any edits you’ve made to their instructions.
+                  Bespoke gezels (written from scratch) are left untouched.
+                </p>
+                <button type="button" className="subtle" onClick={() => void resetTemplatesNow()}>
+                  Reset to defaults
+                </button>
+              </section>
+            </>
+          )}
 
-        {section === 'deviceIntegration' && (
-          <>
-            <section>
-              <h3>System tray</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Keep a Gezel icon in the {isDarwin ? 'menu bar' : 'system tray'} for at-a-glance
-                status, notifications, and a quick engagement-mode toggle. When on
-                {isDarwin
-                  ? ''
-                  : ', closing the window keeps Gezel running in the tray (quit from the tray menu)'}
-                .
-              </p>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <input
-                  type="checkbox"
-                  checked={config?.showSystemTray !== false}
-                  onChange={(e) => void saveShowSystemTray(e.target.checked)}
-                />
-                <span>Show the tray icon</span>
-              </label>
-              {/* Close-to-tray opt-out. Only relevant when the tray is on, and
+          {section === 'deviceIntegration' && (
+            <>
+              <section>
+                <h3>System tray</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Keep a Gezel icon in the {isDarwin ? 'menu bar' : 'system tray'} for at-a-glance
+                  status, notifications, and a quick engagement-mode toggle. When on
+                  {isDarwin
+                    ? ''
+                    : ', closing the window keeps Gezel running in the tray (quit from the tray menu)'}
+                  .
+                </p>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={config?.showSystemTray !== false}
+                    onChange={(e) => void saveShowSystemTray(e.target.checked)}
+                  />
+                  <span>Show the tray icon</span>
+                </label>
+                {/* Close-to-tray opt-out. Only relevant when the tray is on, and
                   only on Windows/Linux — macOS keeps the app alive on close
                   regardless, so the toggle would be a no-op there. */}
-              {config?.showSystemTray !== false && !isDarwin && (
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    marginTop: '0.5rem',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={config?.quitOnClose === true}
-                    onChange={(e) => void saveQuitOnClose(e.target.checked)}
-                  />
-                  <span>Remove the tray icon on close</span>
-                </label>
-              )}
-            </section>
-            {/* Mac-only: by convention macOS keeps the app running after the
+                {config?.showSystemTray !== false && !isDarwin && (
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      marginTop: '0.5rem',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={config?.quitOnClose === true}
+                      onChange={(e) => void saveQuitOnClose(e.target.checked)}
+                    />
+                    <span>Remove the tray icon on close</span>
+                  </label>
+                )}
+              </section>
+              {/* Mac-only: by convention macOS keeps the app running after the
                 window closes. This opt-in makes the red X quit Gezel entirely,
                 matching Windows. Off by default; independent of the tray. */}
-            {isDarwin && (
-              <section style={{ marginTop: '2rem' }}>
-                <h3>Close button</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  By default macOS keeps Gezel running when you close the window. Turn this on to
-                  quit Gezel entirely when you click the red close button.
-                </p>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={config?.quitOnClose === true}
-                    onChange={(e) => void saveQuitOnClose(e.target.checked)}
-                  />
-                  <span>Quit Gezel when the window is closed.</span>
-                </label>
-              </section>
-            )}
-            <div style={{ marginTop: '2rem' }}>
-              <AmbientDashboardCard />
-            </div>
-          </>
-        )}
-
-        {section === 'team' && (
-          <>
-            <EngagementModePanel
-              mode={config?.aiEngagementMode ?? 'proactive'}
-              tempo={config?.workshopTempo ?? 'bedrijvig'}
-              onChange={saveEngagementMode}
-              onTempoChange={saveWorkshopTempo}
-            />
-
-            <section style={{ marginBottom: '2rem' }}>
-              <h3>Meester</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                The Meester is your team concierge — they help you start new projects, answer
-                questions, and check in on projects to keep them moving. Change which gezel wears
-                the hat here; their prompt is untouched when you do.
-              </p>
-              <div className="meester-picker">
-                {config?.meesterGezelId &&
-                  (() => {
-                    const current = gezels.find((g) => g.id === config.meesterGezelId);
-                    if (!current) return null;
-                    return (
-                      <div className="meester-current">
-                        <GezelIcon
-                          svg={current.icon ?? null}
-                          poppetje={current.poppetje}
-                          iconOverride={current.iconOverride}
-                          name={current.name}
-                          size={40}
-                        />
-                        <div>
-                          <div className="meester-current-name">{current.name}</div>
-                          {current.role && <div className="muted small">{current.role}</div>}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                <label className="muted small" style={{ marginTop: '0.5rem', display: 'block' }}>
-                  Change meester to:
-                </label>
-                <Select.Root
-                  value={config?.meesterGezelId ?? ''}
-                  onValueChange={(v) => {
-                    if (v === '__new') {
-                      setNewMeesterOpen(true);
-                      setNewMeesterName('');
-                      return;
-                    }
-                    void setMeester(v);
-                  }}
-                >
-                  <Select.Trigger>
-                    <Select.Value placeholder="Select meester…" />
-                  </Select.Trigger>
-                  <Select.Content>
-                    {gezels.map((g) => (
-                      <Select.Item key={g.id} value={g.id}>
-                        {g.name}
-                        {g.role ? ` — ${g.role}` : ''}
-                      </Select.Item>
-                    ))}
-                    <Select.Item value="__new">✨ New Meester gezel…</Select.Item>
-                  </Select.Content>
-                </Select.Root>
-
-                {newMeesterOpen && (
-                  <form
-                    className="meester-new-form"
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      setNewMeesterBusy(true);
-                      try {
-                        await createNewMeester(newMeesterName);
-                        setNewMeesterOpen(false);
-                        setNewMeesterName('');
-                      } finally {
-                        setNewMeesterBusy(false);
-                      }
-                    }}
-                  >
-                    <input
-                      placeholder="Name (leave blank for a random pick)"
-                      value={newMeesterName}
-                      onChange={(e) => setNewMeesterName(e.target.value)}
-                      disabled={newMeesterBusy}
-                    />
-                    <div className="meester-new-form-actions">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNewMeesterOpen(false);
-                          setNewMeesterName('');
-                        }}
-                        disabled={newMeesterBusy}
-                      >
-                        Cancel
-                      </button>
-                      <button type="submit" className="primary" disabled={newMeesterBusy}>
-                        {newMeesterBusy ? 'Creating…' : 'Create Meester'}
-                      </button>
-                    </div>
-                    <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
-                      A brand-new gezel will be spun up with the curated Meester prompt and set as
-                      your active guide. You can rename or tune them later in the Gezellen tab.
-                    </p>
-                  </form>
-                )}
-              </div>
-            </section>
-            <section style={{ marginBottom: '2rem' }}>
-              <h3>Klerk</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                The Klerk is your workshop scribe — they handle utility text work (about.md drafts,
-                rewrites, end-of-thread summaries, memory consolidation) so you can route grunt
-                tasks to a different model than your conversational gezellen.
-              </p>
-              <div className="meester-picker">
-                {config?.klerkGezelId &&
-                  (() => {
-                    const current = gezels.find((g) => g.id === config.klerkGezelId);
-                    if (!current) return null;
-                    return (
-                      <div className="meester-current">
-                        <GezelIcon
-                          svg={current.icon ?? null}
-                          poppetje={current.poppetje}
-                          iconOverride={current.iconOverride}
-                          name={current.name}
-                          size={40}
-                        />
-                        <div>
-                          <div className="meester-current-name">{current.name}</div>
-                          {current.role && <div className="muted small">{current.role}</div>}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                <label className="muted small" style={{ marginTop: '0.5rem', display: 'block' }}>
-                  Change klerk to:
-                </label>
-                <Select.Root
-                  value={config?.klerkGezelId ?? ''}
-                  onValueChange={(v) => {
-                    if (v === '__new') {
-                      setNewKlerkOpen(true);
-                      setNewKlerkName('');
-                      return;
-                    }
-                    void setKlerk(v);
-                  }}
-                >
-                  <Select.Trigger>
-                    <Select.Value placeholder="Select klerk…" />
-                  </Select.Trigger>
-                  <Select.Content>
-                    {gezels.map((g) => (
-                      <Select.Item key={g.id} value={g.id}>
-                        {g.name}
-                        {g.role ? ` — ${g.role}` : ''}
-                      </Select.Item>
-                    ))}
-                    <Select.Item value="__new">✨ New Klerk gezel…</Select.Item>
-                  </Select.Content>
-                </Select.Root>
-
-                {newKlerkOpen && (
-                  <form
-                    className="meester-new-form"
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      setNewKlerkBusy(true);
-                      try {
-                        await createNewKlerk(newKlerkName);
-                        setNewKlerkOpen(false);
-                        setNewKlerkName('');
-                      } finally {
-                        setNewKlerkBusy(false);
-                      }
-                    }}
-                  >
-                    <input
-                      placeholder="Name (leave blank for a random pick)"
-                      value={newKlerkName}
-                      onChange={(e) => setNewKlerkName(e.target.value)}
-                      disabled={newKlerkBusy}
-                    />
-                    <div className="meester-new-form-actions">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNewKlerkOpen(false);
-                          setNewKlerkName('');
-                        }}
-                        disabled={newKlerkBusy}
-                      >
-                        Cancel
-                      </button>
-                      <button type="submit" className="primary" disabled={newKlerkBusy}>
-                        {newKlerkBusy ? 'Creating…' : 'Create Klerk'}
-                      </button>
-                    </div>
-                    <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
-                      A fresh gezel will be spun up with the curated Klerk prompt and set as your
-                      active scribe. Tune their model in the Gezellen tab to point utility work at
-                      Sonnet, a local model, or whatever fits.
-                    </p>
-                  </form>
-                )}
-              </div>
-            </section>
-
-            <section style={{ marginBottom: '2rem' }} data-testid="boekwachter-settings">
-              <h3>Boekwachter</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                The Boekwachter is your workshop&apos;s index-keeper. A project with a Boekwachter
-                on its assigned crew gets background AI summaries, file reviews, folder rollups, and
-                weekly digests. Remove the role from a project to keep fast structural search
-                without those AI passes. Indexing stays local by default; a local provider and model
-                selected on this gezel can tune the work.
-              </p>
-              <div className="meester-picker">
-                {config?.boekwachterGezelId &&
-                  (() => {
-                    const current = gezels.find((gezel) => gezel.id === config.boekwachterGezelId);
-                    if (!current) return null;
-                    return (
-                      <div className="meester-current">
-                        <GezelIcon
-                          svg={current.icon ?? null}
-                          poppetje={current.poppetje}
-                          iconOverride={current.iconOverride}
-                          name={current.name}
-                          size={40}
-                        />
-                        <div>
-                          <div className="meester-current-name">{current.name}</div>
-                          {current.role && <div className="muted small">{current.role}</div>}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                <label className="muted small" style={{ marginTop: '0.5rem', display: 'block' }}>
-                  Change boekwachter to:
-                </label>
-                <Select.Root
-                  value={config?.boekwachterGezelId ?? ''}
-                  onValueChange={(value) => {
-                    if (value === '__new') {
-                      setNewBoekwachterOpen(true);
-                      setNewBoekwachterName('');
-                      return;
-                    }
-                    void setBoekwachter(value);
-                  }}
-                >
-                  <Select.Trigger>
-                    <Select.Value placeholder="Select boekwachter…" />
-                  </Select.Trigger>
-                  <Select.Content>
-                    {gezels.map((gezel) => (
-                      <Select.Item key={gezel.id} value={gezel.id}>
-                        {gezel.name}
-                        {gezel.role ? ` — ${gezel.role}` : ''}
-                      </Select.Item>
-                    ))}
-                    <Select.Item value="__new">New Boekwachter gezel…</Select.Item>
-                  </Select.Content>
-                </Select.Root>
-
-                {newBoekwachterOpen && (
-                  <form
-                    className="meester-new-form"
-                    onSubmit={async (event) => {
-                      event.preventDefault();
-                      setNewBoekwachterBusy(true);
-                      try {
-                        await createNewBoekwachter(newBoekwachterName);
-                        setNewBoekwachterOpen(false);
-                        setNewBoekwachterName('');
-                      } finally {
-                        setNewBoekwachterBusy(false);
-                      }
-                    }}
-                  >
-                    <input
-                      placeholder="Name (leave blank for a random pick)"
-                      value={newBoekwachterName}
-                      onChange={(event) => setNewBoekwachterName(event.target.value)}
-                      disabled={newBoekwachterBusy}
-                    />
-                    <div className="meester-new-form-actions">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setNewBoekwachterOpen(false);
-                          setNewBoekwachterName('');
-                        }}
-                        disabled={newBoekwachterBusy}
-                      >
-                        Cancel
-                      </button>
-                      <button type="submit" className="primary" disabled={newBoekwachterBusy}>
-                        {newBoekwachterBusy ? 'Creating…' : 'Create Boekwachter'}
-                      </button>
-                    </div>
-                    <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
-                      The new gezel uses the canonical gilde Boekwachter personality. Projects
-                      assigned to the current Boekwachter transfer to the new one.
-                    </p>
-                  </form>
-                )}
-              </div>
-            </section>
-
-            {config?.showAdvancedFeatures && (
-              <section style={{ marginBottom: '2rem' }} data-testid="keurmeester-settings">
-                <h3>Keurmeester</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  The Keurmeester is the guild's quality inspector. When a small on-device model
-                  gets stuck — spinning on the same step, going silent, failing the same check over
-                  and over — a frontier model is consulted to diagnose the problem and step in: a
-                  well-aimed nudge, a rewritten task step, or (at most twice per task) doing the
-                  failing step itself and handing the work back.
-                </p>
-                {config?.keurmeester?.enabled !== true && !keurmeesterConsentOpen && (
-                  <button type="button" onClick={() => setKeurmeesterConsentOpen(true)}>
-                    Turn on supervision…
-                  </button>
-                )}
-                {config?.keurmeester?.enabled !== true && keurmeesterConsentOpen && (
-                  <div className="meester-new-form" data-testid="keurmeester-consent">
-                    <p style={{ marginTop: 0 }}>
-                      When a local model gets stuck, excerpts of the conversation and task will be
-                      sent to{' '}
-                      <strong>
-                        {config?.keurmeester?.providerName ?? 'the cloud provider you pick'}
-                      </strong>{' '}
-                      for diagnosis. If you chose a local model for privacy, that trade-off is yours
-                      to make — nothing is sent until you turn this on.
-                    </p>
-                    <div className="meester-new-form-actions">
-                      <button type="button" onClick={() => setKeurmeesterConsentOpen(false)}>
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        className="primary"
-                        onClick={() => {
-                          setKeurmeesterConsentOpen(false);
-                          void saveKeurmeesterConfig({ enabled: true });
-                        }}
-                      >
-                        I understand — enable
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {config?.keurmeester?.enabled === true && (
-                  <>
-                    <label
-                      style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
-                      className="small"
-                    >
-                      <input
-                        type="checkbox"
-                        checked
-                        onChange={() => void saveKeurmeesterConfig({ enabled: false })}
-                      />
-                      Supervision is on — conversation/task excerpts go to the provider below when a
-                      local model gets stuck.
-                    </label>
-                    <div style={{ display: 'flex', gap: '0.75rem', margin: '0.75rem 0' }}>
-                      <div>
-                        <label className="muted small" style={{ display: 'block' }}>
-                          Consult provider
-                        </label>
-                        <Select.Root
-                          value={config?.keurmeester?.providerName ?? ''}
-                          onValueChange={(v) =>
-                            void saveKeurmeesterConfig({ providerName: v, model: undefined })
-                          }
-                        >
-                          <Select.Trigger>
-                            <Select.Value placeholder="Pick a cloud provider…" />
-                          </Select.Trigger>
-                          <Select.Content>
-                            {/* An already-selected Copilot must keep its item
-                                even when unavailable, or Radix falls back to
-                                the placeholder and the set value looks unset. */}
-                            {(showCopilotProvider ||
-                              config?.keurmeester?.providerName === 'copilot') && (
-                              <Select.Item value="copilot">
-                                Copilot{hasGithubToken ? ' ✓' : ''}
-                              </Select.Item>
-                            )}
-                            {(showAnthropicProvider ||
-                              config?.keurmeester?.providerName === 'anthropic') && (
-                              <Select.Item value="anthropic">
-                                Anthropic{hasAnthropicKey ? ' ✓' : ''}
-                              </Select.Item>
-                            )}
-                            {(showOpenaiProvider ||
-                              config?.keurmeester?.providerName === 'openai') && (
-                              <Select.Item value="openai">
-                                OpenAI{hasOpenaiKey ? ' ✓' : ''}
-                              </Select.Item>
-                            )}
-                            <Select.Item value="anthropic-cli">Anthropic CLI</Select.Item>
-                            <Select.Item value="codex-cli">Codex CLI</Select.Item>
-                          </Select.Content>
-                        </Select.Root>
-                      </div>
-                      {config?.keurmeester?.providerName && (
-                        <div>
-                          <label className="muted small" style={{ display: 'block' }}>
-                            Consult model
-                          </label>
-                          <ModelPicker
-                            provider={config.keurmeester.providerName as ProviderName}
-                            value={config?.keurmeester?.model}
-                            onChange={(m) => void saveKeurmeesterConfig({ model: m })}
-                            placeholder="Provider default"
-                          />
-                        </div>
-                      )}
-                    </div>
-                    <label
-                      style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
-                      className="small"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={config?.keurmeester?.allowTakeover !== false}
-                        onChange={(e) =>
-                          void saveKeurmeesterConfig({ allowTakeover: e.target.checked })
-                        }
-                      />
-                      Allow bounded takeover (the Keurmeester may perform a repeatedly-failing step
-                      itself — at most once per step, twice per task — then hand back)
-                    </label>
-                    <div className="meester-picker" style={{ marginTop: '0.75rem' }}>
-                      {config?.keurmeesterGezelId &&
-                        (() => {
-                          const current = gezels.find((g) => g.id === config.keurmeesterGezelId);
-                          if (!current) return null;
-                          return (
-                            <div className="meester-current">
-                              <GezelIcon
-                                svg={current.icon ?? null}
-                                poppetje={current.poppetje}
-                                iconOverride={current.iconOverride}
-                                name={current.name}
-                                size={40}
-                              />
-                              <div>
-                                <div className="meester-current-name">{current.name}</div>
-                                {current.role && <div className="muted small">{current.role}</div>}
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      {!config?.keurmeesterGezelId && (
-                        <p className="muted small" style={{ margin: 0 }}>
-                          No Keurmeester gezel yet — one is created automatically on the first
-                          intervention, or designate/create one now:
-                        </p>
-                      )}
-                      <label
-                        className="muted small"
-                        style={{ marginTop: '0.5rem', display: 'block' }}
-                      >
-                        Change keurmeester to:
-                      </label>
-                      <Select.Root
-                        value={config?.keurmeesterGezelId ?? ''}
-                        onValueChange={(v) => {
-                          if (v === '__new') {
-                            setNewKeurmeesterOpen(true);
-                            setNewKeurmeesterName('');
-                            return;
-                          }
-                          void setKeurmeester(v);
-                        }}
-                      >
-                        <Select.Trigger>
-                          <Select.Value placeholder="Select keurmeester…" />
-                        </Select.Trigger>
-                        <Select.Content>
-                          {gezels.map((g) => (
-                            <Select.Item key={g.id} value={g.id}>
-                              {g.name}
-                              {g.role ? ` — ${g.role}` : ''}
-                            </Select.Item>
-                          ))}
-                          <Select.Item value="__new">✨ New Keurmeester gezel…</Select.Item>
-                        </Select.Content>
-                      </Select.Root>
-
-                      {newKeurmeesterOpen && (
-                        <form
-                          className="meester-new-form"
-                          onSubmit={async (e) => {
-                            e.preventDefault();
-                            setNewKeurmeesterBusy(true);
-                            try {
-                              await createNewKeurmeester(newKeurmeesterName);
-                              setNewKeurmeesterOpen(false);
-                              setNewKeurmeesterName('');
-                            } finally {
-                              setNewKeurmeesterBusy(false);
-                            }
-                          }}
-                        >
-                          <input
-                            placeholder="Name (leave blank for a random pick)"
-                            value={newKeurmeesterName}
-                            onChange={(e) => setNewKeurmeesterName(e.target.value)}
-                            disabled={newKeurmeesterBusy}
-                          />
-                          <div className="meester-new-form-actions">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setNewKeurmeesterOpen(false);
-                                setNewKeurmeesterName('');
-                              }}
-                              disabled={newKeurmeesterBusy}
-                            >
-                              Cancel
-                            </button>
-                            <button type="submit" className="primary" disabled={newKeurmeesterBusy}>
-                              {newKeurmeesterBusy ? 'Creating…' : 'Create Keurmeester'}
-                            </button>
-                          </div>
-                          <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
-                            A fresh gezel is spun up with the curated inspector prompt and set as
-                            your active keurmeester. Their interventions appear in chat and in the
-                            History tab.
-                          </p>
-                        </form>
-                      )}
-                    </div>
-                  </>
-                )}
-              </section>
-            )}
-          </>
-        )}
-
-        {section === 'folders' && <FoldersSettings />}
-
-        {section === 'defaults' && (
-          <>
-            <section style={{ marginBottom: '2rem' }}>
-              <h3>Default provider</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Which AI chat provider handles chat and one-shot generations. Individual gezellen
-                can override this in their detail pane.
-              </p>
-              <div className="provider-switch" data-testid="default-provider-switch">
-                <button
-                  type="button"
-                  className={`provider-pill${provider === onDeviceProvider ? ' provider-pill-active' : ''}`}
-                  onClick={() => void setProvider(onDeviceProvider)}
-                  title="Run models directly on this device — weights live on disk, no separate software, no cloud round-trip."
-                >
-                  {onDeviceLabel}
-                </button>
-                {isDarwin && (
-                  <button
-                    type="button"
-                    className={`provider-pill${provider === 'llama-cpp' ? ' provider-pill-active' : ''}`}
-                    onClick={() => void setProvider('llama-cpp')}
-                    title="Cross-platform llama runtime — an alternative on-device engine on Mac for cases where MLX isn't a fit."
-                  >
-                    {llamaCppTabLabel}
-                  </button>
-                )}
-                {showDs4Provider && (
-                  <button
-                    type="button"
-                    className={`provider-pill${provider === 'ds4' ? ' provider-pill-active' : ''}`}
-                    onClick={() => void setProvider('ds4')}
-                    title="DwarfStar (ds4) — antirez's specialized engine for very large mixture-of-experts models (DeepSeek V4, GLM 5.2). Streams the experts from disk so a frontier-class model runs on this device."
-                  >
-                    {ds4TabLabel}
-                  </button>
-                )}
-                {showCopilotProvider && (
-                  <button
-                    type="button"
-                    className={`provider-pill${provider === 'copilot' ? ' provider-pill-active' : ''}`}
-                    onClick={() => void setProvider('copilot')}
-                  >
-                    GitHub Copilot
-                  </button>
-                )}
-                {showOpenaiProvider && (
-                  <button
-                    type="button"
-                    className={`provider-pill${provider === 'openai' ? ' provider-pill-active' : ''}`}
-                    onClick={() => void setProvider('openai')}
-                  >
-                    OpenAI
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className={`provider-pill${provider === 'codex-cli' ? ' provider-pill-active' : ''}`}
-                  onClick={() => void setProvider('codex-cli')}
-                  title="Drive a locally-installed `codex` CLI per turn. Auth is whatever the CLI is logged in with on this host — no API key needed here."
-                >
-                  OpenAI Codex CLI
-                </button>
-                {showAnthropicProvider && (
-                  <button
-                    type="button"
-                    className={`provider-pill${provider === 'anthropic' ? ' provider-pill-active' : ''}`}
-                    onClick={() => void setProvider('anthropic')}
-                  >
-                    Anthropic Claude
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className={`provider-pill${provider === 'anthropic-cli' ? ' provider-pill-active' : ''}`}
-                  onClick={() => void setProvider('anthropic-cli')}
-                  title="Drive a locally-installed `claude` CLI per turn. Auth is whatever the CLI is logged in with on this host — no API key needed here."
-                >
-                  Anthropic Claude CLI
-                </button>
-                <button
-                  type="button"
-                  className={`provider-pill${provider === 'ollama' ? ' provider-pill-active' : ''}`}
-                  onClick={() => void setProvider('ollama')}
-                >
-                  Ollama
-                </button>
-              </div>
-
-              {provider === 'copilot' && (
-                <div
-                  className="new-row"
-                  style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
-                >
-                  <label className="muted" style={{ fontSize: '0.9rem' }}>
-                    Default model
-                  </label>
-                  <ModelPicker
-                    provider="copilot"
-                    value={config?.defaultModel?.copilot}
-                    onChange={(v) => void saveDefaultModel('copilot', v)}
-                  />
-                  <EffortPicker
-                    provider="copilot"
-                    model={config?.defaultModel?.copilot}
-                    value={config?.defaultReasoningEffort?.copilot}
-                    onChange={(v) => void saveDefaultEffort('copilot', v)}
-                  />
-                </div>
-              )}
-
-              {provider === 'ollama' && (
-                <>
-                  <div
-                    className="new-row"
-                    style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
-                  >
-                    <label className="muted" style={{ fontSize: '0.9rem' }}>
-                      Default model
-                    </label>
-                    <ModelPicker
-                      provider="ollama"
-                      value={config?.defaultModel?.ollama}
-                      onChange={(v) => void saveDefaultModel('ollama', v)}
-                      placeholder="First local model"
-                    />
-                  </div>
-                  {isOllamaReasoningModel(config?.defaultModel?.ollama ?? '') && (
-                    <OllamaReasoningToggle
-                      value={config?.ollamaThink}
-                      onChange={async (next) => {
-                        const res = await api.updateConfig({ ollamaThink: next });
-                        setConfig(res);
-                      }}
-                    />
-                  )}
-                </>
-              )}
-
-              {(provider === 'llama-cpp' || provider === 'mlx') && (
-                <div
-                  className="new-row"
-                  style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
-                >
-                  <label className="muted" style={{ fontSize: '0.9rem' }}>
-                    Default model
-                  </label>
-                  <ModelPicker
-                    provider={provider}
-                    value={config?.defaultModel?.[provider]}
-                    onChange={(v) => void saveDefaultModel(provider, v)}
-                    placeholder="First local model"
-                  />
-                </div>
-              )}
-
-              {(provider === 'llama-cpp' || provider === 'mlx') && (
-                <p className="muted small" style={{ marginTop: '0.75rem' }}>
-                  Download models and tune advanced settings in the{' '}
-                  <button
-                    type="button"
-                    className="gz-link-button"
-                    onClick={() => setSection(provider === 'mlx' ? 'mlx' : 'llamaCpp')}
-                    style={{ padding: 0 }}
-                  >
-                    {provider === 'mlx' ? mlxTabLabel : llamaCppTabLabel}
-                  </button>{' '}
-                  tab.
-                </p>
-              )}
-
-              {provider === 'ds4' && (
-                <>
-                  <div
-                    className="new-row"
-                    style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
-                  >
-                    <label className="muted" style={{ fontSize: '0.9rem' }}>
-                      Default model
-                    </label>
-                    <ModelPicker
-                      provider="ds4"
-                      value={config?.defaultModel?.ds4}
-                      onChange={(v) => void saveDefaultModel('ds4', v)}
-                      placeholder="First local model"
-                    />
-                  </div>
-                  <p className="muted small" style={{ marginTop: '0.75rem' }}>
-                    Download DwarfStar models and tune SSD streaming in the{' '}
-                    <button
-                      type="button"
-                      className="gz-link-button"
-                      onClick={() => setSection('ds4')}
-                      style={{ padding: 0 }}
-                    >
-                      {ds4TabLabel}
-                    </button>{' '}
-                    tab.
+              {isDarwin && (
+                <section style={{ marginTop: '2rem' }}>
+                  <h3>Close button</h3>
+                  <p className="muted" style={{ marginTop: 0 }}>
+                    By default macOS keeps Gezel running when you close the window. Turn this on to
+                    quit Gezel entirely when you click the red close button.
                   </p>
-                </>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={config?.quitOnClose === true}
+                      onChange={(e) => void saveQuitOnClose(e.target.checked)}
+                    />
+                    <span>Quit Gezel when the window is closed.</span>
+                  </label>
+                </section>
               )}
-              <DefaultModelAdvancedTuning
-                config={config}
-                provider={provider}
-                onConfigUpdated={setConfig}
+              <div style={{ marginTop: '2rem' }}>
+                <AmbientDashboardCard />
+              </div>
+            </>
+          )}
+
+          {section === 'team' && (
+            <>
+              <EngagementModePanel
+                mode={config?.aiEngagementMode ?? 'proactive'}
+                tempo={config?.workshopTempo ?? 'bedrijvig'}
+                onChange={saveEngagementMode}
+                onTempoChange={saveWorkshopTempo}
               />
 
-              <div
-                style={{
-                  marginTop: '1.5rem',
-                  paddingTop: '1.25rem',
-                  borderTop: '1px solid var(--border)',
-                }}
-              >
-                <h4 style={{ margin: '0 0 0.35rem' }}>Night Shift model</h4>
-                <p className="muted" style={{ margin: '0 0 0.75rem' }}>
-                  Night Shift inherits the default provider and model unless you choose a separate,
-                  hands-off model here. For example, you might want to use a larger (but slower)
-                  model during the night shift for more careful thinking overnight. Individual gezel
-                  overrides still take priority.
+              <section style={{ marginBottom: '2rem' }}>
+                <h3>Meester</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  The Meester is your team concierge — they help you start new projects, answer
+                  questions, and check in on projects to keep them moving. Change which gezel wears
+                  the hat here; their prompt is untouched when you do.
                 </p>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={nightShiftModelOverride?.enabled === true}
-                    onChange={(e) => {
-                      const enabled = e.target.checked;
-                      const inheritedModel =
-                        nightShiftModelOverride?.model ??
-                        config?.defaultModel?.[nightShiftProvider];
-                      void saveNightShiftModelOverride({
-                        enabled,
-                        ...(enabled && inheritedModel ? { model: inheritedModel } : {}),
-                      });
+                <div className="meester-picker">
+                  {config?.meesterGezelId &&
+                    (() => {
+                      const current = gezels.find((g) => g.id === config.meesterGezelId);
+                      if (!current) return null;
+                      return (
+                        <div className="meester-current">
+                          <GezelIcon
+                            svg={current.icon ?? null}
+                            poppetje={current.poppetje}
+                            iconOverride={current.iconOverride}
+                            name={current.name}
+                            size={40}
+                          />
+                          <div>
+                            <div className="meester-current-name">{current.name}</div>
+                            {current.role && <div className="muted small">{current.role}</div>}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  <label className="muted small" style={{ marginTop: '0.5rem', display: 'block' }}>
+                    Change meester to:
+                  </label>
+                  <Select.Root
+                    value={config?.meesterGezelId ?? ''}
+                    onValueChange={(v) => {
+                      if (v === '__new') {
+                        setNewMeesterOpen(true);
+                        setNewMeesterName('');
+                        return;
+                      }
+                      void setMeester(v);
                     }}
-                  />
-                  <span>Use a specific model by default during Night Shift</span>
-                </label>
-
-                {nightShiftModelOverride?.enabled === true && (
-                  <div style={{ marginTop: '0.8rem' }}>
-                    <div className="gz-tray" role="radiogroup" aria-label="Night Shift provider">
-                      {nightShiftProviderChoices.map((choice) => (
-                        <button
-                          key={choice.id}
-                          type="button"
-                          // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
-                          role="radio"
-                          aria-checked={nightShiftProvider === choice.id}
-                          className={`gz-key${
-                            nightShiftProvider === choice.id ? ' gz-key-active' : ''
-                          }`}
-                          onClick={() =>
-                            void saveNightShiftModelOverride({
-                              enabled: true,
-                              provider: choice.id,
-                              model: config?.defaultModel?.[choice.id],
-                            })
-                          }
-                          title={choice.title}
-                        >
-                          {choice.label}
-                        </button>
+                  >
+                    <Select.Trigger>
+                      <Select.Value placeholder="Select meester…" />
+                    </Select.Trigger>
+                    <Select.Content>
+                      {gezels.map((g) => (
+                        <Select.Item key={g.id} value={g.id}>
+                          {g.name}
+                          {g.role ? ` — ${g.role}` : ''}
+                        </Select.Item>
                       ))}
+                      <Select.Item value="__new">✨ New Meester gezel…</Select.Item>
+                    </Select.Content>
+                  </Select.Root>
+
+                  {newMeesterOpen && (
+                    <form
+                      className="meester-new-form"
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        setNewMeesterBusy(true);
+                        try {
+                          await createNewMeester(newMeesterName);
+                          setNewMeesterOpen(false);
+                          setNewMeesterName('');
+                        } finally {
+                          setNewMeesterBusy(false);
+                        }
+                      }}
+                    >
+                      <input
+                        placeholder="Name (leave blank for a random pick)"
+                        value={newMeesterName}
+                        onChange={(e) => setNewMeesterName(e.target.value)}
+                        disabled={newMeesterBusy}
+                      />
+                      <div className="meester-new-form-actions">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewMeesterOpen(false);
+                            setNewMeesterName('');
+                          }}
+                          disabled={newMeesterBusy}
+                        >
+                          Cancel
+                        </button>
+                        <button type="submit" className="primary" disabled={newMeesterBusy}>
+                          {newMeesterBusy ? 'Creating…' : 'Create Meester'}
+                        </button>
+                      </div>
+                      <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
+                        A brand-new gezel will be spun up with the curated Meester prompt and set as
+                        your active guide. You can rename or tune them later in the Gezellen tab.
+                      </p>
+                    </form>
+                  )}
+                </div>
+              </section>
+              <section style={{ marginBottom: '2rem' }}>
+                <h3>Klerk</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  The Klerk is your workshop scribe — they handle utility text work (about.md
+                  drafts, rewrites, end-of-thread summaries, memory consolidation) so you can route
+                  grunt tasks to a different model than your conversational gezellen.
+                </p>
+                <div className="meester-picker">
+                  {config?.klerkGezelId &&
+                    (() => {
+                      const current = gezels.find((g) => g.id === config.klerkGezelId);
+                      if (!current) return null;
+                      return (
+                        <div className="meester-current">
+                          <GezelIcon
+                            svg={current.icon ?? null}
+                            poppetje={current.poppetje}
+                            iconOverride={current.iconOverride}
+                            name={current.name}
+                            size={40}
+                          />
+                          <div>
+                            <div className="meester-current-name">{current.name}</div>
+                            {current.role && <div className="muted small">{current.role}</div>}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  <label className="muted small" style={{ marginTop: '0.5rem', display: 'block' }}>
+                    Change klerk to:
+                  </label>
+                  <Select.Root
+                    value={config?.klerkGezelId ?? ''}
+                    onValueChange={(v) => {
+                      if (v === '__new') {
+                        setNewKlerkOpen(true);
+                        setNewKlerkName('');
+                        return;
+                      }
+                      void setKlerk(v);
+                    }}
+                  >
+                    <Select.Trigger>
+                      <Select.Value placeholder="Select klerk…" />
+                    </Select.Trigger>
+                    <Select.Content>
+                      {gezels.map((g) => (
+                        <Select.Item key={g.id} value={g.id}>
+                          {g.name}
+                          {g.role ? ` — ${g.role}` : ''}
+                        </Select.Item>
+                      ))}
+                      <Select.Item value="__new">✨ New Klerk gezel…</Select.Item>
+                    </Select.Content>
+                  </Select.Root>
+
+                  {newKlerkOpen && (
+                    <form
+                      className="meester-new-form"
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        setNewKlerkBusy(true);
+                        try {
+                          await createNewKlerk(newKlerkName);
+                          setNewKlerkOpen(false);
+                          setNewKlerkName('');
+                        } finally {
+                          setNewKlerkBusy(false);
+                        }
+                      }}
+                    >
+                      <input
+                        placeholder="Name (leave blank for a random pick)"
+                        value={newKlerkName}
+                        onChange={(e) => setNewKlerkName(e.target.value)}
+                        disabled={newKlerkBusy}
+                      />
+                      <div className="meester-new-form-actions">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewKlerkOpen(false);
+                            setNewKlerkName('');
+                          }}
+                          disabled={newKlerkBusy}
+                        >
+                          Cancel
+                        </button>
+                        <button type="submit" className="primary" disabled={newKlerkBusy}>
+                          {newKlerkBusy ? 'Creating…' : 'Create Klerk'}
+                        </button>
+                      </div>
+                      <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
+                        A fresh gezel will be spun up with the curated Klerk prompt and set as your
+                        active scribe. Tune their model in the Gezellen tab to point utility work at
+                        Sonnet, a local model, or whatever fits.
+                      </p>
+                    </form>
+                  )}
+                </div>
+              </section>
+
+              <section style={{ marginBottom: '2rem' }} data-testid="boekwachter-settings">
+                <h3>Boekwachter</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  The Boekwachter is your workshop&apos;s index-keeper. A project with a Boekwachter
+                  on its assigned crew gets background AI summaries, file reviews, folder rollups,
+                  and weekly digests. Remove the role from a project to keep fast structural search
+                  without those AI passes. Indexing stays local by default; a local provider and
+                  model selected on this gezel can tune the work.
+                </p>
+                <div className="meester-picker">
+                  {config?.boekwachterGezelId &&
+                    (() => {
+                      const current = gezels.find(
+                        (gezel) => gezel.id === config.boekwachterGezelId,
+                      );
+                      if (!current) return null;
+                      return (
+                        <div className="meester-current">
+                          <GezelIcon
+                            svg={current.icon ?? null}
+                            poppetje={current.poppetje}
+                            iconOverride={current.iconOverride}
+                            name={current.name}
+                            size={40}
+                          />
+                          <div>
+                            <div className="meester-current-name">{current.name}</div>
+                            {current.role && <div className="muted small">{current.role}</div>}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  <label className="muted small" style={{ marginTop: '0.5rem', display: 'block' }}>
+                    Change boekwachter to:
+                  </label>
+                  <Select.Root
+                    value={config?.boekwachterGezelId ?? ''}
+                    onValueChange={(value) => {
+                      if (value === '__new') {
+                        setNewBoekwachterOpen(true);
+                        setNewBoekwachterName('');
+                        return;
+                      }
+                      void setBoekwachter(value);
+                    }}
+                  >
+                    <Select.Trigger>
+                      <Select.Value placeholder="Select boekwachter…" />
+                    </Select.Trigger>
+                    <Select.Content>
+                      {gezels.map((gezel) => (
+                        <Select.Item key={gezel.id} value={gezel.id}>
+                          {gezel.name}
+                          {gezel.role ? ` — ${gezel.role}` : ''}
+                        </Select.Item>
+                      ))}
+                      <Select.Item value="__new">New Boekwachter gezel…</Select.Item>
+                    </Select.Content>
+                  </Select.Root>
+
+                  {newBoekwachterOpen && (
+                    <form
+                      className="meester-new-form"
+                      onSubmit={async (event) => {
+                        event.preventDefault();
+                        setNewBoekwachterBusy(true);
+                        try {
+                          await createNewBoekwachter(newBoekwachterName);
+                          setNewBoekwachterOpen(false);
+                          setNewBoekwachterName('');
+                        } finally {
+                          setNewBoekwachterBusy(false);
+                        }
+                      }}
+                    >
+                      <input
+                        placeholder="Name (leave blank for a random pick)"
+                        value={newBoekwachterName}
+                        onChange={(event) => setNewBoekwachterName(event.target.value)}
+                        disabled={newBoekwachterBusy}
+                      />
+                      <div className="meester-new-form-actions">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewBoekwachterOpen(false);
+                            setNewBoekwachterName('');
+                          }}
+                          disabled={newBoekwachterBusy}
+                        >
+                          Cancel
+                        </button>
+                        <button type="submit" className="primary" disabled={newBoekwachterBusy}>
+                          {newBoekwachterBusy ? 'Creating…' : 'Create Boekwachter'}
+                        </button>
+                      </div>
+                      <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
+                        The new gezel uses the canonical gilde Boekwachter personality. Projects
+                        assigned to the current Boekwachter transfer to the new one.
+                      </p>
+                    </form>
+                  )}
+                </div>
+              </section>
+
+              {config?.showAdvancedFeatures && (
+                <section style={{ marginBottom: '2rem' }} data-testid="keurmeester-settings">
+                  <h3>Keurmeester</h3>
+                  <p className="muted" style={{ marginTop: 0 }}>
+                    The Keurmeester is the guild's quality inspector. When a small on-device model
+                    gets stuck — spinning on the same step, going silent, failing the same check
+                    over and over — a frontier model is consulted to diagnose the problem and step
+                    in: a well-aimed nudge, a rewritten task step, or (at most twice per task) doing
+                    the failing step itself and handing the work back.
+                  </p>
+                  {config?.keurmeester?.enabled !== true && !keurmeesterConsentOpen && (
+                    <button type="button" onClick={() => setKeurmeesterConsentOpen(true)}>
+                      Turn on supervision…
+                    </button>
+                  )}
+                  {config?.keurmeester?.enabled !== true && keurmeesterConsentOpen && (
+                    <div className="meester-new-form" data-testid="keurmeester-consent">
+                      <p style={{ marginTop: 0 }}>
+                        When a local model gets stuck, excerpts of the conversation and task will be
+                        sent to{' '}
+                        <strong>
+                          {config?.keurmeester?.providerName ?? 'the cloud provider you pick'}
+                        </strong>{' '}
+                        for diagnosis. If you chose a local model for privacy, that trade-off is
+                        yours to make — nothing is sent until you turn this on.
+                      </p>
+                      <div className="meester-new-form-actions">
+                        <button type="button" onClick={() => setKeurmeesterConsentOpen(false)}>
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="primary"
+                          onClick={() => {
+                            setKeurmeesterConsentOpen(false);
+                            void saveKeurmeesterConfig({ enabled: true });
+                          }}
+                        >
+                          I understand — enable
+                        </button>
+                      </div>
                     </div>
+                  )}
+                  {config?.keurmeester?.enabled === true && (
+                    <>
+                      <label
+                        style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
+                        className="small"
+                      >
+                        <input
+                          type="checkbox"
+                          checked
+                          onChange={() => void saveKeurmeesterConfig({ enabled: false })}
+                        />
+                        Supervision is on — conversation/task excerpts go to the provider below when
+                        a local model gets stuck.
+                      </label>
+                      <div style={{ display: 'flex', gap: '0.75rem', margin: '0.75rem 0' }}>
+                        <div>
+                          <label className="muted small" style={{ display: 'block' }}>
+                            Consult provider
+                          </label>
+                          <Select.Root
+                            value={config?.keurmeester?.providerName ?? ''}
+                            onValueChange={(v) =>
+                              void saveKeurmeesterConfig({ providerName: v, model: undefined })
+                            }
+                          >
+                            <Select.Trigger>
+                              <Select.Value placeholder="Pick a cloud provider…" />
+                            </Select.Trigger>
+                            <Select.Content>
+                              {/* An already-selected Copilot must keep its item
+                                even when unavailable, or Radix falls back to
+                                the placeholder and the set value looks unset. */}
+                              {(showCopilotProvider ||
+                                config?.keurmeester?.providerName === 'copilot') && (
+                                <Select.Item value="copilot">
+                                  Copilot{hasGithubToken ? ' ✓' : ''}
+                                </Select.Item>
+                              )}
+                              {(showAnthropicProvider ||
+                                config?.keurmeester?.providerName === 'anthropic') && (
+                                <Select.Item value="anthropic">
+                                  Anthropic{hasAnthropicKey ? ' ✓' : ''}
+                                </Select.Item>
+                              )}
+                              {(showOpenaiProvider ||
+                                config?.keurmeester?.providerName === 'openai') && (
+                                <Select.Item value="openai">
+                                  OpenAI{hasOpenaiKey ? ' ✓' : ''}
+                                </Select.Item>
+                              )}
+                              <Select.Item value="anthropic-cli">Anthropic CLI</Select.Item>
+                              <Select.Item value="codex-cli">Codex CLI</Select.Item>
+                            </Select.Content>
+                          </Select.Root>
+                        </div>
+                        {config?.keurmeester?.providerName && (
+                          <div>
+                            <label className="muted small" style={{ display: 'block' }}>
+                              Consult model
+                            </label>
+                            <ModelPicker
+                              provider={config.keurmeester.providerName as ProviderName}
+                              value={config?.keurmeester?.model}
+                              onChange={(m) => void saveKeurmeesterConfig({ model: m })}
+                              placeholder="Provider default"
+                            />
+                          </div>
+                        )}
+                      </div>
+                      <label
+                        style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
+                        className="small"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={config?.keurmeester?.allowTakeover !== false}
+                          onChange={(e) =>
+                            void saveKeurmeesterConfig({ allowTakeover: e.target.checked })
+                          }
+                        />
+                        Allow bounded takeover (the Keurmeester may perform a repeatedly-failing
+                        step itself — at most once per step, twice per task — then hand back)
+                      </label>
+                      <div className="meester-picker" style={{ marginTop: '0.75rem' }}>
+                        {config?.keurmeesterGezelId &&
+                          (() => {
+                            const current = gezels.find((g) => g.id === config.keurmeesterGezelId);
+                            if (!current) return null;
+                            return (
+                              <div className="meester-current">
+                                <GezelIcon
+                                  svg={current.icon ?? null}
+                                  poppetje={current.poppetje}
+                                  iconOverride={current.iconOverride}
+                                  name={current.name}
+                                  size={40}
+                                />
+                                <div>
+                                  <div className="meester-current-name">{current.name}</div>
+                                  {current.role && (
+                                    <div className="muted small">{current.role}</div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        {!config?.keurmeesterGezelId && (
+                          <p className="muted small" style={{ margin: 0 }}>
+                            No Keurmeester gezel yet — one is created automatically on the first
+                            intervention, or designate/create one now:
+                          </p>
+                        )}
+                        <label
+                          className="muted small"
+                          style={{ marginTop: '0.5rem', display: 'block' }}
+                        >
+                          Change keurmeester to:
+                        </label>
+                        <Select.Root
+                          value={config?.keurmeesterGezelId ?? ''}
+                          onValueChange={(v) => {
+                            if (v === '__new') {
+                              setNewKeurmeesterOpen(true);
+                              setNewKeurmeesterName('');
+                              return;
+                            }
+                            void setKeurmeester(v);
+                          }}
+                        >
+                          <Select.Trigger>
+                            <Select.Value placeholder="Select keurmeester…" />
+                          </Select.Trigger>
+                          <Select.Content>
+                            {gezels.map((g) => (
+                              <Select.Item key={g.id} value={g.id}>
+                                {g.name}
+                                {g.role ? ` — ${g.role}` : ''}
+                              </Select.Item>
+                            ))}
+                            <Select.Item value="__new">✨ New Keurmeester gezel…</Select.Item>
+                          </Select.Content>
+                        </Select.Root>
+
+                        {newKeurmeesterOpen && (
+                          <form
+                            className="meester-new-form"
+                            onSubmit={async (e) => {
+                              e.preventDefault();
+                              setNewKeurmeesterBusy(true);
+                              try {
+                                await createNewKeurmeester(newKeurmeesterName);
+                                setNewKeurmeesterOpen(false);
+                                setNewKeurmeesterName('');
+                              } finally {
+                                setNewKeurmeesterBusy(false);
+                              }
+                            }}
+                          >
+                            <input
+                              placeholder="Name (leave blank for a random pick)"
+                              value={newKeurmeesterName}
+                              onChange={(e) => setNewKeurmeesterName(e.target.value)}
+                              disabled={newKeurmeesterBusy}
+                            />
+                            <div className="meester-new-form-actions">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setNewKeurmeesterOpen(false);
+                                  setNewKeurmeesterName('');
+                                }}
+                                disabled={newKeurmeesterBusy}
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="submit"
+                                className="primary"
+                                disabled={newKeurmeesterBusy}
+                              >
+                                {newKeurmeesterBusy ? 'Creating…' : 'Create Keurmeester'}
+                              </button>
+                            </div>
+                            <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
+                              A fresh gezel is spun up with the curated inspector prompt and set as
+                              your active keurmeester. Their interventions appear in chat and in the
+                              History tab.
+                            </p>
+                          </form>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </section>
+              )}
+            </>
+          )}
+
+          {section === 'folders' && <FoldersSettings />}
+
+          {section === 'defaults' && (
+            <>
+              <section style={{ marginBottom: '2rem' }}>
+                <h3>Default provider</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Which AI chat provider handles chat and one-shot generations. Individual gezellen
+                  can override this in their detail pane.
+                </p>
+                <div className="provider-switch" data-testid="default-provider-switch">
+                  <button
+                    type="button"
+                    className={`provider-pill${provider === onDeviceProvider ? ' provider-pill-active' : ''}`}
+                    onClick={() => void setProvider(onDeviceProvider)}
+                    title="Run models directly on this device — weights live on disk, no separate software, no cloud round-trip."
+                  >
+                    {onDeviceLabel}
+                  </button>
+                  {isDarwin && (
+                    <button
+                      type="button"
+                      className={`provider-pill${provider === 'llama-cpp' ? ' provider-pill-active' : ''}`}
+                      onClick={() => void setProvider('llama-cpp')}
+                      title="Cross-platform llama runtime — an alternative on-device engine on Mac for cases where MLX isn't a fit."
+                    >
+                      {llamaCppTabLabel}
+                    </button>
+                  )}
+                  {showDs4Provider && (
+                    <button
+                      type="button"
+                      className={`provider-pill${provider === 'ds4' ? ' provider-pill-active' : ''}`}
+                      onClick={() => void setProvider('ds4')}
+                      title="DwarfStar (ds4) — antirez's specialized engine for very large mixture-of-experts models (DeepSeek V4, GLM 5.2). Streams the experts from disk so a frontier-class model runs on this device."
+                    >
+                      {ds4TabLabel}
+                    </button>
+                  )}
+                  {showCopilotProvider && (
+                    <button
+                      type="button"
+                      className={`provider-pill${provider === 'copilot' ? ' provider-pill-active' : ''}`}
+                      onClick={() => void setProvider('copilot')}
+                    >
+                      GitHub Copilot
+                    </button>
+                  )}
+                  {showOpenaiProvider && (
+                    <button
+                      type="button"
+                      className={`provider-pill${provider === 'openai' ? ' provider-pill-active' : ''}`}
+                      onClick={() => void setProvider('openai')}
+                    >
+                      OpenAI
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={`provider-pill${provider === 'codex-cli' ? ' provider-pill-active' : ''}`}
+                    onClick={() => void setProvider('codex-cli')}
+                    title="Drive a locally-installed `codex` CLI per turn. Auth is whatever the CLI is logged in with on this host — no API key needed here."
+                  >
+                    OpenAI Codex CLI
+                  </button>
+                  {showAnthropicProvider && (
+                    <button
+                      type="button"
+                      className={`provider-pill${provider === 'anthropic' ? ' provider-pill-active' : ''}`}
+                      onClick={() => void setProvider('anthropic')}
+                    >
+                      Anthropic Claude
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={`provider-pill${provider === 'anthropic-cli' ? ' provider-pill-active' : ''}`}
+                    onClick={() => void setProvider('anthropic-cli')}
+                    title="Drive a locally-installed `claude` CLI per turn. Auth is whatever the CLI is logged in with on this host — no API key needed here."
+                  >
+                    Anthropic Claude CLI
+                  </button>
+                  <button
+                    type="button"
+                    className={`provider-pill${provider === 'ollama' ? ' provider-pill-active' : ''}`}
+                    onClick={() => void setProvider('ollama')}
+                  >
+                    Ollama
+                  </button>
+                </div>
+
+                {provider === 'copilot' && (
+                  <div
+                    className="new-row"
+                    style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
+                  >
+                    <label className="muted" style={{ fontSize: '0.9rem' }}>
+                      Default model
+                    </label>
+                    <ModelPicker
+                      provider="copilot"
+                      value={config?.defaultModel?.copilot}
+                      onChange={(v) => void saveDefaultModel('copilot', v)}
+                    />
+                    <EffortPicker
+                      provider="copilot"
+                      model={config?.defaultModel?.copilot}
+                      value={config?.defaultReasoningEffort?.copilot}
+                      onChange={(v) => void saveDefaultEffort('copilot', v)}
+                    />
+                  </div>
+                )}
+
+                {provider === 'ollama' && (
+                  <>
                     <div
                       className="new-row"
                       style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
                     >
                       <label className="muted" style={{ fontSize: '0.9rem' }}>
-                        Night Shift model
+                        Default model
                       </label>
                       <ModelPicker
-                        provider={nightShiftProvider}
-                        value={nightShiftModelOverride.model}
-                        onChange={(model) => void saveNightShiftModelOverride({ model })}
+                        provider="ollama"
+                        value={config?.defaultModel?.ollama}
+                        onChange={(v) => void saveDefaultModel('ollama', v)}
+                        placeholder="First local model"
                       />
                     </div>
+                    {isOllamaReasoningModel(config?.defaultModel?.ollama ?? '') && (
+                      <OllamaReasoningToggle
+                        value={config?.ollamaThink}
+                        onChange={async (next) => {
+                          const res = await api.updateConfig({ ollamaThink: next });
+                          setConfig(res);
+                        }}
+                      />
+                    )}
+                  </>
+                )}
+
+                {(provider === 'llama-cpp' || provider === 'mlx') && (
+                  <div
+                    className="new-row"
+                    style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
+                  >
+                    <label className="muted" style={{ fontSize: '0.9rem' }}>
+                      Default model
+                    </label>
+                    <ModelPicker
+                      provider={provider}
+                      value={config?.defaultModel?.[provider]}
+                      onChange={(v) => void saveDefaultModel(provider, v)}
+                      placeholder="First local model"
+                    />
                   </div>
                 )}
-              </div>
-            </section>
 
-            <section style={{ marginBottom: '2rem' }}>
-              <h3>Tool filtering</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Give each gezel only the tools their role actually needs. A smaller toolbox keeps
-                them focused and makes every reply faster and cheaper — it matters most with small
-                on-device models. Known roles (Meester, Voorman, Reviewer, Copywriter, Designer,
-                Planner) start with a sensible set; each gezel's own Toolsets tab can override it.
-              </p>
-              <div className="provider-switch">
-                <button
-                  type="button"
-                  className={`provider-pill${
-                    (config?.toolFilterMode ?? 'always') === 'always' ? ' provider-pill-active' : ''
-                  }`}
-                  onClick={() => void saveToolFilterMode('always')}
-                >
-                  Always
-                </button>
-                <button
-                  type="button"
-                  className={`provider-pill${
-                    (config?.toolFilterMode ?? 'always') === 'small-model'
-                      ? ' provider-pill-active'
-                      : ''
-                  }`}
-                  onClick={() => void saveToolFilterMode('small-model')}
-                >
-                  On small models
-                </button>
-                <button
-                  type="button"
-                  className={`provider-pill${
-                    (config?.toolFilterMode ?? 'always') === 'never' ? ' provider-pill-active' : ''
-                  }`}
-                  onClick={() => void saveToolFilterMode('never')}
-                >
-                  Never
-                </button>
-              </div>
-            </section>
-
-            <MemorySection
-              config={config}
-              onRetrievalChange={setRetrieval}
-              onSummarizationChange={setSummarization}
-            />
-          </>
-        )}
-
-        {section === 'copilot' && (
-          <>
-            {/* Installing precedes signing in, so this card comes first.
-                The tab itself is never gated on availability — it's where
-                you come to make Copilot available. */}
-            <CopilotInstallCard
-              availability={copilotAvailability}
-              onInstalled={() => void runCopilotProbe()}
-            />
-
-            <section className="provider-card">
-              <h3>GitHub Copilot</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                A Copilot-enabled GitHub account is required. Gezel supports two sign-in modes — the
-                Copilot CLI is the simpler default.
-              </p>
-
-              {/* Connection status ─ reflects the most recent probe. */}
-              <CopilotConnectionStatus
-                probe={copilotProbe}
-                mode={hasGithubToken ? 'pat' : 'cli'}
-                onRetest={() => void runCopilotProbe()}
-              />
-
-              {/* Option 1 — CLI. Collapses to a single "Signed in as …" line
-                  when we know the account; expands to full install/login
-                  instructions when not signed in or when the user asks. */}
-              <div
-                style={{
-                  marginTop: '1.25rem',
-                  paddingTop: '1rem',
-                  borderTop: '1px solid var(--border)',
-                }}
-              >
-                {!hasGithubToken && copilotProbe.kind === 'ok' && copilotLogin ? (
-                  <div className="new-row" style={{ alignItems: 'center', gap: '0.5rem' }}>
-                    <h4 style={{ margin: 0 }}>
-                      Signed in as <code>{copilotLogin}</code>
-                      <span className="home-copilot-recommended" style={{ marginLeft: '0.5rem' }}>
-                        active
-                      </span>
-                    </h4>
+                {(provider === 'llama-cpp' || provider === 'mlx') && (
+                  <p className="muted small" style={{ marginTop: '0.75rem' }}>
+                    Download models and tune advanced settings in the{' '}
                     <button
                       type="button"
                       className="gz-link-button"
-                      onClick={() => setShowCliHelp((s) => !s)}
-                      style={{ marginLeft: 'auto' }}
+                      onClick={() => setSection(provider === 'mlx' ? 'mlx' : 'llamaCpp')}
+                      style={{ padding: 0 }}
                     >
-                      {showCliHelp ? 'Hide' : 'Login instructions'}
-                    </button>
-                  </div>
-                ) : (
-                  <h4 style={{ margin: 0 }}>
-                    Sign in with the Copilot CLI
-                    {!hasGithubToken && copilotProbe.kind === 'ok' && (
-                      <span className="home-copilot-recommended" style={{ marginLeft: '0.5rem' }}>
-                        active
-                      </span>
-                    )}
-                  </h4>
+                      {provider === 'mlx' ? mlxTabLabel : llamaCppTabLabel}
+                    </button>{' '}
+                    tab.
+                  </p>
                 )}
-                {(showCliHelp ||
-                  !(copilotProbe.kind === 'ok' && copilotLogin && !hasGithubToken)) && (
+
+                {provider === 'ds4' && (
                   <>
-                    <p className="muted small">
-                      Gezel bundles the Node runtime. The Copilot CLI can be installed into your
-                      Gezel home, or Gezel can use a compatible CLI you already have. Click below to
-                      sign in through GitHub; the credential lands in <code>~/.copilot</code> and
-                      the status above refreshes automatically.
+                    <div
+                      className="new-row"
+                      style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
+                    >
+                      <label className="muted" style={{ fontSize: '0.9rem' }}>
+                        Default model
+                      </label>
+                      <ModelPicker
+                        provider="ds4"
+                        value={config?.defaultModel?.ds4}
+                        onChange={(v) => void saveDefaultModel('ds4', v)}
+                        placeholder="First local model"
+                      />
+                    </div>
+                    <p className="muted small" style={{ marginTop: '0.75rem' }}>
+                      Download DwarfStar models and tune SSD streaming in the{' '}
+                      <button
+                        type="button"
+                        className="gz-link-button"
+                        onClick={() => setSection('ds4')}
+                        style={{ padding: 0 }}
+                      >
+                        {ds4TabLabel}
+                      </button>{' '}
+                      tab.
                     </p>
-                    <CopilotLoginCommand
-                      installDir={config?.copilotCliInstallDir}
-                      onComplete={() => void runCopilotProbe()}
-                    />
                   </>
                 )}
-              </div>
-            </section>
+                <DefaultModelAdvancedTuning
+                  config={config}
+                  provider={provider}
+                  onConfigUpdated={setConfig}
+                />
 
-            {/* Alternative sign-in method — its own squircle so it reads as
-                a clearly separate option rather than a sub-section of the
-                primary CLI card. */}
-            <section className="provider-card">
-              <h3 style={{ margin: 0 }}>
-                Alternative sign-in: GitHub token
-                {hasGithubToken && copilotProbe.kind === 'ok' && copilotLogin && (
-                  <span
-                    className="muted small"
-                    style={{ marginLeft: '0.5rem', fontWeight: 'normal' }}
-                  >
-                    (signed in as <code>{copilotLogin}</code>)
-                  </span>
-                )}
-                {hasGithubToken && copilotProbe.kind === 'ok' && (
-                  <span className="home-copilot-recommended" style={{ marginLeft: '0.5rem' }}>
-                    active
-                  </span>
-                )}
-                {!hasGithubToken && !showPatForm && (
+                <div
+                  style={{
+                    marginTop: '1.5rem',
+                    paddingTop: '1.25rem',
+                    borderTop: '1px solid var(--border)',
+                  }}
+                >
+                  <h4 style={{ margin: '0 0 0.35rem' }}>Night Shift model</h4>
+                  <p className="muted" style={{ margin: '0 0 0.75rem' }}>
+                    Night Shift inherits the default provider and model unless you choose a
+                    separate, hands-off model here. For example, you might want to use a larger (but
+                    slower) model during the night shift for more careful thinking overnight.
+                    Individual gezel overrides still take priority.
+                  </p>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={nightShiftModelOverride?.enabled === true}
+                      onChange={(e) => {
+                        const enabled = e.target.checked;
+                        const inheritedModel =
+                          nightShiftModelOverride?.model ??
+                          config?.defaultModel?.[nightShiftProvider];
+                        void saveNightShiftModelOverride({
+                          enabled,
+                          ...(enabled && inheritedModel ? { model: inheritedModel } : {}),
+                        });
+                      }}
+                    />
+                    <span>Use a specific model by default during Night Shift</span>
+                  </label>
+
+                  {nightShiftModelOverride?.enabled === true && (
+                    <div style={{ marginTop: '0.8rem' }}>
+                      <div className="gz-tray" role="radiogroup" aria-label="Night Shift provider">
+                        {nightShiftProviderChoices.map((choice) => (
+                          <button
+                            key={choice.id}
+                            type="button"
+                            // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
+                            role="radio"
+                            aria-checked={nightShiftProvider === choice.id}
+                            className={`gz-key${
+                              nightShiftProvider === choice.id ? ' gz-key-active' : ''
+                            }`}
+                            onClick={() =>
+                              void saveNightShiftModelOverride({
+                                enabled: true,
+                                provider: choice.id,
+                                model: config?.defaultModel?.[choice.id],
+                              })
+                            }
+                            title={choice.title}
+                          >
+                            {choice.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div
+                        className="new-row"
+                        style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
+                      >
+                        <label className="muted" style={{ fontSize: '0.9rem' }}>
+                          Night Shift model
+                        </label>
+                        <ModelPicker
+                          provider={nightShiftProvider}
+                          value={nightShiftModelOverride.model}
+                          onChange={(model) => void saveNightShiftModelOverride({ model })}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section style={{ marginBottom: '2rem' }}>
+                <h3>Tool filtering</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Give each gezel only the tools their role actually needs. A smaller toolbox keeps
+                  them focused and makes every reply faster and cheaper — it matters most with small
+                  on-device models. Known roles (Meester, Voorman, Reviewer, Copywriter, Designer,
+                  Planner) start with a sensible set; each gezel's own Toolsets tab can override it.
+                </p>
+                <div className="provider-switch">
                   <button
                     type="button"
-                    className="gz-link-button"
-                    onClick={() => setShowPatForm(true)}
-                    style={{ marginLeft: '0.5rem' }}
+                    className={`provider-pill${
+                      (config?.toolFilterMode ?? 'always') === 'always'
+                        ? ' provider-pill-active'
+                        : ''
+                    }`}
+                    onClick={() => void saveToolFilterMode('always')}
                   >
-                    Show
+                    Always
                   </button>
+                  <button
+                    type="button"
+                    className={`provider-pill${
+                      (config?.toolFilterMode ?? 'always') === 'small-model'
+                        ? ' provider-pill-active'
+                        : ''
+                    }`}
+                    onClick={() => void saveToolFilterMode('small-model')}
+                  >
+                    On small models
+                  </button>
+                  <button
+                    type="button"
+                    className={`provider-pill${
+                      (config?.toolFilterMode ?? 'always') === 'never'
+                        ? ' provider-pill-active'
+                        : ''
+                    }`}
+                    onClick={() => void saveToolFilterMode('never')}
+                  >
+                    Never
+                  </button>
+                </div>
+              </section>
+
+              <MemorySection
+                config={config}
+                onRetrievalChange={setRetrieval}
+                onSummarizationChange={setSummarization}
+              />
+            </>
+          )}
+
+          {section === 'copilot' && (
+            <>
+              {/* Installing precedes signing in, so this card comes first.
+                The tab itself is never gated on availability — it's where
+                you come to make Copilot available. */}
+              <CopilotInstallCard
+                availability={copilotAvailability}
+                onInstalled={() => void runCopilotProbe()}
+              />
+
+              <section className="provider-card">
+                <h3>GitHub Copilot</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  A Copilot-enabled GitHub account is required. Gezel supports two sign-in modes —
+                  the Copilot CLI is the simpler default.
+                </p>
+
+                {/* Connection status ─ reflects the most recent probe. */}
+                <CopilotConnectionStatus
+                  probe={copilotProbe}
+                  mode={hasGithubToken ? 'pat' : 'cli'}
+                  onRetest={() => void runCopilotProbe()}
+                />
+
+                {/* Option 1 — CLI. Collapses to a single "Signed in as …" line
+                  when we know the account; expands to full install/login
+                  instructions when not signed in or when the user asks. */}
+                <div
+                  style={{
+                    marginTop: '1.25rem',
+                    paddingTop: '1rem',
+                    borderTop: '1px solid var(--border)',
+                  }}
+                >
+                  {!hasGithubToken && copilotProbe.kind === 'ok' && copilotLogin ? (
+                    <div className="new-row" style={{ alignItems: 'center', gap: '0.5rem' }}>
+                      <h4 style={{ margin: 0 }}>
+                        Signed in as <code>{copilotLogin}</code>
+                        <span className="home-copilot-recommended" style={{ marginLeft: '0.5rem' }}>
+                          active
+                        </span>
+                      </h4>
+                      <button
+                        type="button"
+                        className="gz-link-button"
+                        onClick={() => setShowCliHelp((s) => !s)}
+                        style={{ marginLeft: 'auto' }}
+                      >
+                        {showCliHelp ? 'Hide' : 'Login instructions'}
+                      </button>
+                    </div>
+                  ) : (
+                    <h4 style={{ margin: 0 }}>
+                      Sign in with the Copilot CLI
+                      {!hasGithubToken && copilotProbe.kind === 'ok' && (
+                        <span className="home-copilot-recommended" style={{ marginLeft: '0.5rem' }}>
+                          active
+                        </span>
+                      )}
+                    </h4>
+                  )}
+                  {(showCliHelp ||
+                    !(copilotProbe.kind === 'ok' && copilotLogin && !hasGithubToken)) && (
+                    <>
+                      <p className="muted small">
+                        Gezel bundles the Node runtime. The Copilot CLI can be installed into your
+                        Gezel home, or Gezel can use a compatible CLI you already have. Click below
+                        to sign in through GitHub; the credential lands in <code>~/.copilot</code>{' '}
+                        and the status above refreshes automatically.
+                      </p>
+                      <CopilotLoginCommand
+                        installDir={config?.copilotCliInstallDir}
+                        onComplete={() => void runCopilotProbe()}
+                      />
+                    </>
+                  )}
+                </div>
+              </section>
+
+              {/* Alternative sign-in method — its own squircle so it reads as
+                a clearly separate option rather than a sub-section of the
+                primary CLI card. */}
+              <section className="provider-card">
+                <h3 style={{ margin: 0 }}>
+                  Alternative sign-in: GitHub token
+                  {hasGithubToken && copilotProbe.kind === 'ok' && copilotLogin && (
+                    <span
+                      className="muted small"
+                      style={{ marginLeft: '0.5rem', fontWeight: 'normal' }}
+                    >
+                      (signed in as <code>{copilotLogin}</code>)
+                    </span>
+                  )}
+                  {hasGithubToken && copilotProbe.kind === 'ok' && (
+                    <span className="home-copilot-recommended" style={{ marginLeft: '0.5rem' }}>
+                      active
+                    </span>
+                  )}
+                  {!hasGithubToken && !showPatForm && (
+                    <button
+                      type="button"
+                      className="gz-link-button"
+                      onClick={() => setShowPatForm(true)}
+                      style={{ marginLeft: '0.5rem' }}
+                    >
+                      Show
+                    </button>
+                  )}
+                </h3>
+                {(hasGithubToken || showPatForm) && (
+                  <>
+                    <p className="muted small">
+                      Use a classic{' '}
+                      <a
+                        href="https://github.com/settings/tokens"
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: 'var(--accent)' }}
+                      >
+                        GitHub personal access token
+                      </a>{' '}
+                      with the <code>copilot</code> scope.
+                    </p>
+                    {hasGithubToken && (
+                      <p>
+                        <code>&lt;Stored GitHub token&gt;</code>{' '}
+                        <button
+                          type="button"
+                          onClick={clearGitHubToken}
+                          style={{ marginLeft: '0.5rem' }}
+                        >
+                          Clear
+                        </button>
+                      </p>
+                    )}
+                    <div className="new-row">
+                      <input
+                        type="password"
+                        placeholder={
+                          hasGithubToken ? 'Replace GitHub token…' : 'Paste GitHub token…'
+                        }
+                        value={tokenDraft}
+                        onChange={(e) => setTokenDraft(e.target.value)}
+                        style={{ flex: 1 }}
+                      />
+                      <button type="button" onClick={saveGitHubToken} disabled={!tokenDraft.trim()}>
+                        Save
+                      </button>
+                    </div>
+                  </>
                 )}
-              </h3>
-              {(hasGithubToken || showPatForm) && (
-                <>
-                  <p className="muted small">
-                    Use a classic{' '}
+              </section>
+
+              <section className="provider-card">
+                <h3>Sandbox Copilot actions</h3>
+                <p className="muted small" style={{ marginTop: 0 }}>
+                  When on, new Copilot threads deny the CLI&rsquo;s built-in tools (
+                  <code>bash</code>, <code>web_fetch</code>, <code>view</code>, file ops,{' '}
+                  <code>grep</code>) and force the model to work through gezel&rsquo;s MCP tools
+                  instead. Gives you an audit trail for every action and consistent behavior across
+                  providers. Per-gezel override lives on each gezel&rsquo;s Settings tab.
+                </p>
+                <label
+                  className="muted"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    marginTop: '0.5rem',
+                    fontSize: '0.9rem',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={config?.sandboxCopilot === true}
+                    onChange={(e) => {
+                      void api.updateConfig({ sandboxCopilot: e.target.checked }).then(setConfig);
+                    }}
+                  />
+                  <span>Sandbox Copilot to gezel tools only</span>
+                </label>
+              </section>
+
+              <section className="provider-card">
+                <h3>Timeouts</h3>
+                <p className="muted small" style={{ marginTop: 0 }}>
+                  Copilot turns are capped at a hard wall-clock ceiling — if the ceiling fires
+                  before the model signals <code>session.idle</code>, the turn ends with a
+                  &ldquo;Turn stopped before finishing&rdquo; banner. Bump this if tool-heavy
+                  gezellen (long shell or Playwright chains) legitimately need longer. Leave blank
+                  to use the default (10 minutes).
+                </p>
+                <TimeoutRow
+                  label="Hard turn timeout"
+                  unit="minutes"
+                  help="Total wall-clock cap from when the turn acquires its queue slot to when the model finishes. Default 10m. Raise for tool-heavy gezellen that run long chains without streaming reply text between calls."
+                  value={copilotTurnTimeoutDraft}
+                  onChange={setCopilotTurnTimeoutDraft}
+                  configValue={config?.copilotTurnTimeoutMin}
+                  onSave={() => void saveCopilotTurnTimeout()}
+                />
+              </section>
+
+              {copilotUsage && (
+                <section style={{ marginTop: '1.5rem' }}>
+                  <ProviderUsagePanel label="GitHub Copilot" data={copilotUsage} />
+                </section>
+              )}
+            </>
+          )}
+
+          {section === 'openai' && (
+            <>
+              <section className="provider-card">
+                <h3>OpenAI</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Uses an OpenAI API key. Billing and usage run through your OpenAI account,
+                  independent of GitHub Copilot.
+                </p>
+                <ol className="muted" style={{ lineHeight: 1.7, paddingLeft: '1.25rem' }}>
+                  <li>
+                    Go to{' '}
                     <a
-                      href="https://github.com/settings/tokens"
+                      href="https://platform.openai.com/api-keys"
                       target="_blank"
                       rel="noreferrer"
                       style={{ color: 'var(--accent)' }}
                     >
-                      GitHub personal access token
+                      platform.openai.com/api-keys
                     </a>{' '}
-                    with the <code>copilot</code> scope.
-                  </p>
-                  {hasGithubToken && (
-                    <p>
-                      <code>&lt;Stored GitHub token&gt;</code>{' '}
-                      <button
-                        type="button"
-                        onClick={clearGitHubToken}
-                        style={{ marginLeft: '0.5rem' }}
-                      >
-                        Clear
-                      </button>
-                    </p>
-                  )}
-                  <div className="new-row">
-                    <input
-                      type="password"
-                      placeholder={hasGithubToken ? 'Replace GitHub token…' : 'Paste GitHub token…'}
-                      value={tokenDraft}
-                      onChange={(e) => setTokenDraft(e.target.value)}
-                      style={{ flex: 1 }}
-                    />
-                    <button type="button" onClick={saveGitHubToken} disabled={!tokenDraft.trim()}>
-                      Save
+                    and create a secret key with All Permissions.
+                  </li>
+                  <li>Paste it below. Organization ID is optional.</li>
+                </ol>
+                {hasOpenaiKey && (
+                  <p>
+                    Current key:{' '}
+                    <code>
+                      {'•'.repeat(8)}…{(config?.openaiApiKey ?? '').slice(-4)}
+                    </code>
+                    {config?.openaiOrganization && (
+                      <>
+                        {' '}
+                        · org <code>{config.openaiOrganization}</code>
+                      </>
+                    )}{' '}
+                    <button type="button" onClick={clearOpenaiKey} style={{ marginLeft: '0.5rem' }}>
+                      Clear
                     </button>
+                  </p>
+                )}
+                <div className="new-row">
+                  <input
+                    type="password"
+                    placeholder={hasOpenaiKey ? 'Replace key…' : 'Paste OpenAI API key (sk-…)'}
+                    value={openaiKeyDraft}
+                    onChange={(e) => setOpenaiKeyDraft(e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Organization (optional)"
+                    value={openaiOrgDraft}
+                    onChange={(e) => setOpenaiOrgDraft(e.target.value)}
+                    style={{ width: 200 }}
+                  />
+                  <button type="button" onClick={saveOpenaiKey} disabled={!openaiKeyDraft.trim()}>
+                    Save
+                  </button>
+                </div>
+                {hasOpenaiKey && (
+                  <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
+                    <label className="muted" style={{ fontSize: '0.9rem' }}>
+                      Default model
+                    </label>
+                    <ModelPicker
+                      provider="openai"
+                      value={config?.defaultModel?.openai}
+                      onChange={(v) => void saveDefaultModel('openai', v)}
+                    />
+                    <EffortPicker
+                      provider="openai"
+                      model={config?.defaultModel?.openai}
+                      value={config?.defaultReasoningEffort?.openai}
+                      onChange={(v) => void saveDefaultEffort('openai', v)}
+                    />
                   </div>
-                </>
-              )}
-            </section>
-
-            <section className="provider-card">
-              <h3>Sandbox Copilot actions</h3>
-              <p className="muted small" style={{ marginTop: 0 }}>
-                When on, new Copilot threads deny the CLI&rsquo;s built-in tools (<code>bash</code>,{' '}
-                <code>web_fetch</code>, <code>view</code>, file ops, <code>grep</code>) and force
-                the model to work through gezel&rsquo;s MCP tools instead. Gives you an audit trail
-                for every action and consistent behavior across providers. Per-gezel override lives
-                on each gezel&rsquo;s Settings tab.
-              </p>
-              <label
-                className="muted"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  marginTop: '0.5rem',
-                  fontSize: '0.9rem',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={config?.sandboxCopilot === true}
-                  onChange={(e) => {
-                    void api.updateConfig({ sandboxCopilot: e.target.checked }).then(setConfig);
-                  }}
-                />
-                <span>Sandbox Copilot to gezel tools only</span>
-              </label>
-            </section>
-
-            <section className="provider-card">
-              <h3>Timeouts</h3>
-              <p className="muted small" style={{ marginTop: 0 }}>
-                Copilot turns are capped at a hard wall-clock ceiling — if the ceiling fires before
-                the model signals <code>session.idle</code>, the turn ends with a &ldquo;Turn
-                stopped before finishing&rdquo; banner. Bump this if tool-heavy gezellen (long shell
-                or Playwright chains) legitimately need longer. Leave blank to use the default (10
-                minutes).
-              </p>
-              <TimeoutRow
-                label="Hard turn timeout"
-                unit="minutes"
-                help="Total wall-clock cap from when the turn acquires its queue slot to when the model finishes. Default 10m. Raise for tool-heavy gezellen that run long chains without streaming reply text between calls."
-                value={copilotTurnTimeoutDraft}
-                onChange={setCopilotTurnTimeoutDraft}
-                configValue={config?.copilotTurnTimeoutMin}
-                onSave={() => void saveCopilotTurnTimeout()}
-              />
-            </section>
-
-            {copilotUsage && (
-              <section style={{ marginTop: '1.5rem' }}>
-                <ProviderUsagePanel label="GitHub Copilot" data={copilotUsage} />
+                )}
               </section>
-            )}
-          </>
-        )}
+              {openaiUsage && (
+                <section style={{ marginTop: '1.5rem' }}>
+                  <ProviderUsagePanel label="OpenAI" data={openaiUsage} />
+                </section>
+              )}
+            </>
+          )}
 
-        {section === 'openai' && (
-          <>
+          {section === 'codexCli' && (
             <section className="provider-card">
-              <h3>OpenAI</h3>
+              <h3>OpenAI Codex CLI</h3>
               <p className="muted" style={{ marginTop: 0 }}>
-                Uses an OpenAI API key. Billing and usage run through your OpenAI account,
-                independent of GitHub Copilot.
+                Drives a locally-installed{' '}
+                <a
+                  href="https://github.com/openai/codex"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: 'var(--accent)' }}
+                >
+                  Codex CLI
+                </a>{' '}
+                once per chat turn.
+              </p>
+              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                  Connection
+                </label>
+                {codexCliProbe.kind === 'ok' && (
+                  <span style={{ color: 'var(--success)', fontSize: '0.9rem' }}>
+                    ✓ Codex CLI ready ({codexCliProbe.modelCount} models)
+                  </span>
+                )}
+                {codexCliProbe.kind === 'fail' && (
+                  <span style={{ color: 'var(--danger, #c66)', fontSize: '0.9rem' }}>
+                    ✗ {codexCliProbe.error}
+                  </span>
+                )}
+                {(codexCliProbe.kind === 'idle' || codexCliProbe.kind === 'probing') && (
+                  <span className="muted" style={{ fontSize: '0.9rem' }}>
+                    Testing…
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void runCodexCliProbe()}
+                  disabled={codexCliProbe.kind === 'probing'}
+                  style={{ marginLeft: '0.75rem' }}
+                >
+                  {codexCliProbe.kind === 'probing' ? 'Testing…' : 'Test connection'}
+                </button>
+              </div>
+
+              {codexCliProbe.kind === 'fail' && (
+                <ol className="muted" style={{ lineHeight: 1.7, paddingLeft: '1.25rem' }}>
+                  <li>
+                    Install the Codex CLI globally and run <code>codex login</code> (or export an{' '}
+                    <code>OPENAI_API_KEY</code>) so the binary is ready to use.
+                  </li>
+                  <li>
+                    Optionally pin an explicit binary path under Advanced — gezel uses{' '}
+                    <code>$PATH</code> by default.
+                  </li>
+                  <li>Pick a default model and permission mode.</li>
+                </ol>
+              )}
+
+              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                  Default permission
+                </label>
+                <div className="gz-tray" role="radiogroup" aria-label="Default Codex access">
+                  {(
+                    [
+                      ['plan', 'Plan'],
+                      ['edit', 'Edit'],
+                      ['reviewed', 'Reviewed'],
+                      ['full', 'Full'],
+                    ] as const satisfies ReadonlyArray<readonly [CodexPermissionMode, string]>
+                  ).map(([value, label]) => {
+                    const selected =
+                      normalizeCodexPermissionMode(config?.codexCli?.defaultPermissionMode) ===
+                      value;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
+                        role="radio"
+                        aria-checked={selected}
+                        className={`gz-key${selected ? ' gz-key-active' : ''}`}
+                        onClick={() => void saveCodexCli({ defaultPermissionMode: value })}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                Plan is read-only. Edit can change the workspace but cannot cross its sandbox.
+                Reviewed sends boundary crossings to an independent Codex reviewer. Full disables
+                Codex sandboxing and approvals. Gezel’s narrow destructive-command guard remains on
+                in every mode. Projects and individual gezels can override this default.
+              </p>
+
+              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                  Default model
+                </label>
+                <ModelPicker
+                  provider="codex-cli"
+                  value={config?.defaultModel?.['codex-cli']}
+                  onChange={(v) => void saveDefaultModel('codex-cli', v)}
+                />
+              </div>
+
+              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                  Reasoning effort
+                </label>
+                <EffortTray
+                  provider="codex-cli"
+                  model={config?.defaultModel?.['codex-cli']}
+                  defaultModel="gpt-5.5"
+                  value={config?.codexCli?.defaultReasoningEffort ?? ''}
+                  onChange={(value) =>
+                    void saveCodexCli({
+                      defaultReasoningEffort: value as CodexCliReasoningEffort | undefined,
+                    })
+                  }
+                />
+              </div>
+
+              <details style={{ marginTop: '1rem' }}>
+                <summary style={{ cursor: 'pointer' }}>
+                  <strong>Advanced</strong>
+                </summary>
+
+                <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                  <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                    Binary path
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="(auto — found on PATH)"
+                    value={codexCliBinaryDraft}
+                    onChange={(e) => setCodexCliBinaryDraft(e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const trimmed = codexCliBinaryDraft.trim();
+                      void saveCodexCli({ binaryPath: trimmed || undefined });
+                    }}
+                  >
+                    Save
+                  </button>
+                </div>
+
+                <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                  <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                    Gezel tools
+                  </label>
+                  <label className="muted" style={{ fontSize: '0.9rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={config?.codexCli?.manageRuntimeFiles !== false}
+                      onChange={(e) => void saveCodexCli({ manageRuntimeFiles: e.target.checked })}
+                      style={{ marginRight: '0.5rem' }}
+                    />
+                    Add Gezel tools like search, memories, tasks, and team coordination to Codex
+                  </label>
+                </div>
+                <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                  Disable to run Codex with only its built-in tools.
+                </p>
+              </details>
+            </section>
+          )}
+
+          {section === 'anthropic' && (
+            <section className="provider-card">
+              <h3>Anthropic Claude</h3>
+              <p className="muted" style={{ marginTop: 0 }}>
+                Uses an Anthropic API key. Billing and usage run through your Anthropic console,
+                independent of GitHub Copilot or OpenAI.
               </p>
               <ol className="muted" style={{ lineHeight: 1.7, paddingLeft: '1.25rem' }}>
                 <li>
                   Go to{' '}
                   <a
-                    href="https://platform.openai.com/api-keys"
+                    href="https://console.anthropic.com/settings/keys"
                     target="_blank"
                     rel="noreferrer"
                     style={{ color: 'var(--accent)' }}
                   >
-                    platform.openai.com/api-keys
+                    console.anthropic.com/settings/keys
                   </a>{' '}
-                  and create a secret key with All Permissions.
+                  and create an API key.
                 </li>
-                <li>Paste it below. Organization ID is optional.</li>
+                <li>Paste it below.</li>
               </ol>
-              {hasOpenaiKey && (
+              {hasAnthropicKey && (
                 <p>
                   Current key:{' '}
                   <code>
-                    {'•'.repeat(8)}…{(config?.openaiApiKey ?? '').slice(-4)}
-                  </code>
-                  {config?.openaiOrganization && (
-                    <>
-                      {' '}
-                      · org <code>{config.openaiOrganization}</code>
-                    </>
-                  )}{' '}
-                  <button type="button" onClick={clearOpenaiKey} style={{ marginLeft: '0.5rem' }}>
+                    {'•'.repeat(8)}…{(config?.anthropicApiKey ?? '').slice(-4)}
+                  </code>{' '}
+                  <button
+                    type="button"
+                    onClick={clearAnthropicKey}
+                    style={{ marginLeft: '0.5rem' }}
+                  >
                     Clear
                   </button>
                 </p>
@@ -2866,832 +3287,587 @@ export function SettingsView() {
               <div className="new-row">
                 <input
                   type="password"
-                  placeholder={hasOpenaiKey ? 'Replace key…' : 'Paste OpenAI API key (sk-…)'}
-                  value={openaiKeyDraft}
-                  onChange={(e) => setOpenaiKeyDraft(e.target.value)}
+                  placeholder={
+                    hasAnthropicKey ? 'Replace key…' : 'Paste Anthropic API key (sk-ant-…)'
+                  }
+                  value={anthropicKeyDraft}
+                  onChange={(e) => setAnthropicKeyDraft(e.target.value)}
                   style={{ flex: 1 }}
                 />
-                <input
-                  type="text"
-                  placeholder="Organization (optional)"
-                  value={openaiOrgDraft}
-                  onChange={(e) => setOpenaiOrgDraft(e.target.value)}
-                  style={{ width: 200 }}
-                />
-                <button type="button" onClick={saveOpenaiKey} disabled={!openaiKeyDraft.trim()}>
+                <button
+                  type="button"
+                  onClick={saveAnthropicKey}
+                  disabled={!anthropicKeyDraft.trim()}
+                >
                   Save
                 </button>
               </div>
-              {hasOpenaiKey && (
+              {hasAnthropicKey && (
                 <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
                   <label className="muted" style={{ fontSize: '0.9rem' }}>
                     Default model
                   </label>
                   <ModelPicker
-                    provider="openai"
-                    value={config?.defaultModel?.openai}
-                    onChange={(v) => void saveDefaultModel('openai', v)}
+                    provider="anthropic"
+                    value={config?.defaultModel?.anthropic}
+                    onChange={(v) => void saveDefaultModel('anthropic', v)}
                   />
                   <EffortPicker
-                    provider="openai"
-                    model={config?.defaultModel?.openai}
-                    value={config?.defaultReasoningEffort?.openai}
-                    onChange={(v) => void saveDefaultEffort('openai', v)}
+                    provider="anthropic"
+                    model={config?.defaultModel?.anthropic}
+                    value={config?.defaultReasoningEffort?.anthropic}
+                    onChange={(v) => void saveDefaultEffort('anthropic', v)}
                   />
                 </div>
               )}
-            </section>
-            {openaiUsage && (
-              <section style={{ marginTop: '1.5rem' }}>
-                <ProviderUsagePanel label="OpenAI" data={openaiUsage} />
-              </section>
-            )}
-          </>
-        )}
-
-        {section === 'codexCli' && (
-          <section className="provider-card">
-            <h3>OpenAI Codex CLI</h3>
-            <p className="muted" style={{ marginTop: 0 }}>
-              Drives a locally-installed{' '}
-              <a
-                href="https://github.com/openai/codex"
-                target="_blank"
-                rel="noreferrer"
-                style={{ color: 'var(--accent)' }}
-              >
-                Codex CLI
-              </a>{' '}
-              once per chat turn.
-            </p>
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-              <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                Connection
-              </label>
-              {codexCliProbe.kind === 'ok' && (
-                <span style={{ color: 'var(--success)', fontSize: '0.9rem' }}>
-                  ✓ Codex CLI ready ({codexCliProbe.modelCount} models)
-                </span>
-              )}
-              {codexCliProbe.kind === 'fail' && (
-                <span style={{ color: 'var(--danger, #c66)', fontSize: '0.9rem' }}>
-                  ✗ {codexCliProbe.error}
-                </span>
-              )}
-              {(codexCliProbe.kind === 'idle' || codexCliProbe.kind === 'probing') && (
-                <span className="muted" style={{ fontSize: '0.9rem' }}>
-                  Testing…
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => void runCodexCliProbe()}
-                disabled={codexCliProbe.kind === 'probing'}
-                style={{ marginLeft: '0.75rem' }}
-              >
-                {codexCliProbe.kind === 'probing' ? 'Testing…' : 'Test connection'}
-              </button>
-            </div>
-
-            {codexCliProbe.kind === 'fail' && (
-              <ol className="muted" style={{ lineHeight: 1.7, paddingLeft: '1.25rem' }}>
-                <li>
-                  Install the Codex CLI globally and run <code>codex login</code> (or export an{' '}
-                  <code>OPENAI_API_KEY</code>) so the binary is ready to use.
-                </li>
-                <li>
-                  Optionally pin an explicit binary path under Advanced — gezel uses{' '}
-                  <code>$PATH</code> by default.
-                </li>
-                <li>Pick a default model and permission mode.</li>
-              </ol>
-            )}
-
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-              <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                Default permission
-              </label>
-              <div className="gz-tray" role="radiogroup" aria-label="Default Codex access">
-                {(
-                  [
-                    ['plan', 'Plan'],
-                    ['edit', 'Edit'],
-                    ['reviewed', 'Reviewed'],
-                    ['full', 'Full'],
-                  ] as const satisfies ReadonlyArray<readonly [CodexPermissionMode, string]>
-                ).map(([value, label]) => {
-                  const selected =
-                    normalizeCodexPermissionMode(config?.codexCli?.defaultPermissionMode) === value;
-                  return (
-                    <button
-                      key={value}
-                      type="button"
-                      // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
-                      role="radio"
-                      aria-checked={selected}
-                      className={`gz-key${selected ? ' gz-key-active' : ''}`}
-                      onClick={() => void saveCodexCli({ defaultPermissionMode: value })}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-              Plan is read-only. Edit can change the workspace but cannot cross its sandbox.
-              Reviewed sends boundary crossings to an independent Codex reviewer. Full disables
-              Codex sandboxing and approvals. Gezel’s narrow destructive-command guard remains on in
-              every mode. Projects and individual gezels can override this default.
-            </p>
-
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-              <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                Default model
-              </label>
-              <ModelPicker
-                provider="codex-cli"
-                value={config?.defaultModel?.['codex-cli']}
-                onChange={(v) => void saveDefaultModel('codex-cli', v)}
-              />
-            </div>
-
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-              <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                Reasoning effort
-              </label>
-              <EffortTray
-                provider="codex-cli"
-                model={config?.defaultModel?.['codex-cli']}
-                defaultModel="gpt-5.5"
-                value={config?.codexCli?.defaultReasoningEffort ?? ''}
-                onChange={(value) =>
-                  void saveCodexCli({
-                    defaultReasoningEffort: value as CodexCliReasoningEffort | undefined,
-                  })
-                }
-              />
-            </div>
-
-            <details style={{ marginTop: '1rem' }}>
-              <summary style={{ cursor: 'pointer' }}>
-                <strong>Advanced</strong>
-              </summary>
-
-              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                  Binary path
-                </label>
-                <input
-                  type="text"
-                  placeholder="(auto — found on PATH)"
-                  value={codexCliBinaryDraft}
-                  onChange={(e) => setCodexCliBinaryDraft(e.target.value)}
-                  style={{ flex: 1 }}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const trimmed = codexCliBinaryDraft.trim();
-                    void saveCodexCli({ binaryPath: trimmed || undefined });
-                  }}
-                >
-                  Save
-                </button>
-              </div>
-
-              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                  Gezel tools
-                </label>
-                <label className="muted" style={{ fontSize: '0.9rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={config?.codexCli?.manageRuntimeFiles !== false}
-                    onChange={(e) => void saveCodexCli({ manageRuntimeFiles: e.target.checked })}
-                    style={{ marginRight: '0.5rem' }}
-                  />
-                  Add Gezel tools like search, memories, tasks, and team coordination to Codex
-                </label>
-              </div>
-              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                Disable to run Codex with only its built-in tools.
+              <p className="muted" style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}>
+                Each reply re-sends the conversation so far; Gezel marks it for Anthropic's caching,
+                so follow-up turns cost a fraction of the first.
               </p>
-            </details>
-          </section>
-        )}
+            </section>
+          )}
 
-        {section === 'anthropic' && (
-          <section className="provider-card">
-            <h3>Anthropic Claude</h3>
-            <p className="muted" style={{ marginTop: 0 }}>
-              Uses an Anthropic API key. Billing and usage run through your Anthropic console,
-              independent of GitHub Copilot or OpenAI.
-            </p>
-            <ol className="muted" style={{ lineHeight: 1.7, paddingLeft: '1.25rem' }}>
-              <li>
-                Go to{' '}
+          {section === 'anthropicCli' && (
+            <section className="provider-card">
+              <h3>Anthropic Claude CLI</h3>
+              <p className="muted" style={{ marginTop: 0 }}>
+                Drives a locally-installed{' '}
                 <a
-                  href="https://console.anthropic.com/settings/keys"
+                  href="https://docs.claude.com/en/docs/claude-code/overview"
                   target="_blank"
                   rel="noreferrer"
                   style={{ color: 'var(--accent)' }}
                 >
-                  console.anthropic.com/settings/keys
+                  Claude Code CLI
                 </a>{' '}
-                and create an API key.
-              </li>
-              <li>Paste it below.</li>
-            </ol>
-            {hasAnthropicKey && (
-              <p>
-                Current key:{' '}
-                <code>
-                  {'•'.repeat(8)}…{(config?.anthropicApiKey ?? '').slice(-4)}
-                </code>{' '}
-                <button type="button" onClick={clearAnthropicKey} style={{ marginLeft: '0.5rem' }}>
-                  Clear
-                </button>
+                once per chat turn.
               </p>
-            )}
-            <div className="new-row">
-              <input
-                type="password"
-                placeholder={
-                  hasAnthropicKey ? 'Replace key…' : 'Paste Anthropic API key (sk-ant-…)'
-                }
-                value={anthropicKeyDraft}
-                onChange={(e) => setAnthropicKeyDraft(e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <button type="button" onClick={saveAnthropicKey} disabled={!anthropicKeyDraft.trim()}>
-                Save
-              </button>
-            </div>
-            {hasAnthropicKey && (
-              <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-                <label className="muted" style={{ fontSize: '0.9rem' }}>
+              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                  Connection
+                </label>
+                {anthropicCliProbe.kind === 'ok' && (
+                  <span style={{ color: 'var(--success)', fontSize: '0.9rem' }}>
+                    ✓ Claude CLI ready ({anthropicCliProbe.modelCount} models)
+                  </span>
+                )}
+                {anthropicCliProbe.kind === 'fail' && (
+                  <span style={{ color: 'var(--danger, #c66)', fontSize: '0.9rem' }}>
+                    ✗ {anthropicCliProbe.error}
+                  </span>
+                )}
+                {(anthropicCliProbe.kind === 'idle' || anthropicCliProbe.kind === 'probing') && (
+                  <span className="muted" style={{ fontSize: '0.9rem' }}>
+                    Testing…
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void runAnthropicCliProbe()}
+                  disabled={anthropicCliProbe.kind === 'probing'}
+                  style={{ marginLeft: '0.75rem' }}
+                >
+                  {anthropicCliProbe.kind === 'probing' ? 'Testing…' : 'Test connection'}
+                </button>
+              </div>
+
+              {anthropicCliProbe.kind === 'fail' && (
+                <ol className="muted" style={{ lineHeight: 1.7, paddingLeft: '1.25rem' }}>
+                  <li>
+                    Install the Claude CLI globally and run <code>claude /status</code> in a
+                    terminal to confirm it's authenticated.
+                  </li>
+                  <li>
+                    Optionally pin an explicit binary path under Advanced — gezel uses{' '}
+                    <code>$PATH</code> by default.
+                  </li>
+                  <li>Pick a default model and permission mode.</li>
+                </ol>
+              )}
+
+              <div
+                className="new-row claude-permission-row"
+                style={{ alignItems: 'flex-start', marginTop: '0.75rem' }}
+              >
+                <span className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                  Default permission
+                </span>
+                <div
+                  className="gz-tray claude-permission-tray"
+                  role="radiogroup"
+                  aria-label="Default permission"
+                >
+                  {CLAUDE_PERMISSION_CHOICES.map((choice) => {
+                    const selected =
+                      (config?.anthropicCli?.defaultPermissionMode ?? 'acceptEdits') === choice.id;
+                    return (
+                      <button
+                        key={choice.id}
+                        type="button"
+                        // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons is the shared keys-in-trays pattern.
+                        role="radio"
+                        aria-checked={selected}
+                        className={`gz-key gz-key--stacked${selected ? ' gz-key-active' : ''}`}
+                        onClick={() => void saveAnthropicCli({ defaultPermissionMode: choice.id })}
+                      >
+                        <span className="claude-permission-label">{choice.label}</span>
+                        <span className="claude-permission-hint">{choice.description}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
                   Default model
                 </label>
                 <ModelPicker
-                  provider="anthropic"
-                  value={config?.defaultModel?.anthropic}
-                  onChange={(v) => void saveDefaultModel('anthropic', v)}
-                />
-                <EffortPicker
-                  provider="anthropic"
-                  model={config?.defaultModel?.anthropic}
-                  value={config?.defaultReasoningEffort?.anthropic}
-                  onChange={(v) => void saveDefaultEffort('anthropic', v)}
+                  provider="anthropic-cli"
+                  value={config?.defaultModel?.['anthropic-cli']}
+                  onChange={(v) => void saveDefaultModel('anthropic-cli', v)}
+                  placeholder="Gezel default (Claude Sonnet)"
                 />
               </div>
-            )}
-            <p className="muted" style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}>
-              Each reply re-sends the conversation so far; Gezel marks it for Anthropic's caching,
-              so follow-up turns cost a fraction of the first.
-            </p>
-          </section>
-        )}
-
-        {section === 'anthropicCli' && (
-          <section className="provider-card">
-            <h3>Anthropic Claude CLI</h3>
-            <p className="muted" style={{ marginTop: 0 }}>
-              Drives a locally-installed{' '}
-              <a
-                href="https://docs.claude.com/en/docs/claude-code/overview"
-                target="_blank"
-                rel="noreferrer"
-                style={{ color: 'var(--accent)' }}
-              >
-                Claude Code CLI
-              </a>{' '}
-              once per chat turn.
-            </p>
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-              <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                Connection
-              </label>
-              {anthropicCliProbe.kind === 'ok' && (
-                <span style={{ color: 'var(--success)', fontSize: '0.9rem' }}>
-                  ✓ Claude CLI ready ({anthropicCliProbe.modelCount} models)
-                </span>
-              )}
-              {anthropicCliProbe.kind === 'fail' && (
-                <span style={{ color: 'var(--danger, #c66)', fontSize: '0.9rem' }}>
-                  ✗ {anthropicCliProbe.error}
-                </span>
-              )}
-              {(anthropicCliProbe.kind === 'idle' || anthropicCliProbe.kind === 'probing') && (
-                <span className="muted" style={{ fontSize: '0.9rem' }}>
-                  Testing…
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => void runAnthropicCliProbe()}
-                disabled={anthropicCliProbe.kind === 'probing'}
-                style={{ marginLeft: '0.75rem' }}
-              >
-                {anthropicCliProbe.kind === 'probing' ? 'Testing…' : 'Test connection'}
-              </button>
-            </div>
-
-            {anthropicCliProbe.kind === 'fail' && (
-              <ol className="muted" style={{ lineHeight: 1.7, paddingLeft: '1.25rem' }}>
-                <li>
-                  Install the Claude CLI globally and run <code>claude /status</code> in a terminal
-                  to confirm it's authenticated.
-                </li>
-                <li>
-                  Optionally pin an explicit binary path under Advanced — gezel uses{' '}
-                  <code>$PATH</code> by default.
-                </li>
-                <li>Pick a default model and permission mode.</li>
-              </ol>
-            )}
-
-            <div
-              className="new-row claude-permission-row"
-              style={{ alignItems: 'flex-start', marginTop: '0.75rem' }}
-            >
-              <span className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                Default permission
-              </span>
-              <div
-                className="gz-tray claude-permission-tray"
-                role="radiogroup"
-                aria-label="Default permission"
-              >
-                {CLAUDE_PERMISSION_CHOICES.map((choice) => {
-                  const selected =
-                    (config?.anthropicCli?.defaultPermissionMode ?? 'acceptEdits') === choice.id;
-                  return (
-                    <button
-                      key={choice.id}
-                      type="button"
-                      // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons is the shared keys-in-trays pattern.
-                      role="radio"
-                      aria-checked={selected}
-                      className={`gz-key gz-key--stacked${selected ? ' gz-key-active' : ''}`}
-                      onClick={() => void saveAnthropicCli({ defaultPermissionMode: choice.id })}
-                    >
-                      <span className="claude-permission-label">{choice.label}</span>
-                      <span className="claude-permission-hint">{choice.description}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-              <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                Default model
-              </label>
-              <ModelPicker
-                provider="anthropic-cli"
-                value={config?.defaultModel?.['anthropic-cli']}
-                onChange={(v) => void saveDefaultModel('anthropic-cli', v)}
-                placeholder="Gezel default (Claude Sonnet)"
-              />
-            </div>
-
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-              <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                Reasoning effort
-              </label>
-              <EffortPicker
-                provider="anthropic-cli"
-                model={config?.defaultModel?.['anthropic-cli']}
-                value={config?.defaultReasoningEffort?.['anthropic-cli']}
-                onChange={(value) => void saveDefaultEffort('anthropic-cli', value)}
-              />
-            </div>
-
-            <details style={{ marginTop: '1rem' }}>
-              <summary style={{ cursor: 'pointer' }}>
-                <strong>Advanced</strong>
-              </summary>
 
               <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
                 <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                  Binary path
+                  Reasoning effort
                 </label>
+                <EffortPicker
+                  provider="anthropic-cli"
+                  model={config?.defaultModel?.['anthropic-cli']}
+                  value={config?.defaultReasoningEffort?.['anthropic-cli']}
+                  onChange={(value) => void saveDefaultEffort('anthropic-cli', value)}
+                />
+              </div>
+
+              <details style={{ marginTop: '1rem' }}>
+                <summary style={{ cursor: 'pointer' }}>
+                  <strong>Advanced</strong>
+                </summary>
+
+                <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                  <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                    Binary path
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="(auto — found on PATH)"
+                    value={anthropicCliBinaryDraft}
+                    onChange={(e) => setAnthropicCliBinaryDraft(e.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const trimmed = anthropicCliBinaryDraft.trim();
+                      void saveAnthropicCli({ binaryPath: trimmed || undefined });
+                    }}
+                  >
+                    Save
+                  </button>
+                </div>
+
+                <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                  <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                    Gezel tools
+                  </label>
+                  <label className="muted" style={{ fontSize: '0.9rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={config?.anthropicCli?.manageRuntimeFiles !== false}
+                      onChange={(e) =>
+                        void saveAnthropicCli({ manageRuntimeFiles: e.target.checked })
+                      }
+                      style={{ marginRight: '0.5rem' }}
+                    />
+                    Add Gezel tools like search, memories, tasks, and team coordination to Claude
+                  </label>
+                </div>
+                <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                  Disable to run Claude with only its built-in tools.
+                </p>
+
+                <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                  <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                    Pool size
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={32}
+                    value={config?.anthropicCli?.poolSize ?? 4}
+                    onChange={(e) => {
+                      const n = Number.parseInt(e.target.value, 10);
+                      if (Number.isFinite(n) && n >= 1 && n <= 32) {
+                        void saveAnthropicCli({ poolSize: n });
+                      }
+                    }}
+                    style={{ width: '2.5rem' }}
+                  />
+                  <span className="muted" style={{ fontSize: '0.85rem' }}>
+                    warm <code>claude</code> subprocesses to keep around
+                  </span>
+                </div>
+                <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                  Each pool slot holds one <code>claude</code> process pinned to a chat thread; turn
+                  2+ of a thread skips the cold-start cost. More slots = lower per-turn latency for
+                  parallel gezellen, more memory (~100–200 MB per warm process). When at cap, the
+                  least-recently-used non-busy worker is evicted.
+                </p>
+
+                <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                  <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                    Concurrency
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={32}
+                    value={
+                      config?.providerConcurrency?.['anthropic-cli'] ??
+                      config?.anthropicCli?.poolSize ??
+                      4
+                    }
+                    onChange={(e) => {
+                      const n = Number.parseInt(e.target.value, 10);
+                      if (Number.isFinite(n) && n >= 1 && n <= 32) {
+                        void saveAnthropicCliConcurrency(n);
+                      }
+                    }}
+                    style={{ width: '2.5rem' }}
+                  />
+                  <span className="muted" style={{ fontSize: '0.85rem' }}>
+                    turns running in parallel
+                  </span>
+                </div>
+                <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                  How many gezel turns can dispatch to <code>claude</code> at once. Defaults to the
+                  pool size — every warm slot can be running a turn. Lower this if you want a memory
+                  headroom buffer (warm processes that aren't currently executing). Setting it above
+                  the pool size logs a warning at provider init; the pool will spawn over-cap
+                  transiently to honor the request.
+                </p>
+
+                <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
+                  <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
+                    Idle timeout
+                  </label>
+                  <input
+                    type="number"
+                    min={60}
+                    max={3600}
+                    step={60}
+                    value={config?.anthropicCli?.workerIdleSec ?? 600}
+                    onChange={(e) => {
+                      const n = Number.parseInt(e.target.value, 10);
+                      if (Number.isFinite(n) && n >= 60 && n <= 3600) {
+                        void saveAnthropicCli({ workerIdleSec: n });
+                      }
+                    }}
+                    style={{ width: '2.5rem' }}
+                  />
+                  <span className="muted" style={{ fontSize: '0.85rem' }}>
+                    seconds
+                  </span>
+                </div>
+                <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                  Shut down a warm subprocess after this long without a turn. Resets on every turn.
+                </p>
+              </details>
+            </section>
+          )}
+
+          {section === 'ollama' && (
+            <section className="provider-card">
+              <OllamaSettings config={config} onConfigChanged={setConfig} />
+            </section>
+          )}
+
+          {section === 'llamaCpp' && (
+            <section className="provider-card">
+              <LlamaCppSettings
+                config={config}
+                onConfigChanged={setConfig}
+                health={health}
+                title={llamaCppTabLabel}
+              />
+            </section>
+          )}
+
+          {section === 'ds4' && (
+            <section className="provider-card">
+              <Ds4Settings
+                config={config}
+                onConfigChanged={setConfig}
+                health={health}
+                title={ds4TabLabel}
+              />
+            </section>
+          )}
+
+          {section === 'mlx' && (
+            <section className="provider-card">
+              <MlxSettings config={config} onConfigChanged={setConfig} />
+            </section>
+          )}
+
+          {section === 'imageEngine' && (
+            <section>
+              <ImageEngineSettings />
+            </section>
+          )}
+
+          {section === 'videoEngine' && (
+            <section>
+              <VideoEngineSettings />
+            </section>
+          )}
+
+          {section === 'imageRecognition' && (
+            <>
+              <section>
+                <ImageRecognitionSettings />
+              </section>
+              <FaceRecognitionCard />
+            </>
+          )}
+
+          {section === 'audio' && (
+            <section>
+              <AudioEngineSettings />
+            </section>
+          )}
+
+          {section === 'webSearch' && (
+            <section className="provider-card">
+              <h3>Web search</h3>
+              <p className="muted" style={{ marginTop: 0 }}>
+                Powers the web search tools that gezellen use to discover content on the internet.
+                Picks one search backend; configure a key only for the providers you choose.
+              </p>
+              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.5rem' }}>
+                <label className="muted" style={{ fontSize: '0.9rem' }}>
+                  Provider
+                </label>
+                <select
+                  value={visibleWebSearchProviderSetting(
+                    config?.webSearch?.provider,
+                    INCLUDE_TESTING_WEB_SEARCH_PROVIDER,
+                  )}
+                  onChange={(e) =>
+                    void saveWebSearchProvider(e.target.value as WebSearchProviderSetting)
+                  }
+                >
+                  {WEB_SEARCH_PROVIDER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.5rem' }}>
+                <label className="muted" style={{ fontSize: '0.9rem' }}>
+                  Fallback
+                </label>
+                <select
+                  value={config?.webSearch?.fallbackProvider ?? 'unset'}
+                  onChange={(e) =>
+                    void saveWebSearchFallback(e.target.value as 'brave' | 'wikipedia' | 'unset')
+                  }
+                >
+                  <option value="unset">None</option>
+                  <option value="wikipedia">Wikipedia</option>
+                  <option value="brave">Brave Search</option>
+                </select>
+                <span className="muted" style={{ fontSize: '0.85rem' }}>
+                  Used when the primary is unavailable or errors.
+                </span>
+              </div>
+
+              <h4 style={{ marginTop: '1.5rem', marginBottom: '0.25rem' }}>Brave Search</h4>
+              <p className="muted" style={{ marginTop: 0, marginBottom: '0.75rem' }}>
+                Free tier: 2000 queries/month, 1 query/second. Get a key at{' '}
+                <a
+                  href="https://api.search.brave.com/app/keys"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: 'var(--accent)' }}
+                >
+                  api.search.brave.com/app/keys
+                </a>
+                .
+              </p>
+              {config?.hasBraveSearchApiKey && (
+                <p>
+                  Current key:{' '}
+                  <code>
+                    {'•'.repeat(8)}…{(config?.braveSearchApiKey ?? '').slice(-4)}
+                  </code>
+                  <button type="button" onClick={clearBraveKey} style={{ marginLeft: '0.5rem' }}>
+                    Clear
+                  </button>
+                </p>
+              )}
+              <div className="new-row">
                 <input
-                  type="text"
-                  placeholder="(auto — found on PATH)"
-                  value={anthropicCliBinaryDraft}
-                  onChange={(e) => setAnthropicCliBinaryDraft(e.target.value)}
+                  type="password"
+                  placeholder={
+                    config?.hasBraveSearchApiKey ? 'Replace key…' : 'Paste Brave Search API key…'
+                  }
+                  value={braveKeyDraft}
+                  onChange={(e) => setBraveKeyDraft(e.target.value)}
                   style={{ flex: 1 }}
                 />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const trimmed = anthropicCliBinaryDraft.trim();
-                    void saveAnthropicCli({ binaryPath: trimmed || undefined });
-                  }}
-                >
+                <button type="button" onClick={saveBraveKey} disabled={!braveKeyDraft.trim()}>
                   Save
                 </button>
               </div>
+            </section>
+          )}
 
-              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                  Gezel tools
-                </label>
-                <label className="muted" style={{ fontSize: '0.9rem' }}>
+          {section === 'channels' && config?.showWorkInProgressFeatures === true && (
+            <ChannelsSettings config={config} onConfigChanged={setConfig} />
+          )}
+
+          {section === 'connectedApps' && <ConnectedAppsPanel />}
+          {section === 'remoteServers' && <RemoteServersPanel />}
+
+          {section === 'knowledge' && <KnowledgeCatalogsCard />}
+
+          {section === 'toolsets' && (
+            <section>
+              <h3>Shared Toolsets</h3>
+              <ToolsetsEditor
+                scope={{ kind: 'shared' }}
+                subject="every gezel"
+                hint="Toolsets here are available to every gezel in addition to their own."
+              />
+            </section>
+          )}
+
+          {section === 'securityCompliance' && (
+            <SecurityComplianceSettings config={config} onConfigChanged={setConfig} />
+          )}
+
+          {section === 'about' && (
+            <>
+              <section style={{ marginBottom: '2rem' }}>
+                <h3>About</h3>
+                {health && (
+                  <dl>
+                    <dt>Version</dt>
+                    <dd>{health.version === '0.0.0' ? 'development build' : health.version}</dd>
+                    <dt>Running since</dt>
+                    <dd>{formatStartedAt(health.startedAt)}</dd>
+                  </dl>
+                )}
+                <LocalEngineStatus />
+                <AutostartToggle />
+                <BackgroundServiceStatus />
+                <p className="muted small" style={{ marginTop: '0.75rem' }}>
+                  Something not working right?{' '}
+                  <ReportErrorLink
+                    className="gz-link-button"
+                    label="Report a problem on GitHub"
+                    report={{ surface: 'settings-about', message: '' }}
+                  />
+                </p>
+              </section>
+              <section style={{ marginBottom: '2rem' }}>
+                <h3>Updates</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Gezel checks public GitHub release metadata when the desktop app launches. No
+                  personal data is sent. Turn this off to stop automatic checks; you can still
+                  choose “Check for updates” from the tray menu.
+                </p>
+                <label className="debug-toggle">
                   <input
                     type="checkbox"
-                    checked={config?.anthropicCli?.manageRuntimeFiles !== false}
-                    onChange={(e) =>
-                      void saveAnthropicCli({ manageRuntimeFiles: e.target.checked })
-                    }
-                    style={{ marginRight: '0.5rem' }}
+                    checked={config?.autoUpdateChecks !== false}
+                    onChange={(e) => void saveAutoUpdateChecks(e.target.checked)}
                   />
-                  Add Gezel tools like search, memories, tasks, and team coordination to Claude
+                  <span>Check for updates automatically when Gezel starts</span>
                 </label>
-              </div>
-              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                Disable to run Claude with only its built-in tools.
-              </p>
-
-              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                  Pool size
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={32}
-                  value={config?.anthropicCli?.poolSize ?? 4}
-                  onChange={(e) => {
-                    const n = Number.parseInt(e.target.value, 10);
-                    if (Number.isFinite(n) && n >= 1 && n <= 32) {
-                      void saveAnthropicCli({ poolSize: n });
-                    }
-                  }}
-                  style={{ width: '2.5rem' }}
-                />
-                <span className="muted" style={{ fontSize: '0.85rem' }}>
-                  warm <code>claude</code> subprocesses to keep around
-                </span>
-              </div>
-              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                Each pool slot holds one <code>claude</code> process pinned to a chat thread; turn
-                2+ of a thread skips the cold-start cost. More slots = lower per-turn latency for
-                parallel gezellen, more memory (~100–200 MB per warm process). When at cap, the
-                least-recently-used non-busy worker is evicted.
-              </p>
-
-              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                  Concurrency
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={32}
-                  value={
-                    config?.providerConcurrency?.['anthropic-cli'] ??
-                    config?.anthropicCli?.poolSize ??
-                    4
-                  }
-                  onChange={(e) => {
-                    const n = Number.parseInt(e.target.value, 10);
-                    if (Number.isFinite(n) && n >= 1 && n <= 32) {
-                      void saveAnthropicCliConcurrency(n);
-                    }
-                  }}
-                  style={{ width: '2.5rem' }}
-                />
-                <span className="muted" style={{ fontSize: '0.85rem' }}>
-                  turns running in parallel
-                </span>
-              </div>
-              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                How many gezel turns can dispatch to <code>claude</code> at once. Defaults to the
-                pool size — every warm slot can be running a turn. Lower this if you want a memory
-                headroom buffer (warm processes that aren't currently executing). Setting it above
-                the pool size logs a warning at provider init; the pool will spawn over-cap
-                transiently to honor the request.
-              </p>
-
-              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                  Idle timeout
-                </label>
-                <input
-                  type="number"
-                  min={60}
-                  max={3600}
-                  step={60}
-                  value={config?.anthropicCli?.workerIdleSec ?? 600}
-                  onChange={(e) => {
-                    const n = Number.parseInt(e.target.value, 10);
-                    if (Number.isFinite(n) && n >= 60 && n <= 3600) {
-                      void saveAnthropicCli({ workerIdleSec: n });
-                    }
-                  }}
-                  style={{ width: '2.5rem' }}
-                />
-                <span className="muted" style={{ fontSize: '0.85rem' }}>
-                  seconds
-                </span>
-              </div>
-              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                Shut down a warm subprocess after this long without a turn. Resets on every turn.
-              </p>
-            </details>
-          </section>
-        )}
-
-        {section === 'ollama' && (
-          <section className="provider-card">
-            <OllamaSettings config={config} onConfigChanged={setConfig} />
-          </section>
-        )}
-
-        {section === 'llamaCpp' && (
-          <section className="provider-card">
-            <LlamaCppSettings
-              config={config}
-              onConfigChanged={setConfig}
-              health={health}
-              title={llamaCppTabLabel}
-            />
-          </section>
-        )}
-
-        {section === 'ds4' && (
-          <section className="provider-card">
-            <Ds4Settings
-              config={config}
-              onConfigChanged={setConfig}
-              health={health}
-              title={ds4TabLabel}
-            />
-          </section>
-        )}
-
-        {section === 'mlx' && (
-          <section className="provider-card">
-            <MlxSettings config={config} onConfigChanged={setConfig} />
-          </section>
-        )}
-
-        {section === 'imageEngine' && (
-          <section>
-            <ImageEngineSettings />
-          </section>
-        )}
-
-        {section === 'videoEngine' && (
-          <section>
-            <VideoEngineSettings />
-          </section>
-        )}
-
-        {section === 'imageRecognition' && (
-          <>
-            <section>
-              <ImageRecognitionSettings />
-            </section>
-            <FaceRecognitionCard />
-          </>
-        )}
-
-        {section === 'audio' && (
-          <section>
-            <AudioEngineSettings />
-          </section>
-        )}
-
-        {section === 'webSearch' && (
-          <section className="provider-card">
-            <h3>Web search</h3>
-            <p className="muted" style={{ marginTop: 0 }}>
-              Powers the web search tools that gezellen use to discover content on the internet.
-              Picks one search backend; configure a key only for the providers you choose.
-            </p>
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '0.5rem' }}>
-              <label className="muted" style={{ fontSize: '0.9rem' }}>
-                Provider
-              </label>
-              <select
-                value={visibleWebSearchProviderSetting(
-                  config?.webSearch?.provider,
-                  INCLUDE_TESTING_WEB_SEARCH_PROVIDER,
-                )}
-                onChange={(e) =>
-                  void saveWebSearchProvider(e.target.value as WebSearchProviderSetting)
-                }
-              >
-                {WEB_SEARCH_PROVIDER_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="new-row" style={{ alignItems: 'center', marginTop: '0.5rem' }}>
-              <label className="muted" style={{ fontSize: '0.9rem' }}>
-                Fallback
-              </label>
-              <select
-                value={config?.webSearch?.fallbackProvider ?? 'unset'}
-                onChange={(e) =>
-                  void saveWebSearchFallback(e.target.value as 'brave' | 'wikipedia' | 'unset')
-                }
-              >
-                <option value="unset">None</option>
-                <option value="wikipedia">Wikipedia</option>
-                <option value="brave">Brave Search</option>
-              </select>
-              <span className="muted" style={{ fontSize: '0.85rem' }}>
-                Used when the primary is unavailable or errors.
-              </span>
-            </div>
-
-            <h4 style={{ marginTop: '1.5rem', marginBottom: '0.25rem' }}>Brave Search</h4>
-            <p className="muted" style={{ marginTop: 0, marginBottom: '0.75rem' }}>
-              Free tier: 2000 queries/month, 1 query/second. Get a key at{' '}
-              <a
-                href="https://api.search.brave.com/app/keys"
-                target="_blank"
-                rel="noreferrer"
-                style={{ color: 'var(--accent)' }}
-              >
-                api.search.brave.com/app/keys
-              </a>
-              .
-            </p>
-            {config?.hasBraveSearchApiKey && (
-              <p>
-                Current key:{' '}
-                <code>
-                  {'•'.repeat(8)}…{(config?.braveSearchApiKey ?? '').slice(-4)}
-                </code>
-                <button type="button" onClick={clearBraveKey} style={{ marginLeft: '0.5rem' }}>
-                  Clear
-                </button>
-              </p>
-            )}
-            <div className="new-row">
-              <input
-                type="password"
-                placeholder={
-                  config?.hasBraveSearchApiKey ? 'Replace key…' : 'Paste Brave Search API key…'
-                }
-                value={braveKeyDraft}
-                onChange={(e) => setBraveKeyDraft(e.target.value)}
-                style={{ flex: 1 }}
-              />
-              <button type="button" onClick={saveBraveKey} disabled={!braveKeyDraft.trim()}>
-                Save
-              </button>
-            </div>
-          </section>
-        )}
-
-        {section === 'channels' && config?.showWorkInProgressFeatures === true && (
-          <ChannelsSettings config={config} onConfigChanged={setConfig} />
-        )}
-
-        {section === 'connectedApps' && <ConnectedAppsPanel />}
-        {section === 'remoteServers' && <RemoteServersPanel />}
-
-        {section === 'knowledge' && <KnowledgeCatalogsCard />}
-
-        {section === 'toolsets' && (
-          <section>
-            <h3>Shared Toolsets</h3>
-            <ToolsetsEditor
-              scope={{ kind: 'shared' }}
-              subject="every gezel"
-              hint="Toolsets here are available to every gezel in addition to their own."
-            />
-          </section>
-        )}
-
-        {section === 'securityCompliance' && (
-          <SecurityComplianceSettings config={config} onConfigChanged={setConfig} />
-        )}
-
-        {section === 'about' && (
-          <>
-            <section style={{ marginBottom: '2rem' }}>
-              <h3>About</h3>
-              {health && (
-                <dl>
-                  <dt>Version</dt>
-                  <dd>{health.version === '0.0.0' ? 'development build' : health.version}</dd>
-                  <dt>Running since</dt>
-                  <dd>{formatStartedAt(health.startedAt)}</dd>
-                </dl>
-              )}
-              <LocalEngineStatus />
-              <AutostartToggle />
-              <BackgroundServiceStatus />
-              <p className="muted small" style={{ marginTop: '0.75rem' }}>
-                Something not working right?{' '}
-                <ReportErrorLink
-                  className="gz-link-button"
-                  label="Report a problem on GitHub"
-                  report={{ surface: 'settings-about', message: '' }}
-                />
-              </p>
-            </section>
-            <section style={{ marginBottom: '2rem' }}>
-              <h3>Updates</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Gezel checks public GitHub release metadata when the desktop app launches. No
-                personal data is sent. Turn this off to stop automatic checks; you can still choose
-                “Check for updates” from the tray menu.
-              </p>
-              <label className="debug-toggle">
-                <input
-                  type="checkbox"
-                  checked={config?.autoUpdateChecks !== false}
-                  onChange={(e) => void saveAutoUpdateChecks(e.target.checked)}
-                />
-                <span>Check for updates automatically when Gezel starts</span>
-              </label>
-              <UpdateStatus />
-            </section>
-            <GildeUpdatesCard />
-            <StorageUsageCard />
-            <section style={{ marginBottom: '2rem' }}>
-              <h3>Advanced</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Reveals advanced, power-user surfaces — currently the “Scripts” area in the sidebar.
-              </p>
-              <label className="debug-toggle">
-                <input
-                  type="checkbox"
-                  checked={config?.showAdvancedFeatures === true}
-                  onChange={(e) => void saveShowAdvancedFeatures(e.target.checked)}
-                />
-                <span>Show advanced features</span>
-              </label>
-              <label className="debug-toggle" style={{ display: 'flex', marginTop: '0.6rem' }}>
-                <input
-                  type="checkbox"
-                  checked={config?.showWorkInProgressFeatures === true}
-                  onChange={(e) => void saveShowWorkInProgressFeatures(e.target.checked)}
-                />
-                <span>Show very early work-in-progress features</span>
-              </label>
-              <p className="muted small">
-                Very early features may be incomplete or change shape. The current preview is
-                Connectors and the project types and craftbooks that use them.
-              </p>
-            </section>
-            {isDarwin && window.__GEZEL__?.uninstall && (
-              <section className="settings-uninstall-section" style={{ marginBottom: '2rem' }}>
-                <h3>Uninstall</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Remove Gezel and its machine-wide background service. You can keep downloaded
-                  models and your work for a later reinstall, or choose exactly which data to
-                  delete.
-                </p>
-                <button type="button" className="danger" onClick={requestMacUninstall}>
-                  Uninstall Gezel…
-                </button>
+                <UpdateStatus />
               </section>
-            )}
-            <section>
-              <h3>Debug mode</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Turns on verbose diagnostics — tool-call internals, bridge startup traces, chat
-                send/response bodies, and ambient-scheduler cadence reasoning — and enables
-                additional tools.
-              </p>
-              <label className="debug-toggle">
-                <input
-                  type="checkbox"
-                  checked={config?.debugMode === true}
-                  onChange={(e) => void saveDebugMode(e.target.checked)}
-                />
-                <span>Debug mode</span>
-              </label>
-              <label className="debug-toggle" style={{ display: 'flex', marginTop: '0.6rem' }}>
-                <input
-                  type="checkbox"
-                  checked={config?.resetTemplatesOnStartup === true}
-                  onChange={(e) => void saveResetTemplatesOnStartup(e.target.checked)}
-                />
-                <span>On startup, reset all gezel templates back to defaults</span>
-              </label>
-              <div style={{ marginTop: '0.6rem' }}>
-                <button type="button" className="subtle" onClick={() => void openLogsFolder()}>
-                  Open logs folder
-                </button>
-              </div>
-            </section>
-          </>
-        )}
+              <GildeUpdatesCard />
+              <StorageUsageCard />
+              <section style={{ marginBottom: '2rem' }}>
+                <h3>Advanced</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Reveals advanced, power-user surfaces — currently the “Scripts” area in the
+                  sidebar.
+                </p>
+                <label className="debug-toggle">
+                  <input
+                    type="checkbox"
+                    checked={config?.showAdvancedFeatures === true}
+                    onChange={(e) => void saveShowAdvancedFeatures(e.target.checked)}
+                  />
+                  <span>Show advanced features</span>
+                </label>
+                <label className="debug-toggle" style={{ display: 'flex', marginTop: '0.6rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={config?.showWorkInProgressFeatures === true}
+                    onChange={(e) => void saveShowWorkInProgressFeatures(e.target.checked)}
+                  />
+                  <span>Show very early work-in-progress features</span>
+                </label>
+                <p className="muted small">
+                  Very early features may be incomplete or change shape. The current preview is
+                  Connectors and the project types and craftbooks that use them.
+                </p>
+              </section>
+              {isDarwin && window.__GEZEL__?.uninstall && (
+                <section className="settings-uninstall-section" style={{ marginBottom: '2rem' }}>
+                  <h3>Uninstall</h3>
+                  <p className="muted" style={{ marginTop: 0 }}>
+                    Remove Gezel and its machine-wide background service. You can keep downloaded
+                    models and your work for a later reinstall, or choose exactly which data to
+                    delete.
+                  </p>
+                  <button type="button" className="danger" onClick={requestMacUninstall}>
+                    Uninstall Gezel…
+                  </button>
+                </section>
+              )}
+              <section>
+                <h3>Debug mode</h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Turns on verbose diagnostics — tool-call internals, bridge startup traces, chat
+                  send/response bodies, and ambient-scheduler cadence reasoning — and enables
+                  additional tools.
+                </p>
+                <label className="debug-toggle">
+                  <input
+                    type="checkbox"
+                    checked={config?.debugMode === true}
+                    onChange={(e) => void saveDebugMode(e.target.checked)}
+                  />
+                  <span>Debug mode</span>
+                </label>
+                <label className="debug-toggle" style={{ display: 'flex', marginTop: '0.6rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={config?.resetTemplatesOnStartup === true}
+                    onChange={(e) => void saveResetTemplatesOnStartup(e.target.checked)}
+                  />
+                  <span>On startup, reset all gezel templates back to defaults</span>
+                </label>
+                <div style={{ marginTop: '0.6rem' }}>
+                  <button type="button" className="subtle" onClick={() => void openLogsFolder()}>
+                    Open logs folder
+                  </button>
+                </div>
+              </section>
+            </>
+          )}
 
-        {section === 'benchmarks' && config?.debugMode === true && <BenchmarksView />}
+          {section === 'benchmarks' && config?.debugMode === true && <BenchmarksView />}
+        </Suspense>
 
         {error && <p className="error">{error}</p>}
       </div>

@@ -81,6 +81,21 @@ export interface BuiltInstructions {
    * so the wire prefix `[stable system][tools]` stays reusable.
    */
   volatileContext?: string;
+  /**
+   * The leading run of `full` that sibling sessions of the same
+   * (gezel, project) render identically — everything before the
+   * session-scoped tail (`taskContext` onward). A byte-prefix of `full`,
+   * never a rewrite of it.
+   *
+   * This exists so the MLX cache adapter can key a prefix entry on what
+   * siblings actually share. Hashing the WHOLE system prompt puts the
+   * task band in the key, which measured 4 distinct prefix ids for 4
+   * sibling PR-review sessions that shared 33,742 leading characters —
+   * i.e. cross-session reuse could never fire. See ADR 0010.
+   *
+   * Only returned on the flat path. Layered mode has its own `layers`.
+   */
+  sharedPrefix?: string;
 }
 
 export interface BuildInstructionsOptions {
@@ -148,6 +163,14 @@ export interface BuildInstructionsOptions {
    */
   executionDensity?: ExecutionDensity;
   project?: import('@bendyline/gezel').ProjectDetail | null;
+  /**
+   * True when this project holds observation tables — the tabular connector
+   * corpus. Changes the Connected data block's closing advice from "read
+   * these files" to "query them", because for a tabular corpus reading the
+   * files is the wrong instruction: they are columnar, often enormous, and
+   * the query tools exist precisely so the model never handles the rows.
+   */
+  hasObservationTables?: boolean;
   workspaceFiles?: ProjectFileEntry[];
   /**
    * True when the recursive workspace walk hit its entry cap, i.e.
@@ -409,6 +432,16 @@ const MINIMAL_CONTEXT_CONDUCT =
  * produce `index.html` but require an acceptance note or a script check
  * before the write; steering from the file extension contradicted that
  * authored order and caused small models to skip the procedure.
+ *
+ * Mentions inside a conditional clause ("If … are all empty, call
+ * `ask_user_question` and stop") or a negated one ("Do not call
+ * `read_task_notes`") are skipped: the anchor commands the tool
+ * unconditionally, so lifting a guarded mention turns the procedure's
+ * escape hatch into a mandate. Wild-caught on the powerpoint-deck
+ * research step — the footer ordered `ask_user_question` even though the
+ * step's topic parameter was supplied and the condition false. Skipping a
+ * guarded mention at worst anchors a later unconditional tool or emits no
+ * anchor, both safe.
  */
 function firstAvailableProcedureTool(
   procedure: string,
@@ -417,9 +450,31 @@ function firstAvailableProcedureTool(
   const namedTool = /`([a-z][a-z0-9_-]+)(?:\([^`]*\))?`/g;
   for (const match of procedure.matchAll(namedTool)) {
     const name = match[1];
-    if (name && availableToolNames.has(name)) return name;
+    if (!name || !availableToolNames.has(name)) continue;
+    if (isGuardedToolMention(procedure, match.index)) continue;
+    return name;
   }
   return undefined;
+}
+
+/** True when the tool mention at `index` sits in a conditional or negated
+ *  clause (see {@link firstAvailableProcedureTool}). Clause = text since
+ *  the last sentence boundary; lexical on purpose — this only ever makes
+ *  the anchor MORE conservative. */
+function isGuardedToolMention(procedure: string, index: number): boolean {
+  const before = procedure.slice(0, index);
+  const boundary = Math.max(
+    before.lastIndexOf('. '),
+    before.lastIndexOf('.\n'),
+    before.lastIndexOf('! '),
+    before.lastIndexOf('? '),
+    before.lastIndexOf(': '),
+    before.lastIndexOf(';'),
+    before.lastIndexOf('\n'),
+  );
+  const clause = before.slice(boundary + 1).replace(/^[\s*>-]+/, '');
+  if (/^(?:if|when|unless|only if|in case|otherwise|should)\b/i.test(clause)) return true;
+  return /\b(?:do not|don't|never|avoid|instead of|rather than)\b[^.!?]*$/i.test(clause);
 }
 
 /** Sentence-aware cap of the about body for minimal-context mode. */
@@ -766,7 +821,28 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       });
       if (bindings.length > shown.length)
         lines.push(`- …and ${bindings.length - shown.length} more`);
-      projectContext += `\n\n### Connected data\n\nExternal sources mirrored into this project's artifacts as readable files:\n${lines.join('\n')}\nUse the artifact listing/reading tools for these paths. These directories are read-only mirrors — write analysis elsewhere in artifacts. To change something at the source, draft a connector action for the user to approve.`;
+      // Data tables get their own block below rather than a note here, because
+      // they no longer only come from connectors — a project can hold nothing
+      // but spreadsheets, in which case this section does not render at all.
+      const tabularNote = '';
+      projectContext += `\n\n### Connected data\n\nExternal sources mirrored into this project's artifacts as readable files:\n${lines.join('\n')}\nUse the artifact listing/reading tools for these paths.${tabularNote} These directories are read-only mirrors — write analysis elsewhere in artifacts. To change something at the source, draft a connector action for the user to approve.`;
+    }
+    // Data tables — a standalone block, because they come from two places now:
+    // a synced connector, and spreadsheets or large data files already in the
+    // workspace. A project can have the second without the first, so this
+    // cannot ride inside the connector section.
+    //
+    // Deliberately short. What each column means belongs in `describe_table`,
+    // fetched on demand; the prompt budget compounds at depth, and all this
+    // has to do is stop the model reaching for `read_artifact` on a Parquet
+    // file and route it to the grounding step instead.
+    if (opts.hasObservationTables) {
+      projectContext +=
+        '\n\n### Data tables\n\nThis project holds **data tables** — spreadsheets and large data files ' +
+        'stored in a form you query rather than read. Call `list_tables` to see them, `describe_table` ' +
+        "to learn a table's columns and units, then `query_table` to answer the question with SQL. " +
+        'Aggregate in the query rather than selecting rows: the tables are far larger than you can read, ' +
+        'and you never need to handle the rows yourself.';
     }
     // Gezels split four ways here based on what they can actually
     // touch in the workspace:
@@ -808,6 +884,20 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       singleReadTools.length > 0
         ? `\nReading efficiently: use ${formatToolList(singleReadTools)} with \`{ path, startLine, endLine }\` for one known range${batchReadTools.length > 0 ? ` and ${formatToolList(batchReadTools)} for several independent known paths/ranges` : ''}${grepReadTools.length > 0 ? `; use ${formatToolList(grepReadTools)} first when the location is unknown` : ''}.`
         : '';
+    // Reading more than fits is a routine assignment (review 25 files, audit
+    // an export), and the shape that fails is "read it all, then write once":
+    // its peak requirement is the whole corpus and a stopped turn loses
+    // everything. Wild-caught on gezel/44 batch 9, where a restart could not
+    // restore 25 large records, the model re-read them, and the next restart
+    // dropped them again — a loop no amount of re-reading escapes.
+    // Gated on a persistence tool actually being on the roster: prescribing
+    // "write it down" to a session that cannot write is the McKinley Park
+    // failure (ADR 0001) in a new costume.
+    const incrementalPersistTools = toolsFrom(['write_task_note', 'write_artifact']);
+    const incrementalReadGuidance =
+      singleReadTools.length > 0 && incrementalPersistTools.length > 0
+        ? `\nWhen the material is larger than you can hold at once, work through it in groups: read a group, record what you concluded with ${formatToolList([incrementalPersistTools[0] as string])}, then move to the next. Do not read everything before writing anything — if the turn stops, only the unwritten part is lost.`
+        : '';
     const workspaceWriteTools = toolsFrom(['write_file']);
     const workspaceDelegationTools = toolsFrom([
       'message_gezel',
@@ -832,7 +922,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
 
 - **Workspace** (${formatToolList([...workspaceWriteTools, ...workspaceReadTools])}) — files the user ships: source, configs, assets, README, tests for their product.
 ${artifactsLine}
-${decisionLine}${efficientReadGuidance}`;
+${decisionLine}${efficientReadGuidance}${incrementalReadGuidance}`;
     } else if (hasReadFile) {
       const artifactsLine = hasArtifactTools
         ? `\n- **Artifacts** (${formatToolList(artifactTools)}) — a separate scratch drawer for plans, diagnoses, and handoff notes. It is not a fallback for workspace files: saving \`packages/...\`, \`src/...\`, or a path listed in \`### Workspace files\` with an artifact-writing tool creates only a side-drawer copy and does not change the project.\n`
@@ -845,6 +935,7 @@ ${decisionLine}${efficientReadGuidance}`;
 ${artifactsLine}
 - **Workspace writes are delegated.** ${workspaceDelegationGuidance} Don't paste source into chat — that can't be applied.`;
       projectContext += efficientReadGuidance;
+      projectContext += incrementalReadGuidance;
     } else if (hasWriteFile) {
       projectContext += `
 
@@ -1247,8 +1338,14 @@ ${artifactsLine}
       // Name the authored first action, not one inferred from the
       // deliverable extension. For example, an HTML step may explicitly
       // require `write_task_note` before `write_file`.
+      //
+      // Suppressed on gate retries (attempt > 1): the attempt note already
+      // says "fix the specific gap named in the notes rather than starting
+      // over", and an anchor commanding the procedure's first action is a
+      // direct contradiction — it steers the model into re-running the
+      // step from the top instead of repairing the named gap.
       let firstActionAnchor = '';
-      if (smallOrLeaky && task.step) {
+      if (smallOrLeaky && task.step && activeStepAttempt <= 1) {
         const firstInput = task.step.consumes?.[0];
         const firstInputTool = firstInput?.artifact ? 'read_artifact' : 'read_file';
         const firstProcedureTool =
@@ -1641,9 +1738,13 @@ ${artifactsLine}
 
   // Legacy single-band ordering (flag OFF) — byte-identical to before.
   if (!layeredPrefixCache) {
-    return {
-      full: `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}${projectContext}${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}${taskContext}${assignedTasksContext}${recall}\n\n---\n\n${actDontNarrate}\n\n${askWhenStuck}${browsingForRole}\n\n---\n\n${markdownGuidance}${untrustedContentBlock}${localHints}${verboseModelHints}${availableToolsBlock}${fileEditsDisabledNote}${consultationAddendum}${freshProjectAddendum}${activeTaskAnchor}`,
-    };
+    // Split at the session-scoped boundary so `sharedPrefix` is a literal
+    // byte-prefix of `full` — siblings of the same (gezel, project) render
+    // everything up to `taskContext` identically. Concatenation order is
+    // unchanged, so `full` stays byte-identical to the single-string form.
+    const sharedPrefix = `${header}${delegationGuardrail}${exactFormatGuidance}${aboutIntro}${body}${traitsBlock}${lessonsBlock}${projectContext}${workspaceGestaltBlock}${workspaceFilesBlock}${documentsContext}`;
+    const sessionTail = `${taskContext}${assignedTasksContext}${recall}\n\n---\n\n${actDontNarrate}\n\n${askWhenStuck}${browsingForRole}\n\n---\n\n${markdownGuidance}${untrustedContentBlock}${localHints}${verboseModelHints}${availableToolsBlock}${fileEditsDisabledNote}${consultationAddendum}${freshProjectAddendum}${activeTaskAnchor}`;
+    return { full: `${sharedPrefix}${sessionTail}`, sharedPrefix };
   }
 
   // Layered ordering (flag ON). The stable system message keeps every

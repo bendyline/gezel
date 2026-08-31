@@ -70,7 +70,17 @@ async function loadTransformers(): Promise<TransformersModule> {
 
 export async function createProfileEmbedder(
   profile: KnowledgeEmbeddingProfile,
-  opts: { cacheDir?: string } = {},
+  opts: {
+    cacheDir?: string;
+    /**
+     * onnxruntime session options (e.g. `{ intraOpNumThreads }`), passed
+     * through to the pipeline. Worker pools use this to divide cores between
+     * concurrent sessions instead of letting every session grab them all.
+     * Thread counts change scheduling, never numerics — batch composition is
+     * what affects values, and that stays with the caller.
+     */
+    sessionOptions?: Record<string, unknown>;
+  } = {},
 ): Promise<ProfileEmbedder> {
   const transformers = await loadTransformers();
   const cacheDir = opts.cacheDir ?? process.env.GEZEL_HF_CACHE_DIR;
@@ -79,7 +89,10 @@ export async function createProfileEmbedder(
     transformers.env.useFSCache = true;
     transformers.env.allowRemoteModels = true;
   }
-  const modelOpts = { revision: profile.model.revision };
+  const modelOpts = {
+    revision: profile.model.revision,
+    ...(opts.sessionOptions ? { session_options: opts.sessionOptions } : {}),
+  };
   const [pipe, tokenizer] = await Promise.all([
     transformers.pipeline('feature-extraction', profile.model.repo, modelOpts),
     transformers.AutoTokenizer.from_pretrained(profile.model.repo, modelOpts),

@@ -22,6 +22,16 @@ import { z } from 'zod';
 export const FitnessCheckSchema = z.object({
   ok: z.boolean(),
   detail: z.string(),
+  /**
+   * False when an earlier stage failed and this axis never ran, so its
+   * `ok: false` carries no verdict. Consumers naming "the reason" must skip
+   * these — a probe that timed out mid-generation records both a real
+   * throughput finding and an unreached tool check, and reporting the latter
+   * tells the user their tool calls are broken when they were never tried.
+   * Absent on records written before the distinction existed, which only ever
+   * assigned `ok: false` to axes that did run.
+   */
+  reached: z.boolean().optional(),
 });
 export type FitnessCheck = z.infer<typeof FitnessCheckSchema>;
 
@@ -56,6 +66,15 @@ export const ModelFitnessRecordSchema = z.object({
   genTokensPerSec: z.number().nullable(),
   /** Engine-reported decode rate from the short warm-up turn. */
   shortPromptGenTokensPerSec: z.number().nullable().optional(),
+  /**
+   * How `genTokensPerSec` was obtained. `engine` is the engine's own
+   * end-of-turn stats. `stream-estimate` is derived from the timing and
+   * volume of streamed deltas, which is the only rate available when a turn
+   * runs out of budget before the engine reports anything — approximate, and
+   * every surface that shows it says so. Absent on older records, which are
+   * all engine-reported.
+   */
+  genTokensPerSecSource: z.enum(['engine', 'stream-estimate']).optional(),
   /**
    * Warm-engine turn with an approximately 20K-token neutral context. Optional
    * so records written before this evidence existed remain readable.

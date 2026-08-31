@@ -379,9 +379,21 @@ export class TaskScheduler {
     // The re-nudge comes from the project's voorman (it's their delegate),
     // falling back to the meester. It must be someone OTHER than the
     // assignee — a self-message just loops.
+    //
+    // Compare CANONICAL ids, never the raw references. A task stores
+    // whatever the model typed as its assignee (`"Alejandro"`) while the
+    // project stores the slug (`"alejandro"`), so a raw `===` here reads
+    // as two different gezels, we call `messageGezel`, and *it* resolves
+    // the name and throws `cannot message yourself`. Nothing about that
+    // is transient, so the sweep retried it every tick forever.
     const project = await this.store.getProject(task.projectId);
     const sender = project?.voormanGezelId ?? opts.meesterGezelId;
-    if (!sender || sender === assignee) return;
+    if (!sender) return;
+    const [senderId, assigneeId] = await Promise.all([
+      this.chat.resolveGezelIdRef(sender, task.projectId).catch(() => null),
+      this.chat.resolveGezelIdRef(assignee, task.projectId).catch(() => null),
+    ]);
+    if ((senderId ?? sender) === (assigneeId ?? assignee)) return;
 
     // `requireChange` deliberately prevents the idle auto-advance above:
     // only a write observed during a model turn can clear that gate. The

@@ -1421,6 +1421,43 @@ jobs:
           name: Gezel Early Beta v${{ needs.release-preflight.outputs.version }}
           draft: true
           generate_release_notes: true
+          # Prepended above the auto-generated notes (GitHub's create-release API
+          # documents `body` as pre-pended when generate_release_notes is true).
+          # The verification instructions belong on the page people download
+          # from, not only in the Handboek: Linux packages carry no signature a
+          # package manager checks, so SHA256SUMS + provenance are the only
+          # verification a Linux user has, and nobody goes looking for docs
+          # before clicking a .deb. Keep in step with
+          # docs/handboek/technical/verifying-your-download.md.
+          body: |
+            ## Verifying your download
+
+            Every file below is listed in `SHA256SUMS` and carries SLSA build
+            provenance tied to this commit and workflow run.
+
+            Check the bytes — `--ignore-missing` matters, because the manifest
+            covers every platform and you downloaded one:
+
+            ```bash
+            sha256sum --ignore-missing -c SHA256SUMS     # Linux
+            shasum -a 256 --ignore-missing -c SHA256SUMS # macOS
+            ```
+
+            Check where the build came from, with the
+            [GitHub CLI](https://cli.github.com) (run `gh auth login` once first):
+
+            ```bash
+            gh attestation verify <file> --repo bendyline/gezel
+            ```
+
+            The macOS and Windows installers are signed, and the macOS package is
+            notarized — your operating system checks those for you. The Linux
+            `.deb` and `.rpm` packages are not GPG-signed, so the two checks above
+            are the verification path there.
+            [Full instructions, including Windows](https://github.com/bendyline/gezel/blob/main/docs/handboek/technical/verifying-your-download.md).
+
+            ---
+
           fail_on_unmatched_files: true
           # The staged directory, not the per-platform globs: it is the same
           # set of files (hard links) plus SHA256SUMS, and it is exactly what

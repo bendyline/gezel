@@ -18,6 +18,7 @@ const ENGINE_ENV_VARS = [
   'GEZEL_WHISPER_SERVER_BIN',
   'GEZEL_DEVICE_HEALTH_BIN',
   'GEZEL_UV_BIN',
+  'GEZEL_DUCKDB_BIN',
   'GEZEL_NATIVE_BIN_DIR',
 ] as const;
 
@@ -87,6 +88,9 @@ describe('discoverNativeBinaries — gezel- prefixed binaries (post-rename)', ()
     const sdBin = stageBinary(nativeBinDir, 'linux-x64', 'gezel-sd-server', 'linux');
     const whisperBin = stageBinary(nativeBinDir, 'linux-x64', 'gezel-whisper-server', 'linux');
     const uvBin = stageBinary(nativeBinDir, 'linux-x64', 'uv', 'linux'); // uv stays unprefixed
+    // duckdb is vendored unmodified too — the Windows signing allowlist matches
+    // on exactly this basename, so a `gezel-` prefix would break it.
+    const duckBin = stageBinary(nativeBinDir, 'linux-x64', 'duckdb', 'linux');
 
     const result = discoverNativeBinaries({
       home,
@@ -99,7 +103,9 @@ describe('discoverNativeBinaries — gezel- prefixed binaries (post-rename)', ()
     expect(process.env.GEZEL_SD_SERVER_BIN).toBe(sdBin);
     expect(process.env.GEZEL_WHISPER_SERVER_BIN).toBe(whisperBin);
     expect(process.env.GEZEL_UV_BIN).toBe(uvBin);
+    expect(process.env.GEZEL_DUCKDB_BIN).toBe(duckBin);
     expect(result.binaries.find((b) => b.name === 'sd-server')?.source).toBe('discovered');
+    expect(result.binaries.find((b) => b.name === 'duckdb')?.source).toBe('discovered');
   });
 
   it('prefers the gezel- name over a stale legacy bare-named binary', () => {
@@ -128,6 +134,7 @@ describe('discoverNativeBinaries — short-circuits', () => {
     process.env.GEZEL_WHISPER_SERVER_BIN = '/already/set/whisper-server';
     process.env.GEZEL_DEVICE_HEALTH_BIN = '/already/set/gezel-device-health';
     process.env.GEZEL_UV_BIN = '/already/set/uv';
+    process.env.GEZEL_DUCKDB_BIN = '/already/set/duckdb';
 
     const result = discoverNativeBinaries({
       home,

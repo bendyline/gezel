@@ -12,26 +12,41 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import type { KnowledgeMachineInventory, TrustedKnowledgeCoordinate } from '@bendyline/gezel';
 import {
   KnowledgeMachineInventorySchema,
   TrustedKnowledgeCoordinateSchema,
+  awakeTimeoutSignal,
   createLogger,
 } from '@bendyline/gezel';
+import type { KnowledgeRegistryIndex } from '@bendyline/gezel';
 import {
   extractGezkVerified,
+  fetchKnowledgeRegistry,
+  findRegistryEntry,
   readGezkManifest,
   validateExtractedCatalog,
 } from '@bendyline/gezel-knowledge';
 import { isPathInside, realpathContained } from '../fs/safe-paths.js';
+import { loadKnowledgeTrustAnchors } from '../knowledge/trust-anchors.js';
 import { SHARED_ASSETS_ENV } from '../models/storage-roots.js';
 
 const log = createLogger('knowledge-assets');
 
 export const KNOWLEDGE_REGISTRY_DIR_ENV = 'GEZEL_KNOWLEDGE_REGISTRY_DIR';
+/**
+ * A signed publisher registry URL (Phase 6). Operator-configured on the
+ * BROKER side only — a requesting daemon can never supply a URL; its request
+ * stays a bare TrustedKnowledgeCoordinate. The registry merely locates
+ * bytes: the coordinate's expectedDigest is still verified on the download.
+ */
+export const KNOWLEDGE_REGISTRY_URL_ENV = 'GEZEL_KNOWLEDGE_REGISTRY_URL';
+
+const REGISTRY_CACHE_TTL_MS = 5 * 60 * 1000;
+const ARCHIVE_DOWNLOAD_BUDGET_MS = 30 * 60 * 1000;
 
 export type EnsureOutcome =
   | { status: 'ready'; path: string }
@@ -96,23 +111,140 @@ export function createKnowledgeAssetsBroker(
     await rename(tmp, inventoryFile);
   };
 
-  /**
-   * Broker-side archive resolution — the registry seam. The operator drop
-   * directory is scanned for a file whose sha256 equals the coordinate's
-   * expected digest; nothing about the requesting daemon reaches it.
-   */
-  const resolveArchive = async (coordinate: TrustedKnowledgeCoordinate): Promise<string | null> => {
-    const registryDir = env[KNOWLEDGE_REGISTRY_DIR_ENV]?.trim();
-    if (!registryDir || !isAbsolute(registryDir)) return null;
-    const preferred = join(registryDir, `${coordinate.catalogId}-${coordinate.version}.gezk`);
-    const candidates: string[] = [];
-    if (await stat(preferred).catch(() => null)) candidates.push(preferred);
-    for (const name of await readdir(registryDir).catch(() => [])) {
-      const abs = join(registryDir, name);
-      if (name.endsWith('.gezk') && abs !== preferred) candidates.push(abs);
+  /** Verified registry document cache — one fetch per TTL window, not per ensure. */
+  let registryCache: { url: string; fetchedAt: number; registry: KnowledgeRegistryIndex } | null =
+    null;
+
+  const fetchRegistry = async (): Promise<KnowledgeRegistryIndex | null> => {
+    const url = env[KNOWLEDGE_REGISTRY_URL_ENV]?.trim();
+    if (!url) return null;
+    if (
+      registryCache &&
+      registryCache.url === url &&
+      Date.now() - registryCache.fetchedAt < REGISTRY_CACHE_TTL_MS
+    ) {
+      return registryCache.registry;
     }
-    for (const candidate of candidates) {
-      if ((await hashFile(candidate)) === coordinate.expectedDigest) return candidate;
+    const anchors = loadKnowledgeTrustAnchors(env);
+    if (anchors.length === 0) {
+      log.warn(`${KNOWLEDGE_REGISTRY_URL_ENV} is set but no trust anchors are available; ignoring`);
+      return null;
+    }
+    try {
+      const { registry, keyId } = await fetchKnowledgeRegistry(url, { anchors });
+      log.info(`knowledge registry verified (publisher ${registry.publisher.id}, key ${keyId})`);
+      registryCache = { url, fetchedAt: Date.now(), registry };
+      return registry;
+    } catch (err) {
+      log.warn(
+        `knowledge registry fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  };
+
+  /**
+   * Download a registry-located archive into the broker's staging area. The
+   * registry's declared byte size is a hard cap (early abort on oversize);
+   * the caller still verifies the coordinate digest on the result.
+   */
+  const downloadArchive = async (
+    url: string,
+    maxBytes: number,
+    destination: string,
+  ): Promise<void> => {
+    const response = await fetch(url, {
+      signal: awakeTimeoutSignal(ARCHIVE_DOWNLOAD_BUDGET_MS),
+      redirect: 'follow',
+    });
+    if (!response.ok || !response.body) {
+      throw new Error(`archive download failed: HTTP ${response.status}`);
+    }
+    await mkdir(dirname(destination), { recursive: true });
+    const out = createWriteStream(destination);
+    let received = 0;
+    try {
+      for await (const chunk of response.body) {
+        const buffer = Buffer.from(chunk);
+        received += buffer.byteLength;
+        if (received > maxBytes) {
+          throw new Error(`archive exceeds its registry-declared size (${maxBytes} bytes)`);
+        }
+        if (!out.write(buffer)) {
+          await new Promise<void>((drained, failed) => {
+            out.once('drain', drained);
+            out.once('error', failed);
+          });
+        }
+      }
+      await new Promise<void>((closed, failed) => {
+        out.end(() => closed());
+        out.once('error', failed);
+      });
+    } catch (err) {
+      out.destroy();
+      await rm(destination, { force: true }).catch(() => {});
+      throw err;
+    }
+  };
+
+  /**
+   * Broker-side archive resolution — the registry seam. First the operator
+   * drop directory (a file whose sha256 equals the coordinate's expected
+   * digest), then the signed CDN registry when `GEZEL_KNOWLEDGE_REGISTRY_URL`
+   * is configured. Nothing about the requesting daemon reaches either source.
+   * Downloaded archives are ephemeral — deleted after extraction.
+   */
+  const resolveArchive = async (
+    coordinate: TrustedKnowledgeCoordinate,
+  ): Promise<{ path: string; ephemeral: boolean } | null> => {
+    const registryDir = env[KNOWLEDGE_REGISTRY_DIR_ENV]?.trim();
+    if (registryDir && isAbsolute(registryDir)) {
+      const preferred = join(registryDir, `${coordinate.catalogId}-${coordinate.version}.gezk`);
+      const candidates: string[] = [];
+      if (await stat(preferred).catch(() => null)) candidates.push(preferred);
+      for (const name of await readdir(registryDir).catch(() => [])) {
+        const abs = join(registryDir, name);
+        if (name.endsWith('.gezk') && abs !== preferred) candidates.push(abs);
+      }
+      for (const candidate of candidates) {
+        if ((await hashFile(candidate)) === coordinate.expectedDigest) {
+          return { path: candidate, ephemeral: false };
+        }
+      }
+    }
+
+    const registry = await fetchRegistry();
+    if (registry && root) {
+      const entry = findRegistryEntry(registry, {
+        publisherId: coordinate.publisherId,
+        catalogId: coordinate.catalogId,
+        version: coordinate.version,
+        contentDigest: coordinate.expectedDigest,
+      });
+      if (!entry) return null;
+      const download = join(
+        root,
+        'downloads',
+        `${coordinate.expectedDigest.slice(0, 16)}.gezk.partial`,
+      );
+      await assertKnowledgePathContained(root, download);
+      try {
+        await downloadArchive(entry.url, entry.archiveBytes, download);
+      } catch (err) {
+        log.warn(
+          `registry archive download failed for ${coordinate.catalogId}@${coordinate.version}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return null;
+      }
+      if ((await hashFile(download)) !== coordinate.expectedDigest) {
+        await rm(download, { force: true }).catch(() => {});
+        log.warn(
+          `registry archive for ${coordinate.catalogId}@${coordinate.version} failed digest verification`,
+        );
+        return null;
+      }
+      return { path: download, ephemeral: true };
     }
     return null;
   };
@@ -126,53 +258,58 @@ export function createKnowledgeAssetsBroker(
     if (await stat(join(target, 'manifest.json')).catch(() => null)) {
       return { status: 'ready', path: target };
     }
-    const archive = await resolveArchive(coordinate);
-    if (!archive) {
+    const resolved = await resolveArchive(coordinate);
+    if (!resolved) {
       return {
         status: 'error',
         code: 'not-found',
         error: `no archive for ${coordinate.catalogId}@${coordinate.version} with digest ${coordinate.expectedDigest.slice(0, 16)}… in the machine knowledge registry`,
       };
     }
+    const archive = resolved.path;
 
-    const manifest = await readGezkManifest(archive).catch(() => null);
-    if (
-      !manifest ||
-      manifest.publisher.id !== coordinate.publisherId ||
-      manifest.id !== coordinate.catalogId ||
-      manifest.version !== coordinate.version
-    ) {
-      return {
-        status: 'error',
-        code: 'invalid',
-        error: 'archive manifest identity does not match the trusted coordinate',
-      };
-    }
-
-    const staging = `${target}.staging-${process.pid}-${randomUUID()}`;
     try {
-      await mkdir(dirname(target), { recursive: true });
-      await assertKnowledgePathContained(root, target);
-      await extractGezkVerified(archive, staging);
-      const report = await validateExtractedCatalog(staging, { deep: true });
-      if (!report.ok) {
-        const failed = report.checks.find((c) => !c.ok);
+      const manifest = await readGezkManifest(archive).catch(() => null);
+      if (
+        !manifest ||
+        manifest.publisher.id !== coordinate.publisherId ||
+        manifest.id !== coordinate.catalogId ||
+        manifest.version !== coordinate.version
+      ) {
         return {
           status: 'error',
           code: 'invalid',
-          error: `catalog failed validation: ${failed?.name}${failed?.detail ? ` (${failed.detail})` : ''}`,
+          error: 'archive manifest identity does not match the trusted coordinate',
         };
       }
-      await assertKnowledgePathContained(root, target);
-      await rm(target, { recursive: true, force: true });
-      await rename(staging, target);
-    } catch (err) {
-      await rm(staging, { recursive: true, force: true }).catch(() => {});
-      return {
-        status: 'error',
-        code: 'invalid',
-        error: err instanceof Error ? err.message : String(err),
-      };
+
+      const staging = `${target}.staging-${process.pid}-${randomUUID()}`;
+      try {
+        await mkdir(dirname(target), { recursive: true });
+        await assertKnowledgePathContained(root, target);
+        await extractGezkVerified(archive, staging);
+        const report = await validateExtractedCatalog(staging, { deep: true });
+        if (!report.ok) {
+          const failed = report.checks.find((c) => !c.ok);
+          return {
+            status: 'error',
+            code: 'invalid',
+            error: `catalog failed validation: ${failed?.name}${failed?.detail ? ` (${failed.detail})` : ''}`,
+          };
+        }
+        await assertKnowledgePathContained(root, target);
+        await rm(target, { recursive: true, force: true });
+        await rename(staging, target);
+      } catch (err) {
+        await rm(staging, { recursive: true, force: true }).catch(() => {});
+        return {
+          status: 'error',
+          code: 'invalid',
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    } finally {
+      if (resolved.ephemeral) await rm(archive, { force: true }).catch(() => {});
     }
 
     // ACL publication — per-item, NEVER fatal (the SCM-1066 lesson).

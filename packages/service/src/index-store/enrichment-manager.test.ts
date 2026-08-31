@@ -32,7 +32,12 @@ function agedIdleState(): SystemIdleState {
   });
 }
 
-function make(opts: { active: boolean; indexingEnabled?: boolean; freshBoot?: boolean }) {
+function make(opts: {
+  active: boolean;
+  indexingEnabled?: boolean;
+  freshBoot?: boolean;
+  engagementMode?: 'proactive' | 'scheduled' | 'reactive' | 'off';
+}) {
   const enrich = vi.fn().mockResolvedValue({ files: 1, summarized: 1, embedded: 1 });
   const embedOnly = vi.fn().mockResolvedValue({ files: 0, embedded: 0 });
   const embedImages = vi.fn().mockResolvedValue({ files: 0, embedded: 0, unavailable: false });
@@ -47,7 +52,9 @@ function make(opts: { active: boolean; indexingEnabled?: boolean; freshBoot?: bo
         ...(opts.indexingEnabled !== undefined ? { indexingEnabled: opts.indexingEnabled } : {}),
       },
     ],
-    readConfig: async () => ({}),
+    readConfig: async () => ({
+      ...(opts.engagementMode ? { aiEngagementMode: opts.engagementMode } : {}),
+    }),
   } as unknown as Store;
   const contentIndex = { enrich, embedOnly, embedImages } as unknown as ContentIndex;
   const idle = opts.freshBoot ? new SystemIdleState() : agedIdleState();
@@ -109,6 +116,39 @@ describe('IndexEnrichmentManager idle gating', () => {
     // Semantic-search embeddings need no roster opt-in; the LLM tiers do.
     expect(embedOnly).toHaveBeenCalledWith('p1', expect.any(Number));
     expect(enrich).not.toHaveBeenCalled();
+  });
+
+  // "Reactive only" promises the AI answers the user and starts no work of
+  // its own. A Boekwachter summarizing a project the user never opened is
+  // exactly that work — and it occupies the engine their next message needs.
+  it('holds the AI tiers when AI activity is set to reactive', async () => {
+    const { mgr, enrich } = make({ active: false, engagementMode: 'reactive' });
+    await mgr.tick();
+    expect(enrich).not.toHaveBeenCalled();
+  });
+
+  it('holds the AI tiers when AI is switched off', async () => {
+    const { mgr, enrich } = make({ active: false, engagementMode: 'off' });
+    await mgr.tick();
+    expect(enrich).not.toHaveBeenCalled();
+  });
+
+  // The complement, and the reason the gate sits at the roster boundary
+  // rather than the head of the tick: retrieval that reactive-mode chat
+  // still depends on must not decay while the model tiers stand down.
+  it('the local embed tier keeps running under reactive', async () => {
+    const { mgr, embedOnly } = make({ active: false, engagementMode: 'reactive' });
+    await mgr.tick();
+    expect(embedOnly).toHaveBeenCalledWith('p1', expect.any(Number));
+  });
+
+  // Enrichment is a scheduled system job — the nachtwacht task IS its
+  // control surface — so it belongs with task work, not with proactive
+  // nudges.
+  it('runs the AI tiers under "Tasks + Reactive"', async () => {
+    const { mgr, enrich } = make({ active: false, engagementMode: 'scheduled' });
+    await mgr.tick();
+    expect(enrich).toHaveBeenCalledTimes(1);
   });
 
   it('the embed-only tier still honors the indexing opt-out', async () => {

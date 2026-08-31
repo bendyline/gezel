@@ -240,6 +240,18 @@ export const GateCheckSchema = z.discriminatedUnion('kind', [
     minRows: z.number().int().nonnegative().optional(),
     uniqueBy: z.string().optional(),
     format: z.enum(['json', 'csv', 'auto']).optional(),
+    /**
+     * Accept fields beyond `fields` (default false — an exact field set).
+     *
+     * Strict is right for a locked-schema data deliverable, where an
+     * unexpected key means the writer misunderstood the contract. It is
+     * wrong for a REGISTER — a findings list, a drift list — where extra
+     * context (a cwe, a title, an id) is a better deliverable, not a
+     * broken one, and rejecting it grades schema-guessing instead of the
+     * work. The underlying `recordSchema` check has always supported this;
+     * only the declarative gate could not say it.
+     */
+    allowExtraFields: z.boolean().optional(),
     artifact: z.boolean().optional(),
   }),
   /**

@@ -3,6 +3,7 @@ import {
   PREVIEW_FRAME_INDETERMINATE,
   type PreviewFrameLike,
   daemonEntrypointArgument,
+  isAllowedMicrophoneCapture,
   isAllowedPreviewNavigation,
   isAllowedPreviewResourceRequest,
   isAllowedTopLevelNavigation,
@@ -53,6 +54,26 @@ describe('daemon-entrypoint launch guard', () => {
 });
 
 describe('Electron boundary policies', () => {
+  it('allows only an audio-only microphone request from the top-level daemon UI', () => {
+    const origin = 'https://127.0.0.1:4312';
+    expect(isAllowedMicrophoneCapture('media', `${origin}/`, origin, true, ['audio'])).toBe(true);
+    expect(isAllowedMicrophoneCapture('media', `${origin}/`, origin, true, ['video'])).toBe(false);
+    expect(
+      isAllowedMicrophoneCapture('media', `${origin}/`, origin, true, ['audio', 'video']),
+    ).toBe(false);
+    expect(
+      isAllowedMicrophoneCapture('media', `${origin}/preview/cap/x`, origin, false, ['audio']),
+    ).toBe(false);
+    expect(
+      isAllowedMicrophoneCapture('media', 'https://127.0.0.1.evil.test:4312/', origin, true, [
+        'audio',
+      ]),
+    ).toBe(false);
+    expect(isAllowedMicrophoneCapture('notifications', `${origin}/`, origin, true, ['audio'])).toBe(
+      false,
+    );
+  });
+
   it('allows only the daemon origin and the exact splash file', () => {
     const origin = 'https://127.0.0.1:4312';
     const splash = 'file:///opt/gezel/splash.html';

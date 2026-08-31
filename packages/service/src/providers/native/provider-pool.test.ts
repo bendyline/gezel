@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { LLMProvider, LLMSession, ModelInfo, SessionOpts } from '../types.js';
 import { CapacityBroker } from './capacity-broker.js';
 import { makeEngineKey } from './engine-key.js';
-import { type ProviderBuilder, ProviderPool, capacityDenialLogLine } from './provider-pool.js';
+import {
+  type ProviderBuilder,
+  ProviderPool,
+  capacityDenialLogLine,
+  measuredVramDenialReason,
+} from './provider-pool.js';
 
 const GB = 1024 ** 3;
 
@@ -965,5 +970,98 @@ describe('ProviderPool', () => {
     // The next load still proceeds — the chain wasn't left rejected.
     const p = await pool.ensure('mlx', 'ok', 0, 5 * GB);
     expect(p).toBeDefined();
+  });
+});
+
+describe('measured accelerator headroom', () => {
+  const discreteBroker = () =>
+    new CapacityBroker({
+      systemRamBytes: () => 64 * GB,
+      gpuVramBytes: 12 * GB,
+      unifiedMemory: false,
+    });
+
+  it('refuses a spawn onto a card another process has filled', async () => {
+    // The ledger is empty and the budget is tens of GB, so every in-process
+    // check says yes. Only the device reading knows the card is full — this is
+    // the second-daemon case, where a per-process broker is structurally blind.
+    const broker = discreteBroker();
+    const pool = new ProviderPool({
+      broker,
+      builders: { mlx: mkBuilder(7 * GB) },
+      vramHeadroom: async () => ({ freeBytes: 0.3 * GB, totalBytes: 12 * GB }),
+    });
+    expect(broker.canReserve(7 * GB)).toBe(true);
+    await expect(pool.ensure('mlx', 'big', 0, 7 * GB)).rejects.toThrow(
+      /Not enough graphics memory to load big/,
+    );
+  });
+
+  it('keeps the denial in the shape the eval harness classifies as infra', () => {
+    // A measured denial is still a capacity denial: the run reports must not
+    // read it as the model failing. Same regexes as the ledger-side test above.
+    const line = capacityDenialLogLine(
+      'llama-cpp:big-model:0',
+      measuredVramDenialReason(7 * GB, 0.3 * GB),
+    );
+    expect(line).toMatch(
+      /capacity broker denied [^\n]+: budget exhausted: would commit \d+ against \d+/,
+    );
+    expect(line).toMatch(/capacity broker denied [^\n]*budget exhausted/);
+  });
+
+  it('admits when the card has the room', async () => {
+    const pool = new ProviderPool({
+      broker: discreteBroker(),
+      builders: { mlx: mkBuilder(7 * GB) },
+      vramHeadroom: async () => ({ freeBytes: 11 * GB, totalBytes: 12 * GB }),
+    });
+    await expect(pool.ensure('mlx', 'fits', 0, 7 * GB)).resolves.toBeDefined();
+  });
+
+  it('never blocks a spawn on an unusable reading', async () => {
+    const noReading = new ProviderPool({
+      broker: discreteBroker(),
+      builders: { mlx: mkBuilder(7 * GB) },
+      vramHeadroom: async () => ({}),
+    });
+    await expect(noReading.ensure('mlx', 'a', 0, 7 * GB)).resolves.toBeDefined();
+
+    const throws = new ProviderPool({
+      broker: discreteBroker(),
+      builders: { mlx: mkBuilder(7 * GB) },
+      vramHeadroom: async () => {
+        throw new Error('nvidia-smi missing');
+      },
+    });
+    await expect(throws.ensure('mlx', 'b', 0, 7 * GB)).resolves.toBeDefined();
+  });
+
+  it('does not apply on a unified host', async () => {
+    // One pool, already governed by the RAM share, and an over-committed
+    // unified host degrades through compressed memory rather than falling off
+    // a PCIe cliff. A free-memory reading there would deny normal work.
+    const pool = new ProviderPool({
+      broker: new CapacityBroker({
+        systemRamBytes: () => 64 * GB,
+        gpuVramBytes: null,
+        unifiedMemory: true,
+      }),
+      builders: { mlx: mkBuilder(7 * GB) },
+      vramHeadroom: async () => ({ freeBytes: 0, totalBytes: 64 * GB }),
+    });
+    await expect(pool.ensure('mlx', 'unified', 0, 7 * GB)).resolves.toBeDefined();
+  });
+
+  it('caps the requirement at the fast pool so an offloaded model still loads', async () => {
+    // A 40 GB MoE on a 12 GB card is meant to stream its experts from system
+    // RAM. Requiring its whole working set on the card would refuse exactly
+    // the case the two-pool budget exists to allow.
+    const pool = new ProviderPool({
+      broker: discreteBroker(),
+      builders: { mlx: mkBuilder(40 * GB) },
+      vramHeadroom: async () => ({ freeBytes: 11 * GB, totalBytes: 12 * GB }),
+    });
+    await expect(pool.ensure('mlx', 'moe', 0, 40 * GB)).resolves.toBeDefined();
   });
 });

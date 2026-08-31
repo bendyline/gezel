@@ -11,10 +11,12 @@ import { z } from 'zod';
  * collapses to two enormous piles, one of which ("General work") is mostly
  * recipes about writing, media, and household admin.
  *
- * Each category belongs to a family — `code`, `non-code`, or the `universal`
- * shelves that belong to neither — so a browser can separate "recipes for
- * working on software" from everything else with one grouping, then offer a
- * real breakdown inside each.
+ * Each category belongs to a family — `code`, `creative`, `business`,
+ * `personal`, or the `universal` shelves that belong to none of them — so a
+ * browser can group the shelves once, then offer a real breakdown inside each.
+ * Every family names what its recipes are *about*: a shelf defined by what it
+ * is not ("non-code") tells a person nothing about whether their work is on it,
+ * and buries seven unlike subjects under one heading.
  */
 export const CraftbookCategorySchema = z.enum([
   'code-build',
@@ -36,7 +38,7 @@ export const CraftbookCategorySchema = z.enum([
 ]);
 export type CraftbookCategory = z.infer<typeof CraftbookCategorySchema>;
 
-export type CraftbookCategoryFamily = 'code' | 'non-code' | 'universal';
+export type CraftbookCategoryFamily = 'code' | 'creative' | 'business' | 'personal' | 'universal';
 
 /** Shelf copy so every craftbook browser presents categories consistently. */
 export const CRAFTBOOK_CATEGORY_META: ReadonlyArray<{
@@ -89,44 +91,44 @@ export const CRAFTBOOK_CATEGORY_META: ReadonlyArray<{
   },
   {
     id: 'writing',
-    family: 'non-code',
+    family: 'creative',
     label: 'Writing & editing',
     description: 'drafts, edits, translations, handbooks, and long-form prose',
   },
   {
     id: 'media',
-    family: 'non-code',
+    family: 'creative',
     label: 'Images, audio & video',
     description: 'generate, transcribe, edit, and organise media',
   },
   {
     id: 'design',
-    family: 'non-code',
+    family: 'creative',
     label: 'Design & print',
     description: 'visual identity, UI critique, decks, and printable layouts',
   },
   {
     id: 'marketing',
-    family: 'non-code',
+    family: 'business',
     label: 'Marketing & sales',
     description: 'campaigns, copy, social posts, launches, and pitches',
   },
   {
     id: 'research',
-    family: 'non-code',
+    family: 'business',
     label: 'Research & analysis',
     description: 'gather sources, check facts, compare options, read the numbers',
   },
   {
     id: 'business',
-    family: 'non-code',
-    label: 'Business & admin',
+    family: 'business',
+    label: 'Money & admin',
     description: 'money, meetings, contracts, careers, and the recurring paperwork',
   },
   {
     id: 'personal',
-    family: 'non-code',
-    label: 'Home & personal',
+    family: 'personal',
+    label: 'Home & family',
     description: 'household, family, travel, study, and everything off the clock',
   },
   {
@@ -144,9 +146,9 @@ export const CRAFTBOOK_CATEGORY_META: ReadonlyArray<{
 ];
 
 /**
- * Shelf groups. `universal` categories hold recipes that are about no
- * particular subject, so they sit outside the code / non-code split rather
- * than being forced into one side of it.
+ * Shelf groups, in browsing order. `universal` categories hold recipes that
+ * are about no particular subject, so they lead and stay ungrouped rather than
+ * being forced onto a subject shelf.
  */
 export const CRAFTBOOK_CATEGORY_FAMILY_META: ReadonlyArray<{
   id: CraftbookCategoryFamily;
@@ -154,7 +156,9 @@ export const CRAFTBOOK_CATEGORY_FAMILY_META: ReadonlyArray<{
 }> = [
   { id: 'universal', label: 'Any work' },
   { id: 'code', label: 'Code' },
-  { id: 'non-code', label: 'Non-code' },
+  { id: 'creative', label: 'Creative' },
+  { id: 'business', label: 'Business' },
+  { id: 'personal', label: 'Personal' },
 ];
 
 /**

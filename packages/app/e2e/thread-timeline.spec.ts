@@ -18,7 +18,9 @@ import { fileURLToPath } from 'node:url';
  */
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { captureScreenshot } from './helpers/screenshot.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const screenshotDir = join(_dirname, '..', 'screenshots');
@@ -155,7 +157,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await app?.close();
+  await closeApp(app);
   await rm(gezelHome, { recursive: true, force: true }).catch(() => {});
 });
 
@@ -168,7 +170,7 @@ test('replies thread under their trigger, not under the next check-in', async ()
     page.getByText('Waiting for the user to respond to my Spanish greeting.'),
   ).toBeVisible({ timeout: 20_000 });
 
-  await page.screenshot({
+  await captureScreenshot(page, {
     path: join(screenshotDir, 'thread-timeline-01.png'),
     fullPage: true,
   });
@@ -180,7 +182,7 @@ test('replies thread under their trigger, not under the next check-in', async ()
     if (el) el.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
   });
   await page.waitForTimeout(400);
-  await page.screenshot({
+  await captureScreenshot(page, {
     path: join(screenshotDir, 'thread-timeline-02-top.png'),
     fullPage: true,
   });
@@ -188,7 +190,7 @@ test('replies thread under their trigger, not under the next check-in', async ()
   // legible on both canvases.
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
   await page.waitForTimeout(300);
-  await page.screenshot({
+  await captureScreenshot(page, {
     path: join(screenshotDir, 'thread-timeline-03-dark.png'),
     fullPage: true,
   });

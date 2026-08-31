@@ -11,6 +11,7 @@ import {
   nearestMatch,
   slugifyStepId,
   sniffCraftbookDocFormat,
+  validateCraftbookFanout,
   validateCraftbookGraph,
   validateCraftbookScriptRefs,
   zodIssuesToDocErrors,
@@ -118,16 +119,38 @@ export function craftbookFromDoc(
     ...(doc.triggers ? { triggers: doc.triggers } : {}),
     ...(doc.command ? { command: doc.command } : {}),
     ...(doc.requirements ? { requirements: doc.requirements } : {}),
+    ...(doc.recommends ? { recommends: doc.recommends } : {}),
     ...(doc.runModes ? { runModes: doc.runModes } : {}),
     ...(doc.toolsets ? { toolsets: doc.toolsets } : {}),
     ...(doc.connectors ? { connectors: doc.connectors } : {}),
+    ...(doc.commands ? { commands: doc.commands } : {}),
     ...(doc.paramSchema ? { paramSchema: doc.paramSchema } : {}),
     ...(doc.hooks ? { hooks: doc.hooks } : {}),
     ...(doc.scripts ? { scripts: doc.scripts } : {}),
+    // Declarative fanout, and the three whole-book flags beside it. Every
+    // one of these is declared on CraftbookDocSchema with its own doc
+    // comment, so a model that writes them gets a 201 — and, until this
+    // line existed, a craftbook with the field silently gone. That made
+    // craftbook_read -> edit -> craftbook_write destructive on the three
+    // bundled spawn hosts, against the round-trip invariant docFromCraftbook
+    // documents. A dropped field is worse than a rejected one: the write
+    // reports success.
+    ...(doc.spawn ? { spawn: doc.spawn } : {}),
+    ...(doc.diffpackCapable !== undefined ? { diffpackCapable: doc.diffpackCapable } : {}),
+    ...(doc.capabilityFloor ? { capabilityFloor: doc.capabilityFloor } : {}),
     createdAt: opts.createdAt ?? doc.releasedAt ?? opts.now,
     updatedAt: opts.now,
   };
 
+  for (const problem of validateCraftbookFanout(candidate)) {
+    errors.push({
+      where: candidate.spawn ? 'spawn' : 'steps',
+      message: `${problem}.`,
+      fix: candidate.spawn
+        ? 'set spawnFanout: true on the step that should fan out over the list'
+        : 'add a spawn block: { overFile, entryStepId, steps } describing the per-item work',
+    });
+  }
   for (const problem of validateCraftbookGraph(candidate)) {
     errors.push(augmentGraphProblem(problem, stepIds));
   }
@@ -172,6 +195,14 @@ function validateHookScriptRefs(doc: CraftbookDoc): CraftbookDocError[] {
  * by construction to be accepted back by `craftbookFromDoc` unchanged —
  * that invariant is what makes `craftbook_read` → edit → `craftbook_write`
  * a safe loop for a model.
+ *
+ * "By construction" was aspirational until `craftbook-doc.roundtrip.test.ts`
+ * pinned it: this function and `craftbookFromDoc` must between them carry
+ * every field `CraftbookDocSchema` declares. They did not carry `spawn`,
+ * `commands`, `diffpackCapable` or `capabilityFloor`, so reading and
+ * re-writing any of the three bundled fanout hosts destroyed the fanout and
+ * returned 201. **Adding a field to CraftbookDocSchema means adding it to
+ * both mappers**, and the test fails until you do.
  */
 export function docFromCraftbook(book: Craftbook): CraftbookDoc {
   return {
@@ -185,11 +216,16 @@ export function docFromCraftbook(book: Craftbook): CraftbookDoc {
     ...(book.triggers ? { triggers: book.triggers } : {}),
     ...(book.command ? { command: book.command } : {}),
     ...(book.requirements ? { requirements: book.requirements } : {}),
+    ...(book.recommends ? { recommends: book.recommends } : {}),
     ...(book.runModes ? { runModes: book.runModes } : {}),
     ...(book.toolsets ? { toolsets: book.toolsets } : {}),
     ...(book.connectors ? { connectors: book.connectors } : {}),
+    ...(book.commands ? { commands: book.commands } : {}),
     ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
     ...(book.hooks ? { hooks: book.hooks } : {}),
+    ...(book.spawn ? { spawn: book.spawn } : {}),
+    ...(book.diffpackCapable !== undefined ? { diffpackCapable: book.diffpackCapable } : {}),
+    ...(book.capabilityFloor ? { capabilityFloor: book.capabilityFloor } : {}),
     steps: book.steps,
     ...(book.scripts ? { scripts: book.scripts } : {}),
     ...(book.version ? { version: book.version } : {}),

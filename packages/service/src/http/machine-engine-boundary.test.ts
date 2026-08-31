@@ -110,6 +110,7 @@ describe('machine-engine service boundary', () => {
       '/v1/remote/manage/video-gen/generate',
       '/v1/remote/manage/audio/transcribe',
       '/v1/remote/manage/audio/synthesize',
+      '/v1/remote/manage/audio/synthesize-stream',
     ]) {
       expect((await machineFetch(path, { method: 'POST' })).status).toBe(404);
     }

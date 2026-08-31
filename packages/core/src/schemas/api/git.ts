@@ -27,6 +27,16 @@ export const GitStatusResponseSchema = z.object({
   mergeInProgress: z.boolean().optional(),
   /** True when the current branch has an upstream (or matching origin ref). */
   hasUpstream: z.boolean().optional(),
+  /**
+   * True when local git activity means the persisted `lastSyncedAt` no
+   * longer describes the current checkout. This is intentionally
+   * conservative: Sync is what clears it.
+   */
+  syncStale: z.boolean().optional(),
+  /** Best-effort explanation for why `syncStale` is true. */
+  syncStaleReason: z
+    .enum(['never-synced', 'branch-changed', 'no-upstream', 'git-activity'])
+    .optional(),
   /** True when the github toolset has a stored PAT. */
   hasPat: z.boolean(),
   /**

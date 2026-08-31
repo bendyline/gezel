@@ -74,6 +74,8 @@ export function humanizeToolCall(
       return `Marked ${str('ref') ?? 'task'} ${str('status') ?? ''}`.trim();
     case 'advance_task_step':
       return `Advanced ${str('ref') ?? 'the task'}`;
+    case 'invoke_craftbook':
+      return `Started ${str('craftbookId') ?? 'a craftbook'}`;
     case 'write_task_note':
       return `Left a note on ${str('ref') ?? 'the task'}`;
     case 'read_task_notes':

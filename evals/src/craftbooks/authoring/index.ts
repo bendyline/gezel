@@ -1,24 +1,37 @@
 import type { EvalScenario } from '../../types.ts';
+import { authorFanoutScenario } from './author-fanout.ts';
 import { authorLinearScenario } from './author-linear.ts';
+import { authorParamsScenario } from './author-params.ts';
 import { editMidtaskScenario } from './edit-midtask.ts';
+import { exportGeneralizeScenario } from './export-generalize.ts';
 import { findVsCreateScenario } from './find-vs-create.ts';
 import { gateScriptScenario } from './gate-script.ts';
+import { devCraftbookRoutingScenario } from './route-dev.ts';
+import { routeMultiScenario } from './route-multi.ts';
 
 /**
- * The craftbook AUTHORING scenarios — the matrix for the craftbook
- * document-format A/B ([bin/ab-craftbook-format.ts](../../bin/ab-craftbook-format.ts)).
+ * The craftbook SELECTION + AUTHORING scenarios — the matrix for the
+ * craftbook document-format A/B
+ * ([bin/ab-craftbook-format.ts](../../bin/ab-craftbook-format.ts)), and the
+ * authoring half of the `complex-work` suite.
  *
- * Deliberately OPT-IN: this map is NOT spread into `SCENARIOS`
- * ([scenarios/index.ts](../../scenarios/index.ts)) so `pnpm eval:all` /
- * full matrices do not grow. `getScenario()` consults it after the main
- * registry, so `pnpm eval:run craftbook-author-linear` still works, and
- * `listScenarios()` output is unchanged.
+ * This map WAS deliberately opt-in, so `pnpm eval:all` did not grow. That
+ * ended when these became suite members: `suites.test.ts` resolves
+ * membership through `SCENARIOS[sid]`, not `getScenario()`, so a scenario
+ * reachable only by name cannot join a suite. It is now spread into
+ * `SCENARIOS` ([scenarios/index.ts](../../scenarios/index.ts)) and every
+ * member carries an explicit `timeoutMs` for the budgeted-suite contract.
  */
 export const CRAFTBOOK_AUTHORING_SCENARIOS: Record<string, EvalScenario> = {
   [authorLinearScenario.id]: authorLinearScenario,
   [gateScriptScenario.id]: gateScriptScenario,
   [editMidtaskScenario.id]: editMidtaskScenario,
   [findVsCreateScenario.id]: findVsCreateScenario,
+  [devCraftbookRoutingScenario.id]: devCraftbookRoutingScenario,
+  [routeMultiScenario.id]: routeMultiScenario,
+  [authorParamsScenario.id]: authorParamsScenario,
+  [exportGeneralizeScenario.id]: exportGeneralizeScenario,
+  [authorFanoutScenario.id]: authorFanoutScenario,
 };
 
 export function listCraftbookAuthoringScenarios(): EvalScenario[] {

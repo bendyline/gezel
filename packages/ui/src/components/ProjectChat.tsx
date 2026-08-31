@@ -1,5 +1,5 @@
 import type { GezelSummary, ProjectDetail, Task } from '@bendyline/gezel';
-import { displayName, pronounFormsForGender } from '@bendyline/gezel';
+import { displayName, isCodingProject, pronounFormsForGender } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { NewTaskDialog } from '../views/tasks/NewTaskDialog.js';
@@ -11,7 +11,14 @@ import { ProjectTimeline } from './ProjectTimeline.js';
 import { SessionSwitcher } from './SessionSwitcher.js';
 import { TerminalComposer } from './TerminalComposer.js';
 import { pickChatPlaceholder } from './chat-placeholder.js';
+import {
+  projectRecipientKey,
+  projectThreadKey,
+  readChatThreadSelection,
+  writeChatThreadSelection,
+} from './chat-thread-memory.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
+import { useShowAdvancedFeatures } from './useShowAdvancedFeatures.js';
 
 /**
  * How recent an ordinary thread has to be for opening the project to resume
@@ -144,6 +151,15 @@ export function ProjectChat({
   // gezel, and finally the first available gezel.
   useEffect(() => {
     if (selectedId) return;
+    // A recipient this session already addressed in this project outranks the
+    // ranking below — the user picked them, and coming back from another area
+    // is not a retraction of that pick.
+    const remembered = readChatThreadSelection(projectRecipientKey(project.id))?.gezelId;
+    if (remembered && gezels.some((gezel) => gezel.id === remembered)) {
+      setSelectedId(remembered);
+      setStartFreshFor(null);
+      return;
+    }
     if (lastThread === undefined) return;
     const resumable =
       isResumableThread(lastThread, Date.now()) &&
@@ -163,7 +179,12 @@ export function ProjectChat({
     // whatever this gezel last talked about days ago. Their older threads
     // stay in the switcher.
     setStartFreshFor(resumable ? null : next);
-  }, [selectedId, lastThread, gezels, project.voormanGezelId, project.gezelIds]);
+  }, [selectedId, lastThread, gezels, project.id, project.voormanGezelId, project.gezelIds]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    writeChatThreadSelection(projectRecipientKey(project.id), { gezelId: selectedId });
+  }, [project.id, selectedId]);
 
   const selected = gezels.find((g) => g.id === selectedId);
 
@@ -249,6 +270,18 @@ function ProjectChatBody({
     setChatFocusRequestKey((key) => key + 1);
     setComposeMode('chat');
   }, []);
+  // The terminal is a developer surface: the switch (and every other way
+  // into terminal mode — the `> ` draft escape, terminal pills) only exists
+  // on coding-typed projects, and only when "Show advanced features" is on.
+  // Everyone else just gets the chat composer, no mode concept at all.
+  const showAdvancedFeatures = useShowAdvancedFeatures();
+  const showComposeModeTabs = showAdvancedFeatures && isCodingProject(project);
+  // If the gate closes while terminal mode is up (settings toggle flipped
+  // live, or a project's detected type changed), land back on chat rather
+  // than stranding the user on a surface with no switch to leave it.
+  useEffect(() => {
+    if (!showComposeModeTabs && composeMode === 'terminal') switchToChat();
+  }, [showComposeModeTabs, composeMode, switchToChat]);
   // Two pieces of state for the terminal pane, separated on purpose:
   //
   //   - `terminalThreadDir` — the folder used for routing. Sent on
@@ -400,16 +433,26 @@ function ProjectChatBody({
   // across a project switch would send the next message to whichever
   // project the user just left — the bug that made "sends aren't showing
   // up in this chat" look like a timeline issue.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: (selectedGezel.id, project.id) is the reset trigger.
   useEffect(() => {
     const focused = focusedSessionRef.current;
     focusedSessionRef.current = null;
-    setSessionId(focused ?? '');
+    // Nothing was explicitly focused, so this is either a fresh mount or a
+    // recipient switch. Resume the thread this session last had open with
+    // that gezel here rather than falling back on the newest one.
+    setSessionId(
+      focused ??
+        readChatThreadSelection(projectThreadKey(project.id, selectedGezel.id))?.sessionId ??
+        '',
+    );
     // The task scope belongs to the thread we're leaving. A pill click that
     // switches gezel re-sets it right after, via `focusedTaskRef`.
     setActiveTask(focusedTaskRef.current);
     focusedTaskRef.current = null;
   }, [selectedGezel.id, project.id]);
+
+  useEffect(() => {
+    writeChatThreadSelection(projectThreadKey(project.id, selectedGezel.id), { sessionId });
+  }, [project.id, selectedGezel.id, sessionId]);
 
   // Pick a role-aware empty-composer prompt once per (gezel, project)
   // pairing. `isVoorman` is passed from the outer roster derivation —
@@ -419,14 +462,14 @@ function ProjectChatBody({
     () =>
       pickChatPlaceholder({
         role: isVoorman ? 'voorman' : 'other',
-        gezelName: selectedGezel.name,
+        gezelName: selectedName,
         gezelGender: selectedGezel.gender,
         projectName: project.name,
         fixedFunctionTool: selectedGezel.fixedFunction?.tool,
       }),
     [
       isVoorman,
-      selectedGezel.name,
+      selectedName,
       selectedGezel.gender,
       project.name,
       selectedGezel.fixedFunction?.tool,
@@ -434,6 +477,50 @@ function ProjectChatBody({
   );
 
   const selectedGezelPronouns = pronounFormsForGender(selectedGezel.gender);
+
+  // The compose-surface switch, rendered into the top row of whichever
+  // composer is mounted — the chat composer's "To:" line, the terminal
+  // composer's toolbar. Those two rows sit at the same height (the terminal
+  // has no recipient band), so the tabs land under the cursor that just
+  // clicked them instead of jumping a row down. Each tab hangs off the bottom
+  // of its host row and the selected one opens into the band beneath it, so
+  // the thread picker and draft area read as the panel that tab fronts. The
+  // glyphs mirror the escape syntax users can type (`@florian …` → chat,
+  // `> ls` → terminal).
+  const composeModeTabs = !showComposeModeTabs ? null : (
+    <div className="compose-mode-tabs" role="tablist" aria-label="Compose surface">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={composeMode === 'chat'}
+        // The project tab bar already owns a tab named "Chat", so this one
+        // carries a distinguishing accessible name. It still contains the
+        // visible label, which is what WCAG's label-in-name rule asks for.
+        aria-label="AI chat"
+        className="compose-mode-tab"
+        onClick={switchToChat}
+        title="AI chat (@-mention to talk to a gezel)"
+      >
+        <span className="compose-mode-tab-glyph" aria-hidden="true">
+          @
+        </span>
+        Chat
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={composeMode === 'terminal'}
+        className="compose-mode-tab"
+        onClick={() => setComposeMode('terminal')}
+        title="Terminal (run shell commands in this project's workspace)"
+      >
+        <span className="compose-mode-tab-glyph" aria-hidden="true">
+          &gt;
+        </span>
+        Terminal
+      </button>
+    </div>
+  );
 
   return (
     <ChatReferences
@@ -463,26 +550,32 @@ function ProjectChatBody({
             onTaskReference(task.ref, { focus: true });
             void focusTask(task);
           }}
-          onFocusTerminal={(thread) => {
-            pickTerminalFolder(thread.workingDir);
-            setActiveTerminalThreadId(thread.id);
-            setComposeMode('terminal');
-            setTerminalFocusRequest((current) => ({
-              threadId: thread.id,
-              requestKey: (current?.requestKey ?? 0) + 1,
-            }));
-            // The thread anchor identifies the persistent shell, while its
-            // latest message records where that shell actually cd'd.
-            void api
-              .getTerminalThread(project.id, thread.id)
-              .then((detail) => {
-                const cwd = [...detail.messages]
-                  .reverse()
-                  .find((message) => message.cwd !== undefined)?.cwd;
-                if (cwd !== undefined) setTerminalPickerDisplay(cwd);
-              })
-              .catch(() => {});
-          }}
+          // Omitting the handler hides terminal pills entirely — a pill
+          // would drop the user into terminal mode with no switch to leave.
+          onFocusTerminal={
+            showComposeModeTabs
+              ? (thread) => {
+                  pickTerminalFolder(thread.workingDir);
+                  setActiveTerminalThreadId(thread.id);
+                  setComposeMode('terminal');
+                  setTerminalFocusRequest((current) => ({
+                    threadId: thread.id,
+                    requestKey: (current?.requestKey ?? 0) + 1,
+                  }));
+                  // The thread anchor identifies the persistent shell, while
+                  // its latest message records where that shell actually cd'd.
+                  void api
+                    .getTerminalThread(project.id, thread.id)
+                    .then((detail) => {
+                      const cwd = [...detail.messages]
+                        .reverse()
+                        .find((message) => message.cwd !== undefined)?.cwd;
+                      if (cwd !== undefined) setTerminalPickerDisplay(cwd);
+                    })
+                    .catch(() => {});
+                }
+              : undefined
+          }
           onNewTask={() => setNewTaskOpen(true)}
         />
       )}
@@ -521,8 +614,8 @@ function ProjectChatBody({
             {...(sessionFocusRequest ? { sessionFocusRequest } : {})}
             emptyPlaceholder={
               isVoorman
-                ? `Talk to ${selectedGezel.name} about running "${project.name}" — planning tasks, delegating, or checking progress.`
-                : `Chat with ${selectedGezel.name} about what ${selectedGezelPronouns.subject} ${selectedGezelPronouns.presentBe} working on in "${project.name}".`
+                ? `Talk to ${selectedName} about running "${project.name}" — planning tasks, delegating, or checking progress.`
+                : `Chat with ${selectedName} about what ${selectedGezelPronouns.subject} ${selectedGezelPronouns.presentBe} working on in "${project.name}".`
             }
           />
           <div className="project-chat-compose-shell">
@@ -555,6 +648,7 @@ function ProjectChatBody({
                   recentReferences={recentReferences}
                   onOpenReference={onOpenReference}
                   placeholder={placeholder}
+                  draftScope="project"
                   onPivotToMention={(mentionedGezelId) => {
                     // Project-chat pivot: when the user @-mentions another
                     // gezel from inside the active chat, switch the focus
@@ -581,10 +675,15 @@ function ProjectChatBody({
                   }}
                   passiveCcGezelIds={pendingPassiveCcIds}
                   onPassiveCcConsumed={() => setPendingPassiveCcIds([])}
-                  onTerminalEscape={(seed) => {
-                    setTerminalInitialInput(seed);
-                    setComposeMode('terminal');
-                  }}
+                  onTerminalEscape={
+                    showComposeModeTabs
+                      ? (seed) => {
+                          setTerminalInitialInput(seed);
+                          setComposeMode('terminal');
+                        }
+                      : undefined
+                  }
+                  addressLineTrailing={composeModeTabs}
                   belowAddressLine={
                     <SessionSwitcher
                       gezelId={selectedGezel.id}
@@ -614,6 +713,7 @@ function ProjectChatBody({
                       onChangeWorkingDir={pickTerminalFolder}
                     />
                   }
+                  toolbarTrailing={composeModeTabs}
                   initialInput={terminalInitialInput}
                   onSent={(input, result) => {
                     setActiveTerminalThreadId(result.threadId);
@@ -627,32 +727,6 @@ function ProjectChatBody({
                   onChatEscape={switchToChat}
                 />
               )}
-            </div>
-            <div className="project-chat-compose-mode-bar">
-              <div className="project-chat-compose-toggle" role="tablist">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={composeMode === 'chat'}
-                  aria-label="AI chat"
-                  className={composeMode === 'chat' ? 'active' : ''}
-                  onClick={switchToChat}
-                  title="AI chat (@-mention to talk to a gezel)"
-                >
-                  @
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={composeMode === 'terminal'}
-                  aria-label="Terminal"
-                  className={composeMode === 'terminal' ? 'active' : ''}
-                  onClick={() => setComposeMode('terminal')}
-                  title="Terminal (run shell commands in this project's workspace)"
-                >
-                  &gt;
-                </button>
-              </div>
             </div>
           </div>
           {/* Portals, so its position in the tree is cosmetic. `projects` is

@@ -178,7 +178,7 @@ describe('POST /api/permissions/request-and-wait — AskUserQuestion interceptio
     });
   });
 
-  it('denies with a best-judgment message when the user picks "Just do whatever"', async () => {
+  it('denies with a best-judgment message when the answer comes back declined', async () => {
     const pending = requestPermission(
       'AskUserQuestion',
       { questions: [{ question: 'Proceed how?', options: [{ label: 'Carefully' }] }] },

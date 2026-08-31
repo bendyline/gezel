@@ -28,6 +28,7 @@ intermediate render.
 | `scripts-and-craftbooks.css` | Script editor, craftbook editor, automation, and gates |
 | `village-and-overview.css` | Village, task planning, project overview, machine budget, and remote serving |
 | `controls-handbook-and-admin.css` | Late shared control recipes, storage cleanup, backup/restore, and first-run content |
+| `squisq-theme.css` | Rebinds the vendored Squisq editor's `--squisq-*` chrome palette onto gezel's tokens |
 | `handbook.css` | **On demand:** Handboek master/detail surface (owned by `HandboekView`) |
 | `knowledge.css` | **On demand:** Knowledge catalog browser (owned by `KnowledgeView`) |
 

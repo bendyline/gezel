@@ -182,4 +182,71 @@ describe('PendingQuestionCard navigation', () => {
       ref: 'learning/3',
     });
   });
+
+  // The gezel is blocked on the question, so "stop working on this" has to
+  // be answerable from here — otherwise the user answers something they
+  // don't mean just to get to the Tasks view and pause it there.
+  it('pauses the attached task and then clears the card', async () => {
+    vi.mocked(api.setTaskStatus).mockResolvedValue({
+      ref: 'learning/3',
+      status: 'paused',
+    } as never);
+    const onAnswered = vi.fn();
+    render(
+      <PendingQuestionCard
+        question={question({ taskRef: 'learning/3' })}
+        onAnswered={onAnswered}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Pause task' }));
+
+    await waitFor(() => {
+      expect(api.setTaskStatus).toHaveBeenCalledWith('learning', 3, 'paused');
+    });
+    // Silent-skip, not `declined` — pausing is not "proceed with defaults".
+    await waitFor(() => {
+      expect(api.answerQuestion).toHaveBeenCalledWith('q1', { silentSkip: true });
+    });
+    expect(onAnswered).toHaveBeenCalled();
+  });
+
+  it('cancels the attached task from the card', async () => {
+    vi.mocked(api.setTaskStatus).mockResolvedValue({
+      ref: 'learning/3',
+      status: 'canceled',
+    } as never);
+    render(<PendingQuestionCard question={question({ taskRef: 'learning/3' })} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Cancel task' }));
+
+    await waitFor(() => {
+      expect(api.setTaskStatus).toHaveBeenCalledWith('learning', 3, 'canceled');
+    });
+  });
+
+  // A failed steer must not collapse the card onto a task that never moved.
+  it('keeps the card open when the task could not be paused', async () => {
+    vi.mocked(api.setTaskStatus).mockRejectedValue(new Error('task is complete'));
+    render(<PendingQuestionCard question={question({ taskRef: 'learning/3' })} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Pause task' }));
+
+    await screen.findByText('task is complete');
+    expect(api.answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it('offers no task controls on a question with no task', () => {
+    render(<PendingQuestionCard question={question()} />);
+
+    expect(screen.queryByRole('button', { name: 'Pause task' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Cancel task' })).toBeNull();
+  });
+
+  it('no longer offers "Just do whatever"', () => {
+    render(<PendingQuestionCard question={question()} />);
+
+    expect(screen.queryByRole('button', { name: 'Just do whatever' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Skip' })).toBeTruthy();
+  });
 });

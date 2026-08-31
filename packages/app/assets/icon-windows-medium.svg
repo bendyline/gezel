@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
   <!--
-    Medium-detail Windows artwork for 40–64 px ICO frames. At these sizes
+    Medium-detail Windows artwork for 40–48 px ICO frames. At these sizes
     Windows has enough physical pixels for the vise, bolts, and restrained
     grain that are intentionally omitted from the 16/20 px pictogram.
   -->
@@ -14,18 +14,24 @@
     <clipPath id="left-leg-clip">
       <path d="M30 42h12l-4 40H26z" />
     </clipPath>
-    <clipPath id="right-leg-clip">
-      <path d="M70 42h12l4 40H74z" />
-    </clipPath>
     <mask id="vise-jaw">
       <rect width="96" height="96" fill="#fff" />
       <circle cx="13.5" cy="28" r="3" fill="#000" />
     </mask>
+    <path id="leg" d="M30 42h12l-4 40H26z" />
+    <g id="leg-openings">
+      <circle cx="35.4" cy="50" r="2.25" />
+      <circle cx="31.8" cy="73" r="2.25" />
+    </g>
+    <g id="leg-grain" clip-path="url(#left-leg-clip)">
+      <path d="M31 45c7 5 1 10 7 15s-2 11-7 15" />
+      <path d="M35 45c5 6 0 10 4 15" />
+    </g>
   </defs>
 
   <rect width="96" height="96" fill="#849577" />
 
-  <g fill="#f8f8f4">
+  <g fill="#faf9f3">
     <!-- Vise with a clean cut before the tabletop. -->
     <rect x="7" y="21" width="13" height="14" rx="2" mask="url(#vise-jaw)" />
     <rect x="12.25" y="11" width="2.5" height="38" rx="1.25" />
@@ -34,17 +40,15 @@
 
     <!-- Bench body. Equal-width legs mirror around x=56. -->
     <rect x="24" y="20" width="64" height="16" rx="2" />
-    <path d="M30 42h12l-4 40H26z" />
-    <path d="M70 42h12l4 40H74z" />
+    <use href="#leg" />
+    <use href="#leg" transform="translate(112 0) scale(-1 1)" />
     <rect x="43" y="59" width="26" height="9" rx="1.5" />
   </g>
 
   <!-- Bolt holes remain simple circles so they survive intermediate DPIs. -->
   <g fill="#849577">
-    <circle cx="35.4" cy="50" r="2.25" />
-    <circle cx="31.8" cy="73" r="2.25" />
-    <circle cx="76.6" cy="50" r="2.25" />
-    <circle cx="80.2" cy="73" r="2.25" />
+    <use href="#leg-openings" />
+    <use href="#leg-openings" transform="translate(112 0) scale(-1 1)" />
   </g>
 
   <!-- A few low-contrast strokes suggest the approved wood grain. -->
@@ -58,13 +62,7 @@
       <path d="M44 63c8-2 15 2 24-1" />
       <path d="M54 65c2-2 5-1 5 0s-3 2-5 1" />
     </g>
-    <g clip-path="url(#left-leg-clip)">
-      <path d="M31 45c7 5 1 10 7 15s-2 11-7 15" />
-      <path d="M35 45c5 6 0 10 4 15" />
-    </g>
-    <g clip-path="url(#right-leg-clip)">
-      <path d="M81 45c-7 5-1 10-7 15s2 11 7 15" />
-      <path d="M77 45c-5 6 0 10-4 15" />
-    </g>
+    <use href="#leg-grain" />
+    <use href="#leg-grain" transform="translate(112 0) scale(-1 1)" />
   </g>
 </svg>

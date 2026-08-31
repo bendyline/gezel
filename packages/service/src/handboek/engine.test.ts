@@ -136,7 +136,7 @@ describe('handboek engine', () => {
     // Shelved by subject, with the family named because the list is flat.
     expect(craftbooks.entries[1]?.subcategory).toEqual({
       id: 'business',
-      title: 'Non-code · Business & admin',
+      title: 'Business · Money & admin',
       order: 12,
     });
     const technical = toc.areas.find((a) => a.area === 'technical')!;
@@ -146,6 +146,7 @@ describe('handboek engine', () => {
       ['providers-and-engines', 'How Gezel works'],
       ['tools-and-toolsets', 'How Gezel works'],
       ['security-model', 'How Gezel works'],
+      ['verifying-your-download', 'How Gezel works'],
       ['cli-reference', 'The Gezel Command Line'],
       ['npm-packages', 'The Gezel Command Line'],
       ['writing-scripts-with-gezel-sdk', 'Developer'],

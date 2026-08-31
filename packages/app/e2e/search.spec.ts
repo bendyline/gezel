@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
@@ -43,7 +44,7 @@ test('titlebar search: shortcut focuses the box and typing opens the palette', a
     await input.fill('default');
     await expect(page.locator('[data-testid="search-palette"]')).toBeVisible({ timeout: 10_000 });
   } finally {
-    await app.close();
+    await closeApp(app);
     await rm(gezelHome, { recursive: true, force: true }).catch(() => {});
   }
 });

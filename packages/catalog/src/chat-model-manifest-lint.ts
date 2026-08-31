@@ -53,7 +53,12 @@ interface LooseManifest {
   };
   behaviors?: Array<string | { id?: string }>;
   llamaCpp?: { residentBytes?: number; huggingfaceRepo?: string; quantization?: string };
-  mlx?: { residentBytes?: number; huggingfaceRepo?: string; quantization?: string };
+  mlx?: {
+    residentBytes?: number;
+    huggingfaceRepo?: string;
+    quantization?: string;
+    chatTemplateOverride?: string;
+  };
   ds4?: { residentBytes?: number };
 }
 
@@ -64,6 +69,14 @@ interface LooseManifest {
  * differently (`Q8_0` vs `8bit`, `UD-Q4_K_XL` vs `4bit`), and the label is
  * what a reviewer reads in the manifest.
  */
+/**
+ * Model-id prefixes whose MLX conversions are known to carry a chat template
+ * upstream has since corrected. Membership is a claim about the published
+ * quant repos, not about the architecture — drop a family from this list only
+ * once the repos the catalog actually installs from ship the fixed template.
+ */
+const MLX_TEMPLATE_OVERRIDE_REQUIRED = /^gemma4-/;
+
 function quantBits(quantization: string | undefined): number | null {
   const q = quantization?.toLowerCase();
   if (!q) return null;
@@ -294,6 +307,44 @@ export function lintChatModelManifest(manifest: LooseManifest): ManifestLintRepo
       rule: 'mlx-nonstandard-quant-format',
       detail: `mlx quantization "${manifest.mlx?.quantization}" is not one of MLX's standard affine widths — confirm Metal has first-class kernels for it (nvfp4 targets NVIDIA Blackwell; MXFP4 is native for some upstreams and legitimate there)`,
     });
+  }
+
+  // A whole model family can inherit one bad chat template. `mlx_lm.convert`
+  // copies whatever template the source snapshot carried, so when upstream
+  // later fixes the template, every conversion cut before that date keeps
+  // shipping the broken one — and re-picking the repo does not help, because
+  // they were all cut from the same stale snapshot. `chatTemplateOverride` is
+  // the only lever, which makes its ABSENCE the regression to guard: a
+  // regenerate that drops `chatTemplateFrom` from the recipe silently returns
+  // the family to the broken template with no error anywhere.
+  //
+  // gemma-4 is the case this was written for: every MLX build predates
+  // Google's 2026-07-09 canonical template ("Fixed tool-calling loops, turn
+  // closures, and thinking content-ordering") while the llama.cpp GGUFs carry
+  // it — a same-id, cross-engine behavior split on exactly the axis these
+  // models are weakest.
+  if (manifest.mlx && MLX_TEMPLATE_OVERRIDE_REQUIRED.test(modelId)) {
+    const override = manifest.mlx.chatTemplateOverride;
+    if (!override) {
+      errors.push({
+        modelId,
+        rule: 'mlx-missing-chat-template-override',
+        detail:
+          'no `mlx.chatTemplateOverride` — every MLX build of this family ships a chat ' +
+          'template its authors have since fixed, so without an override this model runs ' +
+          "the broken one while the same id's llama.cpp build runs the fixed one. Restore " +
+          '`chatTemplateFrom` in the authoring recipe and regenerate',
+      });
+    } else if (!override.includes('{%') && !override.includes('{{')) {
+      errors.push({
+        modelId,
+        rule: 'mlx-chat-template-override-not-jinja',
+        detail:
+          '`mlx.chatTemplateOverride` contains no Jinja delimiters — a template fetch that ' +
+          'silently resolved to an error page would look exactly like this, and would be ' +
+          'written over the working upstream template at install time',
+      });
+    }
   }
 
   // Tier defaults a manifest silently forfeits. Declaring ANY `behaviors`

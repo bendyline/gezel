@@ -84,7 +84,7 @@ describe('TaskManager', () => {
     expect(Math.max(...nums)).toBe(N);
   });
 
-  it('snapshots a craftbook’s toolsets and basedOn credit onto the task', async () => {
+  it('snapshots a craftbook’s toolsets, recommends, and basedOn credit onto the task', async () => {
     await installProjectToolset('usb-camera');
     tasks.setCraftbookResolver({
       async resolve(id) {
@@ -96,6 +96,7 @@ describe('TaskManager', () => {
             entryStepId: 'capture',
             basedOn: { name: 'Camera recipe', url: 'https://example.com/camera-recipe' },
             toolsets: [{ toolsetId: 'usb-camera', autoAllow: true, reason: 'pull frames' }],
+            recommends: [{ kind: 'external-services', reason: 'streams from a cloud camera' }],
             createdAt: '2026-01-01T00:00:00Z',
             updatedAt: '2026-01-01T00:00:00Z',
           },
@@ -110,6 +111,10 @@ describe('TaskManager', () => {
     });
     expect(t.craftbook.toolsets).toEqual([
       { toolsetId: 'usb-camera', autoAllow: true, reason: 'pull frames' },
+    ]);
+    // The chat's craftbook start card reads this off the tool result's task.
+    expect(t.craftbook.recommends).toEqual([
+      { kind: 'external-services', reason: 'streams from a cloud camera' },
     ]);
     expect(t.craftbook.basedOn).toEqual({
       name: 'Camera recipe',
@@ -698,6 +703,44 @@ describe('TaskManager', () => {
       newStepId: t.craftbook.steps[1]!.id,
       completedStepId: t.craftbook.steps[0]!.id,
     });
+  });
+
+  it('redispatchActiveStep re-fires the hook for the CURRENT step without moving it', async () => {
+    // The fanout barrier's release valve: `service.ts` declines to dispatch
+    // a post-fanout step while children are active, and this is what lifts
+    // the hold once the last child settles.
+    const t = await tasks.create('website', {
+      title: 'Fan out then collect',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Draft' }, { name: 'Collect' }],
+    });
+    await tasks.completeStep('website', t.num, t.craftbook.steps[0]!.id);
+    const collectId = t.craftbook.steps[1]!.id;
+
+    const calls: Array<{ newStepId: string; completedStepId: string }> = [];
+    tasks.setStepActivatedHook(async (ctx) => {
+      calls.push({ newStepId: ctx.newStep.id, completedStepId: ctx.completedStep.id });
+    });
+    await tasks.redispatchActiveStep('website', t.num, 'last fanout child settled');
+
+    expect(calls).toEqual([{ newStepId: collectId, completedStepId: collectId }]);
+    const after = await tasks.get('website', t.num);
+    expect(after?.activeStepId).toBe(collectId);
+  });
+
+  it('redispatchActiveStep is a no-op for a task that is not active', async () => {
+    const t = await tasks.create('website', {
+      title: 'Parked',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Draft' }, { name: 'Collect' }],
+    });
+    await tasks.setStatus('website', t.num, 'paused');
+    const calls: unknown[] = [];
+    tasks.setStepActivatedHook(async () => {
+      calls.push(true);
+    });
+    await tasks.redispatchActiveStep('website', t.num, 'child settled');
+    expect(calls).toHaveLength(0);
   });
 
   it('onPhaseActivated failures do not break completePhase', async () => {

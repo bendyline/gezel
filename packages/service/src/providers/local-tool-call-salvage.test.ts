@@ -1599,6 +1599,38 @@ describe('appendCapTruncationHintToRejectedWrite', () => {
     expect(after).not.toContain('replace_in_file');
   });
 
+  it('steers a truncated write_artifact the MLX loop refused to execute', () => {
+    // MLX drops a cap-truncated `write_artifact` at the salvage stage — the
+    // call never runs, so there is no tool result to decorate and the
+    // provider synthesizes this ERROR line to carry the steer. If any of
+    // the helper's four early-return guards rejected that synthetic input
+    // the steer would be a silent no-op and the loop would burn iterations
+    // delivering nothing. Pin the exact string the provider builds.
+    const partial = '{\n  "pullRequest": 42,\n  "reviewedFiles": [\n    "AGENTS.md"';
+    const before =
+      'ERROR: `write_artifact` was not executed because the call was cut off at the per-turn output token cap before its payload finished.';
+    const after = appendCapTruncationHintToRejectedWrite(
+      before,
+      'write_artifact',
+      { path: 'tasks/49/pr-review-coverage.json', content: partial },
+      6144,
+      {
+        availableToolNames: new Set([
+          'write_artifact',
+          'read_artifact',
+          'write_task_note',
+          'set_task_status',
+        ]),
+      },
+    );
+    expect(after).not.toBe(before);
+    expect(after).toContain('hit the per-turn output token cap');
+    expect(after).toContain('max_tokens=6144');
+    expect(after).toContain('tasks/49/pr-review-coverage.json');
+    expect(after).toContain('do not retry a full rewrite');
+    expect(after).toContain('No incremental edit tool is wired this turn');
+  });
+
   it('refuses to steer an over-cap write_artifact at the workspace edit tools', () => {
     // The artifacts drawer has no incremental writer, and `replace_in_file`
     // addresses the workspace — pointing there edits a different file, or on a

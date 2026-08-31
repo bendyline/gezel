@@ -5,5 +5,6 @@ export * as DropdownMenu from './DropdownMenu.js';
 export { DropdownChevron } from './DropdownChevron.js';
 export * as Popover from './Popover.js';
 export * as Select from './Select.js';
+export { SubmitArrow } from './SubmitArrow.js';
 export * as Tabs from './Tabs.js';
 export * as Tooltip from './Tooltip.js';

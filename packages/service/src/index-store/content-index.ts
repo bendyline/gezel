@@ -40,7 +40,13 @@ import type {
   SymbolContext,
   TraceTaintResponse,
 } from '@bendyline/gezel';
-import { SecurityScanProvenanceSchema, isSharedLibraryProject, nowIso } from '@bendyline/gezel';
+import {
+  SecurityScanProvenanceSchema,
+  createLogger,
+  isSharedLibraryProject,
+  nowIso,
+  projectAllowsWorkspaceTables,
+} from '@bendyline/gezel';
 import {
   fallbackProjectIndexDir,
   fallbackProjectVillageFile,
@@ -67,6 +73,13 @@ import type {
   ImageEmbedOutcome,
 } from '../memory/image-embeddings.js';
 import { IMAGE_EMBED_EXTS } from '../memory/image-pixels.js';
+import type { DuckRunner } from '../observations/duck.js';
+import {
+  type DrainResult,
+  NIGHT_MAX_INLINE_BYTES,
+  NIGHT_MAX_TABLES_PER_DRAIN,
+  drainWorkspaceTables,
+} from '../observations/workspace-drain.js';
 import { runSecurityScan } from '../security/scan.js';
 import { type AiShadowDeps, aiShadowFile } from './ai-shadow.js';
 import { ARCHITECTURE_KEY, type AreaPassResult, runAreaPass } from './area-pass.js';
@@ -117,6 +130,8 @@ const MAX_READ_BYTES = 2 * 1024 * 1024;
  * fire-and-forget refresh per binding, and a project can sync several
  * bindings back to back — collapsing them buys one walk per burst.
  */
+
+const log = createLogger('index');
 const ARTIFACTS_REFRESH_DEBOUNCE_MS = 5_000;
 
 /** Mirror of the `filesNeedingReview` SQL predicate's modality filter. */
@@ -213,12 +228,24 @@ export class ContentIndex {
   /** Per-project settle of the last dispatched pass, so passes never overlap. */
   private readonly artifactsRefreshLast = new Map<string, Promise<unknown>>();
 
+  /**
+   * Late-bound because the query engine is constructed after the index in boot
+   * order, and because a build with no engine installed must still index — the
+   * drain simply reports nothing converted and picks the files up later.
+   */
+  private duck: DuckRunner | null = null;
+
   constructor(
     private readonly store: Store,
     private readonly home: string,
     opts: { artifactsDebounceMs?: number } = {},
   ) {
     this.artifactsDebounceMs = opts.artifactsDebounceMs ?? ARTIFACTS_REFRESH_DEBOUNCE_MS;
+  }
+
+  /** Give the index the engine it needs to derive tables from data files. */
+  setDuckRunner(duck: DuckRunner): void {
+    this.duck = duck;
   }
 
   private cityStoreFor(projectId: string, workspaceDir: string | null): VillageFileStore {
@@ -285,6 +312,38 @@ export class ContentIndex {
       // the same tick that ingests churn also refreshes the persisted map.
       // Never throws; degrades to 'unavailable' without git.
       await refreshGitStats(post.index, workspaceDir);
+      // Data files the pass just enrolled become queryable tables. Runs here,
+      // after the worker, because the conversion spawns a DuckDB child and the
+      // static pass executes inside a worker thread. Never throws: an
+      // unreadable CSV must not take down the index pass around it.
+      // Both halves of the user's gate: the project-wide indexing opt-out the
+      // enrichment manager already honours, and the per-feature one.
+      //
+      // A project we cannot read is skipped rather than assumed permissive:
+      // deriving tables spends CPU and disk, and doing that for a project
+      // whose settings are unreadable is the wrong way to be wrong. The drain
+      // is idempotent, so the next pass picks the work up.
+      //
+      // Wrapped rather than `.catch`ed because a Store that lacks the method
+      // throws synchronously, which no promise catch would see.
+      let tablesAllowed = false;
+      try {
+        const meta = await this.store.getProject(projectId);
+        tablesAllowed =
+          meta != null && meta.indexingEnabled !== false && projectAllowsWorkspaceTables(meta);
+      } catch {
+        tablesAllowed = false;
+      }
+      if (this.duck && tablesAllowed) {
+        await drainWorkspaceTables({
+          store: post.index,
+          duck: this.duck,
+          storageDir: this.store.projectArtifactsDir(projectId),
+          workspaceDir,
+        }).catch((err) => {
+          log.warn(`[index] derived-table drain failed for ${projectId}: ${String(err)}`);
+        });
+      }
       // Refresh the persisted city-map layout so it grows with the code. Failure
       // here must not break indexing — the map is a derived, regenerable view.
       try {
@@ -2421,6 +2480,42 @@ export class ContentIndex {
   }
 
   // ── internals ──────────────────────────────────────────────────────────
+
+  /**
+   * Convert tabular files the interactive pass deferred for being too large.
+   *
+   * Same drain, night budgets. A 2 GB CSV is refused during indexing because a
+   * user is waiting on that pass; at night nobody is, so the size ceiling and
+   * the per-run cap both lift. Returns null when the project has nothing to do
+   * or has opted out.
+   */
+  async drainWorkspaceTablesAtNight(projectId: string): Promise<DrainResult | null> {
+    if (!this.duck) return null;
+    let allowed = false;
+    try {
+      const meta = await this.store.getProject(projectId);
+      allowed =
+        meta != null && meta.indexingEnabled !== false && projectAllowsWorkspaceTables(meta);
+    } catch {
+      allowed = false;
+    }
+    if (!allowed) return null;
+
+    const opened = await this.open(projectId);
+    if (!opened) return null;
+    try {
+      return await drainWorkspaceTables({
+        store: opened.index,
+        duck: this.duck,
+        storageDir: opened.artifactsDir,
+        workspaceDir: opened.workspaceDir,
+        maxTables: NIGHT_MAX_TABLES_PER_DRAIN,
+        maxInlineBytes: NIGHT_MAX_INLINE_BYTES,
+      });
+    } finally {
+      opened.index.close();
+    }
+  }
 
   private async open(projectId: string): Promise<{
     index: IndexStore;

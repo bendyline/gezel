@@ -816,7 +816,7 @@ describe('LlamaCppModelManager.install', () => {
   // caching off for that model process-wide — a cost paid on every text turn.
   // Installing a model that merely *ships* a projector must not opt the user
   // into that silently.
-  it('skips the mmproj sidecar by default so prompt caching survives', async () => {
+  it('downloads the mmproj sidecar by DEFAULT so the vision toggle has something to load', async () => {
     const weights = buildGguf({
       arch: 'nemotron_h',
       contextLength: 131072,
@@ -862,21 +862,83 @@ describe('LlamaCppModelManager.install', () => {
     const fetchImpl = (async (input: string | URL) => {
       const href = typeof input === 'string' ? input : input.toString();
       requested.push(href);
+      const buf = href.includes('mmproj') ? mmproj : weights;
+      return new Response(buf, {
+        status: 200,
+        headers: { 'content-length': String(buf.byteLength) },
+      });
+    }) as typeof fetch;
+    const mgr = new LlamaCppModelManager({ home, catalog, fetchImpl });
+    await drain(mgr.install('mm-default'));
+
+    // The download used to be gated on the vision toggle, which meant
+    // enabling vision on an already-installed model appeared to do nothing:
+    // the projector it needed had never been fetched and nothing re-fetched
+    // it. Loading is still opt-in; HAVING the file no longer is.
+    expect(requested.some((u) => u.includes('mmproj'))).toBe(true);
+    const dir = join(home, 'engines', 'llama-cpp', 'models', 'mm-default');
+    const onDisk = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
+    expect(onDisk.weightsFilename).toBe('model-Q4_K_M.gguf');
+    expect(onDisk.mmprojFilename).toBe('mmproj-BF16.gguf');
+    const installed = await mgr.listInstalled();
+    expect(installed[0]?.mmprojPath).toBe(join(dir, 'mmproj-BF16.gguf'));
+  });
+
+  it('still honors an explicit includeMmproj:false — ds4 has no sidecar path', async () => {
+    const weights = buildGguf({
+      arch: 'nemotron_h',
+      contextLength: 131072,
+      fileType: 15,
+      chatTemplate: '{%- if tools %}tools{%- endif %}',
+    });
+    const mmproj = Buffer.from('MMPROJ-PROJECTOR-WEIGHTS', 'utf8');
+    const catalog = fakeCatalog(
+      new Map<string, ChatModelManifest>([
+        [
+          'mm-optout',
+          {
+            schemaVersion: 1,
+            kind: 'chat-model',
+            id: 'mm-optout',
+            name: 'Multimodal Opt Out',
+            description: 'fixture',
+            tags: [],
+            maintainer: { name: 'Test' },
+            version: '1.0.0',
+            releasedAt: '2026-04-22T00:00:00Z',
+            availableVersions: ['1.0.0'],
+            parameterSize: '30B',
+            approxSizeBytes: weights.byteLength,
+            supportsTools: true,
+            llamaCpp: {
+              huggingfaceRepo: 'test-org/multimodal-GGUF',
+              filename: 'model-Q4_K_M.gguf',
+              sha256: sha256Hex(weights),
+              approxSizeBytes: weights.byteLength,
+              quantization: 'Q4_K_M',
+              mmproj: {
+                filename: 'mmproj-BF16.gguf',
+                sha256: sha256Hex(mmproj),
+                sizeBytes: mmproj.byteLength,
+              },
+            },
+          } as ChatModelManifest,
+        ],
+      ]),
+    );
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL) => {
+      const href = typeof input === 'string' ? input : input.toString();
+      requested.push(href);
       return new Response(weights, {
         status: 200,
         headers: { 'content-length': String(weights.byteLength) },
       });
     }) as typeof fetch;
     const mgr = new LlamaCppModelManager({ home, catalog, fetchImpl });
-    await drain(mgr.install('mm-default'));
+    await drain(mgr.install('mm-optout', { includeMmproj: false }));
 
     expect(requested.some((u) => u.includes('mmproj'))).toBe(false);
-    const dir = join(home, 'engines', 'llama-cpp', 'models', 'mm-default');
-    const onDisk = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'));
-    expect(onDisk.weightsFilename).toBe('model-Q4_K_M.gguf');
-    expect(onDisk.mmprojFilename).toBeUndefined();
-    // Without a projector path the capability resolver keeps the model on the
-    // recognition path, which is exactly right.
     const installed = await mgr.listInstalled();
     expect(installed[0]?.mmprojPath).toBeUndefined();
   });

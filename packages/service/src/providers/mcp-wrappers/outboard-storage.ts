@@ -63,6 +63,12 @@ const OUTBOARD_STORAGE_TOOLS = new Set<string>([
   'run_playwright_script',
   'run_nodejs_script',
   'run_npx',
+  // A query the model deliberately widened — a per-row export rather than an
+  // aggregate — spills to a file it can then slice or grep, instead of being
+  // truncated mid-result. The wrapper no-ops when no artifact writer is wired,
+  // so a writes-off roster degrades to the inline cap rather than being told
+  // to use a tool it does not have.
+  'query_table',
 ]);
 
 /**
@@ -101,6 +107,8 @@ const TOOL_EXTENSIONS: Record<string, string> = {
   run_playwright_script: 'txt',
   run_nodejs_script: 'txt',
   run_npx: 'txt',
+  // Rows render as a markdown table, which reads as ordinary text.
+  query_table: 'md',
 };
 
 /**

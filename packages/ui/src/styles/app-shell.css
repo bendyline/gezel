@@ -1070,6 +1070,13 @@ button.search-palette-group-more:hover {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   color: var(--titlebar-ink);
   font-size: 0.8rem;
+  /* The fixed-position variant gets a measured max-height from the hook; this
+     is the fallback for the absolute anchor. Either way the slab is its own
+     scroll container with `contain`, so a wheel gesture over an open popover
+     never reaches the page underneath it. */
+  max-height: min(34rem, calc(100vh - 5rem));
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 /* Engine telemetry carries two-column labels plus memory meters, so give it
    a little more breathing room than the compact quota popover. */
@@ -1722,6 +1729,7 @@ button.machine-memory-unload-button {
   width: min(25rem, calc(100vw - 1rem));
   max-height: 30rem;
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--surface, #1f2124);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -2144,6 +2152,12 @@ button.machine-memory-unload-button {
   color: var(--text);
 }
 
+/* The Gezels pane's toolbar carries a single button and no right-edge control,
+   so it centers rather than sitting flush left like the Projects strip. */
+.gezels-side > .area-toolbar {
+  justify-content: center;
+}
+
 /* Pushed to the right edge (Projects collapse control). */
 .area-toolbar-toggle {
   margin-left: auto;
@@ -2357,66 +2371,9 @@ button.machine-memory-unload-button {
   min-height: 0;
 }
 
-/* Recolor the Squisq editor's bottom status bar to match the gezel
-   header/title-bar green instead of Squisq's default slate-blue
-   (`#1f2937` in dark / `#f9fafb` in light). Applies wherever EditorShell
-   is mounted in gezel (Documents, project artifacts, etc.). */
-.squisq-editor-shell .squisq-status-bar,
-.squisq-editor-shell[data-theme="dark"] .squisq-status-bar,
-.squisq-editor-shell[data-theme="light"] .squisq-status-bar {
-  background: var(--titlebar, #667f62);
-  color: var(--titlebar-ink, #f3ede0);
-  border-top-color: rgba(0, 0, 0, 0.25);
-}
-.squisq-editor-shell[data-theme="dark"] .squisq-status-ok,
-.squisq-editor-shell .squisq-status-ok {
-  color: var(--titlebar-ink, #f3ede0);
-}
-
-/* Squisq editor → gezel palette bridge. The editor's chrome accents are
-   `var(--squisq-accent…, <indigo>)` fallback chains — defining the tokens
-   on the shell root swaps the whole indigo family for the terracotta
-   accent wherever an EditorShell is mounted (documents, project briefs,
-   chat composer, script editors). Same seam idea as the GezelJsonEditor
-   form bridge at the end of this file. */
-.squisq-editor-shell {
-  --squisq-accent: var(--accent);
-  --squisq-accent-hover: var(--accent-hover);
-  --squisq-outline-accent: var(--accent);
-}
-
-/* The block-outline panel hardcodes cool greys (#dcd8d0 panel, #f3f4f6
-   hover) rather than reading tokens — repaint it with the gezel surface
-   family so the editor's left rail reads as part of the app, not an
-   embedded foreign product. */
-.squisq-editor-shell .squisq-outline {
-  /* The outline <aside> itself carries `--squisq-outline-accent: <blue>`
-     as an INLINE style, so this same-element declaration needs
-     `!important` to win — the same reason the GezelJsonEditor bridge at
-     the end of this file uses it. */
-  --squisq-outline-accent: var(--accent) !important;
-  background: var(--surface);
-  color: var(--text);
-}
-.squisq-editor-shell .squisq-outline-row:hover,
-.squisq-editor-shell
-  .squisq-outline-row-wrap:hover
-  .squisq-outline-row:not(.squisq-outline-row--current) {
-  background: color-mix(in oklch, var(--accent) 10%, transparent);
-}
-.squisq-editor-shell
-  .squisq-outline-row-wrap:has(.squisq-outline-row--current)
-  .squisq-outline-row-actions {
-  background: color-mix(in oklch, var(--accent) 14%, var(--surface));
-}
-.squisq-editor-shell[data-theme="dark"] .squisq-outline {
-  background: var(--panel);
-}
-.squisq-editor-shell[data-theme="dark"]
-  .squisq-outline-row-wrap:has(.squisq-outline-row--current)
-  .squisq-outline-row-actions {
-  background: color-mix(in oklch, var(--accent) 26%, var(--panel));
-}
+/* Squisq editor chrome is themed in styles/squisq-theme.css — squisq now
+   declares its whole chrome palette as `--squisq-*` tokens, so gezel rebinds
+   the palette in one place instead of patching selectors here. */
 
 /* Dropdown that collects the less-frequent top-nav destinations
    (Gezels, Documents, Tasks, Scripts, History, Settings). Trigger
@@ -2430,6 +2387,14 @@ button.machine-memory-unload-button {
   min-width: 10rem;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
   z-index: 50;
+  /* Radix flips the panel to the other side when it doesn't fit below,
+     but a list taller than either side still runs past the window edge —
+     the chat rail's References menu grows with every file a gezel touches.
+     The popper's available-height is the only value that knows where that
+     edge is; keep a sliver of it so the panel never butts against it. */
+  max-height: calc(var(--radix-popper-available-height, 100vh) - 0.75rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .app-nav-menu-item {
@@ -2637,10 +2602,13 @@ button.machine-memory-unload-button {
   padding: 1rem 1.25rem;
 }
 
-/* The crew/project split screens and the Craftbooks workspace go edge-to-edge
-   with no surrounding margin. Other views keep the inset. */
+/* Split workspaces and pane-based browsers go edge-to-edge with no surrounding
+   margin. Each pane owns the breathing room its contents need. Other views
+   keep the app-level inset. */
 .app-main:has(> .two-col),
-.app-main:has(> .craftbooks-view) {
+.app-main:has(> .craftbooks-view),
+.app-main:has(> .handboek-view),
+.app-main:has(> .knowledge-view) {
   padding: 0;
 }
 
@@ -3971,10 +3939,14 @@ body.app-resizing webview {
   margin: 0;
 }
 
-/* Sidebar rows can contain trailing action triggers. Keep this generic
-   full-width treatment off those compact actions and off `.gezel-row`,
-   which owns a horizontal portrait/text layout further below. */
-.side li button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.gezel-row) {
+/* Sidebar rows can contain trailing action triggers and live-turn indicators.
+   Keep this generic full-width treatment off those compact actions and off
+   `.gezel-row`, which owns a horizontal portrait/text layout further below. */
+.side
+  li
+  button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.project-row-thinking):not(
+    .gezel-row
+  ) {
   display: block;
   width: 100%;
   text-align: left;
@@ -3986,6 +3958,10 @@ body.app-resizing webview {
   cursor: pointer;
 }
 
-.side li button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.gezel-row).active {
+.side
+  li
+  button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.project-row-thinking):not(
+    .gezel-row
+  ).active {
   background: rgba(176, 114, 76, 0.15);
 }

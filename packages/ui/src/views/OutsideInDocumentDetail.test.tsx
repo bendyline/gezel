@@ -54,9 +54,14 @@ vi.mock('../components/SquisqIntegration/index.js', () => ({
   runtimePathForTarget: () => '_squisq/squisq-player.js',
   withOutsideInMarkdownEditing: (content: string) => `${content}\neditable: true`,
   withOutsideInMetadata: (content: string) => content,
+  gezelProofingProvider: () => ({ kind: 'proofing-provider' }),
+  gezelProofingIgnoreStore: { load: () => undefined, save: () => {} },
 }));
 vi.mock('../components/transform/TransformToolbarButton.js', () => ({
   TransformToolbarButton: () => <span>transform</span>,
+}));
+vi.mock('../components/DocumentNarration.js', () => ({
+  DocumentNarration: () => <span>narrate</span>,
 }));
 vi.mock('../theme.js', () => ({ useEffectiveTheme: () => 'dark' }));
 
@@ -142,6 +147,7 @@ describe('OutsideInDocumentDetail', () => {
 
     expect(await screen.findByTestId('editor-shell')).toHaveAttribute('data-readonly', 'true');
     expect(screen.getByText('DOCX preview · read-only.')).toBeInTheDocument();
+    expect(screen.getByText('narrate')).toBeInTheDocument();
     screen.getByRole('button', { name: 'Enable editing' }).click();
 
     await waitFor(() => {

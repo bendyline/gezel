@@ -96,6 +96,27 @@ function invoke(body: unknown, opts: { auth?: boolean; project?: string } = {}) 
   });
 }
 
+interface PageRunCall {
+  scriptName: string;
+  inputs: Record<string, unknown>;
+  trigger: { kind: string; tool: string };
+  timeoutMs: number;
+}
+
+/**
+ * Runs this route dispatched, ignoring those a backgrounded reaction turn
+ * makes through the same service-wide stub. A summoned gezel reaches its own
+ * script calls whenever its turn gets there — often during a later test —
+ * and `mockClear()` cannot fence out a call that has not happened yet, so
+ * "did the route dispatch?" has to be asked of the `page` trigger, not of the
+ * stub's total.
+ */
+function pageRuns(): PageRunCall[] {
+  return runStub.mock.calls
+    .map(([opts]) => opts as PageRunCall | undefined)
+    .filter((opts): opts is PageRunCall => opts?.trigger?.kind === 'page');
+}
+
 describe('POST /api/projects/:id/page-invoke', () => {
   it('rejects unauthenticated callers', async () => {
     const res = await invoke({ tool: 'user_move' }, { auth: false });
@@ -112,7 +133,7 @@ describe('POST /api/projects/:id/page-invoke', () => {
     const res = await invoke({ tool: 'get_board' });
     expect(res.status).toBe(403);
     expect(((await res.json()) as { error: string }).error).toContain('not exposed to pages');
-    expect(runStub).not.toHaveBeenCalled();
+    expect(pageRuns()).toHaveLength(0);
   });
 
   it('runs a page tool with bind merged over input and the page trigger', async () => {
@@ -124,18 +145,13 @@ describe('POST /api/projects/:id/page-invoke', () => {
     const body = (await res.json()) as { status: string; reaction?: { delivered: boolean } };
     expect(body.status).toBe('ok');
 
-    expect(runStub).toHaveBeenCalledTimes(1);
-    const args = runStub.mock.calls[0]?.[0] as {
-      scriptName: string;
-      inputs: Record<string, unknown>;
-      trigger: { kind: string; tool: string };
-      timeoutMs: number;
-    };
-    expect(args.scriptName).toBe('game-store');
+    const args = pageRuns();
+    expect(args).toHaveLength(1);
+    expect(args[0]!.scriptName).toBe('game-store');
     // bind wins over a page-supplied value for the same key.
-    expect(args.inputs).toEqual({ from: 'c3', to: 'd4', action: 'user_move' });
-    expect(args.trigger).toEqual({ kind: 'page', tool: 'user_move' });
-    expect(args.timeoutMs).toBe(30_000);
+    expect(args[0]!.inputs).toEqual({ from: 'c3', to: 'd4', action: 'user_move' });
+    expect(args[0]!.trigger).toEqual({ kind: 'page', tool: 'user_move' });
+    expect(args[0]!.timeoutMs).toBe(30_000);
   });
 
   it('fires the declared reaction into the Damspeler session on success', async () => {
@@ -196,7 +212,7 @@ describe('POST /api/projects/:id/page-invoke', () => {
     const body = (await res.json()) as { error: string };
     expect(body.error).toContain('input does not match tool schema');
     expect(body.error).toContain('/from');
-    expect(runStub).not.toHaveBeenCalled();
+    expect(pageRuns()).toHaveLength(0);
   });
 
   it('rate-limits runaway pages', async () => {

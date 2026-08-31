@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+  <!-- Native 20 px artwork for Windows at 125% display scaling. -->
+  <rect width="20" height="20" fill="#849577" />
+
+  <defs>
+    <path id="leg" d="M4 7h4L6 18H2z" />
+  </defs>
+
+  <g fill="#faf9f3" shape-rendering="crispEdges">
+    <rect x="2" y="2" width="16" height="4" />
+    <use href="#leg" />
+    <use href="#leg" transform="translate(20 0) scale(-1 1)" />
+    <rect x="6" y="12" width="8" height="3" />
+  </g>
+</svg>

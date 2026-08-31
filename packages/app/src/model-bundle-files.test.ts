@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { findGezmodelArguments, portableGezmodelFilename } from './model-bundle-files.js';
+import { findGezmodelArguments } from './model-bundle-files.js';
 
 describe('model bundle OS argument parsing', () => {
   it('finds case-insensitive absolute and relative .gezmodel paths', () => {
@@ -10,8 +10,7 @@ describe('model bundle OS argument parsing', () => {
     );
   });
 
-  it('ignores unrelated arguments and creates a portable export name', () => {
+  it('ignores unrelated arguments', () => {
     expect(findGezmodelArguments(['gezel', '--gezel-home=C:/tmp'], 'C:/work')).toEqual([]);
-    expect(portableGezmodelFilename('qwen:7b/q4')).toBe('qwen-7b-q4.gezmodel');
   });
 });

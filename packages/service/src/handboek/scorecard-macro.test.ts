@@ -1,6 +1,18 @@
-import { type ScorecardDataset, ScorecardDatasetSchema } from '@bendyline/gezel';
+import {
+  SCORECARD_DATA_ATTRS,
+  type ScorecardDataset,
+  ScorecardDatasetSchema,
+} from '@bendyline/gezel';
+import { markdownDocToPlainHtml } from '@bendyline/squisq-formats/html';
+import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { describe, expect, it } from 'vitest';
-import { breakModelLabel, renderScorecardMarkdown, renderScorecardRunsMarkdown } from './macros.js';
+import {
+  MACROS,
+  breakModelLabel,
+  renderScorecardFilterHtml,
+  renderScorecardMarkdown,
+  renderScorecardRunsMarkdown,
+} from './macros.js';
 
 function dataset(
   over: {
@@ -341,5 +353,190 @@ describe('breakModelLabel', () => {
     expect(breakModelLabel('Big 27B')).toBe('Big 27B');
     expect(breakModelLabel('gpt-5')).toBe('gpt-5');
     expect(breakModelLabel('claude-sonnet')).toBe('claude-sonnet');
+  });
+});
+
+describe('::handboek-model-scorecard in site mode', () => {
+  const twoRounds = (): ScorecardDataset =>
+    ScorecardDatasetSchema.parse({
+      schemaVersion: 1,
+      runs: [
+        {
+          id: 'mac-latest',
+          provenance: {
+            startedAt: '2026-08-22T00:00:00.000Z',
+            device: { label: 'Mac · Apple M4 Max', platform: 'darwin', arch: 'arm64' },
+            harnessCommit: 'aaa1111',
+            gildeVersion: '0.1.40',
+            count: 3,
+            judgeModelId: null,
+          },
+          suites: ['core', 'productivity'],
+          scenariosBySuite: { core: ['general-task'], productivity: ['office-task'] },
+        },
+        {
+          id: 'win-older',
+          provenance: {
+            startedAt: '2026-08-20T00:00:00.000Z',
+            device: { label: 'win32 · Ryzen', platform: 'win32', arch: 'x64' },
+            harnessCommit: 'bbb2222',
+            gildeVersion: '0.1.39',
+            count: 3,
+            judgeModelId: null,
+          },
+          suites: ['core'],
+          scenariosBySuite: { core: ['general-task'] },
+        },
+      ],
+      results: [
+        {
+          modelId: 'gemma4-12b-q4',
+          label: 'gemma4-12b-q4',
+          engine: 'mlx',
+          tier: 'medium',
+          parameterSize: '12B',
+          runId: 'mac-latest',
+          suiteId: 'core',
+          cells: [{ scenarioId: 'general-task', trials: 3, successes: 3, nonModelFailures: 0 }],
+        },
+        {
+          modelId: 'qwen3.5-2b-q4',
+          label: 'qwen3.5-2b-q4',
+          engine: 'mlx',
+          tier: 'tiny',
+          parameterSize: '2B',
+          runId: 'mac-latest',
+          suiteId: 'productivity',
+          cells: [{ scenarioId: 'office-task', trials: 3, successes: 1, nonModelFailures: 0 }],
+        },
+        {
+          modelId: 'gemma4-12b-q8',
+          label: 'gemma4-12b-q8',
+          engine: 'llama-cpp',
+          tier: 'medium',
+          parameterSize: '12B',
+          runId: 'win-older',
+          suiteId: 'core',
+          cells: [{ scenarioId: 'general-task', trials: 3, successes: 2, nonModelFailures: 0 }],
+        },
+      ],
+    });
+
+  it('degrades to a plain sentence before any sweep has been recorded', () => {
+    const empty = ScorecardDatasetSchema.parse({ schemaVersion: 1, runs: [], results: [] });
+    const html = renderScorecardFilterHtml(empty, ['core', 'productivity'], {
+      includeTaskCount: false,
+    });
+    expect(html).toContain('No core or productivity results have been recorded yet');
+    expect(html).not.toContain('<div');
+  });
+
+  it('stamps each round with what a reader can filter it by', () => {
+    const html = renderScorecardFilterHtml(twoRounds(), ['core', 'productivity'], {
+      includeTaskCount: false,
+    });
+    expect(html).toContain(`${SCORECARD_DATA_ATTRS.round}="mac-latest"`);
+    expect(html).toContain(`${SCORECARD_DATA_ATTRS.date}="2026-08-22"`);
+    expect(html).toContain(`${SCORECARD_DATA_ATTRS.hardware}="mac"`);
+    expect(html).toContain(`${SCORECARD_DATA_ATTRS.hardwareLabel}="Mac"`);
+    expect(html).toContain(`${SCORECARD_DATA_ATTRS.hardware}="windows"`);
+    expect(html).toContain(`${SCORECARD_DATA_ATTRS.models}="gemma4-12b qwen3.5-2b"`);
+    expect(html).toContain(`${SCORECARD_DATA_ATTRS.tiers}="medium tiny"`);
+  });
+
+  it('flags exactly one round as the default view', () => {
+    const html = renderScorecardFilterHtml(twoRounds(), ['core', 'productivity'], {
+      includeTaskCount: false,
+    });
+    expect(html.match(new RegExp(SCORECARD_DATA_ATTRS.latest, 'g'))).toHaveLength(1);
+    // Newest first, and the latest flag rides the newest — the script trusts
+    // the flag rather than re-sorting dates in the browser.
+    const latest = html.indexOf(SCORECARD_DATA_ATTRS.latest);
+    const older = html.indexOf('win-older');
+    expect(latest).toBeLessThan(older);
+  });
+
+  it('stamps every row with its model family, not its quantization', () => {
+    const html = renderScorecardFilterHtml(twoRounds(), ['core', 'productivity'], {
+      includeTaskCount: false,
+    });
+    // Both quantizations answer to one pick in the model dropdown, while the
+    // cell still names the exact build that was measured.
+    expect(html.match(new RegExp(`${SCORECARD_DATA_ATTRS.model}="gemma4-12b"`, 'g'))).toHaveLength(
+      2,
+    );
+    expect(html).toContain('<td>gemma4-12b-q4</td>');
+    expect(html).toContain('<td>gemma4-12b-q8</td>');
+    expect(html).toContain(`${SCORECARD_DATA_ATTRS.tier}="tiny"`);
+  });
+
+  it('keeps each suite in its own hideable block under the shared stamp', () => {
+    const html = renderScorecardFilterHtml(twoRounds(), ['core', 'productivity'], {
+      includeTaskCount: false,
+    });
+    const round = html.indexOf(`${SCORECARD_DATA_ATTRS.round}="mac-latest"`);
+    const core = html.indexOf(`${SCORECARD_DATA_ATTRS.suite}="core"`, round);
+    const productivity = html.indexOf(`${SCORECARD_DATA_ATTRS.suite}="productivity"`, round);
+    expect(round).toBeLessThan(core);
+    expect(core).toBeLessThan(productivity);
+    expect(html).toContain('General capability');
+    expect(html).toContain('Office and knowledge work');
+  });
+
+  it('publishes every recorded round, because a filter cannot reach an elided one', () => {
+    const html = renderScorecardFilterHtml(twoRounds(), ['core', 'productivity'], {
+      includeTaskCount: false,
+    });
+    expect(html.match(new RegExp(`${SCORECARD_DATA_ATTRS.round}="`, 'g'))).toHaveLength(2);
+  });
+
+  it('names the machine when two sweeps share a date', () => {
+    const dataset = twoRounds();
+    const sameDay = ScorecardDatasetSchema.parse({
+      ...dataset,
+      runs: dataset.runs.map((run) =>
+        run.id === 'win-older'
+          ? { ...run, provenance: { ...run.provenance, startedAt: '2026-08-22T00:00:00.000Z' } }
+          : run,
+      ),
+    });
+    const html = renderScorecardFilterHtml(sameDay, ['core', 'productivity'], {
+      includeTaskCount: false,
+    });
+    expect(html).toContain(`${SCORECARD_DATA_ATTRS.roundLabel}="2026-08-22 · Mac"`);
+    expect(html).toContain(`${SCORECARD_DATA_ATTRS.roundLabel}="2026-08-22 · Windows"`);
+  });
+
+  it('emits one HTML block, since a blank line would orphan the closing tags', () => {
+    const html = renderScorecardFilterHtml(twoRounds(), ['core', 'productivity'], {
+      includeTaskCount: false,
+    });
+    expect(html.split('\n').every((line) => line.startsWith('<'))).toBe(true);
+    expect(html).not.toContain('\n\n');
+  });
+
+  it('survives the markdown pipeline the site renders it through', () => {
+    const html = renderScorecardFilterHtml(twoRounds(), ['core', 'productivity'], {
+      includeTaskCount: false,
+    });
+    // squisq drops `select`/`script` and keeps `div`/`table` plus `data-`
+    // attributes; the whole design rests on that, so prove it here rather
+    // than only in the export.
+    const rendered = markdownDocToPlainHtml(parseMarkdown(`## Results\n\n${html}\n`), {
+      title: 'scorecard',
+    });
+    expect(rendered).toContain(`${SCORECARD_DATA_ATTRS.round}="mac-latest"`);
+    expect(rendered).toContain(`${SCORECARD_DATA_ATTRS.model}="gemma4-12b"`);
+    expect(rendered).toContain('<table>');
+  });
+
+  it('keeps the fixed markdown rounds for the app and the agent', async () => {
+    for (const mode of ['app', 'agent'] as const) {
+      const rendered = await MACROS['model-scorecard']!({ suites: 'core,productivity' }, {
+        mode,
+      } as never);
+      expect(rendered, mode).not.toContain(SCORECARD_DATA_ATTRS.root);
+      expect(rendered, mode).toContain('###');
+    }
   });
 });

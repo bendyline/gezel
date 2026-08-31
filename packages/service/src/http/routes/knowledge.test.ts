@@ -249,4 +249,93 @@ describe('knowledge routes', () => {
     }
     await client.updateKnowledgeCatalog('test-notes', { enabled: true });
   }, 60_000);
+
+  it('reports newer versions from the signed publisher registry (Phase 6)', async () => {
+    // Unconfigured: honest unavailability, never an error.
+    expect(await client.knowledgeUpdates()).toEqual({
+      available: false,
+      reason: 'no-registry-url',
+    });
+
+    const { generateKnowledgeSigningKeyPair, signRegistryIndex } = await import(
+      '@bendyline/gezel-knowledge'
+    );
+    const keys = generateKnowledgeSigningKeyPair();
+    const installed = (await client.listKnowledgeCatalogs()).catalogs.find(
+      (c) => c.ref.catalogId === 'test-notes',
+    );
+    expect(installed).toBeDefined();
+    if (!installed) return;
+
+    const registry = signRegistryIndex(
+      {
+        kind: 'gezel-knowledge-registry',
+        formatVersion: 1,
+        publisher: { id: installed.ref.publisherId, name: 'Gezel Tests' },
+        generatedAt: new Date().toISOString(),
+        catalogs: [
+          {
+            catalogId: 'test-notes',
+            version: `${installed.ref.version}.99`,
+            name: 'Test Notes (newer)',
+            language: 'en',
+            documents: 3,
+            archiveBytes: 4096,
+            contentDigest: 'c'.repeat(64),
+            url: 'https://example.com/_knowledge/catalogs/test-notes/next/test-notes-next.gezk',
+            license: { name: 'CC BY-SA 4.0', attributionRequired: true },
+          },
+        ],
+      },
+      keys.privateKeyPem,
+    );
+
+    const registryServer: Server = createServer((_req, res) => {
+      const body = JSON.stringify(registry);
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(body);
+    });
+    await new Promise<void>((resolve) => registryServer.listen(0, '127.0.0.1', resolve));
+    const registryAddress = registryServer.address();
+    const registryPort =
+      typeof registryAddress === 'object' && registryAddress ? registryAddress.port : 0;
+    const registryUrl = `http://127.0.0.1:${registryPort}/index.json`;
+    await svc.context.store.writeConfig({ knowledge: { registryUrl } });
+
+    const anchorsPath = join(dir, 'trust-anchors.json');
+    const priorAnchors = process.env.GEZEL_KNOWLEDGE_TRUST_ANCHORS;
+    try {
+      // Configured URL but no anchor that can verify it: refuse to consult.
+      delete process.env.GEZEL_KNOWLEDGE_TRUST_ANCHORS;
+      expect(await client.knowledgeUpdates()).toEqual({
+        available: false,
+        reason: 'no-trust-anchors',
+      });
+
+      const { writeFile } = await import('node:fs/promises');
+      await writeFile(
+        anchorsPath,
+        JSON.stringify([{ keyId: keys.keyId, publicKeyPem: keys.publicKeyPem }]),
+        'utf8',
+      );
+      process.env.GEZEL_KNOWLEDGE_TRUST_ANCHORS = anchorsPath;
+
+      const updates = await client.knowledgeUpdates();
+      expect(updates.available).toBe(true);
+      if (!updates.available) return;
+      expect(updates.publisher.id).toBe(installed.ref.publisherId);
+      expect(updates.updates).toHaveLength(1);
+      expect(updates.updates[0]).toMatchObject({
+        catalogId: 'test-notes',
+        installedVersion: installed.ref.version,
+        availableVersion: `${installed.ref.version}.99`,
+        contentDigest: 'c'.repeat(64),
+      });
+    } finally {
+      if (priorAnchors === undefined) delete process.env.GEZEL_KNOWLEDGE_TRUST_ANCHORS;
+      else process.env.GEZEL_KNOWLEDGE_TRUST_ANCHORS = priorAnchors;
+      await svc.context.store.writeConfig({ knowledge: {} });
+      registryServer.close();
+    }
+  }, 30_000);
 });

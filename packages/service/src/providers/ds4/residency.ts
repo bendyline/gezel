@@ -1,20 +1,15 @@
 import { totalmem } from 'node:os';
+import { DS4_FULL_RESIDENCY_HEADROOM_BYTES, ds4FitsFullResidency } from '@bendyline/gezel';
 
 const GB = 1024 ** 3;
 
-/**
- * Memory kept outside the GGUF when considering full residency. This covers
- * the OS + foreground apps as well as Metal/CUDA context and compute buffers.
- * The measured IQ2_XXS working set is ~103 GiB for an ~81 GiB GGUF, so 32 GiB
- * leaves roughly 10 GiB beyond that measured engine overhead on a 128 GiB Mac.
- */
-export const DS4_FULL_RESIDENCY_HEADROOM_BYTES = 32 * GB;
+export { DS4_FULL_RESIDENCY_HEADROOM_BYTES };
 
 /**
  * Full residency must monopolize the local-engine broker. The broker's normal
  * workstation ceiling is 96 GiB; reserving that ceiling prevents a second
- * local model from being admitted while DS4's measured ~103 GiB working set is
- * live, without requiring a global capacity-policy increase.
+ * local model from being admitted while DS4's measured working set is live,
+ * without requiring a global capacity-policy increase.
  */
 export const DS4_FULL_RESIDENCY_RESERVATION_BYTES = 96 * GB;
 
@@ -23,40 +18,51 @@ export interface Ds4ResidencyOptions {
   /** Size of the selected GGUF. Unknown sizes are never allowed full residency. */
   modelSizeBytes?: number;
   totalRamBytes?: number;
+  /**
+   * Resident bytes beyond the weights this launch would also hold (a DSpark
+   * companion). Not part of `modelSizeBytes`, so residency that ignores it
+   * under-reserves by exactly the companion's size.
+   */
+  companionBytes?: number;
   platform?: NodeJS.Platform;
   arch?: string;
 }
 
 /**
  * Whether this exact model can be made fully resident without consuming the
- * memory macOS/Linux and ds4's runtime still need. Full residency is only a
- * meaningful local choice on unified-memory arm64 machines; discrete-GPU
- * capacity cannot be inferred from system RAM here.
+ * memory macOS/Linux and ds4's runtime still need. Delegates to core so the
+ * model list's fit badge and this launch decision cannot disagree.
  */
 export function canUseDs4FullResidency(opts: Ds4ResidencyOptions = {}): boolean {
-  const platform = opts.platform ?? process.platform;
-  const arch = opts.arch ?? process.arch;
-  const totalRamBytes = opts.totalRamBytes ?? totalmem();
-  const modelSizeBytes = opts.modelSizeBytes;
-  const unifiedMemoryTarget = arch === 'arm64' && (platform === 'darwin' || platform === 'linux');
-
-  return Boolean(
-    unifiedMemoryTarget &&
-      modelSizeBytes &&
-      modelSizeBytes + DS4_FULL_RESIDENCY_HEADROOM_BYTES <= totalRamBytes,
-  );
+  return ds4FitsFullResidency({
+    modelSizeBytes: opts.modelSizeBytes,
+    totalRamBytes: opts.totalRamBytes ?? totalmem(),
+    companionBytes: opts.companionBytes,
+    platform: opts.platform ?? process.platform,
+    arch: opts.arch ?? process.arch,
+  });
 }
 
 /**
  * Decide whether ds4 should stream experts from SSD.
  *
- * Streaming is the safe default. An explicit request to disable it is honored
- * only when the selected GGUF plus runtime/OS headroom fits this unified-memory
- * machine. This keeps stale config and hand-edited config.json files from
- * turning a model picker action into a system-wide memory-pressure event.
+ * **Residency is the default wherever it fits.** Streaming is roughly an
+ * order of magnitude slower — measured 1.85 tok/s streaming against 18.1
+ * tok/s resident for the same IQ2_XXS build on a DGX Spark — so a machine
+ * with the memory to hold a model should hold it.
+ *
+ * This inverts the original policy, which returned `true` unless the config
+ * said exactly `false`. Device RAM was then consulted only to VETO a user's
+ * explicit opt-out, never to choose residency, so no install ever ran resident
+ * without a hand-edited config key that has no UI. The safety direction is
+ * unchanged and is what makes the flip safe: a model that does not fit still
+ * streams, and {@link canUseDs4FullResidency} is what refuses it.
+ *
+ * `configured === true` remains an explicit opt-in to streaming and is always
+ * honored — a user who wants the memory back can have it.
  */
 export function shouldUseDs4SsdStreaming(opts: Ds4ResidencyOptions = {}): boolean {
-  if (opts.configured !== false) return true;
+  if (opts.configured === true) return true;
   return !canUseDs4FullResidency(opts);
 }
 

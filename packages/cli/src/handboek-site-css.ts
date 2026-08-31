@@ -265,6 +265,91 @@ body.hb {
    the description column takes the slack. */
 .hb-article tbody td:first-child { min-width: 6rem; }
 
+/* Model scorecard.
+
+   The stack of test rounds is complete in the markup; assets/scorecard.js
+   narrows it. Everything here has to read correctly before that script runs
+   and after it hides most of the page, so the rounds are self-describing
+   panels rather than a run of headings, and the control bar reserves its own
+   height instead of appearing under the reader's first paragraph. */
+.hb-scorecard { margin: 0 0 1.5rem; }
+.hb-scorecard [hidden] { display: none !important; }
+.hb-scorecard-controls:empty { display: none; }
+.hb-scorecard-controlbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem;
+  padding: 0.8rem 0.9rem;
+  background: var(--hb-inset);
+  border: 1px solid var(--hb-border);
+  border-radius: var(--hb-radius-lg);
+}
+.hb-scorecard-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  /* Grows to share a row, but never to the whole bar: the round picker wraps
+     onto its own line inside the reading measure, and a full-width control
+     there reads as a search field rather than as one key of four. */
+  flex: 1 1 9rem;
+  max-width: 14rem;
+}
+.hb-scorecard-field-label {
+  font-family: var(--hb-font-ui);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hb-ink-muted);
+}
+/* Keys, not capsules: --radius-md inside a --radius-lg tray, matching the
+   app's choice-control recipe in docs/ux.md. */
+.hb-scorecard-select {
+  font-family: var(--hb-font-ui);
+  font-size: 0.9rem;
+  color: var(--hb-ink-warm);
+  background: var(--hb-panel);
+  border: 1px solid var(--hb-border);
+  border-radius: var(--hb-radius-md);
+  padding: 0.35rem 0.5rem;
+  max-width: 100%;
+}
+.hb-scorecard-select:hover { border-color: var(--hb-ink-quiet); }
+.hb-scorecard-reset {
+  font-family: var(--hb-font-ui);
+  font-size: 0.85rem;
+  color: var(--hb-ink-warm);
+  background: var(--hb-panel);
+  border: 1px solid var(--hb-border);
+  border-radius: var(--hb-radius-md);
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+}
+.hb-scorecard-reset:hover { color: var(--hb-accent); border-color: var(--hb-accent); }
+.hb-scorecard-status {
+  font-family: var(--hb-font-ui);
+  font-size: 0.85rem;
+  color: var(--hb-ink-muted);
+  margin: 0.55rem 0 0;
+}
+.hb-article .hb-scorecard-help {
+  font-family: var(--hb-font-ui);
+  font-size: 0.82rem;
+  color: var(--hb-ink-quiet);
+  margin: 0.15rem 0 0;
+}
+.hb-scorecard-round { margin: 1.75rem 0 0; }
+.hb-article .hb-scorecard-round-title { font-size: 1.1rem; margin-top: 0; }
+.hb-article .hb-scorecard-suite-title { font-size: 0.95rem; margin: 1.25rem 0 0.5rem; }
+.hb-scorecard-stamp { font-size: 0.85rem; margin: 0 0 0.75rem; }
+.hb-article .hb-scorecard-withheld,
+.hb-article .hb-scorecard-taskcount {
+  font-size: 0.82rem;
+  color: var(--hb-ink-muted);
+  margin: 0 0 0.75rem;
+}
+
 .hb-watch { max-width: var(--hb-measure); margin: 1.25rem 0 0; font-size: 0.9rem; }
 
 /* Home */

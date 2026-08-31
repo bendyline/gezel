@@ -59,13 +59,20 @@ function mean(values: number[]): number {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
-  assertKnownFlags(args.flags, ['dry-run', 'run-id']);
+  assertKnownFlags(args.flags, ['dry-run', 'fresh', 'run-id']);
   const runId = typeof args.flags['run-id'] === 'string' ? args.flags['run-id'] : null;
   if (!runId) {
     console.error('--run-id <id> is required (see evals/runs/scorecard-*)');
     process.exit(2);
   }
   const dryRun = Boolean(args.flags['dry-run']);
+  // Reuse is the default: point 2 of the module doc ("it can be re-run")
+  // was only half true — a re-run re-judged and OVERWROTE every existing
+  // per-trial report, re-paying the whole sweep to pick up a handful of
+  // new trials (wild-caught: re-judging 2026-08-22-mac-apple-m4-max for
+  // one re-run mistral cell started redoing all ~350). `--fresh` forces
+  // the old behavior for a deliberate second opinion or rubric change.
+  const fresh = Boolean(args.flags.fresh);
   const sweepRoot = join(repoRoot, 'evals/runs', `scorecard-${runId}`);
   if (!existsSync(sweepRoot)) {
     console.error(`[judge] no sweep at ${sweepRoot}`);
@@ -75,6 +82,7 @@ async function main(): Promise<void> {
   const judged: JudgedTrial[] = [];
   let skipped = 0;
   let considered = 0;
+  let reused = 0;
 
   for (const modelId of dirsUnder(sweepRoot)) {
     for (const suiteId of dirsUnder(join(sweepRoot, modelId))) {
@@ -93,6 +101,31 @@ async function main(): Promise<void> {
           if (!statSync(runDir).isDirectory()) continue;
           considered += 1;
           if (dryRun) continue;
+
+          const existingPath = join(runDir, 'llm-judge.json');
+          if (!fresh && existsSync(existingPath)) {
+            try {
+              const report = JSON.parse(readFileSync(existingPath, 'utf8')) as {
+                meanScore: number;
+                scoreAxes: Record<string, number>;
+                judgeModel: string;
+              };
+              judged.push({
+                modelId,
+                suiteId,
+                scenarioId,
+                trialId,
+                rubric: usedRubric,
+                meanScore: report.meanScore,
+                scoreAxes: report.scoreAxes,
+                judgeModel: report.judgeModel,
+              });
+              reused += 1;
+              continue;
+            } catch {
+              // Unreadable report — fall through and re-judge it.
+            }
+          }
 
           const wrote = await maybeJudgeTrial({
             scenario: {
@@ -165,7 +198,9 @@ async function main(): Promise<void> {
   writeFileSync(outPath, `${JSON.stringify(summary, null, 2)}\n`);
 
   console.log(`\n[judge] wrote ${outPath}`);
-  console.log(`[judge] ${judged.length} judged, ${skipped} skipped (no artifact)`);
+  console.log(
+    `[judge] ${judged.length} judged (${reused} reused from existing reports), ${skipped} skipped (no artifact)`,
+  );
   for (const cell of summary.cells) {
     console.log(
       `  ${cell.modelId!.padEnd(20)} ${cell.suiteId!.padEnd(14)} ${cell.rubric!.padEnd(13)} mean ${cell.meanScore} (n=${cell.trials})`,

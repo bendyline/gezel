@@ -2,11 +2,14 @@ import { EditorShell } from '@bendyline/squisq-editor-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
+import { DocumentNarration } from '../components/DocumentNarration.js';
 import {
   type OutsideInLayout,
   chooseOutsideInSource,
   createDocumentLinkProvider,
   createDocumentsContentContainer,
+  gezelProofingIgnoreStore,
+  gezelProofingProvider,
   importOutsideInDocument,
   isOutsideInMarkdownEditingEnabled,
   relativePath,
@@ -262,10 +265,15 @@ function OutsideInEditor({
           fullWidth
           workspaceContainer={container}
           documentLinkProvider={documentLinkProvider}
+          proofing={gezelProofingProvider()}
+          proofingIgnoreStore={gezelProofingIgnoreStore}
           allowVersioning={prepared.editingEnabled}
           versionBasename={basename(prepared.sourcePath)}
           toolbarSlotAfterActions={
-            prepared.editingEnabled ? <TransformToolbarButton context="generic" /> : undefined
+            <>
+              {prepared.editingEnabled && <TransformToolbarButton context="generic" />}
+              <DocumentNarration fileName={path} />
+            </>
           }
           statusBarSlotRight={
             prepared.editingEnabled ? <AutosaveStatus autosave={autosave} /> : undefined

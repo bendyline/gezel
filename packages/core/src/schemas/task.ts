@@ -6,6 +6,7 @@ import {
   CraftbookBranchSchema,
   CraftbookCommandNeedSchema,
   CraftbookConnectorNeedSchema,
+  CraftbookRecommendationSchema,
   CraftbookSchema,
   CraftbookScriptsSchema,
   CraftbookSpawnSchema,
@@ -253,6 +254,8 @@ export const TaskCraftbookSchema = z.object({
   paramSchema: z.record(z.string(), z.unknown()).optional(),
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
   connectors: z.array(CraftbookConnectorNeedSchema).optional(),
+  /** Soft "works better with" hints snapshotted for UI copy — see CraftbookRecommendationSchema. */
+  recommends: z.array(CraftbookRecommendationSchema).optional(),
   /** Command needs snapshotted for kickoff approval — see CraftbookCommandNeedSchema. */
   commands: z.array(CraftbookCommandNeedSchema).optional(),
   /**

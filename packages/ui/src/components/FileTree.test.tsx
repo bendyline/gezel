@@ -6,6 +6,18 @@ import { FileTree } from './FileTree.js';
 const NOTE = { path: 'notes.md', name: 'notes.md', isDirectory: false };
 
 describe('FileTree row actions', () => {
+  it('reports pointer and keyboard intent before selection', () => {
+    const onIntent = vi.fn();
+    render(<FileTree entries={[NOTE]} onSelect={vi.fn()} onIntent={onIntent} />);
+
+    const row = screen.getByRole('button', { name: 'notes.md' }).closest('.tree-row');
+    expect(row).not.toBeNull();
+    fireEvent.pointerEnter(row!);
+    fireEvent.focus(screen.getByRole('button', { name: 'notes.md' }));
+
+    expect(onIntent).toHaveBeenCalledWith(NOTE);
+  });
+
   it('offers Rename and Delete from the three-dots menu', async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
@@ -75,6 +87,22 @@ describe('FileTree folder expansion', () => {
     );
 
     expect(screen.getByRole('button', { name: 'Collapse drafts' })).toBeInTheDocument();
+  });
+});
+
+describe('FileTree file-type icons', () => {
+  it.each([
+    ['brief.docx', 'fa-file-word'],
+    ['deck.pptx', 'fa-file-powerpoint'],
+    ['budget.xlsx', 'fa-file-excel'],
+    ['report.pdf', 'fa-file-pdf'],
+    ['photo.png', 'fa-file-image'],
+    ['source.ts', 'fa-file-code'],
+    ['notes.md', 'fa-file-lines'],
+  ])('uses the Font Awesome %s glyph', (name, iconClass) => {
+    render(<FileTree entries={[{ path: name, name, isDirectory: false }]} onSelect={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name }).querySelector('i')).toHaveClass(iconClass);
   });
 });
 

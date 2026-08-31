@@ -12,7 +12,9 @@ import { fileURLToPath } from 'node:url';
  */
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { captureScreenshot } from './helpers/screenshot.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const screenshotDir = join(_dirname, '..', 'screenshots');
@@ -129,7 +131,7 @@ test.describe('Knowledge catalogs', () => {
   });
 
   test.afterAll(async () => {
-    await app?.close();
+    await closeApp(app);
     await rm(home, { recursive: true, force: true }).catch(() => {});
     await rm(assets, { recursive: true, force: true }).catch(() => {});
   });
@@ -153,7 +155,10 @@ test.describe('Knowledge catalogs', () => {
     // The fixture's hash-embed profile is not the daemon's embedder, so the
     // honest state is keyword-only — still active.
     await expect(page.getByText(/^active/)).toBeVisible({ timeout: 10_000 });
-    await page.screenshot({ path: join(screenshotDir, 'knowledge-settings.png'), fullPage: true });
+    await captureScreenshot(page, {
+      path: join(screenshotDir, 'knowledge-settings.png'),
+      fullPage: true,
+    });
 
     // The sidebar area flips on at registered-count ≥ 1.
     await expect(page.getByTestId('sidebar-area-knowledge')).toBeVisible({ timeout: 10_000 });
@@ -169,7 +174,10 @@ test.describe('Knowledge catalogs', () => {
     await expect(page.getByRole('button', { name: 'Copy citation' })).toBeVisible();
     await page.getByRole('button', { name: 'Copy citation' }).click();
     await expect(page.getByRole('button', { name: 'Copied' })).toBeVisible();
-    await page.screenshot({ path: join(screenshotDir, 'knowledge-browser.png'), fullPage: true });
+    await captureScreenshot(page, {
+      path: join(screenshotDir, 'knowledge-browser.png'),
+      fullPage: true,
+    });
 
     // Disable: the catalog stays REGISTERED, so the area stays in the rail
     // (visibility flips at registered-count ≥ 1, not enabled-count) — the

@@ -234,7 +234,12 @@ describe('data macros', () => {
     const { markdown } = await expandMacros('::handboek-role-tools{role=voorman scope=tiers}', {
       ...ctx('site'),
     });
-    expect(markdown).toContain('| medium | 12–45B | full kit (82 tools) |');
+    // The tool count moves whenever one joins or leaves the voorman kit — the
+    // two AI-app tools left it for a group in no role default, taking it from
+    // 82 to 80. Pinning the number only re-breaks this test; what must not
+    // regress is medium being *trimmed*, which it once was at "57 of N".
+    const medium = markdown.split('\n').find((line) => line.startsWith('| medium |'));
+    expect(medium).toMatch(/^\| medium \| 12–45B \| full kit \(\d+ tools\) \|$/);
     expect(markdown).not.toContain('| medium | 12–45B | 57 of');
   });
 
@@ -276,7 +281,10 @@ describe('data macros', () => {
     expect(app.markdown).toContain('| **large** |');
     const site = await expandMacros('::handboek-device-hardware', { ...ctx('site') });
     expect(site.markdown).not.toContain('64.0 GB');
-    expect(site.markdown).toContain('Open this page in the app');
+    expect(site.markdown).toContain('Gezel classifies each device');
+    // The site build has no device to report on, so it must not tell a web
+    // reader to open a page they are already reading.
+    expect(site.markdown).not.toContain('in the app');
   });
 });
 

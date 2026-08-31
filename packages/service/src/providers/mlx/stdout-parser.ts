@@ -61,11 +61,16 @@ export function classifyMlxStartupLine(line: string): EnginePhaseEvent | null {
     if (tps !== null && Number.isFinite(tps) && tps > 0) {
       detailParts.push(`${tps >= 10 ? tps.toFixed(0) : tps.toFixed(1)} tok/s`);
     }
+    // `cache=<id>` names the sub this marker belongs to. Matched separately
+    // from the tqdm shape above so the bar itself keeps parsing from engines
+    // that don't emit the tag (older sidecars, the aggregate fallback path).
+    const owner = line.match(/\bcache=(\S+)/);
     return {
       provider: 'mlx',
       phase: 'prefill',
       detail: detailParts.join(' · '),
       progress: Math.max(0, Math.min(1, pct / 100)),
+      ...(owner?.[1] ? { cacheId: owner[1] } : {}),
     };
   }
 

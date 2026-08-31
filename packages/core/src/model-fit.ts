@@ -137,6 +137,59 @@ export function estimateMlxResidentBytes(approxSizeBytes: number): number {
   return Math.round(approxSizeBytes * MLX_WEIGHTS_MULTIPLIER) + MLX_FIXED_ENGINE_BYTES;
 }
 
+/**
+ * Memory kept outside the GGUF when ds4 holds a model fully resident: the OS
+ * and foreground apps, plus the CUDA/Metal context and the aligned-artifact
+ * tree ds4 repacks the weights into.
+ *
+ * Derived on a 128 GiB Mac (an ~81 GiB GGUF measured at a ~103 GiB working
+ * set) and since corroborated on CUDA: a DGX Spark GB10 (121.63 GiB) ran the
+ * 80.76 GiB IQ2_XXS build at ~107 GiB of working set, i.e. ~26 GiB of overhead
+ * over the file. The same 32 GiB therefore leaves real margin on both
+ * backends, and it correctly REFUSES the 90.89 GiB mixed-precision build on
+ * that machine — an override there drove MemAvailable from 117 GiB to 0.5 GiB
+ * in about thirty seconds and the kernel killed the engine mid-load.
+ */
+export const DS4_FULL_RESIDENCY_HEADROOM_BYTES = 32 * 1024 ** 3;
+
+export interface Ds4FullResidencyInput {
+  /** On-disk size of the selected GGUF. Unknown sizes never qualify. */
+  modelSizeBytes?: number | undefined;
+  totalRamBytes?: number | undefined;
+  /**
+   * Resident bytes beyond the weights that this launch would also hold — today
+   * only a DSpark speculative-decoding companion. It is NOT part of
+   * `modelSizeBytes`, so leaving it out understates the requirement by exactly
+   * its size. On the measured Spark that margin survived either way (the
+   * 5.58 GiB companion launch peaked at 116.5 GiB of 121.63); a host a few GiB
+   * smaller is where the omission becomes an OOM rather than a near miss.
+   */
+  companionBytes?: number | undefined;
+  platform?: string | undefined;
+  arch?: string | undefined;
+}
+
+/**
+ * Whether ds4 can hold this exact model in memory without consuming what the
+ * OS and the engine's own runtime still need.
+ *
+ * Full residency is only meaningful on unified-memory arm64 hosts: elsewhere a
+ * discrete GPU's capacity cannot be inferred from system RAM, so the answer is
+ * no regardless of size.
+ *
+ * Lives in core for the same reason the llama.cpp estimator does — the
+ * launcher's residency decision and the model list's fit badge must agree, or
+ * the UI promises a mode the daemon then declines to use.
+ */
+export function ds4FitsFullResidency(input: Ds4FullResidencyInput): boolean {
+  const { modelSizeBytes, totalRamBytes } = input;
+  const unified =
+    input.arch === 'arm64' && (input.platform === 'darwin' || input.platform === 'linux');
+  if (!unified || !modelSizeBytes || !totalRamBytes) return false;
+  const needed = modelSizeBytes + (input.companionBytes ?? 0) + DS4_FULL_RESIDENCY_HEADROOM_BYTES;
+  return needed <= totalRamBytes;
+}
+
 export type ModelFitTier = 'fits' | 'fits-offload' | 'tight' | 'too-big';
 
 export interface ModelFitInput {

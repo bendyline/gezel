@@ -34,6 +34,11 @@ function mediaKind(path: string): 'image' | 'video' | 'audio' | null {
   return null;
 }
 
+function isMissingPathError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
 /**
  * A strict UTF-8 decode catches most binary formats; the control-byte ratio
  * catches the remaining ASCII-heavy containers. This runs in the daemon so
@@ -80,7 +85,19 @@ export function referencePreviewRoutes(ctx: ServiceContext): Hono {
     // `artifacts/` folder of its own.
     const path = request.kind === 'artifact' ? normalizeArtifactPath(request.path) : request.path;
     const joined = safeJoin(base, path);
-    if (!joined || !(await realpathContained(base, joined))) {
+    if (!joined) {
+      return c.json({ error: 'path traversal' }, 400);
+    }
+    if (!(await realpathContained(base, joined))) {
+      // A deleted project can leave historical chat references behind. When
+      // its entire drawer is gone, realpath containment cannot establish a
+      // trusted base; that is a missing reference, not an unsafe request.
+      try {
+        await stat(base);
+      } catch (error) {
+        if (isMissingPathError(error)) return c.json({ error: 'not found' }, 404);
+        throw error;
+      }
       return c.json({ error: 'path traversal' }, 400);
     }
 

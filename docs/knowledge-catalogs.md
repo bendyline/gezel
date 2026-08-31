@@ -46,6 +46,53 @@ embedder — first run (bge-small-en-v1.5, 2026-08-20): paraphrased-query
 R@1 0.75 / R@5 1.00 / MRR 0.88, warm explicit search p50 8 ms / p95 22 ms
 against the 750 ms gate.
 
+Phases 5–6 (2026-08-25): the Qualla production pipeline is landed in
+`qualla-internal` — `build-knowledge` streams the enwiki dump directly
+(input adapter A), classifies against a 20-domain versioned taxonomy
+(P31 seeds → description rules → categories → title patterns →
+coordinates/general fallbacks, rules-hash stamped into the catalog
+version), converts wikitext with the knowledge pre-pass (simple tables →
+GFM, lead-infobox scalar fields → a "Key facts" block, entity decoding),
+compiles per-domain `.gezk` catalogs with the public
+`gezel-multilingual-e5-small@1` profile, and is restartable at
+article/spool/catalog boundaries (checkpointed spools + the append-only
+content-hash embed cache as the reproducibility authority — a kill -9
+mid-embed resumed to a byte-identical release, verified by archive
+sha256). `sign-knowledge-release` signs releases with the offline Ed25519
+key (generate/rotate via `--generate-key`; keyId-indexed trust anchors),
+re-hashes every archive, self-verifies against the public key, and stages
+the CDN tree: immutable `_k/catalogs/<id>/<version>/*.gezk`
+plus the RFC 8785-signed `_k/registry/index.json`, uploaded
+catalogs-first/registry-LAST by the `_k` block in qualla's
+sync-to-azure scripts (which re-verify every archive against the signed
+contentDigest before publishing; procedure + withdrawal runbook in
+qualla's RUNBOOK §6.6). The signed chain is proven end-to-end in-repo
+style: registry verification (`verifyRegistryIndex`) accepts the release
+and rejects tampering, and a live daemon installs a signed catalog via
+URL + registry `contentDigest`, refusing a wrong digest.
+
+100k-pilot results (2026-08-26): 100,000 articles → 20 catalogs,
+1,064,599 chunks, 1.67 GB of archives (geography 452 MB, general 360 MB,
+people 303 MB — the sizes that fixed archive hosting on qualla.com, never
+the Pages-backed gezelgilde.com), compiled in 17.7 h at an effective
+16.7 chunks/s on a single CPU embed pipeline — which makes the Phase-7
+worker-pool parallelization a prerequisite, not an optimization (~7M
+chunks ≈ 5 days single-pipeline). Classifier: 65% high / 13% medium /
+22% low confidence, the low tier being exactly the general+coordinates
+fallbacks; the 19% general bucket is the pre-production taxonomy review
+target. Routing recall, measured on a 9-shard rebuild of geography
+(36k-chunk shards, 3 centroids each): S=3 59.7% / S=6 84.7% recall@5 vs
+scan-all (random baselines 33%/67%), with the home shard ranked first by
+centroids for only 26% of queries. Root cause is content, not format:
+the pilot emits a FLAT topic tree per domain, so the topic-affinity
+shard fill degenerates to documentId order and shards are page-age
+slices rather than topical clusters — centroids have nothing to
+separate. The "within 2pp of scan-all" gate is therefore conditional on
+sub-topicking the large domains (geography by country/region, people by
+era/occupation) before the Phase-7 full build; until then the doc-FTS
+arm and the S knob carry exact-name and explicit-search recall, and
+single-catalog scan-all stays affordable at ≤10 shards.
+
 ## Executive decision
 
 A **knowledge catalog** is a versioned, read-only body of reference material that
@@ -599,6 +646,7 @@ Suggested first-party routes:
 | --- | --- |
 | `GET /api/knowledge/catalogs` | This user's catalog refs, storage scope, versions, health, size, enabled state |
 | `GET /api/knowledge/available` | Signed Qualla registry, cached/offline-safe |
+| `GET /api/knowledge/updates` | Installed catalogs with strictly newer versions in the signed registry (shipped; requires `config.knowledge.registryUrl` + a verifying trust anchor, honors `allowAppNetwork`) |
 | `POST /api/knowledge/install` | Add/install for this user; trusted registry ids prefer shared storage |
 | `GET /api/knowledge/jobs/:id` | Progress, phase, bytes, error, cancellation state |
 | `DELETE /api/knowledge/jobs/:id` | Cancel download/install |
@@ -847,7 +895,7 @@ https://qualla.com/cdn/gezel/knowledge/v1/<id>/<version>/<sha256>.gezk
 Immutable archives get long-lived immutable cache headers. The signed registry
 gets a short TTL/ETag and is uploaded only after every referenced archive is
 present and independently downloadable. Never reuse an archive URL for new bytes.
-Extend Qualla's Azure sync scripts with a dedicated `_knowledge/` tree,
+Extend Qualla's Azure sync scripts with a dedicated tree (shipped as `_k/`),
 catalog-specific shrink guards, MIME type, and cache policy; do not mix it into
 the multi-million-file media sync.
 

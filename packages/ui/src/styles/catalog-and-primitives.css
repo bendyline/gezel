@@ -48,6 +48,18 @@
   background: var(--warning-bg);
 }
 
+/* Neutral chip for a state that works but carries a real cost the user should
+   weigh -- today, a ds4 model that runs by streaming experts from SSD (roughly
+   ten times slower than one held in memory). Deliberately NOT `--ok`: that
+   sage chip is the resting "this is fine" signal, and wearing it made the slow
+   path look like the good outcome when it is the fallback. Also not `--warn`:
+   nothing is wrong, and an amber chip on every large model reads as noise. */
+.gz-status-pill--info {
+  color: var(--text-muted);
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+}
+
 /* Amber-tinted pill that tells the user verbose diagnostics are being
    written. Identity-distinct from the ok/warn variants so it's hard to
    forget debug mode is on. */
@@ -192,6 +204,22 @@
   letter-spacing: 0.04em;
 }
 
+/* Active-model radio in an installed-models table. The column holds nothing
+   but the control, so it takes only the width it needs; the nudge down lines
+   the dot up with the first line of the model id beside it, which is
+   top-aligned like every other cell. */
+.ollama-model-table .gz-active-model-radio {
+  margin: 0.2rem 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.ollama-model-table th.gz-active-model-column,
+.ollama-model-table td.gz-active-model-column {
+  width: 1%;
+  white-space: nowrap;
+}
+
 /* Installed-model rows use two deliberate lines instead of wrapping based on
    incidental space. The model id stays intact on line one; any status marks
    occupy line two. */
@@ -251,6 +279,22 @@
    a column; the badge above already carries writing speed. */
 .model-fitness-speeds {
   font-variant-numeric: tabular-nums;
+}
+
+/* Why a check failed, under the badge — clipped to roughly the width of the
+   pill above it, with the full sentence on the element's own tooltip.
+
+   `display: block` is load-bearing: max-width, overflow and text-overflow have
+   no effect on a non-replaced INLINE box, so as a plain span this rule did
+   nothing and the sentence ran the whole width of the table. The reason text
+   is written to lead with its most important clause precisely because this is
+   all most people will read of it. */
+.model-fitness-reason {
+  display: block;
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
 }
 
 .model-actions-table-cell {

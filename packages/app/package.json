@@ -22,10 +22,12 @@
     "build": "tsup",
     "build:bundle": "node ../../scripts/build-service-bundle.mjs",
     "build:packaged": "pnpm run build && node ../../scripts/stage-third-party-licenses.mjs && pnpm run build:bundle",
+    "generate:icon:win": "node scripts/generate-windows-icon.mjs",
+    "check:icon:win": "node scripts/generate-windows-icon.mjs --check",
     "dev": "tsup --watch",
     "start": "electron .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && node --test ../../scripts/dev-fresh-runtime.test.mjs ../../scripts/native-payload.test.mjs ../../scripts/native-file-manifest.test.mjs ../../scripts/fetch-upstream.test.mjs ../../scripts/assert-llama-version.test.mjs ../../scripts/verify-cuda-architecture.test.mjs ../../scripts/sign-macho-tree.test.mjs ../../scripts/verify-pe-tree.test.mjs ../../scripts/nsis-hooks-compile.test.mjs ../../scripts/windows-branding-contract.test.mjs ../../scripts/sbom-coverage.test.mjs ../../scripts/prune-foreign-binaries.test.mjs ../../scripts/prune-runtime-files.test.mjs ../../scripts/pnpm-reflink-compat.test.mjs ../../scripts/pnpm-cli.test.mjs ../../scripts/pnpm-install.test.mjs ../../scripts/pnpm-deploy.test.mjs ../../scripts/fix-deployed-node-pty-perms.test.mjs ../../scripts/deploy-ml-runtime.test.mjs ../../scripts/verify-bundle-archive.test.mjs ../../scripts/sharp-compat.test.mjs ../../scripts/strip-sourcemap-comments.test.mjs ../../scripts/stamp-version.test.mjs ../../scripts/prepare-package.test.mjs ../../scripts/format-release-manifest.test.mjs ../../scripts/release-package-state.test.mjs ../../scripts/workspace-dependencies.test.mjs ../../scripts/release-electron-contract.test.mjs ../../scripts/verify-deb-compression.test.mjs ../../scripts/verify-service-host-contract.test.mjs ../../scripts/check-latest-release-namespace.test.mjs ../../scripts/latest-app-release.test.mjs ../../scripts/mac-update-contract.test.mjs ../../scripts/macos-privacy-strings.test.mjs ../../scripts/macos-entitlements.test.mjs ../../scripts/macos-ats.test.mjs",
+    "test": "pnpm run check:icon:win && vitest run && node --test ../../scripts/dev-fresh-runtime.test.mjs ../../scripts/native-payload.test.mjs ../../scripts/native-file-manifest.test.mjs ../../scripts/fetch-upstream.test.mjs ../../scripts/assert-llama-version.test.mjs ../../scripts/verify-cuda-architecture.test.mjs ../../scripts/sign-macho-tree.test.mjs ../../scripts/verify-pe-tree.test.mjs ../../scripts/nsis-hooks-compile.test.mjs ../../scripts/windows-branding-contract.test.mjs ../../scripts/sbom-coverage.test.mjs ../../scripts/prune-foreign-binaries.test.mjs ../../scripts/prune-runtime-files.test.mjs ../../scripts/pnpm-reflink-compat.test.mjs ../../scripts/pnpm-cli.test.mjs ../../scripts/pnpm-install.test.mjs ../../scripts/pnpm-deploy.test.mjs ../../scripts/fix-deployed-node-pty-perms.test.mjs ../../scripts/deploy-ml-runtime.test.mjs ../../scripts/verify-bundle-archive.test.mjs ../../scripts/sharp-compat.test.mjs ../../scripts/strip-sourcemap-comments.test.mjs ../../scripts/stamp-version.test.mjs ../../scripts/prepare-package.test.mjs ../../scripts/format-release-manifest.test.mjs ../../scripts/release-package-state.test.mjs ../../scripts/workspace-dependencies.test.mjs ../../scripts/release-electron-contract.test.mjs ../../scripts/verify-deb-compression.test.mjs ../../scripts/verify-service-host-contract.test.mjs ../../scripts/check-latest-release-namespace.test.mjs ../../scripts/latest-app-release.test.mjs ../../scripts/mac-update-contract.test.mjs ../../scripts/macos-privacy-strings.test.mjs ../../scripts/macos-entitlements.test.mjs ../../scripts/macos-ats.test.mjs",
     "test:e2e": "playwright test --reporter=line",
     "test:e2e:web": "playwright test --config playwright.web.config.ts --reporter=line",
     "package": "pnpm run build:packaged && electron-builder --publish never",
@@ -40,8 +42,7 @@
     "@bendyline/gezel": "workspace:*",
     "@bendyline/gezel-client": "workspace:*",
     "electron-updater": "^6.8.9",
-    "ms": "^2.1.3",
-    "yauzl": "^3.4.0"
+    "ms": "^2.1.3"
   },
   "devDependencies": {
     "@bendyline/gezel-knowledge": "workspace:*",
@@ -50,16 +51,14 @@
     "@electron/asar": "^4.3.0",
     "@electron/notarize": "^3.1.1",
     "@playwright/test": "^1.61.1",
+    "@resvg/resvg-js": "^2.6.2",
     "@types/node": "^24.13.3",
-    "@types/yauzl": "^3.4.0",
-    "@types/yazl": "^3.3.1",
     "electron": "^43.4.1",
     "electron-builder": "^26.15.3",
     "playwright": "^1.61.1",
     "tar": "7.5.21",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10",
-    "yazl": "^3.3.1"
+    "vitest": "^4.1.10"
   }
 }

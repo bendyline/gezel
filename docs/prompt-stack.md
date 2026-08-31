@@ -286,10 +286,25 @@ they compete with text for context and prefill. Measured accounting:
   explicit Craftbook editor session; ordinary sessions keep the focused
   `set_step_deliverable`. Together those changes remove about **64.2K compact schema
   characters** from an ordinary coordinator surface without removing a capability.
+- The default **Meester roster is 40 tools** (56 with the `delegate_*`/`consult_*` pairs),
+  which is below her own diet cap — so a stock Meester is never trimmed, and a
+  "tool cap trimmed this session" warning again means an installed toolset pushed her
+  over. Getting there meant deleting from the roster rather than capping: tools that sat
+  permanently below the cut are not worth their schema every turn only to be dropped every
+  turn. Stripped by name in `MEESTER_STRIPPED_TOOLS`
+  ([role-tool-filter.ts](../packages/service/src/chat/role-tool-filter.ts)) —
+  the `*_suggested_work` toggles, the craftbook step-surgery tail (restored in an explicit
+  Craftbook-editor session), and `write_document`/`delete_document` — plus dropping the
+  `doc-intel` and `entity-intel` groups from the role. `export_ai_app`/`import_ai_app` left
+  the shared `team-management` group entirely for an opt-in `ai-apps` group, so no default
+  role carries .gezapp packaging. The freed budget
+  curated the typed-project front door (`list_project_types`, `start_project_from_type`)
+  into the priority list, which the diet had been trimming away on exactly the medium local
+  models it targets.
 - Per-role count-caps ([session-tool-surface.ts](../packages/service/src/chat/session-tool-surface.ts)):
   tiny uses a broad cap (implementation 75, everything else 15). Small caps only
   coordinator roles, and does so **at the full curated orchestration-list length**
-  (Meester 33, Voorman 38); implementation and custom roles remain uncapped. Medium and
+  (Meester 42, Voorman 38); implementation and custom roles remain uncapped. Medium and
   large are uncapped when their admitted context is at least 49,152 tokens. If RAM-aware
   admission clamps a coordinator below that floor, the same full-list diet activates
   automatically; it also remains available behind `GEZEL_MEESTER_TOOL_DIET=1`. This

@@ -135,6 +135,19 @@ export function NewTaskDialog({
   const [suggestedIds, setSuggestedIds] = useState<Set<string>>(new Set());
   // Selection: null = the General (blank) card; else a craftbook id.
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
+  /**
+   * Wizard step. `pick` is the catalog — rail + gallery across the whole
+   * dialog. `configure` is the chosen recipe in full: what it does, every
+   * step it runs, and its parameters, with nothing clamped into a 19rem
+   * column. A craftbook is a page of reading, not a card's worth.
+   */
+  const [step, setStep] = useState<'pick' | 'configure'>('pick');
+  /**
+   * Whether the blank card is a *choice* rather than just "nothing picked
+   * yet" — both read as `selectedBookId === null`, and only the former
+   * should light the card when the user steps back to the gallery.
+   */
+  const [generalChosen, setGeneralChosen] = useState(false);
   const [query, setQuery] = useState('');
   const [activeRail, setActiveRail] = useState<string>('all');
   // One-shot "land on the recommended shelf" per open/project — later
@@ -165,6 +178,8 @@ export function NewTaskDialog({
     if (!open) return;
     setProjectId(defaultProjectId);
     setSelectedBookId(null);
+    setGeneralChosen(false);
+    setStep('pick');
     setQuery('');
     setActiveRail('all');
     setRailInitialized(false);
@@ -290,16 +305,41 @@ export function NewTaskDialog({
 
   const selectGeneral = useCallback(() => {
     setSelectedBookId(null);
+    setGeneralChosen(true);
     setParams({});
     setError('');
+    setStep('configure');
     if (!titleTouched) setTitle('');
   }, [titleTouched]);
+
+  /** Back to the catalog. The selection survives, so the card is still lit. */
+  const backToPicker = useCallback(() => {
+    setStep('pick');
+    setError('');
+  }, []);
+
+  /**
+   * A different project means a different shelf: re-fetch applicability +
+   * suggestions and drop any selection that may no longer apply. Lives on
+   * the picker step, because it decides what the gallery even holds.
+   */
+  const changeProject = useCallback((next: string) => {
+    setProjectId(next);
+    setSelectedBookId(null);
+    setGeneralChosen(false);
+    setParams({});
+    setActiveRail('all');
+    setRailInitialized(false);
+    setError('');
+  }, []);
 
   const selectBook = useCallback(
     (b: BookItem) => {
       setSelectedBookId(b.manifest.id);
+      setGeneralChosen(false);
       setParams(seedParamDefaults(b.manifest.paramSchema));
       setError('');
+      setStep('configure');
       if (!titleTouched) setTitle(b.manifest.name);
       if (!assigneeTouched) {
         const d = b.manifest.defaultAssignee;
@@ -433,6 +473,9 @@ export function NewTaskDialog({
     async (e: React.FormEvent) => {
       e.preventDefault();
       if (busy) return;
+      // Enter in the picker's search box submits the form implicitly; the
+      // task is not configured yet, so nothing may be created from there.
+      if (step !== 'configure') return;
       setError('');
       if (!projectId) {
         setError('Pick a project.');
@@ -581,6 +624,7 @@ export function NewTaskDialog({
     },
     [
       busy,
+      step,
       creationMode,
       projectId,
       selectedBook,
@@ -603,6 +647,23 @@ export function NewTaskDialog({
       : null;
   const createDisabled = busy || (selectedBook !== null && selectedNeeds.length > 0);
 
+  const heroEyebrow = selectedBook
+    ? `Craftbook${
+        isRecommended(selectedBook)
+          ? creationMode === 'night-shift'
+            ? ' · recommended for Night Shift'
+            : creationMode === 'scheduled'
+              ? ' · recommended for schedules'
+              : ' · recommended'
+          : ''
+      }`
+    : creationMode === 'one-time'
+      ? 'Blank task'
+      : creationMode === 'scheduled'
+        ? 'Blank schedule'
+        : 'Blank Night Shift task';
+  const projectName = projects.find((p) => p.id === projectId)?.name ?? '';
+
   return (
     <Dialog.Root
       open={open}
@@ -612,137 +673,175 @@ export function NewTaskDialog({
     >
       <Dialog.Portal>
         <Dialog.Overlay />
-        <Dialog.Content className="gz-npd gz-ntd">
+        <Dialog.Content className={`gz-npd gz-ntd gz-ntd-step-${step}`}>
           <form onSubmit={handleSubmit} style={{ display: 'contents' }}>
-            <header className="gz-npd-header">
-              <div className="gz-npd-header-copy">
-                <Dialog.Title asChild>
-                  <h3>{modeCopy.title}</h3>
-                </Dialog.Title>
-                <p className="gz-npd-header-sub">{modeCopy.subtitle}</p>
-              </div>
-              <label className="gz-npd-search">
-                <span className="sr-only">Search craftbooks</span>
-                <input
-                  type="search"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search craftbooks…"
-                />
-              </label>
-            </header>
-            <div className="gz-npd-body">
-              <nav className="gz-npd-rail" aria-label="Craftbook shelves">
-                {suggestedBooks.length > 0 && (
-                  <button
-                    type="button"
-                    className={`gz-npd-rail-item${!searching && activeRail === 'recommended' ? ' active' : ''}`}
-                    onClick={() => setActiveRail('recommended')}
-                  >
-                    <ProjectGlyph glyph="sprout" size={16} />
-                    <span className="gz-npd-rail-label">{modeCopy.featuredLabel}</span>
-                    <span className="gz-npd-rail-count">{suggestedBooks.length}</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className={`gz-npd-rail-item${!searching && activeRail === 'all' ? ' active' : ''}`}
-                  onClick={() => setActiveRail('all')}
-                >
-                  <ProjectGlyph glyph="sheet" size={16} />
-                  <span className="gz-npd-rail-label">All craftbooks</span>
-                  <span className="gz-npd-rail-count">{books.length}</span>
-                </button>
-                {lenses.map((lens, index) => {
-                  const groupLabel =
-                    lenses[index - 1]?.family === lens.family
-                      ? null
-                      : taskLensGroupLabel(lens.family);
-                  return (
-                    <Fragment key={lens.id}>
-                      {groupLabel && <span className="gz-npd-rail-group">{groupLabel}</span>}
-                      <button
-                        type="button"
-                        className={`gz-npd-rail-item${!searching && activeRail === lens.id ? ' active' : ''}`}
-                        onClick={() => setActiveRail(lens.id)}
-                      >
-                        <ProjectGlyph glyph={lens.glyph} size={16} />
-                        <span className="gz-npd-rail-label">{lens.label}</span>
-                        <span className="gz-npd-rail-count">{lens.bookIds.size}</span>
-                      </button>
-                    </Fragment>
-                  );
-                })}
-              </nav>
-              <div className="gz-npd-gallery" role="radiogroup" aria-label="Task type">
-                {generalMatches && (
-                  <section className="gz-npd-section">
-                    <div className="gz-npd-section-head">
-                      <span className="gz-npd-section-title">Start fresh</span>
-                    </div>
-                    <div className="gz-npd-grid">
-                      <GalleryCard
-                        label={modeCopy.generalLabel}
-                        description={modeCopy.generalDescription}
-                        glyph={GENERAL_TASK_CARD.glyph}
-                        index={0}
-                        active={selectedBookId === null}
-                        onSelect={selectGeneral}
+            {step === 'pick' ? (
+              <>
+                <header className="gz-npd-header">
+                  <div className="gz-npd-header-copy">
+                    <Dialog.Title asChild>
+                      <h3>{modeCopy.title}</h3>
+                    </Dialog.Title>
+                    <p className="gz-npd-header-sub">{modeCopy.subtitle}</p>
+                  </div>
+                  <div className="gz-ntd-header-controls">
+                    {!projectLocked && (
+                      <label className="gz-ntd-header-project">
+                        <span>Project</span>
+                        <Select.Root value={projectId} onValueChange={changeProject}>
+                          <Select.Trigger>
+                            <Select.Value />
+                          </Select.Trigger>
+                          <Select.Content>
+                            {projects.map((p) => (
+                              <Select.Item key={p.id} value={p.id}>
+                                {p.name}
+                              </Select.Item>
+                            ))}
+                          </Select.Content>
+                        </Select.Root>
+                      </label>
+                    )}
+                    <label className="gz-npd-search">
+                      <span className="sr-only">Search craftbooks</span>
+                      <input
+                        type="search"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        placeholder="Search craftbooks…"
                       />
-                    </div>
-                  </section>
-                )}
-                {gallerySections.map((section) => (
-                  <section key={section.id} className="gz-npd-section">
-                    <div className="gz-npd-section-head">
-                      <span className="gz-npd-section-title">{section.title}</span>
-                      {section.tagline && (
-                        <span className="gz-npd-section-tagline">{section.tagline}</span>
-                      )}
-                    </div>
-                    {section.books.length > 0 ? (
-                      <div className="gz-npd-grid">
-                        {section.books.map((b, index) => (
-                          <GalleryCard
-                            key={b.manifest.id}
-                            label={b.manifest.name}
-                            description={b.manifest.description}
-                            glyph={craftbookGlyph(b.manifest)}
-                            {...(b.item.iconSvg ? { iconSvg: b.item.iconSvg } : {})}
-                            {...(b.item.logoUrl ? { logoUrl: b.item.logoUrl } : {})}
-                            suggested={isRecommended(b)}
-                            index={index + 1}
-                            active={b.manifest.id === selectedBookId}
-                            onSelect={() => selectBook(b)}
-                          />
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="gz-npd-empty">
-                        {booksLoaded
-                          ? searching
-                            ? 'No craftbooks match your search.'
-                            : 'No craftbooks here yet.'
-                          : 'Loading craftbooks…'}
-                      </p>
-                    )}
-                    {section.id === 'recommended' && books.length > suggestedBooks.length && (
+                    </label>
+                  </div>
+                </header>
+                <div className="gz-npd-body">
+                  <nav className="gz-npd-rail" aria-label="Craftbook shelves">
+                    {suggestedBooks.length > 0 && (
                       <button
                         type="button"
-                        className="gz-ntd-show-all"
-                        onClick={() => setActiveRail('all')}
+                        className={`gz-npd-rail-item${!searching && activeRail === 'recommended' ? ' active' : ''}`}
+                        onClick={() => setActiveRail('recommended')}
                       >
-                        Browse all {books.length} craftbooks
+                        <ProjectGlyph glyph="sprout" size={16} />
+                        <span className="gz-npd-rail-label">{modeCopy.featuredLabel}</span>
+                        <span className="gz-npd-rail-count">{suggestedBooks.length}</span>
                       </button>
                     )}
-                  </section>
-                ))}
-              </div>
-              <aside className="gz-npd-pane">
-                <div className="gz-npd-pane-scroll" key={selectedBookId ?? '__general'}>
-                  {selectedBook ? (
-                    <div className="gz-npd-hero">
-                      <div className="gz-npd-hero-art" aria-hidden="true">
+                    <button
+                      type="button"
+                      className={`gz-npd-rail-item${!searching && activeRail === 'all' ? ' active' : ''}`}
+                      onClick={() => setActiveRail('all')}
+                    >
+                      <ProjectGlyph glyph="sheet" size={16} />
+                      <span className="gz-npd-rail-label">All craftbooks</span>
+                      <span className="gz-npd-rail-count">{books.length}</span>
+                    </button>
+                    {lenses.map((lens, index) => {
+                      const groupLabel =
+                        lenses[index - 1]?.family === lens.family
+                          ? null
+                          : taskLensGroupLabel(lens.family);
+                      return (
+                        <Fragment key={lens.id}>
+                          {groupLabel && <span className="gz-npd-rail-group">{groupLabel}</span>}
+                          <button
+                            type="button"
+                            className={`gz-npd-rail-item${!searching && activeRail === lens.id ? ' active' : ''}`}
+                            onClick={() => setActiveRail(lens.id)}
+                          >
+                            <ProjectGlyph glyph={lens.glyph} size={16} />
+                            <span className="gz-npd-rail-label">{lens.label}</span>
+                            <span className="gz-npd-rail-count">{lens.bookIds.size}</span>
+                          </button>
+                        </Fragment>
+                      );
+                    })}
+                  </nav>
+                  <div className="gz-npd-gallery" role="radiogroup" aria-label="Task type">
+                    {generalMatches && (
+                      <section className="gz-npd-section">
+                        <div className="gz-npd-section-head">
+                          <span className="gz-npd-section-title">Start fresh</span>
+                        </div>
+                        <div className="gz-npd-grid">
+                          <GalleryCard
+                            label={modeCopy.generalLabel}
+                            description={modeCopy.generalDescription}
+                            glyph={GENERAL_TASK_CARD.glyph}
+                            index={0}
+                            active={generalChosen}
+                            onSelect={selectGeneral}
+                          />
+                        </div>
+                      </section>
+                    )}
+                    {gallerySections.map((section) => (
+                      <section key={section.id} className="gz-npd-section">
+                        <div className="gz-npd-section-head">
+                          <span className="gz-npd-section-title">{section.title}</span>
+                          {section.tagline && (
+                            <span className="gz-npd-section-tagline">{section.tagline}</span>
+                          )}
+                        </div>
+                        {section.books.length > 0 ? (
+                          <div className="gz-npd-grid">
+                            {section.books.map((b, index) => (
+                              <GalleryCard
+                                key={b.manifest.id}
+                                label={b.manifest.name}
+                                description={b.manifest.description}
+                                glyph={craftbookGlyph(b.manifest)}
+                                {...(b.item.iconSvg ? { iconSvg: b.item.iconSvg } : {})}
+                                {...(b.item.logoUrl ? { logoUrl: b.item.logoUrl } : {})}
+                                suggested={isRecommended(b)}
+                                index={index + 1}
+                                active={b.manifest.id === selectedBookId}
+                                onSelect={() => selectBook(b)}
+                              />
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="gz-npd-empty">
+                            {booksLoaded
+                              ? searching
+                                ? 'No craftbooks match your search.'
+                                : 'No craftbooks here yet.'
+                              : 'Loading craftbooks…'}
+                          </p>
+                        )}
+                        {section.id === 'recommended' && books.length > suggestedBooks.length && (
+                          <button
+                            type="button"
+                            className="gz-ntd-show-all"
+                            onClick={() => setActiveRail('all')}
+                          >
+                            Browse all {books.length} craftbooks
+                          </button>
+                        )}
+                      </section>
+                    ))}
+                  </div>
+                </div>
+                <div className="gz-npd-pane-footer gz-ntd-pick-footer">
+                  <p className="gz-ntd-footnote">
+                    Pick one to see what it does — nothing is created until the next screen.
+                  </p>
+                  <Dialog.Actions>
+                    <button type="button" onClick={onClose}>
+                      Cancel
+                    </button>
+                  </Dialog.Actions>
+                </div>
+              </>
+            ) : (
+              <>
+                <header className="gz-npd-header gz-ntd-detail-header">
+                  <button type="button" className="gz-ntd-back" onClick={backToPicker}>
+                    <span aria-hidden="true">‹</span>
+                    {selectedBook ? 'Craftbooks' : 'Back'}
+                  </button>
+                  <div className="gz-ntd-detail-id">
+                    <span className="gz-ntd-detail-art" aria-hidden="true">
+                      {selectedBook ? (
                         <CatalogArtwork
                           {...(selectedBook.item.iconSvg
                             ? { iconSvg: selectedBook.item.iconSvg }
@@ -752,22 +851,36 @@ export function NewTaskDialog({
                             : {})}
                           svgClassName="gz-npd-hero-art-svg"
                           fallback={
-                            <ProjectGlyph glyph={craftbookGlyph(selectedBook.manifest)} size={34} />
+                            <ProjectGlyph glyph={craftbookGlyph(selectedBook.manifest)} size={26} />
                           }
                         />
-                      </div>
-                      <p className="gz-npd-hero-eyebrow">
-                        Craftbook
-                        {isRecommended(selectedBook)
-                          ? creationMode === 'night-shift'
-                            ? ' · recommended for Night Shift'
-                            : creationMode === 'scheduled'
-                              ? ' · recommended for schedules'
-                              : ' · recommended'
-                          : ''}
-                      </p>
-                      <h4 className="gz-npd-hero-name">{selectedBook.manifest.name}</h4>
-                      <p className="gz-npd-hero-description">{selectedBook.manifest.description}</p>
+                      ) : (
+                        <ProjectGlyph glyph={GENERAL_TASK_CARD.glyph} size={26} />
+                      )}
+                    </span>
+                    <div className="gz-npd-header-copy">
+                      <p className="gz-npd-hero-eyebrow">{heroEyebrow}</p>
+                      <Dialog.Title asChild>
+                        <h3 className="gz-npd-hero-name">
+                          {selectedBook ? selectedBook.manifest.name : modeCopy.generalLabel}
+                        </h3>
+                      </Dialog.Title>
+                    </div>
+                  </div>
+                  {!projectLocked && projectName && (
+                    <p className="gz-ntd-detail-project">
+                      in <strong>{projectName}</strong>
+                    </p>
+                  )}
+                </header>
+                <div
+                  className="gz-ntd-detail"
+                  data-blank={selectedBook ? undefined : 'true'}
+                  key={selectedBookId ?? '__general'}
+                >
+                  {selectedBook && (
+                    <div className="gz-ntd-brief">
+                      <p className="gz-ntd-brief-lede">{selectedBook.manifest.description}</p>
                       {selectedBook.manifest.basedOn && (
                         <p className="gz-ntd-based-on">
                           Based on{' '}
@@ -788,207 +901,173 @@ export function NewTaskDialog({
                         <ol className="gz-ntd-steps-list">
                           {selectedBook.manifest.steps.map((s) => (
                             <li key={s.id}>
-                              <span className="gz-ntd-step-name">{s.name}</span>
-                              {s.suggestedRole && (
-                                <span className="gz-ntd-step-role">{s.suggestedRole}</span>
+                              <span className="gz-ntd-step-head">
+                                <span className="gz-ntd-step-name">{s.name}</span>
+                                {s.suggestedRole && (
+                                  <span className="gz-ntd-step-role">{s.suggestedRole}</span>
+                                )}
+                              </span>
+                              {s.description && (
+                                <span className="gz-ntd-step-note">{s.description}</span>
                               )}
                             </li>
                           ))}
                         </ol>
                       </div>
                     </div>
-                  ) : (
-                    <div className="gz-npd-hero">
-                      <div className="gz-npd-hero-art" aria-hidden="true">
-                        <ProjectGlyph glyph={GENERAL_TASK_CARD.glyph} size={34} />
-                      </div>
-                      <p className="gz-npd-hero-eyebrow">
-                        {creationMode === 'one-time'
-                          ? 'Blank task'
-                          : creationMode === 'scheduled'
-                            ? 'Blank schedule'
-                            : 'Blank Night Shift task'}
-                      </p>
-                      <h4 className="gz-npd-hero-name">{modeCopy.generalLabel}</h4>
-                      <p className="gz-npd-hero-description">{modeCopy.generalDescription}</p>
-                    </div>
                   )}
-                  <div className="gz-npd-pane-form">
-                    {!projectLocked && (
+                  <div className="gz-ntd-setup">
+                    {!selectedBook && (
+                      <p className="gz-ntd-brief-lede">{modeCopy.generalDescription}</p>
+                    )}
+                    <div className="gz-npd-pane-form">
                       <label>
-                        Project
+                        Title
+                        <input
+                          value={title}
+                          onChange={(e) => {
+                            setTitle(e.target.value);
+                            setTitleTouched(true);
+                          }}
+                          placeholder={
+                            selectedBook ? selectedBook.manifest.name : 'e.g. Ship the landing page'
+                          }
+                        />
+                      </label>
+                      {selectedNeeds.length > 0 && selectedBook && (
+                        <div className="gz-ntd-needs">
+                          <p className="gz-npd-give-eyebrow">Needs setup</p>
+                          <CraftbookToolsetSetup
+                            missing={selectedNeeds}
+                            onAllInstalled={() => void loadCraftbooks()}
+                            onCancel={backToPicker}
+                          />
+                        </div>
+                      )}
+                      {selectedSchema && selectedNeeds.length === 0 && (
+                        <div className="gz-npd-params">
+                          <p className="gz-npd-give-eyebrow">Parameters</p>
+                          <GezelJsonEditor
+                            schema={selectedSchema}
+                            value={params}
+                            onChange={(next) => {
+                              setParams((next ?? {}) as Record<string, unknown>);
+                              setError('');
+                            }}
+                            density="comfortable"
+                          />
+                        </div>
+                      )}
+                      {!selectedBook && (
+                        <>
+                          <label>
+                            Description <span className="muted">· a sentence or two</span>
+                            <textarea
+                              value={description}
+                              onChange={(e) => setDescription(e.target.value)}
+                              rows={4}
+                              placeholder="What's the problem? What does success look like for the user?"
+                            />
+                          </label>
+                          <label>
+                            Steps <span className="muted">(one per line)</span>
+                            <textarea
+                              value={stepNames}
+                              onChange={(e) => setStepNames(e.target.value)}
+                              rows={4}
+                            />
+                          </label>
+                        </>
+                      )}
+                      <label>
+                        Assign to
                         <Select.Root
-                          value={projectId}
+                          value={resolvedAssigneeSel}
                           onValueChange={(v) => {
-                            // A different project means a different shelf:
-                            // re-fetch applicability + suggestions and drop
-                            // any selection that may no longer apply.
-                            setProjectId(v);
-                            setSelectedBookId(null);
-                            setParams({});
-                            setActiveRail('all');
-                            setRailInitialized(false);
-                            setError('');
+                            setAssigneeSel(v);
+                            setAssigneeTouched(true);
                           }}
                         >
                           <Select.Trigger>
                             <Select.Value />
                           </Select.Trigger>
                           <Select.Content>
-                            {projects.map((p) => (
-                              <Select.Item key={p.id} value={p.id}>
-                                {p.name}
+                            {entryRole && (
+                              <Select.Item value={AUTO_ASSIGNEE}>
+                                Auto — the {entryRole} for step 1
+                              </Select.Item>
+                            )}
+                            {gezels.map((g) => (
+                              <Select.Item key={g.id} value={g.id}>
+                                {g.name}
+                                {g.role ? ` — ${g.role}` : ''}
                               </Select.Item>
                             ))}
+                            <Select.Item value="__user">Me (no gezel)</Select.Item>
                           </Select.Content>
                         </Select.Root>
-                      </label>
-                    )}
-                    <label>
-                      Title
-                      <input
-                        value={title}
-                        onChange={(e) => {
-                          setTitle(e.target.value);
-                          setTitleTouched(true);
-                        }}
-                        placeholder={
-                          selectedBook ? selectedBook.manifest.name : 'e.g. Ship the landing page'
-                        }
-                      />
-                    </label>
-                    {selectedNeeds.length > 0 && selectedBook && (
-                      <div className="gz-ntd-needs">
-                        <p className="gz-npd-give-eyebrow">Needs setup</p>
-                        <CraftbookToolsetSetup
-                          missing={selectedNeeds}
-                          onAllInstalled={() => void loadCraftbooks()}
-                          onCancel={selectGeneral}
-                        />
-                      </div>
-                    )}
-                    {selectedSchema && selectedNeeds.length === 0 && (
-                      <div className="gz-npd-params">
-                        <GezelJsonEditor
-                          schema={selectedSchema}
-                          value={params}
-                          onChange={(next) => {
-                            setParams((next ?? {}) as Record<string, unknown>);
-                            setError('');
-                          }}
-                          density="compact"
-                        />
-                      </div>
-                    )}
-                    {!selectedBook && (
-                      <>
-                        <label>
-                          Description <span className="muted">· a sentence or two</span>
-                          <textarea
-                            value={description}
-                            onChange={(e) => setDescription(e.target.value)}
-                            rows={3}
-                            placeholder="What's the problem? What does success look like for the user?"
-                          />
-                        </label>
-                        <label>
-                          Steps <span className="muted">(one per line)</span>
-                          <textarea
-                            value={stepNames}
-                            onChange={(e) => setStepNames(e.target.value)}
-                            rows={3}
-                          />
-                        </label>
-                      </>
-                    )}
-                    <label>
-                      Assign to
-                      <Select.Root
-                        value={resolvedAssigneeSel}
-                        onValueChange={(v) => {
-                          setAssigneeSel(v);
-                          setAssigneeTouched(true);
-                        }}
-                      >
-                        <Select.Trigger>
-                          <Select.Value />
-                        </Select.Trigger>
-                        <Select.Content>
-                          {entryRole && (
-                            <Select.Item value={AUTO_ASSIGNEE}>
-                              Auto — the {entryRole} for step 1
-                            </Select.Item>
-                          )}
-                          {gezels.map((g) => (
-                            <Select.Item key={g.id} value={g.id}>
-                              {g.name}
-                              {g.role ? ` — ${g.role}` : ''}
-                            </Select.Item>
-                          ))}
-                          <Select.Item value="__user">Me (no gezel)</Select.Item>
-                        </Select.Content>
-                      </Select.Root>
-                      {resolvedAssigneeSel === AUTO_ASSIGNEE ? (
-                        <small className="muted">
-                          Every step picks its own specialist by role when the task fires. Step 1
-                          goes to the {entryRole}, and whoever that turns out to be owns the task.
-                        </small>
-                      ) : (
-                        selectedBook && (
+                        {resolvedAssigneeSel === AUTO_ASSIGNEE ? (
                           <small className="muted">
-                            Steps that name a role pick their own specialist when the task fires —
-                            this only covers steps that name none.
+                            Every step picks its own specialist by role when the task fires. Step 1
+                            goes to the {entryRole}, and whoever that turns out to be owns the task.
                           </small>
-                        )
+                        ) : (
+                          selectedBook && (
+                            <small className="muted">
+                              Steps that name a role pick their own specialist when the task fires —
+                              this only covers steps that name none.
+                            </small>
+                          )
+                        )}
+                        {resolvedAssigneeSel === '__user' && (
+                          <small className="muted">
+                            Assigned to you — firing won't hand it to a gezel.
+                          </small>
+                        )}
+                      </label>
+                      {creationMode === 'scheduled' && (
+                        <div className="gz-ntd-schedule">
+                          <p className="gz-npd-give-eyebrow">Schedule</p>
+                          <label>
+                            Cron expression <span className="muted">(UTC, 5-field)</span>
+                            <input
+                              value={cron}
+                              placeholder="e.g. 0 9 * * 1 — every Monday 09:00"
+                              onChange={(e) => setCron(e.target.value)}
+                            />
+                          </label>
+                          <label>
+                            Overlap policy
+                            <Select.Root
+                              value={cronOverlap}
+                              onValueChange={(v) => setCronOverlap(v as TaskCronOverlap)}
+                            >
+                              <Select.Trigger>
+                                <Select.Value />
+                              </Select.Trigger>
+                              <Select.Content>
+                                <Select.Item value="skip">
+                                  skip — don't spawn if a prior run is still active
+                                </Select.Item>
+                                <Select.Item value="queue">
+                                  queue — always spawn, let the runner throttle
+                                </Select.Item>
+                                <Select.Item value="concurrent">
+                                  concurrent — spawn unconditionally
+                                </Select.Item>
+                              </Select.Content>
+                            </Select.Root>
+                          </label>
+                        </div>
                       )}
-                      {resolvedAssigneeSel === '__user' && (
-                        <small className="muted">
-                          Assigned to you — firing won't hand it to a gezel.
-                        </small>
-                      )}
-                    </label>
-                    {creationMode === 'scheduled' && (
-                      <div className="gz-ntd-schedule">
-                        <p className="gz-npd-give-eyebrow">Schedule</p>
-                        <label>
-                          Cron expression <span className="muted">(UTC, 5-field)</span>
-                          <input
-                            value={cron}
-                            placeholder="e.g. 0 9 * * 1 — every Monday 09:00"
-                            onChange={(e) => setCron(e.target.value)}
-                          />
-                        </label>
-                        <label>
-                          Overlap policy
-                          <Select.Root
-                            value={cronOverlap}
-                            onValueChange={(v) => setCronOverlap(v as TaskCronOverlap)}
-                          >
-                            <Select.Trigger>
-                              <Select.Value />
-                            </Select.Trigger>
-                            <Select.Content>
-                              <Select.Item value="skip">
-                                skip — don't spawn if a prior run is still active
-                              </Select.Item>
-                              <Select.Item value="queue">
-                                queue — always spawn, let the runner throttle
-                              </Select.Item>
-                              <Select.Item value="concurrent">
-                                concurrent — spawn unconditionally
-                              </Select.Item>
-                            </Select.Content>
-                          </Select.Root>
-                        </label>
-                      </div>
-                    )}
+                    </div>
                   </div>
                 </div>
                 {/* Every submit failure renders HERE, in the fixed footer
-                    beside the button — never inside the scrolling pane above,
+                    beside the button — never inside the scrolling body above,
                     where a message lands below the fold on a pane parked at
                     the top and the launch reads as a dead button. */}
-                <div className="gz-npd-pane-footer">
+                <div className="gz-npd-pane-footer gz-ntd-detail-footer">
                   {error ? (
                     <p className="error small gz-ntd-submit-error" role="alert">
                       {error}
@@ -1017,8 +1096,8 @@ export function NewTaskDialog({
                     </button>
                   </Dialog.Actions>
                 </div>
-              </aside>
-            </div>
+              </>
+            )}
           </form>
         </Dialog.Content>
       </Dialog.Portal>

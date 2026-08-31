@@ -275,6 +275,103 @@ export interface SampleMachineMemoryUsageOptions {
   sampledAt?: string;
 }
 
+const WINDOWS_PROCESS_LOCAL_MEMORY_SOURCE = 'windows-gpu-process-local-memory';
+const NVML_PROCESS_MEMORY_SOURCE = 'nvml-process-memory';
+const PROCESS_BREAKDOWN_MIN_BYTES = 16 * 1024 ** 2;
+const PROCESS_RECONCILIATION_ABSOLUTE_TOLERANCE_BYTES = 256 * 1024 ** 2;
+const PROCESS_RECONCILIATION_RELATIVE_TOLERANCE = 0.15;
+
+function isWindowsDesktopProcess(process: GpuProcessMemory): boolean {
+  return (
+    (process.name ?? '')
+      .trim()
+      .replace(/\.exe$/i, '')
+      .toLowerCase() === 'dwm'
+  );
+}
+
+function scaleGpuProcesses(processes: GpuProcessMemory[], scale: number): GpuProcessMemory[] {
+  return processes.map((process) => ({
+    ...process,
+    dedicatedBytes: process.dedicatedBytes * scale,
+  }));
+}
+
+/**
+ * Windows' resident-local process samples can still overlap where display
+ * surfaces are shared with DWM. Attribute application residency first, then
+ * make Windows Desktop the remainder of the measured non-Gezel pool. This
+ * keeps every displayed estimate inside the adapter-wide physical total.
+ */
+function reconcileWindowsGpuProcesses(
+  processes: GpuProcessMemory[],
+  usedBytes: number,
+): { processes: GpuProcessMemory[]; observedGezelBytes: number } {
+  const engineProcesses = processes.filter((process) => process.owner !== 'external');
+  const rawGezelBytes = engineProcesses.reduce((sum, process) => sum + process.dedicatedBytes, 0);
+  const engineScale =
+    rawGezelBytes > usedBytes && rawGezelBytes > 0 ? usedBytes / rawGezelBytes : 1;
+  const reconciledEngines = scaleGpuProcesses(engineProcesses, engineScale);
+  const observedGezelBytes = Math.min(rawGezelBytes, usedBytes);
+  const otherBytes = Math.max(0, usedBytes - observedGezelBytes);
+
+  const desktopProcesses = processes.filter(
+    (process) => process.owner === 'external' && isWindowsDesktopProcess(process),
+  );
+  const otherAppProcesses = processes.filter(
+    (process) => process.owner === 'external' && !isWindowsDesktopProcess(process),
+  );
+  const rawOtherAppBytes = otherAppProcesses.reduce(
+    (sum, process) => sum + process.dedicatedBytes,
+    0,
+  );
+  const allowedOverage = Math.max(
+    PROCESS_RECONCILIATION_ABSOLUTE_TOLERANCE_BYTES,
+    otherBytes * PROCESS_RECONCILIATION_RELATIVE_TOLERANCE,
+  );
+
+  // A badly inconsistent sample is not rescued through aggressive scaling.
+  // Keep the Gezel attribution, but leave the remainder to the bar's Other
+  // bucket instead of inventing a plausible-looking application breakdown.
+  if (rawOtherAppBytes > otherBytes + allowedOverage) {
+    return {
+      processes: reconciledEngines.sort((a, b) => b.dedicatedBytes - a.dedicatedBytes),
+      observedGezelBytes,
+    };
+  }
+
+  const appScale =
+    rawOtherAppBytes > otherBytes && rawOtherAppBytes > 0 ? otherBytes / rawOtherAppBytes : 1;
+  const reconciledApps = scaleGpuProcesses(otherAppProcesses, appScale);
+  const reconciledAppBytes = reconciledApps.reduce(
+    (sum, process) => sum + process.dedicatedBytes,
+    0,
+  );
+  const desktopBytes = Math.max(0, otherBytes - reconciledAppBytes);
+  const desktopSource = desktopProcesses[0];
+  const desktop =
+    desktopSource && desktopBytes >= PROCESS_BREAKDOWN_MIN_BYTES
+      ? [
+          {
+            pid: desktopSource.pid,
+            name: 'Windows Desktop',
+            dedicatedBytes: desktopBytes,
+            owner: 'external' as const,
+            ...(desktopProcesses.length === 1 && desktopSource.adapterLuid
+              ? { adapterLuid: desktopSource.adapterLuid }
+              : {}),
+          },
+        ]
+      : [];
+
+  return {
+    processes: [...reconciledEngines, ...reconciledApps, ...desktop].sort(
+      (a, b) => b.dedicatedBytes - a.dedicatedBytes,
+    ),
+    observedGezelBytes,
+  };
+}
+
 /**
  * Combine stable capacity detection, cached accelerator health, and cheap OS
  * RAM counters into the live memory strip's portable wire shape.
@@ -408,7 +505,7 @@ export function sampleMachineMemoryUsage(
       )
       .map((lifecycle) => lifecycle.pid as number),
   );
-  const gpuProcesses: GpuProcessMemory[] = (opts.deviceHealth?.processes ?? [])
+  const rawGpuProcesses: GpuProcessMemory[] = (opts.deviceHealth?.processes ?? [])
     .filter(
       (process) =>
         Number.isInteger(process.pid) &&
@@ -421,13 +518,23 @@ export function sampleMachineMemoryUsage(
         ? { ...process, owner: 'gezel-engine' as const }
         : { ...process },
     );
+  const sources = opts.deviceHealth?.sources ?? [];
+  const hasWindowsProcessAccounting = sources.includes(WINDOWS_PROCESS_LOCAL_MEMORY_SOURCE);
+  const hasMeasuredProcessAccounting = sources.includes(NVML_PROCESS_MEMORY_SOURCE);
   const processAccountingAvailable =
-    gpuProcesses.length > 0 ||
-    (opts.deviceHealth?.sources ?? []).some(
-      (source) => source === 'windows-gpu-process-memory' || source === 'nvml-process-memory',
-    );
-  const observedGezelBytes =
-    usedBytes !== null && processAccountingAvailable
+    rawGpuProcesses.length > 0 && (hasWindowsProcessAccounting || hasMeasuredProcessAccounting);
+  const windowsAttribution =
+    usedBytes !== null && processAccountingAvailable && hasWindowsProcessAccounting
+      ? reconcileWindowsGpuProcesses(rawGpuProcesses, usedBytes)
+      : null;
+  const gpuProcesses = windowsAttribution
+    ? windowsAttribution.processes
+    : hasMeasuredProcessAccounting
+      ? rawGpuProcesses
+      : [];
+  const observedGezelBytes = windowsAttribution
+    ? windowsAttribution.observedGezelBytes
+    : usedBytes !== null && processAccountingAvailable
       ? clamp(
           gpuProcesses
             .filter((process) => process.owner !== 'external')
@@ -457,13 +564,22 @@ export function sampleMachineMemoryUsage(
     usedBytes,
     gezelBytesEstimated,
     gezelBytesObserved: observedGezelBytes,
+    ...(processAccountingAvailable
+      ? {
+          processAttributionKind: hasWindowsProcessAccounting
+            ? ('estimated' as const)
+            : ('measured' as const),
+        }
+      : {}),
     ...breakdown,
     engineReservedBytes: engineBytes,
     engineBudgetBytes,
     residentModels,
     ...(opts.engineLifecycles ? { engineLifecycles: opts.engineLifecycles } : {}),
     ...(gpuProcesses.length > 0 ? { gpuProcesses } : {}),
-    gezelEngineProcessCount: gpuProcesses.filter((process) => process.owner !== 'external').length,
+    gezelEngineProcessCount: new Set(
+      gpuProcesses.filter((process) => process.owner !== 'external').map((process) => process.pid),
+    ).size,
     orphanedGezelEngineProcessCount: 0,
     otherBytes: usedBytes === null ? null : Math.max(0, usedBytes - gezelBytesAttributed),
     cachedBytes: null,

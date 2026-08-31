@@ -264,6 +264,24 @@ button.danger {
   border-radius: 0;
 }
 
+/* Overlay the resize grip instead of reserving a track for it. The grip's
+   own background is transparent, so an 8px track is 8px of app `--bg`
+   between two `--panel` surfaces — invisible against the editor body,
+   but a notch of bare background at the left end of the editor's tinted
+   toolbar and status bar. Collapsing the track and letting the handle
+   overhang the seam keeps the same drag target with no gap to paint.
+   Scoped to the library; the project file tabs still sit inside a
+   bordered card where the track reads as part of the frame. */
+.project-files-layout-documents.has-tree-grip {
+  --file-tree-grip-track: 0px;
+}
+
+.project-files-layout-documents .file-tree-grip {
+  width: 9px;
+  margin-inline: -4px;
+  z-index: 2;
+}
+
 .file-tree-grip {
   width: auto;
 }
@@ -289,6 +307,76 @@ button.danger {
   display: flex;
   align-items: center;
   gap: 0.35rem;
+}
+
+/* Library content search — the file tree answers "where did I file it", this
+   answers "which document says this". It takes the title row's flexible grid
+   cell while the create tray keeps its intrinsic width in the cell beside it.
+   These rules belong in the always-loaded file-browser sheet: putting them in
+   a lazy view's stylesheet leaves the native search input wide enough to run
+   beneath the create actions until that unrelated view has been opened. */
+.documents-search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.documents-search-input {
+  flex: 1 1 0;
+  width: 100%;
+  min-width: 0;
+  padding: 0.3rem 0.45rem;
+  color: inherit;
+  /* Transparent, not `--panel`: standing in the title's place it should read
+     as part of the pane, whichever surface color the theme gives it. */
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+}
+
+.documents-search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.documents-search-status {
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+/* The matched prose under the document name. Wraps, but clamped to two
+   lines: a search result is a signpost to the document, not a substitute for
+   opening it, and an unclamped summary turns the list into a wall of text. */
+.documents-search-snippet {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+/* A hit the document earned by embedding proximity rather than by containing
+   the words the user typed. Neutral sibling of the chat `automatic` badge —
+   same `--text-2xs` / `--radius-sm` recipe — because the claim is "you might
+   also want this", not "this is what you asked for". */
+.documents-search-related {
+  display: inline-block;
+  margin-right: 0.35rem;
+  vertical-align: 1px;
+  padding: 0 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 /* Transient result of the last create / delete / import, under the header. */
@@ -904,18 +992,30 @@ button.danger {
   font-weight: 600;
 }
 
-.pending-question-night-reports {
+/* Morning night-shift card: three labelled bands (proposals to decide,
+   reports to read, tasks that finished), each a stack of rows. */
+.pending-question-night-band {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  margin: 0.4rem 0;
+  margin: 0.6rem 0;
 }
 
-.pending-question-night-report {
+/* Uppercase eyebrow per docs/ux.md — same recipe as `.gz-npd-rail-group`. */
+.pending-question-night-band-label {
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pending-question-night-row {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0.3rem 0.5rem;
+  padding: 0.35rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--surface);
@@ -923,6 +1023,19 @@ button.danger {
   font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
+  transition: background 140ms ease-out;
+}
+
+.pending-question-night-row:hover {
+  background: var(--panel);
+}
+
+.pending-question-night-row-title {
+  font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gz-dialog.project-add-gezel-dialog {
@@ -1578,6 +1691,45 @@ button.danger {
   font-size: 0.85rem;
 }
 
+.timeline-session-error-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  line-height: 1.45;
+}
+
+.timeline-session-error-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.timeline-session-error-action {
+  padding: 0.32rem 0.7rem;
+  border-radius: var(--radius-md);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.timeline-session-error-action-primary {
+  background: var(--accent);
+  color: white;
+}
+
+.timeline-session-error-action:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.timeline-session-error-action-error {
+  margin: 0.5rem 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
 /* First-run on-device install banner — shown on Home while the
    bootstrapped Gemma 4 model is still downloading (or failed).
    Goes away automatically when the model appears on disk. */
@@ -1701,6 +1853,10 @@ button.danger {
   text-decoration: underline;
   font: inherit;
   cursor: pointer;
+}
+
+.timeline-session-error-actions .timeline-session-error-link {
+  margin-left: 0.1rem;
 }
 
 .timeline-session-error-link:hover {

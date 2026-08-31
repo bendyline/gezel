@@ -31,6 +31,13 @@ declarative expression. See [Drivers](#drivers-most-connector-types-are-configur
 > read [connector-standards.md](./connector-standards.md), whose conformance table records
 > the per-rule implementation state (all met since the August 2026 overhaul, with the
 > residual gaps named there).
+>
+> Connectors have **two** output shapes. This document and connector-standards.md describe the
+> **document** shape — one markdown file per record, read as files. High-volume tabular sources
+> (Azure Monitor, CDN logs, exports) use the **observation** shape instead: rows mirrored as
+> partitioned Parquet and read back with SQL, so a gezel never handles a row. Its contract is
+> [observation-corpora.md](./observation-corpora.md); the decision is
+> [ADR 0009](./decisions/0009-observation-corpora.md).
 
 ## Vocabulary
 

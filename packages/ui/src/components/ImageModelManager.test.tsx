@@ -37,6 +37,67 @@ const IMAGE_MODEL = {
   },
 };
 
+const TWO_INSTALLED = {
+  models: [
+    {
+      id: 'flux-2-klein-4b-q4',
+      name: 'FLUX.2 Klein 4B (Q4)',
+      approxSizeBytes: 4.8 * GiB,
+      installedAt: '2026-06-24T00:00:00.000Z',
+    },
+    {
+      id: 'krea-2-turbo-q4',
+      name: 'Krea 2 Turbo (Q4)',
+      approxSizeBytes: 9.5 * GiB,
+      installedAt: '2026-06-25T00:00:00.000Z',
+    },
+  ],
+};
+
+describe('ImageModelManager active-model selection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.listInstalledImageModels).mockResolvedValue(TWO_INSTALLED as never);
+    vi.mocked(api.listActiveImagePulls).mockResolvedValue({ pulls: [] } as never);
+    vi.mocked(api.listCatalogItems).mockResolvedValue({ items: [] } as never);
+  });
+
+  it('omits the Active column when no onSetActiveModel handler is given', async () => {
+    render(<ImageModelManager />);
+
+    await screen.findByText('flux-2-klein-4b-q4');
+    expect(screen.queryByRole('radio')).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: 'Active' })).toBeNull();
+  });
+
+  it('marks the configured default active and persists a new pick', async () => {
+    const onSet = vi.fn();
+    render(
+      <ImageModelManager configuredDefaultModelId="krea-2-turbo-q4" onSetActiveModel={onSet} />,
+    );
+
+    const krea = await screen.findByRole('radio', {
+      name: 'Use krea-2-turbo-q4 as the active image model',
+    });
+    const flux = screen.getByRole('radio', {
+      name: 'Use flux-2-klein-4b-q4 as the active image model',
+    });
+    expect(krea).toBeChecked();
+    expect(flux).not.toBeChecked();
+
+    await userEvent.click(flux);
+    expect(onSet).toHaveBeenCalledWith('flux-2-klein-4b-q4');
+  });
+
+  it('falls back to the first installed model when the configured default is gone', async () => {
+    const onSet = vi.fn();
+    render(<ImageModelManager configuredDefaultModelId="deleted-model" onSetActiveModel={onSet} />);
+
+    const flux = await screen.findByRole('radio', { name: /flux-2-klein-4b-q4/ });
+    expect(flux).toBeChecked();
+  });
+});
+
 describe('ImageModelManager downloads', () => {
   beforeEach(() => {
     vi.clearAllMocks();

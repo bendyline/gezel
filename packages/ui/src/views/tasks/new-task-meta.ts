@@ -19,7 +19,7 @@ import type { ProjectGlyphId } from '../projects/new-project-meta.js';
  * Lens + card metadata for the New Task dialog's craftbook gallery.
  *
  * "Recommended" stays project-type-aware. The browse rail below it shelves
- * the catalog by subject category, grouped code / non-code, because the
+ * the catalog by subject category, grouped by subject family, because the
  * lifecycle role alone leaves a code project staring at one 190-book pile
  * called "General work" that is mostly recipes about media and household
  * admin. The one role shelf worth keeping beside the categories is

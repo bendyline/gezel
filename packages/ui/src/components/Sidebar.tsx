@@ -102,6 +102,8 @@ interface SidebarProps {
   onSelect: (tab: RecentTab | null) => void;
   /** Open a top-level area (Tasks, Settings, Scripts, …). */
   onOpenArea: (area: RecentTabArea) => void;
+  /** Warm a destination module after navigation intent, before selection. */
+  onPreload?: (tab: RecentTab | null) => void;
   /** Project ids with a gezel currently mid-turn — drives the animated
    *  "thinking" indicator on the row (replaces the status dot). */
   activeProjectIds?: Set<string>;
@@ -219,6 +221,7 @@ export function Sidebar({
   selection,
   onSelect,
   onOpenArea,
+  onPreload,
   activeProjectIds,
   activeGezelIds,
   pendingByProject,
@@ -683,6 +686,14 @@ export function Sidebar({
   // `{ kind: 'area', area }` selection; individual items are their own
   // `kind` ('project' | 'document' | 'gezel').
   const activeArea = selection?.kind === 'area' ? selection.area : null;
+  const intentProps = useCallback(
+    (tab: RecentTab | null) => ({
+      onPointerEnter: () => onPreload?.(tab),
+      onFocus: () => onPreload?.(tab),
+      onPointerDown: () => onPreload?.(tab),
+    }),
+    [onPreload],
+  );
 
   return (
     <aside
@@ -696,6 +707,7 @@ export function Sidebar({
           type="button"
           className={`app-sidebar-item app-sidebar-item-root app-sidebar-home${selection === null ? ' active' : ''}`}
           onClick={() => onSelect(null)}
+          {...intentProps(null)}
           title={homeTitle}
           data-testid="sidebar-meester"
         >
@@ -723,6 +735,7 @@ export function Sidebar({
           active={activeArea === 'projects'}
           onToggle={() => toggleGroup('projects')}
           onOpen={() => onOpenArea('projects')}
+          onPreload={() => onPreload?.(toRecentTab({ kind: 'area', area: 'projects' }))}
           onAdd={addFor('projects', 'project', 'gezel:new-project')}
           addTitle="New project"
         >
@@ -730,16 +743,18 @@ export function Sidebar({
             <li className="app-sidebar-empty">No projects yet.</li>
           ) : (
             visibleProjects.map((p) => {
-              const key = tabKey({ kind: 'project', id: p.id });
+              const projectTab = toRecentTab({ kind: 'project', id: p.id });
+              const key = tabKey(projectTab);
               const isActive = activeProjectIds?.has(p.id) ?? false;
               const pendingCount = pendingByProject?.get(p.id) ?? 0;
               const poisoned = poisonedProjects?.get(p.id);
               const status = p.status ?? 'active';
-              const select = () => onSelect(toRecentTab({ kind: 'project', id: p.id }));
+              const select = () => onSelect(projectTab);
               return (
                 <li
                   key={p.id}
                   className={`app-sidebar-proj-row${activeKey === key ? ' active' : ''}`}
+                  {...intentProps(projectTab)}
                 >
                   <button
                     type="button"
@@ -868,6 +883,7 @@ export function Sidebar({
           active={activeArea === 'documents'}
           onToggle={() => toggleGroup('documents')}
           onOpen={() => onOpenArea('documents')}
+          onPreload={() => onPreload?.(toRecentTab({ kind: 'area', area: 'documents' }))}
           onAdd={openNewDoc}
           addTitle="New document"
         >
@@ -882,6 +898,11 @@ export function Sidebar({
                 onSelect={(entry) => {
                   if (entry.isDirectory) return;
                   onSelect(toRecentTab({ kind: 'document', path: entry.path }));
+                }}
+                onIntent={(entry) => {
+                  if (!entry.isDirectory) {
+                    onPreload?.(toRecentTab({ kind: 'document', path: entry.path }));
+                  }
                 }}
                 onRename={openRenameDocument}
                 onDelete={openDeleteDocument}
@@ -901,6 +922,7 @@ export function Sidebar({
           active={activeArea === 'gezels'}
           onToggle={() => toggleGroup('gezels')}
           onOpen={() => onOpenArea('gezels')}
+          onPreload={() => onPreload?.(toRecentTab({ kind: 'area', area: 'gezels' }))}
           onAdd={addFor('gezels', 'gezel', 'gezel:new-gezel')}
           addTitle="New gezel"
         >
@@ -908,7 +930,8 @@ export function Sidebar({
             <li className="app-sidebar-empty">No gezellen yet.</li>
           ) : (
             gezels.map((g) => {
-              const key = tabKey({ kind: 'gezel', id: g.id });
+              const gezelTab = toRecentTab({ kind: 'gezel', id: g.id });
+              const key = tabKey(gezelTab);
               const isWorking = activeGezelIds?.has(g.id) ?? false;
               const name = displayName(
                 { name: g.name, roleBasedName: g.roleBasedName },
@@ -925,7 +948,7 @@ export function Sidebar({
               let title = !roleBasedNameOnly && roleLabel ? `${name} — ${roleLabel}` : name;
               if (description) title += ` · ${description}`;
               const select = () => {
-                onSelect(toRecentTab({ kind: 'gezel', id: g.id }));
+                onSelect(gezelTab);
                 if (isWorking) {
                   window.dispatchEvent(
                     new CustomEvent('gezel:prefer-working-project', {
@@ -938,6 +961,7 @@ export function Sidebar({
                 <li
                   key={g.id}
                   className={`app-sidebar-gezel-row${activeKey === key ? ' active' : ''}`}
+                  {...intentProps(gezelTab)}
                 >
                   <button
                     type="button"
@@ -995,13 +1019,15 @@ export function Sidebar({
         {/* Top-level area links */}
         <div className="app-sidebar-links">
           {areaLinks.map((area) => {
-            const key = tabKey({ kind: 'area', area });
+            const areaTab = toRecentTab({ kind: 'area', area });
+            const key = tabKey(areaTab);
             return (
               <button
                 key={area}
                 type="button"
                 className={`app-sidebar-item app-sidebar-item-root${activeKey === key ? ' active' : ''}`}
                 onClick={() => onOpenArea(area)}
+                {...intentProps(areaTab)}
                 title={AREA_LINK_LABELS[area]}
                 data-testid={`sidebar-area-${area}`}
               >
@@ -1147,6 +1173,8 @@ interface GroupProps {
   onToggle: () => void;
   /** Open the full area screen for this group (title click). */
   onOpen: () => void;
+  /** Warm the full-area destination before selection. */
+  onPreload?: () => void;
   onAdd: (e: ReactMouseEvent) => void;
   addTitle: string;
   children: React.ReactNode;
@@ -1161,6 +1189,7 @@ function Group({
   active,
   onToggle,
   onOpen,
+  onPreload,
   onAdd,
   addTitle,
   children,
@@ -1205,6 +1234,9 @@ function Group({
           // collapse toggle / drag grip still expand the rail, so the icon is
           // free to navigate rather than toggle the inline list.
           onClick={onOpen}
+          onPointerEnter={onPreload}
+          onFocus={onPreload}
+          onPointerDown={onPreload}
           title={label}
           data-testid={`sidebar-group-${id}`}
         >

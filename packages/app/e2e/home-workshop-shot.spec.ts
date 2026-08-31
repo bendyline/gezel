@@ -13,7 +13,9 @@ import { fileURLToPath } from 'node:url';
  */
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { captureScreenshot } from './helpers/screenshot.js';
 
 const appRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -37,7 +39,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await app?.close();
+  await closeApp(app);
   await rm(gezelHome, { recursive: true, force: true }).catch(() => {});
 });
 
@@ -134,7 +136,7 @@ test('captures the workshop home at a tall window', async () => {
   expect(Math.abs(railMain.bottom - measurements.innerHeight)).toBeLessThanOrEqual(2);
   expect(Math.abs(composer.bottom - measurements.innerHeight)).toBeLessThanOrEqual(4);
 
-  await page.screenshot({ path: '/tmp/gezel-home-workshop.png', fullPage: false });
+  await captureScreenshot(page, { path: '/tmp/gezel-home-workshop.png', fullPage: false });
 });
 
 test('narrow window keeps the conversation visible without a side rail', async () => {
@@ -171,5 +173,5 @@ test('narrow window keeps the conversation visible without a side rail', async (
   expect(narrow.rail).toBeNull();
   expect(narrow.bodyColumns?.split(' ')).toHaveLength(1);
 
-  await page.screenshot({ path: '/tmp/gezel-home-workshop-narrow.png', fullPage: false });
+  await captureScreenshot(page, { path: '/tmp/gezel-home-workshop-narrow.png', fullPage: false });
 });

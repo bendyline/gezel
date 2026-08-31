@@ -4,7 +4,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { captureScreenshot } from './helpers/screenshot.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -46,12 +48,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  // `app.close()` exercises Electron's real before-quit path. The embedded
-  // service gets a 30-second graceful-shutdown window before the app forces
-  // the final quit, so Playwright's 30-second hook default races that safety
-  // wall and can report a teardown failure just as Electron is exiting.
-  test.setTimeout(HOOK_TIMEOUT_MS);
-  await app?.close();
+  await closeApp(app);
   await rm(gezelHome, { recursive: true, force: true }).catch(() => {});
 });
 
@@ -61,7 +58,10 @@ test('01 - app window opens with correct title', async () => {
   // briefly exposes a generated "Loading https://…" title, so wait for the
   // served UI's document title instead of snapshotting the transient value.
   await expect(page).toHaveTitle('Gezel');
-  await page.screenshot({ path: join(screenshotDir, '01-initial-load.png'), fullPage: true });
+  await captureScreenshot(page, {
+    path: join(screenshotDir, '01-initial-load.png'),
+    fullPage: true,
+  });
 });
 
 test('02 - header shows the brand and the left sidebar lists every area', async () => {
@@ -75,7 +75,7 @@ test('02 - header shows the brand and the left sidebar lists every area', async 
 
   const sidebar = page.locator('[data-testid="app-sidebar"]');
   await expect(sidebar).toBeVisible();
-  await page.screenshot({ path: join(screenshotDir, '02-header.png'), fullPage: true });
+  await captureScreenshot(page, { path: join(screenshotDir, '02-header.png'), fullPage: true });
 
   // Groups (with inline lists) + top-level area links.
   await expect(page.locator('[data-testid="sidebar-group-projects"]')).toBeVisible();
@@ -144,14 +144,14 @@ test('03 - no error messages on initial load', async () => {
     const errorTexts = await errors.allTextContents();
     console.log('Errors found:', errorTexts);
   }
-  await page.screenshot({ path: join(screenshotDir, '03-no-errors.png'), fullPage: true });
+  await captureScreenshot(page, { path: join(screenshotDir, '03-no-errors.png'), fullPage: true });
   expect(errorCount).toBe(0);
 });
 
 test('04 - gezels list loads without JSON parse error', async () => {
   await expandGroup('gezels');
   await page.waitForTimeout(1000);
-  await page.screenshot({ path: join(screenshotDir, '04-gezels.png'), fullPage: true });
+  await captureScreenshot(page, { path: join(screenshotDir, '04-gezels.png'), fullPage: true });
 
   // Should NOT see "Unexpected token" or "not valid JSON"
   const body = await page.textContent('body');
@@ -172,7 +172,10 @@ test('05 - can create a gezel via the sidebar "+"', async () => {
   // Waiting for the dialog to disappear is a deterministic "create resolved" signal —
   // far more robust than a fixed sleep (the old source of the flake).
   await expect(dialog).toBeHidden();
-  await page.screenshot({ path: join(screenshotDir, '05-gezel-created.png'), fullPage: true });
+  await captureScreenshot(page, {
+    path: join(screenshotDir, '05-gezel-created.png'),
+    fullPage: true,
+  });
 
   // The new gezel flows back into the sidebar list via the async
   // `gezel:gezel-updated` event, which can lag the dialog close under cold-start
@@ -186,7 +189,7 @@ test('05 - can create a gezel via the sidebar "+"', async () => {
 test('06 - settings area loads', async () => {
   await openArea('settings');
   await page.waitForTimeout(1000);
-  await page.screenshot({ path: join(screenshotDir, '06-settings.png'), fullPage: true });
+  await captureScreenshot(page, { path: join(screenshotDir, '06-settings.png'), fullPage: true });
 
   const body = await page.textContent('body');
   expect(body).toContain('GitHub Copilot');
@@ -200,7 +203,7 @@ test('07 - projects group hides the built-in default project', async () => {
   // project, so the sidebar hides it (HIDDEN_PROJECT_IDS in Sidebar.tsx). With
   // no user projects in a fresh home dir, the group shows its empty state.
   await expandGroup('projects');
-  await page.screenshot({ path: join(screenshotDir, '07-projects.png'), fullPage: true });
+  await captureScreenshot(page, { path: join(screenshotDir, '07-projects.png'), fullPage: true });
 
   const sidebar = page.locator('[data-testid="app-sidebar"]');
   await expect(sidebar).toContainText('No projects yet');
@@ -210,7 +213,7 @@ test('07 - projects group hides the built-in default project', async () => {
 test('08 - brand routes to the meester home', async () => {
   await page.locator('.app-header-brand').click();
   await page.waitForTimeout(1000);
-  await page.screenshot({ path: join(screenshotDir, '08-home.png'), fullPage: true });
+  await captureScreenshot(page, { path: join(screenshotDir, '08-home.png'), fullPage: true });
 
   const body = await page.textContent('body');
   expect(body).not.toContain('Unexpected token');
@@ -227,7 +230,10 @@ test('09 - no old branding anywhere', async () => {
     await openArea(area);
     await page.waitForTimeout(500);
   }
-  await page.screenshot({ path: join(screenshotDir, '09-final-state.png'), fullPage: true });
+  await captureScreenshot(page, {
+    path: join(screenshotDir, '09-final-state.png'),
+    fullPage: true,
+  });
 
   const fullText = await page.textContent('body');
   expect(fullText).not.toContain('Longview');

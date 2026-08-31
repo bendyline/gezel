@@ -222,6 +222,14 @@ const DropdownChevron = ({ className, ...props }: Omit<SVGProps<SVGSVGElement>, 
   />
 );
 
+const SubmitArrow = ({ className, ...props }: Omit<SVGProps<SVGSVGElement>, 'children'>) => (
+  <svg
+    {...props}
+    className={className ? `gz-submit-arrow ${className}` : 'gz-submit-arrow'}
+    aria-hidden="true"
+  />
+);
+
 const ContextMenuCtx = createContext<{ open: boolean; setOpen: (open: boolean) => void }>({
   open: false,
   setOpen: () => undefined,
@@ -265,6 +273,7 @@ export const primitivesMock = {
   Popover,
   DropdownMenu,
   DropdownChevron,
+  SubmitArrow,
   ContextMenu,
 };
 
@@ -279,5 +288,6 @@ export {
   Popover,
   DropdownMenu,
   DropdownChevron,
+  SubmitArrow,
   ContextMenu,
 };

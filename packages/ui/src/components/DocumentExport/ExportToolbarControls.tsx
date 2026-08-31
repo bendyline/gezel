@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { Dialog, DropdownMenu } from '../../primitives/index.js';
 import { ExportDialog } from './ExportDialog.js';
+import { downloadBlob } from './download-blob.js';
 import type { ExportOptions } from './export-options.js';
 import {
   DEFAULT_OPTIONS,
@@ -23,7 +24,6 @@ import {
   saveExportOptions,
   syncLastExportOptions,
 } from './export-options.js';
-import { downloadBlob, runExport } from './run-export.js';
 
 export interface ExportToolbarControlsProps {
   /** Path of the currently-open file — drives the document download filename. */
@@ -151,6 +151,7 @@ export function ExportToolbarControls({
       setLastOptions(options);
       try {
         await saveExportOptions(options);
+        const { runExport } = await import('./run-export.js');
         await runExport(markdownSource, selectedFile, options, mediaContainer);
         setDialogOpen(false);
       } catch (caught: unknown) {
@@ -168,6 +169,7 @@ export function ExportToolbarControls({
     setExporting(true);
     setExportError(null);
     try {
+      const { runExport } = await import('./run-export.js');
       await runExport(markdownSource, selectedFile, lastOptions, mediaContainer);
     } catch (caught: unknown) {
       setExportError(exportErrorMessage(caught));

@@ -811,3 +811,72 @@ describe('resolveTuning — suggested (role/template) profile', () => {
     expect(withoutSuggestion.resolvedTuningProfile).toBe('thinking-general');
   });
 });
+
+describe('resolveTuning — profile maxTokens floor', () => {
+  // A profile is a behavioral preset; `maxTokens` is a truncation point,
+  // not a behavior. 33 shipped manifests author `thinking-precise` below
+  // their own base, and that profile is what the Reviewer role selects.
+  const qwenShaped: ChatModelTuning = {
+    sampling: { temperature: 1, topP: 0.95, maxTokens: 12_288 },
+    profiles: {
+      'thinking-precise': { sampling: { temperature: 0.6, maxTokens: 6_144 } },
+      'thinking-coding': { sampling: { temperature: 1, maxTokens: 16_384 } },
+    },
+  };
+
+  it('raises a profile cap that sits below the model base back to the base', () => {
+    const out = resolveTuning({
+      catalog: qwenShaped,
+      suggestedProfileId: 'thinking-precise',
+    });
+    expect(out.resolvedTuningProfile).toBe('thinking-precise');
+    expect(out.sampling.maxTokens).toBe(12_288);
+    // Everything else the profile sets still applies.
+    expect(out.sampling.temperature).toBe(0.6);
+  });
+
+  it('leaves a profile cap ABOVE the model base alone', () => {
+    const out = resolveTuning({ catalog: qwenShaped, suggestedProfileId: 'thinking-coding' });
+    expect(out.sampling.maxTokens).toBe(16_384);
+  });
+
+  it('never overrides an explicit per-gezel maxTokens, in either direction', () => {
+    const out = resolveTuning({
+      catalog: qwenShaped,
+      suggestedProfileId: 'thinking-precise',
+      override: { sampling: { maxTokens: 2_048 } },
+    });
+    expect(out.sampling.maxTokens).toBe(2_048);
+  });
+
+  it('never overrides an install-wide preset maxTokens', () => {
+    const out = resolveTuning({
+      catalog: qwenShaped,
+      suggestedProfileId: 'thinking-precise',
+      installDefault: { sampling: { maxTokens: 4_096 } },
+    });
+    expect(out.sampling.maxTokens).toBe(4_096);
+  });
+
+  it('leaves an instruct-kind profile cap alone — a small ceiling is that mode', () => {
+    const out = resolveTuning({
+      catalog: {
+        sampling: { temperature: 1, maxTokens: 8_192 },
+        profiles: { terse: { sampling: { maxTokens: 1_024 } } },
+      },
+      suggestedProfileId: 'terse',
+    });
+    expect(out.sampling.maxTokens).toBe(1_024);
+  });
+
+  it('is a no-op when the model declares no base maxTokens', () => {
+    const out = resolveTuning({
+      catalog: {
+        sampling: { temperature: 1 },
+        profiles: { 'thinking-precise': { sampling: { maxTokens: 6_144 } } },
+      },
+      suggestedProfileId: 'thinking-precise',
+    });
+    expect(out.sampling.maxTokens).toBe(6_144);
+  });
+});

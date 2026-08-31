@@ -6,6 +6,7 @@ import {
   CraftbookBasedOnSchema,
   CraftbookCommandNeedSchema,
   CraftbookConnectorNeedSchema,
+  CraftbookRecommendationSchema,
   CraftbookRequirementSchema,
   CraftbookRunModesSchema,
   CraftbookScriptsSchema,
@@ -18,6 +19,7 @@ import { ProviderNameSchema } from './gezel.js';
 import { HookSpecSchema } from './hook.js';
 import { BehaviorEntrySchema, ModelStyleSchema } from './model-profile.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
+import { ObservationTableManifestSchema } from './observations.js';
 import { PreviewSourceSchema } from './preview.js';
 import { ProjectTabVisibilitySchema } from './project.js';
 
@@ -721,6 +723,8 @@ export const CraftbookTemplateVersionManifestSchema = z.object({
     .optional(),
   /** Prerequisites for the craftbook to be offered (see CraftbookSchema). */
   requirements: z.array(CraftbookRequirementSchema).optional(),
+  /** Soft "works better with" hints — never gate (see CraftbookRecommendationSchema). */
+  recommends: z.array(CraftbookRecommendationSchema).optional(),
   /** Unattended launch modes this recipe is suitable for. */
   runModes: CraftbookRunModesSchema.optional(),
   /**
@@ -799,6 +803,8 @@ export const CraftbookTemplateManifestSchema = z.object({
     .optional(),
   /** Applicability prerequisites (mirrored from the version manifest). */
   requirements: z.array(CraftbookRequirementSchema).optional(),
+  /** Soft "works better with" hints (mirrored from the version manifest). */
+  recommends: z.array(CraftbookRecommendationSchema).optional(),
   /** Unattended launch modes (mirrored from the version manifest). */
   runModes: CraftbookRunModesSchema.optional(),
   /** Toolset dependencies (mirrored from the version manifest). */
@@ -1139,6 +1145,19 @@ const ConnectorNormalizeSchema = z.union([
   z.object({ kind: z.literal('mapping'), map: z.record(z.string(), z.unknown()) }),
   z.object({ kind: z.literal('script'), script: z.string() }),
   z.object({ kind: z.literal('native') }),
+  /**
+   * The observation shape: this type mirrors rows into partitioned columnar
+   * tables rather than one markdown file per record. Declaring the tables here
+   * — rather than inferring them — is what lets a source ship real column
+   * documentation, units, and worked example queries as *content*, PR-able to
+   * gilde and shippable without an app release. A type that omits `tables`
+   * still works; its schema is inferred from the rows that land and labelled
+   * as inferred so a model knows the types are a guess.
+   */
+  z.object({
+    kind: z.literal('observations'),
+    tables: z.array(ObservationTableManifestSchema).min(1).max(64).optional(),
+  }),
 ]);
 
 const ConnectorActionSchema = z.object({
@@ -1470,6 +1489,31 @@ export const ChatModelDs4SourceSchema = z
      * default. An explicit `config.ds4NumCtx` always wins over this.
      */
     maxLaunchCtx: z.number().int().positive().optional(),
+    /**
+     * Optional DSpark speculative-decoding companion GGUF, the ds4 analogue of
+     * {@link ChatModelLlamaCppSourceSchema}'s `draftModel`. ds4 loads it with
+     * `--mtp <path>` and drafts with `--dspark`; the draft width comes from the
+     * support model's own `block_size`, not from `--mtp-draft` (that flag is
+     * legacy-MTP only). Family-scoped: DeepSeek V4 Flash publishes one, GLM 5.2
+     * does not support the external `--mtp` file at all.
+     *
+     * Declaring this makes it a MANDATORY download for every install of the
+     * entry — `buildDownloadPlan` fetches a declared draft companion
+     * unconditionally, unlike the opt-in `mmproj`. The DeepSeek support GGUF is
+     * ~5.6 GiB, and DSpark is off under `--ssd-streaming` and unhelpful on
+     * Metal, so weigh that cost against who can actually use it before adding
+     * this to an entry.
+     */
+    draftModel: z
+      .object({
+        /** Filename within the same HF repo. May include a subdirectory. */
+        filename: z.string(),
+        /** SHA-256 of the support GGUF, lifted from HF LFS metadata. */
+        sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        /** Size on disk after download. */
+        sizeBytes: z.number().int().positive(),
+      })
+      .optional(),
   })
   .refine(
     (v) => {
@@ -1564,6 +1608,58 @@ export const ChatModelMlxSourceSchema = z
     /** Short quant tag for display (`4bit`, `8bit`, `bf16`). */
     quantization: z.string().optional(),
     /**
+     * Optional speculative-decoding drafter to install beside the model.
+     *
+     * MLX speculation arms from a drafter's *presence* next to the model
+     * (`engines/mlx/drafters/<modelId>-mtp`), so this block is what turns the
+     * feature on for an entry — no per-user configuration. Absent means the
+     * model simply decodes normally.
+     *
+     * A drafter carries a model's multi-token-prediction head and nothing
+     * else: it binds to the target's embeddings at load, so ONE artifact
+     * serves every quantization of the same base model, and several catalog
+     * entries may legitimately point at the same repo. It cannot change what
+     * the model emits — every proposed token is verified against the target —
+     * so a mismatched or corrupt drafter costs throughput, never correctness.
+     *
+     * Same download contract as the model above (pinned `revision`, per-file
+     * `sha256`), because it rides the same verified install path. Failing to
+     * fetch it is NOT an install failure: the model is usable without it.
+     */
+    drafter: z
+      .object({
+        /** Hugging Face repo id, e.g. `Bendyline/Qwen3.8-27B-mtp-drafter-mlx-4bit`. */
+        huggingfaceRepo: z.string().regex(/^[A-Za-z0-9_\-.]+\/[A-Za-z0-9_\-.]+$/),
+        /** Commit SHA to fetch from. Pin it — `main` can be rewritten. */
+        revision: z.string().optional(),
+        /**
+         * Drafter architecture. `mtp` is the model's own native
+         * multi-token-prediction head; other kinds (eagle3, dflash) use
+         * separately-trained heads and are not wired yet.
+         */
+        kind: z.enum(['mtp']).default('mtp'),
+        /** Files to download, each with an LFS-derived sha256. */
+        files: z
+          .array(
+            z.object({
+              name: ContainedPosixModelPathSchema,
+              sha256: z.string().regex(/^[a-f0-9]{64}$/),
+              sizeBytes: z.number().int().positive(),
+            }),
+          )
+          .min(1),
+        /** Total on-disk size of the drafter. */
+        approxSizeBytes: z.number().int().positive(),
+        /**
+         * Resident cost when speculation is active. The drafter is a second
+         * model in memory, so this is added to the target's weights before
+         * slot planning — an unpriced one is exactly the over-commit that
+         * aborts the MLX process. Absent → the on-disk size is used.
+         */
+        residentBytes: z.number().int().positive().optional(),
+      })
+      .optional(),
+    /**
      * Last-resort Jinja chat template to inject into `tokenizer_config.json`
      * when the downloaded tokenizer_config has no `chat_template` and no
      * `chat_template.jinja` sidecar is shipped alongside. Some MLX
@@ -1578,6 +1674,30 @@ export const ChatModelMlxSourceSchema = z
      *   4. None — mark `chatTemplatePresent: false` and warn.
      */
     chatTemplate: z.string().optional(),
+    /**
+     * Jinja chat template that REPLACES whatever the repo ships, rather
+     * than filling a gap. `chatTemplate` above is a recovery path — it
+     * fires only when the download carried no template at all — so it
+     * cannot correct a template that is present but wrong. This field
+     * can: the install writes it to the `chat_template.jinja` sidecar
+     * (the file mlx_vlm loads natively) and overwrites any
+     * `tokenizer_config.chat_template`, so both resolution paths agree.
+     *
+     * Reach for this when an upstream conversion froze a template the
+     * model's authors have since fixed. The MLX gemma-4 line is the
+     * motivating case: every community conversion — the mlx-community
+     * `qat-*` builds, the `unsloth-*-qat-oQ4` rebuilds, the non-QAT
+     * builds — was cut before Google published the 2026-07-09 canonical
+     * template ("Fixed tool-calling loops, turn closures, and thinking
+     * content-ordering"), and `mlx_lm.convert` copies whatever it finds,
+     * so no repo choice fixes it. The llama.cpp GGUFs carry the
+     * corrected template; that asymmetry is a standing suspect whenever
+     * one engine loops on tool calls and the other does not.
+     *
+     * Pinning one means owning it — a template that drifts from the
+     * weights is worse than a stale one. Re-check on version bumps.
+     */
+    chatTemplateOverride: z.string().optional(),
     /**
      * When set, this MLX build is KNOWN NOT TO LOAD/RUN and must be treated
      * as if the model had no MLX source — hidden from the MLX install picker,

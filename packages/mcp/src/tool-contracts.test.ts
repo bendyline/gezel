@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ExecutionToolOutputSchema,
   SearchToolOutputSchema,
+  TaskToolOutputSchema,
   annotationsForTool,
   errorResult,
   okResult,
@@ -180,5 +181,35 @@ describe('tool annotations', () => {
       openWorldHint: true,
     });
     expect(outputSchemaForTool('constructor')).toBeUndefined();
+  });
+
+  it('invoke_craftbook advertises the task contract and validates a launch payload', () => {
+    expect(outputSchemaForTool('invoke_craftbook')).toBe(TaskToolOutputSchema);
+    const result = okResult(
+      TaskToolOutputSchema,
+      {
+        summary: 'Invoked craftbook "powerpoint-deck" — task default/12.',
+        operation: 'invoke_craftbook',
+        ref: 'default/12',
+        status: 'active',
+        stepId: 'research',
+        task: {
+          ref: 'default/12',
+          status: 'active',
+          activeStepId: 'research',
+          craftbook: { id: 'powerpoint-deck', steps: [{ id: 'research', name: 'Research' }] },
+        },
+        details: { reused: false, installed: ['docblocks'] },
+      },
+      { text: 'Invoked craftbook "powerpoint-deck" — task default/12 (1 step(s)).' },
+    );
+    expect(result.structuredContent).toMatchObject({
+      operation: 'invoke_craftbook',
+      ref: 'default/12',
+    });
+    // The text is the model-facing surface and stays the caller's exact string.
+    expect(result.content[0]).toMatchObject({
+      text: 'Invoked craftbook "powerpoint-deck" — task default/12 (1 step(s)).',
+    });
   });
 });

@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
@@ -88,7 +89,7 @@ test('sidebar selection persists and document icons align with their group heade
       )
       .toMatchObject({ kind: 'area', area: 'projects' });
   } finally {
-    await app.close();
+    await closeApp(app);
     await rm(gezelHome, { recursive: true, force: true }).catch(() => {});
   }
 });

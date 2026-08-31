@@ -371,6 +371,90 @@ export class ProjectDeleteError extends Error {
   }
 }
 
+/**
+ * The craftbook fields a stored version manifest carries beyond
+ * `steps`/`entryStepId`, and the fields read back out of it.
+ *
+ * These two functions exist because the local-template pair and the
+ * project-local pair were hand-maintained copies of the same list and
+ * drifted: the project pair carried the full declaration while the local
+ * pair silently dropped `triggers`, `toolsets`, `connectors`, `hooks`,
+ * `paramSchema`, `command` and `requirements`, and NEITHER carried
+ * `spawn`. Since `craftbook_write(create: true)` routes every
+ * model-authored book to the LOCAL writer, that meant a model could author
+ * a parameterized or fanning-out recipe, be told it saved, and read back a
+ * book with the declaration gone.
+ *
+ * A dropped field here is invisible: the write succeeds and the loss only
+ * shows up as a recipe that does not do what its author wrote. Adding a
+ * field to `CraftbookSchema` that belongs in a stored book means adding it
+ * to BOTH functions below and nowhere else.
+ */
+function craftbookVersionManifest(book: Craftbook): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    version: book.version ?? '1.0.0',
+    releasedAt: book.updatedAt,
+    about: 'about.md',
+    entryStepId: book.entryStepId,
+    steps: book.steps,
+    ...(book.basedOn ? { basedOn: book.basedOn } : {}),
+    ...(book.plan !== undefined ? { plan: book.plan } : {}),
+    ...(book.defaultAssignee ? { defaultAssignee: book.defaultAssignee } : {}),
+    ...(book.triggers ? { triggers: book.triggers } : {}),
+    ...(book.toolsets ? { toolsets: book.toolsets } : {}),
+    // connectors decide whether the launch runs connector prep at all —
+    // the same drop that once disabled the feature for every catalog
+    // craftbook (see runtimeCraftbookFromTemplate). Without them a book
+    // launches with no corpus and `{{corpusScope}}` survives interpolation
+    // straight into the step prompts and gates.
+    ...(book.connectors ? { connectors: book.connectors } : {}),
+    ...(book.commands ? { commands: book.commands } : {}),
+    ...(book.hooks ? { hooks: book.hooks } : {}),
+    ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
+    ...(book.command ? { command: book.command } : {}),
+    ...(book.requirements ? { requirements: book.requirements } : {}),
+    ...(book.recommends ? { recommends: book.recommends } : {}),
+    ...(book.runModes ? { runModes: book.runModes } : {}),
+    // Declarative fanout. Dropping this turned a spawn host into an
+    // ordinary linear book whose `spawnFanout` step fans out over nothing.
+    ...(book.spawn ? { spawn: book.spawn } : {}),
+    ...(book.diffpackCapable !== undefined ? { diffpackCapable: book.diffpackCapable } : {}),
+    ...(book.capabilityFloor ? { capabilityFloor: book.capabilityFloor } : {}),
+    ...(book.scripts ? { bundledScripts: Object.keys(book.scripts).map((n) => `${n}.ts`) } : {}),
+  };
+}
+
+/** Read back what {@link craftbookVersionManifest} wrote. Mirror it exactly. */
+function craftbookFieldsFromVersionManifest(v: Record<string, unknown>): Partial<Craftbook> {
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    !!value && typeof value === 'object' && !Array.isArray(value);
+  return {
+    ...(isRecord(v.basedOn) ? { basedOn: v.basedOn as Craftbook['basedOn'] } : {}),
+    ...(typeof v.plan === 'string' ? { plan: v.plan } : {}),
+    ...(v.defaultAssignee
+      ? { defaultAssignee: v.defaultAssignee as Craftbook['defaultAssignee'] }
+      : {}),
+    ...(Array.isArray(v.triggers) ? { triggers: v.triggers as string[] } : {}),
+    ...(Array.isArray(v.toolsets) ? { toolsets: v.toolsets as Craftbook['toolsets'] } : {}),
+    ...(Array.isArray(v.connectors) ? { connectors: v.connectors as Craftbook['connectors'] } : {}),
+    ...(Array.isArray(v.commands) ? { commands: v.commands as Craftbook['commands'] } : {}),
+    ...(Array.isArray(v.hooks) ? { hooks: v.hooks as Craftbook['hooks'] } : {}),
+    ...(isRecord(v.paramSchema) ? { paramSchema: v.paramSchema as Craftbook['paramSchema'] } : {}),
+    ...(typeof v.command === 'string' ? { command: v.command } : {}),
+    ...(Array.isArray(v.requirements)
+      ? { requirements: v.requirements as Craftbook['requirements'] }
+      : {}),
+    ...(Array.isArray(v.recommends) ? { recommends: v.recommends as Craftbook['recommends'] } : {}),
+    ...(isRecord(v.runModes) ? { runModes: v.runModes as Craftbook['runModes'] } : {}),
+    ...(isRecord(v.spawn) ? { spawn: v.spawn as Craftbook['spawn'] } : {}),
+    ...(typeof v.diffpackCapable === 'boolean' ? { diffpackCapable: v.diffpackCapable } : {}),
+    ...(typeof v.capabilityFloor === 'string'
+      ? { capabilityFloor: v.capabilityFloor as Craftbook['capabilityFloor'] }
+      : {}),
+  };
+}
+
 export class Store {
   private readonly home: string;
   private readonly history?: import('../history/manager.js').HistoryManager;
@@ -3374,6 +3458,13 @@ export class Store {
       knowledgeCatalogs?: import('@bendyline/gezel').ProjectKnowledgeCatalogs;
       /** Replaces the optional project-tab visibility overrides. */
       tabVisibility?: ProjectTabVisibility;
+      /**
+       * Output-pane visibility for this project; `null` returns it to the
+       * capability-driven default. Deliberately absent from `metaChanged` —
+       * it is a view toggle, and logging every click would bury the history
+       * view in noise.
+       */
+      outputPaneVisible?: boolean | null;
       /** Project shape — `solo` (a single-gezel job/game) vs `crew`. */
       mode?: 'crew' | 'solo';
       /** Custom project-lead label (e.g. checkers → "Opponent"); `null` clears it. */
@@ -3516,6 +3607,11 @@ export class Store {
         ? { knowledgeCatalogs: patch.knowledgeCatalogs }
         : {}),
       ...(patch.tabVisibility !== undefined ? { tabVisibility: patch.tabVisibility } : {}),
+      ...(patch.outputPaneVisible === null
+        ? { outputPaneVisible: undefined }
+        : patch.outputPaneVisible !== undefined
+          ? { outputPaneVisible: patch.outputPaneVisible }
+          : {}),
       ...(patch.mode !== undefined ? { mode: patch.mode } : {}),
       ...(patch.leadLabel === null
         ? { leadLabel: undefined }
@@ -5610,6 +5706,7 @@ export class Store {
           ...(s.model ? { sessionModel: s.model } : {}),
           ...(s.archived ? { sessionArchived: true } : {}),
           ...(s.lastTurnError ? { sessionLastTurnError: s.lastTurnError } : {}),
+          ...(s.lastTurnErrorDetail ? { sessionLastTurnErrorDetail: s.lastTurnErrorDetail } : {}),
           ...(s.taskRef ? { taskRef: s.taskRef } : {}),
           ...(s.stepId ? { stepId: s.stepId } : {}),
           ...(handoff ? { handoffFrom: handoff } : {}),
@@ -5636,6 +5733,7 @@ export class Store {
           ...(m.attemptedToolCalls && m.attemptedToolCalls.length > 0
             ? { attemptedToolCalls: m.attemptedToolCalls }
             : {}),
+          ...(m.synthetic ? { synthetic: m.synthetic } : {}),
         });
       }
     }
@@ -6144,12 +6242,13 @@ export class Store {
    */
   async listAllPendingQuestions(): Promise<Question[]> {
     const p = gezelPaths(this.home);
-    let projectIds: string[] = [];
-    try {
-      projectIds = await readdir(p.projects);
-    } catch {
-      return [];
-    }
+    // Same guard `listProjects` applies: the projects root holds OS
+    // detritus (`.DS_Store`) alongside real project dirs, and an id that
+    // fails `assertSafeEntityId` throws out of `projectQuestionsFile`.
+    // Unguarded, one stray dotfile 500s the whole endpoint for every
+    // project, so no pending question reaches the UI and any task parked
+    // on `ask_user_question` waits on an answer the user cannot give.
+    const projectIds = (await safeReaddir(p.projects)).filter(isSafeEntityId);
     const all: Question[] = [];
     for (const id of projectIds) {
       const qs = await this.listProjectQuestions(id);
@@ -6505,15 +6604,7 @@ export class Store {
     } catch {
       return null;
     }
-    const v = parsedRaw as {
-      steps?: unknown;
-      entryStepId?: unknown;
-      plan?: unknown;
-      defaultAssignee?: unknown;
-      basedOn?: unknown;
-      runModes?: unknown;
-      releasedAt?: unknown;
-    };
+    const v = parsedRaw as Record<string, unknown>;
     let steps: Craftbook['steps'] | null;
     try {
       steps = z_array_parse(v.steps);
@@ -6530,16 +6621,7 @@ export class Store {
       name: identity.name ?? id,
       ...(identity.description ? { description: identity.description } : {}),
       version: chosen,
-      ...(v.basedOn && typeof v.basedOn === 'object'
-        ? { basedOn: v.basedOn as Craftbook['basedOn'] }
-        : {}),
-      ...(typeof v.plan === 'string' ? { plan: v.plan } : {}),
-      ...(v.defaultAssignee
-        ? { defaultAssignee: v.defaultAssignee as Craftbook['defaultAssignee'] }
-        : {}),
-      ...(v.runModes && typeof v.runModes === 'object'
-        ? { runModes: v.runModes as Craftbook['runModes'] }
-        : {}),
+      ...craftbookFieldsFromVersionManifest(v),
       steps,
       entryStepId: v.entryStepId,
       ...(scripts ? { scripts } : {}),
@@ -6587,19 +6669,7 @@ export class Store {
       };
       await writeFileAtomic(identityFile, `${JSON.stringify(identity, null, 2)}\n`);
     }
-    const versionManifest = {
-      schemaVersion: 1,
-      version,
-      releasedAt: book.updatedAt,
-      about: 'about.md',
-      entryStepId: book.entryStepId,
-      steps: book.steps,
-      ...(book.basedOn ? { basedOn: book.basedOn } : {}),
-      ...(book.plan !== undefined ? { plan: book.plan } : {}),
-      ...(book.defaultAssignee ? { defaultAssignee: book.defaultAssignee } : {}),
-      ...(book.runModes ? { runModes: book.runModes } : {}),
-      ...(book.scripts ? { bundledScripts: Object.keys(book.scripts).map((n) => `${n}.ts`) } : {}),
-    };
+    const versionManifest = craftbookVersionManifest(book);
     await writeFileAtomic(versionFile, `${JSON.stringify(versionManifest, null, 2)}\n`);
     if (book.description) {
       await writeFileAtomic(join(versionDir, 'about.md'), book.description);
@@ -6699,22 +6769,7 @@ export class Store {
     } catch {
       return null;
     }
-    const v = parsedRaw as {
-      steps?: unknown;
-      entryStepId?: unknown;
-      plan?: unknown;
-      defaultAssignee?: unknown;
-      basedOn?: unknown;
-      triggers?: unknown;
-      toolsets?: unknown;
-      connectors?: unknown;
-      hooks?: unknown;
-      paramSchema?: unknown;
-      command?: unknown;
-      requirements?: unknown;
-      runModes?: unknown;
-      releasedAt?: unknown;
-    };
+    const v = parsedRaw as Record<string, unknown>;
     let steps: Craftbook['steps'] | null;
     try {
       steps = z_array_parse(v.steps);
@@ -6729,31 +6784,9 @@ export class Store {
       name: identity.name ?? id,
       ...(identity.description ? { description: identity.description } : {}),
       version: chosen,
-      ...(v.basedOn && typeof v.basedOn === 'object'
-        ? { basedOn: v.basedOn as Craftbook['basedOn'] }
-        : {}),
-      ...(typeof v.plan === 'string' ? { plan: v.plan } : {}),
-      ...(v.defaultAssignee
-        ? { defaultAssignee: v.defaultAssignee as Craftbook['defaultAssignee'] }
-        : {}),
+      ...craftbookFieldsFromVersionManifest(v),
       steps,
       entryStepId: v.entryStepId,
-      ...(Array.isArray(v.triggers) ? { triggers: v.triggers as string[] } : {}),
-      ...(Array.isArray(v.toolsets) ? { toolsets: v.toolsets as Craftbook['toolsets'] } : {}),
-      ...(Array.isArray(v.connectors)
-        ? { connectors: v.connectors as Craftbook['connectors'] }
-        : {}),
-      ...(Array.isArray(v.hooks) ? { hooks: v.hooks as Craftbook['hooks'] } : {}),
-      ...(v.paramSchema && typeof v.paramSchema === 'object'
-        ? { paramSchema: v.paramSchema as Craftbook['paramSchema'] }
-        : {}),
-      ...(typeof v.command === 'string' ? { command: v.command } : {}),
-      ...(Array.isArray(v.requirements)
-        ? { requirements: v.requirements as Craftbook['requirements'] }
-        : {}),
-      ...(v.runModes && typeof v.runModes === 'object'
-        ? { runModes: v.runModes as Craftbook['runModes'] }
-        : {}),
       ...(scripts ? { scripts } : {}),
       createdAt: typeof v.releasedAt === 'string' ? v.releasedAt : now,
       updatedAt: typeof v.releasedAt === 'string' ? v.releasedAt : now,
@@ -6794,31 +6827,7 @@ export class Store {
       };
       await writeFileAtomic(identityFile, `${JSON.stringify(identity, null, 2)}\n`);
     }
-    const versionManifest = {
-      schemaVersion: 1,
-      version,
-      releasedAt: book.updatedAt,
-      about: 'about.md',
-      entryStepId: book.entryStepId,
-      steps: book.steps,
-      ...(book.basedOn ? { basedOn: book.basedOn } : {}),
-      ...(book.plan !== undefined ? { plan: book.plan } : {}),
-      ...(book.defaultAssignee ? { defaultAssignee: book.defaultAssignee } : {}),
-      ...(book.triggers ? { triggers: book.triggers } : {}),
-      ...(book.toolsets ? { toolsets: book.toolsets } : {}),
-      // connectors decide whether the launch runs connector prep at all —
-      // the same drop that once disabled the feature for every catalog
-      // craftbook (see runtimeCraftbookFromTemplate). Without them a
-      // project-local book launches with no corpus and `{{corpusScope}}`
-      // survives interpolation straight into the step prompts and gates.
-      ...(book.connectors ? { connectors: book.connectors } : {}),
-      ...(book.hooks ? { hooks: book.hooks } : {}),
-      ...(book.paramSchema ? { paramSchema: book.paramSchema } : {}),
-      ...(book.command ? { command: book.command } : {}),
-      ...(book.requirements ? { requirements: book.requirements } : {}),
-      ...(book.runModes ? { runModes: book.runModes } : {}),
-      ...(book.scripts ? { bundledScripts: Object.keys(book.scripts).map((n) => `${n}.ts`) } : {}),
-    };
+    const versionManifest = craftbookVersionManifest(book);
     await writeFileAtomic(
       join(versionDir, 'manifest.json'),
       `${JSON.stringify(versionManifest, null, 2)}\n`,

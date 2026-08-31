@@ -11,7 +11,9 @@ import { deriveThreadTitle } from '@bendyline/gezel';
  */
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { captureScreenshot } from './helpers/screenshot.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const screenshotDir = join(_dirname, '..', 'screenshots');
@@ -61,7 +63,7 @@ test('sessions — send a message, it persists, shows up after restart', async (
   {
     const { app, page } = await launch();
     try {
-      await page.screenshot({
+      await captureScreenshot(page, {
         path: join(screenshotDir, 'sessions-01-chat-opened.png'),
         fullPage: true,
       });
@@ -71,7 +73,10 @@ test('sessions — send a message, it persists, shows up after restart', async (
       const editor = page.locator('.squisq-wysiwyg-editor').first();
       await editor.click();
       await page.keyboard.type('hello from e2e');
-      await page.screenshot({ path: join(screenshotDir, 'sessions-02-typed.png'), fullPage: true });
+      await captureScreenshot(page, {
+        path: join(screenshotDir, 'sessions-02-typed.png'),
+        fullPage: true,
+      });
 
       // Submit via Enter (submitOnEnter wires this up).
       await page.keyboard.press('Enter');
@@ -85,9 +90,12 @@ test('sessions — send a message, it persists, shows up after restart', async (
         .filter({ hasText: 'hello from e2e' })
         .last();
       await expect(reply).toBeVisible({ timeout: 90_000 });
-      await page.screenshot({ path: join(screenshotDir, 'sessions-03-reply.png'), fullPage: true });
+      await captureScreenshot(page, {
+        path: join(screenshotDir, 'sessions-03-reply.png'),
+        fullPage: true,
+      });
     } finally {
-      await app.close();
+      await closeApp(app);
     }
   }
 
@@ -103,7 +111,7 @@ test('sessions — send a message, it persists, shows up after restart', async (
         .filter({ hasText: 'hello from e2e' })
         .last();
       await expect(persistedReply).toBeVisible({ timeout: 15_000 });
-      await page.screenshot({
+      await captureScreenshot(page, {
         path: join(screenshotDir, 'sessions-04-restarted.png'),
         fullPage: true,
       });
@@ -117,7 +125,7 @@ test('sessions — send a message, it persists, shows up after restart', async (
         { timeout: 10_000 },
       );
     } finally {
-      await app.close();
+      await closeApp(app);
     }
   }
 });
@@ -134,11 +142,11 @@ test('sessions — + New session starts a fresh thread', async () => {
     // specific locator is more robust against future tab additions.
     await page.locator('.gezel-chat-session-btn', { hasText: '+ New' }).click();
     await expect(sessionTrigger).not.toHaveText(before, { timeout: 10_000 });
-    await page.screenshot({
+    await captureScreenshot(page, {
       path: join(screenshotDir, 'sessions-05-new-session.png'),
       fullPage: true,
     });
   } finally {
-    await app.close();
+    await closeApp(app);
   }
 });

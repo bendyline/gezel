@@ -261,6 +261,15 @@ export function configRoutes(ctx: ServiceContext): Hono {
       imageProvider: config.imageProvider,
       defaultImageModel: config.defaultImageModel,
       imageGenerationConfirmation: config.imageGenerationConfirmation,
+      // Video generation settings. Hand-pick like everything above, or the
+      // Video panel reads undefined on every GET: the active-model radio
+      // snaps back to the first installed model and the confirmation tray
+      // back to "Ask", even though config.json (and the engine) has the
+      // user's real choice.
+      videoProvider: config.videoProvider,
+      defaultVideoModel: config.defaultVideoModel,
+      videoGenerationConfirmation: config.videoGenerationConfirmation,
+      defaultSttModel: config.defaultSttModel,
       gpuMemoryPolicy: config.gpuMemoryPolicy,
       deviceSafety: config.deviceSafety,
       // Centralized security & compliance posture. Hand-pick into the
@@ -555,6 +564,12 @@ export function configRoutes(ctx: ServiceContext): Hono {
     if (videoResetFields.some((f) => body[f] !== undefined)) {
       await ctx.videoProvider.reset();
     }
+    // STT reset: whisper-server binds one model at launch, so a new
+    // default has to tear the running engine down; the next transcribe
+    // relaunches with the chosen weights.
+    if (body.defaultSttModel !== undefined) {
+      await ctx.stt.reset();
+    }
     // Recognition reset: a model or engine change has to tear down the
     // running vision server, which holds the old weights open. Policy-only
     // edits (`recognition.mode`) are read per-turn and need no rebuild.
@@ -712,6 +727,10 @@ export function configRoutes(ctx: ServiceContext): Hono {
       imageProvider: updated.imageProvider,
       defaultImageModel: updated.defaultImageModel,
       imageGenerationConfirmation: updated.imageGenerationConfirmation,
+      videoProvider: updated.videoProvider,
+      defaultVideoModel: updated.defaultVideoModel,
+      videoGenerationConfirmation: updated.videoGenerationConfirmation,
+      defaultSttModel: updated.defaultSttModel,
       gpuMemoryPolicy: updated.gpuMemoryPolicy,
       deviceSafety: updated.deviceSafety,
       // Echo install-wide tuning so the preset / custom fine-tuning

@@ -75,6 +75,8 @@ export function gitRoutes(ctx: ServiceContext, segment: 'git' | 'github' = 'git'
       ...(status.conflictedCount !== undefined ? { conflictedCount: status.conflictedCount } : {}),
       ...(status.mergeInProgress !== undefined ? { mergeInProgress: status.mergeInProgress } : {}),
       ...(status.hasUpstream !== undefined ? { hasUpstream: status.hasUpstream } : {}),
+      ...(status.syncStale !== undefined ? { syncStale: status.syncStale } : {}),
+      ...(status.syncStaleReason ? { syncStaleReason: status.syncStaleReason } : {}),
       hasPat: status.hasPat,
       credentialSource: status.credentialSource,
     };

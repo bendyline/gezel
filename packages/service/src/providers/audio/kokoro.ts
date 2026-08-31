@@ -332,7 +332,16 @@ export class KokoroProvider implements TextToSpeechProvider {
 
   async synthesize(input: SynthesizeInput): Promise<SynthesizeOutput> {
     const started = Date.now();
+    const totalCharacters = input.text.length;
+    let completedCharacters = 0;
+    let completedChunks = 0;
+    const report = (phase: 'loading' | 'synthesizing' | 'encoding') =>
+      input.onProgress?.({ phase, completedCharacters, totalCharacters, completedChunks });
+    input.signal?.throwIfAborted();
+    await report('loading');
     const tts = await this.ensureLoaded();
+    input.signal?.throwIfAborted();
+    await report('synthesizing');
     const splitterCtor = (await this.module()).TextSplitterStream;
     const voice = input.voice ?? DEFAULT_VOICE_ID;
     const speed = clamp(input.speed ?? 1, 0.5, 2);
@@ -367,14 +376,28 @@ export class KokoroProvider implements TextToSpeechProvider {
       let stalled = false;
       try {
         for (;;) {
+          input.signal?.throwIfAborted();
           const step = await withTimeout(
             iterator.next(),
             this.inferenceTimeoutMs,
             `Kokoro produced no audio for ${Math.round(this.inferenceTimeoutMs / 1000)}s after ${chunks.length} chunk(s) — giving up so the request doesn't hang. Retry, and restart the Gezel service if it persists.`,
           );
+          input.signal?.throwIfAborted();
           if (step.done) break;
           chunks.push(step.value.audio.audio);
           sampleRate ??= step.value.audio.sampling_rate;
+          completedCharacters = Math.min(
+            totalCharacters,
+            completedCharacters + step.value.text.length,
+          );
+          completedChunks += 1;
+          await report('synthesizing');
+          await input.onChunk?.({
+            index: completedChunks - 1,
+            wav: encodeWavPcm16(step.value.audio.audio, step.value.audio.sampling_rate),
+            sampleRate: step.value.audio.sampling_rate,
+            durationSeconds: step.value.audio.audio.length / step.value.audio.sampling_rate,
+          });
           // Yield to the event loop before the next sentence's
           // inference starts. setImmediate sits after IO/timers in the
           // Node event loop, which is what we want — UI ticks and
@@ -405,13 +428,25 @@ export class KokoroProvider implements TextToSpeechProvider {
         this.inferenceTimeoutMs,
         `Kokoro produced no audio for ${Math.round(this.inferenceTimeoutMs / 1000)}s — giving up so the request doesn't hang. Retry, and restart the Gezel service if it persists.`,
       );
+      input.signal?.throwIfAborted();
       chunks = [result.audio];
       sampleRate = result.sampling_rate;
+      completedCharacters = totalCharacters;
+      completedChunks = 1;
+      await report('synthesizing');
+      await input.onChunk?.({
+        index: 0,
+        wav: encodeWavPcm16(result.audio, result.sampling_rate),
+        sampleRate: result.sampling_rate,
+        durationSeconds: result.audio.length / result.sampling_rate,
+      });
     }
 
     if (chunks.length === 0 || sampleRate === undefined) {
       throw new Error('kokoro stream produced no audio (empty text?)');
     }
+    completedCharacters = totalCharacters;
+    await report('encoding');
     const combined = concatFloat32(chunks);
     const wav = encodeWavPcm16(combined, sampleRate);
     const durationSeconds = combined.length / sampleRate;

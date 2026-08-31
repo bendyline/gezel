@@ -2,6 +2,11 @@ import type { Task } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import { SCENARIOS, getScenario, listScenarios } from '../../scenarios/index.ts';
 import { ORDERS_CSV } from './author-linear.ts';
+import {
+  countTasksForCraftbook,
+  paramSchemaPropertyNames,
+  stepUsesInterpolation,
+} from './author-params.ts';
 import { GATE_HEADING, SEEDED_POLISH_PROMPT, seededPromptStillPresent } from './edit-midtask.ts';
 import { INVENTORY_JSON } from './gate-script.ts';
 import {
@@ -14,6 +19,7 @@ import {
   ungatedBuildStepIds,
 } from './helpers.ts';
 import { CRAFTBOOK_AUTHORING_SCENARIOS } from './index.ts';
+import { checkPressRelease } from './route-multi.ts';
 
 /* ── anti-stub gate-script floor ─────────────────────────────────────── */
 
@@ -247,25 +253,37 @@ describe('authoring fixtures', () => {
 
 /* ── registration contract ───────────────────────────────────────────── */
 
-describe('authoring scenario registration (opt-in)', () => {
+describe('authoring scenario registration', () => {
   const AUTHORING_IDS = [
     'craftbook-author-linear',
     'craftbook-author-gate-script',
     'craftbook-edit-midtask',
     'craftbook-find-vs-create',
+    'dev-craftbook-routing',
+    'craftbook-route-multi',
+    'craftbook-author-params',
+    'craftbook-export-generalize',
+    'craftbook-author-fanout',
   ];
 
-  it('exports exactly the four authoring scenarios', () => {
+  it('exports exactly the selection + authoring scenarios', () => {
     expect(Object.keys(CRAFTBOOK_AUTHORING_SCENARIOS).sort()).toEqual([...AUTHORING_IDS].sort());
   });
 
-  it('is NOT part of SCENARIOS / listScenarios (eval:all must not grow)', () => {
+  // These were opt-in until they became suite members. suites.test.ts
+  // resolves membership through SCENARIOS[sid], not getScenario(), so a
+  // scenario reachable only by name cannot join a suite — the map is now
+  // spread into the main registry and eval:all grows by design.
+  it('is part of SCENARIOS / listScenarios so the ids can carry suite membership', () => {
     for (const id of AUTHORING_IDS) {
-      expect(SCENARIOS[id]).toBeUndefined();
+      expect(
+        SCENARIOS[id],
+        `${id} must be in the main registry to be suite-eligible`,
+      ).toBeDefined();
     }
     const listedIds = listScenarios().map((s) => s.id);
     for (const id of AUTHORING_IDS) {
-      expect(listedIds).not.toContain(id);
+      expect(listedIds).toContain(id);
     }
   });
 
@@ -312,5 +330,122 @@ describe('checkGateScriptSubstance — raw fs rejection', () => {
     const verdict = checkGateScriptSubstance(source);
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) expect(verdict.reason).toContain('raw fs');
+  });
+});
+
+describe('checkPressRelease (craftbook-route-multi)', () => {
+  const reference = [
+    'FOR IMMEDIATE RELEASE',
+    '',
+    'ROTTERDAM, Netherlands, 14 October 2026 — Fieldstone Goods today opened its first',
+    'permanent retail workshop, letting customers watch pieces being finished on the same',
+    "floor where they are made. Sixty-eight percent of last year's orders came from within",
+    'forty kilometres of the city. The workshop employs eleven people and holds open',
+    'evenings twice a month, giving the company its first standing invitation to the',
+    'customers who already live nearby. The company has spent seven years shipping parcels',
+    'to addresses a short tram ride from its bench, and the new space closes that gap.',
+    '',
+    '"We have spent seven years posting parcels to people who live twenty minutes away.',
+    'Now they can watch the glaze go on," said Marijke Tenhoven, managing director of',
+    'Fieldstone Goods, who founded the company in 2019.',
+    '',
+    'Fieldstone Goods makes handmade homeware in the Netherlands. Founded in 2019, it sells',
+    'mugs, notebooks, candles and totes to more than 40 independent shops.',
+    '',
+    'Press contact: Sanne de Ruiter, press@fieldstone.example, +31 10 555 0142',
+  ].join('\n');
+
+  it('passes a release that carries every class-level marker and the approved facts', () => {
+    const result = checkPressRelease(reference);
+    expect(result.failures).toEqual([]);
+    expect(result.ok).toBe(true);
+    expect(result.score).toBe(result.scoreMax);
+  });
+
+  // The whole point of seeding drafts/old-teaser.md: a release assembled
+  // from the nearest convenient draft rather than the approved fact sheet
+  // is well-formed and wrong, and only the grounding check separates them.
+  it('fails a release grounded in the stale teaser rather than the approved facts', () => {
+    const stale = reference
+      .replace('14 October 2026', '30 September 2026')
+      .replace('managing director', 'founder and CEO');
+    const result = checkPressRelease(stale);
+    expect(result.ok).toBe(false);
+    expect(result.failures.join(' ')).toMatch(/stale teaser/i);
+  });
+
+  it.each([
+    ['the approved quote', /watch the glaze go on/, 'quote'],
+    ['the boilerplate', /more than 40 independent shops/, 'boilerplate'],
+    ['the press contact', /press@fieldstone\.example/, 'contact'],
+  ])('fails when %s is missing', (_label, pattern) => {
+    const stripped = reference.replace(pattern, 'REMOVED');
+    expect(checkPressRelease(stripped).ok).toBe(false);
+  });
+
+  it('fails a release too short to be one', () => {
+    const result = checkPressRelease('ROTTERDAM — we opened a shop.');
+    expect(result.ok).toBe(false);
+    expect(result.failures.join(' ')).toMatch(/length/i);
+  });
+});
+
+describe('stepUsesInterpolation (craftbook-author-params)', () => {
+  const step = (extra: Record<string, unknown>) =>
+    ({ id: 's', name: 'S', ...extra }) as unknown as Parameters<typeof stepUsesInterpolation>[0];
+
+  it('accepts an author-declared token in the prompt', () => {
+    expect(stepUsesInterpolation(step({ prompt: 'Read data/{{region}}.csv' }))).toBe(true);
+  });
+
+  it('accepts a token buried in a gate check path', () => {
+    const gate = { at: 'completion', checks: [{ kind: 'minBytes', file: 'out/{{region}}.md' }] };
+    expect(stepUsesInterpolation(step({ gate }))).toBe(true);
+  });
+
+  // The discriminating case. Reserved runtime tokens are supplied by the
+  // task runtime for every book, parameterized or not, so counting them
+  // would pass a hardcoded recipe.
+  it('rejects a step whose only tokens are reserved runtime ones', () => {
+    expect(
+      stepUsesInterpolation(step({ prompt: 'Write to {{task.dir}}/notes.md for {{task.ref}}' })),
+    ).toBe(false);
+  });
+
+  it('rejects a step with no tokens at all', () => {
+    expect(stepUsesInterpolation(step({ prompt: 'Read data/north.csv' }))).toBe(false);
+  });
+});
+
+describe('paramSchemaPropertyNames (craftbook-author-params)', () => {
+  it('reads a JSON-Schema properties map', () => {
+    expect(
+      paramSchemaPropertyNames({ type: 'object', properties: { region: { type: 'string' } } }),
+    ).toEqual(['region']);
+  });
+
+  it('treats a bare object schema as declaring nothing', () => {
+    expect(paramSchemaPropertyNames({ type: 'object' })).toEqual([]);
+    expect(paramSchemaPropertyNames(undefined)).toEqual([]);
+  });
+
+  it('falls back to top-level keys once metadata is excluded', () => {
+    expect(paramSchemaPropertyNames({ $schema: 'x', required: ['region'], region: {} })).toEqual([
+      'region',
+    ]);
+  });
+});
+
+describe('countTasksForCraftbook (craftbook-author-params)', () => {
+  const task = (id: string, sources: string[] = []) =>
+    ({
+      craftbook: { id },
+      sourceCraftbookIds: sources.map((catalogId) => ({ catalogId })),
+    }) as unknown as Parameters<typeof countTasksForCraftbook>[0][number];
+
+  it('counts embedded and sourced references, and nothing else', () => {
+    const tasks = [task('regional-rollup'), task('other', ['regional-rollup']), task('unrelated')];
+    expect(countTasksForCraftbook(tasks, 'regional-rollup')).toBe(2);
+    expect(countTasksForCraftbook(tasks, 'absent')).toBe(0);
   });
 });

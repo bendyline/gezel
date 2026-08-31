@@ -366,6 +366,19 @@ describe('projects', () => {
     expect((await store.getProject(created.id))?.icon).toBeUndefined();
   });
 
+  it('persists and clears the output-pane visibility choice', async () => {
+    const created = await store.createProject({ name: 'Panes' });
+    expect(created.outputPaneVisible).toBeUndefined();
+
+    const hidden = await store.updateProject(created.id, { outputPaneVisible: false });
+    expect(hidden.outputPaneVisible).toBe(false);
+    expect((await store.getProject(created.id))?.outputPaneVisible).toBe(false);
+
+    const cleared = await store.updateProject(created.id, { outputPaneVisible: null });
+    expect(cleared.outputPaneVisible).toBeUndefined();
+    expect((await store.getProject(created.id))?.outputPaneVisible).toBeUndefined();
+  });
+
   it('stores a creation-time workingDir and disables Meester progress check-ins', async () => {
     await store.createProject({ name: 'External', workingDir: '/tmp/ext' });
     const detail = await store.getProject('external');

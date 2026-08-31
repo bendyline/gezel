@@ -2,6 +2,7 @@ import type { ConfigResponse } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { OllamaModelManager } from '../components/OllamaModelManager.js';
+import { TimeoutRow } from './TimeoutRow.js';
 
 interface Props {
   config: ConfigResponse | null;
@@ -313,53 +314,6 @@ export function OllamaSettings({ config, onConfigChanged }: Props) {
         enabled={status.kind === 'ok'}
         onModelsChanged={() => void refreshStatus()}
       />
-    </div>
-  );
-}
-
-/** Single editable timeout row — shared by the three caps. Left
- *  blank to fall back to the service-side default; explicit value
- *  overrides. The Save button stays disabled when the draft
- *  matches the persisted value. */
-export function TimeoutRow({
-  label,
-  unit,
-  help,
-  value,
-  onChange,
-  configValue,
-  onSave,
-}: {
-  label: string;
-  unit: 'seconds' | 'minutes';
-  help: string;
-  value: string;
-  onChange: (next: string) => void;
-  configValue: number | undefined;
-  onSave: () => void;
-}) {
-  const persistedDraft = configValue ? String(configValue) : '';
-  return (
-    <div style={{ marginTop: '0.6rem' }}>
-      <div style={{ fontSize: '0.85rem', marginBottom: '0.2rem' }}>
-        <strong>{label}</strong> <span className="muted small">({unit})</span>
-      </div>
-      <p className="muted small" style={{ margin: '0 0 0.3rem 0' }}>
-        {help}
-      </p>
-      <div className="new-row">
-        <input
-          type="number"
-          min={1}
-          placeholder="default"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          style={{ flex: 1 }}
-        />
-        <button type="button" onClick={onSave} disabled={value.trim() === persistedDraft}>
-          Save
-        </button>
-      </div>
     </div>
   );
 }

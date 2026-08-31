@@ -30,6 +30,7 @@ const FULL: CraftbookTemplateManifest = CraftbookTemplateManifestSchema.parse({
   paramSchema: { type: 'object', properties: { focus: { type: 'string' } } },
   command: 'everything',
   requirements: [{ kind: 'github' }],
+  recommends: [{ kind: 'external-services', reason: 'verifies sources with live web search' }],
   runModes: { scheduled: 'supported' },
   commands: [{ scope: 'script', name: 'test' }],
   diffpackCapable: true,

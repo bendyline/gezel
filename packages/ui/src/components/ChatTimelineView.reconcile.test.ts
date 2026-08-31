@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { staleLiveSessionIds } from './ChatTimelineView.js';
+import { staleLiveSessionIds } from './chat-live-slot.js';
 
 describe('staleLiveSessionIds', () => {
   it('retires only clean slots observed before the in-flight request', () => {

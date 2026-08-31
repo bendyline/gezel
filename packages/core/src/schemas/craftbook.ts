@@ -310,6 +310,50 @@ export function validateCraftbookGraph(cb: {
   return problems;
 }
 
+/**
+ * Declarative fanout needs BOTH halves: the `spawn` block naming what to
+ * fan out over, and a `spawnFanout` step that triggers it. Either alone is
+ * inert — the runtime guard is
+ * `newStep.spawnFanout && task.spawnsCraftbook && spawn` — so a book with
+ * one and not the other saves cleanly, reports success, and then silently
+ * does nothing at all.
+ *
+ * Separate from {@link validateCraftbookGraph} because this is a WHOLE-BOOK
+ * property, not a step-graph one: `collapseCraftbookForTier` validates a
+ * merged step list it has no spawn context for, and folding this in there
+ * would reject every tier-collapsed fanout book.
+ *
+ * Deliberately NOT a `CraftbookSchema` refinement. Persisted task
+ * snapshots embed their craftbook and are parsed forever; making this a
+ * parse-time error would render a book authored before the check
+ * unreadable rather than merely inert. It runs at WRITE time, where the
+ * message reaches the author who can act on it.
+ *
+ * Wild-caught on the inaugural frontier run of `craftbook-author-fanout`:
+ * the model marked its step `spawnFanout: true`, omitted the `spawn` block,
+ * was told "Saved craftbook — 2 of 2 steps are gated", and then spent
+ * eighteen minutes unable to see why no children appeared. All 929 bundled
+ * book versions already satisfy this, so enforcing it costs nothing and
+ * turns a silent no-op into a repair-grade error the author can act on.
+ */
+export function validateCraftbookFanout(cb: {
+  steps: CraftbookStep[];
+  spawn?: CraftbookSpawn | undefined;
+}): string[] {
+  const triggers = cb.steps.filter((s) => s.spawnFanout).map((s) => s.id);
+  if (cb.spawn && triggers.length === 0) {
+    return [
+      'the craftbook declares a spawn block but no step has spawnFanout: true — nothing triggers the fanout, so no child task is ever created',
+    ];
+  }
+  if (!cb.spawn && triggers.length > 0) {
+    return [
+      `step "${triggers[0]}" has spawnFanout: true but the craftbook declares no spawn block — add spawn.overFile (the JSON array to fan out over) and spawn.steps (the per-item work), or the step fans out over nothing`,
+    ];
+  }
+  return [];
+}
+
 /** Throw an Error if a craftbook graph has any structural problem. */
 export function assertCraftbookGraph(cb: { steps: CraftbookStep[]; entryStepId: string }): void {
   const problems = validateCraftbookGraph(cb);
@@ -319,7 +363,12 @@ export function assertCraftbookGraph(cb: { steps: CraftbookStep[]; entryStepId: 
 }
 
 function refineCraftbook(
-  cb: { steps: CraftbookStep[]; entryStepId: string; scripts?: Record<string, string> },
+  cb: {
+    steps: CraftbookStep[];
+    entryStepId: string;
+    scripts?: Record<string, string>;
+    spawn?: CraftbookSpawn | undefined;
+  },
   ctx: z.RefinementCtx,
 ) {
   for (const message of validateCraftbookGraph(cb)) {
@@ -348,6 +397,29 @@ export const CraftbookRequirementSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('non-main-branch') }),
 ]);
 export type CraftbookRequirement = z.infer<typeof CraftbookRequirementSchema>;
+
+/**
+ * A soft author hint that the craftbook works BETTER with an install
+ * capability enabled, while remaining fully runnable without it. Never
+ * gates: unlike {@link CraftbookRequirementSchema} (hard — hides the book
+ * when unmet) and {@link CraftbookToolsetNeedSchema} (surfaces an install
+ * affordance), a recommendation only informs UI copy — e.g. the craftbook
+ * start card nudging that "PowerPoint from Content" researches better with
+ * External services on. Carried into the runtime craftbook and the task
+ * snapshot so the chat card can read it off the task at event time.
+ */
+export const CraftbookRecommendationSchema = z.discriminatedUnion('kind', [
+  /**
+   * Works better with the install-wide External services capability
+   * (`securityPolicy.allowExternalServices`) — web search, URL fetch.
+   */
+  z.object({
+    kind: z.literal('external-services'),
+    /** Human-readable rationale shown in the nudge ("verifies sources with live web search"). */
+    reason: z.string().optional(),
+  }),
+]);
+export type CraftbookRecommendation = z.infer<typeof CraftbookRecommendationSchema>;
 
 /**
  * Author guidance for the task launchers. Every craftbook remains usable as
@@ -657,6 +729,13 @@ export const CraftbookSchema = z
      * and not recognized as a terminal command. Absent = always offered.
      */
     requirements: z.array(CraftbookRequirementSchema).optional(),
+    /**
+     * Soft "works better with" hints — never gate, only inform UI copy
+     * (the craftbook start card's permission nudge). See
+     * {@link CraftbookRecommendationSchema}. Carried into the runtime
+     * craftbook and the task snapshot, unlike `requirements`.
+     */
+    recommends: z.array(CraftbookRecommendationSchema).optional(),
     /** Unattended launch modes this recipe is suitable for. */
     runModes: CraftbookRunModesSchema.optional(),
     /**
@@ -849,6 +928,7 @@ export const CreateCraftbookRequestSchema = z.object({
     .regex(/^[a-z][a-z0-9-]*$/)
     .optional(),
   requirements: z.array(CraftbookRequirementSchema).optional(),
+  recommends: z.array(CraftbookRecommendationSchema).optional(),
   runModes: CraftbookRunModesSchema.optional(),
   toolsets: z.array(CraftbookToolsetNeedSchema).optional(),
   scripts: CraftbookScriptsSchema.optional(),
@@ -870,6 +950,7 @@ export const UpdateCraftbookRequestSchema = z.object({
     .nullable()
     .optional(),
   requirements: z.array(CraftbookRequirementSchema).nullable().optional(),
+  recommends: z.array(CraftbookRecommendationSchema).nullable().optional(),
   runModes: CraftbookRunModesSchema.nullable().optional(),
   toolsets: z.array(CraftbookToolsetNeedSchema).nullable().optional(),
   /** Full-replace semantics: the map is the truth. `null` clears all scripts. */

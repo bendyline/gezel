@@ -34,9 +34,23 @@ interface Props {
   disabledReason?: string;
   /** Fired after install / delete so the parent can refresh status pills. */
   onModelsChanged?: () => void;
+  /**
+   * The configured default model id for this engine. Drives which installed
+   * row is marked active. When {@link onSetActiveModel} is also supplied the
+   * Local models table grows a leading radio column for picking it.
+   */
+  configuredDefaultModelId?: string;
+  /** Persist a new default model. Enables the active-model radios. */
+  onSetActiveModel?: (id: string) => void | Promise<void>;
 }
 
-export function AudioModelManager({ kind, disabledReason, onModelsChanged }: Props) {
+export function AudioModelManager({
+  kind,
+  disabledReason,
+  onModelsChanged,
+  configuredDefaultModelId,
+  onSetActiveModel,
+}: Props) {
   const [installed, setInstalled] = useState<InstalledAudioModel[]>([]);
   const [catalog, setCatalog] = useState<AudioCatalogModel[]>([]);
   const [installedError, setInstalledError] = useState<string | null>(null);
@@ -160,6 +174,17 @@ export function AudioModelManager({ kind, disabledReason, onModelsChanged }: Pro
 
   const installedIds = new Set(installed.map((m) => m.id));
 
+  // The model the engine actually binds: the configured default when it's
+  // still installed, else the first installed model (the engine's own
+  // fallback). Only worth a column once there's a choice
+  // to make — a lone radio next to a lone model asks a question with one
+  // answer.
+  const showActivePicker = Boolean(onSetActiveModel) && installed.length > 1;
+  const activeModelId =
+    configuredDefaultModelId && installedIds.has(configuredDefaultModelId)
+      ? configuredDefaultModelId
+      : installed[0]?.id;
+
   return (
     <div className="ollama-model-manager">
       {pulls.size > 0 && (
@@ -177,10 +202,22 @@ export function AudioModelManager({ kind, disabledReason, onModelsChanged }: Pro
         <div className="ollama-section">
           <h4>Local models</h4>
           {installedError && <p className="error">{installedError}</p>}
+          {showActivePicker && (
+            <p className="muted small">
+              The <strong>active</strong> model is the one transcription runs on. The engine binds
+              one model at a time, so switching reloads it — the next transcription takes a moment
+              longer.
+            </p>
+          )}
           {installed.length > 0 && (
             <table className="ollama-model-table">
               <thead>
                 <tr>
+                  {showActivePicker && (
+                    <th scope="col" className="gz-active-model-column">
+                      Active
+                    </th>
+                  )}
                   <th>Name</th>
                   <th>Size</th>
                   <th>Added</th>
@@ -190,6 +227,22 @@ export function AudioModelManager({ kind, disabledReason, onModelsChanged }: Pro
               <tbody>
                 {installed.map((m) => (
                   <tr key={m.id}>
+                    {showActivePicker && (
+                      <td className="gz-active-model-column">
+                        <input
+                          type="radio"
+                          name={`active-${kind}-model`}
+                          className="gz-active-model-radio"
+                          aria-label={`Use ${m.id} as the active ${kind === 'stt' ? 'speech-to-text' : 'text-to-speech'} model`}
+                          checked={activeModelId === m.id}
+                          onChange={() => {
+                            // Re-selecting the active model would still reset the
+                            // provider and cold-reload a warm engine — no-op it.
+                            if (activeModelId !== m.id) void onSetActiveModel?.(m.id);
+                          }}
+                        />
+                      </td>
+                    )}
                     <td>
                       <code>{m.id}</code>
                       <div className="muted small">{m.name}</div>
@@ -294,7 +347,9 @@ function AudioPullProgress({
     ? pull.error
     : known
       ? `Downloading… (${formatSize(pull.bytesWritten)} of ${formatSize(pull.totalBytes)}, ${pct}%)`
-      : `Downloading… (${formatSize(pull.bytesWritten)})`;
+      : pull.bytesWritten > 0
+        ? `Downloading… (${formatSize(pull.bytesWritten)})`
+        : 'Preparing download…';
   return (
     <div className={`ollama-pull${pull.error ? ' ollama-pull-error' : ''}`}>
       <div className="ollama-pull-head">

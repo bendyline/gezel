@@ -2,17 +2,22 @@
   "schemaVersion": 1,
   "engines": {
     "ds4": {
-      "tag": "main-2026-08-09",
-      "commit": "84cc882352757baf628a1776badf7cc54d584e28",
+      "tag": "main-2026-08-23",
+      "commit": "c1d4597a80e300b803dc642519718f2c999589da",
       "files": [
         "LICENSE-ds4-MIT.txt",
         "LICENSE-ds4-rax-BSD-3-Clause.txt",
         "LICENSE-ds4-yarn-MIT.txt"
       ]
     },
+    "duckdb": {
+      "tag": "v1.5.5",
+      "commit": "d8cdaa33fda8df955cc76ef58a280f68f4cd43fa",
+      "files": ["LICENSE-duckdb-MIT.txt"]
+    },
     "llama-cpp": {
-      "tag": "b10353",
-      "commit": "f8def7fe168bab245fbf15d3f18b26dbb1ef73c8",
+      "tag": "v0.3.0",
+      "commit": "c1d0e7a004015f23bc0233470b747b596f29b264",
       "files": ["LICENSE-ggml-MIT.txt"]
     },
     "sd-cpp": {

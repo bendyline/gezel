@@ -41,6 +41,8 @@
 10. Telemetry & operator surface
 11. Configuration & environment reference
 12. Known limitations, gotchas & correctness invariants
+12b. Open findings — 2026-08-18
+12c. Cross-session reuse — 2026-08-30
 13. Key-file index
 
 ---
@@ -151,7 +153,7 @@ full caching-relevant argv:
 --ctx-size   <effectiveNumCtx * slots>     # TOTAL KV; llama-server splits it across slots
 --parallel   <slots>                       # one KV slot per request lane (RAM-tiered default: 4 at ≥64GB)
 --slot-save-path <dir>                     # enables per-slot disk save/restore (else 501)
---cache-type-k q8_0   --cache-type-v q8_0  # KV quantization (default; Gemma family forces f16 — see below)
+--cache-type-k <kv>   --cache-type-v <kv>   # memory-aware: f16 when it fits, else q8_0 (Gemma special — see below)
 [--mlock] [--flash-attn] [--ubatch-size N] [--mmproj …] [--reasoning-budget N]
 ```
 
@@ -160,13 +162,21 @@ full caching-relevant argv:
   budget. Default per-turn context is `PREFERRED_CTX_DEFAULT = 65_536`
   (`chat/manager.ts:11039`), clamped down to the model's native context from GGUF metadata, and
   overridable via `config.llamaCppNumCtx` / env `GEZEL_LLAMA_NUM_CTX`.
-- **KV quantization defaults to `q8_0` for both K and V** — ~50% KV-memory savings with
-  essentially no quality impact — **except the Gemma family, which forces `f16`**: Gemma 3/4's
-  large attention head dims + final logit softcap + sliding-window attention make a quantized KV
-  cache corrupt the *stored prompt tokens* (recalled source came back as Korean glyphs + emoji
-  under q8_0; see `chat/manager.ts` `resolveLlamaCppKvCacheType`). So the
-  family default is model-conditioned, not flat. Operator-tunable via `config.llamaCppKvCacheType`
-  (down to `q4_0` or out to `f16`). **It is not hardware-tiered**: `hardware-tier.ts` only selects
+- **KV precision is memory-aware, f16-first (2026-08-28)** — the old flat `q8_0` default was
+  priced on a 2B model; at 30B the q8_0 tax is ~6% decode flat and **−6% → −17% prefill as
+  context grows 8k → 90k** (`reports/llama-kv-q8-longctx-20260828.md`).
+  `planLlamaCppKv` ([llama-cpp/kv-cache-type.ts](../packages/service/src/providers/llama-cpp/kv-cache-type.ts))
+  now prefers **f16 whenever the memory plan fits it, sacrificing engine slots first and then
+  context above `F16_PREFERRED_CTX_CAP_TOKENS = 65_536`**, and falls back to `q8_0` only when
+  f16 cannot fit a single 64k slot (~50% KV-memory saving where it is genuinely needed).
+  Explicit operator choices are never sacrificed: a `config.llamaCppKvCacheType` override wins
+  outright, an explicit slot count is honored, and an explicit context (numeric or `model-max`
+  sizing) is never capped. **The Gemma family is the deliberate exception** and keeps its
+  long-standing shape — `f16` for correctness (Gemma 3/4's large attention head dims + final
+  logit softcap + sliding-window attention corrupt *stored prompt tokens* under q8_0; recalled
+  source came back as Korean glyphs + emoji), traded to `q8_0` only when that buys a second slot
+  (single-slot SWA alternation re-prefills wholesale, ~79 s/switch wild-caught — a far larger
+  cost than q8_0's prefill tax). **It is not hardware-tiered**: `hardware-tier.ts` only selects
   *which Gemma model* to run from RAM/VRAM, never a launch flag.
 - **`--cache-reuse 256` auto-enables at single-slot (`--parallel 1`); no `--n-keep`, no
   `--no-context-shift`.** b9843 rejects `--cache-reuse` under multi-slot non-unified KV, so the
@@ -228,6 +238,23 @@ env: HF_HUB_OFFLINE=1, TRANSFORMERS_OFFLINE=1, …
 | `DELETE /v1/cache/{cache_id}` | Drop from memory **and** disk. |
 | `POST /admin/flush` | Persist every in-memory entry to disk without dropping (idle-freeze hook). |
 | `GET /health` | Supervisor readiness probe. |
+
+#### Tower selection (2026-08-28)
+
+The MLX sidecar serves text only, but historically loaded every model through
+`mlx_vlm` — whose language towers pay a context-growing decode tax under the
+BatchGenerator (matched-thermal 2x2 on qwen3.8-27b-q4: 0.97 vs 0.34 us per
+context token; ~2x decode at 54k). Boot now picks the tower: allow-listed
+architectures (`qwen3_5`) with `--max-concurrency >= 1` load via
+`mlx_lm.utils.load` and feed BatchGenerator raw logits; other archs, serial
+mode, lm-load failures, and `GEZEL_MLX_TEXT_TOWER=off` keep the `mlx_vlm`
+loader. Template rendering is token-identical across towers (verified against
+the same `chat_template.jinja`), so prefix caches survive the switch. Every
+boot prints a `[tower] active=...` fingerprint — any A/B touching this layer
+must confirm it from the engine log. Growing the allowlist requires the arch's
+own 2x2 first (`scratchpad stack-aba/instrument2.py` pattern). Measured
+effect through the full server: 23.2 -> 31.8 tok/s at ~11k, 12.1 -> 22.0 at
+~54k; eval preflight 164.7 -> 217.7 tok/s at unchanged smoke pass rate.
 
 ### 2.3 Side by side
 
@@ -348,8 +375,17 @@ the tool schemas) reusable across sessions. It is a **local-engine-only** optimi
 the volatile band into a second `system` message that only the llama-cpp / mlx provider sessions
 seed, so it **never applies to cloud providers** (they'd drop that band). Per-engine default when
 `config.layeredPrefixCache.enabled` is unset: **ON for `llama-cpp`** (perf-proven, no regression),
-**OFF for `mlx`** (cache mechanism validated end-to-end — see §coverage — but no MLX quality A/B
-yet). Set `enabled: true`/`false` to
+**OFF for `mlx`** — and that default is now **correctness-forced, not provisional**. The layout
+puts a second `system` message at index 1, and the Qwen chat template raises on exactly that
+(`raise_exception('System message must be at the beginning.')`), so on a Qwen-family model the
+render drops the tools and the request 500s. Measured 2026-08-30 on qwen3.8-27b: **2/2 pass with
+the flag OFF, 0/2 with it ON.** Every prior validation of this feature ran on **Gemma** — the
+llama-cpp 9/9 quality A/B on `gemma4-e4b-q8`, and the MLX end-to-end mechanism check on
+`mlx-community/gemma-4-E4B-it-qat-4bit` — which is the template family the layout was designed
+for (see the wire-prefix argument below). It was never tried on Qwen. Cross-session prefix reuse
+for MLX is instead delivered by the shared-band keying in
+[ADR 0010](decisions/0010-shared-band-prefix-reuse.md), which changes cache identity only and
+leaves the rendered prompt byte-identical. Set `enabled: true`/`false` to
 override both engines; `GEZEL_LAYERED_PREFIX_CACHE` (`1`/`0`) overrides config (the eval A/B
 toggle). When off for an engine, its system message is byte-identical to the legacy single string.
 
@@ -428,6 +464,78 @@ adapter keys on the now-volatile-free system message.
 > symlinking a pre-built venv from `~/.gezel-dev`; the app's on-device bootstrap pre-provisions it.
 > Subsequent runs (venv cached) start in seconds. Set `GEZEL_MLX_STARTUP_TIMEOUT_MS` (mirrors
 > `GEZEL_LLAMA_STARTUP_TIMEOUT_MS`; default 300 s) to let a cold first MLX turn wait out the build.
+
+### 3.7 The tool roster is part of the prefix SHAPE, not decoration
+
+Qwen-family chat templates render the tool block at the **top** of the system message. Two renders
+of the same prompt text — one with a roster, one without — therefore share **~3 tokens**. This is
+not a degradation; it is a different prefix.
+
+The template also constrains message *shape*, not just content placement — and
+**it varies by repacker, not by model family**, which is the trap. Measured
+2026-08-30 on two artifacts of the *same base model*:
+
+| Artifact | Leading `system` run |
+| --- | --- |
+| `mlx-community/Qwen3.8-27B-4bit` (8,952-char template) | **raises** — `{%- if not loop.first %}{{- raise_exception('System message must be at the beginning.') }}` |
+| `unsloth/Qwen3.8-27B-GGUF` (9,993-char template) | **merges** — walks the leading run into `merged_system`, records `num_sys`, and raises only for a `system` message *after* it |
+
+So the layered two-system-message layout is fatal on the MLX artifact and
+perfectly fine on the GGUF one. Never infer a template constraint from the
+model family, the architecture, or a sibling quant: read the artifact's own
+`chat_template.jinja` (or, for a GGUF, its `tokenizer.chat_template` metadata —
+a ranged fetch of the first ~12 MB is enough to parse it without downloading
+the weights). This is what closed the layered layout for MLX (§3.6) and why
+[ADR 0010](decisions/0010-shared-band-prefix-reuse.md) changes cache *identity*
+rather than prompt structure.
+
+Three rules follow, all enforced in
+[mlx/cache-adapter.ts](../packages/service/src/providers/mlx/cache-adapter.ts) and pinned by its
+tests:
+
+1. **The roster feeds every prefix id** (flat `gezelPrefixId` and layered `gezelLayerPrefixIds`,
+   via the shared names+arity `toolRosterSignature`). MLX's batched KV is untrimmable and the
+   server seeds a session cache from a prefix entry *before* any LCP check, so a same-id collision
+   across rosters is not a miss — it seeds a wrong-shape cache that forces a full re-prefill.
+   Roles carry different rosters (tier tool-caps, per-turn task tools), so mixed rosters over one
+   prompt text are the common case.
+2. **Never warm a shape that cannot match.** A system-only warm for a tool-bearing session renders
+   the no-tools template branch and `persist: true` writes it to disk, where it **overwrites the
+   good entry the last real session saved back**. The two shapes then oscillate on every daemon
+   boot. Wild-caught (2026-08-27, PR-review fanout): `prefix-0b60345fcefa9ffd` flipped between a
+   15,563-token no-tools render and the 24,796-token real one — `lcp=3`, `mode=fresh reused=0`,
+   **40 full re-prefills, 1.58M tokens re-prefilled against 238K tokens of new work (6.6:1)**.
+   With `GEZEL_MLX_STABLE_PREFIX` off (the measured default — warm-with-tools alone was a 34%→14%
+   reuse regression), a tool-bearing session is now *registered but not warmed*: the first turn
+   pays cold prefill once, and the save-back it writes is the durable, correctly-shaped prefix.
+3. **`prefillOnly` refuses to warm before the roster exists.** MCP bridges spawn lazily; a warm
+   that fires first sees an empty roster and renders the wrong branch. A cold prefix costs one
+   slow turn; a wrong one costs every turn.
+
+llama-cpp is structurally immune to the catastrophic variant: its adapter never issues a warm,
+`llama-server` does true token-LCP matching before reuse, and its KV is trimmable — a stale id
+there costs one wasted disk restore, not a poisoned seed. Its layered ids stay roster-blind on
+purpose (the scheme is A/B-validated; changing it orphans every existing disk prefix on the
+default path). If llama-side roster churn ever shows up in `[slot-restore]` waste, fold
+`toolRosterSignature` in there too — deliberately, with the A/B rerun.
+
+**Validated live (2026-08-27, qwen3.8-27b-q4, scratch engine + persist dir, ~6.2K-token prompt,
+12-tool roster, A/B/A):**
+
+| arm | first turn | subsequent sessions |
+|---|---|---|
+| flag OFF (register-only) | cold, 6,217 prefilled | `reused=6201 prefill=17` — **99.7% reuse** |
+| flag ON (warm WITH tools) | **`reused=6186 prefill=29` — 99.5%** | `reused=6199 prefill=16` |
+| poison replay (system-only warm) | overwrote the good entry (`tokens=4838, prior=6186`) → `lcp=3`, full 6,216 re-prefill | — |
+| flag OFF again (A/B/A) | cold 6,217 | `reused=6201 prefill=16` |
+
+The old 34%→14% regression does not reproduce under roster-aware ids: a with-tools warm is a
+token-for-token prefix of the real turn. ON's win is moving the one cold prefill off the
+interactive path; OFF and ON are identical afterwards. **Caveat before promoting the flag:** the
+tools-branch render begins with a template-injected `Reasoning effort is set to …` system line, so
+reasoning-effort (and any other kwarg that reaches the template) is part of the prefix shape — the
+production warm body must carry the session's tuning-affecting fields, not just messages+tools,
+or a warm at one effort poisons a session at another.
 
 ---
 
@@ -664,16 +772,21 @@ KV state survives process death so a returning user doesn't pay cold prefill.
 | `config.cacheBudgetMb.{mlx,llama-cpp}` | RAM-tiered (§6) | Controller LRU budget per engine. |
 | `config.providerConcurrency['llama-cpp']` | 2 | Slots = queue concurrency = `--parallel` = adapter `slotCount`. |
 | `config.providerConcurrency['mlx']` | 1 | MLX queue concurrency (single-stream). |
-| `config.llamaCppKvCacheType` | `q8_0` | `--cache-type-k/v` (`f16`, `q8_0`, `q4_0`). |
+| `config.llamaCppKvCacheType` | memory-aware (f16-first) | `--cache-type-k/v` (`f16`, `q8_0`, `q4_0`); override disables the ladder. |
 | `config.llamaCppNumCtx` / `GEZEL_LLAMA_NUM_CTX` | 65536 | Per-slot context (clamped to model native). |
 | `config.llamaCppMlock` / `…FlashAttn` / `…UbatchSize` | off / off / unset | Optional launch flags. |
 | `config.mlxNumCtx` | 32768 | TS-side compaction threshold only (not sent to engine). |
 | `config.mlxKvBits` | **0 (off)** | `--kv-bits`; see §12 caveat. |
+| `config.mlxSpeculativeDecoding` | **unset = on** | MTP speculative decoding, armed for any model with a drafter beside it (§14). `false` disables it everywhere. |
+| `config.mlxSpecDraftModelPath` | unset (convention path) | Explicit drafter directory, overriding the `drafters/<modelDir>-mtp` convention. |
+| `config.mlxSpecBlockSize` | unset (drafter config) | Draft depth override. The configured depth measured optimal; deeper went net-negative. |
+| `GEZEL_MLX_SPEC` | unset | `off` kills speculation engine-side; `greedy-only` restricts it to greedy, processor-free turns. |
 | `config.mlxPrefillStepSize` | 2048 | `--prefill-step-size` (peak-memory vs. speed). |
 | `config.mlxDiskCacheBudgetMb` | 8192 | `--disk-cache-budget-mb` (0 disables disk pruning). |
 | `config.localEngineIdleTimeoutMs` | 30 min | Idle SIGTERM; freeze fires at half. |
 | `GEZEL_LLAMA_STARTUP_TIMEOUT_MS` / `GEZEL_MLX_STARTUP_TIMEOUT_MS` | 180 s / 300 s | Engine cold-start ceiling. Lift MLX's for a cold first turn that must build the `mlx-vlm`/torch venv (§3.6). |
 | `config.layeredPrefixCache.enabled` / `GEZEL_LAYERED_PREFIX_CACHE` | llama-cpp **on**, mlx **off**, cloud **n/a** | Volatile-out restructure + layered `prefix-gp`/`prefix-gezel` keys (§3.6). Local-engine only. `enabled` overrides both engines; env (`1`/`0`) overrides config. |
+| `config.mlxSharedBandPrefix.enabled` / `GEZEL_MLX_SHARED_BAND_PREFIX` | mlx **on**, others **n/a** | Cross-session reuse by keying the `prefix-band-` entry on the shared band and publishing it from a real turn's boundary snapshot (§12c, [ADR 0010](decisions/0010-shared-band-prefix-reuse.md)). Cache identity only — the rendered prompt is byte-identical either way. Env (`1`/`0`) overrides config. |
 | `GEZEL_CAPACITY_BUDGET_GB` | auto (60%/80%, cap 96) | Hard memory budget for engine residency. |
 | `GEZEL_FORCE_BEHAVIORS` / `GEZEL_REMOVE_BEHAVIORS` | — | A/B inject/remove model-profile behaviors. |
 
@@ -714,6 +827,84 @@ KV state survives process death so a returning user doesn't pay cold prefill.
     skips engines a live supervisor owns. Only owner-less orphans are reaped.
 
 ---
+
+## 12c. Cross-session reuse — measured 2026-08-30 (qwen3.8-27b-q4, M5 Max)
+
+§"MLX: why trimming can never be the answer" concluded that **"every remaining
+avenue must make the prompt a pure EXTENSION rather than rewind the cache."**
+This section records the first demonstration that such an avenue exists, and
+the three things that were blocking it. The decision and its rejected
+alternatives are [ADR 0010](decisions/0010-shared-band-prefix-reuse.md); this
+is the evidence.
+
+**Pure extension works, live.** A short entry warmed under one `cache_id`, then
+consumed by a longer prompt under a *different* `cache_id`:
+
+```
+[cache] prefix-seed cache_id=probe-session-A from prefix=probe-shared-prefix tokens=7202
+[batch] seed cache_id=probe-session-A mode=extension reused=7202 prefill=822
+```
+
+89.8% of the prompt served from the entry (`cached_tokens: 7202` of
+`input_tokens: 8024`). `_offsets_consistent` held; nothing needed trimming.
+
+**Why production never saw it.** Three independent causes:
+
+1. **The key carried the task band.** Two live PR-review siblings' rendered
+   system prompts share a literal **33,742 characters**, diverging only at
+   `### Current task: gezel/43` vs `/44`. But `gezelPrefixId` hashed the whole
+   prompt, so four sibling sessions minted four distinct ids — sharing was
+   arithmetically impossible before any cache logic ran.
+2. **The entry was published at full length.** The line immediately after the
+   successful reuse above:
+   `[cache] prefix-seeded probe-shared-prefix from cache_id=probe-session-A tokens=8008`
+   — the session's full post-turn state replaced the 7,202-token entry that had
+   just delivered 90%. A longer entry is not a partial hit here; `lcp < n` is
+   `fresh-untrimmable`, a full re-prefill.
+3. **Short is not the same as prefix.** A 961-token entry against an
+   1,842-token prompt still produced `mode=fresh-untrimmable reused=0` — it was
+   rendered through a different template branch, so it shared ~3 tokens
+   (§3.7). Snapshotting a real turn avoids this by construction; a synthetic
+   warm does not.
+
+**Band composition**, measured from the live rendered prompt (59,729 chars,
+~14.9K tok):
+
+| Band | Chars | Share |
+| --- | --- | --- |
+| Shared across siblings (through `documentsContext`) | 33,742 | 56.5% |
+| Session-scoped tail (`taskContext` onward) | 25,987 | 43.5% |
+
+Note the layered `gp` id would have keyed on only 22,053 chars — 35% less than
+is actually shared — because workspace map/files/documents are tagged volatile
+yet are identical across siblings of one project. The band boundary is
+therefore drawn at the *session* scope, not the volatile tag.
+
+**Shipped and measured end-to-end (flag `mlxSharedBandPrefix`, default ON for mlx).**
+Two sibling task sessions, one gezel+project, real prompts:
+`seed <pioneer> mode=fresh reused=0 prefill=39446` → `prefix-seeded … tokens=36576`
+→ `seed <sibling> mode=extension reused=36576 prefill=2867` (**92.7% reused**),
+settling to `reused=39427 prefill=240` by the next turn. The pioneer's own turn 2
+still extends (`reused=36576 prefill=3094`), so publishing costs it ~2,900 extra
+tokens once rather than a full re-prefill. Note `chars=13177 target=36576`: the
+band is system *text*, but it resolves late in the token stream because the tool
+block renders ahead of the system message (§3.7) — the reusable prefix is
+`[tools][band]` and the tool block dominates it.
+
+One hazard is worth naming because two layers of testing missed it: the prefix
+lookup runs when the HTTP request ARRIVES, while a band is published when its
+pioneer's turn ENDS, and static-wave admission puts minutes between them. Every
+sibling dispatched alongside the pioneer resolved `fresh` until `_seed_args`
+learned to re-check at wave admission. Unit tests and a synthetic single-engine
+probe both passed beforehand — the probe ran the pioneer to completion before
+issuing the sibling request, the one ordering that hides it. Test this area with
+two sessions dispatched *together*, never sequentially.
+
+**Where to look when this regresses.** The engine log is
+`~/.gezel-dev/logs/mlx-server-*.log`, **not** `service-*.log`. The decisive line
+is `[batch] seed … mode=`: `extension` is reuse, `fresh-untrimmable` names a
+cache that was longer than the shared head, and `[cache] prefix-keep …` is the
+never-lengthen guard refusing to replace a good short entry.
 
 ## 12b. Open findings — measured 2026-08-18 (qwen3.8-27b-q4, M4 Max)
 
@@ -1014,6 +1205,53 @@ and hits both engines, but llama-server takes its template from the GGUF and
 would need `--chat-template-file`. llama-cpp already achieves 43% prompt-token
 reuse on qwen3.8 (one turn at 92%), so any gain there sits on top of a
 working baseline — unlike MLX, where reuse was ~0.
+
+## 14. MTP speculative decoding (on by default, 2026-08-28)
+
+qwen3.8-27b ships an unused multi-token-prediction head. Driving it as a
+drafter measured **+34% decode against the shipped configuration at both 11k
+and 73k context** (reports/mlx-mtp-rig-20260828.md), and on live 76–81k-token
+agentic turns it sustains 2.4–2.7 accepted tokens per round — the long-context
+workload this whole document exists because of.
+
+**What "on by default" means.** No configuration arms it; a drafter's
+*presence* does. The launcher looks for `<engines>/mlx/drafters/<modelDir>-mtp`
+([spec-drafter.ts](../packages/service/src/providers/mlx/spec-drafter.ts)) and a
+model without one serves exactly as before, with one `[spec] off` line naming
+the reason. The path is keyed on the model directory rather than a base-model
+guess, because string-surgering a quantization suffix is how a drafter ends up
+silently paired with the wrong checkpoint; sharing one across quantizations is
+a symlink or an explicit path, so the decision stays the operator's.
+
+**Two things this must never get wrong, both learned the hard way:**
+
+1. **The drafter is a second resident model.** Its ~0.8 GB is added to the
+   weights term *before* slot planning, because an MLX over-commit aborts the
+   whole python process rather than failing one request (§6's rule, applied to
+   a model the ceiling math otherwise cannot see).
+2. **Constrained decoding must survive it.** Upstream's speculative batch takes
+   a sampler and no logits processors — measured, it applies them to the first
+   token and silently drops them thereafter, which for a tool grammar is worse
+   than having none. So gezel routes: greedy + processor-free turns take the
+   fused path (token-exact against ordinary decode, verified on-device), and
+   everything else takes a sidecar-owned **processed walk** where each
+   position's target logits pass through the request's real processor list
+   before acceptance. Grammar and think-budget therefore consume tokens exactly
+   once, in order, and every emitted token is a draw from the processed target
+   distribution.
+
+**The pin is correctness-forced.** mlx-vlm 0.6.6's MTP verify is
+measured-inexact (greedy speculation diverged from greedy decode), so
+`spec_decode.py` refuses to arm below 0.6.17 regardless of configuration.
+
+**What changes visibly.** Greedy output is identical. *Sampled* output is drawn
+from the same processor-shaped distribution but a different RNG stream
+(positioned, per-(seed,position) keys), so sampled text differs token-for-token
+from a non-speculative run of the same prompt — a different sample, not a worse
+one. Per-turn `[spec] stats` lines carry mode, seed, context, and acceptance;
+an A/B arm without them is not evidence.
+
+---
 
 ## 13. Key-file index
 

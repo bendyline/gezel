@@ -89,6 +89,37 @@ describe('winShellSafe', () => {
     });
   });
 
+  // Quoting a PATH-resolved command name makes cmd put the literal token in
+  // `%0`, so the shim it resolves to sees `%~dp0` as the caller's cwd. That
+  // sent corepack's pnpm.CMD looking for `<cwd>\node_modules\corepack\...`.
+  it('leaves a bare PATH-resolved command name unquoted so %~dp0 survives', () => {
+    const out = winShellSafe('pnpm', ['--dir', 'C:\\Program Files\\x', 'exec', 'node'], true);
+    expect(out).toEqual({
+      command: 'pnpm "--dir" "C:\\Program Files\\x" "exec" "node"',
+      args: [],
+    });
+  });
+
+  it('still quotes any command that is path-like, spaced, or metacharacter-bearing', () => {
+    // Only a name cmd must resolve itself is exempt; everything else keeps
+    // the quoting this module exists to guarantee.
+    for (const command of [
+      'C:\\Program Files\\nodejs\\pnpm.cmd',
+      '.\\pnpm.cmd',
+      'some tool',
+      'foo&calc.exe',
+      'dir/tool',
+      '',
+    ]) {
+      expect(winShellSafe(command, [], true).command).toBe(quoteWinShellToken(command));
+    }
+  });
+
+  it('keeps rejecting a command that cannot be quoted safely', () => {
+    // The bare-name exception must not become a hole around validation.
+    expect(() => winShellSafe('%PATH%', [], true)).toThrow(UnquotableShellTokenError);
+  });
+
   it('does not alias the caller\u2019s array', () => {
     const args = ['a'];
     const out = winShellSafe('x', args, false);

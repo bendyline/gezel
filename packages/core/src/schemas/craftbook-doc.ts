@@ -5,6 +5,7 @@ import {
   CraftbookBasedOnSchema,
   CraftbookCommandNeedSchema,
   CraftbookConnectorNeedSchema,
+  CraftbookRecommendationSchema,
   CraftbookRequirementSchema,
   CraftbookRunModesSchema,
   CraftbookScriptsSchema,
@@ -45,6 +46,8 @@ export const CraftbookDocSchema = zod.object({
     .optional(),
   defaultAssignee: TaskAssigneeSchema.optional(),
   requirements: zod.array(CraftbookRequirementSchema).optional(),
+  /** Soft "works better with" hints — never gate. See CraftbookRecommendationSchema. */
+  recommends: zod.array(CraftbookRecommendationSchema).optional(),
   /** Unattended launch modes this recipe is suitable for. */
   runModes: CraftbookRunModesSchema.optional(),
   toolsets: zod.array(CraftbookToolsetNeedSchema).optional(),

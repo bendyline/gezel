@@ -146,7 +146,7 @@ esac
   };
 }
 
-async function runAncestryFixture({ initiallyShallow = false, tag = 'b3' } = {}) {
+async function runAncestryFixture({ initiallyShallow = false, tag = 'b3', build } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'gezel-fetch-ancestry-'));
   const upstream = join(root, 'upstream');
   const script = join(root, 'native', 'scripts', 'fetch-upstream.sh');
@@ -170,9 +170,10 @@ async function runAncestryFixture({ initiallyShallow = false, tag = 'b3' } = {})
   await mkdir(engineDir, { recursive: true });
   await copyFile(sourceScript, script);
   await chmod(script, 0o755);
+  const buildLine = build === undefined ? '' : `build=${build}\n`;
   await writeFile(
     join(engineDir, 'VERSION'),
-    `upstream=${pathToFileURL(upstream).href}\ntag=${tag}\ncommit=${commit}\n`,
+    `upstream=${pathToFileURL(upstream).href}\ntag=${tag}\n${buildLine}commit=${commit}\n`,
   );
   if (initiallyShallow) {
     runGit(root, [
@@ -296,6 +297,39 @@ test('fetch-upstream restores ancestry in a real shallow checkout', async () => 
     assert.equal(runGit(fixture.checkout, ['rev-parse', '--is-shallow-repository']), 'false');
     assert.equal(runGit(fixture.checkout, ['rev-list', '--count', 'HEAD']), '3');
     assert.match(fixture.result.stdout, /llama\.cpp build number verified: 3 \(b3\)/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('fetch-upstream verifies a semver llama tag against its declared build number', async () => {
+  const fixture = await runAncestryFixture({ tag: 'v0.3.0', build: 3 });
+  try {
+    assert.equal(fixture.result.status, 0, fixture.result.stderr);
+    assert.match(fixture.result.stdout, /llama\.cpp build number verified: 3 \(v0\.3\.0\)/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('fetch-upstream refuses a semver llama tag with no declared build number', async () => {
+  const fixture = await runAncestryFixture({ tag: 'v0.3.0' });
+  try {
+    assert.equal(fixture.result.status, 1);
+    assert.match(
+      fixture.result.stderr,
+      /llama\.cpp tag v0\.3\.0 is not a b<number> tag, so .* must declare build=<number>/,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test('fetch-upstream rejects a declared build number that contradicts a b#### tag', async () => {
+  const fixture = await runAncestryFixture({ tag: 'b3', build: 4 });
+  try {
+    assert.equal(fixture.result.status, 1);
+    assert.match(fixture.result.stderr, /declares build=4 but tag b3 implies 3/);
   } finally {
     await fixture.cleanup();
   }

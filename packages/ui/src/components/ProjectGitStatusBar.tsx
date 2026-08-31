@@ -808,13 +808,17 @@ export function ProjectGitStatusBar({
         changesCount: status.changesCount,
         ahead: status.ahead,
         behind: status.behind,
+        syncStale: status.syncStale,
       })
     : '';
   const chipAttention =
     status?.mergeInProgress === true ||
     (status?.changesCount ?? 0) > 0 ||
     (status?.ahead ?? 0) > 0 ||
-    (status?.behind ?? 0) > 0;
+    (status?.behind ?? 0) > 0 ||
+    status?.syncStale === true;
+  const syncNeedsAttention =
+    status?.syncStale === true || (status?.ahead ?? 0) > 0 || (status?.behind ?? 0) > 0;
 
   return (
     <div className={`project-git-status-bar${compact ? ' is-compact' : ''}`}>
@@ -1412,7 +1416,7 @@ export function ProjectGitStatusBar({
           {hasGitHub && (
             <button
               type="button"
-              className="project-git-action"
+              className={`project-git-action${syncNeedsAttention ? ' primary' : ''}`}
               onClick={() => void onSync()}
               disabled={syncing || busy !== ''}
               title="Get new changes from GitHub and send yours"

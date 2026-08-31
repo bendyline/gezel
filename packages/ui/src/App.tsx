@@ -36,14 +36,15 @@ import {
 } from './components/output-pane-maximize.js';
 import { openQuestionInChat } from './components/question-nav.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
-import { EmbeddedChat } from './embedded/EmbeddedChat.js';
+import { loadHomeViewModule, preloadTabContent } from './components/tab-content-loaders.js';
 import { requestSettingsSection } from './settings-nav.js';
 import { streamSharedAllChatEvents } from './shared-chat-events.js';
 import { syncSidebarSideFromConfig } from './sidebar-side.js';
 import { syncThemeFromConfig } from './theme.js';
 
-const HomeView = lazy(() =>
-  import('./views/HomeView.js').then(({ HomeView }) => ({ default: HomeView })),
+const HomeView = lazy(() => loadHomeViewModule().then(({ HomeView }) => ({ default: HomeView })));
+const EmbeddedChat = lazy(() =>
+  import('./embedded/EmbeddedChat.js').then(({ EmbeddedChat }) => ({ default: EmbeddedChat })),
 );
 
 // Navigation is a single `selection` driven by the left Sidebar:
@@ -123,15 +124,17 @@ const EMBEDDED_PARAMS = readEmbeddedParams();
 export function App() {
   if (EMBEDDED_PARAMS) {
     return (
-      <EmbeddedChat
-        projectId={EMBEDDED_PARAMS.projectId}
-        gezelId={EMBEDDED_PARAMS.gezelId}
-        theme={EMBEDDED_PARAMS.theme}
-        accent={EMBEDDED_PARAMS.accent}
-        bg={EMBEDDED_PARAMS.bg}
-        fg={EMBEDDED_PARAMS.fg}
-        fontFamily={EMBEDDED_PARAMS.fontFamily}
-      />
+      <Suspense fallback={<div className="placeholder">Loading chat…</div>}>
+        <EmbeddedChat
+          projectId={EMBEDDED_PARAMS.projectId}
+          gezelId={EMBEDDED_PARAMS.gezelId}
+          theme={EMBEDDED_PARAMS.theme}
+          accent={EMBEDDED_PARAMS.accent}
+          bg={EMBEDDED_PARAMS.bg}
+          fg={EMBEDDED_PARAMS.fg}
+          fontFamily={EMBEDDED_PARAMS.fontFamily}
+        />
+      </Suspense>
     );
   }
   return <FullApp />;
@@ -258,6 +261,10 @@ function FullApp() {
     (area: RecentTabArea) => commitSelection(toRecentTab({ kind: 'area', area })),
     [commitSelection],
   );
+  const preloadSelection = useCallback((next: RecentTab | null) => {
+    if (next === null) void loadHomeViewModule().catch(() => {});
+    else preloadTabContent(next);
+  }, []);
   const openModelBundleSettings = useCallback(
     (engine: 'llama-cpp' | 'mlx' | 'ds4') => {
       requestSettingsSection(engine === 'llama-cpp' ? 'llamaCpp' : engine);
@@ -808,6 +815,7 @@ function FullApp() {
           selection={selection}
           onSelect={commitSelection}
           onOpenArea={openArea}
+          onPreload={preloadSelection}
           activeProjectIds={activeProjectIds}
           activeGezelIds={activeGezelIds}
           pendingByProject={pendingByProject}

@@ -9,13 +9,22 @@
   -->
   <rect width="24" height="24" fill="#849577" />
 
-  <g fill="#f8f8f4">
+  <defs>
+    <path id="leg" d="M8 10h3l-1 11H7z" />
+    <g id="leg-openings">
+      <circle cx="9.5" cy="12.5" r=".75" />
+      <circle cx="8.5" cy="18.5" r=".75" />
+    </g>
+  </defs>
+
+  <g fill="#faf9f3">
     <!-- Bench top and stretcher. -->
     <rect x="6" y="5" width="16" height="4" rx=".5" />
     <rect x="10" y="15" width="8" height="2" rx=".5" />
 
     <!-- Equal-width legs reflected exactly around the bench center (x=14). -->
-    <path d="M8 10h3l-1 11H7z M17 10h3l1 11h-3z" />
+    <use href="#leg" />
+    <use href="#leg" transform="translate(28 0) scale(-1 1)" />
 
     <!-- Vise: a full-pixel spindle, substantial knobs, and a separate jaw. -->
     <rect x="3" y="2" width="1" height="10" />
@@ -27,9 +36,7 @@
   <!-- Openings are painted directly instead of masked so they survive 24 px. -->
   <g fill="#849577">
     <circle cx="3.5" cy="7" r="1" />
-    <circle cx="9.5" cy="12.5" r=".75" />
-    <circle cx="18.5" cy="12.5" r=".75" />
-    <circle cx="8.5" cy="18.5" r=".75" />
-    <circle cx="19.5" cy="18.5" r=".75" />
+    <use href="#leg-openings" />
+    <use href="#leg-openings" transform="translate(28 0) scale(-1 1)" />
   </g>
 </svg>

@@ -92,6 +92,7 @@ import type {
   TurnCtx,
 } from '../model-profile/types.js';
 import { reconcileDefaultModel } from '../models/default-model-fallback.js';
+import { hasObservationTables } from '../observations/query.js';
 import { type PreviewLogBuffer, formatPreviewLogPrelude } from '../preview-log/buffer.js';
 import {
   reconcileScriptTools,
@@ -336,10 +337,13 @@ import {
   type TaskBudgetSnapshot,
   TaskBudgetTracker,
 } from './task-budget.js';
+import { extractToolCard } from './tool-cards.js';
+import { buildToolEvidenceReplay, toolEvidenceBudgetChars } from './tool-evidence-replay.js';
 import type { AvailableToolInfo } from './tools-block.js';
 import { describeTurnError } from './turn-error.js';
 import { UsageTracker } from './usage.js';
 import type { RecognitionMode } from './vision-capability.js';
+import { mmprojBudgetBytes, nativeVisionEnabledFor } from './vision-capability.js';
 import { renderWorkspaceGestalt } from './workspace-gestalt.js';
 
 const DEFAULT_PROJECT_ID = 'default';
@@ -371,6 +375,12 @@ const TURN_LIBRARY_RECALL_MIN_CHARS = 15;
  * the app never reads as a hang.
  */
 const BACKGROUND_DRAIN_TIMEOUT_MS = 15_000;
+/**
+ * How long a queue-wait stamp stays authoritative. `runInQueue` re-asserts
+ * every 5s while waiting and stops on acquire, so anything older than a
+ * couple of cycles means the turn is running, not queued.
+ */
+const QUEUE_WAIT_FRESH_MS = 12_000;
 const DEFAULT_INTERACTIVE_RECALL_DEADLINE_MS = 2_000;
 
 export function resolveInteractiveRecallDeadlineMs(env: NodeJS.ProcessEnv = process.env): number {
@@ -1113,6 +1123,22 @@ export class ChatManager {
    * silently wedged. Cleared in the `finally` at the end of `send()`.
    */
   private readonly inflight = new Map<string, InflightTurn>();
+  /**
+   * When each in-flight turn last reported that it is still WAITING for a
+   * provider slot rather than generating.
+   *
+   * "In flight" and "running on the model" are not the same state, and
+   * conflating them is what let a turn parked behind another gezel's
+   * agentic loop be reported — to the UI and in the debug bundle — as an
+   * ordinary in-progress turn that had simply gone quiet.
+   *
+   * Self-expiring rather than explicitly cleared: `runInQueue` re-asserts
+   * the wait every few seconds and stops the moment it acquires, so a
+   * stamp older than {@link QUEUE_WAIT_FRESH_MS} means the turn got its
+   * slot. That avoids threading an "acquired" hook back through the
+   * provider layer purely to flip a status bit.
+   */
+  private readonly queueWaitingSince = new Map<string, number>();
   /**
    * Per-session FIFO queue of messages that arrived while the session
    * was already mid-turn. Before this existed, `send()` threw
@@ -2758,6 +2784,7 @@ export class ChatManager {
     if (!entry) return { cancelled: false };
     entry.cancelled = true;
     this.inflight.delete(sessionId);
+    this.queueWaitingSince.delete(sessionId);
     this.telemetry.noteTurnEnd(sessionId);
     // Do NOT clear the per-turn salvage buffers (tools / warnings /
     // content / reasoning) here. Aborting below rejects the in-flight
@@ -3241,9 +3268,12 @@ export class ChatManager {
             },
           }
         : {}),
-      turnStatus:
-        this.inflight.has(sessionId) ||
-        this.externalConversations.listActive().some((activity) => activity.sessionId === sessionId)
+      turnStatus: this.isAwaitingProviderSlot(sessionId)
+        ? 'queued'
+        : this.inflight.has(sessionId) ||
+            this.externalConversations
+              .listActive()
+              .some((activity) => activity.sessionId === sessionId)
           ? 'in-progress'
           : (this.pendingSends.get(sessionId)?.length ?? 0) > 0
             ? 'queued'
@@ -3922,11 +3952,45 @@ export class ChatManager {
       : roleBasedNameOnlyMode
         ? undefined
         : args.fromGezelName;
+    // What has this task already put on disk? A restart mid-batch is the
+    // moment a model most needs to know that its own partial deliverable
+    // survived — otherwise its only recovery is to re-read every source
+    // record, which is precisely the loop that cannot converge when the
+    // evidence is larger than any replay budget. Naming the artifacts turns
+    // "read all 25 records again" into "read back what I already wrote and
+    // continue from there".
+    let persistedWork = '';
+    if (resumedExisting) {
+      const parsedForResume = parseTaskRef(args.taskRef);
+      const resumeTask = parsedForResume
+        ? await this.store
+            .readTask(parsedForResume.projectId, parsedForResume.num)
+            .catch(() => null)
+        : null;
+      const dir = resumeTask?.artifactDir ?? (resumeTask ? `tasks/${resumeTask.num}` : null);
+      if (dir && parsedForResume) {
+        const written = await this.store
+          .listProjectArtifactsRecursive(parsedForResume.projectId, { subpath: dir })
+          .catch(() => [])
+          .then((entries) => entries.filter((e) => !e.isDirectory).map((e) => e.path));
+        if (written.length > 0) {
+          persistedWork = ` ${[
+            `You have already written these artifacts for this task: ${written
+              .map((f) => `\`${f}\``)
+              .join(', ')}.`,
+            'Read them back with `read_artifact` before re-reading any source — they hold the work',
+            'you already did, and continuing them is cheaper and more reliable than reconstructing it.',
+            'Persist each finding as you go rather than holding every source in your head;',
+            'that is what makes a restart cheap.',
+          ].join(' ')}`;
+        }
+      }
+    }
     const seed =
       args.kind === 'retry'
         ? `You paused on step \`${dispatchStepId}\` of task ${args.taskRef}, and the user has asked you to try again. Call \`read_task_notes\` first — the newest note says why it stopped. Then take a DIFFERENT approach to the same deliverable instead of repeating the attempt that failed, and call \`advance_task_step\` when it is done. If it still cannot work, say exactly what you need with \`ask_user_question\` rather than going quiet.`
         : resumedExisting
-          ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Continue this existing task thread from the progress and tool evidence above. Re-read only what you still need, keep appending focused notes with \`write_task_note\`, and call \`advance_task_step\` when the step is done.`
+          ? `The service restarted while task ${args.taskRef} was still active on step \`${dispatchStepId}\`. Your earlier tool results are restored above, each marked \`[recovered from an earlier turn]\` — treat those as already read and do NOT read them again. Some may be missing or marked TRUNCATED: if a source is larger than what can be restored, do NOT keep re-reading everything hoping it all lands at once — work through the remainder in small groups, writing what you conclude after each group so progress survives the next restart.${persistedWork} Keep appending focused notes with \`write_task_note\`, and call \`advance_task_step\` when the step is done.`
           : args.kind === 'entry'
             ? `${entryPreface}You've been assigned task ${args.taskRef} (step \`${dispatchStepId}\`). Follow the step instructions already in your prompt — make the first tool call they name this turn. Append focused notes with \`write_task_note\` as you go. When the step is done, call \`advance_task_step\` to hand off to whoever's next.`
             : selfHandoff
@@ -4851,6 +4915,33 @@ export class ChatManager {
   }
 
   /**
+   * Canonical gezel id for a reference that may be an id, a display name,
+   * or a roleBasedName — `null` when nothing matches.
+   *
+   * Any caller comparing two gezel references for identity must put BOTH
+   * through here first. The references are not stored in one normal form:
+   * a task's `assignee.gezelId` keeps whatever the model typed
+   * (`"Alejandro"`), while `project.voormanGezelId` keeps the slug id
+   * (`"alejandro"`). A raw `===` between the two reads as "different
+   * gezels", so a self-message guard passes and {@link messageGezel} —
+   * which *does* resolve — then throws `cannot message yourself` on every
+   * attempt. That is a permanent condition, so the caller retries forever.
+   */
+  async resolveGezelIdRef(idOrName: string, projectId?: string): Promise<string | null> {
+    return (await this.resolveGezel(idOrName, projectId))?.id ?? null;
+  }
+
+  /**
+   * Whether this session's in-flight turn is parked waiting for a provider
+   * slot instead of running on the model. See {@link queueWaitingSince}.
+   */
+  isAwaitingProviderSlot(sessionId: string): boolean {
+    if (!this.inflight.has(sessionId)) return false;
+    const at = this.queueWaitingSince.get(sessionId);
+    return at !== undefined && Date.now() - at < QUEUE_WAIT_FRESH_MS;
+  }
+
+  /**
    * Subscribe to the target session's event bus and, on the first
    * `complete` event, queue a reply summary into the sender's inbox.
    * Auto-unsubscribes after first fire or the listener's idle timeout.
@@ -5596,8 +5687,8 @@ export class ChatManager {
 
   /**
    * Clear the poisoned state on every non-archived session in a project — the
-   * "get this project working again" action behind the chat banner's Continue
-   * button. One engine crash typically poisons several of a project's sessions
+   * "get this project working again" action behind the chat banner's
+   * Acknowledge button. One engine crash typically poisons several of a project's sessions
    * (voorman + helpers), so clearing just one leaves the sidebar flag lit; this
    * resets them all so ambient work resumes. Returns how many were cleared.
    */
@@ -5610,6 +5701,40 @@ export class ChatManager {
       if (rec && rec.lastTurnError === undefined) cleared++;
     }
     return cleared;
+  }
+
+  /**
+   * Re-run the input that produced a session's persisted failed-turn state.
+   * The retry seed is hidden from the transcript: the person already has one
+   * visible copy of their request, and duplicating it would make Retry look
+   * like a second user send. The model still receives the exact original
+   * input, with cross-gezel/system provenance preserved where it matters.
+   *
+   * This accepts quickly and tracks the actual turn in the same background
+   * set as the ordinary HTTP send path. Success clears `lastTurnError` through
+   * the normal turn commit; another failure replaces it with the new error.
+   */
+  async retryLastTurn(sessionId: string): Promise<{ accepted: true; sessionId: string }> {
+    const record = await this.getSessionRecord(sessionId);
+    if (!record) throw new Error(`session ${sessionId} not found`);
+    if (!record.lastTurnError) throw new Error('this session has no failed turn to retry');
+    if (this.inflight.has(sessionId) || (this.pendingSends.get(sessionId)?.length ?? 0) > 0) {
+      throw new Error('a turn is already in progress for this session');
+    }
+
+    const failedInput = [...record.messages].reverse().find((message) => message.role === 'user');
+    if (!failedInput) throw new Error('the failed turn has no input to retry');
+
+    const retry = this.send(sessionId, failedInput.content, {
+      hidden: true,
+      ...(failedInput.from ? { from: failedInput.from } : {}),
+      ...(failedInput.origin === 'system' ? { messageOrigin: 'system' as const } : {}),
+    }).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn(`[chat] failed-turn retry failed for ${sessionId}: ${message}`);
+    });
+    this.trackBackground(retry);
+    return { accepted: true, sessionId };
   }
 
   async archiveSession(sessionId: string): Promise<ChatSession> {
@@ -6095,6 +6220,7 @@ export class ChatManager {
     // idle rather than enqueue behind a turn that no longer exists.
     if (this.inflight.get(sessionId) === finishedTurn) {
       this.inflight.delete(sessionId);
+      this.queueWaitingSince.delete(sessionId);
     }
     // A cancelled adapter can take a moment to unwind after the UI starts a
     // replacement turn. Never let the old turn's finally block clear or
@@ -7127,6 +7253,7 @@ export class ChatManager {
             ...(isAskTarget ? { bypassQueue: true } : {}),
             signal: turnAbort.signal,
             onQueueWait: ({ aheadOf }) => {
+              this.queueWaitingSince.set(sessionId, Date.now());
               this.events.publish(scope, { type: 'queued', aheadOf });
             },
           },
@@ -7796,6 +7923,16 @@ export class ChatManager {
             log.info(
               `session ${sessionId}: ${advanceOutcome.gateRejected.taskRef} step ` +
                 `"${advanceOutcome.gateRejected.stepId}" gate rejected — re-prompting with the verdict${stage > 0 ? ` (escalation stage ${stage})` : ''}`,
+            );
+            // The verdict is about the step the TASK is on, which is not
+            // necessarily the step this session was pinned to. Re-pin
+            // before delivering it, or the model reads one step's
+            // procedure while being corrected about another's — see
+            // {@link repinSessionStep}.
+            await this.repinSessionStep(
+              state,
+              advanceOutcome.gateRejected.taskRef,
+              advanceOutcome.gateRejected.stepId,
             );
             promptForTurn = correctivePromptForLiveRoster(
               stage >= 1
@@ -11028,7 +11165,17 @@ export class ChatManager {
     builders.ds4 = ds4Builder;
 
     // Replace the empty pool with one that holds the actual builders.
-    const realPool = new ProviderPool({ broker, builders, gpuPanicGuard });
+    const realPool = new ProviderPool({
+      broker,
+      builders,
+      gpuPanicGuard,
+      // The arbiter already reads device-wide accelerator memory for the idle
+      // release hint; the pool needs the same number to refuse a spawn onto a
+      // card another process has filled.
+      ...(this.gpuArbiter
+        ? { vramHeadroom: () => this.gpuArbiter!.getMemoryPressureStatus() }
+        : {}),
+    });
     return new EngineRouter({
       broker,
       pool: realPool,
@@ -11822,6 +11969,66 @@ export class ChatManager {
   }
 
   /**
+   * The memory picture every engine's launch preview prices against.
+   *
+   * One derivation because each engine branch below used to rebuild it, and
+   * they drifted: the llama.cpp branch pinned its admission clamp to usable
+   * VRAM alone on discrete hosts, so a 21 GB MoE the broker would gladly
+   * admit against a 30 GB budget reported "won't fit" — while the MLX branch,
+   * which never passed live RAM, priced the same question correctly. A 4.7 GB
+   * model was denied the same way. Adding an engine must not re-open that.
+   *
+   * Deliberately carries no `freeSystemRamBytes`. A preview answers a policy
+   * question ("what window would this model get?"), where live free RAM is
+   * both the wrong input and a self-referential one — our own resident engine
+   * is what depressed it, so consulting it makes one running model deny every
+   * row in the list, itself included (see
+   * {@link CtxMemoryClampInput.freeSystemRamBytes}). Real placement belongs to
+   * the launch path: `buildLlamaCppProvider` passes `availableSystemRamBytes()`
+   * and is the only caller that should. Confining grown KV to fast memory is
+   * not lost with it — `planAdaptiveContextGrowth` applies that clamp itself
+   * from `budgetKind` + `vramBytes`.
+   */
+  private async previewCapacityInputs(
+    provider: LocalProviderName,
+    modelId: string,
+    opts: { standalone?: boolean },
+  ): Promise<{
+    /** Admission budget for the whole resident set. */
+    budgetBytes: number;
+    /** Fast (on-accelerator) pool — the ceiling adaptive growth may spend. */
+    fastBudgetBytes: number;
+    /** What slot COUNT is sized against; below `fastBudgetBytes` on big hosts. */
+    concurrencySizingBytes: number;
+    /** Usable VRAM on a discrete card; 0 on unified / CPU-only hosts. */
+    vramBytes: number;
+    budgetKind: CapacityCommitted['pools']['kind'];
+    /** Reservations held by models OTHER than this one. */
+    committedOtherBytes: number;
+  }> {
+    const { computeCapacityBudget } = await import('../providers/native/capacity-broker.js');
+    const router = this.engineRouter ?? this.engineRouterCache;
+    const snapshot = router?.broker.committed();
+    // An unenforced budget carries no usable numbers — fall back wholesale
+    // rather than per-field, so a snapshot never contributes half a picture.
+    const enforced = snapshot?.enforced ? snapshot : undefined;
+    const live = computeCapacityBudget();
+    return {
+      budgetBytes: enforced?.budgetBytes ?? live.budgetBytes,
+      fastBudgetBytes:
+        enforced === undefined
+          ? live.fastBytes
+          : (router?.broker.fastBudgetBytes() ?? enforced.pools.fastBytes),
+      concurrencySizingBytes: enforced?.pools.concurrencySizingBytes ?? live.concurrencySizingBytes,
+      vramBytes: enforced?.pools.vramBytes ?? live.vramBytes,
+      budgetKind: enforced?.pools.kind ?? live.kind,
+      committedOtherBytes: opts.standalone
+        ? 0
+        : this.committedOtherBytesFor(snapshot, provider, modelId),
+    };
+  }
+
+  /**
    * Full non-binding launch preview: the context window a native model
    * would receive AND the resident footprint at that window. Powers the
    * models-list "size in memory" column alongside
@@ -11927,26 +12134,19 @@ export class ChatManager {
       const geometry = installed.modelDir ? readMlxModelGeometry(installed.modelDir) : undefined;
       const {
         CapacityBroker,
-        computeCapacityBudget,
         defaultLocalEngineSlots,
         kvQuantScale,
         localEngineSlotCeiling,
         planCtxTokensForMemory,
         plannedLocalEngineSlots,
       } = await import('../providers/native/capacity-broker.js');
-      const router = this.engineRouter ?? this.engineRouterCache;
-      const brokerSnap = router?.broker.committed();
-      const liveBudget = computeCapacityBudget();
-      const budgetBytes = brokerSnap?.enforced ? brokerSnap.budgetBytes : liveBudget.budgetBytes;
-      const fastBudget = brokerSnap?.enforced
-        ? (router?.broker.fastBudgetBytes() ?? brokerSnap.pools.fastBytes)
-        : liveBudget.fastBytes;
-      const committedOtherBytes = opts.standalone
-        ? 0
-        : this.committedOtherBytesFor(brokerSnap, 'mlx', modelId);
-      const concurrencySizingBudget = brokerSnap?.enforced
-        ? brokerSnap.pools.concurrencySizingBytes
-        : liveBudget.concurrencySizingBytes;
+      const capacity = await this.previewCapacityInputs('mlx', modelId, opts);
+      const {
+        budgetBytes,
+        fastBudgetBytes: fastBudget,
+        committedOtherBytes,
+        concurrencySizingBytes: concurrencySizingBudget,
+      } = capacity;
       const kvBits = config.mlxKvBits ?? 0;
       const kvCacheType = kvBits === 4 ? 'q4_0' : kvBits === 8 ? 'q8_0' : 'f16';
       const weightsResident = CapacityBroker.estimateResidentBytes(
@@ -11998,7 +12198,7 @@ export class ChatManager {
           weightsResidentBytes: weightsResident,
           budgetBytes,
           committedOtherBytes,
-          vramBytes: 0,
+          vramBytes: capacity.vramBytes,
         });
         if (!admission.minimumSatisfied) {
           throw new CapacityDeniedError(
@@ -12163,6 +12363,17 @@ export class ChatManager {
     const installed = await this.llamaCppModels?.resolveModel(modelId);
     if (!installed) throw new ModelNotInstalledError(name, modelId);
 
+    // Charge the projector against memory only when the launch will actually
+    // load it. Every estimate below used to pass `installed.mmprojSizeBytes`
+    // unconditionally, which was harmless while the file only existed for
+    // models that had opted in — but the projector now ships with the model,
+    // so an unconditional charge would quietly tax every multimodal model
+    // (~900MB on a 27B) including the ones deliberately running text-only.
+    const visionBudgetBytes = mmprojBudgetBytes(
+      installed.mmprojSizeBytes,
+      !!installed.mmprojPath && nativeVisionEnabledFor(config.nativeVision, modelId),
+    );
+
     const envNumCtx = (() => {
       const raw = process.env.GEZEL_LLAMA_NUM_CTX;
       if (!raw) return undefined;
@@ -12203,7 +12414,6 @@ export class ChatManager {
       (residentContextWindow !== undefined && !overrideActive) || envNumCtx !== undefined;
 
     const {
-      computeCapacityBudget,
       defaultLocalEngineSlots,
       estimatePerSlotKvBytes,
       kvQuantScale,
@@ -12212,26 +12422,8 @@ export class ChatManager {
       planCtxTokensForMemory,
       plannedLocalEngineSlots,
     } = await import('../providers/native/capacity-broker.js');
-    const router = this.engineRouter ?? this.engineRouterCache;
-    const brokerSnap = router?.broker.committed();
-    const liveBudget = computeCapacityBudget();
-    const fastBudgetBytes = brokerSnap?.enforced
-      ? (router?.broker.fastBudgetBytes() ?? brokerSnap.pools.fastBytes)
-      : liveBudget.fastBytes;
-    const admissionBudgetBytes = brokerSnap?.enforced
-      ? brokerSnap.budgetBytes
-      : liveBudget.budgetBytes;
-    const committedOtherBytes = opts.standalone
-      ? 0
-      : this.committedOtherBytesFor(brokerSnap, 'llama-cpp', modelId);
-    // A preview answers a policy question, so it drops the live-free-RAM half
-    // of the clamp (see CtxMemoryClampInput.freeSystemRamBytes). A discrete
-    // card still gets a placement cap: pass 0 free RAM so the live term
-    // reduces to usable VRAM, which is stable and not self-referential. On a
-    // unified host "VRAM" IS that same RAM, so there is nothing left to cap
-    // with and the field is omitted entirely.
-    const previewBudgetKind = brokerSnap?.enforced ? brokerSnap.pools.kind : liveBudget.kind;
-    const previewLiveRam = previewBudgetKind === 'discrete-gpu' ? { freeSystemRamBytes: 0 } : {};
+    const capacity = await this.previewCapacityInputs('llama-cpp', modelId, opts);
+    const { budgetBytes: admissionBudgetBytes, fastBudgetBytes, committedOtherBytes } = capacity;
     const configuredSlots = config.providerConcurrency?.['llama-cpp'];
     const kvCacheType = resolveLlamaCppKvCacheType({
       architecture: installed.architecture,
@@ -12303,7 +12495,7 @@ export class ChatManager {
       );
       if (perSlotF16 === undefined) return undefined;
       const weightsBytes = estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-        mmprojBytes: installed.mmprojSizeBytes,
+        mmprojBytes: visionBudgetBytes,
       });
       const perSlotBytes = perSlotF16 * kvQuantScale(kv);
       return {
@@ -12348,9 +12540,7 @@ export class ChatManager {
     const ceilingAt = (ctx: number, kv: LlamaCppKvCacheType) =>
       llamaCppSlotCeiling({
         budgetBytes: fastBudgetBytes,
-        sizingBudgetBytes: brokerSnap?.enforced
-          ? brokerSnap.pools.concurrencySizingBytes
-          : liveBudget.concurrencySizingBytes,
+        sizingBudgetBytes: capacity.concurrencySizingBytes,
         weightsBytes: installed.approxSizeBytes,
         perTurnCtxTokens: ctx,
         kvCacheType: kv,
@@ -12384,7 +12574,7 @@ export class ChatManager {
               reservedResidentBytes: planned.reserved,
               plannedSlots: planned.slots,
               weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-                mmprojBytes: installed.mmprojSizeBytes,
+                mmprojBytes: visionBudgetBytes,
               }),
             }
           : {}),
@@ -12455,64 +12645,105 @@ export class ChatManager {
             grantedCtx,
           )
         : undefined;
-      const passCeiling = (kvType: LlamaCppKvCacheType) =>
+      const passPlanCtx = grantedCtx;
+      const passCeiling = (kvType: LlamaCppKvCacheType, ctxTokens: number) =>
         llamaCppSlotCeiling({
           budgetBytes: fastBudgetBytes,
-          sizingBudgetBytes: brokerSnap?.enforced
-            ? brokerSnap.pools.concurrencySizingBytes
-            : liveBudget.concurrencySizingBytes,
+          sizingBudgetBytes: capacity.concurrencySizingBytes,
           weightsBytes: installed.approxSizeBytes,
-          perTurnCtxTokens: grantedCtx,
+          perTurnCtxTokens: ctxTokens,
           kvCacheType: kvType,
           committedOtherBytes,
-          ...(exactAtRequested !== undefined ? { exactPerSlotKvBytesF16: exactAtRequested } : {}),
+          ...(exactAtRequested !== undefined
+            ? { exactPerSlotKvBytesF16: (exactAtRequested * ctxTokens) / passPlanCtx }
+            : {}),
         });
+      // One pricing for a candidate KV dtype, shared by the plan's fit gate
+      // and by the admission below — a second copy is how a preview starts
+      // promising a window the launch then denies.
+      const referenceCtx = 4096;
+      const exactKvAtReferenceFor = (kvType: LlamaCppKvCacheType) =>
+        summary
+          ? estimateKvReserveBytes({
+              blockCount: summary.blockCount,
+              embeddingLength: summary.embeddingLength,
+              headCount: summary.headCount,
+              headCountKv: summary.headCountKv,
+              headCountKvPerLayer: summary.headCountKvPerLayer,
+              slidingWindowPattern: summary.slidingWindowPattern,
+              sharedKvLayers: summary.sharedKvLayers,
+              keyLength: summary.keyLength,
+              valueLength: summary.valueLength,
+              keyLengthSwa: summary.keyLengthSwa,
+              valueLengthSwa: summary.valueLengthSwa,
+              fullAttentionInterval: summary.fullAttentionInterval,
+              ssmInnerSize: summary.ssmInnerSize,
+              ssmStateSize: summary.ssmStateSize,
+              ssmConvKernel: summary.ssmConvKernel,
+              ctxTokens: referenceCtx,
+              kvCacheType: kvType,
+            })
+          : undefined;
+      const kvBytesPerTokenFor = (kvType: LlamaCppKvCacheType) => {
+        const exact = exactKvAtReferenceFor(kvType);
+        return exact !== undefined
+          ? exact / referenceCtx
+          : estimatePerSlotKvBytes({
+              perTurnCtxTokens: referenceCtx,
+              weightsBytes: installed.approxSizeBytes,
+              kvCacheType: kvType,
+            }) / referenceCtx;
+      };
+      const weightsResidentBytes = estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
+        mmprojBytes: visionBudgetBytes,
+      });
+      const planFitsAt = (kvType: LlamaCppKvCacheType, ctxTokens: number, slotCount: number) => {
+        // `minimumPerTurnCtxTokens: ctxTokens` makes this ask for the WHOLE
+        // window — a plan admission would only accept by clamping does not
+        // count as a fit, which is exactly the case q8_0 has to rescue.
+        const probe = planCtxTokensForMemory({
+          requestedPerTurnCtxTokens: ctxTokens,
+          slots: slotCount,
+          minimumPerTurnCtxTokens: ctxTokens,
+          kvBytesPerToken: kvBytesPerTokenFor(kvType),
+          weightsResidentBytes,
+          budgetBytes: admissionBudgetBytes,
+          committedOtherBytes,
+          vramBytes: capacity.vramBytes,
+        });
+        return probe.minimumSatisfied && probe.slots >= slotCount;
+      };
       const kvPlan = planLlamaCppKv({
         architecture: installed.architecture,
         modelId,
         override: config.llamaCppKvCacheType,
         slotsConfigured: configuredSlots !== undefined,
+        ...(configuredSlots !== undefined ? { configuredSlots } : {}),
+        requestedCtxTokens: grantedCtx,
+        minimumCtxTokens: requirement.minimumPerTurnCtxTokens,
+        ctxConfigured:
+          explicitArg !== undefined || (config.llamaCppContextSizing ?? 'adaptive') === 'model-max',
         ceilingFor: passCeiling,
+        fitsAt: planFitsAt,
         maxSlots: defaultLocalEngineSlots(fastBudgetBytes),
       });
       kv = kvPlan.kvCacheType;
+      // Mirror the launch: the f16-by-context-cap trade shrinks the granted
+      // window here too, so the settings preview shows what will really run.
+      if (kvPlan.ctxCapTokens !== undefined && kvPlan.ctxCapTokens < grantedCtx) {
+        grantedCtx = kvPlan.ctxCapTokens;
+      }
       let slots = plannedLocalEngineSlots({
         configuredSlots,
-        ceiling: passCeiling(kv),
+        ceiling: passCeiling(kv, grantedCtx),
         tierDefault: defaultLocalEngineSlots(fastBudgetBytes),
       });
       if ((config.llamaCppSpecType ?? manifestEngineConfig?.spec?.type) === 'draft-mtp') slots = 1;
 
       try {
         if (!summary) throw new Error('GGUF header unreadable');
-        const referenceCtx = 4096;
-        const exactKvAtReference = estimateKvReserveBytes({
-          blockCount: summary.blockCount,
-          embeddingLength: summary.embeddingLength,
-          headCount: summary.headCount,
-          headCountKv: summary.headCountKv,
-          headCountKvPerLayer: summary.headCountKvPerLayer,
-          slidingWindowPattern: summary.slidingWindowPattern,
-          sharedKvLayers: summary.sharedKvLayers,
-          keyLength: summary.keyLength,
-          valueLength: summary.valueLength,
-          keyLengthSwa: summary.keyLengthSwa,
-          valueLengthSwa: summary.valueLengthSwa,
-          fullAttentionInterval: summary.fullAttentionInterval,
-          ssmInnerSize: summary.ssmInnerSize,
-          ssmStateSize: summary.ssmStateSize,
-          ssmConvKernel: summary.ssmConvKernel,
-          ctxTokens: referenceCtx,
-          kvCacheType: kv,
-        });
-        const kvBytesPerToken =
-          exactKvAtReference !== undefined
-            ? exactKvAtReference / referenceCtx
-            : estimatePerSlotKvBytes({
-                perTurnCtxTokens: referenceCtx,
-                weightsBytes: installed.approxSizeBytes,
-                kvCacheType: kv,
-              }) / referenceCtx;
+        const exactKvAtReference = exactKvAtReferenceFor(kv);
+        const kvBytesPerToken = kvBytesPerTokenFor(kv);
         // The linearization the accepted plan priced with, so the growth
         // pass cannot disagree with admission about the same launch.
         let ladderKvLinearization: {
@@ -12525,12 +12756,11 @@ export class ChatManager {
           minimumPerTurnCtxTokens: requirement.minimumPerTurnCtxTokens,
           kvBytesPerToken,
           weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-            mmprojBytes: installed.mmprojSizeBytes,
+            mmprojBytes: visionBudgetBytes,
           }),
           budgetBytes: admissionBudgetBytes,
           committedOtherBytes,
-          ...previewLiveRam,
-          vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
+          vramBytes: capacity.vramBytes,
         });
         // Mirror the launch path's windowed-cache admission (see
         // buildLlamaCppProvider): when the launch will decline the Gemma
@@ -12577,13 +12807,12 @@ export class ChatManager {
               kvBytesPerToken: windowed.bytesPerToken,
               weightsResidentBytes:
                 estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-                  mmprojBytes: installed.mmprojSizeBytes,
+                  mmprojBytes: visionBudgetBytes,
                 }) +
                 windowed.fixedBytes * slots,
               budgetBytes: admissionBudgetBytes,
               committedOtherBytes,
-              ...previewLiveRam,
-              vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
+              vramBytes: capacity.vramBytes,
             });
             ladderKvLinearization = {
               bytesPerToken: windowed.bytesPerToken,
@@ -12618,13 +12847,12 @@ export class ChatManager {
             kvBytesPerToken: ladderKvLinearization.bytesPerToken,
             kvFixedPerSlotBytes: ladderKvLinearization.fixedPerSlotBytes,
             weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-              mmprojBytes: installed.mmprojSizeBytes,
+              mmprojBytes: visionBudgetBytes,
             }),
             fastBudgetBytes,
             committedOtherBytes,
-            budgetKind: brokerSnap?.enforced ? brokerSnap.pools.kind : liveBudget.kind,
-            ...previewLiveRam,
-            vramBytes: brokerSnap?.enforced ? brokerSnap.pools.vramBytes : liveBudget.vramBytes,
+            budgetKind: capacity.budgetKind,
+            vramBytes: capacity.vramBytes,
             isMoE: (summary.expertCount ?? 0) > 1,
             // A user-chosen lane count is not growth's to spend.
             allowSlotTrade: configuredSlots === undefined,
@@ -12678,7 +12906,7 @@ export class ChatManager {
             reservedResidentBytes: planned.reserved,
             plannedSlots: planned.slots,
             weightsResidentBytes: estimateLlamaCppResidentBytes(installed.approxSizeBytes, {
-              mmprojBytes: installed.mmprojSizeBytes,
+              mmprojBytes: visionBudgetBytes,
             }),
           }
         : {}),
@@ -13037,12 +13265,26 @@ export class ChatManager {
   private async resolveTurnVisionContext(
     state: LiveSessionState,
   ): Promise<{ modelId?: string; mmprojPath?: string; nativeVisionEnabled?: boolean }> {
-    const modelId = state.record.model ?? undefined;
+    // Ask about the model that is actually SERVING this turn.
+    //
+    // `record.model` is only one input to model resolution (gezel
+    // frontmatter, the install default, and the config default all feed it),
+    // so it routinely names something other than what the engine bound —
+    // wild-caught with `record.model = 'gemma4-e4b'` on a session whose
+    // `engineKey` was `llama-cpp:qwen3.8-27b-q2:0`. That made the whole
+    // vision decision answer the wrong question: it resolved gemma's
+    // projector to decide what qwen could see, and printed gemma's name in
+    // the reason the user was shown. `engineKey` is stamped at bind time and
+    // is the authoritative record of what ran.
+    const boundModelId = state.record.engineKey
+      ? parseEngineKey(state.record.engineKey)?.modelId
+      : undefined;
+    const modelId = boundModelId ?? state.record.model ?? undefined;
     if (!modelId || !this.llamaCppModels) return modelId ? { modelId } : {};
     try {
       const resolved = await this.llamaCppModels.resolveModel(modelId);
       const cfg = await this.store.readConfig().catch(() => null);
-      const enabled = cfg?.nativeVision?.[modelId] === true;
+      const enabled = nativeVisionEnabledFor(cfg?.nativeVision, modelId);
       return {
         modelId,
         ...(resolved?.mmprojPath ? { mmprojPath: resolved.mmprojPath } : {}),
@@ -13826,6 +14068,82 @@ export class ChatManager {
    * Best-effort: failures here log + swallow so a malformed refresh
    * never breaks an otherwise-working session.
    */
+  /**
+   * Re-pin a task-scoped session onto the step the task is actually on,
+   * rebuilding the live system message in place.
+   *
+   * `record.stepId` is snapshotted when the session is created and wins
+   * over `task.activeStepId` in `buildSessionOpts`. That is right for a
+   * session that owns one step, and wrong the moment the gate or the
+   * observable-progress advancer re-prompts THIS session about a
+   * DIFFERENT step: the model then reads step X's procedure while being
+   * told to fix step Y's deliverable, and every instruction that would
+   * have prevented the failure lives in the step it cannot see.
+   *
+   * Wild-caught on gezel/49 (Pull Request Review). The session stayed
+   * pinned to `scope` while the `collect` gate rejected twice, so the
+   * model never read collect's "the ledger is runtime-owned — do not
+   * write it yourself" and spent 62 minutes trying to enumerate 580
+   * corpus paths into a 6144-token output cap.
+   *
+   * Rebuilding in place is required, not belt-and-braces: `ensureState`
+   * runs ONCE per send, before the continuation loop, so a warm session
+   * re-prompted via `continue` can never pick a new step up on its own.
+   *
+   * The rebuilt system message diverges from the cached prefix, so the
+   * next iteration pays a full prefill — minutes on a long local context.
+   * That is the correct trade: it happens only when the step genuinely
+   * changed (the normal case matches and returns immediately), and the
+   * alternative is every remaining iteration reasoning from the wrong
+   * procedure.
+   */
+  private async repinSessionStep(
+    state: LiveSessionState,
+    taskRef: string,
+    stepId: string,
+  ): Promise<void> {
+    const record = state.record;
+    if (record.stepId === stepId) return;
+    const previous = record.stepId ?? '(unpinned)';
+    record.stepId = stepId;
+    if (!record.taskRef) record.taskRef = taskRef;
+    await this.store.writeSession(record).catch((err) => {
+      log.warn(
+        `session ${record.id.slice(0, 8)}: persisting re-pinned step failed: ${err instanceof Error ? err.message : err}`,
+      );
+    });
+    log.info(
+      `session ${record.id.slice(0, 8)}: re-pinned ${taskRef} step "${previous}" → "${stepId}" and rebuilding the system prompt so the model reads the active step's procedure`,
+    );
+    const session = state.session;
+    if (!session?.setSystemMessage) return;
+    try {
+      const gezel = await this.store.getGezel(record.gezelId);
+      if (!gezel) return;
+      const liveToolNames = session.getRegisteredToolNames?.() ?? [];
+      const toolsOverride =
+        liveToolNames.length > 0
+          ? await this.buildToolsOverrideForLiveSession(record, liveToolNames)
+          : { availableTools: [], thirdPartyToolsetIds: [] };
+      const refreshed = await this.recomputeSystemMessage(
+        record,
+        gezel,
+        toolsOverride,
+        undefined,
+        undefined,
+        session,
+      );
+      if (refreshed) session.setSystemMessage(refreshed);
+    } catch (err) {
+      // Best-effort, same contract as the tools-block refresh: a failed
+      // rebuild leaves the stale-but-working prompt rather than killing
+      // a turn that still has a prescriptive gate verdict to deliver.
+      log.warn(
+        `session ${record.id.slice(0, 8)}: step re-pin prompt rebuild failed: ${err instanceof Error ? err.message : err}`,
+      );
+    }
+  }
+
   private async refreshSystemPromptForLiveTools(
     session: LLMSession,
     record: ChatSession,
@@ -14416,6 +14734,12 @@ export class ChatManager {
       this.store.listInstalledToolsets({ kind: 'project', projectId: record.projectId }),
     ]);
     const projectWorkspaceDirForMcp = await this.store.projectWorkspaceDir(record.projectId);
+    // Directory probe, not a scan: stops at the first table and reads no
+    // manifests. Only projects that actually hold tabular data get the
+    // observation-table tools registered on their bridge.
+    const hasTables = project
+      ? await hasObservationTables(this.store, project).catch(() => false)
+      : false;
     const discoveredProjectMcp = await discoverProjectMcpToolsets(
       projectWorkspaceDirForMcp,
       record.projectId,
@@ -14551,11 +14875,14 @@ export class ChatManager {
       }
     }
 
-    // Per-project workspace writability — the single write gate (see
-    // projectManagedWorkspaceWritable in core). Drives the workspace-fs-write
-    // tool strip and the prompt's "edits off" posture note; the global
-    // allowFileEdits deliberately does not.
-    const workspaceWritable = projectManagedWorkspaceWritable(project);
+    // Per-project workspace writability is normally the single write gate
+    // (see projectManagedWorkspaceWritable in core). A drafting task is the
+    // deliberate exception: its managed file tools are writable because the
+    // MCP bridge re-roots them into the diffpack draft tree. Treat that sink
+    // as writable here so the tool filter does not strip the very tools the
+    // proposal needs; the real workspace remains untouched and read-only.
+    const workspaceWritable =
+      projectManagedWorkspaceWritable(project) || Boolean(taskContext?.task.diffpackId);
     const isProjectVoorman = project?.voormanGezelId === record.gezelId;
     const latestUserTextForToolFilter =
       pendingUserText ?? latestUserMessageContent(record.messages);
@@ -14631,15 +14958,18 @@ export class ChatManager {
       },
     });
     // A drafting session composes its change through before/after edits and
-    // the runtime derives the diff. `apply_patch` asks the model to author a
-    // unified hunk instead — the one edit shape models reliably get wrong —
-    // so it is withheld from BOTH surfaces. Both, because the prompt block
-    // and the wired roster must agree: promising a tool the turn cannot make
-    // is the McKinley Park failure (ADR 0001).
+    // the runtime derives the diff. Keep only operations implemented by the
+    // draft adapter: apply_patch deliberately refuses hand-authored hunks,
+    // while mkdir/rename/binary-copy still target the real workspace. They
+    // must be withheld from BOTH surfaces so proposal mode can never leak a
+    // mutation into a writable checkout and never promises a tool that will
+    // merely hit the read-only project gate (ADR 0001).
     const withheldWhileDrafting = <T extends Set<string> | null | undefined>(allowlist: T): T => {
-      if (!taskContext?.task.diffpackId || !allowlist?.has('apply_patch')) return allowlist;
+      if (!taskContext?.task.diffpackId || !allowlist) return allowlist;
       const next = new Set(allowlist);
-      next.delete('apply_patch');
+      for (const tool of ['apply_patch', 'copy_artifact_to_workspace', 'make_dir', 'rename']) {
+        next.delete(tool);
+      }
       return next as T;
     };
     const promptToolAllowlist = withheldWhileDrafting(promptSurface.allowlist);
@@ -14700,6 +15030,22 @@ export class ChatManager {
       (envLayeredOverride ??
         config.layeredPrefixCache?.enabled ??
         record.providerName === 'llama-cpp');
+    // Shared-band prefix reuse (ADR 0010). MLX-only, default ON since the
+    // matched cross-session A/B: two sibling sessions, 22,516 → 12,794 tokens
+    // prefilled (43% less), the sibling's own turn −86%, no
+    // `fresh-untrimmable` in either arm. The pioneer pays ~1,327 extra tokens
+    // ONCE (turn 2 saves at end-minus-margin again), so only a session that
+    // never gets a sibling is net-negative, and only mildly.
+    // `enabled: false` or the env var turns it off.
+    const envBand = (process.env.GEZEL_MLX_SHARED_BAND_PREFIX ?? '').trim().toLowerCase();
+    const sharedBandPrefixEnabled =
+      record.providerName === 'mlx' &&
+      (envBand === '1' || envBand === 'true'
+        ? true
+        : envBand === '0' || envBand === 'false'
+          ? false
+          : (config.mlxSharedBandPrefix?.enabled ?? true));
+
     const executionDensity = resolveExecutionDensity(
       config.executionDensity,
       record.providerName,
@@ -14720,6 +15066,7 @@ export class ChatManager {
       providerName: record.providerName,
       executionDensity,
       project,
+      hasObservationTables: hasTables,
       workspaceFiles,
       ...(workspaceListing.truncated ? { workspaceFilesTruncated: true } : {}),
       documentFiles,
@@ -14865,6 +15212,9 @@ export class ChatManager {
     const opts: BuiltSessionOpts = {
       systemMessage,
       ...(systemInstructions.layers ? { systemPromptLayers: systemInstructions.layers } : {}),
+      ...(sharedBandPrefixEnabled && systemInstructions.sharedPrefix
+        ? { systemSharedPrefix: systemInstructions.sharedPrefix }
+        : {}),
       ...(volatileContext ? { volatileContext } : {}),
       model: resolvedModel,
       reasoningEffort: resolvedReasoningEffort,
@@ -14950,6 +15300,7 @@ export class ChatManager {
         name: step.name,
         ...(lastExit?.name ? { onExitScriptName: lastExit.name } : {}),
         ...(step.advanceWhen?.file ? { deliverableFile: step.advanceWhen.file } : {}),
+        ...(step.advanceWhen?.artifact ? { deliverableIsArtifact: true } : {}),
       };
     }
     // Craftbook hooks: when this session's active task carries a
@@ -15106,8 +15457,10 @@ export class ChatManager {
     // seed the new session with the full persisted transcript. Without
     // this, a session reopened after an app restart lands with an empty
     // context and the model asks "what were we talking about?" on the
-    // very next turn. Filter out tool/system roles: the model only needs
-    // user+assistant turns to recover conversational context. Both local
+    // very next turn. The persisted tool calls and their results ride
+    // along (see `buildToolEvidenceReplay`): dropping them was fine for
+    // conversation and ruinous for work — a read-heavy craftbook step
+    // recovered none of its reads and started the batch over. Both local
     // engines (Ollama / llama-cpp / mlx), RemoteGezelProvider (B is
     // deliberately stateless), and Anthropic's Messages API qualify —
     // Anthropic is cloud but the API requires the client to replay history
@@ -15122,10 +15475,13 @@ export class ChatManager {
       const replayMessages = runtime?.omitLastUserFromPriorMessages
         ? record.messages.slice(0, -1)
         : record.messages;
-      opts.priorMessages = replayMessages
+      const replaySources = replayMessages
         .filter((m) => m.role === 'user' || m.role === 'assistant')
         .map((m) => ({
           role: m.role as 'user' | 'assistant',
+          ...(m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0
+            ? { toolCalls: m.toolCalls }
+            : {}),
           // Strip leftover `<think>` / `<|channel>` markup from
           // assistant turns before feeding history back to the model.
           // Two reasons this matters:
@@ -15151,6 +15507,20 @@ export class ChatManager {
               ? stripReasoningTags(m.content)
               : spliceIntoText(m.content, m.recognizedImages),
         }));
+      // Scale what we volunteer to the window the model actually has;
+      // a fixed cap starves long-context sessions into re-read loops.
+      const replayBudget = toolEvidenceBudgetChars(
+        this.providers.get(record.providerName)?.getContextWindow?.(),
+      );
+      const replay = buildToolEvidenceReplay(replaySources, replayBudget);
+      opts.priorMessages = replay.entries;
+      if (replay.replayed > 0 || replay.superseded > 0) {
+        log.info(
+          `session ${record.id}: replayed ${replay.replayed} tool result(s) (${replay.chars} chars) ` +
+            `into the rebuilt context; ${replay.superseded} superseded, ${replay.budgetDropped} over budget ` +
+            `(budget ${replayBudget} chars)`,
+        );
+      }
     }
     const historyManager = this.historyManager;
     const events = this.events;
@@ -15239,6 +15609,11 @@ export class ChatManager {
               },
             ]
           : undefined;
+      // Rich inline cards (craftbook start, step advance) — same
+      // structuredContent allow-list pattern as `diff`/`gezelVideo` above:
+      // the extractor is tool-name-keyed and shape-guarded, so foreign
+      // structuredContent yields no card rather than a malformed one.
+      const card = extractToolCard(info);
       const call: ChatMessageToolCall = {
         name: info.name,
         durationMs: info.durationMs,
@@ -15256,6 +15631,7 @@ export class ChatManager {
         ...(diff !== undefined ? { diff } : {}),
         ...(addedLines !== undefined ? { addedLines } : {}),
         ...(removedLines !== undefined ? { removedLines } : {}),
+        ...(card ? { card } : {}),
       };
       // Accumulate for persistence on the final assistant message. `send()`
       // clears this array at turn start and drains it at turn end.
@@ -15282,6 +15658,7 @@ export class ChatManager {
           ...(diff !== undefined ? { diff } : {}),
           ...(addedLines !== undefined ? { addedLines } : {}),
           ...(removedLines !== undefined ? { removedLines } : {}),
+          ...(card ? { card } : {}),
         },
       );
       if (historyManager) {
@@ -15461,6 +15838,11 @@ export class ChatManager {
           : {}),
         // Only projects with bound connectors expose draft_connector_action.
         ...(project?.connectors?.length ? { GEZEL_CONNECTORS_ENABLED: '1' } : {}),
+        // Same pattern again for the observation-table tools. A project with
+        // no tabular corpus would otherwise carry list_tables/describe_table/
+        // query_table in every system prompt's tool listing for nothing, and
+        // a model that sees a tool tends to reach for it.
+        ...(hasTables ? { GEZEL_TABLES_ENABLED: '1' } : {}),
         // Named script-backed tools from the applied project type; gezel-mcp
         // registers each as a real tool dispatching through the run_script
         // pipeline (script-tools.ts on both sides).
@@ -15994,7 +16376,10 @@ export class ChatManager {
         const transcript = renderTranscript(
           priorMessages.map((m) => ({
             role: m.role === 'user' ? 'user' : 'assistant',
-            content: m.content,
+            // A tool result has no role of its own once the transcript is
+            // flattened; label it rather than let the condenser attribute
+            // tool output to the model as something it said.
+            content: m.role === 'tool' ? `[tool result] ${m.content}` : m.content,
             at: '',
           })) as ChatMessage[],
         );
@@ -16454,6 +16839,10 @@ function researchTargetForToolCall(
     const query = typeof args.query === 'string' ? args.query.trim() : '';
     return query ? `query:${query.slice(0, 240)}` : undefined;
   }
+  if (name === 'wikipedia_read') {
+    const title = typeof args.title === 'string' ? args.title.trim() : '';
+    return title ? `article:${title.slice(0, 240)}` : undefined;
+  }
   if (name === 'fetch_url' || name === 'browser_navigate') {
     const url = typeof args.url === 'string' ? args.url.trim() : '';
     return /^https?:\/\//i.test(url) ? url.slice(0, 500) : undefined;
@@ -16726,7 +17115,19 @@ const CHAT_TURN_TIMEOUT_MS = 2 * 60 * 60 * 1000;
  * `config.ollamaTurnTimeoutMin` still works for users who want a
  * tighter local ceiling.
  */
-const OLLAMA_TURN_TIMEOUT_MS = 8 * 60 * 60 * 1000;
+/**
+ * Lowered from 8h. Wild-caught (koray PR-review fanout): four turns were
+ * 1.5–5.3 hours deep when the user stopped them, and a turn persists
+ * nothing until it ends — so seven hours of work committed nothing at all.
+ * The 5.3h turn made 21 engine requests and spent only ~19 minutes of that
+ * in prefill; the rest was ~60,000 output tokens at the ~3.4 tok/s this
+ * box sustains under fanout. Four hours still covers any legitimate
+ * tool-heavy local turn while halving how long a non-converging one can
+ * hide. This is a damage bound, not a fix — the cure is a cap on how much
+ * a single turn may GENERATE, which `MAX_TOOL_LOOP_TURNS = 96` does not
+ * provide at ~6 min/iteration.
+ */
+export const OLLAMA_TURN_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 
 const CONTINUATION_NUDGE =
   'Continue. Your previous response described what you would do or what you read, ' +

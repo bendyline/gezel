@@ -167,3 +167,55 @@ describe('MLX sidecar cache seeding', () => {
     expect(batch).not.toMatch(/return procs or None/);
   });
 });
+
+describe('shared-band prefix reuse (ADR 0010)', () => {
+  const SIDECAR = SERVER_SRC;
+
+  it('publishes the band only from a session that reused nothing', () => {
+    // The pioneer saves the band as its own entry and re-prefills its tail
+    // next turn; siblings inherit it. A session that already extended keeps
+    // the normal end-minus-margin boundary — otherwise this would shrink
+    // every session's own cache and destroy the intra-session reuse that
+    // works today (`extension reused=91413 prefill=290`).
+    const seedArgs = SIDECAR.slice(SIDECAR.indexOf('def _seed_args'));
+    expect(seedArgs).toMatch(
+      /sub\.snapshot_target is None and str\(plan\.mode\)\.startswith\("fresh"\)/,
+    );
+    expect(seedArgs).toContain('_band_snapshot_target(sub)');
+  });
+
+  it('never replaces a prefix entry with a longer one', () => {
+    // The invariant. `seed_from_state` reuses an entry only on `lcp == n`;
+    // an entry longer than the shared head is a full re-prefill for every
+    // sibling, so lengthening is never an improvement. Measured: a
+    // 7,202-token entry delivering 89.8% reuse was overwritten by the same
+    // session's 8,008-token post-turn state moments later.
+    const seeder = SIDECAR.slice(SIDECAR.indexOf('def _seed_prefix_from_session'));
+    const guard = seeder.slice(0, seeder.indexOf('cache_persist.save_cache'));
+    expect(guard).toContain('prior and incoming > prior');
+    expect(guard).toContain('[cache] prefix-keep');
+  });
+
+  it('re-checks the prefix at wave admission, not only at request arrival', () => {
+    // The lookup in the request handler runs when the HTTP request arrives; a
+    // band is published when its pioneer's turn ends, and static-wave
+    // admission puts minutes between them. Without a re-check every sibling
+    // dispatched alongside the pioneer resolves `fresh` — which is the entire
+    // fanout case. Measured before the fix: two real siblings agreed on
+    // `prefix-band-8977c4fc5f74e5d9`, the pioneer published 16,576 tokens,
+    // and the sibling still cold-prefilled 71,346.
+    const seedArgs = SIDECAR.slice(SIDECAR.indexOf('def _seed_args'));
+    // Anchor on the assignment: the docstring names the helper too.
+    const beforePlan = seedArgs.slice(0, seedArgs.indexOf('plan = cache_seed.seed_from_state'));
+    expect(beforePlan).toContain('_try_seed_from_prefix(sub.request.cache_id, pid)');
+    expect(beforePlan).toContain('not getattr(sub.seed_state, "token_ids", None)');
+  });
+
+  it('derives the token boundary rather than trusting the char offset', () => {
+    // Only the engine has the tokenizer, and the render carries template
+    // framing plus the tool block ahead of the system content — so the
+    // character offset the TS side knows cannot be mapped arithmetically.
+    expect(SIDECAR).toContain('cache_seed.token_boundary_for_marker');
+    expect(SIDECAR).toContain('stable_prefix_chars');
+  });
+});

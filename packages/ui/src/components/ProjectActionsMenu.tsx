@@ -57,7 +57,7 @@ function useProjectActions({ project, onDeleted, onChanged }: ProjectActionProps
   // Clearing is project-wide on purpose: one engine crash poisons several
   // of a project's sessions, so per-session clearing would leave the
   // indicator up after the user just dismissed it. Same call the chat
-  // banner's "Continue" makes.
+  // banner's "Acknowledge" action makes.
   const clearErrors = async () => {
     try {
       await api.clearProjectErrors(project.id);

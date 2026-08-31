@@ -31,6 +31,7 @@ import type { MeesterStatusGenerator } from '../meester/status-generator.js';
 import type { MemoryManager } from '../memory/manager.js';
 import type { EnsureModelOrchestrator } from '../models/ensure.js';
 import type { ChatModelInstallRegistries } from '../models/install-jobs.js';
+import type { DuckRunner } from '../observations/duck.js';
 import type { OpenCodeSetupManager } from '../opencode-setup/manager.js';
 import type { PiSetupManager } from '../pi-setup/manager.js';
 import type { PreviewLogBuffer } from '../preview-log/buffer.js';
@@ -135,6 +136,14 @@ export interface ServiceContext {
   diffpacks: DiffpackManager;
   connectors: ConnectorManager;
   connectorActions: ConnectorActionManager;
+  /**
+   * The bundled DuckDB CLI, used to read observation corpora (the tabular
+   * connector shape). Stateless — one short-lived child per statement — so it
+   * needs no lifecycle beyond construction, and it stays usable even when no
+   * binary is installed: `available()` is false and the query routes return an
+   * actionable 409 rather than the daemon failing to boot.
+   */
+  duck: DuckRunner;
   renderer: ImageRenderer;
   /**
    * Image-generation provider manager. Holds a lazily-built underlying

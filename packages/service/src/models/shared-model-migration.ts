@@ -461,8 +461,12 @@ function assertCatalogPayloadIntegrity(
     expected.set(path, source.sha256);
     required.add(path);
   }
-  if (engine === 'llama-cpp' && catalog.llamaCpp?.draftModel) {
-    const draft = catalog.llamaCpp.draftModel;
+  // Both engine sources can ship a draft companion, and `buildDownloadPlan`
+  // fetches a declared one unconditionally — so it must be in `expected` for
+  // either engine, or the integrity sweep below rejects it as an unexpected
+  // GGUF and the migration fails on a file we put there ourselves.
+  if (source.draftModel) {
+    const draft = source.draftModel;
     const path = basename(draft.filename);
     expected.set(path, draft.sha256);
     required.add(path);

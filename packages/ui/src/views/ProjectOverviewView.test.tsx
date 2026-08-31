@@ -85,3 +85,51 @@ describe('ProjectOverviewView', () => {
     window.removeEventListener('gezel:open-file', listener);
   });
 });
+
+describe('ProjectOverviewView data tables', () => {
+  const project = { id: 'p1', name: 'Shop' } as never;
+
+  it('lists spreadsheets and data files as tables, naming their source', async () => {
+    const { api } = await import('../api.js');
+    vi.mocked(api.toolListTables).mockResolvedValue({
+      tables: [
+        {
+          table: 'q3-revenue',
+          rows: 1204,
+          columns: 4,
+          partitions: 1,
+          origin: 'workspace',
+          source: 'data/plan.xlsx',
+          schemaInferred: true,
+        },
+        {
+          table: 'requests',
+          rows: 4312889,
+          columns: 8,
+          partitions: 30,
+          origin: 'connector',
+          source: 'Web traffic',
+          schemaInferred: false,
+        },
+      ],
+    } as never);
+
+    render(<ProjectOverviewView projectId="p1" project={project} />);
+
+    expect(await screen.findByText('q3-revenue')).toBeTruthy();
+    // "Which spreadsheet is this?" is the question a workspace table has to
+    // answer, so the file path is on the line.
+    expect(screen.getByText(/from data\/plan\.xlsx/)).toBeTruthy();
+    expect(screen.getByText(/schema inferred/)).toBeTruthy();
+    // Connector tables sit in the same list — one place to look.
+    expect(screen.getByText('requests')).toBeTruthy();
+    expect(screen.getByText(/4,312,889 rows/)).toBeTruthy();
+  });
+
+  it('shows no section at all for a project with no tables', async () => {
+    const { api } = await import('../api.js');
+    vi.mocked(api.toolListTables).mockResolvedValue({ tables: [] } as never);
+    render(<ProjectOverviewView projectId="p1" project={project} />);
+    await waitFor(() => expect(screen.queryByText('Data tables')).toBeNull());
+  });
+});

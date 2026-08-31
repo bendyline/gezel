@@ -24,6 +24,7 @@ import {
   defaultCacheRoot,
   ensureWarmModel,
   isModelInstalled,
+  linkDrafterIntoTrial,
   linkModelIntoTrial,
   staleInstallReason,
 } from './model-cache.ts';
@@ -621,6 +622,11 @@ export async function runTrial(scenario: EvalScenario, opts: TrialOptions): Prom
         modelId,
       });
       log(`[trial] linked mlx/${modelId} from ${mlxSourceHome} into ${trialHome}`);
+      // Speculative decoding arms from the drafter's presence, so a trial
+      // without it silently measures speculation OFF.
+      if (await linkDrafterIntoTrial({ sourceHome: mlxSourceHome, trialHome, modelId })) {
+        log(`[trial] linked mlx drafter for ${modelId} (speculative decoding armed)`);
+      }
     }
     // Also link in the prebuilt uv venv tree so the trial daemon
     // doesn't have to download mlx-lm + transformers + torch from

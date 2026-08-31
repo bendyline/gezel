@@ -66,6 +66,12 @@ export interface TranscribeOutput {
 
 export interface SynthesizeInput {
   text: string;
+  /** Stop after the current inference chunk when the caller disconnects or cancels. */
+  signal?: AbortSignal;
+  /** Reports sentence-level work when the active engine exposes it. */
+  onProgress?: (progress: SynthesizeProgress) => void | Promise<void>;
+  /** Delivers independently playable sentence audio as soon as it is available. */
+  onChunk?: (chunk: SynthesizeChunk) => void | Promise<void>;
   /**
    * Voice identifier. Kokoro ships 54+ named voices (`af_heart`,
    * `am_adam`, …); falls back to the provider's default when omitted.
@@ -81,6 +87,20 @@ export interface SynthesizeInput {
    * range is 0.5–2.0; values outside clamp at the engine.
    */
   speed?: number;
+}
+
+export interface SynthesizeProgress {
+  phase: 'loading' | 'synthesizing' | 'encoding';
+  completedCharacters: number;
+  totalCharacters: number;
+  completedChunks: number;
+}
+
+export interface SynthesizeChunk {
+  index: number;
+  wav: Buffer;
+  sampleRate: number;
+  durationSeconds: number;
 }
 
 export interface SynthesizeOutput {
