@@ -62,7 +62,10 @@ test('gallery lists the Language Trainer type and creates a project with a pinne
 
   // Selecting it hides the free-form About/Mission and shows the type's copy.
   await card.click();
-  await expect(card).toHaveAttribute('aria-checked', 'true');
+  // Picking a card advances the dialog to its configure step, where the
+  // selection is identified by the detail header rather than the (now
+  // unmounted) gallery card.
+  await expect(page.getByRole('heading', { name: 'Language Trainer' })).toBeVisible();
   await expect(page.getByRole('textbox', { name: /^Name/ })).toHaveValue(
     'Spanish Language Trainer',
   );
@@ -104,7 +107,7 @@ test('gallery creates a Job Hunt project: two-gezel crew and the pipeline board'
   const card = page.getByRole('radio', { name: 'Job Hunt' });
   await expect(card).toBeVisible({ timeout: 10_000 });
   await card.click();
-  await expect(card).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('heading', { name: 'Job Hunt' })).toBeVisible();
   // nameTemplate + the role param default drive the suggested name.
   await expect(page.getByRole('textbox', { name: /^Name/ })).toHaveValue(
     'Software Engineer Job Hunt',

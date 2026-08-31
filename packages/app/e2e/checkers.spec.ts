@@ -88,7 +88,10 @@ test('checkers: create from gallery, move on the board, the reaction summons the
   const card = page.getByRole('radio', { name: 'Checkers' });
   await expect(card).toBeVisible({ timeout: 10_000 });
   await card.click();
-  await expect(card).toHaveAttribute('aria-checked', 'true');
+  // Picking a card advances the dialog to its configure step, where the
+  // selection is identified by the detail header rather than the (now
+  // unmounted) gallery card.
+  await expect(page.getByRole('heading', { name: 'Checkers' })).toBeVisible();
   await expect(page.getByRole('textbox', { name: /^Name/ })).toHaveValue(
     'Checkers vs the Damspeler',
   );
