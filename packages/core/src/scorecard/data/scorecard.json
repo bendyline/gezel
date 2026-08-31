@@ -19,7 +19,7 @@
         "count": 3,
         "judgeModelId": null
       },
-      "suites": ["core", "productivity"],
+      "suites": ["core", "productivity", "developer", "complex-work"],
       "scenariosBySuite": {
         "core": [
           "tictactoe",
@@ -48,6 +48,29 @@
           "craftbook-research-to-document",
           "craftbook-powerpoint-deck",
           "wikipedia-research-brief"
+        ],
+        "developer": [
+          "fix-squisq-bugs",
+          "dev-craftbook-routing",
+          "interface-contract",
+          "craftbook-code-review",
+          "craftbook-api-contract-review",
+          "craftbook-codemod-sweep",
+          "large-pr-review",
+          "craftbook-bug-fix-tdd",
+          "craftbook-deep-security-review",
+          "craftbook-refactor-module"
+        ],
+        "complex-work": [
+          "craftbook-find-vs-create",
+          "craftbook-route-multi",
+          "craftbook-invoice-run",
+          "craftbook-author-params",
+          "craftbook-export-generalize",
+          "craftbook-author-linear",
+          "craftbook-author-gate-script",
+          "craftbook-edit-midtask",
+          "craftbook-author-fanout"
         ]
       }
     },
@@ -514,6 +537,11 @@
         "peakMemoryMb": 5283,
         "kvCacheType": "f16"
       },
+      "judge": {
+        "meanScore": 7.1,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "tictactoe",
@@ -611,6 +639,11 @@
         "contextTokens": 65536,
         "peakMemoryMb": 4347,
         "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 8,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -710,6 +743,11 @@
         "peakMemoryMb": 6202,
         "kvCacheType": "f16"
       },
+      "judge": {
+        "meanScore": 8.2,
+        "artifacts": 9,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "tictactoe",
@@ -807,6 +845,11 @@
         "contextTokens": 262144,
         "peakMemoryMb": 4590,
         "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 6.4,
+        "artifacts": 27,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
@@ -920,6 +963,11 @@
         "peakMemoryMb": 4230,
         "kvCacheType": "f16"
       },
+      "judge": {
+        "meanScore": 6.9,
+        "artifacts": 26,
+        "judgeModel": "claude-sonnet-4-6"
+      },
       "cells": [
         {
           "scenarioId": "constrained-comms",
@@ -1031,6 +1079,11 @@
         "contextTokens": 262144,
         "peakMemoryMb": 4996,
         "kvCacheType": "f16"
+      },
+      "judge": {
+        "meanScore": 7.2,
+        "artifacts": 27,
+        "judgeModel": "claude-sonnet-4-6"
       },
       "cells": [
         {
