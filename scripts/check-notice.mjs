@@ -27,7 +27,6 @@ export const repoRoot = resolve(scriptDir, '..');
 
 const ENGINE_NOTICE_NAMES = {
   ds4: 'ds4 / DwarfStar',
-  duckdb: 'DuckDB',
   'llama-cpp': 'llama.cpp',
   'sd-cpp': 'stable-diffusion.cpp',
   uv: 'uv',
@@ -356,6 +355,15 @@ async function checkBundledRuntimes(notice) {
     Electron: electronPackage.version,
     'Node.js': await parsePinnedConstant(join(appRoot, 'src', 'node-version.ts'), 'NODE_VERSION'),
     pnpm: await parsePinnedConstant(join(appRoot, 'src', 'pnpm-version.ts'), 'PNPM_VERSION'),
+    // DuckDB's pin lives in core, not packages/app, because the service's
+    // engine resolver reads the same constant when an npm / CLI install
+    // downloads it. It is a bundled runtime rather than a native engine: we
+    // redistribute the DuckDB Foundation's own signed, notarized binary and
+    // never build or re-sign it.
+    DuckDB: await parsePinnedConstant(
+      join(repoRoot, 'packages', 'core', 'src', 'native', 'duckdb-pin.ts'),
+      'DUCKDB_VERSION',
+    ),
   };
   const runtimeSection = markdownSection(notice, 'Bundled application runtimes').split('\n### ')[0];
   const rows = parseMarkdownTable(runtimeSection).filter(

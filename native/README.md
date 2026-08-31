@@ -55,7 +55,6 @@ native/build/<platform>/            # single-backend engines + helpers
 ├── gezel-whisper-server[.exe]
 ├── gezel-ds4-server                # darwin-arm64 + linux-* (GPU-only)
 ├── uv[.exe]                        # vendored unmodified, never gezel- prefixed
-├── duckdb[.exe]                    # vendored unmodified; observation-corpus queries
 └── THIRD_PARTY_LICENSES/           # staged per artifact before upload
 
 native/build/<platform>-<variant>/  # multi-backend engines (llama-cpp)
@@ -132,8 +131,18 @@ now.
 ## Adding a new engine
 
 Two shapes. **Compiled** engines (llama-cpp, sd-cpp, whisper-cpp, ds4)
-clone upstream and build it; **vendored** engines (`uv`, `duckdb`) download
-a prebuilt binary and verify it against a pinned sha256. Copy `sd-cpp/`
+clone upstream and build it; **vendored** engines (`uv`) download a prebuilt
+binary and verify it against a pinned sha256.
+
+Note the third shape, which does **not** belong here: a prebuilt binary whose
+vendor already signs and notarizes it for the platform's own trust model. The
+DuckDB CLI is the example — shipping it through this pipeline would mean
+re-signing it on macOS, replacing the DuckDB Foundation's attestation with
+ours and breaking the "byte-identical to upstream" property that makes
+redistribution defensible. Those live as bundled runtimes beside node and
+pnpm: pinned in `packages/core/src/native/duckdb-pin.ts`, staged by
+`packages/app/scripts/fetch-duckdb.mjs`, and `signIgnore`d in
+electron-builder.yml. Copy `sd-cpp/`
 for the first, `uv/` for the second.
 
 1. `mkdir native/engines/<name>/` and write `VERSION`. Compiled engines

@@ -35,6 +35,7 @@
       "native/build/**",
       "packages/app/native-bin/**",
       "native/helpers/service-host/.build/**",
+      ".codex-tmp/**",
       "temp/**",
       "packages/catalog/scripts/harvested-auth/**",
       "packages/eval-viewer/src/data/runs-index.json"

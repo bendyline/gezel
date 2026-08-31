@@ -31,6 +31,12 @@
  *   - no `linux-arm64-vulkan` — LunarG ships no aarch64 SDK tarball
  *   - `gezel-device-health` is Windows + Linux only (macOS uses IOKit in-process)
  *   - `gezel-service-host` is Windows only (macOS/Linux use launchd/systemd)
+ *   - no `duckdb` — the DuckDB CLI is vendored unmodified from the DuckDB
+ *     Foundation's own signed + notarized release, so it is a bundled runtime
+ *     beside node and pnpm (`packages/app/scripts/fetch-duckdb.mjs`, pinned in
+ *     `packages/core/src/native/duckdb-pin.ts`) rather than an artifact of
+ *     this pipeline. Building it here would have meant re-signing it on macOS,
+ *     replacing the vendor's attestation with ours.
  *   - `gezel-ds4-server` is GPU-only: darwin-arm64 Metal + Linux CUDA. On
  *     Linux it lives in the `-cuda` key, NOT the bare one, because it and
  *     llama-server's CUDA build need the same NVIDIA redistributables.
@@ -50,18 +56,17 @@ export const NATIVE_PAYLOAD = Object.freeze({
     'gezel-sd-server',
     'gezel-whisper-server',
     'uv',
-    'duckdb',
   ],
   'win32-x64-cpu': ['gezel-llama-server'],
   'win32-x64-vulkan': ['gezel-llama-server'],
   'win32-x64-cuda': ['gezel-llama-server'],
-  'darwin-arm64': ['gezel-sd-server', 'gezel-ds4-server', 'gezel-whisper-server', 'uv', 'duckdb'],
+  'darwin-arm64': ['gezel-sd-server', 'gezel-ds4-server', 'gezel-whisper-server', 'uv'],
   'darwin-arm64-metal': ['gezel-llama-server'],
-  'linux-x64': ['gezel-device-health', 'gezel-sd-server', 'gezel-whisper-server', 'uv', 'duckdb'],
+  'linux-x64': ['gezel-device-health', 'gezel-sd-server', 'gezel-whisper-server', 'uv'],
   'linux-x64-cpu': ['gezel-llama-server'],
   'linux-x64-vulkan': ['gezel-llama-server'],
   'linux-x64-cuda': ['gezel-llama-server', 'gezel-ds4-server'],
-  'linux-arm64': ['gezel-device-health', 'gezel-sd-server', 'gezel-whisper-server', 'uv', 'duckdb'],
+  'linux-arm64': ['gezel-device-health', 'gezel-sd-server', 'gezel-whisper-server', 'uv'],
   'linux-arm64-cpu': ['gezel-llama-server'],
   'linux-arm64-cuda': ['gezel-llama-server', 'gezel-ds4-server'],
 });
@@ -84,7 +89,6 @@ export const ENGINE_FOR_BINARY = Object.freeze({
   'gezel-ds4-server': 'ds4',
   'gezel-whisper-server': 'whisper-cpp',
   uv: 'uv',
-  duckdb: 'duckdb',
   'gezel-device-health': null,
   'gezel-service-host': null,
 });

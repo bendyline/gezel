@@ -25,6 +25,7 @@ import {
   pressureIdleGraceMs,
   resolveLlamaCppContextRequirement,
 } from '../native/capacity-broker.js';
+import { engineApiKey, withEngineApiKey } from '../native/engine-api-key.js';
 import { makeEngineKey } from '../native/engine-key.js';
 import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
@@ -1321,6 +1322,19 @@ export async function buildLlamaCppProvider(opts: {
           '127.0.0.1',
           '--port',
           String(port),
+          // Loopback binding is not a closed door. llama.cpp defaults
+          // `--cors-origins` to `*` with credentials enabled, so it echoes
+          // back whatever Origin it is handed — meaning any web page the user
+          // has open can drive this engine and read the answer, given the
+          // port. The `localhost` special value emits no
+          // Access-Control-Allow-Origin at all for a foreign origin, which is
+          // what actually closes it. `--no-webui` drops the built-in chat
+          // page; nothing in Gezel uses it. The matching bearer token goes in
+          // through the environment below — CORS is a browser policy and does
+          // nothing about a native process opening the port directly.
+          '--cors-origins',
+          'localhost',
+          '--no-webui',
           // --jinja: use the chat template embedded in the GGUF (or
           // an override via --chat-template). Without it, llama-server
           // falls back to a generic template that doesn't match most
@@ -1430,6 +1444,9 @@ export async function buildLlamaCppProvider(opts: {
         },
         env: {
           PATH: inheritedPath ? `${binDir}${delimiter}${inheritedPath}` : binDir,
+          // Equivalent to `--api-key`, but out of `argv` so it does not show
+          // up in `ps` on a shared machine.
+          LLAMA_API_KEY: engineApiKey(),
         },
         baseUrl: `http://127.0.0.1:${port}`,
       };
@@ -1459,6 +1476,11 @@ export async function buildLlamaCppProvider(opts: {
         }
       : {}),
     ...baseProviderOpts,
+    // MUST come after the spread: baseProviderOpts carries the bare
+    // `patientFetch()` used by the external-baseUrl path, and later keys win.
+    // Only engines WE launch get the bearer token — an external llama-server
+    // is the user's, and we neither set its flags nor assume a credential.
+    fetchImpl: withEngineApiKey(patientFetch(), engineApiKey()),
     // The RAM-aware admission pass may have lowered the launch from the
     // configured/default ceiling. Keep the session-side pressure checks,
     // tool budgets, and user-facing diagnostics on the exact per-slot value

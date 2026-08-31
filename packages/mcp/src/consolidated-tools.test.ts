@@ -63,6 +63,12 @@ describe('consolidated MCP tools', () => {
     vi.stubEnv('GEZEL_MAIL_ENABLED', '1');
     vi.stubEnv('GEZEL_SOCIAL_ENABLED', '1');
     vi.stubEnv('GEZEL_CONNECTORS_ENABLED', '1');
+    // These cases assert what a tool *says*, not whether the host can run
+    // it. Without this the deny-net tools (`run_nodejs_script`,
+    // `derive_file`) go unregistered on Windows and their assertions fail
+    // as "tool not found"; the gate itself is covered by
+    // platform-tool-availability.test.ts.
+    vi.stubEnv('GEZEL_MCP_SCHEMA_LINT', '1');
 
     const { server } = await import('./server.js');
     client = new Client(
@@ -912,5 +918,228 @@ describe('consolidated MCP tools', () => {
     expect(text).toContain('Project ids and exact display names are both accepted');
     expect(text).toContain('Call `list_projects`');
     expect(text).not.toContain('not the display name');
+  });
+
+  // A tool that calls the API without its own catch used to hand the model
+  // the bare HTTP status line: the SDK stringifies an uncaught throw to
+  // `error.message` and nothing else, so the daemon's `hint` — the only
+  // sentence that says WHY — was discarded one layer above the fix that
+  // taught `unwrapApiError` to read it. Seen on `craftbook-author-fanout`,
+  // where `list_projects` came back as
+  // "Gezel API error 403 on GET /api/projects?rollup=1" and the gezel had
+  // nothing to redirect on.
+  it('surfaces the daemon hint for a tool that has no catch of its own', async () => {
+    handler = (url) => {
+      if (url.pathname === '/api/projects') {
+        return {
+          __status: 403,
+          body: { error: 'forbidden', hint: 'project collection requires a coordinator session' },
+        };
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    };
+
+    const result = await client.callTool({ name: 'list_projects', arguments: {} });
+    const text = (result.content as Array<{ type: string; text?: string }>)
+      .map((item) => item.text ?? '')
+      .join('\n');
+
+    expect(result.isError).toBe(true);
+    expect(text).toContain('project collection requires a coordinator session');
+    expect(text).toContain('list_projects');
+  });
+
+  // The daemon raises `no step "extract" to activate`, but its
+  // unhandled-error middleware answers `{ error: 'internal_error' }`, so the
+  // model read a bare 500 and re-emitted the identical call. Wild-caught on
+  // `conflict-synthesis` (qwen3.6-35b): three byte-identical
+  // `advance_task_step` calls, same 500 each time, then the turn died.
+  it('names the steps that actually exist when advance_task_step is rejected', async () => {
+    handler = (url, method) => {
+      if (
+        method === 'POST' &&
+        url.pathname === '/api/projects/project-a/tasks/1/steps/scope/complete'
+      ) {
+        return { __status: 500, body: { error: 'internal_error', requestId: 'req-1' } };
+      }
+      if (method === 'GET' && url.pathname === '/api/projects/project-a/tasks/1') {
+        return {
+          ref: 'project-a/1',
+          title: 'Synthesize',
+          status: 'active',
+          craftbook: {
+            steps: [
+              { id: 'scope', name: 'Scope' },
+              { id: 'synthesize', name: 'Synthesize' },
+              { id: 'review', name: 'Review' },
+            ],
+          },
+        };
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    };
+
+    const result = await client.callTool({
+      name: 'advance_task_step',
+      arguments: { ref: 'project-a/1', stepId: 'scope', next: 'extract' },
+    });
+    const text = (result.content as Array<{ type: string; text?: string }>)
+      .map((item) => item.text ?? '')
+      .join('\n');
+
+    expect(result.isError).toBe(true);
+    expect(text).toContain('has no step "extract"');
+    expect(text).toContain('"synthesize"');
+    expect(text).toContain('"review"');
+  });
+
+  // derive_file appended "The script must fs.writeFileSync the output
+  // itself." to every verification failure, including the one where the
+  // script had already done exactly that and the file was on disk — it was
+  // simply not tabular. Three developer gezels on the inaugural
+  // `craftbook-author-gate-script` run were told to repeat the one thing
+  // they had done and never called the tool again.
+  it('does not blame the write when derive_file rejects non-tabular output', async () => {
+    handler = (url, method) => {
+      if (method === 'POST' && url.pathname === '/api/projects/project-a/derive-file') {
+        return {
+          ok: false,
+          code: 0,
+          stdout: 'Written: {"totalItems":10}\n',
+          stderr: '',
+          stdoutTruncated: false,
+          stderrTruncated: false,
+          timedOut: false,
+          verifyError:
+            'out/inventory-report.json does not parse as a data table (expected a non-empty JSON array, delimited rows with a header, or a Markdown table).',
+        };
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    };
+
+    const result = await client.callTool({
+      name: 'derive_file',
+      arguments: {
+        script: 'import fs from "node:fs";',
+        outputPath: 'out/inventory-report.json',
+      },
+    });
+    const text = (result.content as Array<{ type: string; text?: string }>)
+      .map((item) => item.text ?? '')
+      .join('\n');
+
+    expect(result.isError).toBe(true);
+    expect(text).not.toContain('The script must fs.writeFileSync the output itself.');
+    expect(text).toContain('The file WAS written');
+    expect(text).toContain('write_file');
+  });
+
+  // A 422 from the craftbook document writer came back through `cbResult`,
+  // which carries no `isError` bit — so a rejection where NOTHING was saved
+  // was booked as a successful call, and `UnresolvedToolFailureLedger`
+  // (which treats any non-error as "the model found a shape that works")
+  // cleared the tool's standing entry instead of counting the loop. Three
+  // consecutive rejections on `craftbook-author-gate-script` all recorded
+  // success=true.
+  it('marks a rejected craftbook_write as a failure, not a success', async () => {
+    handler = (url, method) => {
+      if (method === 'POST' && url.pathname === '/api/craftbooks/document') {
+        return {
+          __status: 422,
+          body: {
+            error: 'invalid_craftbook',
+            formatted: '1. scripts: expected record, got array.',
+          },
+        };
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    };
+
+    const result = await client.callTool({
+      name: 'craftbook_write',
+      arguments: { create: true, content: '{"name":"Broken","steps":[]}', format: 'json' },
+    });
+    const text = (result.content as Array<{ type: string; text?: string }>)
+      .map((item) => item.text ?? '')
+      .join('\n');
+
+    expect(result.isError).toBe(true);
+    expect(text).toContain('scripts: expected record, got array.');
+    expect(text).toContain('NOT saved');
+  });
+
+  // Every `project` argument in this file is resolved through
+  // `resolveProjectId` because models reach for the display name they see
+  // in chat. The projectId half of a task REF was not, so
+  // `list_tasks({ project: "PowerPoint Grounding Eval" })` succeeded while
+  // `get_task({ ref: "PowerPoint Grounding Eval/1" })` came back as a bare
+  // `Gezel API error 400` — and the eval sessions that hit it stopped using
+  // the task tools altogether.
+  it('accepts a project display name in a task ref', async () => {
+    handler = (url, method) => {
+      if (method === 'GET' && url.pathname === '/api/projects/PowerPoint Grounding Eval') {
+        return { __status: 404, body: { error: 'not_found' } };
+      }
+      if (method === 'GET' && url.pathname === '/api/projects') {
+        return {
+          projects: [{ id: 'powerpoint-grounding-eval', name: 'PowerPoint Grounding Eval' }],
+        };
+      }
+      if (method === 'GET' && url.pathname === '/api/projects/powerpoint-grounding-eval/tasks/1') {
+        return {
+          ref: 'powerpoint-grounding-eval/1',
+          title: 'Build the deck',
+          status: 'active',
+          craftbook: { steps: [] },
+        };
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    };
+
+    const result = await client.callTool({
+      name: 'get_task',
+      arguments: { ref: 'PowerPoint Grounding Eval/1' },
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      operation: 'get',
+      ref: 'powerpoint-grounding-eval/1',
+    });
+  });
+
+  // `note` is the argument name models reach for on a tool called
+  // `write_task_note`, and the rejection happens in the SDK's schema
+  // validation before any handler-side coercion can help — so the slip cost
+  // a whole turn. It is the most frequent argument-validation failure in the
+  // eval corpus; three unrelated sessions in the new hard suites hit it.
+  it('accepts `note` and `content` as aliases for the task-note body', async () => {
+    let received: Record<string, unknown> | undefined;
+    handler = (url, method, body) => {
+      if (method === 'POST' && url.pathname === '/api/projects/project-a/tasks/1/notes') {
+        received = body;
+        return { note: { id: 'note-1', at: '2026-08-30T00:00:00.000Z', text: 'Computed totals.' } };
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    };
+
+    const viaNote = await client.callTool({
+      name: 'write_task_note',
+      arguments: { ref: 'project-a/1', note: 'Computed totals.' },
+    });
+    expect(viaNote.isError).not.toBe(true);
+    expect(received).toMatchObject({ text: 'Computed totals.' });
+
+    // `content` is not a guess — the shipped `investigate` and
+    // `pull-request-review` craftbooks tell the assignee to call
+    // `write_task_note({ ref, content: … })`, so a gezel following the
+    // catalog verbatim used to get an argument-validation rejection.
+    received = undefined;
+    const viaContent = await client.callTool({
+      name: 'write_task_note',
+      arguments: { ref: 'project-a/1', content: 'Symptom summary.' },
+    });
+    expect(viaContent.isError).not.toBe(true);
+    expect(received).toMatchObject({ text: 'Symptom summary.' });
   });
 });

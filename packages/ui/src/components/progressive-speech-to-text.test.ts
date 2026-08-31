@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SpeechActivityMonitor } from './microphone-speech-activity.js';
 import { ProgressiveSpeechToText } from './progressive-speech-to-text.js';
 
 class FakeMediaRecorder {
@@ -33,6 +34,19 @@ class FakeMediaRecorder {
       this.ondataavailable?.({ data } as BlobEvent);
       this.onstop?.(new Event('stop'));
     });
+  }
+}
+
+class FakeSpeechActivityMonitor implements SpeechActivityMonitor {
+  private onActivity: ((speaking: boolean, level: number) => void) | null = null;
+  readonly stop = vi.fn();
+
+  start(onActivity: (speaking: boolean, level: number) => void): void {
+    this.onActivity = onActivity;
+  }
+
+  emit(speaking: boolean, level = speaking ? 0.1 : 0.002): void {
+    this.onActivity?.(speaking, level);
   }
 }
 
@@ -107,5 +121,118 @@ describe('ProgressiveSpeechToText', () => {
 
     expect(stopTrack).toHaveBeenCalledOnce();
     expect(onTranscript).not.toHaveBeenCalled();
+  });
+
+  it('ignores Whisper blank-audio sentinels and continues with later speech', async () => {
+    const stream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
+    const onTranscript = vi.fn();
+    const transcribe = vi
+      .fn<(blob: Blob, mimeType: string, signal: AbortSignal) => Promise<string>>()
+      .mockResolvedValueOnce('[BLANK_AUDIO]')
+      .mockResolvedValueOnce('actual speech');
+    const recorder = new ProgressiveSpeechToText({
+      stream,
+      segmentMs: 1_000,
+      transcribe,
+      onTranscript,
+      onError: vi.fn(),
+    });
+
+    recorder.start();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(onTranscript).not.toHaveBeenCalled();
+
+    await recorder.stop();
+    expect(onTranscript).toHaveBeenCalledOnce();
+    expect(onTranscript).toHaveBeenCalledWith('actual speech');
+  });
+
+  it('flushes on micropauses and still uploads later speech the meter misses', async () => {
+    const stopTrack = vi.fn();
+    const stream = { getTracks: () => [{ stop: stopTrack }] } as unknown as MediaStream;
+    const activityMonitor = new FakeSpeechActivityMonitor();
+    const onTranscript = vi.fn();
+    const onAudioLevel = vi.fn();
+    const transcribe = vi
+      .fn<(blob: Blob, mimeType: string, signal: AbortSignal) => Promise<string>>()
+      .mockResolvedValueOnce('1 2')
+      .mockResolvedValueOnce('3 4')
+      .mockResolvedValue('');
+    const onLongPause = vi.fn();
+    const recorder = new ProgressiveSpeechToText({
+      stream,
+      segmentMs: 1_000,
+      speechPauseMs: 400,
+      minSegmentMs: 600,
+      longPauseMs: 5_000,
+      activityMonitor,
+      transcribe,
+      onTranscript,
+      onAudioLevel,
+      onError: vi.fn(),
+      onLongPause,
+    });
+
+    recorder.start();
+    activityMonitor.emit(true, 0.2);
+    expect(onAudioLevel).toHaveBeenLastCalledWith(0.2);
+    await vi.advanceTimersByTimeAsync(400);
+    activityMonitor.emit(true);
+    await vi.advanceTimersByTimeAsync(200);
+    activityMonitor.emit(false);
+    await vi.advanceTimersByTimeAsync(150);
+    activityMonitor.emit(false);
+    expect(FakeMediaRecorder.instances).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(50);
+    activityMonitor.emit(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(FakeMediaRecorder.instances).toHaveLength(2);
+    expect(onTranscript).toHaveBeenCalledWith('1 2');
+    expect(onLongPause).not.toHaveBeenCalled();
+    expect(stopTrack).not.toHaveBeenCalled();
+
+    // The energy gate misses the next phrase entirely. Its take must still go
+    // to Whisper at the hard boundary instead of being discarded as silence.
+    await vi.advanceTimersByTimeAsync(500);
+    activityMonitor.emit(false);
+    await vi.advanceTimersByTimeAsync(500);
+    activityMonitor.emit(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(FakeMediaRecorder.instances).toHaveLength(3);
+    expect(onTranscript).toHaveBeenCalledWith('3 4');
+    expect(onLongPause).not.toHaveBeenCalled();
+
+    await recorder.stop();
+    expect(stopTrack).toHaveBeenCalledOnce();
+    expect(activityMonitor.stop).toHaveBeenCalled();
+  });
+
+  it('finishes only after Whisper confirms a long silence', async () => {
+    const stream = { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
+    const onLongPause = vi.fn();
+    const transcribe = vi
+      .fn<(blob: Blob, mimeType: string, signal: AbortSignal) => Promise<string>>()
+      .mockResolvedValueOnce('one two')
+      .mockResolvedValue('');
+    const recorder = new ProgressiveSpeechToText({
+      stream,
+      segmentMs: 1_000,
+      longPauseMs: 2_500,
+      activityMonitor: null,
+      transcribe,
+      onTranscript: vi.fn(),
+      onError: vi.fn(),
+      onLongPause,
+    });
+
+    recorder.start();
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(onLongPause).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(onLongPause).toHaveBeenCalledOnce();
+    expect(onLongPause).toHaveBeenCalledWith(true);
+    await recorder.stop();
   });
 });

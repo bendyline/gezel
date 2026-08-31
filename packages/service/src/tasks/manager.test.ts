@@ -122,6 +122,55 @@ describe('TaskManager', () => {
     });
   });
 
+  // The spawn template is derived from `mainBook.spawn` with an explicit
+  // field list, and `scripts` was not on it — the same field-list-loss shape
+  // as the dropped `spawn`/`commands` doc mappers, one level down.
+  // `embeddedScriptSource` resolves a shard's `scope: 'craftbook'` gate ref
+  // against the SHARD's own snapshot, so without the map every shard fell
+  // through to the project-installed copy. For a book written straight onto a
+  // task — which is exactly what the author-fanout flow produces — no such
+  // copy exists, and every shard would pause with a gate_infrastructure_error
+  // naming a scripts/ path the model cannot create.
+  it('carries the parent book’s embedded scripts onto the derived spawn template', async () => {
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            id,
+            name: 'Store Health Sweep',
+            steps: [{ id: 'sweep', name: 'Sweep', spawnFanout: true, terminal: true }],
+            entryStepId: 'sweep',
+            scripts: { verifyShard: 'export const meta = 1;' },
+            spawn: {
+              overFile: 'data/stores.json',
+              steps: [
+                {
+                  id: 'store',
+                  name: 'One store',
+                  terminal: true,
+                  gate: {
+                    at: 'completion' as const,
+                    checks: [{ kind: 'minBytes' as const, file: 'out/store.md', bytes: 1 }],
+                    scripts: [{ name: 'verifyShard', scope: 'craftbook' as const }],
+                  },
+                },
+              ],
+            },
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+    const t = await tasks.create('website', {
+      title: 'Sweep',
+      assignee: { kind: 'user' },
+      craftbookId: 'store-health-sweep',
+    });
+    expect(t.spawnsCraftbook?.scripts).toEqual({ verifyShard: 'export const meta = 1;' });
+  });
+
   it('refuses to create a craftbook task until required project toolsets are installed', async () => {
     tasks.setCraftbookResolver({
       async resolve(id) {

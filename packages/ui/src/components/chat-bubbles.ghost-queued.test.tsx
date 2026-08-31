@@ -110,7 +110,7 @@ describe('GhostQueuedBubble', () => {
     const mediaProvider: MediaProvider = {
       resolveUrl,
       addMedia: vi.fn(),
-      listMedia: vi.fn(),
+      listMedia: vi.fn().mockResolvedValue([]),
       removeMedia: vi.fn(),
       dispose: vi.fn(),
     };

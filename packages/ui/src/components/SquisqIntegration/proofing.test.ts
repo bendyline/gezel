@@ -152,3 +152,56 @@ describe('proofing ignore store', () => {
     ).not.toThrow();
   });
 });
+
+describe('inline checking preferences', () => {
+  const FINDINGS = [
+    { id: '1', category: 'spelling', kind: 'Typo' },
+    { id: '2', category: 'grammar', kind: 'Agreement' },
+    { id: '3', category: 'style', kind: 'Readability' },
+  ];
+
+  /** A provider whose engine reports one finding of each tier. */
+  async function loadWithFindings() {
+    const mod = await load();
+    const { createHarperProofingProvider } = await import('@bendyline/squisq-editor-react');
+    vi.mocked(createHarperProofingProvider).mockReturnValue({
+      lint: async () => FINDINGS,
+    } as never);
+    return mod;
+  }
+
+  it('shows every tier by default', async () => {
+    const { gezelProofingProvider } = await loadWithFindings();
+    expect(await gezelProofingProvider().lint('text')).toHaveLength(3);
+  });
+
+  it('drops spelling findings when inline spell checking is off', async () => {
+    const { gezelProofingProvider, setProofingPreferences } = await loadWithFindings();
+    setProofingPreferences({ spelling: false, grammar: true });
+
+    const shown = await gezelProofingProvider().lint('text');
+    expect(shown.map((f) => f.id)).toEqual(['2', '3']);
+  });
+
+  it('drops grammar AND style findings when inline grammar checking is off', async () => {
+    // harper's style tier (Readability, Redundancy…) is prose advice, so it
+    // belongs to the grammar checkbox — putting it behind "spell checking"
+    // would surface opinions under a label that promises misspellings.
+    const { gezelProofingProvider, setProofingPreferences } = await loadWithFindings();
+    setProofingPreferences({ spelling: true, grammar: false });
+
+    const shown = await gezelProofingProvider().lint('text');
+    expect(shown.map((f) => f.id)).toEqual(['1']);
+  });
+
+  it('applies a preference change to the already-built engine', async () => {
+    // The engine is a page-lifetime singleton; a filter captured at
+    // construction could never be changed from Settings.
+    const { gezelProofingProvider, setProofingPreferences } = await loadWithFindings();
+    const provider = gezelProofingProvider();
+    expect(await provider.lint('text')).toHaveLength(3);
+
+    setProofingPreferences({ spelling: false, grammar: false });
+    expect(await provider.lint('text')).toEqual([]);
+  });
+});

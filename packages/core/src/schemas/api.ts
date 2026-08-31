@@ -887,6 +887,13 @@ export const GezelConfigSchema = z.object({
    * the first installed model by id.
    */
   defaultSttModel: z.string().optional(),
+  /**
+   * Preferred browser microphone for prompt narration. Device ids are scoped
+   * to the renderer origin and can change when the local daemon port changes,
+   * so the human-readable label is persisted as a fallback lookup key.
+   */
+  microphoneDeviceId: z.string().max(1024).optional(),
+  microphoneDeviceLabel: z.string().max(1024).optional(),
   githubToken: z.string().optional(),
   /** Non-secret companion to `githubToken`. See {@link GitHubAuthMetaSchema}. */
   githubAuth: GitHubAuthMetaSchema.optional(),
@@ -2390,6 +2397,21 @@ export const GezelConfigSchema = z.object({
    */
   documentExportOptions: DocumentExportOptionsSchema.optional(),
   /**
+   * Whether the document editors paint red spelling squiggles as you
+   * write. Defaults to `true`. Turning both this and
+   * `inlineGrammarChecking` off means the proofing engine never loads at
+   * all — the WASM is fetched lazily on the first pass, not on mount.
+   */
+  inlineSpellChecking: z.boolean().optional(),
+  /**
+   * Whether the document editors paint grammar and style squiggles.
+   * Defaults to `true`. Separate from spelling because grammar findings
+   * are the opinionated half: harper flags usage, punctuation, and
+   * readability, and someone drafting notes may want the misspellings
+   * without the advice.
+   */
+  inlineGrammarChecking: z.boolean().optional(),
+  /**
    * Which side of the window the primary navigation sidebar
    * (projects / gezellen / documents / …) sits on. Server-side for the
    * same reason as `themePref` — the embedded service rebinds an
@@ -2865,6 +2887,8 @@ export type GezelConfig = z.infer<typeof GezelConfigSchema>;
 export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
   ollamaThink: z.boolean().nullable().optional(),
   firstRunInstallError: z.string().nullable().optional(),
+  microphoneDeviceId: z.string().max(1024).nullable().optional(),
+  microphoneDeviceLabel: z.string().max(1024).nullable().optional(),
   // Request side accepts `null` so "disconnect from the remote daemon"
   // can clear the stored Branch-1 target; writeConfig strips the null.
   service: z.object({ url: z.string(), token: z.string() }).nullable().optional(),

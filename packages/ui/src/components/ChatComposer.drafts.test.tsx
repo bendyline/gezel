@@ -18,8 +18,10 @@ vi.mock('./GezelMediaProvider.js', () => ({
   createGezelMediaProvider: () => ({ dispose: vi.fn() }),
 }));
 vi.mock('@bendyline/squisq-editor-react', async () => {
-  const { useState } = await import('react');
+  const { createContext, useContext, useState } = await import('react');
+  const EditorTestContext = createContext({ replaceAll: (_source: string) => {} });
   return {
+    useEditorContext: () => useContext(EditorTestContext),
     EditorShell: ({
       initialMarkdown = '',
       onChange,
@@ -31,18 +33,20 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
     }) => {
       const [draft, setDraft] = useState(initialMarkdown);
       return (
-        <div>
-          <textarea
-            className="squisq-wysiwyg-editor"
-            aria-label="Message"
-            value={draft}
-            onChange={(event) => {
-              setDraft(event.target.value);
-              onChange?.(event.target.value);
-            }}
-          />
-          {toolbarSlotRight}
-        </div>
+        <EditorTestContext.Provider value={{ replaceAll: (source) => setDraft(source) }}>
+          <div>
+            <textarea
+              className="squisq-wysiwyg-editor"
+              aria-label="Message"
+              value={draft}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                onChange?.(event.target.value);
+              }}
+            />
+            {toolbarSlotRight}
+          </div>
+        </EditorTestContext.Provider>
       );
     },
   };

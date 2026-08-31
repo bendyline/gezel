@@ -587,7 +587,9 @@ describe('ProjectsView', () => {
     render(<ProjectsView forceProjectId="pj-alpha" />);
     await screen.findByTestId('project-chat');
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
-    await screen.findByText('developer');
+    // The crew roster and the voorman picker both render the role-based name
+    // here, so there is deliberately more than one match.
+    await screen.findAllByText('developer');
     fireEvent.click(screen.getByRole('button', { name: 'Add Gezel' }));
     fireEvent.click(
       await screen.findByRole('button', { name: /Researcher.*Finds and checks evidence/ }),
@@ -1757,9 +1759,10 @@ describe('ProjectsView', () => {
     fireEvent.click(screen.getByRole('button', { name: '+ New Project' }));
 
     const gallery = await screen.findByRole('radiogroup', { name: 'Project type' });
+    // The picker opens with nothing chosen — step 1 is the catalog alone.
     expect(within(gallery).getByRole('radio', { name: 'General' })).toHaveAttribute(
       'aria-checked',
-      'true',
+      'false',
     );
     const designType = await within(gallery).findByRole('radio', { name: 'Design Scheme' });
     expect(designType).toBeInTheDocument();
@@ -1770,8 +1773,17 @@ describe('ProjectsView', () => {
     expect(within(gallery).queryByRole('radio', { name: 'General' })).not.toBeInTheDocument();
     expect(within(gallery).getByRole('radio', { name: 'Design Scheme' })).toBeInTheDocument();
 
+    // Choosing advances to step 2; going back leaves the choice lit.
     fireEvent.click(designType);
-    expect(designType).toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByRole('radiogroup', { name: 'Project type' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Design Scheme' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Project types/ }));
+    const backGallery = await screen.findByRole('radiogroup', { name: 'Project type' });
+    expect(within(backGallery).getByRole('radio', { name: 'Design Scheme' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
   });
 
   it('filters the gallery by category from the rail', async () => {

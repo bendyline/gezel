@@ -165,6 +165,14 @@ export interface CraftbookEvalSuccessSpec {
 export interface CraftbookEvalSpec {
   /** Bundled craftbook template id, e.g. `html-arcade-game`. */
   craftbookId: string;
+
+  /**
+   * Backticked slash-containing path tokens from the book's own step
+   * prompts, uninterpolated. Fed (with params) to the runtime's citation
+   * forgiveness so the grader matches production — see
+   * `taskSuppliedCitationPaths`.
+   */
+  stepPathTokens?: string[];
   /** Scenario id when this spec is runnable in the eval matrix. */
   scenarioId: string;
   title: string;

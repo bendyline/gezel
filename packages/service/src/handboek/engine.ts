@@ -35,6 +35,26 @@ export type {
 } from './device.js';
 export { MACROS, expandMacros, parseAttrs } from './macros.js';
 export type { HandboekCatalog } from './macros.js';
+export {
+  GEZEL_SITE_THEME,
+  OG_CARD_HEIGHT,
+  OG_CARD_WIDTH,
+  buildCardMarkdown,
+  isOgRendererReady,
+  renderOgCard,
+} from './og-image.js';
+export type { OgCardSpec } from './og-image.js';
+export {
+  OG_HEADLINES_FILE,
+  OG_HEADLINE_MAX,
+  emptyOgHeadlineFile,
+  hashArticleBody,
+  ogHeadlineSource,
+  ogKicker,
+  readOgHeadlines,
+  resolveOgHeadline,
+} from './og-headlines.js';
+export type { OgHeadlineFile, OgHeadlineRecord } from './og-headlines.js';
 
 const log = createLogger('handboek');
 
@@ -99,6 +119,7 @@ export function createHandboekEngine(opts: HandboekEngineOptions): HandboekEngin
               area,
               order: a.order,
               summary: a.summary,
+              ogHeadline: a.ogHeadline,
               generated: false,
               siteVisible: a.siteVisible,
               subcategory: a.subcategory,

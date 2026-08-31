@@ -454,45 +454,6 @@ jobs:
             artifact: uv.exe
             needs_cuda: false
             needs_vulkan: false
-          # DuckDB — the query engine for observation corpora (the
-          # tabular connector shape: high-volume sources mirrored as
-          # partitioned Parquet instead of one markdown file per record).
-          # Like uv, a precompiled single-file binary that ships
-          # unmodified, so the build script downloads and verifies
-          # rather than compiling and no toolchain steps fire.
-          - engine: duckdb
-            platform: darwin-arm64
-            variant: ''
-            runner: macos-latest
-            script: build.sh
-            artifact: duckdb
-            needs_cuda: false
-            needs_vulkan: false
-          # darwin-x64 omitted for the same reason as uv above.
-          - engine: duckdb
-            platform: linux-x64
-            variant: ''
-            runner: ubuntu-latest
-            script: build.sh
-            artifact: duckdb
-            needs_cuda: false
-            needs_vulkan: false
-          - engine: duckdb
-            platform: linux-arm64
-            variant: ''
-            runner: ubuntu-24.04-arm
-            script: build.sh
-            artifact: duckdb
-            needs_cuda: false
-            needs_vulkan: false
-          - engine: duckdb
-            platform: win32-x64
-            variant: ''
-            runner: windows-latest
-            script: build.ps1
-            artifact: duckdb.exe
-            needs_cuda: false
-            needs_vulkan: false
     runs-on: ${{ matrix.runner }}
     # The llama-cpp darwin-arm64 metal leg has legitimately run 98 min green,
     # and the linux-x64 cuda leg 67. Sized at roughly 2x the worst observed so
@@ -1129,7 +1090,7 @@ jobs:
       # honors /pathmap with /experimental:deterministic, and checkout paths
       # are not worth putting release builds on an experimental compiler mode.
       - name: Assert no build-host paths
-        if: steps.preflight.outputs.pinned == 'true' && matrix.engine != 'uv' && matrix.engine != 'duckdb' && !startsWith(matrix.platform, 'win32')
+        if: steps.preflight.outputs.pinned == 'true' && matrix.engine != 'uv' && !startsWith(matrix.platform, 'win32')
         shell: bash
         run: |
           set -euo pipefail
@@ -1222,14 +1183,13 @@ jobs:
           Set-Content -Path $metadataPath -Value $metadata
           echo "TRUSTED_SIGNING_METADATA_PATH=$metadataPath" >> $env:GITHUB_ENV
 
-      # The `uv` / `duckdb` exclusions: both are prebuilt binaries we
-      # download from their upstreams (Astral, the DuckDB Foundation), not
-      # something we compile, so they ship as published (unsigned). Signing
+      # The `uv` exclusion: it is a prebuilt binary we download from Astral,
+      # not something we compile, so it ships as published (unsigned). Signing
       # what we build only; the matching allowlist that keeps the packaged
       # verifier and the file manifest in agreement lives in
       # packages/app/scripts/third-party-binaries.cjs.
       - name: Sign Windows native payload (Authenticode)
-        if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'win32') && matrix.engine != 'uv' && matrix.engine != 'duckdb'
+        if: steps.preflight.outputs.pinned == 'true' && startsWith(matrix.platform, 'win32') && matrix.engine != 'uv'
         shell: pwsh
         env:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}

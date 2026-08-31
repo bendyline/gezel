@@ -1687,4 +1687,36 @@ describe('citationsResolve across surfaces', () => {
     expect(phantom.pass).toBe(false);
     expect(phantom.failures[0]).toContain('src/ghost.js');
   });
+
+  it('a WORKSPACE deliverable may cite a real drawer-side file', async () => {
+    // The inverse of the case above, and the one powerpoint-deck hits: its
+    // research step mandates `sources.md` live in the drawer ("do not write
+    // this working file to the workspace"), and the workspace `deck.md`
+    // then cites it as provenance. Before the surfaces were merged in both
+    // directions this read as a fabricated citation and failed a correct run.
+    const r = splitReader(
+      {
+        'powerpoint/eval/deck.md':
+          'Figures are drawn from `tasks/eval/sources.md` and `source/brief.md`.\n',
+        'source/brief.md': '# brief\n',
+      },
+      { 'tasks/eval/sources.md': 'the source packet\n' },
+    );
+    const ok = await evaluateGate(
+      [{ kind: 'citationsResolve', file: 'powerpoint/eval/deck.md', minCitations: 1 }],
+      r,
+    );
+    expect(ok.pass).toBe(true);
+
+    // Merging surfaces must not blunt the anti-fabrication verdict.
+    const phantom = await evaluateGate(
+      [{ kind: 'citationsResolve', file: 'powerpoint/eval/deck.md', minCitations: 1 }],
+      splitReader(
+        { 'powerpoint/eval/deck.md': 'Drawn from `tasks/eval/ghost.md`.\n' },
+        { 'tasks/eval/sources.md': 'unrelated\n' },
+      ),
+    );
+    expect(phantom.pass).toBe(false);
+    expect(phantom.failures[0]).toContain('tasks/eval/ghost.md');
+  });
 });

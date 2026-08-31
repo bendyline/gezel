@@ -646,12 +646,24 @@ async function evalCheckInner(
       // itself reads artifact-first, and a cited path resolves when it
       // exists on EITHER surface. For a drafting task `ws.read` is already
       // the overlay, so drafted files count too.
-      const citationsReader: WorkspaceLike = usesArtifact
-        ? {
-            read: async (f) => (await artifactReader.read(f)) ?? (await ws.read(f)),
-            list: async () => [...(await ws.list()), ...(await artifactReader.list())],
-          }
-        : ws;
+      // Resolution spans BOTH surfaces in BOTH directions. The
+      // artifact-flagged direction was fixed first (a drawer-side evidence
+      // doc citing real workspace files). The inverse is just as honest and
+      // was still failing: a WORKSPACE deliverable citing a file the same
+      // recipe told it to keep in the drawer. powerpoint-deck mandates
+      // exactly that — its research step says "do not write this working
+      // file to the workspace" for `sources.md`, and the workspace `deck.md`
+      // then cites it as provenance — so a correct run was failed for
+      // "fabricated" citations naming a file it had just written. Only the
+      // READ ORDER depends on the flag: whichever surface owns the report
+      // is consulted first for the report's own bytes.
+      const citationsReader: WorkspaceLike = {
+        read: async (f) =>
+          usesArtifact
+            ? ((await artifactReader.read(f)) ?? (await ws.read(f)))
+            : ((await ws.read(f)) ?? (await artifactReader.read(f))),
+        list: async () => [...(await ws.list()), ...(await artifactReader.list())],
+      };
       const r = await citationsResolve(citationsReader, c.file, {
         ...(c.pattern ? { pattern: c.pattern } : {}),
         ...(c.flags ? { flags: c.flags } : {}),

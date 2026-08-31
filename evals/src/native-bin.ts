@@ -419,12 +419,19 @@ export function resolveSdBinary(): ResolvedBinary | null {
 }
 
 /**
- * Resolve the `ds4-server` (DeepSeek-V4) binary. One shippable backend per
- * platform (Metal on darwin-arm64, CUDA on linux), so we look directly under
- * `<root>/<platform>/ds4-server[.exe]` — the staged `metal/` shader dir sits
- * beside it, which `buildDs4Provider` relies on (it launches with cwd = the
- * binary's dir so ds4 finds `./metal/*.metal`). Honors GEZEL_DS4_SERVER_BIN
- * first. Returns null when missing (ds4 is opt-in per trial).
+ * Resolve the `ds4-server` (DeepSeek-V4 / DwarfStar) binary. The staged
+ * `metal/` shader dir sits beside it, which `buildDs4Provider` relies on (it
+ * launches with cwd = the binary's dir so ds4 finds `./metal/*.metal`).
+ * Honors GEZEL_DS4_SERVER_BIN first. Returns null when missing (ds4 is opt-in
+ * per trial).
+ *
+ * Probes the BACKEND-VARIANT directories as well as the bare platform dir.
+ * This used to look only under `<root>/<platform>/` on the theory that ds4
+ * ships one backend per platform — but on Linux both the local `build.sh` and
+ * the shipped release stage it at `<root>/<platform>-cuda/`, so the resolver
+ * returned null for a binary sitting right there. `installedAppRoots()` is
+ * searched too, matching `resolveLlamaBinary`: a machine with the desktop app
+ * installed has a usable engine even with no local build tree.
  */
 export function resolveDs4Binary(): ResolvedBinary | null {
   const envBin = process.env.GEZEL_DS4_SERVER_BIN?.trim();
@@ -432,10 +439,14 @@ export function resolveDs4Binary(): ResolvedBinary | null {
     if (existsSync(envBin)) return { path: envBin, variant: 'env', build: null, warnings: [] };
     throw new Error(`GEZEL_DS4_SERVER_BIN is set to "${envBin}" but no file exists there.`);
   }
-  for (const root of lookupRoots()) {
-    for (const exe of exeCandidates('ds4-server')) {
-      const path = join(root, platformKey(), exe);
-      if (existsSync(path)) return { path, variant: null, build: null, warnings: [] };
+  const roots = [...lookupRoots(), ...installedAppRoots()];
+  for (const variant of [null, ...LLAMA_BACKEND_PRECEDENCE] as const) {
+    const dir = variant ? `${platformKey()}-${variant}` : platformKey();
+    for (const root of roots) {
+      for (const exe of exeCandidates('ds4-server')) {
+        const path = join(root, dir, exe);
+        if (existsSync(path)) return { path, variant, build: null, warnings: [] };
+      }
     }
   }
   return null;

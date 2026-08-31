@@ -5,14 +5,22 @@ import type { HandboekArea, HandboekTocArea, HandboekTocEntry } from '@bendyline
 import { SCORECARD_DATA_ATTRS } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import {
+  OG_CARD_HEIGHT,
+  OG_CARD_WIDTH,
   createHandboekEngine,
   findHandboekContent,
+  ogKicker,
+  readOgHeadlines,
+  resolveOgHeadline,
   siteDeviceInfo,
 } from '@bendyline/gezel-service/handboek';
+import { gezelHome } from '@bendyline/gezel/paths';
 import { generateExternalHtml, markdownDocToPlainHtml } from '@bendyline/squisq-formats/html';
 import { PLAYER_BUNDLE } from '@bendyline/squisq-react/standalone-source';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
+import type { OgCardPlan, OgCardsResult } from './handboek-og-cards.js';
+import { ogCardPath, writeOgCards } from './handboek-og-cards.js';
 import { BASELINE_CSS } from './handboek-site-css.js';
 import { SCORECARD_FILTER_JS } from './handboek-site-scorecard.js';
 
@@ -41,6 +49,8 @@ export interface HandboekExportResult {
   out: string;
   pages: number;
   skipped: string[];
+  /** Card-generation tally, absent when no `ogOut` was configured. */
+  cards?: OgCardsResult;
 }
 
 export interface HandboekExportOptions {
@@ -59,6 +69,28 @@ export interface HandboekExportOptions {
    * Omitted by default: a standalone export has nowhere to go.
    */
   siteUrl?: string;
+  /**
+   * Absolute URL the export root is published at, e.g.
+   * `https://gezel.com/docs/`. Turns on `rel=canonical` and the Open Graph
+   * block, both of which are meaningless without absolute URLs. Distinct from
+   * `siteUrl`, which is an href for a link and defaults to `/`.
+   */
+  canonicalBase?: string;
+  /**
+   * Absolute URL the card directory is served from, e.g.
+   * `https://gezel.com/og/`. Required alongside `ogOut`.
+   */
+  ogBase?: string;
+  /**
+   * Directory to write Open Graph cards into. Must be outside `out`, which is
+   * wiped on every run — the card set is its own cache and has to survive.
+   */
+  ogOut?: string;
+  /**
+   * Gezel home holding the managed Chromium a card render needs. Defaults to
+   * the usual resolution; a card pass is skipped when no browser is there.
+   */
+  home?: string;
 }
 
 /**
@@ -131,6 +163,16 @@ export async function runHandboekExport(
   const skipped: string[] = [];
   let pages = 0;
 
+  // Headlines are read from the committed lockfile only. Distilling is a
+  // separate, occasional pass (`pnpm docs:og-headlines`) precisely so a docs
+  // publish never needs a model provider to be reachable.
+  const headlines = readOgHeadlines(contentDir);
+  const canonicalBase = normalizeBase(opts.canonicalBase);
+  // Cards need somewhere to be written and a URL to be served from. With only
+  // one of the pair, pages would advertise images that were never rendered.
+  const ogBase = opts.ogOut ? normalizeBase(opts.ogBase) : undefined;
+  const cardPlans: OgCardPlan[] = [];
+
   for (const entry of entries) {
     const article = await engine.article(entry.id, { mode: 'site' });
     if (!article) {
@@ -146,6 +188,20 @@ export async function runHandboekExport(
     );
     const dir = join(out, ...entry.id.split('/'));
     await mkdir(dir, { recursive: true });
+
+    const headline = resolveOgHeadline(entry, headlines);
+    if (ogBase) {
+      cardPlans.push({ id: entry.id, kicker: ogKicker(entry), headline });
+    }
+    const social: SocialMeta | undefined = canonicalBase
+      ? {
+          url: `${canonicalBase}${entry.id}/`,
+          title: entry.title,
+          image: ogBase ? `${ogBase}${ogCardPath(entry.id)}` : undefined,
+          imageAlt: headline,
+        }
+      : undefined;
+
     await writeFile(
       join(dir, 'index.html'),
       articlePage({
@@ -156,6 +212,7 @@ export async function runHandboekExport(
         depth,
         css,
         siteUrl,
+        social,
         scripts: pageScripts(body),
       }),
       'utf8',
@@ -179,7 +236,21 @@ export async function runHandboekExport(
     pages += 2;
   }
 
-  await writeFile(join(out, 'index.html'), landingPage(areas, css, siteUrl), 'utf8');
+  const landingSocial: SocialMeta | undefined = canonicalBase
+    ? {
+        url: canonicalBase,
+        title: 'The Gezel Handboek',
+        image: ogBase ? `${ogBase}${ogCardPath(LANDING_CARD_ID)}` : undefined,
+      }
+    : undefined;
+  if (ogBase) {
+    cardPlans.push({
+      id: LANDING_CARD_ID,
+      kicker: `${WORDMARK} · Handboek`,
+      headline: 'The Gezel Handboek',
+    });
+  }
+  await writeFile(join(out, 'index.html'), landingPage(areas, css, siteUrl, landingSocial), 'utf8');
   pages += 1;
 
   const assetsSrc = join(contentDir, 'assets');
@@ -188,7 +259,29 @@ export async function runHandboekExport(
   }
   await writeFile(join(out, 'assets', 'handboek.css'), BASELINE_CSS, 'utf8');
 
-  return { out, pages, skipped };
+  // Last, and never fatal: the pages above are the deliverable, and a page
+  // whose card is missing still unfurls with its title, description, and the
+  // site-wide card. Same posture the wrapper takes toward `releases.json`.
+  const cards =
+    ogBase && opts.ogOut
+      ? await writeOgCards({
+          home: opts.home ?? gezelHome(),
+          dir: resolve(opts.ogOut),
+          plans: cardPlans,
+        })
+      : undefined;
+
+  return { out, pages, skipped, cards };
+}
+
+/** The Handboek landing page's own card, written beside the article cards. */
+const LANDING_CARD_ID = 'index';
+
+/** A URL base only concatenates correctly with exactly one trailing slash. */
+function normalizeBase(base: string | undefined): string | undefined {
+  const trimmed = base?.trim();
+  if (!trimmed) return undefined;
+  return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
 }
 
 /**
@@ -320,7 +413,70 @@ function cssLinks(css: string[], depth: number): string {
     .join('\n');
 }
 
-function head(title: string, css: string[], depth: number, description?: string): string {
+/**
+ * Absolute-URL metadata for one page. Only produced when the caller supplied
+ * a `--site-origin`: Open Graph requires absolute URLs, and the existing
+ * `--site-url` is an href (default `/`) that cannot serve as an origin.
+ */
+export interface SocialMeta {
+  /** Canonical URL of this page. */
+  url: string;
+  /**
+   * Share title. The `<title>` element's `— Gezel Handboek` suffix is a
+   * browser-tab affordance; on a card it just repeats `og:site_name`.
+   */
+  title: string;
+  /** Card image, when one was rendered for this page. */
+  image?: string;
+  imageAlt?: string;
+}
+
+/**
+ * The `og:`/`twitter:` block, matching the vocabulary the hand-written
+ * landing page at the site root already uses.
+ *
+ * A page with no card still gets the rest: a link that unfurls with a real
+ * title and description beats one that unfurls as a bare URL, and consumers
+ * fall back to the site-wide card declared on the origin.
+ */
+function socialTags(description: string | undefined, social: SocialMeta): string {
+  const title = social.title;
+  const lines = [
+    `<link rel="canonical" href="${esc(social.url)}">`,
+    '<meta property="og:type" content="article">',
+    '<meta property="og:site_name" content="Gezel">',
+    `<meta property="og:url" content="${esc(social.url)}">`,
+    `<meta property="og:title" content="${esc(title)}">`,
+    `<meta name="twitter:title" content="${esc(title)}">`,
+  ];
+  if (description) {
+    lines.push(`<meta property="og:description" content="${esc(description)}">`);
+    lines.push(`<meta name="twitter:description" content="${esc(description)}">`);
+  }
+  if (social.image) {
+    const alt = social.imageAlt ?? title;
+    lines.push(`<meta property="og:image" content="${esc(social.image)}">`);
+    lines.push(`<meta property="og:image:width" content="${OG_CARD_WIDTH}">`);
+    lines.push(`<meta property="og:image:height" content="${OG_CARD_HEIGHT}">`);
+    lines.push(`<meta property="og:image:alt" content="${esc(alt)}">`);
+    lines.push(`<meta name="twitter:image" content="${esc(social.image)}">`);
+    lines.push(`<meta name="twitter:image:alt" content="${esc(alt)}">`);
+  }
+  // `summary_large_image` needs an image to be honored; without one the plain
+  // summary card is what consumers should draw.
+  lines.push(
+    `<meta name="twitter:card" content="${social.image ? 'summary_large_image' : 'summary'}">`,
+  );
+  return `\n${lines.join('\n')}`;
+}
+
+function head(
+  title: string,
+  css: string[],
+  depth: number,
+  description?: string,
+  social?: SocialMeta,
+): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -328,7 +484,7 @@ function head(title: string, css: string[], depth: number, description?: string)
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${esc(title)}</title>${
     description ? `\n<meta name="description" content="${esc(description)}">` : ''
-  }
+  }${social ? socialTags(description, social) : ''}
 ${cssLinks(css, depth)}
 </head>`;
 }
@@ -453,9 +609,10 @@ function articlePage(args: {
   depth: number;
   css: string[];
   siteUrl: string | undefined;
+  social: SocialMeta | undefined;
   scripts: string[];
 }): string {
-  const { entry, body, headings, areas, depth, css, siteUrl, scripts } = args;
+  const { entry, body, headings, areas, depth, css, siteUrl, social, scripts } = args;
   const area = areas.find((a) => a.area === entry.area);
   const aside = onThisPage(headings);
   // Deferred and last: the markup it enhances is already complete, so a
@@ -463,7 +620,7 @@ function articlePage(args: {
   const scriptTags = scripts
     .map((name) => `<script defer src="${up(depth)}assets/${esc(name)}"></script>`)
     .join('\n');
-  return `${head(`${entry.title} — Gezel Handboek`, css, depth, entry.summary)}
+  return `${head(`${entry.title} — Gezel Handboek`, css, depth, entry.summary, social)}
 <body class="hb hb-article-page">
 ${masthead(areas, depth, siteUrl, entry.area)}
 <div class="hb-layout">
@@ -496,7 +653,12 @@ function footer(depth: number): string {
  * buries the ten things a newcomer actually needs under ~300 catalog
  * entries, so generated areas link to their own index article instead.
  */
-function landingPage(areas: HandboekTocArea[], css: string[], siteUrl: string | undefined): string {
+function landingPage(
+  areas: HandboekTocArea[],
+  css: string[],
+  siteUrl: string | undefined,
+  social?: SocialMeta,
+): string {
   const byId = new Map(areas.flatMap((a) => a.entries).map((e) => [e.id, e]));
   const startHere = START_HERE.map((id) => byId.get(id)).filter(
     (e): e is HandboekTocEntry => e !== undefined,
@@ -537,7 +699,7 @@ ${list}
     })
     .join('\n');
 
-  return `${head('Gezel Handboek', css, 0, 'Documentation for gezel — a crew of AI companions that works for you, from your own computer.')}
+  return `${head('Gezel Handboek', css, 0, 'Documentation for gezel — a crew of AI companions that works for you, from your own computer.', social)}
 <body class="hb hb-home">
 ${masthead(areas, 0, siteUrl)}
 <main class="hb-main hb-home-main">

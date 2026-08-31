@@ -16,7 +16,7 @@ export { MemoryCompactor } from './memory/compaction.js';
 // query-side callers must use embedQuery (asymmetric instruction prefix).
 export { embed, embedBatch, embedQuery, warmEmbeddings } from './memory/embeddings.js';
 export { embedModelId } from './memory/embed-core.js';
-export { evaluateGate, gateCheckLabel } from './tasks/gate-eval.js';
+export { evaluateGate, gateCheckLabel, taskSuppliedCitationPaths } from './tasks/gate-eval.js';
 export type { GateCheckOutcome, GateCheckResult, GateEvalDeps } from './tasks/gate-eval.js';
 export { parseScriptMeta } from './scripts/meta.js';
 export {

@@ -19,6 +19,7 @@ import {
   ds4EvalShouldUseSsdStreaming,
   evalDaemonEnvForTrial,
   hardStallShape,
+  incompleteTranscripts,
   inflightDeferMsForEngine,
   isHarnessInterventionSettling,
   llamaCppEvalLaunchOverridesForModel,
@@ -34,6 +35,8 @@ import {
   readContextOverflowFromLog,
   recoveryFilePathForSniff,
   repeatedPoisonedSessionFailure,
+  retryLoopChatterTripped,
+  retryLoopFastPathTripped,
   retryLoopSniffKey,
   runawaySessionFailure,
   selectSilentRecoveries,
@@ -48,6 +51,7 @@ import {
   summarizeSilentRecoveries,
   taskGraphPoisonedSessionRecoveryLine,
   throughputScaledMaxDurationMs,
+  totalWorkspaceFileCount,
 } from './runner.ts';
 import type { EvalScenario } from './types.ts';
 
@@ -113,6 +117,30 @@ describe('completed repair-action snapshots', () => {
     );
 
     expect(snapshot).toEqual({ completedMutationTurns: 2, inflight: false });
+  });
+
+  // INCIDENT: this counter is the SECOND arm of `advanceEscalationState` —
+  // the one that recognizes a repair whose resulting bytes are identical.
+  // It matched bare gezel-mcp names only, so it read zero for the whole of
+  // every anthropic-cli trial, where the same tools arrive as
+  // `mcp__gezel__append_to_file` and the model also edits with its own
+  // built-in `Write`/`Edit`. With the failure text frozen too, the ladder
+  // could never leave attempt 1: craftbook-author-fanout x
+  // claude-sonnet-4-6 got ONE repair message at 19:28:06, worked for
+  // 17 more minutes (9 namespaced appends, 5 `Write`s), was never nudged
+  // again, and died reporting "(retry-loop nudge was sent and ignored)".
+  it('sees mutations however the provider spells them', () => {
+    expect(
+      completedRepairActionSnapshot({
+        messages: [
+          { role: 'assistant', toolCalls: [{ name: 'mcp__gezel__append_to_file', success: true }] },
+          { role: 'assistant', toolCalls: [{ name: 'Write', success: true }] },
+          { role: 'assistant', toolCalls: [{ name: 'Edit', success: true }] },
+          { role: 'assistant', toolCalls: [{ name: 'Read', success: true }] },
+          { role: 'assistant', toolCalls: [{ name: 'mcp__gezel__read_file', success: true }] },
+        ],
+      }),
+    ).toEqual({ completedMutationTurns: 3, inflight: false });
   });
 
   it('carries the live in-flight bit separately from committed action count', () => {
@@ -1624,12 +1652,81 @@ describe('sniffKeyToWorkspaceFilePath', () => {
   });
 });
 
+describe('retryLoopChatterTripped', () => {
+  const base = {
+    artifactHasScored: true,
+    plateauMs: 11 * 60_000,
+    writeCallsInPlateau: 0,
+    turnStartsInPlateau: 14,
+    windowMs: 10 * 60_000,
+    turnThreshold: 12,
+  };
+
+  it('still kills a team that scored an artifact and then only talked', () => {
+    expect(retryLoopChatterTripped({ ...base, writeCounterHasEverMoved: true })).toBe(true);
+  });
+
+  // INCIDENT: the daemon classifies a file mutation by BARE tool name, so a
+  // provider that namespaces gezel-mcp (`mcp__gezel__append_to_file`) or
+  // edits with its own `Write`/`Edit` reports `fileMutations: 0` for the
+  // whole trial — every anthropic-cli trial in the first hard-suite runs
+  // did, at 3-273 tool calls apiece. That left "took turns and wrote
+  // nothing" permanently armed against the teams that were writing hardest,
+  // and made "(0 re-writes)" a phantom the postmortem then chased.
+  it('does not fire when the write counter never moved all trial', () => {
+    expect(retryLoopChatterTripped({ ...base, writeCounterHasEverMoved: false })).toBe(false);
+  });
+});
+
 describe('retryLoopSniffKey', () => {
   it('does not advance for same-score byte churn', () => {
     const a = retryLoopSniffKey({ key: 'codebase-evolution', score: 107, bytes: 8003 });
     const b = retryLoopSniffKey({ key: 'codebase-evolution', score: 107, bytes: 8480 });
 
     expect(a).toBe(b);
+  });
+
+  // INCIDENT: craftbook-author-fanout deliberately publishes each COMPLETED
+  // per-store fanout run so that "active authoring moves the sniff". It
+  // rode `bytes`, which this key excludes on purpose, so three finished
+  // runs (sniff 2/1009B -> 2/3509B -> 2/4509B -> 2/6009B) all landed on the
+  // identical plateau key `craftbook-author-fanout:2:targetnone:fr1tjwffw:rp0:rf0`
+  // and the stall path killed the trial as "stalled 18m". A finished unit of
+  // work is progress by the scenario's own definition; byte churn is not.
+  it('advances on a completed scenario milestone but still not on byte churn', () => {
+    const one = retryLoopSniffKey({
+      key: 'craftbook-author-fanout',
+      score: 2,
+      bytes: 3509,
+      milestones: 1,
+    });
+    const two = retryLoopSniffKey({
+      key: 'craftbook-author-fanout',
+      score: 2,
+      bytes: 4509,
+      milestones: 2,
+    });
+    expect(one).not.toBe(two);
+
+    const churnA = retryLoopSniffKey({
+      key: 'craftbook-author-fanout',
+      score: 2,
+      bytes: 4509,
+      milestones: 2,
+    });
+    const churnB = retryLoopSniffKey({
+      key: 'craftbook-author-fanout',
+      score: 2,
+      bytes: 9001,
+      milestones: 2,
+    });
+    expect(churnA).toBe(churnB);
+  });
+
+  it('keys scenarios that report no milestone exactly as before', () => {
+    expect(retryLoopSniffKey({ key: 'petshop', score: 4, bytes: 6000 })).toBe(
+      'petshop:4:targetnone:frnone:rp0:rf0',
+    );
   });
 
   it('advances when runtime assertion counters change', () => {
@@ -1839,5 +1936,106 @@ describe('describeSendFailure', () => {
 
   it('handles non-Error rejections', () => {
     expect(describeSendFailure('nope')).toBe('nope');
+  });
+});
+
+describe('retryLoopFastPathTripped', () => {
+  const base = {
+    artifactHasScored: true,
+    plateauMs: 9 * 60_000,
+    writeCallsInPlateau: 4,
+    filesAddedInPlateau: 0,
+    windowMs: 8 * 60_000,
+    writeThreshold: 3,
+  };
+
+  it('still kills a stubborn rewriter re-emitting one failing artifact', () => {
+    expect(retryLoopFastPathTripped(base)).toBe(true);
+  });
+
+  /**
+   * The qwen3.8-27b-q4 re-baseline of craftbook-invoice-run was killed at 8m
+   * on "4 re-writes ... without sniff movement". The four writes were four
+   * DISTINCT paths — invoices/2026-042.html, invoices/2026-043.html,
+   * tasks/eval/scope.md, tasks/eval/billables.json. Nothing was rewritten
+   * once, and two of the three required invoices were produced inside the
+   * window being judged as a loop. `writeCalls` is a bare sum with no path
+   * in it, so "wrote 4 times" and "re-emitted the same file 4 times" were
+   * indistinguishable.
+   */
+  it('does not fire while new files are still appearing', () => {
+    expect(retryLoopFastPathTripped({ ...base, filesAddedInPlateau: 2 })).toBe(false);
+  });
+
+  it('fires again once production stops even though earlier files landed', () => {
+    // Same plateau, later: the team added nothing new and kept writing.
+    expect(retryLoopFastPathTripped({ ...base, filesAddedInPlateau: 0 })).toBe(true);
+  });
+
+  it.each([
+    ['the artifact never scored', { artifactHasScored: false }],
+    ['the window has not elapsed', { plateauMs: 3 * 60_000 }],
+    ['writes are below the threshold', { writeCallsInPlateau: 2 }],
+  ])('does not fire when %s', (_label, over) => {
+    expect(retryLoopFastPathTripped({ ...base, ...over })).toBe(false);
+  });
+});
+
+describe('totalWorkspaceFileCount', () => {
+  it('sums every project and tolerates an absent or partial fingerprint', () => {
+    expect(totalWorkspaceFileCount({ a: { fileCount: 3 }, b: { fileCount: 4 } })).toBe(7);
+    expect(totalWorkspaceFileCount({ a: {}, b: { fileCount: 2 } })).toBe(2);
+    expect(totalWorkspaceFileCount(undefined)).toBe(0);
+  });
+});
+
+describe('incompleteTranscripts', () => {
+  /**
+   * Triaging the qwen3.8-27b-q4 re-baseline of craftbook-author-linear:
+   * telemetry recorded 15 and 7 tool calls across two sessions (3 file
+   * mutations; notes/anomalies.md on disk), and BOTH dumped transcripts held
+   * exactly one message — the kickoff. Assistant turns commit at turn end, so
+   * a mid-turn watchdog kill loses them while the files they wrote survive.
+   * Read naively the trial dir says the model did nothing.
+   */
+  it('flags a session whose transcript lost the turns telemetry counted', () => {
+    const gaps = incompleteTranscripts(
+      [
+        { id: 'a', gezelId: 'reza', toolCallsPersisted: 0 },
+        { id: 'b', gezelId: 'taha', toolCallsPersisted: 0 },
+      ],
+      [
+        { sessionId: 'a', toolCalls: 15 },
+        { sessionId: 'b', toolCalls: 7 },
+      ],
+    );
+    expect(gaps).toEqual([
+      { id: 'a', gezelId: 'reza', persisted: 0, recorded: 15 },
+      { id: 'b', gezelId: 'taha', persisted: 0, recorded: 7 },
+    ]);
+  });
+
+  it('stays silent when the transcript is complete', () => {
+    expect(
+      incompleteTranscripts(
+        [{ id: 'a', toolCallsPersisted: 19 }],
+        [{ sessionId: 'a', toolCalls: 19 }],
+      ),
+    ).toEqual([]);
+  });
+
+  // A transcript carrying MORE than telemetry saw is not a gap — telemetry is
+  // bounded and evicts, so over-counting there would cry wolf every long run.
+  it('does not flag a transcript richer than telemetry', () => {
+    expect(
+      incompleteTranscripts(
+        [{ id: 'a', toolCallsPersisted: 30 }],
+        [{ sessionId: 'a', toolCalls: 4 }],
+      ),
+    ).toEqual([]);
+  });
+
+  it('treats an unknown session as having recorded nothing', () => {
+    expect(incompleteTranscripts([{ id: 'z', toolCallsPersisted: 0 }], [])).toEqual([]);
   });
 });

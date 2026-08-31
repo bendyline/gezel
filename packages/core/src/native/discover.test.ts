@@ -1,8 +1,9 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { discoverNativeBinaries } from './discover.js';
+import { duckdbInstallDir } from './duckdb-pin.js';
 import { recordLlamaQuarantine } from './llama-quarantine.js';
 
 let home: string;
@@ -88,9 +89,12 @@ describe('discoverNativeBinaries — gezel- prefixed binaries (post-rename)', ()
     const sdBin = stageBinary(nativeBinDir, 'linux-x64', 'gezel-sd-server', 'linux');
     const whisperBin = stageBinary(nativeBinDir, 'linux-x64', 'gezel-whisper-server', 'linux');
     const uvBin = stageBinary(nativeBinDir, 'linux-x64', 'uv', 'linux'); // uv stays unprefixed
-    // duckdb is vendored unmodified too — the Windows signing allowlist matches
-    // on exactly this basename, so a `gezel-` prefix would break it.
-    const duckBin = stageBinary(nativeBinDir, 'linux-x64', 'duckdb', 'linux');
+    // DuckDB is vendored too, but it is NOT in native-bin: it ships as a
+    // bundled runtime beside node and pnpm and installs into its own
+    // version-keyed directory under the home, so discovery must find it there.
+    const duckBin = join(duckdbInstallDir(home), 'duckdb');
+    mkdirSync(dirname(duckBin), { recursive: true });
+    writeFileSync(duckBin, '');
 
     const result = discoverNativeBinaries({
       home,

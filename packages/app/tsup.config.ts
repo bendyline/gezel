@@ -125,5 +125,22 @@ export default defineConfig({
         throw new Error('[tsup] fetch-node failed — see output above');
       }
     }
+
+    // The DuckDB CLI, into dist/duckdb-bundle/. Vendored unmodified from the
+    // DuckDB Foundation's signed + notarized release rather than built by our
+    // native pipeline, which is why it sits here beside node and pnpm instead
+    // of in native-bin/. The supervisor's extract-duckdb step installs it to
+    // `~/.gezel/engines/duckdb/<version>/` — the same directory the service's
+    // engine resolver downloads into for npm / CLI installs.
+    const duckdbRes = spawnSync(process.execPath, ['scripts/fetch-duckdb.mjs'], {
+      stdio: 'inherit',
+    });
+    if (duckdbRes.status !== 0) {
+      if (process.env.GEZEL_DUCKDB_SKIP === '1') {
+        console.warn('[tsup] fetch-duckdb skipped (GEZEL_DUCKDB_SKIP=1)');
+      } else {
+        throw new Error('[tsup] fetch-duckdb failed — see output above');
+      }
+    }
   },
 });

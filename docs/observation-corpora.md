@@ -180,6 +180,34 @@ Two rules the compactor enforces:
 Publishing is write-to-`.tmp` → verify → `rename` → delete the source, so a
 reader never sees a partial part.
 
+## 4b. Where the engine comes from
+
+DuckDB is **vendored, not built**. The DuckDB Foundation publishes a
+precompiled single-file CLI that is already Developer ID signed and notarized
+on macOS and Authenticode signed on Windows, so Gezel redistributes those exact
+bytes and never re-signs them — the same provenance rule the bundled Node
+runtime follows. It is therefore *not* part of the `native/` build pipeline and
+has no artifact in the `native-v*` release.
+
+One pin, in [`packages/core/src/native/duckdb-pin.ts`](../packages/core/src/native/duckdb-pin.ts),
+records the version, the commit, and **two** digests per platform: the
+published archive and the executable inside it. Two consumers read it —
+`packages/app/scripts/fetch-duckdb.mjs` stages the binary into the installer at
+build time, and the service's engine resolver downloads it for npm / CLI
+installs. Both verify both digests and both land the result in
+`<home>/engines/duckdb/<version>/`, so a machine running the desktop app and an
+npm `gezeld` shares one verified copy.
+
+`DuckRunner` then resolves in descending order of what we can vouch for:
+`GEZEL_DUCKDB_BIN` → that pinned install → `~/.duckdb/cli/latest/` (where
+DuckDB's own installer puts it) → `PATH`. The ordering is a security decision:
+everything in section 5 is a behavioural contract measured against the pinned
+build, so a system DuckDB of unknown vintage must never outrank it. The
+resolved rung is logged at boot, with a warning when it is unverified.
+
+Bump with `node scripts/bump-duckdb.mjs <version>` — and treat it as a security
+review, re-running the matrix below against the new binary.
+
 ## 5. Querying, and the guard that makes it safe
 
 `DuckRunner` runs one short-lived CLI child per statement, SQL on **stdin**

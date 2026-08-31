@@ -1,5 +1,5 @@
-/** Supported image MIME types for chat attachments and artifact previews. */
-const IMAGE_MIME_TO_EXT: Record<string, string> = {
+/** MIME types preserved for chat attachments and artifact previews. */
+const MIME_TO_EXT: Record<string, string> = {
   'image/png': '.png',
   'image/jpeg': '.jpg',
   'image/jpg': '.jpg',
@@ -9,9 +9,21 @@ const IMAGE_MIME_TO_EXT: Record<string, string> = {
   'image/bmp': '.bmp',
   'image/x-icon': '.ico',
   'image/vnd.microsoft.icon': '.ico',
+  'application/pdf': '.pdf',
+  'application/json': '.json',
+  'application/zip': '.zip',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+  'application/msword': '.doc',
+  'application/vnd.ms-powerpoint': '.ppt',
+  'application/vnd.ms-excel': '.xls',
+  'text/plain': '.txt',
+  'text/markdown': '.md',
+  'text/csv': '.csv',
 };
 
-const IMAGE_EXT_TO_MIME: Record<string, string> = {
+const EXT_TO_MIME: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -23,18 +35,31 @@ const IMAGE_EXT_TO_MIME: Record<string, string> = {
   // 500 before ever looking at the bytes.
   '.bmp': 'image/bmp',
   '.ico': 'image/x-icon',
+  '.pdf': 'application/pdf',
+  '.json': 'application/json',
+  '.zip': 'application/zip',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.doc': 'application/msword',
+  '.ppt': 'application/vnd.ms-powerpoint',
+  '.xls': 'application/vnd.ms-excel',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.markdown': 'text/markdown',
+  '.csv': 'text/csv',
 };
 
 export function extForMimeType(mime: string): string {
   const key = mime.toLowerCase().split(';')[0]!.trim();
-  return IMAGE_MIME_TO_EXT[key] ?? '.bin';
+  return MIME_TO_EXT[key] ?? '.bin';
 }
 
 export function mimeTypeForFilename(name: string): string {
   const lower = name.toLowerCase();
   const dot = lower.lastIndexOf('.');
   if (dot < 0) return 'application/octet-stream';
-  return IMAGE_EXT_TO_MIME[lower.slice(dot)] ?? 'application/octet-stream';
+  return EXT_TO_MIME[lower.slice(dot)] ?? 'application/octet-stream';
 }
 
 /** Reject any path components: filename-only values are safe to join. */

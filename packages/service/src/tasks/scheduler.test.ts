@@ -1726,6 +1726,115 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     expect((await store.readTask('cron', num))!.status).toBe('paused');
   });
 
+  // The auto-advance rung is pure bookkeeping — it reads a file, evaluates
+  // the gate, and writes the task. It sat behind a project-wide "someone is
+  // mid-turn" guard whose comment was written for the rungs that message a
+  // gezel. On a 1-slot local engine some session in the project is
+  // essentially always in flight, so the whole ladder was dead for the life
+  // of a run. Wild-caught on `craftbook-author-linear` (qwen3.8-27b-q4):
+  // `order-intake-cleanup/1` step "verify" activated 15ms AFTER its
+  // deliverable already cleared both `advanceWhen` and the completion gate,
+  // then sat active for fifteen minutes across 85 ticks that all returned at
+  // this guard, and the trial was booked as a model failure.
+  it('auto-advances a finished step even while another session in the project is mid-turn', async () => {
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setProjectVoorman('leo');
+    const { num, nextStepId } = await makeStalledTask({ now, agoMs: 30 * 60_000 });
+    await store.writeProjectWorkspaceFile('cron', 'notes/scope.md', 'x'.repeat(200));
+    const chat = fakeChat();
+    chat.setProjectActive(true); // a DIFFERENT session in this project is busy
+    await makeScheduler(chat, now).sweepStuckSteps();
+    expect((await store.readTask('cron', num))!.activeStepId).toBe(nextStepId);
+    // Still no model turn started — the busy project gates only the rungs
+    // that message somebody.
+    expect(chat.delivered).toHaveLength(0);
+  });
+
+  it('does NOT re-drive or escalate while another session in the project is mid-turn', async () => {
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setProjectVoorman('leo');
+    const { num } = await makeStalledTask({ now, agoMs: 30 * 60_000, redriveCount: 3 });
+    const chat = fakeChat();
+    chat.setProjectActive(true);
+    await makeScheduler(chat, now).sweepStuckSteps();
+    expect(chat.delivered).toHaveLength(0);
+    expect((await store.readTask('cron', num))!.status).toBe('active'); // not paused
+  });
+
+  // A terminal step bailed out of the supervisor entirely, so "active on the
+  // last step" had no recovery at all: no auto-advance (a terminal step may
+  // not carry `advanceWhen`), no re-drive, no escalation. The task looked
+  // abandoned with nothing in history and no needs-help event. Wild-caught on
+  // `craftbook-crossword-forge` (qwen3.6-35b): `verify-puzzle-html/1` sat on
+  // its terminal `finish` step for nine minutes past the stall bar while the
+  // sweep reached it every 30s and returned.
+  it('re-drives an open terminal step instead of letting the task look abandoned', async () => {
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setProjectVoorman('leo');
+    const { num, nextStepId } = await makeStalledTask({ now, agoMs: 30 * 60_000 });
+    const rec = await store.readTask('cron', num);
+    // Park the task on its terminal last step, stale.
+    await store.writeTask({
+      ...rec!,
+      activeStepId: nextStepId,
+      craftbook: {
+        ...rec!.craftbook,
+        steps: rec!.craftbook.steps.map((s) =>
+          s.id === nextStepId
+            ? {
+                ...s,
+                terminal: true,
+                lastActivatedAt: new Date(now.getTime() - 30 * 60_000).toISOString(),
+              }
+            : s,
+        ),
+      },
+    });
+    const chat = fakeChat();
+    await makeScheduler(chat, now).sweepStuckSteps();
+    expect(chat.delivered).toHaveLength(1);
+    expect(chat.delivered[0]!.stepId).toBe(nextStepId);
+    // The nudge must say what is actually missing — the close, not more work.
+    expect(chat.delivered[0]!.text).toContain('FINAL step');
+    expect(chat.delivered[0]!.text).toContain('advance_task_step');
+    expect(chat.delivered[0]!.text).not.toContain("isn't there yet");
+    expect(
+      (await store.readTask('cron', num))!.craftbook.steps.find((s) => s.id === nextStepId)!
+        .redriveCount,
+    ).toBe(1);
+  });
+
+  it('pauses a task whose terminal step never closed, with a note that says so', async () => {
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setProjectVoorman('leo');
+    const { num, nextStepId } = await makeStalledTask({ now, agoMs: 30 * 60_000 });
+    const rec = await store.readTask('cron', num);
+    await store.writeTask({
+      ...rec!,
+      activeStepId: nextStepId,
+      craftbook: {
+        ...rec!.craftbook,
+        steps: rec!.craftbook.steps.map((s) =>
+          s.id === nextStepId
+            ? {
+                ...s,
+                terminal: true,
+                redriveCount: 3,
+                lastActivatedAt: new Date(now.getTime() - 30 * 60_000).toISOString(),
+              }
+            : s,
+        ),
+      },
+    });
+    const chat = fakeChat();
+    await makeScheduler(chat, now).sweepStuckSteps();
+    expect(chat.delivered).toHaveLength(0);
+    const after = await store.readTask('cron', num);
+    expect(after!.status).toBe('paused');
+    const notes = await tasks.listNotes('cron', num);
+    expect(notes.some((n) => n.text.includes('Task never closed'))).toBe(true);
+  });
+
   it('skips entirely under reactive engagement mode', async () => {
     const now = new Date('2026-05-01T12:00:00Z');
     await setProjectVoorman('leo');

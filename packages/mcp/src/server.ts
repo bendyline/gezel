@@ -498,6 +498,9 @@ const excludedToolNames = new Set(
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+    // `GEZEL_MCP_SCHEMA_LINT` registers the whole corpus regardless of what
+    // this host can actually sandbox, so schema lints and tool-response
+    // tests see the same tools everywhere.
     ...(process.env.GEZEL_MCP_SCHEMA_LINT === '1'
       ? []
       : unavailableToolsForPlatform(process.platform)),
@@ -6417,7 +6420,11 @@ server.tool(
   'message_gezel',
   'Send a message to another gezel (status check, nudge, broadcast, or file handoff). This is async fire-and-forget: it drops the message into their active project session and their reply surfaces automatically in your next turn. Use this for fan-out and ambient updates; for explicit consultations where you need an inline answer before continuing, use `ask_gezel`. For substantial multi-step work, use tasks + `advance_task_step`. Do NOT just say \'I\'ll talk to Maya\' in chat; that does nothing. Call this tool. When the message asks them to produce a long-form file deliverable (a review, a report, an analysis, a written design), pass `expectedDeliverable: { kind: "file", filePath: "<path>" }` — the target will be steered to `write_file` the deliverable and reply with just the path + a short precis, instead of pasting the full text into chat (the matrix #2 squisq-review failure mode).',
   {
-    gezel: z.string().describe('Target gezel id or display name'),
+    gezel: z.string().optional().describe('Target gezel id or display name'),
+    // `gezelId` is the spelling models reach for; without it the slip
+    // surfaces as a raw MCP -32602 Zod dump and costs a turn. Same
+    // precedent as `ask_user_question`'s `prompt` / `description`.
+    gezelId: z.string().optional().describe('Alias for `gezel`.'),
     message: z.string().describe('What to ask or tell them'),
     project: z
       .string()
@@ -6429,7 +6436,14 @@ server.tool(
       "Optional deliverable-shape hint. `{ kind: 'file', filePath: 'index.html' }`, `{ kind: 'file', filePath: 'review.md' }`, or `{ kind: 'file', filePath: 'logo.png' }` swaps the target's default chat-reply framing for a file-deliverable one. Text/source paths are written with `write_file`; image paths are rendered with `generate_image({ prompt, saveAs })`. Use this whenever the message asks for an actual workspace file; omit for normal short-message pings.",
     ),
   },
-  async ({ gezel, message, project, expectedDeliverable }) => {
+  async ({ gezel, gezelId: gezelArg, message, project, expectedDeliverable }) => {
+    const target = gezel ?? gezelArg;
+    if (!target) {
+      return errorResult(
+        'message_gezel needs a target — pass `gezel` (an id or display name). Call `list_gezels` for the roster.',
+        { retryable: true },
+      );
+    }
     const resolvedProject = project ? await resolveProjectId(project) : projectId;
     const documentRoute = await routeBinaryDocumentHandoff({
       project: resolvedProject,
@@ -6446,7 +6460,7 @@ server.tool(
     const normalizedMessage = normalizeFileHandoffMessage(message, expectedDeliverable);
     let res: Awaited<ReturnType<typeof api.messageGezel>>;
     try {
-      res = await api.messageGezel(gezel, {
+      res = await api.messageGezel(target, {
         fromGezelId: gezelId,
         ...(sessionId ? { fromSessionId: sessionId } : {}),
         projectId: resolvedProject,
@@ -6532,7 +6546,8 @@ server.tool(
   'ask_gezel',
   "SYNC consultation — block your current turn and wait for another gezel to answer. Their full reply text is returned to you as the tool result, ready to use inline within this turn. Spins up a fresh consultation session for the target so their main chat stays clean. Use this when you need their answer to keep working (e.g. 'is task 47 done?', 'what's the spec for the foo endpoint?', 'review this draft and tell me what's missing'). Cycle protection: if A asks B and B asks A (directly or transitively) the inner ask is rejected with `outcome: 'error', reason: 'cycle'`. The idle timeout defaults to 5 min, with a 15 min floor for DS4/frontier-size local targets. Falls back to an `outcome: 'error'` envelope on timeout, target failure, or target session deletion — inspect `reason` to branch on the specific cause and tell the user what happened. For broadcast / fire-and-forget pings, use `message_gezel` instead. When you want an actual file back rather than a chat answer — source like `index.html`, a review/report, or an image like `logo.png` — pass `expectedDeliverable: { kind: \"file\", filePath: \"<path>\" }` so the target writes/renders it to disk and replies with the path.",
   {
-    gezel: z.string().describe('Target gezel id or display name'),
+    gezel: z.string().optional().describe('Target gezel id or display name'),
+    gezelId: z.string().optional().describe('Alias for `gezel`.'),
     question: z
       .string()
       .describe(
@@ -6563,7 +6578,23 @@ server.tool(
       "Optional deliverable-shape hint. `{ kind: 'file', filePath: 'index.html' }`, `{ kind: 'file', filePath: 'review.md' }`, or `{ kind: 'file', filePath: 'logo.png' }` swaps the consultation's default chat-reply framing for a file-deliverable one. Text/source paths are written with `write_file`; image paths are rendered with `generate_image({ prompt, saveAs })`. The asker is expected to verify the path.",
     ),
   },
-  async ({ gezel, question, project, task, step, timeoutMs, expectedDeliverable }) => {
+  async ({
+    gezel,
+    gezelId: gezelArg,
+    question,
+    project,
+    task,
+    step,
+    timeoutMs,
+    expectedDeliverable,
+  }) => {
+    const target = gezel ?? gezelArg;
+    if (!target) {
+      return errorResult(
+        'ask_gezel needs a target — pass `gezel` (an id or display name). Call `list_gezels` for the roster.',
+        { retryable: true },
+      );
+    }
     if (!sessionId) {
       // ask_gezel needs a session to anchor the cycle-detection graph
       // and the asker's audit trail.
@@ -6601,7 +6632,7 @@ server.tool(
     const res = await api.askGezel({
       fromGezelId: gezelId,
       fromSessionId: sessionId,
-      toGezelIdOrName: gezel,
+      toGezelIdOrName: target,
       projectId: resolvedProject,
       question,
       ...(typeof timeoutMs === 'number' ? { timeoutMs } : {}),
@@ -9656,22 +9687,45 @@ server.tool(
   'Append one focused, dated, attributed note to a task. Prefer many small notes over a long blob — teammates and you will read this feed later. Author is auto-attributed to you.',
   {
     ref: z.string(),
-    text: z.string().min(1),
+    text: z
+      .string()
+      .min(1)
+      .optional()
+      .describe('The note body. Markdown ok. Required unless you pass `note` / `content` instead.'),
+    // `note` and `content` are the two names models reach for on a tool
+    // called `write_task_note`. `write_task_note` is the single most common
+    // argument-validation failure in the whole eval corpus, and `content` is
+    // not even a guess — the shipped `investigate` and `pull-request-review`
+    // craftbooks instruct the assignee to call
+    // `write_task_note({ ref, content: … })`, so following the catalog
+    // verbatim earns a -32602. The rejection happens in the SDK's schema
+    // validation before the handler runs, so no coercion layer downstream can
+    // rescue it: the model burns a turn re-reading the schema. Same precedent
+    // as `ask_user_question`'s `prompt` / `description` aliases.
+    note: z.string().min(1).optional().describe('Alias for `text`.'),
+    content: z.string().min(1).optional().describe('Alias for `text`.'),
     stepId: z.string().optional(),
   },
-  async ({ ref, text, stepId }) => {
+  async ({ ref, text, note, content, stepId }) => {
+    const body = text ?? note ?? content;
+    if (!body) {
+      return errorResult(
+        'write_task_note needs the note body — pass it as `text` (or `note` / `content`), a non-empty string.',
+        { retryable: true },
+      );
+    }
     const parsed = await parseRef(ref);
     const effectiveStep = stepId ?? (sessionStepId || undefined);
-    const { note } = await api.appendTaskNote(
+    const { note: appended } = await api.appendTaskNote(
       parsed.projectId,
       parsed.num,
       {
-        text: normalizeMarkdown(text),
+        text: normalizeMarkdown(body),
         ...(effectiveStep ? { stepId: effectiveStep } : {}),
       },
       gezelId ? { actorGezelId: gezelId } : {},
     );
-    const summary = `Appended note ${note.id} to ${ref}${effectiveStep ? `/${effectiveStep}` : ''} at ${note.at}.`;
+    const summary = `Appended note ${appended.id} to ${ref}${effectiveStep ? `/${effectiveStep}` : ''} at ${appended.at}.`;
     return okResult(
       TaskToolOutputSchema,
       {
@@ -9679,7 +9733,7 @@ server.tool(
         operation: 'write_note',
         ref,
         ...(effectiveStep ? { stepId: effectiveStep } : {}),
-        note,
+        note: appended,
       },
       { text: summary },
     );

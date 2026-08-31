@@ -113,6 +113,7 @@
     "check:docs": "node scripts/check-markdown-links.mjs",
     "docs:site": "node --test scripts/latest-app-release.test.mjs && node scripts/export-handboek-site.mjs",
     "docs:releases": "node --test scripts/latest-app-release.test.mjs && node scripts/latest-app-release.mjs",
+    "docs:og-headlines": "node scripts/distill-og-headlines.mjs",
     "check:notice": "node scripts/check-notice.mjs",
     "stage:licenses": "node scripts/stage-third-party-licenses.mjs",
     "verify:licenses": "node scripts/verify-packaged-licenses.mjs packages/app/dist/licenses && pnpm verify:npm-licenses",

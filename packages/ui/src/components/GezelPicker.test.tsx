@@ -1,7 +1,8 @@
 import { type GezelSummary, initialPoppetjeForGezel } from '@bendyline/gezel';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { api } from '../api.js';
 import { GezelPicker } from './GezelPicker.js';
 
 vi.mock('../api.js', () => ({
@@ -24,6 +25,11 @@ const GEZELS = [
     poppetje: initialPoppetjeForGezel('yusuf', 'Yusuf'),
   },
 ] as GezelSummary[];
+
+const BORING_GEZELS = GEZELS.map((gezel) => ({
+  ...gezel,
+  roleBasedName: gezel.role?.toLowerCase(),
+})) as GezelSummary[];
 
 describe('GezelPicker', () => {
   beforeAll(() => {
@@ -87,5 +93,30 @@ describe('GezelPicker', () => {
     await user.click(await screen.findByRole('option', { name: '(no voorman)' }));
 
     expect(onValueChange).toHaveBeenCalledWith(null);
+  });
+
+  it('drops friendly names from the trigger and every option in boring mode', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      showPoppetjes: true,
+      roleBasedNameOnlyMode: true,
+    } as never);
+    const user = userEvent.setup();
+    render(
+      <GezelPicker
+        gezels={BORING_GEZELS}
+        value="tomas"
+        ariaLabel="Voorman"
+        onValueChange={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole('combobox', { name: 'Voorman' });
+    await waitFor(() => expect(trigger).toHaveTextContent('voorman'));
+    expect(trigger).not.toHaveTextContent('Tomas');
+
+    await user.click(trigger);
+
+    const options = await screen.findAllByRole('option');
+    expect(options.map((o) => o.textContent)).toEqual(['voorman', 'developer']);
   });
 });

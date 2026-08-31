@@ -85,6 +85,19 @@ Body prose…
 
 - `siteVisible: false` — exclude the article from the gezel.com static export.
 
+- `ogHeadline` — the poster line on this page's social preview card. Optional,
+  and the last word: it beats the distilled headline in
+  [`og-headlines.json`](og-headlines.json), which in turn beats falling back to
+  the title. Keep it under 80 characters — it is set very large and is the only
+  text on the card besides the small kicker. Set one when a distilled headline
+  reads wrong and you would rather fix it than re-run the distiller.
+
+  `summary` is a different job: it stays the page's `<meta name="description">`
+  and `og:description`, and at up to 200 characters it is far too long to be a
+  headline. Refresh the distilled ones with `pnpm docs:og-headlines` (a model
+  call, so it is a deliberate occasional pass, never part of a docs build);
+  `pnpm docs:og-headlines --check` reports which are stale without writing.
+
 Plain markdown renders fine everywhere. Squisq heading annotations (`## Heading {[pullQuote]}`, `{[statHighlight]}`, …) are progressive enhancement for the video/social playback mode — see the squisq SquigglySquare docs for the template vocabulary.
 
 ## Autoannotation macros

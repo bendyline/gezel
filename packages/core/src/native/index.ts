@@ -78,3 +78,19 @@ export {
 } from './device-health.js';
 export type { FindGpuPanicOptions, GpuPanicRecord } from './gpu-panic.js';
 export { findRecentGpuPanics, GPU_PANIC_RE } from './gpu-panic.js';
+export type { DuckdbPlatformKey } from './duckdb-pin.js';
+export {
+  DUCKDB_APPLE_TEAM_ID,
+  DUCKDB_ARCHIVE_SHA256,
+  DUCKDB_ASSET,
+  DUCKDB_BINARY_SHA256,
+  DUCKDB_COMMIT,
+  DUCKDB_LICENSE_SHA256,
+  DUCKDB_VERSION,
+  DUCKDB_WINDOWS_PUBLISHER,
+  duckdbAssetUrl,
+  duckdbBinaryName,
+  duckdbInstallDir,
+  duckdbInstalledBinary,
+  duckdbPlatformKey,
+} from './duckdb-pin.js';

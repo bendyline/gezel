@@ -3093,10 +3093,44 @@ button.timeline-session-divider-continuing::before {
   border-radius: var(--radius-sm);
 }
 
-/* Composer error banner sits inside .chat-composer above the editor. */
+/* Error banners in the chat window: the composer's send/transcription
+   failure and the timeline's own load failure. Same shape as the
+   failed-turn banner (.timeline-session-error-banner in
+   file-browser.css) so a failure reads the same wherever it surfaces —
+   bare red prose ran edge to edge against the composer chrome with
+   nothing separating it from the message being typed. */
+.chat-composer-error,
+.chat-timeline-error > .error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+/* Inset matches .chat-composer-to so the banner shares the recipient
+   row's left edge rather than the composer's outer padding. */
 .chat-composer-error {
-  margin: 0 0 0.4rem 0;
-  font-size: 0.8rem;
+  margin: 0 0.25rem 0.45rem 0.25rem;
+}
+
+.chat-timeline-error > .error {
+  margin: 0;
+}
+
+.chat-composer-error-mark {
+  flex: none;
+  line-height: 1.45;
+}
+
+.chat-composer-error-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* "Previous turn still running" banner — shown when the service returns

@@ -44,6 +44,12 @@ const DEFAULT_CSS = '../handboek.css';
 // landing page. A project-scoped Pages deploy would need '/<repo>/'.
 const DEFAULT_SITE_URL = '/';
 
+// Absolute URLs for canonical + Open Graph. The origin is the site's CNAME;
+// the docs live at /docs/ and the cards at /og/ — beside handboek.css and
+// releases.json at the site root, so regenerating docs cannot wipe them.
+const DEFAULT_SITE_ORIGIN = 'https://gezel.com';
+const OG_DIR = 'og';
+
 if (flag('--help') || flag('-h')) {
   console.log(`Usage: node scripts/export-handboek-site.mjs [options]
 
@@ -55,6 +61,9 @@ if (flag('--help') || flag('-h')) {
   --releases <f> download listing index.html reads (default: the site root beside
                  --out, i.e. ../gezel-site/${RELEASES_FILE}); --no-releases skips it
   --repo <o/n>   repository to read releases from (default: ${DEFAULT_REPO})
+  --site-origin <u>  origin for canonical + Open Graph URLs (default:
+                 ${DEFAULT_SITE_ORIGIN}); --no-site-origin omits both
+  --no-og        skip rendering Open Graph cards into ../gezel-site/${OG_DIR}/
   --skip-build   reuse the current packages/cli/dist instead of rebuilding
   --force        wipe the output directory even without an export marker
 `);
@@ -70,6 +79,13 @@ const releasesOut = flag('--no-releases')
     ? resolve(repoRoot, value('--releases'))
     : resolve(out, '..', RELEASES_FILE);
 const repo = value('--repo') ?? process.env.GH_REPO ?? DEFAULT_REPO;
+const siteOrigin = flag('--no-site-origin')
+  ? null
+  : (value('--site-origin') ?? DEFAULT_SITE_ORIGIN).replace(/\/+$/, '');
+// Cards live beside handboek.css and releases.json at the site root — outside
+// the directory this script wipes — because the card set is its own cache and
+// re-rendering all of them costs minutes of headless Chromium.
+const ogOut = siteOrigin && !flag('--no-og') ? resolve(out, '..', OG_DIR) : null;
 
 const run = (label, cmd, args) => {
   console.log(`[handboek-site] ${label}`);
@@ -128,6 +144,8 @@ run('rendering handboek', process.execPath, [
   out,
   ...cssHrefs.flatMap((href) => ['--css', href]),
   ...(siteUrl ? ['--site-url', siteUrl] : []),
+  ...(siteOrigin ? ['--canonical-base', `${siteOrigin}/docs/`] : []),
+  ...(ogOut ? ['--og-out', ogOut, '--og-base', `${siteOrigin}/${OG_DIR}/`] : []),
 ]);
 
 await writeFile(

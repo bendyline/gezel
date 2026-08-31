@@ -22,6 +22,7 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { FormData } from 'undici';
 import { resolveModelDirectory } from '../../models/model-id.js';
 import {
   MODEL_HASH_READ_BUFFER_BYTES,
@@ -156,6 +157,11 @@ export class WhisperCppProvider implements SpeechToTextProvider {
       filename = inlineAudioFilename(mime);
     }
 
+    // `patientFetch()` is the npm `undici` fetch, not Node's bundled global
+    // fetch. Its BodyInit brand-check does not recognize Node's global
+    // FormData and serializes it as the literal string "[object FormData]".
+    // Build the form with the matching undici implementation so whisper.cpp
+    // receives a real multipart `file` field.
     const form = new FormData();
     form.set('file', new Blob([new Uint8Array(bytes)], { type: mime }), filename);
     form.set('response_format', 'json');
@@ -196,7 +202,7 @@ export class WhisperCppProvider implements SpeechToTextProvider {
       segments?: Array<{ start?: number; end?: number; text?: string }>;
     };
 
-    const text = (payload.text ?? '').trim();
+    const text = normalizeWhisperTranscript(payload.text ?? '');
     const out: TranscribeOutput = {
       text,
       durationMs: Date.now() - started,
@@ -340,6 +346,12 @@ export class WhisperCppProvider implements SpeechToTextProvider {
   async shutdown(): Promise<void> {
     await this.supervisor?.stop();
   }
+}
+
+/** whisper.cpp emits this sentinel for valid audio containing no speech. */
+export function normalizeWhisperTranscript(value: string): string {
+  const text = value.trim();
+  return /^\[\s*BLANK_AUDIO\s*\]$/i.test(text) ? '' : text;
 }
 
 /** MediaRecorder MIME values often carry codec parameters; filenames cannot. */

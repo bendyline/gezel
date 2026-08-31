@@ -20,6 +20,7 @@ import {
   ProjectSearchResponseSchema,
   TaskStatusSchema,
   UpdateBoekwachterIssueRequestSchema,
+  UpdateConfigRequestSchema,
   UpdateProjectRequestSchema,
   UpdateTaskRequestSchema,
   parseTaskRef,
@@ -44,6 +45,26 @@ describe('CraftbookTemplateIdentitySchema', () => {
     expect(
       CraftbookTemplateIdentitySchema.parse({ ...identity, role: 'project-starter' }).role,
     ).toBe('project-starter');
+  });
+});
+
+describe('microphone input config', () => {
+  it('persists an origin id with a label fallback and accepts null to reset', () => {
+    expect(
+      GezelConfigSchema.parse({
+        microphoneDeviceId: 'browser-device-id',
+        microphoneDeviceLabel: 'Studio microphone',
+      }),
+    ).toMatchObject({
+      microphoneDeviceId: 'browser-device-id',
+      microphoneDeviceLabel: 'Studio microphone',
+    });
+    expect(
+      UpdateConfigRequestSchema.parse({
+        microphoneDeviceId: null,
+        microphoneDeviceLabel: null,
+      }),
+    ).toMatchObject({ microphoneDeviceId: null, microphoneDeviceLabel: null });
   });
 });
 

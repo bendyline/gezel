@@ -50,8 +50,10 @@ const THIRD_PARTY_PATTERNS = [
   { pattern: '^nvJitLink_\\d+\\.dll$', source: 'NVIDIA CUDA Toolkit' },
 
   // Prebuilt vendor binaries we download rather than compile. uv.exe and
-  // pnpm's optional fastlist helpers are unsigned as published; node.exe
-  // carries OpenJS's own signature and must keep it.
+  // pnpm's optional fastlist helpers are unsigned as published; node.exe and
+  // duckdb.exe carry their vendors' own signatures and must keep them —
+  // duckdb.exe is Authenticode-signed by the DuckDB Foundation, so the
+  // afterPack sweep must leave it byte-identical to their release.
   { pattern: '^uv\\.exe$', source: 'Astral uv (prebuilt release)' },
   { pattern: '^duckdb\\.exe$', source: 'DuckDB Foundation (prebuilt CLI release)' },
   { pattern: '^node\\.exe$', source: 'OpenJS Node.js (prebuilt release)' },

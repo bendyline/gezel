@@ -284,6 +284,115 @@ describe('craftbookFromDoc', () => {
     }
   });
 
+  // A gate script ref only NAMES a script. `GateScriptRefSchema` is a plain
+  // z.object, so a body written onto the ref was stripped without a word and
+  // the ref degraded to the default `project` scope naming a file nobody
+  // installed. On the inaugural `craftbook-author-gate-script` run the model
+  // wrote its 2.2 KB check as `gate.scripts: [{ name, source }]`, was told
+  // "Created craftbook ... 1 of 3 steps are gated", and every subsequent
+  // advance came back `[gate_infrastructure_error] ... ENOENT ...
+  // /projects/inventory-health-check/scripts/verifyInventoryReport.ts` — a
+  // path the model could not create. The gate could only ever fail.
+  it('refuses a script reference that carries its body inline', () => {
+    const res = parseCraftbookDoc(
+      JSON.stringify({
+        name: 'Inventory Health Check',
+        entryStepId: 'build',
+        steps: [
+          {
+            id: 'build',
+            name: 'Build',
+            prompt: 'Write out/inventory-report.json.',
+            gate: {
+              at: 'completion',
+              checks: [{ kind: 'minBytes', file: 'out/inventory-report.json', bytes: 50 }],
+              scripts: [
+                {
+                  name: 'verifyInventoryReport',
+                  source: 'gezel.output({ decision: "approve" });',
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      'json',
+    );
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    const message = formatCraftbookDocErrors(res.errors);
+    expect(message).toContain('steps (id "build") → gate.scripts');
+    expect(message).toContain('carries its body inline as `source`');
+    // The repair has to name the shape that works, not just the problem.
+    expect(message).toContain('scripts');
+    expect(message).toContain('"scope": "craftbook"');
+  });
+
+  // `refineCraftbook` only ever walked `cb.steps`, so a `spawn.steps` child
+  // template — the graph every shard is snapshotted from — was accepted with
+  // a dangling `next`, a bogus `spawn.entryStepId`, or a craftbook-scope
+  // script ref naming nothing. `completeStepInternal` trusts
+  // `completedStep.next`, so a dangling one wrote the shard with an
+  // activeStepId matching no step: no handoff, no gate, no auto-advance, and
+  // `maybeDriveStuckStep` returning at its `if (!step)` guard. Silently and
+  // permanently wedged, with the host's collect barrier never lifting.
+  it('rejects a dangling edge inside the spawn (per-item) template', () => {
+    const parsed = parseCraftbookDoc(
+      JSON.stringify({
+        name: 'Batch review',
+        entryStepId: 'plan',
+        steps: [{ id: 'plan', name: 'Plan', prompt: 'Split the work.', spawnFanout: true }],
+        spawn: {
+          overFile: 'batches.json',
+          entryStepId: 'NO-SUCH-STEP',
+          steps: [{ id: 'work', name: 'Work', prompt: 'Review one batch.', next: 'ALSO-MISSING' }],
+        },
+      }),
+      'json',
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const res = craftbookFromDoc(parsed.doc, { now: '2026-08-30T00:00:00.000Z' });
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    const message = formatCraftbookDocErrors(res.errors);
+    expect(message).toContain('spawn.steps');
+    expect(message).toContain('"ALSO-MISSING" missing from steps');
+    expect(message).toContain('entryStepId "NO-SUCH-STEP" not in steps');
+    expect(message).toContain('valid spawn step ids: work');
+  });
+
+  // Seven bundled book versions (every `pull-request-review` line plus
+  // `nightly-fix-sweep`) carry a terminal shard step that also declares
+  // `advanceWhen` — inert at runtime, but a hard error under the parent-book
+  // graph rules. Enforcing the full validator on `spawn.steps` would have
+  // rejected shipped content for no benefit.
+  it('accepts a spawn template whose terminal step carries advanceWhen', () => {
+    const parsed = parseCraftbookDoc(
+      JSON.stringify({
+        name: 'Batch review',
+        entryStepId: 'plan',
+        steps: [{ id: 'plan', name: 'Plan', prompt: 'Split the work.', spawnFanout: true }],
+        spawn: {
+          overFile: 'batches.json',
+          steps: [
+            {
+              id: 'review-batch',
+              name: 'Review batch',
+              prompt: 'Review one batch.',
+              terminal: true,
+              advanceWhen: { file: 'out/batch.md', minBytes: 1, sniff: 'nonempty' },
+            },
+          ],
+        },
+      }),
+      'json',
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(craftbookFromDoc(parsed.doc, { now: '2026-08-30T00:00:00.000Z' }).ok).toBe(true);
+  });
+
   it('docFromCraftbook(book) is accepted back unchanged (read→write loop)', () => {
     const first = craftbookFromDoc(FULL_DOC, { now: '2026-01-01T00:00:00.000Z' });
     expect(first.ok).toBe(true);

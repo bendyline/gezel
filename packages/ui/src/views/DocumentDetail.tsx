@@ -10,8 +10,8 @@ import {
   createDocumentsContentContainer,
   deriveContainerScope,
   gezelProofingIgnoreStore,
-  gezelProofingProvider,
   resolveOutsideInLayout,
+  useProofingCapability,
 } from '../components/SquisqIntegration/index.js';
 import { BINARY_FILE, NonTextFilePreview, looksBinary } from '../components/file-browser/index.js';
 import { normalizeMarkdownBaseline } from '../components/markdown-baseline.js';
@@ -58,6 +58,7 @@ const fetchDocumentBlob = (filePath: string) => api.fetchDocumentBlob(filePath);
 
 function TextDocumentDetail({ path }: DocumentDetailProps) {
   const editorTheme = useEffectiveTheme();
+  const proofing = useProofingCapability();
   const [content, setContent] = useState<string | null>(null);
   const [sizeBytes, setSizeBytes] = useState<number | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -154,7 +155,7 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
           fullWidth
           workspaceContainer={markdown ? container : null}
           documentLinkProvider={markdown ? documentLinkProvider : null}
-          proofing={markdown ? gezelProofingProvider() : null}
+          proofing={markdown ? proofing : null}
           proofingIgnoreStore={gezelProofingIgnoreStore}
           allowVersioning={markdown}
           versionBasename={primaryDocumentFilename}

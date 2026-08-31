@@ -74,7 +74,7 @@ export const SHOT_REGISTRY: Record<ShotArea, string[]> = {
     'about',
     'provider-ds4',
   ],
-  dialogs: ['create-gezel', 'create-project'],
+  dialogs: ['create-gezel', 'create-project', 'create-project-configure'],
   handboek: ['home'],
   updates: ['downloading', 'ready-home', 'ready-settings'],
 };

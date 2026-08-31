@@ -11,6 +11,7 @@ import {
   postMissingDeliverableFeedback,
   postSniffFeedback,
 } from '../sniff-feedback.ts';
+import { bareToolName } from '../tool-names.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
 import {
   type CraftbookEvalWorkspace,
@@ -102,9 +103,23 @@ function binaryProductionInstruction(paths: readonly string[]): string | null {
   return `Produce the real binary deliverable${paths.length === 1 ? '' : 's'} through the active craftbook production workflow: ${paths.map((path) => `\`${path}\``).join(', ')}. Author and review the text source first, then use DocBlocks \`convert_document\`, \`preview_document\`, and \`save_artifact\`; finally use \`copy_artifact_to_workspace\` to copy the saved binary bytes to each exact workspace path. Never call \`write_file\` with prose, base64, or hand-built OOXML for these binary paths, and do not replace the craftbook with an ad-hoc Developer handoff.`;
 }
 
+/**
+ * Mission objectives are written into the project BEFORE any task exists, so
+ * a `{{task.dir}}` deliverable path cannot be resolved here — and this text is
+ * injected verbatim into every session's system prompt. Emitting the raw token
+ * taught the model to write `{{task.dir}}/sources.md` into its own deliverable,
+ * where it then failed the citation gate as an unresolvable path. Name the file
+ * and let the craftbook step prompt, which IS interpolated against the live
+ * task, supply the folder.
+ */
+function describeArtifactPath(path: string): string {
+  const m = path.match(/^\{\{\s*task\.dir\s*\}\}\/(.+)$/);
+  return m ? `\`${m[1]}\` in this task's own artifacts working folder` : `\`${path}\``;
+}
+
 function artifactBinaryProductionInstruction(paths: readonly string[]): string | null {
   if (paths.length === 0) return null;
-  return `Produce the real binary artifact${paths.length === 1 ? '' : 's'} through the active craftbook workflow: ${paths.map((path) => `\`${path}\``).join(', ')}. Author and review the source, then use DocBlocks \`convert_document\`, \`preview_document\`, and \`save_artifact\` so the exact binary path remains in the artifacts drawer. Do not copy it into the workspace and do not substitute prose, base64, or hand-built OOXML.`;
+  return `Produce the real binary artifact${paths.length === 1 ? '' : 's'} through the active craftbook workflow: ${paths.map(describeArtifactPath).join(', ')}. Author and review the source, then use DocBlocks \`convert_document\`, \`preview_document\`, and \`save_artifact\` so the exact binary path remains in the artifacts drawer. Do not copy it into the workspace and do not substitute prose, base64, or hand-built OOXML.`;
 }
 
 function directWorkerNeedsWorkspaceToolsets(spec: CraftbookEvalSpec): boolean {
@@ -158,7 +173,7 @@ interface ChatSessionLike {
   messages?: ChatMessageLike[];
 }
 
-function craftbookEvalProjectAbout(spec: CraftbookEvalSpec): string {
+export function craftbookEvalProjectAbout(spec: CraftbookEvalSpec): string {
   const seededPaths = sourceWorkspaceFixturePaths(spec);
   const workspaceOutputs = workspaceDeliverablePaths(spec);
   const artifactOutputs = artifactDeliverablePaths(spec);
@@ -172,13 +187,13 @@ function craftbookEvalProjectAbout(spec: CraftbookEvalSpec): string {
       ? `Required workspace deliverable${workspaceOutputs.length === 1 ? '' : 's'}: ${workspaceOutputs.map((path) => `\`${path}\``).join(', ')}. Chat summaries, artifacts, plans, and task notes do not satisfy workspace file deliverables.`
       : null,
     artifactOutputs.length > 0
-      ? `Required artifact deliverable${artifactOutputs.length === 1 ? '' : 's'}: ${artifactOutputs.map((path) => `\`${path}\``).join(', ')}. Write and re-read these with \`write_artifact\` / \`read_artifact\`; workspace copies and task notes do not satisfy them.`
+      ? `Required artifact deliverable${artifactOutputs.length === 1 ? '' : 's'}: ${artifactOutputs.map(describeArtifactPath).join(', ')}. Write and re-read these with \`write_artifact\` / \`read_artifact\`; workspace copies and task notes do not satisfy them.`
       : null,
   ].filter((line): line is string => !!line);
   return [spec.setup?.about?.trim(), lines.join('\n\n')].filter(Boolean).join('\n\n');
 }
 
-function craftbookEvalMissionObjectives(spec: CraftbookEvalSpec): string {
+export function craftbookEvalMissionObjectives(spec: CraftbookEvalSpec): string {
   const splitOutputs = splitDeliverablePaths(spec);
   const harnessMission = spec.success.taskGraph
     ? [
@@ -192,7 +207,7 @@ function craftbookEvalMissionObjectives(spec: CraftbookEvalSpec): string {
           ? `Land the final workspace file${splitOutputs.workspace.text.length + splitOutputs.workspace.binary.length === 1 ? '' : 's'} at the exact workspace-root-relative path${splitOutputs.workspace.text.length + splitOutputs.workspace.binary.length === 1 ? '' : 's'}: ${[...splitOutputs.workspace.text, ...splitOutputs.workspace.binary].map((path) => `\`${path}\``).join(', ')}.`
           : null,
         splitOutputs.artifacts.text.length + splitOutputs.artifacts.binary.length > 0
-          ? `Land the final artifact${splitOutputs.artifacts.text.length + splitOutputs.artifacts.binary.length === 1 ? '' : 's'} at the exact artifacts-drawer path${splitOutputs.artifacts.text.length + splitOutputs.artifacts.binary.length === 1 ? '' : 's'}: ${[...splitOutputs.artifacts.text, ...splitOutputs.artifacts.binary].map((path) => `\`${path}\``).join(', ')}.`
+          ? `Land the final artifact${splitOutputs.artifacts.text.length + splitOutputs.artifacts.binary.length === 1 ? '' : 's'} at the exact artifacts-drawer path${splitOutputs.artifacts.text.length + splitOutputs.artifacts.binary.length === 1 ? '' : 's'}: ${[...splitOutputs.artifacts.text, ...splitOutputs.artifacts.binary].map(describeArtifactPath).join(', ')}.`
           : null,
         binaryProductionInstruction(splitOutputs.workspace.binary),
         artifactBinaryProductionInstruction(splitOutputs.artifacts.binary),
@@ -217,7 +232,7 @@ function craftbookEvalKickoffPrompt(spec: CraftbookEvalSpec): string {
       ? `Write the text workspace deliverable${splitOutputs.workspace.text.length === 1 ? '' : 's'} with \`write_file\` at the exact path${splitOutputs.workspace.text.length === 1 ? '' : 's'}: ${splitOutputs.workspace.text.map((path) => `\`${path}\``).join(', ')} (not \`workspace/<path>\`).`
       : null,
     splitOutputs.artifacts.text.length > 0
-      ? `Write the text artifact deliverable${splitOutputs.artifacts.text.length === 1 ? '' : 's'} with \`write_artifact\` at the exact artifacts-drawer path${splitOutputs.artifacts.text.length === 1 ? '' : 's'}: ${splitOutputs.artifacts.text.map((path) => `\`${path}\``).join(', ')}. Re-read it with \`read_artifact\`; do not create a workspace copy.`
+      ? `Write the text artifact deliverable${splitOutputs.artifacts.text.length === 1 ? '' : 's'} with \`write_artifact\` at the exact artifacts-drawer path${splitOutputs.artifacts.text.length === 1 ? '' : 's'}: ${splitOutputs.artifacts.text.map(describeArtifactPath).join(', ')}. Re-read it with \`read_artifact\`; do not create a workspace copy.`
       : null,
     binaryProductionInstruction(splitOutputs.workspace.binary),
     artifactBinaryProductionInstruction(splitOutputs.artifacts.binary),
@@ -282,7 +297,7 @@ function craftbookMissingDeliverableRepairDirective(
       ? `Text workspace deliverables must be written with \`write_file\`: ${workspaceText.failing.map((path) => `\`${path}\``).join(', ')}. Do not substitute \`write_artifact\` or \`write_document\` for those workspace files.`
       : null,
     artifactsText.failing.length > 0
-      ? `Text artifact deliverables must be written with \`write_artifact\`: ${artifactsText.failing.map((path) => `\`${path}\``).join(', ')}. Re-read them with \`read_artifact\` and do not substitute workspace files.`
+      ? `Text artifact deliverables must be written with \`write_artifact\`: ${artifactsText.failing.map(describeArtifactPath).join(', ')}. Re-read them with \`read_artifact\` and do not substitute workspace files.`
       : null,
     binaryProductionInstruction(outputs.workspace.binary),
     artifactBinaryProductionInstruction(outputs.artifacts.binary),
@@ -376,12 +391,6 @@ function toolCallReferencesPath(call: ToolCallLike, path: string): boolean {
  * write, a move, or a mention as a read).
  */
 const SEEDED_READ_TOOL_NAMES = new Set(['read_file', 'read_files', 'read', 'view']);
-
-/** Strip an MCP namespace prefix: `mcp__gezel__read_file` -> `read_file`. */
-function bareToolName(name: string): string {
-  const match = /^mcp__[^_]+(?:_[^_]+)*?__(.+)$/.exec(name);
-  return (match?.[1] ?? name).toLowerCase();
-}
 
 function isSeededReadTool(name: string | undefined): boolean {
   return !!name && SEEDED_READ_TOOL_NAMES.has(bareToolName(name));
@@ -899,7 +908,87 @@ async function taskGraphTextForSpec(
   };
 }
 
-function successChecksForSpec(spec: CraftbookEvalSpec) {
+/**
+ * The path tokens this run handed its workers: every craftbook param value
+ * plus the step prompts' own backticked path examples, interpolated with
+ * those params. Mirrors the runtime's `taskSuppliedCitationPaths` — the
+ * grader must forgive exactly what production forgives, or it judges honest
+ * work more harshly than the product ever would.
+ */
+/**
+ * Resolve `{{task.dir}}` / `{{task.num}}` against the craftbook task this run
+ * actually created, so a sidecar can grade the SHIPPED default working folder
+ * (`artifacts/tasks/<num>/`) instead of pinning a shared `tasks/eval`.
+ *
+ * The pin existed because the kickoff prompt is sent before any task exists,
+ * so a stable name was the only thing the grader could refer to. That is only
+ * true up front: by grading time the task is on disk with its own `num`, so
+ * the grader can resolve the real folder. Returns null when no craftbook task
+ * matched — callers then leave tokens untouched and the check fails loudly on
+ * a literal `{{task.dir}}` rather than silently grading the wrong tree.
+ */
+async function resolveTaskTokens(
+  client: GezelClient,
+  projectId: string,
+  spec: CraftbookEvalSpec,
+): Promise<Record<string, string> | null> {
+  try {
+    const listed = await client.listProjectTasks(projectId);
+    const matching = listed.tasks.filter((task) => taskMatchesCraftbook(task, spec));
+    const task = matching[0] ?? listed.tasks[0];
+    if (!task) return null;
+    return { 'task.dir': `tasks/${task.num}`, 'task.num': String(task.num) };
+  } catch {
+    return null;
+  }
+}
+
+/** Rewrite `{{task.*}}` tokens in every path-bearing field of a check set. */
+function interpolateTaskTokens<T>(value: T, tokens: Record<string, string>): T {
+  const sub = (raw: string): string =>
+    raw.replace(/\{\{\s*(task\.(?:dir|num))\s*\}\}/g, (whole, key: string) => tokens[key] ?? whole);
+  const walk = (node: unknown): unknown => {
+    if (typeof node === 'string') return sub(node);
+    if (Array.isArray(node)) return node.map(walk);
+    if (node && typeof node === 'object') {
+      return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, walk(v)]));
+    }
+    return node;
+  };
+  return walk(value) as T;
+}
+
+export function knownCitationPathsForSpec(spec: CraftbookEvalSpec): string[] {
+  // `workPath` is deliberately NOT pinned by sidecars any more — the book's
+  // own `{{task.dir}}` default drives it. Substitute that default here so the
+  // book's forward references (`{{workPath}}/outline.md`) still reduce to a
+  // task token the grader can resolve once the run has a task.
+  const params: Record<string, string> = {
+    workPath: '{{task.dir}}',
+    ...(spec.setup?.craftbookParams ?? {}),
+  };
+  const interpolate = (raw: string): string =>
+    raw.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (whole, key: string) => params[key] ?? whole);
+  const out = new Set<string>();
+  for (const value of Object.values(params)) {
+    const v = String(value).trim();
+    if (v) out.add(v);
+  }
+  for (const token of spec.stepPathTokens ?? []) {
+    const t = interpolate(token).trim().replace(/^"|"$/g, '');
+    // A surviving `{{task.*}}` is NOT unresolvable — the grader substitutes it
+    // against the real task once the run has one. Dropping it here discarded
+    // the book's own forward references (`{{workPath}}/outline.md`, which now
+    // interpolates to `{{task.dir}}/outline.md`), so a packet naming the file
+    // it is about to write read as a fabricated citation.
+    if (!t) continue;
+    if (t.includes('{{') && !/\{\{\s*task\.(?:dir|num)\s*\}\}/.test(t)) continue;
+    out.add(t);
+  }
+  return [...out];
+}
+
+export function successChecksForSpec(spec: CraftbookEvalSpec) {
   const checks = [...(spec.success.checks ?? [])];
   for (const deliverable of spec.success.deliverables ?? []) {
     // completionGate only understands core GateChecks; eval-only checks
@@ -1593,7 +1682,9 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
       if (!projectId) return { done: false };
       await approvePendingCommandQuestions(ctx, projectId, spec);
 
-      const checks = successChecksForSpec(spec);
+      const taskTokens = await resolveTaskTokens(ctx.client, projectId, spec);
+      const rawChecks = successChecksForSpec(spec);
+      const checks = taskTokens ? interpolateTaskTokens(rawChecks, taskTokens) : rawChecks;
       const workspace = workspaceFromClient(ctx.client, projectId);
       const primaryDeliverable = spec.success.deliverables?.[0];
       const primaryText = primaryDeliverable
@@ -1640,7 +1731,15 @@ export function craftbookScenarioFromSpec(spec: CraftbookEvalSpec): EvalScenario
           },
         };
       }
-      const result = await evaluateCraftbookGateChecks(checks, gateWorkspace);
+      // Forgive the run's OWN metadata the same way production does. The
+      // grader previously injected no deps at all, so a citation naming a
+      // craftbook param (`tasks/eval`) or one of the step prompt's own
+      // boundary examples (`notes/outline.md`) read as a fabricated source
+      // and failed honest work that the runtime gate would have passed.
+      const rawKnown = knownCitationPathsForSpec(spec);
+      const result = await evaluateCraftbookGateChecks(checks, gateWorkspace, {
+        knownCitationPaths: taskTokens ? interpolateTaskTokens(rawKnown, taskTokens) : rawKnown,
+      });
       const failures = [...result.failures];
       if (
         spec.success.taskNotes?.requireCraftbookTask &&

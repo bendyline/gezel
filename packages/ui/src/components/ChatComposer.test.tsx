@@ -30,16 +30,31 @@ vi.mock('./GezelIcon.js', () => ({ GezelIcon: () => <span /> }));
 vi.mock('./GezelMediaProvider.js', () => ({
   createGezelMediaProvider: () => ({ dispose: vi.fn() }),
 }));
-vi.mock('./ChatNarrateButton.js', () => ({
-  ChatNarrateButton: ({ onTranscript }: { onTranscript: (text: string) => void }) => (
-    <button type="button" onClick={() => onTranscript('dictated words')}>
-      Narrate prompt
-    </button>
-  ),
-}));
-vi.mock('@bendyline/squisq-editor-react', async () => {
+vi.mock('./ChatNarrateButton.js', async () => {
   const { useState } = await import('react');
   return {
+    ChatNarrateButton: ({ onTranscript }: { onTranscript: (text: string) => void }) => {
+      const [recording, setRecording] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setRecording((current) => !current)}>
+            {recording ? 'Stop narrating' : 'Narrate prompt'}
+          </button>
+          {recording && (
+            <button type="button" onClick={() => onTranscript('dictated words')}>
+              Emit narration chunk
+            </button>
+          )}
+        </>
+      );
+    },
+  };
+});
+vi.mock('@bendyline/squisq-editor-react', async () => {
+  const { createContext, useContext, useState } = await import('react');
+  const EditorTestContext = createContext({ replaceAll: (_source: string) => {} });
+  return {
+    useEditorContext: () => useContext(EditorTestContext),
     EditorShell: ({
       initialMarkdown = '',
       placeholder,
@@ -59,32 +74,34 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
       const [mountedPlaceholder] = useState(placeholder);
       const [draft, setDraft] = useState(initialMarkdown);
       return (
-        <div>
-          <textarea
-            className="squisq-wysiwyg-editor"
-            aria-label="Message"
-            value={draft}
-            onChange={(event) => {
-              setDraft(event.target.value);
-              onChange?.(event.target.value);
-            }}
-          />
-          <span data-testid="editor-placeholder">{mountedPlaceholder}</span>
-          <span data-testid="editor-draft">{draft}</span>
-          <button
-            type="button"
-            onClick={() => {
-              setDraft('Hello from the test');
-              onChange?.('Hello from the test');
-            }}
-          >
-            Fill draft
-          </button>
-          <button type="button" onClick={() => submitOnEnter?.()}>
-            Press Enter
-          </button>
-          {toolbarSlotRight}
-        </div>
+        <EditorTestContext.Provider value={{ replaceAll: (source) => setDraft(source) }}>
+          <div>
+            <textarea
+              className="squisq-wysiwyg-editor"
+              aria-label="Message"
+              value={draft}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                onChange?.(event.target.value);
+              }}
+            />
+            <span data-testid="editor-placeholder">{mountedPlaceholder}</span>
+            <span data-testid="editor-draft">{draft}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setDraft('Hello from the test');
+                onChange?.('Hello from the test');
+              }}
+            >
+              Fill draft
+            </button>
+            <button type="button" onClick={() => submitOnEnter?.()}>
+              Press Enter
+            </button>
+            {toolbarSlotRight}
+          </div>
+        </EditorTestContext.Provider>
       );
     },
   };
@@ -145,17 +162,19 @@ describe('ChatComposer keyboard hints', () => {
     await waitFor(() => expect(document.activeElement).toBe(editor));
   });
 
-  it('extends the current draft with narrated text', () => {
+  it('extends the draft without remounting and stopping active narration', () => {
     render(
       <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
     fireEvent.click(screen.getByRole('button', { name: 'Narrate prompt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Emit narration chunk' }));
 
     expect(screen.getByTestId('editor-draft')).toHaveTextContent(
       'Hello from the test dictated words',
     );
+    expect(screen.getByRole('button', { name: 'Stop narrating' })).toBeEnabled();
   });
 });
 

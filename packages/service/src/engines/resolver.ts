@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createReadStream, existsSync } from 'node:fs';
+import { createReadStream, existsSync, readdirSync } from 'node:fs';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
@@ -10,7 +10,17 @@ import {
   retryTransient,
 } from '@bendyline/gezel';
 import {
+  DUCKDB_APPLE_TEAM_ID,
+  DUCKDB_ARCHIVE_SHA256,
+  DUCKDB_ASSET,
+  DUCKDB_BINARY_SHA256,
+  DUCKDB_VERSION,
+  DUCKDB_WINDOWS_PUBLISHER,
   type NativeBinaryName,
+  duckdbAssetUrl,
+  duckdbBinaryName,
+  duckdbInstallDir,
+  duckdbPlatformKey,
   resolvePlatformKey,
   windowsHeadlessSpawnOptions,
 } from '@bendyline/gezel/native';
@@ -97,6 +107,10 @@ export interface ResolveEngineOptions {
   expectedSha256sumsDigest?: string;
   /** Override the source-bundled per-archive hashes (tests). */
   expectedArchiveSha256?: Readonly<Record<string, string>>;
+  /** Override the pinned executable digest for a vendored engine (tests). */
+  expectedBinarySha256?: string;
+  /** Override the vendored engine's download URL (tests). */
+  vendoredUrlOverride?: string;
   /** Override the GitHub API base (tests point this at a local fixture). */
   githubApiBase?: string;
   /** Override signature verification (tests — avoids spawning powershell/codesign). */
@@ -139,9 +153,223 @@ interface GhRelease {
  * pull (so registry consumers break on the event and direct drainers see
  * the throw — see `resolveEngineToCompletion`).
  */
+/**
+ * Resolve a **vendored** engine — one Gezel redistributes exactly as its
+ * upstream published it, rather than building.
+ *
+ * Today that is DuckDB alone. It does not go through the flow below because
+ * almost none of that flow applies: there is no `native-v*` release to look
+ * up, no `SHA256SUMS` manifest to digest-pin, no `gezel-` prefixed artifact
+ * name, and no Bendyline signature to assert. What replaces them is a
+ * stronger, simpler chain — the archive digest and the executable digest are
+ * both baked into this build (`packages/core/src/native/duckdb-pin.ts`), so
+ * the bytes are pinned twice over without trusting any intermediary manifest.
+ *
+ * The signature check asserts the **vendor's** identity, not ours: the
+ * DuckDB Foundation's Apple team on macOS, their Authenticode subject on
+ * Windows. That is deliberately stricter than the Windows precedent for
+ * vendored binaries, which asserts no publisher at all — the point of
+ * shipping the vendor's bytes is that the vendor's attestation travels with
+ * them, so we should be checking it.
+ *
+ * Landing directory is {@link duckdbInstallDir}, keyed by DuckDB's own
+ * version rather than the Gezel native-release version, and shared with the
+ * Electron bundle installer. One machine gets one verified copy no matter
+ * which install path produced it.
+ */
+async function* resolveVendoredDuckdb(
+  opts: ResolveEngineOptions,
+): AsyncGenerator<EngineResolveEvent, EngineResolveResult, void> {
+  const key = duckdbPlatformKey(process.platform, process.arch);
+  if (!key) {
+    yield* fail(
+      `DuckDB publishes no build for ${process.platform}/${process.arch} — install it yourself and set GEZEL_DUCKDB_BIN`,
+    );
+  }
+  const platformKey = key as NonNullable<ReturnType<typeof duckdbPlatformKey>>;
+  const isWin = process.platform === 'win32';
+  const binaryName = duckdbBinaryName(process.platform);
+  const cacheDir = duckdbInstallDir(opts.home);
+  const binPath = join(cacheDir, binaryName);
+  const sentinelPath = join(cacheDir, '.verified.json');
+  const archiveName = DUCKDB_ASSET[platformKey];
+  const expectedArchiveSha = (
+    opts.expectedArchiveSha256?.[archiveName] ?? DUCKDB_ARCHIVE_SHA256[platformKey]
+  ).toLowerCase();
+  const expectedBinarySha = (
+    opts.expectedBinarySha256 ?? DUCKDB_BINARY_SHA256[platformKey]
+  ).toLowerCase();
+  const verifyAuthenticity = opts.verifyOverride ?? verifyCodeSignature;
+
+  // Vendor identity, per platform. Linux ELF carries no signature at all, so
+  // the digests are the whole check there — which is also true of every other
+  // Linux engine we ship.
+  const verifyOptions =
+    process.platform === 'darwin'
+      ? ({
+          policy: 'require' as SignaturePolicy,
+          expectedAppleTeamId: DUCKDB_APPLE_TEAM_ID,
+        } as const)
+      : isWin
+        ? ({
+            policy: 'prefer' as SignaturePolicy,
+            expectedPublisher: DUCKDB_WINDOWS_PUBLISHER,
+          } as const)
+        : ({ policy: 'skip' as SignaturePolicy } as const);
+
+  // Warm cache: the sentinel records the digest this build expects, so a pin
+  // bump invalidates it without a version-string comparison.
+  if (existsSync(binPath) && existsSync(sentinelPath)) {
+    const sentinel = await readSentinel(sentinelPath);
+    if (sentinel.archiveSha?.toLowerCase() === expectedArchiveSha) {
+      const { result: signature, accepted } = await verifyAuthenticity(binPath, verifyOptions);
+      if (!accepted) {
+        yield* fail(
+          `cached DuckDB failed signature policy '${verifyOptions.policy}': ${signature.status}${signature.detail ? ` (${signature.detail})` : ''}`,
+        );
+      }
+      process.env[ENGINE_ENV_VAR.duckdb] = binPath;
+      yield { type: 'done', binPath, cached: true };
+      return {
+        binPath,
+        cached: true,
+        signature,
+        version: DUCKDB_VERSION,
+        assetPlatformKey: platformKey,
+      };
+    }
+  }
+
+  await mkdir(cacheDir, { recursive: true });
+  const tmpExtractDir = `${cacheDir}.tmp`;
+  await rm(tmpExtractDir, { recursive: true, force: true });
+  const archivePath = join(cacheDir, `${archiveName}.download`);
+
+  // No auth header and no GitHub API call: these are public release assets
+  // fetched by direct URL, so the 60-request/hour unauthenticated API limit
+  // that constrains the native-release path does not apply here at all.
+  const dl = downloadWithRetry({
+    url: opts.vendoredUrlOverride ?? duckdbAssetUrl(platformKey),
+    destPath: archivePath,
+    approxSizeBytes: 0,
+    fetchImpl: opts.fetchImpl ?? globalThis.fetch,
+    ...(opts.signal ? { signal: opts.signal } : {}),
+  });
+  let outcome: DownloadResult | undefined;
+  while (true) {
+    const step = await dl.next();
+    if (step.done) {
+      outcome = step.value;
+      break;
+    }
+    const ev = step.value;
+    if (ev.type === 'progress') {
+      yield { type: 'progress', bytesWritten: ev.bytesWritten, totalBytes: ev.totalBytes };
+    } else {
+      yield {
+        type: 'retrying',
+        attempt: ev.attempt,
+        maxAttempts: ev.maxAttempts,
+        delayMs: ev.delayMs,
+        reason: ev.reason,
+      };
+    }
+  }
+  const partialPath = `${archivePath}.partial`;
+  if (!outcome || outcome.kind === 'aborted') yield* fail('DuckDB download was cancelled');
+  if (outcome && outcome.kind === 'error') yield* fail(outcome.error);
+
+  yield { type: 'verifying', what: 'sha256' };
+  const actualSha = (await sha256File(partialPath)).toLowerCase();
+  if (actualSha !== expectedArchiveSha) {
+    await rm(partialPath, { force: true });
+    yield* fail(
+      `${archiveName} failed integrity check: expected ${expectedArchiveSha.slice(0, 16)}…, got ${actualSha.slice(0, 16)}…`,
+    );
+  }
+
+  await mkdir(tmpExtractDir, { recursive: true });
+  try {
+    new AdmZip(partialPath).extractAllTo(tmpExtractDir, /* overwrite */ true);
+  } finally {
+    await rm(partialPath, { force: true });
+  }
+
+  // The CLI archive holds a single `duckdb` at its root, but locate it by
+  // walk so an upstream layout change fails loudly instead of publishing an
+  // empty directory.
+  const tmpBin = findNamedFile(tmpExtractDir, binaryName);
+  if (!tmpBin) {
+    await rm(tmpExtractDir, { recursive: true, force: true });
+    yield* fail(`extracted ${archiveName} but no '${binaryName}' was inside it`);
+  }
+  if (!isWin) await chmod(tmpBin as string, 0o755).catch(() => {});
+
+  // Second digest: the archive check above proves we downloaded the published
+  // asset; this proves the executable inside it is the one the Electron
+  // bundle also ships, which is what makes the two install paths equivalent.
+  const binarySha = (await sha256File(tmpBin as string)).toLowerCase();
+  if (binarySha !== expectedBinarySha) {
+    await rm(tmpExtractDir, { recursive: true, force: true });
+    yield* fail(
+      `${binaryName} inside ${archiveName} failed integrity check: expected ${expectedBinarySha.slice(0, 16)}…, got ${binarySha.slice(0, 16)}…`,
+    );
+  }
+
+  yield { type: 'verifying', what: 'signature' };
+  await stripQuarantine(tmpBin as string);
+  const { result: signature, accepted } = await verifyAuthenticity(tmpBin as string, verifyOptions);
+  if (!accepted) {
+    await rm(tmpExtractDir, { recursive: true, force: true });
+    yield* fail(
+      `DuckDB failed signature policy '${verifyOptions.policy}': ${signature.status}${signature.detail ? ` (${signature.detail})` : ''}`,
+    );
+  }
+
+  await rm(cacheDir, { recursive: true, force: true });
+  await rename(tmpExtractDir, cacheDir);
+  await writeFile(
+    sentinelPath,
+    `${JSON.stringify(
+      {
+        engine: 'duckdb',
+        version: DUCKDB_VERSION,
+        assetPlatformKey: platformKey,
+        archiveName,
+        archiveSha: actualSha,
+        binarySha,
+        signature,
+        verifiedAt: nowIso(),
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  );
+
+  // Deliberately NOT stampEnv: that also repoints GEZEL_NATIVE_BIN_DIR, which
+  // is the root the other engines resolve their siblings from. DuckDB lives in
+  // its own version-keyed tree and has no siblings there, so pointing the
+  // native-bin root at it would break llama/sd/whisper discovery on next boot.
+  process.env[ENGINE_ENV_VAR.duckdb] = binPath;
+  log.info(
+    `[engine-resolver] resolved duckdb ${DUCKDB_VERSION} → ${binPath} [sig=${signature.status}]`,
+  );
+  yield { type: 'done', binPath, cached: false };
+  return {
+    binPath,
+    cached: false,
+    signature,
+    version: DUCKDB_VERSION,
+    assetPlatformKey: platformKey,
+  };
+}
+
 export async function* resolveEngine(
   opts: ResolveEngineOptions,
 ): AsyncGenerator<EngineResolveEvent, EngineResolveResult, void> {
+  // DuckDB is vendored, not built — it has no artifact in our native release.
+  if (opts.engine === 'duckdb') return yield* resolveVendoredDuckdb(opts);
   const platformKey = resolvePlatformKey();
   if (!platformKey) {
     yield* fail(
@@ -655,4 +883,18 @@ async function readSentinel(
   } catch {
     return { signature: { status: 'unsupported' } };
   }
+}
+
+/** First file named `name` anywhere under `root`, or null. */
+function findNamedFile(root: string, name: string): string | null {
+  const stack = [root];
+  while (stack.length > 0) {
+    const dir = stack.pop() as string;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) stack.push(full);
+      else if (entry.isFile() && entry.name === name) return full;
+    }
+  }
+  return null;
 }

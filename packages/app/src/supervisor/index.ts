@@ -27,6 +27,7 @@ import {
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { describeOwnedChildState, formatDiagnosticError } from './diagnostics.js';
 import { defaultBundlePaths, extractBundleIfNeeded, readBundleMeta } from './extract-bundle.js';
+import { defaultDuckdbBundleDir, installDuckdbIfNeeded } from './extract-duckdb.js';
 import { defaultNodeBundleDir, installNodeIfNeeded } from './extract-node.js';
 import { defaultPnpmBundleDir, installPnpmIfNeeded } from './extract-pnpm.js';
 import { readHomeUsageSignals, readHostingPin, writeHostingPin } from './home-signals.js';
@@ -1127,10 +1128,30 @@ export async function connectOrStart(opts: ConnectOptions): Promise<SupervisedSe
     // connector shape. The service spawns it as a short-lived child per
     // query; without this the corpus is still on disk and still readable,
     // the query tools just report the engine as unavailable.
-    const bin = resolveNativeBinaryPath('duckdb', import.meta.url);
-    if (bin) {
-      process.env.GEZEL_DUCKDB_BIN = bin;
-      opts.logger?.info?.(`[supervisor] bundled duckdb: ${bin}`);
+    //
+    // Unlike the engines above it does NOT come from native-bin/: DuckDB is
+    // vendored unmodified from the DuckDB Foundation's own signed, notarized
+    // release, so it ships as a bundled runtime beside node and pnpm rather
+    // than as an artifact of our native build. Installing it into the
+    // version-keyed directory the service's engine resolver also uses means a
+    // machine with both the desktop app and an npm `gezeld` shares one copy.
+    try {
+      const installed = await installDuckdbIfNeeded({
+        home: opts.home,
+        bundleDir: defaultDuckdbBundleDir(import.meta.url),
+        ...(opts.logger ? { logger: opts.logger } : {}),
+      });
+      if (installed.binaryPath) {
+        process.env.GEZEL_DUCKDB_BIN = installed.binaryPath;
+        opts.logger?.info?.(
+          `[supervisor] bundled duckdb v${installed.version} (${installed.action}): ${installed.binaryPath}`,
+        );
+      }
+    } catch (err) {
+      // Never fatal: the daemon boots and the data features report the engine
+      // as unavailable, which is a far better outcome than refusing to start
+      // over a subsystem most projects never touch.
+      opts.logger?.warn?.(`[supervisor] duckdb install failed: ${String(err)}`);
     }
   }
 

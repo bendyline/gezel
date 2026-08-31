@@ -5,7 +5,11 @@ import { primitivesMock } from '../../test-utils/primitivesMock.js';
 
 vi.mock('../../api.js', () => ({ api: createMockApi() }));
 vi.mock('../../primitives/index.js', () => primitivesMock);
-vi.mock('./NewProjectDetailPane.js', () => ({ NewProjectPaneHero: () => null }));
+vi.mock('./NewProjectDetailPane.js', () => ({
+  NewProjectBrief: () => null,
+  SelectionArt: () => null,
+  selectionIdentity: () => ({ name: 'Selection', categoryLabel: 'General', description: '' }),
+}));
 
 const { NewProjectDialog } = await import('./NewProjectDialog.js');
 const { api } = await import('../../api.js');

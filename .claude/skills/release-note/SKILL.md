@@ -89,7 +89,7 @@ The Handboek exists to make gezel approachable for people who are not engineers.
 - **No marketing.** No "delighted to announce", no "powerful", no "seamless". State the change; let it be good on its own.
 - **No emojis** (repo-wide rule).
 - **Don't hard-wrap prose** — one paragraph is one line, per `docs/handboek/README.md`.
-- Keep an **"Anything to do?"** section at the end. Almost always the answer is "no, update when offered" — say it anyway, and point at the one or two settings worth a visit.
+- Close with a **"Things to see and do after update"** section naming the one or two settings worth a visit. Never open it by saying there is nothing to do: that line was identical on every release, so it was removed from all of them — the pointers are the section's whole reason to exist.
 
 Length: a substantial release runs 60–120 lines. A quiet one runs 20. Do not pad.
 

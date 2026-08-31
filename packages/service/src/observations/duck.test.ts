@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
+import { duckdbBinaryName, duckdbInstalledBinary } from '@bendyline/gezel/native';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DuckQueryError,
@@ -9,7 +10,12 @@ import {
   buildDuckPrelude,
   sqlLiteral,
 } from './duck.js';
-import { findRealDuckdb, hasRealDuckdb, makeFakeDuckdb } from './testing/duck-fixture.js';
+import {
+  fakeDuckSpawn,
+  findRealDuckdb,
+  hasRealDuckdb,
+  makeFakeDuckdb,
+} from './testing/duck-fixture.js';
 
 let dir: string;
 const priorBin = process.env.GEZEL_DUCKDB_BIN;
@@ -60,7 +66,11 @@ describe('DuckRunner — plumbing (fake CLI)', () => {
 
   it('reports an actionable error when no binary is configured', async () => {
     delete process.env.GEZEL_DUCKDB_BIN;
-    const runner = new DuckRunner();
+    // `fileExists: () => false` is what makes this hermetic: without it the
+    // ladder would find a system DuckDB on any developer machine that has one
+    // (brew, apt, install.duckdb.org) and the test would pass or fail
+    // depending on the host rather than the code.
+    const runner = new DuckRunner({ fileExists: () => false });
     expect(runner.available()).toBe(false);
     await expect(runner.runTrusted('SELECT 1', opts)).rejects.toBeInstanceOf(DuckUnavailableError);
     await expect(runner.runTrusted('SELECT 1', opts)).rejects.toMatchObject({
@@ -72,7 +82,10 @@ describe('DuckRunner — plumbing (fake CLI)', () => {
     const bin = await makeFakeDuckdb(join(dir, 'duckdb'), {
       stdout: '[{"n":1,"s":"ok"},{"n":2,"s":"two"}]',
     });
-    const rows = await new DuckRunner({ binaryPath: bin }).runTrusted('SELECT 1', opts);
+    const rows = await new DuckRunner({ binaryPath: bin, spawnImpl: fakeDuckSpawn() }).runTrusted(
+      'SELECT 1',
+      opts,
+    );
     expect(rows).toEqual([
       { n: 1, s: 'ok' },
       { n: 2, s: 'two' },
@@ -81,7 +94,12 @@ describe('DuckRunner — plumbing (fake CLI)', () => {
 
   it('treats empty output as no rows', async () => {
     const bin = await makeFakeDuckdb(join(dir, 'duckdb'), { stdout: '' });
-    expect(await new DuckRunner({ binaryPath: bin }).runTrusted('SELECT 1', opts)).toEqual([]);
+    expect(
+      await new DuckRunner({ binaryPath: bin, spawnImpl: fakeDuckSpawn() }).runTrusted(
+        'SELECT 1',
+        opts,
+      ),
+    ).toEqual([]);
   });
 
   it('surfaces the engine message verbatim so a model can repair its SQL', async () => {
@@ -90,7 +108,7 @@ describe('DuckRunner — plumbing (fake CLI)', () => {
       stderr: 'Binder Error: Referenced column "rout" not found\nDid you mean "route"?',
       exitCode: 1,
     });
-    const err = await new DuckRunner({ binaryPath: bin })
+    const err = await new DuckRunner({ binaryPath: bin, spawnImpl: fakeDuckSpawn() })
       .runTrusted('SELECT rout FROM t', opts)
       .catch((e) => e);
     expect(err).toBeInstanceOf(DuckQueryError);
@@ -99,7 +117,7 @@ describe('DuckRunner — plumbing (fake CLI)', () => {
 
   it('aborts on its budget and reports the elapsed budget, not a crash', async () => {
     const bin = await makeFakeDuckdb(join(dir, 'duckdb'), { sleepSeconds: 30, stdout: '[]' });
-    const err = await new DuckRunner({ binaryPath: bin })
+    const err = await new DuckRunner({ binaryPath: bin, spawnImpl: fakeDuckSpawn() })
       .runTrusted('SELECT 1', { ...opts, timeoutMs: 300 })
       .catch((e) => e);
     expect(err).toBeInstanceOf(DuckQueryError);
@@ -112,12 +130,15 @@ describe('DuckRunner — plumbing (fake CLI)', () => {
     process.env.GEZEL_TOKEN = 'super-secret-daemon-token';
     process.env.OPENAI_API_KEY = 'sk-should-not-leak';
     try {
-      await new DuckRunner({ binaryPath: bin }).runTrusted('SELECT 1', opts);
+      await new DuckRunner({ binaryPath: bin, spawnImpl: fakeDuckSpawn() }).runTrusted(
+        'SELECT 1',
+        opts,
+      );
       const dumped = await readFile(envDumpPath, 'utf8');
       expect(dumped).not.toContain('super-secret-daemon-token');
       expect(dumped).not.toContain('sk-should-not-leak');
       // PATH is on the allowlist and must survive, or the child cannot run.
-      expect(dumped).toMatch(/^PATH=/m);
+      expect(dumped).toMatch(/^PATH=/im);
     } finally {
       delete process.env.GEZEL_TOKEN;
       delete process.env.OPENAI_API_KEY;
@@ -126,9 +147,9 @@ describe('DuckRunner — plumbing (fake CLI)', () => {
 
   it('rejects non-JSON output instead of returning junk rows', async () => {
     const bin = await makeFakeDuckdb(join(dir, 'duckdb'), { stdout: 'not json at all' });
-    await expect(new DuckRunner({ binaryPath: bin }).runTrusted('SELECT 1', opts)).rejects.toThrow(
-      /not JSON/,
-    );
+    await expect(
+      new DuckRunner({ binaryPath: bin, spawnImpl: fakeDuckSpawn() }).runTrusted('SELECT 1', opts),
+    ).rejects.toThrow(/not JSON/);
   });
 });
 
@@ -198,5 +219,80 @@ describe.runIf(hasRealDuckdb())('DuckRunner — sandbox (real engine)', () => {
       opts,
     );
     await expect(readFile(dbPath)).resolves.toBeDefined();
+  });
+});
+
+describe('DuckRunner — binary discovery ladder', () => {
+  const priorEnv = process.env.GEZEL_DUCKDB_BIN;
+  const priorPath = process.env.PATH;
+  afterEach(() => {
+    if (priorEnv === undefined) delete process.env.GEZEL_DUCKDB_BIN;
+    else process.env.GEZEL_DUCKDB_BIN = priorEnv;
+    process.env.PATH = priorPath;
+  });
+
+  it('prefers the pinned build over a system DuckDB on PATH', () => {
+    // The ordering is a security property, not a preference: the sandbox
+    // prelude and the statement guard are contracts measured against the
+    // pinned build, so an unknown-vintage PATH binary must never win.
+    delete process.env.GEZEL_DUCKDB_BIN;
+    process.env.PATH = '/usr/local/bin';
+    const home = '/tmp/gezel-home';
+    const pinned = duckdbInstalledBinary(home);
+    const runner = new DuckRunner({
+      home,
+      fileExists: (p) => p === pinned || p === join('/usr/local/bin', duckdbBinaryName()),
+    });
+    expect(runner.resolvedBinaryProvenance()).toEqual({
+      path: pinned,
+      source: 'pinned',
+      pinned: true,
+    });
+  });
+
+  it('falls back to the DuckDB installer location, then PATH', () => {
+    delete process.env.GEZEL_DUCKDB_BIN;
+    process.env.PATH = '/usr/local/bin';
+    const vendor = join(homedir(), '.duckdb', 'cli', 'latest', duckdbBinaryName());
+    const onPath = join('/usr/local/bin', duckdbBinaryName());
+
+    const viaInstaller = new DuckRunner({
+      home: '/tmp/gezel-home',
+      fileExists: (p) => p === vendor || p === onPath,
+    });
+    expect(viaInstaller.resolvedBinaryProvenance()).toMatchObject({
+      source: 'duckdb-installer',
+      pinned: false,
+    });
+
+    const viaPath = new DuckRunner({
+      home: '/tmp/gezel-home',
+      fileExists: (p) => p === onPath,
+    });
+    expect(viaPath.resolvedBinaryProvenance()).toMatchObject({
+      path: onPath,
+      source: 'path',
+      pinned: false,
+    });
+  });
+
+  it('lets GEZEL_DUCKDB_BIN override a present pinned build', () => {
+    process.env.GEZEL_DUCKDB_BIN = '/opt/custom/duckdb';
+    const runner = new DuckRunner({ home: '/tmp/gezel-home', fileExists: () => true });
+    expect(runner.resolvedBinaryProvenance()).toMatchObject({
+      path: '/opt/custom/duckdb',
+      source: 'env',
+    });
+  });
+
+  it('ignores empty PATH segments so a stray ./duckdb cannot win', () => {
+    delete process.env.GEZEL_DUCKDB_BIN;
+    process.env.PATH = `${delimiter}${delimiter}`;
+    // Everything "exists" except the installer rung, so the only way to
+    // resolve is through PATH — and every segment here is empty.
+    const runner = new DuckRunner({
+      fileExists: (p) => !p.includes(join('.duckdb', 'cli')),
+    });
+    expect(runner.resolvedBinaryProvenance()).toBeNull();
   });
 });

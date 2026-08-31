@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -2562,6 +2564,44 @@ describe('score-plateau escalation (progressive failures)', () => {
     expect(failures[0]!.reason).toContain('repair-exhausted (score plateau)');
     expect(failures[0]!.reason).toContain('score frozen at 4');
     expect(failures[0]!.failureMode).toBe('model-stuck');
+  });
+
+  // INCIDENT: the craftbook node-gate oracle copies the workspace into a
+  // fresh `mkdtemp` root every poll, and node stamps that root into every
+  // stack frame it prints. That made ONE frozen failure hash differently
+  // every five seconds: the signature ladder reset to attempt 1 forever
+  // (so it always re-sent), and each of those sends armed the plateau
+  // ladder, which then counted a "completed repair" on the next poll.
+  // qwen3.8-27b x codemod-sweep booked attempts 3, 4 and 5 exactly 5.1s
+  // apart while the target gezel had been mid-turn for four minutes and
+  // stayed mid-turn for fourteen more; the trial died as
+  // `repair-exhausted (score plateau): 6 completed repairs` and was
+  // classified `model`. The model never touched that counter.
+  it('does not count a repair when only a throwaway sandbox path moved', async () => {
+    const client = makeClient({
+      sessions: [{ id: 's', gezelId: 'builder-1', lastActivityAt: '2026-08-02T05:00:00Z' }],
+    });
+    const failures: EvalTerminalFailure[] = [];
+    const ctx: EvalContext = {
+      ...makeCtx(client),
+      requestTerminalFailure: (f) => failures.push(f),
+    };
+    const failureWithSandbox = (suffix: string): SniffResult => ({
+      ok: false,
+      signals: [],
+      score: 3,
+      failReason: `tests/verify-sweep.mjs did not pass when run with node: exit=1\n    at file://${join(tmpdir(), `gezel-craftbook-node-${suffix}`)}/tests/verify-sweep.mjs:32:8`,
+      missingRequiredSignals: ['residual scan clean'],
+    });
+
+    for (const suffix of ['x9vefm', 'cEhqdE', 'YRDeK4', 'oRE8Ob', 'y4D3N4', '39K4nG', 'aBRl9l']) {
+      await postSniffFeedback(ctx, 'tasks/eval/sites.md', failureWithSandbox(suffix), {
+        expectedDeliverable: null,
+      });
+    }
+
+    expect(client.messageGezel).toHaveBeenCalledTimes(1);
+    expect(failures).toEqual([]);
   });
 
   it('the frozen-signature ladder still wins when the same failure repeats', async () => {

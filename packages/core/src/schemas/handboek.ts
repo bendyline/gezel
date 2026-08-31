@@ -50,6 +50,8 @@ export const HandboekTocEntrySchema = z.object({
   /** Sort key within the area. Curated articles set it via frontmatter. */
   order: z.number(),
   summary: z.string().optional(),
+  /** Poster headline for the page's Open Graph card, when the author set one. */
+  ogHeadline: z.string().optional(),
   /** True for articles whose body is produced from catalog/registry data. */
   generated: z.boolean(),
   /** False when the article is excluded from the static-site export. */

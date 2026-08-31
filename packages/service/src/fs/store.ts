@@ -4496,8 +4496,20 @@ export class Store {
     projectId: string,
     data: Buffer,
     mimeType: string,
+    originalName?: string,
   ): Promise<{ relativePath: string; filename: string }> {
-    const ext = extForMimeType(mimeType);
+    const safeOriginalName = originalName ? safeBasename(originalName) : null;
+    const originalExt = safeOriginalName?.match(/\.[a-z0-9]{1,16}$/i)?.[0].toLowerCase();
+    const canonicalExt = extForMimeType(mimeType);
+    // Image consumers trust the MIME and send the bytes to a vision backend,
+    // so keep their extension canonical. Known generic MIME types do the same;
+    // only an unknown/octet-stream upload falls back to the user's safe
+    // extension so artifact reads can still recover Markdown/text/Office MIME.
+    const ext = mimeType.toLowerCase().startsWith('image/')
+      ? canonicalExt
+      : canonicalExt === '.bin'
+        ? (originalExt ?? canonicalExt)
+        : canonicalExt;
     const filename = `${randomUUID()}${ext}`;
     const dir = this.projectAttachmentsDir(projectId);
     await mkdir(dir, { recursive: true });

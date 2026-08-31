@@ -397,7 +397,11 @@ export async function buildDs4Provider(opts: {
             return 16_384;
           })(),
         ),
-        '--cors',
+        // NOT `--cors`. ds4 leaves Access-Control-Allow-* headers OFF by
+        // default and that flag opts into them, which would let any web page
+        // the user has open drive this engine and read the answer, given the
+        // port. Nothing in Gezel needs it: the daemon talks to the engine
+        // server-side, where CORS — a browser policy — does not apply.
       ];
       if (ssdStreaming) {
         args.push('--ssd-streaming');

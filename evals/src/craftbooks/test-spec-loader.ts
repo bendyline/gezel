@@ -31,6 +31,14 @@ export interface LoadedCraftbookTestSpec {
    * rather than the freehand direct-worker path. See scenario.ts.
    */
   hasSpawn: boolean;
+  /**
+   * Backticked slash-containing tokens from the book's own step prompts —
+   * the procedure's boundary examples (e.g. "an earlier `notes/outline.md`").
+   * The RUNTIME forgives these as task-supplied metadata when a citation
+   * names one (`taskSuppliedCitationPaths`); the grader must forgive the
+   * same set or it judges honest work more harshly than production does.
+   */
+  stepPathTokens: string[];
 }
 
 /** The recipe sidecar next to each version's `test.json`. */
@@ -53,6 +61,27 @@ function craftbookHasSpawn(versionDir: string): boolean {
     return !!doc && typeof doc === 'object' && doc.spawn != null;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Best-effort read of the backticked path tokens a book's step prompts hand
+ * their assignee — never throws. Mirrors the prompt half of the runtime's
+ * `taskSuppliedCitationPaths`; the params half comes from the test spec.
+ */
+function craftbookStepPathTokens(versionDir: string): string[] {
+  try {
+    const raw = readFileSync(join(versionDir, CRAFTBOOK_FILENAME), 'utf8');
+    const doc = JSON.parse(raw) as { steps?: Array<{ prompt?: string }> };
+    const out = new Set<string>();
+    for (const step of doc.steps ?? []) {
+      for (const m of (step.prompt ?? '').matchAll(/`([^`\s]*\/[^`\s]+)`/g)) {
+        if (m[1]) out.add(m[1]);
+      }
+    }
+    return [...out];
+  } catch {
+    return [];
   }
 }
 
@@ -100,6 +129,7 @@ export function loadCraftbookTestSpecsSync(): LoadedCraftbookTestSpec[] {
       version,
       spec: parsed.spec,
       hasSpawn: craftbookHasSpawn(versionDir),
+      stepPathTokens: craftbookStepPathTokens(versionDir),
     });
   }
   loaded.sort((a, b) => a.craftbookId.localeCompare(b.craftbookId));
