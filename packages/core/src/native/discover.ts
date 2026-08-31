@@ -39,6 +39,7 @@ import type { DetectInput, GpuVendorHint, LlamaBackend } from './llama-backend.j
 import { LLAMA_ENGINE_VERSION } from './llama-engine-version.js';
 import { isBinaryQuarantined, readLlamaQuarantine } from './llama-quarantine.js';
 import type { LlamaQuarantineEntry } from './llama-quarantine.js';
+import { duckdbInstalledBinary } from './duckdb-pin.js';
 import { resolvePlatformKey } from './platform-key.js';
 
 export type NativeBinaryName =
@@ -129,8 +130,12 @@ export interface DiscoverResult {
  * vendor's and the Windows signing allowlist
  * (packages/app/scripts/third-party-binaries.cjs) matches on exactly that
  * name. Everything we compile is emitted as `gezel-<name>`.
+ *
+ * DuckDB is vendored too, but it is not in `native-bin/` at all — it ships as
+ * a bundled runtime beside node and pnpm, and resolves from its own
+ * version-keyed directory below.
  */
-const UNPREFIXED_BINARIES = new Set<NativeBinaryName>(['uv', 'duckdb']);
+const UNPREFIXED_BINARIES = new Set<NativeBinaryName>(['uv']);
 
 export function resolveNativeBinaryUnder(
   root: string,
@@ -300,6 +305,26 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
     }
   }
 
+  // ── duckdb (own versioned directory, not native-bin) ───────────────
+  // DuckDB is redistributed exactly as the DuckDB Foundation published it, so
+  // it never entered the native release; the Electron supervisor and the
+  // service's engine resolver both install it to `<home>/engines/duckdb/
+  // <version>/`. This probe is what makes it reachable from an OS system
+  // service, which is started with a clean environment and so never sees the
+  // supervisor's env stamping.
+  if (process.env.GEZEL_DUCKDB_BIN) {
+    binaries.push({ name: 'duckdb', source: 'pre-set', path: process.env.GEZEL_DUCKDB_BIN });
+  } else {
+    const duckBin = duckdbInstalledBinary(input.home, platform);
+    if (fileExists(duckBin)) {
+      process.env.GEZEL_DUCKDB_BIN = duckBin;
+      binaries.push({ name: 'duckdb', source: 'discovered', path: duckBin });
+      log?.info?.(`[native] duckdb: ${duckBin}`);
+    } else {
+      binaries.push({ name: 'duckdb', source: 'not-found' });
+    }
+  }
+
   // ── Variant-less binaries (ds4-server / sd-server / whisper-server / uv) ────────
   // ds4-server ships exactly ONE build per supported platform (Metal on
   // darwin-arm64, CUDA on linux-x64/arm64; nothing on darwin-x64 / win32), so
@@ -324,7 +349,6 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
     { name: 'whisper-server' as const, envVar: 'GEZEL_WHISPER_SERVER_BIN' },
     { name: 'device-health' as const, envVar: 'GEZEL_DEVICE_HEALTH_BIN' },
     { name: 'uv' as const, envVar: 'GEZEL_UV_BIN' },
-    { name: 'duckdb' as const, envVar: 'GEZEL_DUCKDB_BIN' },
   ]) {
     if (process.env[envVar]) {
       binaries.push({ name, source: 'pre-set', path: process.env[envVar] });

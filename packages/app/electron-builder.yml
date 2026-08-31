@@ -69,6 +69,7 @@ files:
   - dist/service-bundle.meta.json
   - dist/pnpm-bundle/**/*
   - dist/node-bundle/**/*
+  - dist/duckdb-bundle/**/*
   - dist/ui/**/*
   # Vite source maps are useful in the build tree but not loaded by the
   # packaged renderer. The RC shipped 215 of them (70.8 MiB) as loose files.
@@ -149,6 +150,7 @@ asarUnpack:
   - dist/service-bundle.meta.json
   - dist/pnpm-bundle/**/*
   - dist/node-bundle/**/*
+  - dist/duckdb-bundle/**/*
   - dist/ui/**/*
   - native-bin/**/*
 
@@ -351,6 +353,10 @@ mac:
   signIgnore:
     - /Contents/Resources/app\.asar\.unpacked/native-bin/
     - /Contents/Resources/app\.asar\.unpacked/dist/node-bundle/node$
+    # DuckDB follows the same vendored-provenance rule: the DuckDB Foundation
+    # ships it Developer ID signed, hardened, and notarized under their own
+    # team, and re-signing it here would replace that attestation with ours.
+    - /Contents/Resources/app\.asar\.unpacked/dist/duckdb-bundle/duckdb$
   # Ship the LaunchDaemon plist + uninstall.sh inside the .app bundle
   # so the postinstall script can find them at known paths under
   # /Applications/Gezel.app/Contents/Resources/.

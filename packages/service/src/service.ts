@@ -2171,7 +2171,24 @@ export async function startService(opts: StartServiceOptions = {}): Promise<Runn
   // start or stop. Constructing it when no binary is installed is deliberate —
   // the query routes then return an actionable "engine not installed" rather
   // than the daemon refusing to boot over a feature most projects never use.
-  const duck = new DuckRunner();
+  const duck = new DuckRunner({ home });
+  {
+    // Log which rung of the discovery ladder answered. A support case that
+    // starts "the query returned the wrong thing" needs to know whether this
+    // is the pinned build the sandbox matrix was measured against or a system
+    // DuckDB of unknown vintage; without this the answer takes a repro.
+    const resolved = duck.resolvedBinaryProvenance();
+    if (!resolved) {
+      log.info('[duckdb] no query engine resolved — data features will report it as unavailable');
+    } else if (resolved.pinned) {
+      log.info(`[duckdb] using pinned build (${resolved.source}): ${resolved.path}`);
+    } else {
+      log.warn(
+        `[duckdb] using an unverified DuckDB (${resolved.source}): ${resolved.path} — ` +
+          'sandbox behaviour is only measured against the pinned build',
+      );
+    }
+  }
   // The index's derived-table drain needs the engine, but the index is
   // constructed far earlier in boot order — hand it over once both exist.
   contentIndex.setDuckRunner(duck);

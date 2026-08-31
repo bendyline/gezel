@@ -12,7 +12,7 @@
  *
  * Every run applies a configuration prelude and then `SET lock_configuration
  * = true`, after which the statement cannot undo it. Measured against the
- * pinned DuckDB (see native/engines/duckdb/README.md), that prelude blocks
+ * pinned DuckDB (see docs/observation-corpora.md), that prelude blocks
  * reads outside the allowed directories, remote URLs, extension installs, and
  * `COPY` to an outside path — and refuses attempts to re-widen any of it.
  *
@@ -36,7 +36,11 @@
  */
 
 import { type ChildProcess, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { delimiter, join } from 'node:path';
 import { createAwakeTimeout, createLogger } from '@bendyline/gezel';
+import { duckdbBinaryName, duckdbInstalledBinary } from '@bendyline/gezel/native';
 import { sandboxEnv } from '../sandbox/runner.js';
 
 const log = createLogger('duckdb');
@@ -93,8 +97,16 @@ export interface DuckRunOptions {
 export interface DuckRunnerOptions {
   /** Overrides binary resolution. Tests point this at a fake CLI. */
   binaryPath?: string;
+  /**
+   * GEZEL_HOME, so the ladder can look for the pinned build under
+   * `<home>/engines/duckdb/<version>/`. Omitted in tests that supply
+   * `binaryPath`; omitting it just removes that rung.
+   */
+  home?: string;
   /** Test seam; defaults to `node:child_process.spawn`. */
   spawnImpl?: typeof spawn;
+  /** Test seam for existence checks; defaults to `node:fs.existsSync`. */
+  fileExists?: (p: string) => boolean;
 }
 
 /**
@@ -127,29 +139,116 @@ export function sqlLiteral(value: string): string {
   return value.replaceAll("'", "''");
 }
 
+/** Which rung of {@link DuckRunner.binary}'s ladder produced the executable. */
+export type DuckBinarySource = 'explicit' | 'env' | 'pinned' | 'duckdb-installer' | 'path';
+
+export interface DuckBinaryResolution {
+  path: string;
+  source: DuckBinarySource;
+  /** True only when the bytes were verified against the pinned digest. */
+  pinned: boolean;
+}
+
+/**
+ * First `name` on `PATH`. Deliberately does not consult the shell, so a
+ * user's rc-file aliases cannot redirect the query engine, and deliberately
+ * skips empty PATH segments — an empty entry means "current directory" on
+ * some shells, which would let a stray `duckdb` in the working tree win.
+ */
+function findOnPath(name: string, fileExists: (p: string) => boolean): string | null {
+  const raw = process.env.PATH;
+  if (!raw) return null;
+  for (const dir of raw.split(delimiter)) {
+    if (!dir) continue;
+    const candidate = join(dir, name);
+    if (fileExists(candidate)) return candidate;
+  }
+  return null;
+}
+
 export class DuckRunner {
   private readonly spawnImpl: typeof spawn;
   private readonly explicitBinary?: string;
+  private readonly home?: string;
+  private readonly fileExists: (p: string) => boolean;
 
   constructor(opts: DuckRunnerOptions = {}) {
     this.spawnImpl = opts.spawnImpl ?? spawn;
     if (opts.binaryPath !== undefined) this.explicitBinary = opts.binaryPath;
+    if (opts.home !== undefined) this.home = opts.home;
+    this.fileExists = opts.fileExists ?? existsSync;
   }
 
   /**
-   * Resolve the CLI. `GEZEL_DUCKDB_BIN` is stamped by the supervisor (packaged
-   * and dev) and by the engine resolver's runtime download (npm / CLI installs
-   * with no Electron), so by the time a query runs it is normally already set.
+   * Resolve the CLI, in descending order of how much we can vouch for it.
+   *
+   * The ordering is a security decision, not a convenience one. Both the
+   * configuration prelude above and `statement-guard`'s use of
+   * `json_serialize_sql` are behavioural contracts measured against the
+   * pinned build, so a binary we verified against {@link DUCKDB_BINARY_SHA256}
+   * must win over whatever `duckdb` happens to be on `PATH` — an older or
+   * differently-configured engine could change those semantics silently, and
+   * a writable PATH entry would otherwise be a substitution vector for the
+   * component that enforces the query sandbox.
+   *
+   * Rungs three and four exist so an npm / CLI install that declined the
+   * download still works: `~/.duckdb/cli/latest/` is where DuckDB's own
+   * installer (install.duckdb.org) puts the CLI, and it is frequently not on
+   * PATH. Those rungs are unverified by construction, which is why
+   * {@link resolvedBinaryProvenance} records which rung answered — a support
+   * case needs to know whether the measured sandbox matrix applies.
    */
   binary(): string {
-    const bin = this.explicitBinary ?? process.env.GEZEL_DUCKDB_BIN;
-    if (!bin) {
+    const resolved = this.resolve();
+    if (!resolved) {
       throw new DuckUnavailableError(
-        'The data query engine (DuckDB) is not installed yet. Open Settings → Engines to download it, ' +
-          'or set GEZEL_DUCKDB_BIN to an existing duckdb binary. The mirrored data is safe on disk either way.',
+        'The data query engine (DuckDB) is not installed yet. Run `gezel engines install duckdb` to ' +
+          'download the pinned build, install DuckDB yourself (https://install.duckdb.org, `brew install duckdb`, ' +
+          'or your package manager), or set GEZEL_DUCKDB_BIN to an existing duckdb binary. ' +
+          'The mirrored data is safe on disk either way.',
       );
     }
-    return bin;
+    return resolved.path;
+  }
+
+  /**
+   * Which rung of the ladder answered, and whether those bytes were checked
+   * against the pin. Logged once per process by {@link exec} so a bug report
+   * carries the provenance without needing a repro.
+   */
+  resolvedBinaryProvenance(): DuckBinaryResolution | null {
+    return this.resolve();
+  }
+
+  private resolve(): DuckBinaryResolution | null {
+    if (this.explicitBinary) {
+      return { path: this.explicitBinary, source: 'explicit', pinned: false };
+    }
+    const fromEnv = process.env.GEZEL_DUCKDB_BIN;
+    if (fromEnv) return { path: fromEnv, source: 'env', pinned: false };
+
+    if (this.home) {
+      const pinned = duckdbInstalledBinary(this.home);
+      if (this.fileExists(pinned)) {
+        return { path: pinned, source: 'pinned', pinned: true };
+      }
+    }
+
+    const vendorInstall = join(
+      homedir(),
+      '.duckdb',
+      'cli',
+      'latest',
+      duckdbBinaryName(process.platform),
+    );
+    if (this.fileExists(vendorInstall)) {
+      return { path: vendorInstall, source: 'duckdb-installer', pinned: false };
+    }
+
+    const onPath = findOnPath(duckdbBinaryName(process.platform), this.fileExists);
+    if (onPath) return { path: onPath, source: 'path', pinned: false };
+
+    return null;
   }
 
   available(): boolean {

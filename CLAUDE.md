@@ -485,6 +485,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/sandbox/` — sandboxed script runs, owned by [sandbox/runner.ts](packages/service/src/sandbox/runner.ts)
   - `~/.gezel/python/` — uv runtime, owned by [python/uv-runtime.ts](packages/service/src/python/uv-runtime.ts)
   - `~/.gezel/engines/face-models/` — sha256-pinned ONNX face models (YuNet detection + AuraFace embeddings), downloaded on the face-recognition opt-in and owned by [index-store/face/catalog.ts](packages/service/src/index-store/face/catalog.ts); safe to delete, re-downloaded on the next face-tier run
+  - `~/.gezel/engines/duckdb/<version>/` — the vendored DuckDB CLI, pinned in [duckdb-pin.ts](packages/core/src/native/duckdb-pin.ts) and written by **two** installers that share the directory on purpose: the Electron supervisor's [extract-duckdb.ts](packages/app/src/supervisor/extract-duckdb.ts) and, for npm/CLI installs, the engine resolver's vendored download path. DuckDB is redistributed exactly as the DuckDB Foundation signed and notarized it, so it is NOT part of the `native/` build pipeline and has no artifact in the native release — it is a bundled runtime beside node and pnpm. Safe to delete; either installer recreates it.
   - Native binary trees (`~/.gezel/bin/llama-cpp/`, `sd-cpp/`, `uv/`) — owned by the matching provider; see [native/README.md](native/README.md) for the upstream fetch + bundle pipeline.
 
   If you're writing code that touches state outside this list, it goes through `Store`.

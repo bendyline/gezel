@@ -14,39 +14,36 @@
 
 import { existsSync } from 'node:fs';
 import { chmod, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { duckdbBinaryName, duckdbInstallDir } from '@bendyline/gezel/native';
 
 /**
- * Locate a real duckdb binary, or null. Prefers whatever the supervisor or the
- * engine resolver already stamped, then the local `native/build` tree a
- * developer gets from `native/engines/duckdb/build.sh`, then the fetched
- * release payload.
+ * Locate a real duckdb binary, or null.
+ *
+ * Prefers whatever the supervisor or the engine resolver already stamped, then
+ * the Electron build's staged bundle, then the version-keyed install both
+ * installers write to under a dev or production home.
+ *
+ * DuckDB is not in `native/build/` or `native-bin/` any more — it is vendored
+ * from the DuckDB Foundation's own signed release and ships as a bundled
+ * runtime beside node and pnpm, so those trees are deliberately not probed.
+ * Get one with `node packages/app/scripts/fetch-duckdb.mjs`.
  */
 export function findRealDuckdb(): string | null {
   const fromEnv = process.env.GEZEL_DUCKDB_BIN;
   if (fromEnv && existsSync(fromEnv)) return fromEnv;
 
-  const platformKey =
-    process.platform === 'darwin' && process.arch === 'arm64'
-      ? 'darwin-arm64'
-      : process.platform === 'linux' && process.arch === 'x64'
-        ? 'linux-x64'
-        : process.platform === 'linux' && process.arch === 'arm64'
-          ? 'linux-arm64'
-          : process.platform === 'win32' && process.arch === 'x64'
-            ? 'win32-x64'
-            : null;
-  if (!platformKey) return null;
-
-  const exe = process.platform === 'win32' ? 'duckdb.exe' : 'duckdb';
+  const exe = duckdbBinaryName(process.platform);
   // packages/service/src/observations/testing → repo root
   const repoRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '../../../../..');
-  for (const dir of [
-    join(repoRoot, 'native', 'build', platformKey),
-    join(repoRoot, 'packages', 'app', 'native-bin', platformKey),
-  ]) {
-    const candidate = join(dir, exe);
+  const candidates = [
+    join(repoRoot, 'packages', 'app', 'dist', 'duckdb-bundle', exe),
+    join(duckdbInstallDir(join(homedir(), '.gezel-dev')), exe),
+    join(duckdbInstallDir(join(homedir(), '.gezel')), exe),
+  ];
+  for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
   }
   return null;

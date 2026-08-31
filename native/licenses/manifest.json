@@ -10,11 +10,6 @@
         "LICENSE-ds4-yarn-MIT.txt"
       ]
     },
-    "duckdb": {
-      "tag": "v1.5.5",
-      "commit": "d8cdaa33fda8df955cc76ef58a280f68f4cd43fa",
-      "files": ["LICENSE-duckdb-MIT.txt"]
-    },
     "llama-cpp": {
       "tag": "v0.3.0",
       "commit": "c1d0e7a004015f23bc0233470b747b596f29b264",
