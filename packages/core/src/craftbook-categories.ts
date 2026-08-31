@@ -38,12 +38,7 @@ export const CraftbookCategorySchema = z.enum([
 ]);
 export type CraftbookCategory = z.infer<typeof CraftbookCategorySchema>;
 
-export type CraftbookCategoryFamily =
-  | 'code'
-  | 'creative'
-  | 'business'
-  | 'personal'
-  | 'universal';
+export type CraftbookCategoryFamily = 'code' | 'creative' | 'business' | 'personal' | 'universal';
 
 /** Shelf copy so every craftbook browser presents categories consistently. */
 export const CRAFTBOOK_CATEGORY_META: ReadonlyArray<{

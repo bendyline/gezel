@@ -537,6 +537,7 @@
  * (AI chat ⇄ Terminal). The mode tabs live inside it, in the address line of
  * whichever composer is mounted — see `.compose-mode-tabs` below. */
 .project-chat-compose-shell {
+  --chat-composer-action-inset: 0.6rem;
   display: flex;
   align-items: stretch;
   gap: 0;
@@ -632,7 +633,7 @@
   min-height: var(--compose-top-row-height);
   flex-shrink: 0;
   margin: 0;
-  padding: 0 0.4rem;
+  padding: 0 var(--chat-composer-action-inset) 0 0.4rem;
   border: 0;
   border-bottom: 1px solid var(--compose-band-rule);
   border-radius: 0;
@@ -687,10 +688,11 @@
   height: calc(var(--compose-top-row-height) + 1px);
   border-bottom: 1px solid var(--compose-band-rule);
   margin: 0 1px;
+  padding-inline-end: calc(var(--chat-composer-action-inset) - 3px);
 }
 
 /* Chat's toolbar is content-sized, so it used to be exactly as tall as the
- * Send key inside it (28px + 1px of margin each side) — 5px shorter than the
+ * Send key inside it plus its vertical margins — shorter than the
  * terminal's Fire row, which left the key looking wedged against the draft
  * below it and put every row after it at a different y across a mode flip.
  * The two modes' totals always matched (the editor body simply absorbed the

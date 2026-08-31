@@ -1,6 +1,9 @@
 import type {
   AudioEngineStatusResponse,
   AudioModelPullEvent,
+  AudioSynthesizeChunk,
+  AudioSynthesizeEvent,
+  AudioSynthesizeProgress,
   AudioSynthesizeRequest,
   AudioSynthesizeResponse,
   AudioTranscribeRequest,
@@ -406,6 +409,7 @@ import { parseTaskRef } from '@bendyline/gezel';
 import type { DeviceHealthStatusSnapshot } from '@bendyline/gezel/native';
 import {
   AudioModelPullEventSchema,
+  AudioSynthesizeEventSchema,
   ImageModelPullEventSchema,
   type ImageRecognition,
   type ImageStaticMeta,
@@ -433,6 +437,11 @@ export interface ScanModelBundleOptions {
   totalBytes?: number;
   signal?: AbortSignal;
   onProgress?: (progress: GezmodelImportProgress) => void;
+}
+
+export interface SpeechSynthesisStreamCallbacks {
+  onProgress: (progress: AudioSynthesizeProgress) => void;
+  onChunk?: (chunk: AudioSynthesizeChunk) => void | Promise<void>;
 }
 
 class ModelBundleScanError extends Error {}
@@ -4391,8 +4400,11 @@ export class GezelClient {
 
   // ── Audio (whisper.cpp STT + Kokoro TTS) ──
 
-  transcribeAudio(body: AudioTranscribeRequest): Promise<AudioTranscribeResponse> {
-    return this.request('POST', '/api/audio/transcribe', body);
+  transcribeAudio(
+    body: AudioTranscribeRequest & { signal?: AbortSignal },
+  ): Promise<AudioTranscribeResponse> {
+    const { signal, ...payload } = body;
+    return this.request('POST', '/api/audio/transcribe', payload, undefined, signal);
   }
 
   synthesizeSpeech(
@@ -4400,6 +4412,44 @@ export class GezelClient {
   ): Promise<AudioSynthesizeResponse> {
     const { signal, ...payload } = body;
     return this.request('POST', '/api/audio/synthesize', payload, undefined, signal);
+  }
+
+  /** Synthesize speech while reporting sentence-level engine progress. */
+  async synthesizeSpeechWithProgress(
+    body: AudioSynthesizeRequest,
+    callbacks: SpeechSynthesisStreamCallbacks,
+    signal?: AbortSignal,
+  ): Promise<AudioSynthesizeResponse> {
+    let result: AudioSynthesizeResponse | undefined;
+    let streamError: string | undefined;
+    let chunkWork = Promise.resolve();
+    await consumeApiSseJson<AudioSynthesizeEvent>({
+      url: `${this.baseUrl}/api/audio/synthesize-stream`,
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      signal,
+      fetch: this.fetchImpl,
+      schema: AudioSynthesizeEventSchema,
+      onEvent: (event) => {
+        if (event.type === 'progress') callbacks.onProgress(event.progress);
+        if (event.type === 'chunk' && callbacks.onChunk) {
+          chunkWork = chunkWork.then(() => callbacks.onChunk?.(event.chunk));
+        }
+        if (event.type === 'done') result = event.result;
+        if (event.type === 'error') streamError = event.error;
+      },
+      isTerminal: (event) => event.type === 'done' || event.type === 'error',
+      label: 'Speech synthesis stream',
+      keepaliveTimeoutMs: 10 * 60_000,
+    });
+    await chunkWork;
+    if (streamError) throw new GezelApiError(streamError, 500);
+    if (!result) throw new GezelApiError('Speech synthesis ended without audio.', 500);
+    return result;
   }
 
   /**

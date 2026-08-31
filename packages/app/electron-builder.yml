@@ -316,29 +316,21 @@ mac:
   # Info.plist telling users "This app needs access to the camera" and
   # "…to Bluetooth" for hardware nothing in the product touches.
   #
-  # Gezel captures no live media at all. There is no getUserMedia,
-  # MediaRecorder, mediaDevices, desktopCapturer, Web Bluetooth, WebUSB or
-  # Web Serial call anywhere in the app, the renderer, or the daemon, and no
-  # record affordance in the UI. Speech-to-text is real, but it transcribes
-  # *files*: `POST /api/audio/transcribe` and the `transcribe_audio` MCP tool
-  # take base64 bytes or a project artifact path, never a microphone stream.
-  #
-  # So there is no honest string to write here — a plausible-sounding
-  # "Gezel transcribes what you say…" would be a worse lie than the
-  # placeholder. A key that is absent is also never shown: macOS only surfaces
-  # a usage description when the app actually requests that device.
+  # Voice input is the sole live-media exception: the chat composer's explicit
+  # Narrate action records microphone-only audio and sends short takes to the
+  # user's configured speech-to-text engine. Camera, screen capture, Bluetooth,
+  # WebUSB, and Web Serial still have no product surface and remain absent.
   #
   # `null` is the documented removal: extendInfo is deep-assigned over the
   # generated plist, then app-builder-lib deletes every null/undefined key
   # (macPackager.js — "for (const [k, v] of Object.entries(appPlist))").
   #
-  # SHARP EDGE: macOS *terminates* an app that touches the microphone or
-  # camera with no usage string. The day voice input lands, the matching key
-  # has to come back with real copy in the same change.
+  # SHARP EDGE: macOS *terminates* an app that touches protected capture APIs
+  # with no matching usage string. Keep this copy aligned with the feature.
   # scripts/macos-privacy-strings.test.mjs fails the build if a capture API
   # appears without one, so this cannot rot silently.
   extendInfo:
-    NSMicrophoneUsageDescription: null
+    NSMicrophoneUsageDescription: Gezel records your voice when you choose Narrate so your configured speech-to-text engine can add it to the chat prompt.
     NSCameraUsageDescription: null
     NSAudioCaptureUsageDescription: null
     NSBluetoothAlwaysUsageDescription: null

@@ -6,6 +6,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { api } from '../api.js';
 import { SubmitArrow } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
+import { ChatNarrateButton } from './ChatNarrateButton.js';
 import { ChatRecipientPicker } from './ChatRecipientPicker.js';
 import { GezelIcon } from './GezelIcon.js';
 import { createGezelMediaProvider } from './GezelMediaProvider.js';
@@ -643,6 +644,28 @@ export function ChatComposer({
     },
     [onTerminalEscape],
   );
+
+  // Progressive STT returns one finalized fragment per self-contained audio
+  // segment. Append each fragment to whatever is currently in the editor so
+  // narration extends an existing prompt and never replaces typing that
+  // happened while the microphone was live.
+  const appendNarratedText = useCallback((text: string) => {
+    const spoken = text.trim();
+    if (!spoken) return;
+    const current = draftRef.current;
+    const merged = `${current}${current && !/\s$/.test(current) ? ' ' : ''}${spoken}`;
+    draftRef.current = merged;
+    writeComposerDraft(draftKeyRef.current, merged);
+    draftEditVersionRef.current += 1;
+    prevDraftLenRef.current = merged.length;
+    setDraftNonEmpty(true);
+    setOpenCommandQuery(parseOpenChatQuery(merged));
+    const next = extractMentionTokens(merged);
+    setMentioned((previous) => (sameMentionTokens(previous, next) ? previous : next));
+    // EditorShell intentionally treats its source as initial content. Remount
+    // from the lossless draft ref so the newly transcribed text is visible.
+    setEditorRevision((revision) => revision + 1);
+  }, []);
 
   const beginDraftSubmission = useCallback((): ComposerDraftSnapshot | null => {
     if (draftSubmissionPendingRef.current) return null;
@@ -1302,74 +1325,82 @@ export function ChatComposer({
           thinMargins
           submitOnEnter={() => submitRef.current()}
           toolbarSlotRight={
-            openCommandQuery !== null ? (
-              <button
-                type="button"
-                className="chat-send-btn"
-                data-testid="chat-open"
-                onClick={() => void executeOpenTarget()}
-                disabled={draftSubmissionPending}
-                title="Open this folder or recent file (Enter)"
-              >
-                {draftSubmissionPending ? 'Opening…' : 'Open'}
-              </button>
-            ) : turnActive ? (
-              <>
-                {draftNonEmpty && !engagementOff && (
-                  <>
-                    <button
-                      type="button"
-                      className="chat-send-btn chat-nudge-btn"
-                      data-testid="chat-nudge"
-                      onClick={() => void queueNudge()}
-                      disabled={draftSubmissionPending}
-                      title="Queue for after this turn (Enter)"
-                    >
-                      Nudge
-                    </button>
-                    <button
-                      type="button"
-                      className="chat-interrupt-btn"
-                      data-testid="chat-interrupt"
-                      onClick={() => void interruptWithDraft()}
-                      disabled={draftSubmissionPending}
-                      title="Stop this turn and send now"
-                    >
-                      Interrupt
-                    </button>
-                  </>
-                )}
+            <>
+              <ChatNarrateButton
+                projectId={projectId}
+                disabled={!gezelId || engagementOff || draftSubmissionPending}
+                onTranscript={appendNarratedText}
+                onError={setError}
+              />
+              {openCommandQuery !== null ? (
                 <button
                   type="button"
-                  className="chat-stop-btn"
-                  onClick={() => void stopActiveTurn()}
+                  className="chat-send-btn"
+                  data-testid="chat-open"
+                  onClick={() => void executeOpenTarget()}
                   disabled={draftSubmissionPending}
-                  title="Stop generating (Escape)"
+                  title="Open this folder or recent file (Enter)"
                 >
-                  ■ Stop
+                  {draftSubmissionPending ? 'Opening…' : 'Open'}
                 </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                className="chat-send-btn chat-send-btn-icon"
-                data-testid="chat-send"
-                onClick={send}
-                disabled={!gezelId || engagementOff || draftSubmissionPending}
-                // The glyph replaced the label, so the button's whole
-                // accessible name lives here — including the pending state,
-                // which used to be readable on its face as "Sending…".
-                aria-label={draftSubmissionPending ? 'Sending…' : 'Send'}
-                aria-busy={draftSubmissionPending}
-                title={
-                  engagementOff
-                    ? 'AI is disabled in Settings → General'
-                    : `Enter to send, ${newlineShortcutLabel()} for newline`
-                }
-              >
-                <SubmitArrow />
-              </button>
-            )
+              ) : turnActive ? (
+                <>
+                  {draftNonEmpty && !engagementOff && (
+                    <>
+                      <button
+                        type="button"
+                        className="chat-send-btn chat-nudge-btn"
+                        data-testid="chat-nudge"
+                        onClick={() => void queueNudge()}
+                        disabled={draftSubmissionPending}
+                        title="Queue for after this turn (Enter)"
+                      >
+                        Nudge
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-interrupt-btn"
+                        data-testid="chat-interrupt"
+                        onClick={() => void interruptWithDraft()}
+                        disabled={draftSubmissionPending}
+                        title="Stop this turn and send now"
+                      >
+                        Interrupt
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    className="chat-stop-btn"
+                    onClick={() => void stopActiveTurn()}
+                    disabled={draftSubmissionPending}
+                    title="Stop generating (Escape)"
+                  >
+                    ■ Stop
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="chat-send-btn chat-send-btn-icon"
+                  data-testid="chat-send"
+                  onClick={send}
+                  disabled={!gezelId || engagementOff || draftSubmissionPending}
+                  // The glyph replaced the label, so the button's whole
+                  // accessible name lives here — including the pending state,
+                  // which used to be readable on its face as "Sending…".
+                  aria-label={draftSubmissionPending ? 'Sending…' : 'Send'}
+                  aria-busy={draftSubmissionPending}
+                  title={
+                    engagementOff
+                      ? 'AI is disabled in Settings → General'
+                      : `Enter to send, ${newlineShortcutLabel()} for newline`
+                  }
+                >
+                  <SubmitArrow />
+                </button>
+              )}
+            </>
           }
         />
       </div>

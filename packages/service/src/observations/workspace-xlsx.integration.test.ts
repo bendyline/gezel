@@ -62,13 +62,13 @@ async function writeWorkbook(absPath: string): Promise<void> {
       `<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>` +
       `<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>` +
       `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>` +
-      `</Types>`,
+      '</Types>',
   );
   add(
     '_rels/.rels',
     `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
       `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>` +
-      `</Relationships>`,
+      '</Relationships>',
   );
   add(
     'xl/_rels/workbook.xml.rels',
@@ -76,7 +76,7 @@ async function writeWorkbook(absPath: string): Promise<void> {
       `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>` +
       `<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>` +
       `<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>` +
-      `</Relationships>`,
+      '</Relationships>',
   );
   add(
     'xl/workbook.xml',
@@ -92,15 +92,12 @@ async function writeWorkbook(absPath: string): Promise<void> {
       `<numFmts count="1"><numFmt numFmtId="200" formatCode="0.0%"/></numFmts>` +
       `<cellXfs count="3">` +
       `<xf numFmtId="0"/><xf numFmtId="200" applyNumberFormat="1"/><xf numFmtId="14" applyNumberFormat="1"/>` +
-      `</cellXfs></styleSheet>`,
+      '</cellXfs></styleSheet>',
   );
   const strings = ['Region', 'Units', 'Share', 'As Of', 'North', 'South'];
   add(
     'xl/sharedStrings.xml',
-    `<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ` +
-      `count="${strings.length}" uniqueCount="${strings.length}">` +
-      strings.map((t) => `<si><t>${t}</t></si>`).join('') +
-      `</sst>`,
+    `<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${strings.length}" uniqueCount="${strings.length}">${strings.map((t) => `<si><t>${t}</t></si>`).join('')}</sst>`,
   );
 
   // 45874 is 2025-08-05 in Excel's 1900 system (serials past 60 shift by one
@@ -114,8 +111,7 @@ async function writeWorkbook(absPath: string): Promise<void> {
     `<c r="C3" s="1"><v>0.095</v></c><c r="D3" s="2"><v>45875</v></c></row>`;
   add(
     'xl/worksheets/sheet1.xml',
-    `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
-      `<sheetData>${sheet}</sheetData></worksheet>`,
+    `<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheet}</sheetData></worksheet>`,
   );
 
   await writeFile(absPath, zip.toBuffer());

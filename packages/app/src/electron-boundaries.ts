@@ -169,6 +169,28 @@ export function isAllowedPreviewResourceRequest(
   }
 }
 
+/**
+ * Allow microphone capture only from Gezel's trusted, top-level daemon UI.
+ * Preview documents are model-authored subframes on the same origin, so the
+ * main-frame check is as important as the exact-origin comparison. A request
+ * that also asks for video is rejected; the narrate control needs audio only.
+ */
+export function isAllowedMicrophoneCapture(
+  permission: string,
+  requestingUrl: string,
+  allowedOrigin: string | null,
+  isMainFrame: boolean,
+  mediaTypes: readonly string[] | undefined,
+): boolean {
+  if (permission !== 'media' || !allowedOrigin || !isMainFrame) return false;
+  if (mediaTypes?.length !== 1 || mediaTypes[0] !== 'audio') return false;
+  try {
+    return new URL(requestingUrl).origin === new URL(allowedOrigin).origin;
+  } catch {
+    return false;
+  }
+}
+
 /** Compare already-realpathed directories without accidentally authorizing descendants. */
 export function isExactApprovedPath(
   target: string,

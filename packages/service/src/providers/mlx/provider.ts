@@ -128,11 +128,29 @@ import type {
 import { EngineLogRouter } from './engine-log-router.js';
 import { StreamingReasoningSplit } from './reasoning-stream.js';
 import {
+  buildMidStreamDropMessage,
+  buildPreFirstByteAbortMessage,
+  computePreFirstByteBudgetMs,
+  estimatePromptTokens,
+  formatTps,
+  isMidStreamConnectionDrop,
+  PRE_FIRST_BYTE_BASE_MS,
+  readProcessRssBytes,
+  translateMlxHttpError,
+} from './runtime-diagnostics.js';
+import {
   type MlxFatalError,
   classifyMlxFatalErrorLine,
   classifyMlxStartupLine,
 } from './stdout-parser.js';
 import { LeakyToolCallStripper } from './tool-call-stripper.js';
+
+export {
+  buildMidStreamDropMessage,
+  computePreFirstByteBudgetMs,
+  estimatePromptTokens,
+  isMidStreamConnectionDrop,
+};
 
 const MAX_TOOL_LOOP_TURNS = 96;
 // Hard per-turn ceiling when the caller doesn't pass `opts.timeoutMs`.
@@ -3794,260 +3812,4 @@ function toChatCompletionsTools(bridges: McpBridgePool): ChatCompletionTool[] {
       parameters: t.parameters,
     },
   }));
-}
-
-/**
- * Read a process's resident-set size (bytes) via `ps`. mlx_lm.server's
- * logs don't include a memory-footprint summary, so we sample the
- * child's RSS after it reports ready and use that as the engine
- * memory readout.
- *
- * Returns `null` on any failure (pid gone, ps missing, unparsable
- * output) — the caller treats RSS as an enrichment, not a
- * requirement, and silently skips the telemetry event when we
- * can't get a number.
- *
- * `ps -o rss= -p <pid>` works identically on macOS and Linux and
- * prints the RSS in kilobytes with no header. Windows doesn't have
- * `ps` — MLX is Mac-only today, so we don't try to support it.
- */
-async function readProcessRssBytes(pid: number): Promise<number | null> {
-  const { spawn } = await import('node:child_process');
-  return await new Promise<number | null>((resolve) => {
-    try {
-      const proc = spawn('ps', ['-o', 'rss=', '-p', String(pid)], {
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-      let stdout = '';
-      proc.stdout.on('data', (chunk: Buffer) => {
-        stdout += chunk.toString('utf8');
-      });
-      proc.on('error', () => resolve(null));
-      proc.on('close', (code) => {
-        if (code !== 0) return resolve(null);
-        const kb = Number.parseInt(stdout.trim(), 10);
-        if (!Number.isFinite(kb) || kb <= 0) return resolve(null);
-        resolve(kb * 1024);
-      });
-    } catch {
-      resolve(null);
-    }
-  });
-}
-
-/**
- * Map known `mlx_vlm.server` error-response shapes to user-actionable
- * messages so the chat bubble reads like a helpful hint instead of a
- * wall of JSON + request IDs.
- *
- * The engine surfaces a lot of its internal hugging-face + transformers
- * errors verbatim in the 500 body; most of them translate to "your
- * install is stale, reinstall it" — the only bit the user can act on.
- */
-function translateMlxHttpError(status: number, statusText: string, body: string): string {
-  // "Repository Not Found for url: …" — the engine fell back to a
-  // network fetch (it shouldn't, with HF_HUB_OFFLINE=1; if you still
-  // see this the offline gate didn't take, or a different code path
-  // bypassed it). Either way the actionable advice is the same:
-  // confirm the install is current, then reset the venv if mlx-vlm
-  // is too old for the model's architecture.
-  if (/Repository Not Found for url/i.test(body) || /401 Client Error/i.test(body)) {
-    return (
-      "[Mac AI] The engine couldn't load this model. Try, in order:\n" +
-      '  1. Settings → This Mac → Delete the local model, then download it again (in case the on-disk files are incomplete).\n' +
-      '  2. Settings → This Mac → Advanced → Reset venv (in case mlx-vlm is too old for this architecture).\n' +
-      '  3. Restart gezel and retry.'
-    );
-  }
-  // Architecture / weights mismatch — mlx-vlm doesn't recognize the
-  // model class this install was saved for.
-  if (/Received \d+ parameters not in model/i.test(body)) {
-    return (
-      "[Mac AI] The on-device runtime doesn't recognize this model's architecture.\n" +
-      'Settings → This Mac → Advanced → Reset venv, then retry. If it still fails, the catalog entry may need a newer mlx-vlm.'
-    );
-  }
-  // Out of memory — mlx_vlm propagates the Metal / MPS error.
-  if (/out of memory|mps backend|allocation failed/i.test(body)) {
-    return (
-      '[Mac AI] Not enough unified memory to load this model.\n' +
-      'Try the E2B variant, close other memory-heavy apps, or restart this Mac to release cached memory.'
-    );
-  }
-  // Local-disk file missing (now visible because of the offline gate).
-  if (/FileNotFoundError|No such file or directory/i.test(body)) {
-    const filename = body.match(/['"]?([^'"\s]+\.(?:json|safetensors|jinja|model))['"]?/)?.[1];
-    return `[Mac AI] The local model is missing a file the engine needs${filename ? ` (\`${filename}\`)` : ''}.\nSettings → This Mac → Delete the local model, then download it again.`;
-  }
-  // Fallback: keep the shape but trim the noise.
-  const parsed = tryParseJsonDetail(body);
-  const detail = parsed ?? body.slice(0, 200);
-  return `[Mac AI] engine returned ${status} ${statusText}: ${detail}`;
-}
-
-/**
- * Did this error come from the engine dropping the HTTP response stream
- * mid-flight (vs. one of our own aborts)? Node's `fetch`/undici reports
- * a premature socket close while reading a streamed body as a bare
- * `TypeError: terminated` — sometimes with a `cause` like a socket
- * error (`UND_ERR_SOCKET`) or "other side closed". We match those shapes
- * so the SSE catch can replace the cryptic one-word message with an
- * actionable one. AbortErrors are handled separately upstream and never
- * reach here.
- */
-export function isMidStreamConnectionDrop(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  if (err.name === 'AbortError') return false;
-  const haystacks: string[] = [err.message];
-  const cause = (err as { cause?: unknown }).cause;
-  if (cause instanceof Error) haystacks.push(cause.message);
-  const causeCode =
-    cause && typeof cause === 'object' && 'code' in cause
-      ? String((cause as { code: unknown }).code)
-      : '';
-  if (causeCode) haystacks.push(causeCode);
-  const blob = haystacks.join(' ').toLowerCase();
-  return (
-    /\bterminated\b/.test(blob) ||
-    blob.includes('other side closed') ||
-    blob.includes('premature close') ||
-    blob.includes('und_err_socket') ||
-    blob.includes('econnreset')
-  );
-}
-
-/**
- * Format a tokens-per-second number for the in-chat status line.
- * Mirrors the UI's `formatTokensPerSec` helper (one decimal under 10
- * tok/s, integer otherwise) so the live chat detail matches what the
- * pill displays at turn end.
- */
-function formatTps(rate: number): string {
-  if (rate >= 10) return rate.toFixed(0);
-  return rate.toFixed(1);
-}
-
-/**
- * Build the user-facing message for a pre-first-byte abort. When we
- * observed prefill progress before the abort, fold the percentage and
- * the chunk-detail into the message so the user sees "stalled at
- * prefill 75% (22,528 / 29,930 tokens)" instead of a generic "no first
- * byte" — much more diagnostic, and it tells them the model was
- * actually working, not stuck. Without prefill events, fall back to
- * the cold-load message.
- */
-function buildPreFirstByteAbortMessage(
-  lastPrefill: { progress: number; detail: string; at: number } | null,
-): string {
-  if (lastPrefill && lastPrefill.progress > 0) {
-    const pct = Math.round(lastPrefill.progress * 100);
-    const detail = lastPrefill.detail ? ` (${lastPrefill.detail})` : '';
-    return `[Mac AI] aborting — prefill stalled at ${pct}%${detail}. The prompt may be too large for this model's effective speed. Try a shorter prompt, retry, or restart the engine in Settings → On-device.`;
-  }
-  // progress === 0 but a prefill marker DID arrive — the batched path
-  // (BatchGenerator) prefills the whole prompt in one event-loop-blocking
-  // call and emits only a "prefilling N tokens" start marker (no tqdm
-  // chunks), so we never see a >0% line even when the engine is genuinely
-  // grinding through a large prompt. Surface that as "stalled while
-  // prefilling …" rather than the misleading "model unhealthy" message.
-  if (lastPrefill?.detail) {
-    return `[Mac AI] aborting — still prefilling ${lastPrefill.detail} when the budget ran out. The prompt is large for this model's prefill speed; retry (the cache is warm now) or pick a faster/smaller model.`;
-  }
-  return '[Mac AI] no first byte from the engine; aborting (model is loading slowly or mlx_vlm.server is unhealthy). Retry the turn; if it keeps happening, restart the engine in Settings → On-device.';
-}
-
-/**
- * Build the user-facing message for a stream that died mid-turn.
- *
- * A planned teardown and a crash are indistinguishable on the wire — both
- * arrive as undici's bare `TypeError: terminated` — so the message has to
- * come from our own knowledge of whether we stopped the engine
- * (`plannedStop`, i.e. the provider was disposed by the pool). Getting this
- * wrong is expensive in user time: the crash wording sends someone hunting
- * for an out-of-memory event that never happened, when what actually
- * occurred is that their own settings change restarted the session.
- */
-export function buildMidStreamDropMessage(
-  charsReceived: number,
-  plannedStop: boolean,
-  engineStillRunning?: boolean,
-): string {
-  const got = charsReceived > 0 ? `after ${charsReceived} chars` : 'before any output';
-  if (plannedStop) {
-    return `[Mac AI] this turn stopped ${got} because Gezel unloaded the on-device engine while it was answering. Changing your settings restarts chat sessions so the new settings apply, and unloading a model in Settings → On-device or quitting the app does the same. The model didn't crash — send the message again to redo this turn.`;
-  }
-  // Only claim a crash when the engine actually went away. A live engine
-  // plus a dead socket is a transport fault on our side, and "restart the
-  // engine" is then advice that cannot help — it sent a real investigation
-  // hunting for an OOM that never happened while undici was quietly
-  // cutting the request at its 300s default. See patient-fetch.ts.
-  if (engineStillRunning) {
-    return `[Mac AI] the connection to the on-device engine dropped ${got}, but the engine is still running — so it did not crash or run out of memory. Something closed the HTTP request underneath the turn. Send the message again; if it keeps happening at roughly the same elapsed time each turn, that points at a timeout rather than the model, so capture the service log for that window.`;
-  }
-  return `[Mac AI] the on-device engine dropped the connection mid-turn (${got}). This usually means the mlx server crashed, ran out of memory, or was restarted while the turn was streaming — this turn's work was lost. Retry the turn; if it keeps happening, restart the engine in Settings → On-device.`;
-}
-
-/**
- * Rough token estimate for the outbound request — message bodies plus the
- * serialized tool schemas. Chars/4 is the standard cheap proxy; we only
- * need order-of-magnitude to size the watchdog, not exactness. The tool
- * block dominates for coordinator roles (the qwen3.6-27b voorman repro
- * carried ~30K tokens of tool schemas alone), so it MUST be included —
- * estimating from messages-only would badly under-size the budget on the
- * exact turns that need it most.
- */
-export function estimatePromptTokens(messages: unknown, tools: unknown): number {
-  let chars = 0;
-  try {
-    chars += JSON.stringify(messages)?.length ?? 0;
-  } catch {
-    /* circular / unstringifiable — ignore, the tools term still sizes it */
-  }
-  if (tools) {
-    try {
-      chars += JSON.stringify(tools)?.length ?? 0;
-    } catch {
-      /* ignore */
-    }
-  }
-  return Math.ceil(chars / 4);
-}
-
-// Pre-first-byte watchdog sizing. A 27B-q8 model on MLX produces its first
-// token only after prefilling the WHOLE prompt; on a 37K-token turn that
-// can legitimately exceed the old flat 300s budget (the qwen3.6-27b voorman
-// stall — aborted at 343s with the engine still grinding). Scale the budget
-// with prompt size so big-context turns get the time they actually need,
-// while small turns keep a tight bound.
-const PRE_FIRST_BYTE_BASE_MS = 300_000; // floor — matches the prior flat value
-const PRE_FIRST_BYTE_BASELINE_TOKENS = 8_000; // budget starts growing past this
-const PRE_FIRST_BYTE_MS_PER_1K_TOKENS = 12_000; // +12s of headroom per 1K tokens
-const PRE_FIRST_BYTE_CAP_MS = 900_000; // 15 min ceiling (< the 30-min hard turn deadline)
-
-/**
- * Pre-first-byte idle budget for a prompt of `approxPromptTokens`. Floors at
- * {@link PRE_FIRST_BYTE_BASE_MS}, grows linearly past
- * {@link PRE_FIRST_BYTE_BASELINE_TOKENS}, and caps at
- * {@link PRE_FIRST_BYTE_CAP_MS}. Used for BOTH the cold-start timer and the
- * post-prefill-event re-arm: pre-first-byte we only know "no token yet," so a
- * single generous size-scaled bound beats a tight per-chunk one that
- * false-aborts a slow-but-healthy batched prefill (which emits no tqdm
- * chunks to re-arm a tighter timer).
- */
-export function computePreFirstByteBudgetMs(approxPromptTokens: number): number {
-  const over = Math.max(0, approxPromptTokens - PRE_FIRST_BYTE_BASELINE_TOKENS);
-  const scaled = PRE_FIRST_BYTE_BASE_MS + (over / 1000) * PRE_FIRST_BYTE_MS_PER_1K_TOKENS;
-  return Math.min(PRE_FIRST_BYTE_CAP_MS, Math.round(scaled));
-}
-
-function tryParseJsonDetail(body: string): string | null {
-  try {
-    const obj = JSON.parse(body) as unknown;
-    if (obj && typeof obj === 'object' && 'detail' in obj && typeof obj.detail === 'string') {
-      return obj.detail.slice(0, 200);
-    }
-  } catch {
-    /* not JSON, fall through */
-  }
-  return null;
 }

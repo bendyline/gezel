@@ -49,6 +49,96 @@ describe('GezelClient health', () => {
   });
 });
 
+describe('GezelClient speech transcription', () => {
+  it('forwards cancellation without serializing the AbortSignal into the audio request', async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe('http://test/api/audio/transcribe');
+      expect(init?.method).toBe('POST');
+      expect(init?.signal).toBe(controller.signal);
+      expect(JSON.parse(String(init?.body))).toEqual({
+        audio: { data: 'dm9pY2U=', mimeType: 'audio/webm' },
+        projectId: 'demo',
+      });
+      return Response.json({ text: 'voice', durationMs: 1200 });
+    }) as unknown as typeof fetch;
+    const client = new GezelClient({ baseUrl: 'http://test', token: 't', fetch: fetchImpl });
+
+    await expect(
+      client.transcribeAudio({
+        audio: { data: 'dm9pY2U=', mimeType: 'audio/webm' },
+        projectId: 'demo',
+        signal: controller.signal,
+      }),
+    ).resolves.toEqual({ text: 'voice', durationMs: 1200 });
+  });
+});
+
+describe('GezelClient speech synthesis', () => {
+  it('streams synthesis progress and returns the finished audio response', async () => {
+    const controller = new AbortController();
+    const progress = vi.fn();
+    const chunks = vi.fn();
+    const result = {
+      artifactPath: 'artifacts/audio/tts.wav',
+      b64Wav: 'UklGRg==',
+      meta: {
+        voice: 'af_heart',
+        model: 'kokoro',
+        sampleRate: 24_000,
+        durationSeconds: 3,
+        durationMs: 1500,
+      },
+    };
+    const frames = [
+      {
+        type: 'progress',
+        progress: {
+          phase: 'synthesizing',
+          completedCharacters: 8,
+          totalCharacters: 12,
+          completedChunks: 1,
+        },
+      },
+      {
+        type: 'chunk',
+        chunk: {
+          index: 0,
+          b64Wav: 'UklGRg==',
+          sampleRate: 24_000,
+          durationSeconds: 1.2,
+        },
+      },
+      { type: 'done', result },
+    ];
+    const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      expect(String(url)).toBe('http://test/api/audio/synthesize-stream');
+      expect(init?.method).toBe('POST');
+      expect(init?.signal).toBe(controller.signal);
+      expect(new Headers(init?.headers).get('authorization')).toBe('Bearer t');
+      expect(JSON.parse(String(init?.body))).toEqual({ text: 'Hello there.', inline: true });
+      return new Response(frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join(''), {
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    }) as unknown as typeof fetch;
+    const client = new GezelClient({ baseUrl: 'http://test', token: 't', fetch: fetchImpl });
+
+    await expect(
+      client.synthesizeSpeechWithProgress(
+        { text: 'Hello there.', inline: true },
+        { onProgress: progress, onChunk: chunks },
+        controller.signal,
+      ),
+    ).resolves.toEqual(result);
+    expect(progress).toHaveBeenCalledWith(
+      expect.objectContaining({ completedCharacters: 8, totalCharacters: 12 }),
+    );
+    expect(chunks).toHaveBeenCalledWith(
+      expect.objectContaining({ index: 0, durationSeconds: 1.2 }),
+    );
+  });
+});
+
 describe('GezelClient workspace binary writes', () => {
   it('sends raw bytes through the authenticated workspace endpoint', async () => {
     const fetchImpl = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {

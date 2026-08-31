@@ -292,11 +292,55 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
     const body = RemoteSynthesizeRequestSchema.parse(await c.req.json());
     const out = await (await ctx.tts.current()).synthesize({
       text: body.text,
+      signal: c.req.raw.signal,
       ...(body.voice ? { voice: body.voice } : {}),
       ...(body.model ? { model: body.model } : {}),
       ...(body.speed !== undefined ? { speed: body.speed } : {}),
     });
     return c.json({ wav: out.wav.toString('base64'), meta: out.meta });
+  });
+
+  app.post('/audio/synthesize-stream', async (c) => {
+    const body = RemoteSynthesizeRequestSchema.parse(await c.req.json());
+    return streamSSE(c, async (stream) => {
+      try {
+        const out = await (await ctx.tts.current()).synthesize({
+          text: body.text,
+          signal: c.req.raw.signal,
+          onProgress: (progress) =>
+            stream.writeSSE({ data: JSON.stringify({ type: 'progress', progress }) }),
+          onChunk: (chunk) =>
+            stream.writeSSE({
+              data: JSON.stringify({
+                type: 'chunk',
+                chunk: {
+                  index: chunk.index,
+                  b64Wav: chunk.wav.toString('base64'),
+                  sampleRate: chunk.sampleRate,
+                  durationSeconds: chunk.durationSeconds,
+                },
+              }),
+            }),
+          ...(body.voice ? { voice: body.voice } : {}),
+          ...(body.model ? { model: body.model } : {}),
+          ...(body.speed !== undefined ? { speed: body.speed } : {}),
+        });
+        await stream.writeSSE({
+          data: JSON.stringify({
+            type: 'done',
+            result: { wav: out.wav.toString('base64'), meta: out.meta },
+          }),
+        });
+      } catch (error) {
+        if (c.req.raw.signal.aborted) return;
+        await stream.writeSSE({
+          data: JSON.stringify({
+            type: 'error',
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        });
+      }
+    });
   });
 
   app.get('/audio/voices', async (c) =>

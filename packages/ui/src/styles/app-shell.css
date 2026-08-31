@@ -2602,10 +2602,13 @@ button.machine-memory-unload-button {
   padding: 1rem 1.25rem;
 }
 
-/* The crew/project split screens and the Craftbooks workspace go edge-to-edge
-   with no surrounding margin. Other views keep the inset. */
+/* Split workspaces and pane-based browsers go edge-to-edge with no surrounding
+   margin. Each pane owns the breathing room its contents need. Other views
+   keep the app-level inset. */
 .app-main:has(> .two-col),
-.app-main:has(> .craftbooks-view) {
+.app-main:has(> .craftbooks-view),
+.app-main:has(> .handboek-view),
+.app-main:has(> .knowledge-view) {
   padding: 0;
 }
 

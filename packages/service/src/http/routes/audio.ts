@@ -1,5 +1,8 @@
 import {
+  type AudioSynthesizeProgress,
+  type AudioSynthesizeRequest,
   AudioSynthesizeRequestSchema,
+  type AudioSynthesizeResponse,
   AudioTranscribeRequestSchema,
   createLogger,
 } from '@bendyline/gezel';
@@ -16,7 +19,7 @@ import {
   KOKORO_DEFAULT_VOICES,
   isKokoroRuntimeAvailable,
 } from '../../providers/audio/kokoro.js';
-import type { AudioModelPullSpec } from '../../providers/audio/types.js';
+import type { AudioModelPullSpec, SynthesizeChunk } from '../../providers/audio/types.js';
 import { WHISPER_MODEL_CATALOG } from '../../providers/audio/whisper-cpp.js';
 import type { ServiceContext } from '../context.js';
 import { machineEngineProxy } from './machine-engine-proxy.js';
@@ -68,6 +71,7 @@ export function buildAudioCatalog(options: { kokoroRuntimeAvailable?: boolean } 
  * Layout mirrors `/api/image-gen`:
  *   - `POST /transcribe`           — STT one-shot.
  *   - `POST /synthesize`           — TTS one-shot.
+ *   - `POST /synthesize-stream`    — TTS with sentence-level SSE progress.
  *   - `GET  /engine-status`        — combined STT + TTS readiness.
  *   - `GET  /catalog`              — what's available to pull.
  *   - `GET  /stt/models`           — list installed STT models.
@@ -85,8 +89,53 @@ export function audioRoutes(ctx: ServiceContext): Hono {
     machineEngineProxy(ctx, '/api/audio', '/v1/remote/manage/audio', [
       '/api/audio/transcribe',
       '/api/audio/synthesize',
+      '/api/audio/synthesize-stream',
     ]),
   );
+
+  async function synthesize(
+    req: AudioSynthesizeRequest,
+    signal: AbortSignal,
+    onProgress?: (progress: AudioSynthesizeProgress) => void | Promise<void>,
+    onChunk?: (chunk: SynthesizeChunk) => void | Promise<void>,
+  ): Promise<AudioSynthesizeResponse> {
+    const projectId = req.projectId ?? 'default';
+
+    // Resolve the effective voice. Caller-supplied wins; otherwise fall
+    // back to the gezel's per-character voice from frontmatter.
+    let resolvedVoice = req.voice;
+    if (!resolvedVoice && req.gezelId) {
+      const gezel = await ctx.store.getGezel(req.gezelId).catch(() => null);
+      resolvedVoice = gezel?.parsed.frontmatter.voice;
+    }
+
+    const synthStarted = Date.now();
+    log.info(
+      `[synthesize] start chars=${req.text.length} voice=${resolvedVoice ?? '(default)'} gezelId=${req.gezelId ?? '(none)'}`,
+    );
+    const provider = await ctx.tts.providerForModel(req.model);
+    const out = await provider.synthesize({
+      text: req.text,
+      signal,
+      ...(onProgress ? { onProgress } : {}),
+      ...(onChunk ? { onChunk } : {}),
+      ...(resolvedVoice ? { voice: resolvedVoice } : {}),
+      ...(req.model ? { model: req.model } : {}),
+      ...(req.speed !== undefined ? { speed: req.speed } : {}),
+    });
+    log.info(
+      `[synthesize] done in ${Date.now() - synthStarted}ms (${out.meta.durationSeconds.toFixed(1)}s audio, ${out.wav.length}B wav)`,
+    );
+
+    const filename = audioArtifactFilename(req.sessionId);
+    const relPath = `audio/${filename}`;
+    const writtenPath = await ctx.store.writeProjectArtifactBinary(projectId, relPath, out.wav);
+    return {
+      artifactPath: writtenPath,
+      meta: out.meta,
+      ...(req.inline ? { b64Wav: out.wav.toString('base64') } : {}),
+    };
+  }
 
   app.post('/transcribe', async (c) => {
     const body = await c.req.json().catch(() => null);
@@ -143,56 +192,58 @@ export function audioRoutes(ctx: ServiceContext): Hono {
     if (!parsed.success) {
       return c.json({ error: parsed.error.message }, 400);
     }
-    const req = parsed.data;
-    const projectId = req.projectId ?? 'default';
-
-    // Resolve the effective voice. Caller-supplied wins; otherwise fall
-    // back to the gezel's per-character voice from frontmatter so
-    // synthesize_speech from a gezel chat picks up that gezel's voice
-    // without callers having to thread it through. Provider applies its
-    // own default (`af_heart`) when both are absent.
-    let resolvedVoice = req.voice;
-    if (!resolvedVoice && req.gezelId) {
-      const gezel = await ctx.store.getGezel(req.gezelId).catch(() => null);
-      resolvedVoice = gezel?.parsed.frontmatter.voice;
-    }
-
-    const synthStarted = Date.now();
-    log.info(
-      `[synthesize] start chars=${req.text.length} voice=${resolvedVoice ?? '(default)'} gezelId=${req.gezelId ?? '(none)'}`,
-    );
     try {
-      const provider = await ctx.tts.providerForModel(req.model);
-      const out = await provider.synthesize({
-        text: req.text,
-        signal: c.req.raw.signal,
-        ...(resolvedVoice ? { voice: resolvedVoice } : {}),
-        ...(req.model ? { model: req.model } : {}),
-        ...(req.speed !== undefined ? { speed: req.speed } : {}),
-      });
-      log.info(
-        `[synthesize] done in ${Date.now() - synthStarted}ms (${out.meta.durationSeconds.toFixed(1)}s audio, ${out.wav.length}B wav)`,
-      );
-
-      const filename = audioArtifactFilename(req.sessionId);
-      const relPath = `audio/${filename}`;
-      const writtenPath = await ctx.store.writeProjectArtifactBinary(projectId, relPath, out.wav);
-      const respBody: {
-        artifactPath: string;
-        meta: typeof out.meta;
-        b64Wav?: string;
-      } = {
-        artifactPath: writtenPath,
-        meta: out.meta,
-      };
-      if (req.inline) respBody.b64Wav = out.wav.toString('base64');
-      return c.json(respBody);
+      return c.json(await synthesize(parsed.data, c.req.raw.signal));
     } catch (err) {
-      log.warn(
-        `[synthesize] failed after ${Date.now() - synthStarted}ms: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      log.warn(`[synthesize] failed: ${err instanceof Error ? err.message : String(err)}`);
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
+  });
+
+  app.post('/synthesize-stream', async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const parsed = AudioSynthesizeRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ error: parsed.error.message }, 400);
+    }
+    const req = parsed.data;
+    return streamSSE(c, async (stream) => {
+      const writeProgress = (progress: AudioSynthesizeProgress) =>
+        stream.writeSSE({ data: JSON.stringify({ type: 'progress', progress }) });
+      try {
+        await writeProgress({
+          phase: 'loading',
+          completedCharacters: 0,
+          totalCharacters: req.text.length,
+          completedChunks: 0,
+        });
+        const result = await synthesize(req, c.req.raw.signal, writeProgress, (chunk) =>
+          stream.writeSSE({
+            data: JSON.stringify({
+              type: 'chunk',
+              chunk: {
+                index: chunk.index,
+                b64Wav: chunk.wav.toString('base64'),
+                sampleRate: chunk.sampleRate,
+                durationSeconds: chunk.durationSeconds,
+              },
+            }),
+          }),
+        );
+        await writeProgress({
+          phase: 'encoding',
+          completedCharacters: req.text.length,
+          totalCharacters: req.text.length,
+          completedChunks: 0,
+        });
+        await stream.writeSSE({ data: JSON.stringify({ type: 'done', result }) });
+      } catch (err) {
+        if (c.req.raw.signal.aborted) return;
+        const error = err instanceof Error ? err.message : String(err);
+        log.warn(`[synthesize-stream] failed: ${error}`);
+        await stream.writeSSE({ data: JSON.stringify({ type: 'error', error }) });
+      }
+    });
   });
 
   app.get('/engine-status', async (c) => {

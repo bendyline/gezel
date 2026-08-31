@@ -53,6 +53,7 @@ import { buildEditableContextMenuTemplate } from './editable-context-menu.js';
 import {
   PREVIEW_FRAME_INDETERMINATE,
   daemonEntrypointArgument,
+  isAllowedMicrophoneCapture,
   isAllowedPreviewNavigation,
   isAllowedPreviewResourceRequest,
   isAllowedTopLevelNavigation,
@@ -604,6 +605,43 @@ async function createWindow(): Promise<void> {
     });
     if (template.length === 0) return;
     Menu.buildFromTemplate(template).popup({ window: contextMenuWindow });
+  });
+
+  // Electron otherwise approves renderer permission requests by default.
+  // Preserve its existing behavior for unrelated APIs, but bind microphone
+  // capture to this exact top-level daemon UI and reject camera/subframe
+  // requests. The main-frame clause keeps model-authored preview documents
+  // from borrowing the app's same-origin microphone permission.
+  const rendererSession = contextMenuWebContents.session;
+  rendererSession.setPermissionCheckHandler(
+    (webContents, permission, requestingOrigin, details) => {
+      if (permission !== 'media') return true;
+      if (webContents !== contextMenuWebContents) return false;
+      return isAllowedMicrophoneCapture(
+        permission,
+        details.requestingUrl ?? requestingOrigin,
+        connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null,
+        details.isMainFrame,
+        details.mediaType ? [details.mediaType] : undefined,
+      );
+    },
+  );
+  rendererSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    if (permission !== 'media') {
+      callback(true);
+      return;
+    }
+    const media = details as Electron.MediaAccessPermissionRequest;
+    callback(
+      webContents === contextMenuWebContents &&
+        isAllowedMicrophoneCapture(
+          permission,
+          media.requestingUrl,
+          connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null,
+          media.isMainFrame,
+          media.mediaTypes,
+        ),
+    );
   });
 
   // Only ever hand a vetted scheme to the OS. `openExternal` will launch

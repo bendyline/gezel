@@ -264,6 +264,24 @@ button.danger {
   border-radius: 0;
 }
 
+/* Overlay the resize grip instead of reserving a track for it. The grip's
+   own background is transparent, so an 8px track is 8px of app `--bg`
+   between two `--panel` surfaces — invisible against the editor body,
+   but a notch of bare background at the left end of the editor's tinted
+   toolbar and status bar. Collapsing the track and letting the handle
+   overhang the seam keeps the same drag target with no gap to paint.
+   Scoped to the library; the project file tabs still sit inside a
+   bordered card where the track reads as part of the frame. */
+.project-files-layout-documents.has-tree-grip {
+  --file-tree-grip-track: 0px;
+}
+
+.project-files-layout-documents .file-tree-grip {
+  width: 9px;
+  margin-inline: -4px;
+  z-index: 2;
+}
+
 .file-tree-grip {
   width: auto;
 }

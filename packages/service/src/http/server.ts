@@ -548,6 +548,9 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     app.all('/v1/remote/manage/video-gen/generate', (c) => c.json({ error: 'not_found' }, 404));
     app.all('/v1/remote/manage/audio/transcribe', (c) => c.json({ error: 'not_found' }, 404));
     app.all('/v1/remote/manage/audio/synthesize', (c) => c.json({ error: 'not_found' }, 404));
+    app.all('/v1/remote/manage/audio/synthesize-stream', (c) =>
+      c.json({ error: 'not_found' }, 404),
+    );
     app.route('/v1/remote/manage/image-gen', imageGenRoutes(ctx));
     app.route('/v1/remote/manage/video-gen', videoGenRoutes(ctx));
     app.route('/v1/remote/manage/audio', audioRoutes(ctx));

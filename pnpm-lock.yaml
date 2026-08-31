@@ -715,8 +715,8 @@ importers:
         specifier: 2.10.0
         version: 2.10.0(supports-color@8.1.1)
       '@bendyline/squisq-editor-react':
-        specifier: 2.10.1
-        version: 2.10.1(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+        specifier: 2.10.2
+        version: 2.10.2(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
       '@bendyline/squisq-formats':
         specifier: 2.5.1
         version: 2.5.1(supports-color@8.1.1)
@@ -957,8 +957,8 @@ packages:
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     hasBin: true
 
-  '@bendyline/squisq-editor-react@2.10.1':
-    resolution: {integrity: sha512-nwaPleZNLeApa2fNnfSfPG1r7ogIMXENRglyaU4S0ZNyriqsxD9TF1JgDbNNrwXybJgpxlRBMO2eYwIXQQCkRw==}
+  '@bendyline/squisq-editor-react@2.10.2':
+    resolution: {integrity: sha512-IHEhMaIOoxN/3XPN2dXEbqaFQ3jsxEGsMMdaHP0gCqItg/Y5I1DoeiU1LsqGEh1yBikSdch9mB6NtILtVe/Reg==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       harper.js: ^2.7.0
@@ -8245,7 +8245,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq-editor-react@2.10.1(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
+  '@bendyline/squisq-editor-react@2.10.2(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
     dependencies:
       '@bendyline/squisq': 2.10.0(supports-color@8.1.1)
       '@bendyline/squisq-formats': 2.5.1(supports-color@8.1.1)

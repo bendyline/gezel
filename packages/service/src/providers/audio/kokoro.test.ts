@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   KOKORO_DEFAULT_MODEL_ID,
   type KokoroAudioOutput,
@@ -130,6 +130,36 @@ describe('KokoroProvider.synthesize', () => {
     // Two sentences streamed → both chunks concatenated into one WAV.
     expect(out.meta.sampleRate).toBe(24_000);
     expect(out.wav.length).toBe(44 + 1200 * 2);
+  });
+
+  it('reports character progress after each synthesized sentence', async () => {
+    const { module } = makeModule({ withSplitter: true });
+    const progress = vi.fn();
+    const chunks = vi.fn();
+
+    await provider(module).synthesize({
+      text: 'One two three. Four five six.',
+      onProgress: progress,
+      onChunk: chunks,
+    });
+
+    expect(progress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: 'synthesizing',
+        completedChunks: 1,
+        totalCharacters: 29,
+      }),
+    );
+    expect(progress).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        phase: 'encoding',
+        completedCharacters: 29,
+        completedChunks: 2,
+      }),
+    );
+    expect(chunks).toHaveBeenCalledTimes(2);
+    expect(chunks.mock.calls[0]?.[0]).toMatchObject({ index: 0, sampleRate: 24_000 });
+    expect(chunks.mock.calls[0]?.[0].wav.subarray(0, 4).toString('ascii')).toBe('RIFF');
   });
 
   it('synthesizes a single sentence — the case an unclosed splitter never yields at all', async () => {

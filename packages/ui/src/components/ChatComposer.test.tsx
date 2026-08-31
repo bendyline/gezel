@@ -30,6 +30,13 @@ vi.mock('./GezelIcon.js', () => ({ GezelIcon: () => <span /> }));
 vi.mock('./GezelMediaProvider.js', () => ({
   createGezelMediaProvider: () => ({ dispose: vi.fn() }),
 }));
+vi.mock('./ChatNarrateButton.js', () => ({
+  ChatNarrateButton: ({ onTranscript }: { onTranscript: (text: string) => void }) => (
+    <button type="button" onClick={() => onTranscript('dictated words')}>
+      Narrate prompt
+    </button>
+  ),
+}));
 vi.mock('@bendyline/squisq-editor-react', async () => {
   const { useState } = await import('react');
   return {
@@ -136,6 +143,19 @@ describe('ChatComposer keyboard hints', () => {
     );
 
     await waitFor(() => expect(document.activeElement).toBe(editor));
+  });
+
+  it('extends the current draft with narrated text', () => {
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Narrate prompt' }));
+
+    expect(screen.getByTestId('editor-draft')).toHaveTextContent(
+      'Hello from the test dictated words',
+    );
   });
 });
 

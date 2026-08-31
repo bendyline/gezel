@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -13,9 +13,21 @@ const editorContext = vi.hoisted(() => ({
   tiptapEditor: null,
 }));
 
+const contextMenu = vi.hoisted(() => ({
+  items: [] as Array<{
+    id: string;
+    label: string;
+    when?: string;
+    onSelect: (context: { selectedText: string }) => void | Promise<void>;
+  }>,
+}));
+
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('@bendyline/squisq-editor-react', () => ({
   useEditorContext: () => editorContext,
+  useEditorContextMenuItems: (items: typeof contextMenu.items) => {
+    contextMenu.items = [...items];
+  },
 }));
 vi.mock('./document-narration-mp3.js', () => ({
   encodeWavAsMp3: vi.fn(async () => new Blob([], { type: 'audio/mpeg' })),
@@ -55,6 +67,26 @@ class MockAudio extends EventTarget {
   }
 }
 
+class MockBufferSource extends EventTarget {
+  buffer: AudioBuffer | null = null;
+  connect(): void {}
+  start(): void {}
+  stop(): void {}
+}
+
+class MockAudioContext {
+  currentTime = 0;
+  destination = {} as AudioDestinationNode;
+  async resume(): Promise<void> {}
+  async close(): Promise<void> {}
+  async decodeAudioData(): Promise<AudioBuffer> {
+    return { duration: 5 } as AudioBuffer;
+  }
+  createBufferSource(): AudioBufferSourceNode {
+    return new MockBufferSource() as unknown as AudioBufferSourceNode;
+  }
+}
+
 function renderControl(projectId?: string) {
   return render(
     <div className="squisq-editor-shell">
@@ -69,6 +101,7 @@ function renderControl(projectId?: string) {
 describe('DocumentNarration', () => {
   beforeEach(() => {
     lastAudio = null;
+    contextMenu.items = [];
     vi.stubGlobal('Audio', MockAudio);
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
@@ -78,7 +111,7 @@ describe('DocumentNarration', () => {
       configurable: true,
       value: vi.fn(),
     });
-    vi.mocked(api.synthesizeSpeech).mockResolvedValue({
+    vi.mocked(api.synthesizeSpeechWithProgress).mockResolvedValue({
       artifactPath: 'artifacts/audio/tts.wav',
       b64Wav: 'UklGRg==',
       meta: {
@@ -101,46 +134,129 @@ describe('DocumentNarration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Narrate document' }));
 
-    await waitFor(() => expect(api.synthesizeSpeech).toHaveBeenCalledOnce());
-    expect(api.synthesizeSpeech).toHaveBeenCalledWith(
+    await waitFor(() => expect(api.synthesizeSpeechWithProgress).toHaveBeenCalledOnce());
+    expect(api.synthesizeSpeechWithProgress).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining('Field notes'),
         projectId: 'project-1',
         inline: true,
-        signal: expect.any(AbortSignal),
       }),
+      expect.objectContaining({
+        onProgress: expect.any(Function),
+        onChunk: expect.any(Function),
+      }),
+      expect.any(AbortSignal),
     );
-    expect(vi.mocked(api.synthesizeSpeech).mock.calls[0]?.[0].text).not.toContain('#');
+    expect(vi.mocked(api.synthesizeSpeechWithProgress).mock.calls[0]?.[0].text).not.toContain('#');
     expect(await screen.findByText('Document narration')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Download MP3' })).toBeInTheDocument();
+    const download = screen.getByRole('button', { name: 'Download MP3' });
+    expect(download).toBeInTheDocument();
+    expect(download).toHaveTextContent('');
   });
 
-  it('offers Narrate selection from the editor context menu', async () => {
+  it('registers Narrate selection with the Squisq context menu', async () => {
     renderControl();
 
-    fireEvent.contextMenu(screen.getByTestId('editor-content'), { clientX: 40, clientY: 60 });
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Narrate selection' }));
+    const item = contextMenu.items.find((candidate) => candidate.id === 'gezel.narrate-selection');
+    expect(item).toMatchObject({ label: 'Narrate selection', when: 'selection' });
+    await act(async () => {
+      await item?.onSelect({ selectedText: 'a quiet morning' });
+    });
 
     await waitFor(() =>
-      expect(api.synthesizeSpeech).toHaveBeenCalledWith(
+      expect(api.synthesizeSpeechWithProgress).toHaveBeenCalledWith(
         expect.objectContaining({ text: 'a quiet morning', inline: true }),
+        expect.objectContaining({
+          onProgress: expect.any(Function),
+          onChunk: expect.any(Function),
+        }),
+        expect.any(AbortSignal),
       ),
     );
     expect(await screen.findByText('Selection narration')).toBeInTheDocument();
   });
 
   it('cancels an in-flight narration request', async () => {
-    vi.mocked(api.synthesizeSpeech).mockImplementation(() => new Promise(() => undefined) as never);
+    vi.mocked(api.synthesizeSpeechWithProgress).mockImplementation(
+      () => new Promise(() => undefined) as never,
+    );
     renderControl();
 
     fireEvent.click(screen.getByRole('button', { name: 'Narrate document' }));
     expect(await screen.findByText('Creating narration…')).toBeInTheDocument();
-    const signal = vi.mocked(api.synthesizeSpeech).mock.calls[0]?.[0].signal;
+    const signal = vi.mocked(api.synthesizeSpeechWithProgress).mock.calls[0]?.[2];
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(signal?.aborted).toBe(true);
     await waitFor(() => expect(screen.queryByLabelText('Narration controls')).toBeNull());
+  });
+
+  it('shows live sentence progress while narration is created', async () => {
+    vi.mocked(api.synthesizeSpeechWithProgress).mockImplementation(
+      (_body, callbacks) =>
+        new Promise(() => {
+          callbacks.onProgress({
+            phase: 'synthesizing',
+            completedCharacters: 50,
+            totalCharacters: 100,
+            completedChunks: 2,
+          });
+        }) as never,
+    );
+    renderControl();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Narrate document' }));
+
+    const progress = await screen.findByRole('progressbar', { name: 'Creating narration' });
+    expect(progress).toHaveAttribute('aria-valuenow', '50');
+    expect(document.querySelector('.document-narration-progress-value')).toHaveTextContent('50%');
+    expect(screen.getByText(/Starting speech/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  });
+
+  it('starts progressive playback once sentence generation is safely faster than playback', async () => {
+    let now = 1000;
+    vi.stubGlobal('AudioContext', MockAudioContext);
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    vi.mocked(api.synthesizeSpeechWithProgress).mockImplementation(async (_body, callbacks) => {
+      callbacks.onProgress({
+        phase: 'synthesizing',
+        completedCharacters: 25,
+        totalCharacters: 100,
+        completedChunks: 1,
+      });
+      await callbacks.onChunk?.({
+        index: 0,
+        b64Wav: 'UklGRg==',
+        sampleRate: 24_000,
+        durationSeconds: 5,
+      });
+      now = 2000;
+      callbacks.onProgress({
+        phase: 'synthesizing',
+        completedCharacters: 50,
+        totalCharacters: 100,
+        completedChunks: 2,
+      });
+      await callbacks.onChunk?.({
+        index: 1,
+        b64Wav: 'UklGRg==',
+        sampleRate: 24_000,
+        durationSeconds: 5,
+      });
+      return new Promise(() => undefined) as never;
+    });
+    renderControl();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Narrate document' }));
+
+    expect(await screen.findByText('Playing while creating…')).toBeInTheDocument();
+    expect(screen.getByText(/0:10 buffered/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pause narration' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
   });
 
   it('skips the finished audio backward and forward by 30 seconds', async () => {

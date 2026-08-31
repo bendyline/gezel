@@ -834,6 +834,7 @@
 }
 
 .chat-composer {
+  --chat-composer-action-inset: 0.6rem;
   padding: 0.5rem 0.25rem 0.25rem;
 }
 
@@ -845,8 +846,8 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin: 0 0.25rem 0.25rem;
-  padding: 0.15rem 0.55rem;
+  margin: 0 0 0.25rem 0.25rem;
+  padding: 0.15rem var(--chat-composer-action-inset) 0.15rem 0.55rem;
   font-size: var(--text-2xs);
   background: var(--surface-2, rgba(0, 0, 0, 0.04));
   border-radius: var(--radius-md);
@@ -1275,7 +1276,10 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 
 .chat-editor-wrap .squisq-editor-shell[data-host-mode="chat"] .squisq-toolbar {
   background: var(--compose-toolbar-bg) !important;
-  padding-inline-end: 0;
+  /* The header contributes 1px and the submit key contributes 2px of margin;
+     spend the remainder here so the whole action group shares the recipient
+     and thread rows' right edge. */
+  padding-inline-end: calc(var(--chat-composer-action-inset) - 3px);
 }
 
 /* Squisq's `.squisq-editor-content` has `overflow: hidden` — when the
@@ -1563,7 +1567,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
    doesn't change shape when the user flips compose mode. */
 .chat-send-btn,
 .terminal-fire-btn {
-  margin: 1px;
+  margin: 1px 2px;
   border: 1px solid color-mix(in srgb, var(--accent) 82%, var(--text));
   border-radius: var(--radius-md);
   background: linear-gradient(
@@ -1601,13 +1605,83 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 .terminal-fire-btn {
   display: inline-grid;
   place-items: center;
-  width: 2rem;
-  height: 1.75rem;
+  width: 1.65rem;
+  height: 1.65rem;
   padding: 0;
+}
+
+.chat-send-btn-icon,
+.terminal-fire-btn {
+  margin: 2px;
 }
 
 .chat-send-btn-icon[aria-busy="true"] {
   opacity: 0.7;
+}
+
+/* Voice input is a quiet tool key beside the primary Send key. It records in
+   independently-decodable takes, so the small live dot is the persistent cue
+   that the microphone remains open while earlier speech is being transcribed. */
+.chat-narrate-btn {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 1.75rem;
+  margin: 2px;
+  padding: 0;
+  border: 1px solid var(--key-border);
+  border-radius: var(--radius-md);
+  background: var(--key-bg);
+  color: var(--text-muted);
+  box-shadow: var(--key-shadow);
+  transition:
+    background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out,
+    box-shadow 120ms ease-out, transform 120ms ease-out;
+}
+
+.chat-narrate-btn svg {
+  width: 1rem;
+  height: 1rem;
+  stroke-width: 1.35;
+}
+
+.chat-narrate-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--key-border));
+  background: var(--key-bg-hover);
+  color: var(--text);
+}
+
+.chat-narrate-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--text) 22%, transparent);
+}
+
+.chat-narrate-btn-recording {
+  border-color: color-mix(in srgb, var(--danger) 72%, var(--border));
+  background: color-mix(in srgb, var(--danger) 13%, var(--surface));
+  color: var(--danger);
+  box-shadow: inset 0 1px 2px color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.chat-narrate-btn-recording:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--danger) 82%, var(--border));
+  background: color-mix(in srgb, var(--danger) 17%, var(--surface));
+  color: var(--danger);
+}
+
+.chat-narrate-live-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.chat-narrate-btn[aria-busy="true"] {
+  opacity: 0.68;
 }
 
 /* Mid-turn composer controls. Nudge reuses .chat-send-btn so terracotta
@@ -1794,44 +1868,6 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   fill: currentColor;
 }
 
-.document-narration-context-menu {
-  position: fixed;
-  z-index: 1200;
-  min-width: 13rem;
-  padding: 0.25rem;
-  color: var(--text);
-  background: var(--surface, var(--panel));
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--text) 24%, transparent);
-}
-
-.document-narration-context-menu button {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  width: 100%;
-  padding: 0.45rem 0.6rem;
-  color: var(--text);
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-sm);
-  text-align: left;
-}
-
-.document-narration-context-menu button:hover,
-.document-narration-context-menu button:focus-visible {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  outline: none;
-}
-
-.document-narration-context-menu svg {
-  width: 1rem;
-  height: 1rem;
-  flex: 0 0 auto;
-  fill: currentColor;
-}
-
 .document-narration-transport {
   position: fixed;
   z-index: 1100;
@@ -1874,13 +1910,67 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 .document-narration-progress {
+  position: relative;
   flex: 1 1 12rem;
   min-width: 6rem;
   height: 0.45rem;
   overflow: hidden;
-  accent-color: var(--accent);
-  border: 0;
+  background: color-mix(in srgb, var(--text) 18%, transparent);
   border-radius: var(--radius-sm);
+}
+
+.document-narration-progress-buffered,
+.document-narration-progress-played {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 0.2rem;
+  transition: width 240ms ease-out;
+}
+
+.document-narration-progress-buffered {
+  z-index: 1;
+  background: color-mix(in srgb, var(--accent) 42%, var(--surface));
+}
+
+.document-narration-progress-played {
+  z-index: 2;
+  background: var(--accent);
+}
+
+.document-narration-progress::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--text) 50%, transparent) 48%,
+    transparent 100%
+  );
+  content: "";
+  z-index: 3;
+  pointer-events: none;
+  transform: translateX(-100%);
+  animation: document-narration-progress-sweep 1.35s ease-in-out infinite;
+}
+
+.document-narration-progress-value {
+  width: 5.2rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-xs);
+  text-align: right;
+}
+
+@keyframes document-narration-progress-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .document-narration-progress::after {
+    animation: none;
+  }
 }
 
 .document-narration-control,
@@ -1950,10 +2040,26 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   white-space: nowrap;
 }
 
-.document-narration-download,
 .document-narration-cancel {
   padding-inline: 0.65rem;
   white-space: nowrap;
+}
+
+.document-narration-download {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  padding: 0;
+}
+
+.document-narration-download svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 .document-narration-close {

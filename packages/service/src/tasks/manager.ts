@@ -14,7 +14,6 @@ import {
   MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   type NewCraftbookStep,
   type NormalizedStepGate,
-  type ScriptOutputPredicate,
   type ScriptRef,
   type ScriptRun,
   type StepPosition,
@@ -86,6 +85,15 @@ import {
 } from './gate-eval.js';
 import { execNodeRunsInSandbox } from './node-runs-exec.js';
 import { type StepGateOutcome, evaluateStepGate, gateMessageFingerprint } from './step-gate.js';
+import {
+  bumpStepActivation,
+  findBranchGoto,
+  mainBookSource,
+  shouldAutoAdvance,
+  stepOwnerGezelId,
+} from './step-runtime.js';
+
+export { mainBookSource, stepOwnerGezelId };
 
 const log = createLogger('tasks');
 
@@ -4580,175 +4588,4 @@ export class TaskManager {
     if (!task) throw new Error(`task ${buildTaskRef(projectId, num)} not found`);
     return task;
   }
-}
-
-/**
- * Walk a step's branches in order, evaluating each predicate against
- * the supplied output. Returns the first matching `goto`, or undefined
- * when no branch matches (caller falls through to `next`).
- */
-function findBranchGoto(
-  branches: { when: ScriptOutputPredicate; goto: string }[],
-  output: unknown,
-): string | undefined {
-  for (const b of branches) {
-    if (evaluatePredicate(b.when, output)) return b.goto;
-  }
-  return undefined;
-}
-
-/**
- * Stamp an activation onto a step: bump `attemptCount` and set
- * `lastActivatedAt`. Called every time a step becomes the active step —
- * the entry step at create/spawn, manual `activateStep`, and each
- * advancement, INCLUDING loop-backs (build-loop's `evaluate → build`
- * cycle re-activates `build`, so its count climbs). The count is what
- * surfaces "we've poked the dev step 3 times" to the voorman and lets
- * the eval harness confirm a model iterated rather than one-shotting.
- */
-function bumpStepActivation(
-  steps: TaskCraftbookStep[],
-  stepId: string,
-  at: string,
-  opts?: { preserveGateBudget?: boolean },
-): TaskCraftbookStep[] {
-  return steps.map((s) => {
-    if (s.id !== stepId) return s;
-    // A re-activated step (loop-back) is active again, not done — drop any
-    // stale `completedAt` from its previous pass so the phase state reads
-    // truthfully — and bump the attempt counter. Gate state resets too:
-    // a fresh activation grants a fresh rejection budget, and the damper
-    // must not replay a rejection from a previous pass. The anti-stall
-    // re-drive budget resets on the same principle — a fresh activation is
-    // a clean start, not a continuation of the prior pass's silence.
-    //
-    // `gateAttemptHistory` deliberately SURVIVES this reset: `onReject:
-    // <self>` loop gates re-activate on every rejection, so stripping the
-    // trail here would blind the plateau ladder exactly where it matters.
-    // The trail self-heals — real progress changes the failing-check
-    // signature and the trailing-run score resets to 1.
-    const {
-      completedAt: _done,
-      onEnterCompletedAt: _entered,
-      gateAttempts: _ga,
-      gateProgressAttempts: _gpa,
-      lastGateReject: _lgr,
-      redriveCount: _rc,
-      lastRedriveAt: _lra,
-      ...rest
-    } = s;
-    void _done;
-    void _entered;
-    void _ga;
-    void _gpa;
-    void _lgr;
-    void _rc;
-    void _lra;
-    const bumped = { ...rest, attemptCount: (s.attemptCount ?? 0) + 1, lastActivatedAt: at };
-    if (!opts?.preserveGateBudget) return bumped;
-    // Self-loop carve-out. A gate with `onReject: <self>` re-activates the
-    // step it just rejected, so the reset above handed it a brand-new
-    // budget on every rejection and `maxAttempts` became unreachable —
-    // the pause-for-help that budget exists to trigger could never fire.
-    // Wild-caught on Pull Request Review: the step logged attemptCount 3
-    // while every trail entry (and every message the model saw) read
-    // "attempt 1/3", so nothing ever escalated and the loop could have run
-    // forever. Only a gate rejection routing back to ITSELF takes this
-    // branch; a loop through another step is real upstream rework and
-    // still earns a clean budget, as do create/manual activation and the
-    // deliberate `resetStepRecoveryBudget` second chance.
-    return {
-      ...bumped,
-      ...(s.gateAttempts !== undefined ? { gateAttempts: s.gateAttempts } : {}),
-      // Same reasoning for the progress budget: a self-loop that re-earned
-      // it every pass would make GATE_MAX_PROGRESS_ATTEMPTS unreachable,
-      // which is the exact bug this carve-out exists to prevent.
-      ...(s.gateProgressAttempts !== undefined
-        ? { gateProgressAttempts: s.gateProgressAttempts }
-        : {}),
-      ...(s.lastGateReject !== undefined ? { lastGateReject: s.lastGateReject } : {}),
-    };
-  });
-}
-
-/**
- * Decide whether a step should auto-advance based on its onEnter ref
- * and the stamped output. `autoAdvanceOnSuccess: true` is sugar for
- * `{op: 'ok'}`. If both flags are set, `autoAdvanceWhen` wins.
- */
-function shouldAutoAdvance(ref: ScriptRef, output: unknown): boolean {
-  const predicate: ScriptOutputPredicate | undefined =
-    ref.autoAdvanceWhen ?? (ref.autoAdvanceOnSuccess ? { op: 'ok' } : undefined);
-  if (!predicate) return false;
-  return evaluatePredicate(predicate, output);
-}
-
-function evaluatePredicate(predicate: ScriptOutputPredicate, output: unknown): boolean {
-  switch (predicate.op) {
-    case 'always':
-      return true;
-    case 'never':
-      return false;
-    case 'ok': {
-      if (!isRecord(output)) return true;
-      return output.ok !== false;
-    }
-    case 'equals': {
-      const v = readFieldPath(output, predicate.field);
-      return v === predicate.value;
-    }
-    case 'exists': {
-      const v = readFieldPath(output, predicate.field);
-      const exists = v !== undefined && v !== null;
-      return predicate.negate ? !exists : exists;
-    }
-    case 'gt': {
-      const v = readFieldPath(output, predicate.field);
-      return typeof v === 'number' && v > predicate.value;
-    }
-  }
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-function readFieldPath(output: unknown, path: string): unknown {
-  if (output === null || output === undefined) return undefined;
-  const segments = path.split('.');
-  let cur: unknown = output;
-  for (const seg of segments) {
-    if (cur === null || cur === undefined) return undefined;
-    if (Array.isArray(cur) && seg === 'length') {
-      cur = cur.length;
-      continue;
-    }
-    if (typeof cur !== 'object') return undefined;
-    cur = (cur as Record<string, unknown>)[seg];
-  }
-  return cur;
-}
-
-/**
- * The gezel accountable for a step right now: explicit step assignee →
- * the step's resolved suggested gezel → the task-level assignee. Same
- * triple the scheduler and the gate's keurmeester consult use.
- */
-export function stepOwnerGezelId(task: Task, step: TaskCraftbookStep): string | undefined {
-  if (step.assignee?.kind === 'gezel') return step.assignee.gezelId;
-  if (step.suggestedGezelId) return step.suggestedGezelId;
-  return task.assignee.kind === 'gezel' ? task.assignee.gezelId : undefined;
-}
-
-/**
- * The catalog identity of the recipe this task walks — the per-book join
- * key gate telemetry aggregates on. `role: 'main'` is the walked book;
- * the embedded snapshot id is the fallback for older/inline tasks.
- */
-export function mainBookSource(task: Task): { catalogId: string; version?: string } {
-  const main = task.sourceCraftbookIds?.find((s) => s.role === 'main');
-  if (main) {
-    return { catalogId: main.catalogId, ...(main.version ? { version: main.version } : {}) };
-  }
-  return { catalogId: task.craftbook.id };
 }

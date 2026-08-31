@@ -96,6 +96,33 @@ export const AudioSynthesizeResponseSchema = z.object({
 });
 export type AudioSynthesizeResponse = z.infer<typeof AudioSynthesizeResponseSchema>;
 
+/** Live progress emitted while a speech request is being synthesized. */
+export const AudioSynthesizeProgressSchema = z.object({
+  phase: z.enum(['loading', 'synthesizing', 'encoding']),
+  completedCharacters: z.number().int().nonnegative(),
+  totalCharacters: z.number().int().positive(),
+  completedChunks: z.number().int().nonnegative(),
+});
+export type AudioSynthesizeProgress = z.infer<typeof AudioSynthesizeProgressSchema>;
+
+/** One independently playable sentence emitted before the final WAV is assembled. */
+export const AudioSynthesizeChunkSchema = z.object({
+  index: z.number().int().nonnegative(),
+  b64Wav: z.string(),
+  sampleRate: z.number().int().positive(),
+  durationSeconds: z.number().positive(),
+});
+export type AudioSynthesizeChunk = z.infer<typeof AudioSynthesizeChunkSchema>;
+
+/** Finite SSE stream used by document narration and other progress-aware callers. */
+export const AudioSynthesizeEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('progress'), progress: AudioSynthesizeProgressSchema }),
+  z.object({ type: z.literal('chunk'), chunk: AudioSynthesizeChunkSchema }),
+  z.object({ type: z.literal('done'), result: AudioSynthesizeResponseSchema }),
+  z.object({ type: z.literal('error'), error: z.string() }),
+]);
+export type AudioSynthesizeEvent = z.infer<typeof AudioSynthesizeEventSchema>;
+
 // ── installed model lists ────────────────────────────────────────
 
 export const InstalledAudioModelSchema = z.object({

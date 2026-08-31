@@ -473,7 +473,8 @@ async function isSessionRouteAllowed(
       path === '/api/image-gen/generate' ||
       path === '/api/video-gen/generate' ||
       path === '/api/audio/transcribe' ||
-      path === '/api/audio/synthesize') &&
+      path === '/api/audio/synthesize' ||
+      path === '/api/audio/synthesize-stream') &&
     method === 'POST'
   ) {
     const body = await readJsonSafe(c);

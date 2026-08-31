@@ -1,17 +1,17 @@
-import { useEditorContext } from '@bendyline/squisq-editor-react';
+import type { AudioSynthesizeProgress } from '@bendyline/gezel';
+import {
+  type EditorContextMenuItem,
+  useEditorContext,
+  useEditorContextMenuItems,
+} from '@bendyline/squisq-editor-react';
 import { extractPlainText, parseMarkdown } from '@bendyline/squisq/markdown';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../api.js';
+import { ProgressiveNarrationPlayer } from './progressive-narration-player.js';
 
 type NarrationScope = 'document' | 'selection';
 type NarrationStatus = 'idle' | 'creating' | 'ready' | 'error';
-
-interface SelectionMenu {
-  x: number;
-  y: number;
-  text: string;
-}
 
 export interface DocumentNarrationProps {
   fileName?: string;
@@ -70,23 +70,26 @@ function triggerDownload(blob: Blob, name: string): void {
 /**
  * Host-owned text-to-speech controls for Squisq document editors.
  *
- * The visible toolbar button narrates the complete parsed document. A capture
- * listener on this editor shell adds "Narrate selection" to the right-click
- * path without changing Squisq itself. Generation and playback live in a
- * body-portaled transport so they survive view changes inside the editor.
+ * The visible toolbar button narrates the complete parsed document. The
+ * selection action registers with Squisq's shared context menu. Generation
+ * and playback live in a body-portaled transport so they survive view changes
+ * inside the editor.
  */
 export function DocumentNarration({ fileName, projectId }: DocumentNarrationProps) {
-  const { activeView, markdownDoc, markdownSource, monacoEditor, tiptapEditor } =
-    useEditorContext();
-  const toolbarRootRef = useRef<HTMLSpanElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const { markdownDoc, markdownSource } = useEditorContext();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioCleanupRef = useRef<(() => void) | null>(null);
   const audioUrlRef = useRef<string | null>(null);
   const wavBlobRef = useRef<Blob | null>(null);
   const mp3BlobRef = useRef<Blob | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const [menu, setMenu] = useState<SelectionMenu | null>(null);
+  const progressivePlayerRef = useRef<ProgressiveNarrationPlayer | null>(null);
+  const creationProgressRef = useRef<AudioSynthesizeProgress | null>(null);
+  const creationStartedAtRef = useRef(0);
+  const firstChunkAtRef = useRef(0);
+  const firstChunkDurationRef = useRef(0);
+  const firstChunkCharactersRef = useRef(0);
+  const userPausedRef = useRef(false);
   const [status, setStatus] = useState<NarrationStatus>('idle');
   const [scope, setScope] = useState<NarrationScope>('document');
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +98,10 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [creationProgress, setCreationProgress] = useState<AudioSynthesizeProgress | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [bufferedDuration, setBufferedDuration] = useState(0);
+  const [waitingForAudio, setWaitingForAudio] = useState(false);
 
   const documentText = useMemo(() => {
     try {
@@ -106,6 +113,8 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
   }, [markdownDoc, markdownSource]);
 
   const releaseAudio = useCallback(() => {
+    progressivePlayerRef.current?.dispose();
+    progressivePlayerRef.current = null;
     audioCleanupRef.current?.();
     audioCleanupRef.current = null;
     const audio = audioRef.current;
@@ -131,6 +140,11 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
+    setBufferedDuration(0);
+    setWaitingForAudio(false);
+    setCreationProgress(null);
+    creationProgressRef.current = null;
+    userPausedRef.current = false;
   }, [releaseAudio]);
 
   useEffect(
@@ -141,6 +155,29 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
     [releaseAudio],
   );
 
+  useEffect(() => {
+    if (status !== 'creating') return;
+    const startedAt = creationStartedAtRef.current || performance.now();
+    setElapsedSeconds(0);
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((performance.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [status]);
+
+  useEffect(() => {
+    if (status === 'idle' || !progressivePlayerRef.current) return;
+    const timer = window.setInterval(() => {
+      const snapshot = progressivePlayerRef.current?.snapshot();
+      if (!snapshot) return;
+      setCurrentTime(snapshot.currentTime);
+      setBufferedDuration(snapshot.bufferedDuration);
+      setIsPlaying(snapshot.isPlaying);
+      setWaitingForAudio(snapshot.waitingForAudio);
+    }, 200);
+    return () => window.clearInterval(timer);
+  }, [status]);
+
   const beginNarration = useCallback(
     async (text: string, nextScope: NarrationScope) => {
       const cleanText = normalizeNarrationText(text);
@@ -148,9 +185,22 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
 
       abortRef.current?.abort();
       releaseAudio();
+      const player = ProgressiveNarrationPlayer.create((snapshot) => {
+        setCurrentTime(snapshot.currentTime);
+        setBufferedDuration(snapshot.bufferedDuration);
+        setIsPlaying(snapshot.isPlaying);
+        setWaitingForAudio(snapshot.waitingForAudio);
+      });
+      progressivePlayerRef.current = player;
+      player?.prime();
       const controller = new AbortController();
       abortRef.current = controller;
-      setMenu(null);
+      creationStartedAtRef.current = performance.now();
+      firstChunkAtRef.current = 0;
+      firstChunkDurationRef.current = 0;
+      firstChunkCharactersRef.current = 0;
+      creationProgressRef.current = null;
+      userPausedRef.current = false;
       setScope(nextScope);
       setStatus('creating');
       setError(null);
@@ -159,20 +209,78 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
       setIsPlaying(false);
       setCurrentTime(0);
       setDuration(0);
+      setBufferedDuration(0);
+      setWaitingForAudio(false);
+      setCreationProgress(null);
 
       try {
-        const result = await api.synthesizeSpeech({
-          text: cleanText,
-          ...(projectId ? { projectId } : {}),
-          inline: true,
-          signal: controller.signal,
-        });
+        const result = await api.synthesizeSpeechWithProgress(
+          {
+            text: cleanText,
+            ...(projectId ? { projectId } : {}),
+            inline: true,
+          },
+          {
+            onProgress: (progress) => {
+              creationProgressRef.current = progress;
+              setCreationProgress(progress);
+            },
+            onChunk: async (chunk) => {
+              if (controller.signal.aborted || progressivePlayerRef.current !== player || !player)
+                return;
+              const snapshot = await player.appendWav(
+                chunk.index,
+                ownedArrayBuffer(bytesFromBase64(chunk.b64Wav)),
+              );
+              const now = performance.now();
+              const progress = creationProgressRef.current;
+              if (firstChunkAtRef.current === 0) {
+                firstChunkAtRef.current = now;
+                firstChunkDurationRef.current = snapshot.bufferedDuration;
+                firstChunkCharactersRef.current = progress?.completedCharacters ?? 0;
+              }
+              if (snapshot.isPlaying || userPausedRef.current) return;
+
+              const secondsSinceFirstChunk = (now - firstChunkAtRef.current) / 1000;
+              const generatedSinceFirst = snapshot.bufferedDuration - firstChunkDurationRef.current;
+              const audioGenerationRate =
+                secondsSinceFirstChunk > 0.25 ? generatedSinceFirst / secondsSinceFirstChunk : 0;
+              const charactersSinceFirst =
+                (progress?.completedCharacters ?? 0) - firstChunkCharactersRef.current;
+              const characterRate =
+                secondsSinceFirstChunk > 0.25 ? charactersSinceFirst / secondsSinceFirstChunk : 0;
+              const remainingGenerationSeconds =
+                progress && characterRate > 0
+                  ? (progress.totalCharacters - progress.completedCharacters) / characterRate
+                  : Number.POSITIVE_INFINITY;
+              const bufferAhead = snapshot.bufferedDuration - snapshot.currentTime;
+              const safeToStart =
+                bufferAhead >= 4 &&
+                (audioGenerationRate >= 1.15 || bufferAhead >= remainingGenerationSeconds + 3);
+              if (safeToStart) await player.play();
+            },
+          },
+          controller.signal,
+        );
         if (controller.signal.aborted) return;
         if (!result.b64Wav) throw new Error('The speech engine did not return playable audio.');
 
         const wav = new Blob([ownedArrayBuffer(bytesFromBase64(result.b64Wav))], {
           type: 'audio/wav',
         });
+        wavBlobRef.current = wav;
+        if (player && player.snapshot().bufferedDuration > 0) {
+          player.finish();
+          setBufferedDuration(player.snapshot().bufferedDuration);
+          setDuration(result.meta?.durationSeconds ?? player.snapshot().bufferedDuration);
+          setStatus('ready');
+          abortRef.current = null;
+          if (!player.snapshot().isPlaying && !userPausedRef.current) await player.play();
+          return;
+        }
+
+        player?.dispose();
+        if (progressivePlayerRef.current === player) progressivePlayerRef.current = null;
         const url = URL.createObjectURL(wav);
         const audio = new Audio(url);
         const syncTime = () => {
@@ -202,7 +310,6 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
           audio.removeEventListener('ended', onEnded);
           audio.removeEventListener('error', onError);
         };
-        wavBlobRef.current = wav;
         audioUrlRef.current = url;
         audioRef.current = audio;
         setDuration(result.meta?.durationSeconds ?? 0);
@@ -214,6 +321,8 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
           if (abortRef.current === controller) setStatus('idle');
           return;
         }
+        player?.dispose();
+        if (progressivePlayerRef.current === player) progressivePlayerRef.current = null;
         setError(caught instanceof Error ? caught.message : 'Could not create the narration.');
         setStatus('error');
         abortRef.current = null;
@@ -222,74 +331,41 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
     [projectId, releaseAudio],
   );
 
-  const selectedText = useCallback((): string => {
-    if (activeView === 'raw' && monacoEditor) {
-      const selection = monacoEditor.getSelection();
-      const model = monacoEditor.getModel();
-      if (selection && model && !selection.isEmpty()) {
-        return normalizeNarrationText(model.getValueInRange(selection));
-      }
-      return '';
-    }
-    if (activeView === 'wysiwyg' && tiptapEditor) {
-      const { from, to, empty } = tiptapEditor.state.selection;
-      return empty
-        ? ''
-        : normalizeNarrationText(tiptapEditor.state.doc.textBetween(from, to, '\n'));
-    }
-    const selection = window.getSelection();
-    const shell = toolbarRootRef.current?.closest('.squisq-editor-shell');
-    if (selection?.anchorNode && shell && !shell.contains(selection.anchorNode)) return '';
-    return normalizeNarrationText(selection?.toString() ?? '');
-  }, [activeView, monacoEditor, tiptapEditor]);
-
-  useEffect(() => {
-    const shell = toolbarRootRef.current?.closest('.squisq-editor-shell');
-    if (!shell) return;
-    const openSelectionMenu = (event: Event) => {
-      if (status === 'creating') return;
-      const mouseEvent = event as MouseEvent;
-      const target = mouseEvent.target;
-      if (!(target instanceof Element) || !target.closest('.squisq-editor-content')) return;
-      const text = selectedText();
-      if (!text) return;
-      mouseEvent.preventDefault();
-      mouseEvent.stopPropagation();
-      const menuWidth = 210;
-      const menuHeight = 46;
-      setMenu({
-        x: Math.max(8, Math.min(mouseEvent.clientX, window.innerWidth - menuWidth - 8)),
-        y: Math.max(8, Math.min(mouseEvent.clientY, window.innerHeight - menuHeight - 8)),
-        text,
-      });
-    };
-    shell.addEventListener('contextmenu', openSelectionMenu, true);
-    return () => shell.removeEventListener('contextmenu', openSelectionMenu, true);
-  }, [selectedText, status]);
-
-  useEffect(() => {
-    if (!menu) return;
-    menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
-    const dismiss = (event: Event) => {
-      if (event.target instanceof Node && menuRef.current?.contains(event.target)) return;
-      setMenu(null);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMenu(null);
-    };
-    window.addEventListener('pointerdown', dismiss, true);
-    window.addEventListener('scroll', dismiss, true);
-    window.addEventListener('resize', dismiss);
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      window.removeEventListener('pointerdown', dismiss, true);
-      window.removeEventListener('scroll', dismiss, true);
-      window.removeEventListener('resize', dismiss);
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [menu]);
+  const contextMenuItems = useMemo<readonly EditorContextMenuItem[]>(
+    () => [
+      {
+        id: 'gezel.narrate-selection',
+        label: 'Narrate selection',
+        group: 'narration',
+        when: 'selection',
+        disabled: status === 'creating',
+        icon: (
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2-3.74v7.48a4.5 4.5 0 0 0 2-3.74Z" />
+          </svg>
+        ),
+        onSelect: ({ selectedText }) => beginNarration(selectedText, 'selection'),
+      },
+    ],
+    [beginNarration, status],
+  );
+  useEditorContextMenuItems(contextMenuItems);
 
   const togglePlayback = useCallback(() => {
+    const progressive = progressivePlayerRef.current;
+    if (progressive) {
+      if (progressive.snapshot().isPlaying) {
+        userPausedRef.current = true;
+        progressive.pause();
+      } else {
+        userPausedRef.current = false;
+        void progressive.play().catch((caught: unknown) => {
+          setError(caught instanceof Error ? caught.message : 'Could not play the narration.');
+          setStatus('error');
+        });
+      }
+      return;
+    }
     const audio = audioRef.current;
     if (!audio) return;
     if (audio.paused) {
@@ -305,6 +381,12 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
   }, []);
 
   const seekBy = useCallback((seconds: number) => {
+    const progressive = progressivePlayerRef.current;
+    if (progressive) {
+      const snapshot = progressive.snapshot();
+      progressive.seek(snapshot.currentTime + seconds);
+      return;
+    }
     const audio = audioRef.current;
     if (!audio) return;
     const upper = Number.isFinite(audio.duration) ? audio.duration : Number.POSITIVE_INFINITY;
@@ -313,6 +395,11 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
   }, []);
 
   const seekTo = useCallback((seconds: number) => {
+    const progressive = progressivePlayerRef.current;
+    if (progressive) {
+      progressive.seek(seconds);
+      return;
+    }
     const audio = audioRef.current;
     if (!audio) return;
     audio.currentTime = seconds;
@@ -335,6 +422,22 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
     }
   }, [encodingMp3, fileName, scope]);
 
+  const creationPercent =
+    creationProgress?.phase === 'encoding'
+      ? 100
+      : Math.min(
+          100,
+          Math.round(
+            ((creationProgress?.completedCharacters ?? 0) /
+              (creationProgress?.totalCharacters || 1)) *
+              100,
+          ),
+        );
+  const playedPercent =
+    bufferedDuration > 0
+      ? Math.min(creationPercent, (currentTime / bufferedDuration) * creationPercent)
+      : 0;
+
   const transport =
     status === 'idle'
       ? null
@@ -343,10 +446,76 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
             {status === 'creating' && (
               <>
                 <div className="document-narration-summary" aria-live="polite">
-                  <strong>Creating narration…</strong>
-                  <span>{scope === 'document' ? 'Full document' : 'Selected text'}</span>
+                  <strong>
+                    {isPlaying
+                      ? 'Playing while creating…'
+                      : waitingForAudio && !userPausedRef.current
+                        ? 'Buffering narration…'
+                        : 'Creating narration…'}
+                  </strong>
+                  <span>
+                    {bufferedDuration > 0
+                      ? `${formatTime(currentTime)} played · ${formatTime(bufferedDuration)} buffered`
+                      : `${scope === 'document' ? 'Full document' : 'Selected text'} · ${
+                          creationProgress?.phase === 'loading'
+                            ? 'Preparing voice'
+                            : 'Starting speech'
+                        } · ${formatTime(elapsedSeconds)} elapsed`}
+                  </span>
                 </div>
-                <progress className="document-narration-progress" aria-label="Creating narration" />
+                {bufferedDuration > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      className="document-narration-control"
+                      aria-label="Back 30 seconds"
+                      title="Back 30 seconds"
+                      onClick={() => seekBy(-30)}
+                    >
+                      ↶<small>30</small>
+                    </button>
+                    <button
+                      type="button"
+                      className="document-narration-control document-narration-play"
+                      aria-label={isPlaying ? 'Pause narration' : 'Play buffered narration'}
+                      title={isPlaying ? 'Pause' : 'Play buffered audio'}
+                      onClick={togglePlayback}
+                    >
+                      {isPlaying ? 'Ⅱ' : '▶'}
+                    </button>
+                    <button
+                      type="button"
+                      className="document-narration-control"
+                      aria-label="Forward 30 seconds"
+                      title="Forward within buffered audio"
+                      onClick={() => seekBy(30)}
+                    >
+                      ↷<small>30</small>
+                    </button>
+                  </>
+                )}
+                <div
+                  className="document-narration-progress"
+                  role="progressbar"
+                  aria-label="Creating narration"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  tabIndex={0}
+                  aria-valuenow={creationPercent}
+                  title={`${formatTime(bufferedDuration)} generated · ${creationPercent}% complete`}
+                >
+                  <span
+                    className="document-narration-progress-buffered"
+                    style={{ width: `${creationPercent}%` }}
+                  />
+                  <span
+                    className="document-narration-progress-played"
+                    style={{ width: `${playedPercent}%` }}
+                  />
+                </div>
+                <span className="document-narration-progress-value">
+                  {creationPercent}% · {formatTime(bufferedDuration)}
+                </span>
                 <button
                   type="button"
                   className="document-narration-cancel"
@@ -408,10 +577,15 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
                 <button
                   type="button"
                   className="document-narration-download"
+                  aria-label={encodingMp3 ? 'Preparing MP3' : 'Download MP3'}
+                  aria-busy={encodingMp3}
+                  title={encodingMp3 ? 'Preparing MP3…' : 'Download MP3'}
                   disabled={encodingMp3}
                   onClick={() => void downloadMp3()}
                 >
-                  {encodingMp3 ? 'Preparing MP3…' : 'Download MP3'}
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v3h14v-3" />
+                  </svg>
                 </button>
                 <button
                   type="button"
@@ -449,7 +623,7 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
         );
 
   return (
-    <span ref={toolbarRootRef} className="document-narration-root">
+    <span className="document-narration-root">
       <button
         type="button"
         className="squisq-toolbar-button document-narration-trigger"
@@ -462,28 +636,6 @@ export function DocumentNarration({ fileName, projectId }: DocumentNarrationProp
           <path d="M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2-3.74v7.48a4.5 4.5 0 0 0 2-3.74Zm-2-8.65v2.12a7.5 7.5 0 0 1 0 13.06v2.12a9.5 9.5 0 0 0 0-17.3Z" />
         </svg>
       </button>
-      {menu &&
-        createPortal(
-          <div
-            ref={menuRef}
-            className="document-narration-context-menu"
-            role="menu"
-            aria-label="Selection actions"
-            style={{ left: menu.x, top: menu.y }}
-          >
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => void beginNarration(menu.text, 'selection')}
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 9v6h4l5 4V5L8 9H4Zm12.5 3a4.5 4.5 0 0 0-2-3.74v7.48a4.5 4.5 0 0 0 2-3.74Z" />
-              </svg>
-              Narrate selection
-            </button>
-          </div>,
-          document.body,
-        )}
       {transport}
     </span>
   );
