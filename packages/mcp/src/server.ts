@@ -58,6 +58,7 @@ import {
   formatReviewProvenance,
   inferDeliverableKind,
   isReservedShadowArtifactPath,
+  isSafeEntityId,
   isTrustedConstrainedToolset,
   parseKnowledgeUri,
   pickRandomNameWithGender,
@@ -3265,9 +3266,32 @@ server.tool(
   },
 );
 
+/**
+ * Follow-up steer for a `derive_file` verification failure.
+ *
+ * The three `verifyError` sentences describe three different problems, and
+ * the handler used to append the same remedy — "The script must
+ * fs.writeFileSync the output itself." — to all of them. For the
+ * data-table rejection that sentence is simply false: the script exited 0
+ * and the file IS on disk, it is just not a table. Wild-caught on the
+ * inaugural `craftbook-author-gate-script` run, where three separate
+ * developer gezels each wrote a valid JSON summary object, were told to do
+ * the one thing they had already done, and never called the tool again —
+ * one of them abandoning it for a raw file write.
+ */
+function deriveVerifyRemedy(verifyError: string): string {
+  if (/does not parse as a data table/i.test(verifyError)) {
+    return " The file WAS written — derive_file only accepts tabular output. Emit a JSON ARRAY of row objects (wrap a single summary object as `[ { … } ]`), delimited rows with a header, or a Markdown table. If the deliverable is genuinely a non-tabular JSON document or a report, write it with write_file instead.";
+  }
+  if (/is empty/i.test(verifyError)) {
+    return ' The script wrote the file but left it blank — check that the rows you computed actually reach fs.writeFileSync.';
+  }
+  return ' The script must fs.writeFileSync the output itself.';
+}
+
 server.tool(
   'derive_file',
-  'Derive a data file by EXECUTING a script — the reliable way to produce json/csv/tsv outputs computed from other files (transform, normalize, dedup, convert, aggregate). Hand-typing derived rows via write_file loses data; this tool runs your Node script in the sandbox and verifies the output landed and parses. Provide the complete script source; it executes from a scratch location (never saved into your workspace) with fs access to the project — read inputs with fs.readFileSync and write the output with fs.writeFileSync, paths relative to the workspace root. NOT for prose/reports/HTML — write those directly with write_file. On failure you get stderr; fix the script and call again.',
+  'Derive a data file by EXECUTING a script — the reliable way to produce json/csv/tsv outputs computed from other files (transform, normalize, dedup, convert, aggregate). Hand-typing derived rows via write_file loses data; this tool runs your Node script in the sandbox and verifies the output landed and parses. The output must be TABULAR — a JSON array of row objects, delimited rows with a header, or a Markdown table; a single summary object has to be wrapped as `[ { … } ]`. For a non-tabular JSON document, a report, or prose, use write_file instead. Provide the complete script source; it executes from a scratch location (never saved into your workspace) with fs access to the project — read inputs with fs.readFileSync and write the output with fs.writeFileSync, paths relative to the workspace root. NOT for prose/reports/HTML — write those directly with write_file. On failure you get stderr; fix the script and call again.',
   {
     script: z
       .string()
@@ -3278,7 +3302,9 @@ server.tool(
     outputPath: z
       .string()
       .min(1)
-      .describe('Workspace-relative file the script must produce (e.g. "out/customers.json").'),
+      .describe(
+        'Workspace-relative file the script must produce (e.g. "out/customers.json"). Its contents must be tabular: a JSON ARRAY of row objects, delimited rows with a header, or a Markdown table.',
+      ),
     timeoutMs: z
       .number()
       .int()
@@ -3302,7 +3328,7 @@ server.tool(
         parts.push(`✗ derive_file timed out${res.error ? `: ${res.error}` : ''}`);
       } else if (res.verifyError) {
         parts.push(
-          `✗ derive_file: the script ran (exit ${res.code}) but ${res.verifyError} The script must fs.writeFileSync the output itself.`,
+          `✗ derive_file: the script ran (exit ${res.code}) but ${res.verifyError}${deriveVerifyRemedy(res.verifyError)}`,
         );
       } else if (res.error) {
         parts.push(`✗ derive_file failed: ${res.error}`);
@@ -5648,12 +5674,12 @@ async function resolveCraftbookTarget(args: {
 }): Promise<CraftbookTarget> {
   if (args.craftbook) return { kind: 'craftbook', id: args.craftbook };
   if (args.task) {
-    const parsed = parseRef(args.task);
+    const parsed = await parseRef(args.task);
     return { kind: 'task', projectId: parsed.projectId, num: parsed.num, ref: args.task };
   }
   if (sessionCraftbookId) return { kind: 'craftbook', id: sessionCraftbookId };
   if (sessionTaskRef) {
-    const parsed = parseRef(sessionTaskRef);
+    const parsed = await parseRef(sessionTaskRef);
     return { kind: 'task', projectId: parsed.projectId, num: parsed.num, ref: sessionTaskRef };
   }
   throw new Error(
@@ -5858,8 +5884,19 @@ server.tool(
           ? (err.details as { formatted?: string } | undefined)?.formatted
           : undefined;
       if (formatted) {
-        return cbResult(
-          `The document was NOT saved. Fix these problems and call craftbook_write again with the corrected FULL document:\n${formatted}`,
+        // A rejection is a FAILURE, not a result. Returning it through
+        // `cbResult` booked it as `success: true` in the transcript and in
+        // history — and, because `UnresolvedToolFailureLedger.record` treats
+        // any non-error as "the model found a shape that works", every
+        // craftbook_write rejection cleared the ledger entry for the tool
+        // instead of accumulating one. Observed on the inaugural
+        // `craftbook-author-gate-script` run: three consecutive rejections
+        // ("scripts: expected record, got array", then two more), all three
+        // recorded as successful calls. The `invalid arguments for tool`
+        // wording is what makes the text legible to `isValidationFailure`.
+        return errorResult(
+          `craftbook_write: invalid arguments for tool craftbook_write — the document was NOT saved. Fix these problems and call craftbook_write again with the corrected FULL document:\n${formatted}`,
+          { code: 'craftbook_invalid', retryable: true },
         );
       }
       throw err;
@@ -6213,7 +6250,7 @@ server.tool(
   async ({ task, id, name }) => {
     const ref = task ?? sessionTaskRef;
     if (!ref) throw new Error('no task: pass `task` (a ref) or run inside a task session.');
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const { craftbook } = await api.exportTaskCraftbook(parsed.projectId, parsed.num, {
       ...(id ? { id } : {}),
       ...(name ? { name } : {}),
@@ -8654,7 +8691,13 @@ server.tool(
   'Get one task by ref (format: `projectId/num`). Returns full detail: status, assignee, every phase, active phase, any cron schedule, parent task.',
   { ref: z.string().describe('Task ref, e.g. "marketing/7"') },
   async ({ ref }) => {
-    const t = await api.getTaskByRef(ref);
+    // `getTaskByRef` splits the ref literally, so it saw neither the
+    // small-model mangle recovery in `resolveTaskRef` nor the display-name
+    // resolution its sibling tools get. Same session that could
+    // `list_tasks({ project: "PowerPoint Grounding Eval" })` got a bare
+    // `Gezel API error 400` from `get_task({ ref: "PowerPoint Grounding Eval/1" })`.
+    const parsed = await parseRef(ref);
+    const t = await api.getTask(parsed.projectId, parsed.num);
     return okResult(
       TaskToolOutputSchema,
       {
@@ -8962,7 +9005,7 @@ server.tool(
     fanout: fanoutArg,
   },
   async ({ ref, title, description, plan, assignee, cron, cronOverlap, fanout }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const body: Record<string, unknown> = {};
     if (title !== undefined) body.title = title;
     if (description !== undefined) body.description = description;
@@ -9014,7 +9057,7 @@ server.tool(
     ),
   },
   async ({ task, outcomes }) => {
-    const parsed = parseRef(task || sessionTaskRef);
+    const parsed = await parseRef(task || sessionTaskRef);
     const list: Outcome[] = (outcomes ?? []).map((text, i) => ({ id: `o${i + 1}`, text }));
     const updated = await api.updateTask(parsed.projectId, parsed.num, { outcomes: list } as never);
     const ref = `${parsed.projectId}/${parsed.num}`;
@@ -9053,7 +9096,7 @@ server.tool(
   async ({ ref, id, met, evidence }) => {
     const draftBlock = partialEdits.blockReason('verify_outcome');
     if (draftBlock) return errorResult(draftBlock);
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const t = await api.getTask(parsed.projectId, parsed.num);
     const existing = t.outcomes ?? [];
     if (!existing.some((o) => o.id === id)) {
@@ -9095,7 +9138,7 @@ server.tool(
     prompt: z.string().optional().describe('Override the default verification prompt.'),
   },
   async ({ task, name, prompt }) => {
-    const parsed = parseRef(task || sessionTaskRef);
+    const parsed = await parseRef(task || sessionTaskRef);
     const before = await api.getTask(parsed.projectId, parsed.num);
     const beforeIds = new Set(before.craftbook.steps.map((s) => s.id));
     const stepName = name ?? 'Verify outcomes';
@@ -9156,7 +9199,7 @@ server.tool(
     ),
   },
   async ({ ref, count, variations }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const result = await api.spawnTaskInstances(parsed.projectId, parsed.num, {
       count,
       ...(variations ? { variations } : {}),
@@ -9186,7 +9229,7 @@ server.tool(
     limit: z.number().int().positive().optional(),
   },
   async ({ ref, status, limit }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const res = await api.listTaskChildren(parsed.projectId, parsed.num, {
       ...(status ? { status } : {}),
       ...(limit ? { limit } : {}),
@@ -9226,7 +9269,7 @@ server.tool(
       ),
   },
   async ({ ref, status, verification }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const current = await api.getTask(parsed.projectId, parsed.num);
     if (current.status === 'draft') {
       const ungatedBuildSteps = current.craftbook.steps.filter(
@@ -9353,7 +9396,7 @@ server.tool(
     force: z.boolean().optional().describe('Run even if the plan is not fully formed.'),
   },
   async ({ ref, force }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const t = await api.activateTask(parsed.projectId, parsed.num, force === true);
     const summary = `Activated ${ref} — now running at step "${t.activeStepId}".`;
     return okResult(
@@ -9379,7 +9422,7 @@ server.tool(
     assignee: assigneeArg(),
   },
   async ({ ref, assignee }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const updated = await api.setTaskAssignee(
       parsed.projectId,
       parsed.num,
@@ -9427,7 +9470,7 @@ server.tool(
     after,
     before,
   }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const beforeTask = await api.getTask(parsed.projectId, parsed.num);
     const beforeIds = new Set(beforeTask.craftbook.steps.map((step) => step.id));
     const d = coerceBlueprintDeliverable(deliverable);
@@ -9523,7 +9566,7 @@ server.tool(
   async ({ ref, stepId, next }) => {
     const draftBlock = partialEdits.blockReason('advance_task_step');
     if (draftBlock) return errorResult(draftBlock);
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     let advanced: Awaited<ReturnType<typeof api.completeTaskStep>>;
     try {
       advanced = await api.completeTaskStep(
@@ -9589,7 +9632,7 @@ server.tool(
     stepId: z.string().optional(),
   },
   async ({ ref, stepId }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const effectiveStep = stepId?.trim() || undefined;
     const { notes } = await api.listTaskNotes(parsed.projectId, parsed.num, effectiveStep);
     const summary = `Loaded ${notes.length} ${notes.length === 1 ? 'note' : 'notes'} for ${ref}${effectiveStep ? `/${effectiveStep}` : ''}.`;
@@ -9617,7 +9660,7 @@ server.tool(
     stepId: z.string().optional(),
   },
   async ({ ref, text, stepId }) => {
-    const parsed = parseRef(ref);
+    const parsed = await parseRef(ref);
     const effectiveStep = stepId ?? (sessionStepId || undefined);
     const { note } = await api.appendTaskNote(
       parsed.projectId,
@@ -9715,8 +9758,20 @@ async function resolveGezelId(input: string): Promise<string> {
 // backticks, a truncated projectId) by falling back to the session's
 // own task. See `task-ref.ts` for the resolution order and the
 // wild-caught failures that motivated it.
-function parseRef(ref: string): { projectId: string; num: number } {
-  return resolveTaskRef(ref, sessionTaskRef);
+async function parseRef(ref: string): Promise<{ projectId: string; num: number }> {
+  const parsed = resolveTaskRef(ref, sessionTaskRef);
+  // The projectId half of a ref gets the same tolerance every `project`
+  // argument already gets. `resolveProjectId` exists because models reach
+  // for the display name they see in chat instead of the slug, and ~40
+  // tools honor that — but a ref went through verbatim, so
+  // `list_tasks({ project: "PowerPoint Grounding Eval" })` worked while
+  // `read_task_notes({ ref: "PowerPoint Grounding Eval/1" })` 400'd on
+  // `invalid entity id` with no remedy in the message. Observed in 11
+  // distinct eval sessions; each one stopped using the task tools
+  // entirely afterwards. Only refs whose project half cannot be an id at
+  // all pay the extra lookup.
+  if (isSafeEntityId(parsed.projectId)) return parsed;
+  return { ...parsed, projectId: await resolveProjectId(parsed.projectId) };
 }
 
 // ── History (audit log search) ──
