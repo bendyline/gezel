@@ -39,6 +39,12 @@ export interface TranscribeInput {
    * cold-start but free-form.
    */
   language?: string;
+  /**
+   * Recent transcript supplied as Whisper's initial prompt. This biases the
+   * current audio window toward the established wording and sequence while
+   * the returned text still contains only newly recognized speech.
+   */
+  prompt?: string;
 }
 
 export interface TranscribeSegment {

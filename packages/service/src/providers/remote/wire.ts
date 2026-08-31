@@ -314,6 +314,7 @@ export const RemoteTranscribeRequestSchema = z.object({
   audio: z.object({ data: z.string(), mimeType: z.string() }),
   model: z.string().optional(),
   language: z.string().optional(),
+  prompt: z.string().max(2_000).optional(),
 });
 export type RemoteTranscribeRequest = z.infer<typeof RemoteTranscribeRequestSchema>;
 

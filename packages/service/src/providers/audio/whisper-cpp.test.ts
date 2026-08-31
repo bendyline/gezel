@@ -52,6 +52,7 @@ describe('WhisperCppProvider', () => {
 
       const result = await provider.transcribe({
         audio: { data: Buffer.from('RIFF-test-audio'), mimeType: 'audio/wav' },
+        prompt: 'one two three four',
       });
 
       expect(result.text).toBe('working transcript');
@@ -59,6 +60,10 @@ describe('WhisperCppProvider', () => {
       expect(requestBody.toString('latin1')).toContain(
         'Content-Disposition: form-data; name="file"; filename="audio.wav"',
       );
+      expect(requestBody.toString('latin1')).toContain(
+        'Content-Disposition: form-data; name="prompt"',
+      );
+      expect(requestBody.toString('latin1')).toContain('one two three four');
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));

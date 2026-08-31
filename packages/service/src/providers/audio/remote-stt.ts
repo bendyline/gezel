@@ -51,6 +51,7 @@ export class RemoteSttProvider implements SpeechToTextProvider {
         audio: { data: bytes.data.toString('base64'), mimeType: bytes.mimeType },
         ...(model ? { model } : {}),
         ...(input.language ? { language: input.language } : {}),
+        ...(input.prompt ? { prompt: input.prompt } : {}),
       }),
     });
     if (!res.ok) {

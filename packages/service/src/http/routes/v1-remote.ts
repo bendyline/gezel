@@ -278,6 +278,7 @@ export function v1RemoteRoutes(ctx: ServiceContext): Hono {
       audio: { data: Buffer.from(body.audio.data, 'base64'), mimeType: body.audio.mimeType },
       ...(body.model ? { model: body.model } : {}),
       ...(body.language ? { language: body.language } : {}),
+      ...(body.prompt ? { prompt: body.prompt } : {}),
     });
     return c.json(out);
   });
