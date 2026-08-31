@@ -603,6 +603,36 @@ function installAliasDispatchOnce(): void {
   });
 }
 
+/**
+ * Convert an escaped handler throw into a model-facing tool error.
+ *
+ * The MCP SDK's own catch stringifies an uncaught throw to `error.message`
+ * and nothing else. For a `GezelApiError` that message is the bare HTTP
+ * status line — `Gezel API error 403 on GET /api/projects?rollup=1` — while
+ * the daemon's actual sentence rides along in `details.hint`, which
+ * `unwrapApiError` knows how to recover. Roughly a third of the tool
+ * handlers in this file call `api.*` without a catch, so the hint fix landed
+ * for the tools that already caught and was silently bypassed by the rest.
+ *
+ * Wild-caught on the inaugural frontier run of `craftbook-author-fanout`:
+ * `list_projects` came back to the model as that bare status line, with
+ * `project collection requires a coordinator session` — the one fact that
+ * would have redirected it — discarded on the way through. Guarding at the
+ * registration seam means a new tool cannot forget it.
+ */
+function guardToolHandler(
+  name: string,
+  handler: (...args: unknown[]) => unknown,
+): (...args: unknown[]) => Promise<unknown> {
+  return async (...args: unknown[]) => {
+    try {
+      return await handler(...args);
+    } catch (err) {
+      return errorResult(`${name} failed: ${unwrapApiError(err)}`);
+    }
+  };
+}
+
 const originalRegister = server.tool.bind(server) as (name: string, ...rest: unknown[]) => unknown;
 (server as unknown as { tool: (name: string, ...rest: unknown[]) => unknown }).tool = (
   name: string,
@@ -612,7 +642,19 @@ const originalRegister = server.tool.bind(server) as (name: string, ...rest: unk
     return { enable: () => {}, disable: () => {}, update: () => {}, remove: () => {} };
   }
   const advertised = legacyNamingMode ? (LEGACY_SPELLING_BY_CANONICAL[name] ?? name) : name;
-  const registered = originalRegister(advertised, ...rest);
+  const handlerIndex = rest.reduce<number>(
+    (found, entry, idx) => (typeof entry === 'function' ? idx : found),
+    -1,
+  );
+  const guardedRest =
+    handlerIndex >= 0
+      ? rest.map((entry, idx) =>
+          idx === handlerIndex
+            ? guardToolHandler(name, entry as (...args: unknown[]) => unknown)
+            : entry,
+        )
+      : rest;
+  const registered = originalRegister(advertised, ...guardedRest);
   const stored = registeredToolRegistry()[advertised]!;
   stored.annotations = annotationsForTool(name);
   stored.outputSchema = outputSchemaForTool(name);
@@ -3321,14 +3363,38 @@ server.tool(
  * non-API failures (timeouts, network errors) surfacing their own
  * messages unchanged.
  */
+/**
+ * Join a daemon error body's machine code with its human explanation.
+ *
+ * The daemon answers a refusal as `{ error, hint }` — `error` is a code
+ * (`forbidden`, `job-in-progress`, `invalid_model`) and `hint` is the
+ * sentence saying WHY and what to do. Both readers below used to take
+ * `error` alone, so every one of those sentences was written by the
+ * service and then discarded before it reached the model.
+ *
+ * Wild-caught on the inaugural frontier run of `craftbook-author-fanout`:
+ * a gezel's `invoke_craftbook` and two `create_task` calls came back as
+ * the bare word "forbidden", with no way to tell a scope mismatch from a
+ * missing project membership. `scope-guard.ts` had put the real reason in
+ * `hint` on the way out.
+ */
+function joinErrorAndHint(details: unknown): string | null {
+  if (!details || typeof details !== 'object') return null;
+  const record = details as { error?: unknown; hint?: unknown; message?: unknown };
+  const code = typeof record.error === 'string' && record.error ? record.error : null;
+  const hint = typeof record.hint === 'string' && record.hint ? record.hint : null;
+  const message = typeof record.message === 'string' && record.message ? record.message : null;
+  const head = code ?? message;
+  if (!head) return null;
+  // A hint that merely restates the code adds nothing but noise.
+  if (!hint || hint.toLowerCase() === head.toLowerCase()) return head;
+  return `${head}: ${hint}`;
+}
+
 function unwrapApiError(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
-  const details = (err as { details?: unknown }).details;
-  if (details && typeof details === 'object' && 'error' in details) {
-    const inner = (details as { error?: unknown }).error;
-    if (typeof inner === 'string' && inner.length > 0) return inner;
-  }
-  return message;
+  const joined = joinErrorAndHint((err as { details?: unknown }).details);
+  return joined ?? message;
 }
 
 /** Recover a concise daemon error from a non-2xx fetch response. */
@@ -3338,6 +3404,7 @@ async function responseErrorMessage(res: Response): Promise<string> {
     try {
       const parsed = JSON.parse(body) as {
         error?: unknown;
+        hint?: unknown;
         message?: unknown;
         requestId?: unknown;
       };
@@ -3345,12 +3412,8 @@ async function responseErrorMessage(res: Response): Promise<string> {
         typeof parsed.requestId === 'string' && parsed.requestId
           ? ` (request id: ${parsed.requestId})`
           : '';
-      if (typeof parsed.error === 'string' && parsed.error) {
-        return `${parsed.error}${requestSuffix}`;
-      }
-      if (typeof parsed.message === 'string' && parsed.message) {
-        return `${parsed.message}${requestSuffix}`;
-      }
+      const joined = joinErrorAndHint(parsed);
+      if (joined) return `${joined}${requestSuffix}`;
     } catch {
       // Plain-text errors are already useful to a model; clamp noisy bodies.
     }
@@ -9404,6 +9467,46 @@ server.tool(
   },
 );
 
+/**
+ * Turn a `completeTaskStep` rejection into something the model can act on.
+ *
+ * The daemon raises `no step "extract" to activate` for a `next` that does
+ * not exist, but that sentence never leaves the service: the unhandled-error
+ * middleware answers `{ error: 'internal_error', requestId }`, so the model
+ * reads a bare `Gezel API error 500 on POST …/steps/scope/complete` and has
+ * nothing to change. Wild-caught on `conflict-synthesis` (qwen3.6-35b): three
+ * consecutive `advance_task_step` calls with byte-identical arguments, the
+ * same 500 each time, and the turn died there. Re-reading the task costs one
+ * request on a path that has already failed and yields the one fact the model
+ * is missing — the step ids that actually exist.
+ */
+async function explainAdvanceFailure(
+  err: unknown,
+  parsed: { projectId: string; num: number },
+  stepId: string,
+  next: string | undefined,
+): Promise<string> {
+  const base = `advance_task_step failed: ${unwrapApiError(err)}`;
+  let steps: Array<{ id: string; name?: string }>;
+  try {
+    const task = await api.getTask(parsed.projectId, parsed.num);
+    steps = task.craftbook?.steps ?? [];
+  } catch {
+    // The follow-up read failed too — the original message is all there is.
+    return base;
+  }
+  if (steps.length === 0) return base;
+  const ids = steps.map((s) => s.id);
+  const roster = steps.map((s) => (s.name ? `"${s.id}" (${s.name})` : `"${s.id}"`)).join(', ');
+  if (next && next !== 'next' && !ids.includes(next)) {
+    return `${base}\nThis task has no step "${next}". Its steps are: ${roster}. Pass one of those ids as \`next\`, or omit \`next\` to advance to the following step in order.`;
+  }
+  if (!ids.includes(stepId)) {
+    return `${base}\nThis task has no step "${stepId}". Its steps are: ${roster}. Pass one of those ids as \`stepId\`.`;
+  }
+  return `${base}\nThe task's steps are: ${roster}.`;
+}
+
 server.tool(
   'advance_task_step',
   'Mark the named step complete and activate the next one (or a specifically-named step). THIS is how you hand off to another gezel — calling this tool automatically opens a fresh session with the new step\'s assignee (or `suggestedGezelId`) and kicks them off on the work. Do NOT just say "ready to hand off" in chat; that does nothing. Call this tool.',
@@ -9421,12 +9524,20 @@ server.tool(
     const draftBlock = partialEdits.blockReason('advance_task_step');
     if (draftBlock) return errorResult(draftBlock);
     const parsed = parseRef(ref);
-    const { task, gate } = await api.completeTaskStep(
-      parsed.projectId,
-      parsed.num,
-      stepId,
-      next ? { next } : {},
-    );
+    let advanced: Awaited<ReturnType<typeof api.completeTaskStep>>;
+    try {
+      advanced = await api.completeTaskStep(
+        parsed.projectId,
+        parsed.num,
+        stepId,
+        next ? { next } : {},
+      );
+    } catch (err) {
+      return errorResult(await explainAdvanceFailure(err, parsed, stepId, next), {
+        retryable: true,
+      });
+    }
+    const { task, gate } = advanced;
     if (gate) {
       // The step's completion gate judged the work and rejected it. The
       // message is prescriptive — surfacing it as the tool result lets
