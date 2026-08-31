@@ -8,10 +8,15 @@
  * disk, answers "does the sandbox actually hold?", which no fake can tell you.
  *
  * The fake follows the `makeFakeCodex` pattern already used for the CLI
- * providers, including its Windows branch: interpolating multi-line output
- * into a single `set /p` makes cmd.exe execute line two as a command.
+ * providers. Windows needs two things beyond it, and both are properties of
+ * the fake rather than of the engine. A batch file is the only stand-in cmd
+ * can execute, so the fake carries a `.cmd` extension — and Node has refused
+ * to spawn a `.cmd` without a shell since the 2024 argument-injection fix,
+ * which is why {@link fakeDuckSpawn} exists. The real engine is a genuine
+ * `.exe` and needs neither.
  */
 
+import { type SpawnOptions, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { chmod, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -69,28 +74,51 @@ export interface FakeDuckdbSpec {
 }
 
 /**
- * Write an executable stand-in for the duckdb CLI at `path` and return it.
- * It ignores its SQL entirely — the point is the runner's plumbing, not the
- * engine's semantics.
+ * `spawnImpl` for a {@link makeFakeDuckdb} stand-in: the production path
+ * unchanged everywhere but Windows, where the batch fake is reached through
+ * cmd.exe. The command is quoted here because Node concatenates file and args
+ * verbatim when `shell` is set.
+ */
+export function fakeDuckSpawn(): typeof spawn {
+  if (process.platform !== 'win32') return spawn;
+  // One pre-joined command line rather than a command plus an args array:
+  // handing `shell: true` separate args is deprecated (DEP0190) because Node
+  // concatenates them without escaping, which is exactly what is done here —
+  // deliberately, over a path and flags this file wrote itself.
+  return ((command: string, args: readonly string[], options: SpawnOptions) =>
+    spawn([`"${command}"`, ...args].join(' '), { ...options, shell: true })) as typeof spawn;
+}
+
+/**
+ * Write an executable stand-in for the duckdb CLI at `path` and return the
+ * path it actually landed at — on Windows that is `path` plus `.cmd`, since
+ * cmd.exe will not execute an extension-less script. It ignores its SQL
+ * entirely — the point is the runner's plumbing, not the engine's semantics.
  */
 export async function makeFakeDuckdb(path: string, spec: FakeDuckdbSpec = {}): Promise<string> {
   const { stdout = '[]', stderr = '', exitCode = 0, sleepSeconds = 0, envDumpPath } = spec;
 
   if (process.platform === 'win32') {
+    const cmdPath = path.toLowerCase().endsWith('.cmd') ? path : `${path}.cmd`;
+    // The payload goes to sidecar files and comes back out with `type`, not
+    // through `set /p`: this fake's whole job is emitting JSON, and cmd has no
+    // way to put a double quote inside the quoted `set /p "=…"` form — doubling
+    // it emits two. `type` reproduces the file's bytes with nothing appended,
+    // so multi-line output needs no per-line handling either.
+    const outPath = `${cmdPath}.out`;
+    const errPath = `${cmdPath}.err`;
+    await writeFile(outPath, stdout, 'utf8');
+    await writeFile(errPath, stderr, 'utf8');
     const lines = ['@echo off'];
     if (envDumpPath) lines.push(`set > "${envDumpPath}"`);
-    if (sleepSeconds > 0) lines.push(`timeout /t ${sleepSeconds} /nobreak >NUL`);
-    // One `set /p` per line: cmd.exe would treat a subsequent line of an
-    // interpolated multi-line value as its own command.
-    for (const line of stdout.split('\n')) {
-      lines.push(`<NUL set /p "=${line.replaceAll('%', '%%').replaceAll('"', '""')}"`);
-    }
-    for (const line of stderr.split('\n').filter(Boolean)) {
-      lines.push(`echo ${line.replaceAll('%', '%%')} 1>&2`);
-    }
+    // `timeout` refuses to run at all when stdin is a pipe ("input redirection
+    // is not supported"), and the runner always pipes its SQL script in.
+    if (sleepSeconds > 0) lines.push(`ping -n ${sleepSeconds + 1} 127.0.0.1 >NUL`);
+    if (stdout) lines.push(`type "${outPath}"`);
+    if (stderr) lines.push(`type "${errPath}" 1>&2`);
     lines.push(`exit /b ${exitCode}`);
-    await writeFile(path, `${lines.join('\r\n')}\r\n`, 'utf8');
-    return path;
+    await writeFile(cmdPath, `${lines.join('\r\n')}\r\n`, 'utf8');
+    return cmdPath;
   }
 
   const sh = (s: string) => s.replaceAll("'", "'\\''");

@@ -14,7 +14,12 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { duckdbInstallDir } from '@bendyline/gezel/native';
+import {
+  DUCKDB_ASSET,
+  duckdbBinaryName,
+  duckdbInstallDir,
+  duckdbPlatformKey,
+} from '@bendyline/gezel/native';
 import AdmZip from 'adm-zip';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EngineUnavailableError, type ResolveEngineOptions, resolveEngine } from './resolver.js';
@@ -34,7 +39,16 @@ afterEach(async () => {
   else process.env.GEZEL_NATIVE_BIN_DIR = priorNativeDir;
 });
 
-const binaryName = process.platform === 'win32' ? 'duckdb.exe' : 'duckdb';
+const binaryName = duckdbBinaryName(process.platform);
+
+// The resolver looks the pinned digest up by the asset name for the *running*
+// platform, so a fixture keyed to one platform's asset silently falls through
+// to the real pin everywhere else — which is how this suite passed on macOS
+// and failed the whole Linux CI run on an integrity check against bytes it
+// never downloaded. A host DuckDB publishes no build for has nothing to test
+// here at all: the resolver refuses before it downloads anything.
+const platformKey = duckdbPlatformKey(process.platform, process.arch);
+const archiveName = platformKey ? DUCKDB_ASSET[platformKey] : 'duckdb.zip';
 
 function sha(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex');
@@ -74,7 +88,7 @@ function baseOpts(archive: ReturnType<typeof fakeArchive>): ResolveEngineOptions
     home,
     fetchImpl: stubFetch(archive.archive),
     vendoredUrlOverride: 'https://example.invalid/duckdb.zip',
-    expectedArchiveSha256: { 'duckdb_cli-osx-arm64.zip': archive.archiveSha },
+    expectedArchiveSha256: { [archiveName]: archive.archiveSha },
     expectedBinarySha256: archive.binarySha,
     verifyOverride: async () => ({
       result: { status: 'valid' as const },
@@ -83,7 +97,7 @@ function baseOpts(archive: ReturnType<typeof fakeArchive>): ResolveEngineOptions
   } as unknown as ResolveEngineOptions;
 }
 
-describe('resolveEngine — vendored DuckDB', () => {
+describe.runIf(platformKey)('resolveEngine — vendored DuckDB', () => {
   it('lands the binary in the version-keyed directory shared with the bundle installer', async () => {
     const archive = fakeArchive();
     const { result } = await drain(baseOpts(archive));
@@ -128,7 +142,7 @@ describe('resolveEngine — vendored DuckDB', () => {
     const archive = fakeArchive();
     const opts = {
       ...baseOpts(archive),
-      expectedArchiveSha256: { 'duckdb_cli-osx-arm64.zip': 'f'.repeat(64) },
+      expectedArchiveSha256: { [archiveName]: 'f'.repeat(64) },
     } as ResolveEngineOptions;
     await expect(drain(opts)).rejects.toBeInstanceOf(EngineUnavailableError);
     expect(existsSync(join(duckdbInstallDir(home), binaryName))).toBe(false);

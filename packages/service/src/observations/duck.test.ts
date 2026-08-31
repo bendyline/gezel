@@ -10,7 +10,12 @@ import {
   buildDuckPrelude,
   sqlLiteral,
 } from './duck.js';
-import { findRealDuckdb, hasRealDuckdb, makeFakeDuckdb } from './testing/duck-fixture.js';
+import {
+  fakeDuckSpawn,
+  findRealDuckdb,
+  hasRealDuckdb,
+  makeFakeDuckdb,
+} from './testing/duck-fixture.js';
 
 let dir: string;
 const priorBin = process.env.GEZEL_DUCKDB_BIN;
@@ -77,7 +82,10 @@ describe('DuckRunner — plumbing (fake CLI)', () => {
     const bin = await makeFakeDuckdb(join(dir, 'duckdb'), {
       stdout: '[{"n":1,"s":"ok"},{"n":2,"s":"two"}]',
     });
-    const rows = await new DuckRunner({ binaryPath: bin }).runTrusted('SELECT 1', opts);
+    const rows = await new DuckRunner({ binaryPath: bin, spawnImpl: fakeDuckSpawn() }).runTrusted(
+      'SELECT 1',
+      opts,
+    );
     expect(rows).toEqual([
       { n: 1, s: 'ok' },
       { n: 2, s: 'two' },
@@ -86,7 +94,12 @@ describe('DuckRunner — plumbing (fake CLI)', () => {
 
   it('treats empty output as no rows', async () => {
     const bin = await makeFakeDuckdb(join(dir, 'duckdb'), { stdout: '' });
-    expect(await new DuckRunner({ binaryPath: bin }).runTrusted('SELECT 1', opts)).toEqual([]);
+    expect(
+      await new DuckRunner({ binaryPath: bin, spawnImpl: fakeDuckSpawn() }).runTrusted(
+        'SELECT 1',
+        opts,
+      ),
+    ).toEqual([]);
   });
 
   it('surfaces the engine message verbatim so a model can repair its SQL', async () => {
@@ -95,7 +108,7 @@ describe('DuckRunner — plumbing (fake CLI)', () => {
       stderr: 'Binder Error: Referenced column "rout" not found\nDid you mean "route"?',
       exitCode: 1,
     });
-    const err = await new DuckRunner({ binaryPath: bin })
+    const err = await new DuckRunner({ binaryPath: bin, spawnImpl: fakeDuckSpawn() })
       .runTrusted('SELECT rout FROM t', opts)
       .catch((e) => e);
     expect(err).toBeInstanceOf(DuckQueryError);
@@ -104,7 +117,7 @@ describe('DuckRunner — plumbing (fake CLI)', () => {
 
   it('aborts on its budget and reports the elapsed budget, not a crash', async () => {
     const bin = await makeFakeDuckdb(join(dir, 'duckdb'), { sleepSeconds: 30, stdout: '[]' });
-    const err = await new DuckRunner({ binaryPath: bin })
+    const err = await new DuckRunner({ binaryPath: bin, spawnImpl: fakeDuckSpawn() })
       .runTrusted('SELECT 1', { ...opts, timeoutMs: 300 })
       .catch((e) => e);
     expect(err).toBeInstanceOf(DuckQueryError);
@@ -117,12 +130,15 @@ describe('DuckRunner — plumbing (fake CLI)', () => {
     process.env.GEZEL_TOKEN = 'super-secret-daemon-token';
     process.env.OPENAI_API_KEY = 'sk-should-not-leak';
     try {
-      await new DuckRunner({ binaryPath: bin }).runTrusted('SELECT 1', opts);
+      await new DuckRunner({ binaryPath: bin, spawnImpl: fakeDuckSpawn() }).runTrusted(
+        'SELECT 1',
+        opts,
+      );
       const dumped = await readFile(envDumpPath, 'utf8');
       expect(dumped).not.toContain('super-secret-daemon-token');
       expect(dumped).not.toContain('sk-should-not-leak');
       // PATH is on the allowlist and must survive, or the child cannot run.
-      expect(dumped).toMatch(/^PATH=/m);
+      expect(dumped).toMatch(/^PATH=/im);
     } finally {
       delete process.env.GEZEL_TOKEN;
       delete process.env.OPENAI_API_KEY;
@@ -131,9 +147,9 @@ describe('DuckRunner — plumbing (fake CLI)', () => {
 
   it('rejects non-JSON output instead of returning junk rows', async () => {
     const bin = await makeFakeDuckdb(join(dir, 'duckdb'), { stdout: 'not json at all' });
-    await expect(new DuckRunner({ binaryPath: bin }).runTrusted('SELECT 1', opts)).rejects.toThrow(
-      /not JSON/,
-    );
+    await expect(
+      new DuckRunner({ binaryPath: bin, spawnImpl: fakeDuckSpawn() }).runTrusted('SELECT 1', opts),
+    ).rejects.toThrow(/not JSON/);
   });
 });
 

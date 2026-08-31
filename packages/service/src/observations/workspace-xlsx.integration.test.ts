@@ -4,6 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { convertInSandbox } from '../index-store/sandbox-convert.js';
+import {
+  canApplyLinuxSystemdSandbox,
+  canApplyMacSandbox,
+  selectDenyNetBoundary,
+} from '../sandbox/runner.js';
 import { DuckRunner } from './duck.js';
 import { tableRelDir } from './layout.js';
 import { findRealDuckdb, hasRealDuckdb } from './testing/duck-fixture.js';
@@ -18,7 +23,11 @@ import { materializeWorkbook } from './workspace-xlsx.js';
  * that reads it back.
  *
  * Skips where the pieces are not installed: a build without the query engine,
- * or a squisq older than the typed-table export.
+ * a squisq older than the typed-table export, or a host with no enforceable
+ * network boundary for the sandbox to hold the parser inside. That last one
+ * covers Windows, where `runInSandbox` refuses to start a `denyNet` child at
+ * all rather than run the parser unsandboxed — so there is nothing here for
+ * the test to measure.
  */
 
 let workspace: string;
@@ -37,7 +46,19 @@ async function typedTablesAvailable(): Promise<boolean> {
   }
 }
 
-const canRun = hasRealDuckdb() && (await typedTablesAvailable());
+/** True where a `denyNet` child can actually be started — see `wrapForPlatform`. */
+async function denyNetSandboxAvailable(): Promise<boolean> {
+  const boundary = selectDenyNetBoundary({
+    platform: process.platform,
+    macSandboxAvailable: process.platform === 'darwin' && (await canApplyMacSandbox()),
+    linuxSystemdSandboxAvailable:
+      process.platform === 'linux' && (await canApplyLinuxSystemdSandbox()),
+  });
+  return boundary !== 'unavailable';
+}
+
+const canRun =
+  hasRealDuckdb() && (await typedTablesAvailable()) && (await denyNetSandboxAvailable());
 
 /**
  * Build a real .xlsx by hand, as OOXML.
